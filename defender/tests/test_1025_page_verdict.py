@@ -772,7 +772,7 @@ def test_1025_a_draw_document_that_is_only_a_failure_reason(tmp_path):
 
 def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path):
     """A world finding the pass refused for citing a samples section the record marks
-    `unavailable` (`cites_sample`; its ledger entry `unqueueable` with that reason) renders in
+    `unavailable` (pointer assessment; its ledger entry `unqueueable` with that reason) renders in
     the world-author table under an "unqueueable — <reason>" group — never dropped from the
     table (O2).
     """

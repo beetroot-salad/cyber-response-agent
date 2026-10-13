@@ -40,7 +40,6 @@ from defender.learning.judge.run import (
     NOT_MEASURED_BUCKETS,
     NO_BUCKET,
     WORLD_FINDINGS,
-    cites_sample,
 )
 
 # -- the ledger's lanes (A13): one per filed finding ------------------------------------------
@@ -225,8 +224,7 @@ def defender_lane_blocked(verdict: WorldVerdict) -> str | None:
     return None
 
 
-def fate(item: Filed, *, focus: str | None, verdict: WorldVerdict | None, samples: Any,
-         served_systems: list[str]) -> tuple[str, str | None]:
+def fate(item: Filed, *, focus: str | None, verdict: WorldVerdict | None) -> tuple[str, str | None]:
     """The one ledger lane of one filed finding, and its reason where the lane is a refusal.
 
     @owns lane — every ledger entry's `lane` is decided here; readers show the ledger rather
@@ -245,8 +243,7 @@ def fate(item: Filed, *, focus: str | None, verdict: WorldVerdict | None, sample
         if item.finding.get(KEPT_FACTS) is True:
             return LANE_USER_RECORD, None
         return LANE_GAP_UNKEYED, "its resolving pointers name no blocked call"
-    if item.kind == KIND_WORLD and focus is not None and cites_sample(
-            list(a.filed), samples=samples, served_systems=served_systems):
+    if item.kind == KIND_WORLD and focus is not None and a.prohibited_sample:
         return LANE_UNQUEUEABLE, (
             f"cites `{LAYOUT.samples}` somewhere other than a served system's own section of real "
             "answers (O16: samples are shown only for served systems)")

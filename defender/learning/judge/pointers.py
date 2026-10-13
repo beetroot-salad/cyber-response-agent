@@ -76,6 +76,7 @@ class PointerScope:
     outcome: Annotated[dict[str, Any], SkipValidation] = field(default_factory=dict)
     samples: Annotated[dict[str, Any] | None, SkipValidation] = None
     j3: frozenset[str] = frozenset()
+    served_systems: frozenset[str] = frozenset()
 
 
 @model(frozen=True)
@@ -199,14 +200,9 @@ def _plan_pointer(scope: PointerScope, pointer: str, fragment: str | None) -> Re
     return None
 
 
-def _resolves(pointer: Any, scope: PointerScope) -> Resolution | None:  # noqa: C901 — one rule per pointer class, kept in the one resolver
-    """The one resolver (A1): `pointer` mapped to exactly one run and one class, or `None`
-    (unresolved). Never raises for any pointer a model could write.
-
-    The one resolver: every judge site deciding whether an evidence pointer resolves
-    (routing, the two-run rule, gap-only, design, a row's citations) calls this."""
-    if not isinstance(pointer, str) or not pointer.strip() or len(pointer) > _MAX_POINTER \
-            or any(ch in pointer for ch in "\x00\n\r*?~") or "://" in pointer:
+def _parse(pointer: Any) -> tuple[list[str], str | None] | None:
+    """Parse one episode-relative pointer, including its canonical path, once."""
+    if not isinstance(pointer, str) or not pointer.strip() or len(pointer) > _MAX_POINTER:
         return None
     path, has_fragment, frag = pointer.partition("#")
     fragment = frag if has_fragment else None
@@ -215,6 +211,20 @@ def _resolves(pointer: Any, scope: PointerScope) -> Resolution | None:  # noqa: 
     parts = _canonical_parts(path)
     if parts is None:
         return None
+    return parts, fragment
+
+
+def _resolves(  # noqa: C901 — one rule per pointer class, kept in the one resolver
+        pointer: str, scope: PointerScope,
+        parsed: tuple[list[str], str | None]) -> Resolution | None:
+    """The one resolver (A1): `pointer` mapped to exactly one run and one class, or `None`
+    (unresolved). Never raises for any pointer a model could write.
+
+    The one resolver: every judge site deciding whether an evidence pointer resolves
+    (routing, the two-run rule, gap-only, design, a row's citations) calls this."""
+    if any(ch in pointer for ch in "\x00\n\r*?~") or "://" in pointer:
+        return None
+    parts, fragment = parsed
     head = parts[0]
     if head == str(LAYOUT.worlds) and len(parts) >= 3:
         return _world_pointer(scope, pointer, parts, fragment)
@@ -249,6 +259,8 @@ class Assessment:
 
     filed: list[Any]
     resolving: list[Resolution]
+    #: Includes forbidden sample sections that do not resolve beside valid evidence.
+    prohibited_sample: bool = False
 
     @property
     def runs_named(self) -> set[str]:
@@ -308,8 +320,21 @@ class Assessment:
 def assess(pointers: Iterable[Any], scope: PointerScope) -> Assessment:
     """Resolve every filed pointer of one finding through `_resolves`."""
     filed = list(pointers)
-    resolving = [r for p in filed if (r := _resolves(p, scope)) is not None]
-    return Assessment(filed=filed, resolving=resolving)
+    resolving = []
+    prohibited_sample = False
+    for pointer in filed:
+        parsed = _parse(pointer)
+        if parsed is None:
+            continue
+        parts, fragment = parsed
+        if parts == [str(LAYOUT.samples)]:
+            section = (scope.samples or {}).get(fragment)
+            if not (fragment in scope.served_systems and isinstance(section, dict)
+                    and isinstance(section.get("verbs"), dict)):
+                prohibited_sample = True
+        if (resolution := _resolves(pointer, scope, parsed)) is not None:
+            resolving.append(resolution)
+    return Assessment(filed=filed, resolving=resolving, prohibited_sample=prohibited_sample)
 
 
 def named_rows(assessment: Assessment) -> Mapping[tuple[str, str], dict[str, Any]]:

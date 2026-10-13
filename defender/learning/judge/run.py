@@ -506,25 +506,6 @@ def _finding_doc(finding: InvestigatorFinding | WorldFinding | Gap) -> dict[str,
     return finding.document()
 
 
-def cites_sample(evidence: list[str], *, samples: Any, served_systems: Any) -> bool:
-    """Does a world finding's evidence cite `samples.yaml` anywhere but a served system's own
-    section of real answers (O16)? A citation passes only as `samples.yaml#<system>` where
-    `<system>` is a served system whose section of the samples record holds `verbs` (exact
-    spelling). `True`: the finding is dropped before routing."""
-    record = samples if isinstance(samples, dict) else {}
-    served = {str(s) for s in served_systems or ()}
-    for pointer in evidence:
-        prefix, _has_fragment, system = pointer.partition("#")
-        if prefix != str(LAYOUT.samples):
-            continue
-        section = record.get(system)
-        if not (isinstance(section, dict) and isinstance(section.get("verbs"), dict)):
-            return True
-        if system not in served:
-            return True
-    return False
-
-
 # ------------------------------------------------------------------------------------------
 # The prompts (design M3, A10): host text — the task, section titles, run labels — outside
 # every untrusted frame; each frame holds only non-host text.
@@ -668,6 +649,6 @@ __all__ = [
     "KEPT_FACTS", "LEAD_SET", "MISLABELLED", "NOT_MEASURED_BUCKETS", "NO_BUCKET",
     "ON_VERDICT_PATH", "SUBJECT_DEFENDER", "SUBJECT_WORLD", "WORLD_BUCKETS", "WORLD_FINDINGS",
     "WORLD_FINDING_BUCKETS", "WorldFinding", "_build_family_prompt", "_build_prompt",
-    "cites_sample", "draw_document", "family_predicate", "is_world_finding_bucket",
+    "draw_document", "family_predicate", "is_world_finding_bucket",
     "served_systems_of", "validate_reply",
 ]

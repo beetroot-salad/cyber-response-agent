@@ -11,6 +11,7 @@ family call's scope is every usable run.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import field
 from pathlib import Path
 from typing import Annotated, Any
@@ -66,7 +67,8 @@ class RunSet:
         return [label for label in self.usable if label != focus]
 
     def scope(self, bound: Bound, *, manifest: dict[str, Any], outcome: dict[str, Any] | None,
-              samples: dict[str, Any] | None, focus: str | None = None) -> PointerScope:
+              samples: dict[str, Any] | None, focus: str | None = None,
+              served_systems: Sequence[str] = ()) -> PointerScope:
         """The pointer scope of one call: the focus and its references (world scope, with the
         samples record), or every usable run (`focus=None`: the family call, shown no samples,
         A22)."""
@@ -75,7 +77,7 @@ class RunSet:
             bound=bound, episode_token=self.episode_token,
             run_facts={label: self.usable[label] for label in labels}, manifest=manifest,
             outcome=dict(outcome or {}), samples=None if focus is None else dict(samples or {}),
-            j3=self.j3)
+            j3=self.j3, served_systems=frozenset(served_systems))
 
 
 def read_run_set(bound: Bound, manifest: dict[str, Any], *, episode_dir: Path,

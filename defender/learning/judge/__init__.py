@@ -722,7 +722,8 @@ class _Pass:
         shown_samples = {system: section for system, section in self.samples.items()
                          if system in placed.samples_shown}
         scope = self.run_set.scope(self.bound, manifest=self.manifest, outcome=self.record,
-                                samples=shown_samples, focus=label)
+                                samples=shown_samples, focus=label,
+                                served_systems=self.served_systems)
         answered = {n: doc for n, doc in documents.items() if "failure_reason" not in doc}
         filed = {n: route_mod.assess_draw(n, doc, scope) for n, doc in answered.items()}
         verdict = route_mod.combine_draws({
@@ -751,8 +752,7 @@ class _Pass:
         all_filed = [item for n in sorted(filed) for item in filed[n]]
         for item in all_filed:
             fid = f"{self.run_id}/{label}/{item.draw}/{item.index}"
-            lane, why = route_mod.fate(item, focus=label, verdict=verdict, samples=shown_samples,
-                                       served_systems=self.served_systems)
+            lane, why = route_mod.fate(item, focus=label, verdict=verdict)
             lane, why = self._place(item, fid, lane, why, label=label, verdict=verdict,
                                     alert_key=alert_key, defender_rows=defender_rows,
                                     world_rows=world_rows, user=pending)
@@ -887,8 +887,7 @@ class _Pass:
                 continue
             for item in route_mod.assess_draw(n, documents[n], scope):
                 fid = f"{self.run_id}/{FAMILY_LABEL}/{n}/{item.index}"
-                lane, why = route_mod.fate(item, focus=None, verdict=None, samples=None,
-                                           served_systems=self.served_systems)
+                lane, why = route_mod.fate(item, focus=None, verdict=None)
                 lane, why = self._place(item, fid, lane, why, label=FAMILY_LABEL, verdict=None,
                                         alert_key=alert_key, defender_rows=[],
                                         world_rows=world_rows, user=pending)

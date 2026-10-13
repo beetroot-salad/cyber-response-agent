@@ -902,7 +902,7 @@ def test_1224_judge_grades_only_an_accepted_outcome(tmp_path):
 
 
 def test_1224_judge_citation_check_matches_samples_by_system(tmp_path):
-    """d16c_citation_check_by_system — cites_sample accepts a finding citing the samples
+    """d16c_citation_check_by_system — pointer assessment accepts a finding citing the samples
     section of a served system with a section, and refuses one citing a system's section the
     record marks unavailable.
     s_p242 — only a served system's own samples section passes the citation check; an
@@ -925,7 +925,12 @@ def test_1224_judge_citation_check_matches_samples_by_system(tmp_path):
         "siem-x": {"unavailable": "the capture made no siem-x call"}})
     pointers = {
         "own-section": "samples.yaml#edr",
+        "own-dot": "./samples.yaml#edr",
+        "own-redundant": "unused/../samples.yaml#edr",
         "unavailable": "samples.yaml#siem-x",
+        "unavailable-dot": "./samples.yaml#siem-x",
+        "unavailable-redundant": "unused/../samples.yaml#siem-x",
+        "missing-dot": "./samples.yaml#missing",
         "case": "samples.yaml#EDR",
         "lookalike": "samples.yaml#edr_",
         "old-pattern": "samples.yaml#logs-*",
@@ -941,11 +946,28 @@ def test_1224_judge_citation_check_matches_samples_by_system(tmp_path):
     assert set(lanes) == set(pointers), f"the ledger does not file every finding: {lanes!r}"
     passed = {topic for topic, lane in lanes.items()
               if lane not in ("unqueueable", "dropped_unresolved")}
-    assert passed == {"own-section"}, (
+    assert passed == {"own-section", "own-dot", "own-redundant"}, (
         f"the citation check passed {sorted(passed)}; only a served system's own section may "
         f"(lanes {lanes!r})")
     assert lanes["own-section"] == "user_record", lanes
     assert not _queue(channel=QUESTIONER_FINDINGS), "a samples-only finding reached the questioner"
+
+    # A resolving plan must not rescue a prohibited sample citation, even when the
+    # sample section itself cannot resolve. Equivalent paths have the same fate.
+    reply = _world_reply("lead-quality", ("edr", "siem-x"), findings=[
+        _finding(topic, subject="world", bucket="mislabelled",
+                 evidence=["family.yaml#worlds/b", pointer])
+        for topic, pointer in pointers.items()
+        if topic.startswith(("own-", "unavailable", "missing-", "old-pattern"))])
+    ep = S.judged_episode(tmp_path / "with-plan")
+    S.samples_record(ep, {
+        "edr": {"verbs": {"query": ['{"events": []}']}},
+        "siem-x": {"unavailable": "no captured call"}})
+    _grade(tmp_path / "with-plan", ep, _judge({"b": reply}))
+    lanes = _lanes(ep, "b")
+    assert len(lanes) == 8, lanes
+    assert all(lane == ("world" if topic.startswith("own-") else "unqueueable")
+               for topic, lane in lanes.items()), lanes
 
 
 def test_1224_judge_render_shows_samples_per_system(tmp_path):
