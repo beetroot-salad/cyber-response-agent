@@ -419,7 +419,7 @@ def start_box(
     except BoxFault as e:
         _opt_out_or_raise(e)
     from defender import run_common
-    return unboxed_executor(spec, env=run_common.run_env(defender_dir, run_dir, agent_root=tenant_agent))
+    return unboxed_executor(spec, env=run_common.run_env(defender_dir, run_dir))
 
 
 def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:

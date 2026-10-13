@@ -684,7 +684,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         dispatches_lead_zero=resume is None and verbs is not None,
     )
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
-        env=run_common.run_env(tree, run_dir, agent_root=run_tenant.agent),
+        env=run_common.run_env(tree, run_dir),
     )
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(

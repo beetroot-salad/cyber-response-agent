@@ -143,6 +143,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import shutil
+from contextvars import ContextVar
 import functools
 import hashlib
 import json
@@ -672,10 +674,6 @@ class Planted:
         """The tenant's runs base (`<root>/<T>/runs`)."""
         return self.root / self.tenant_id / "runs"
 
-    @property
-    def lessons(self) -> Path:
-        return tenant_lessons_dir(self.knowledge)
-
     def accept(self) -> Any:
         return T6.accept(self.root, self.tenant_id)
 
@@ -701,7 +699,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     (written verbatim — for a malformed file), or None (NOT written: the missing-file shape).
     `case_mapping` defaults to `case_mapping_text()` (no top-level `source:`). `lead_zero`
     defaults to the template the table's correlation holder needs. `omit_systems` drops those
-    systems' `config.env` (an unconfigured system). `lessons` plants lesson files (name -> text)."""
+    systems' `config.env` (an unconfigured system). `lessons` plants files in the isolated product checkout (name -> text); it does not relocate the corpus into the tenant."""
     root = Path(root) if root is not None else D.current_data_root()
     if lead_zero is None:
         lead_zero = LEAD_ZERO_NON_ELASTIC if table is TABLE_NON_ELASTIC else LEAD_ZERO_ELASTIC
@@ -718,7 +716,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     elif alert_mapping is not None:
         planted.alert_mapping.write_text(alert_mapping_text(alert_mapping), encoding="utf-8")
     for name, text in (lessons or {}).items():
-        plant_lesson(planted.knowledge, name, text=text)
+        plant_lesson(name, text=text)
     return planted
 
 
@@ -835,11 +833,31 @@ def restore_modes(root: Path) -> None:
 
 # --- lessons --------------------------------------------------------------------------------
 
-def tenant_lessons_dir(knowledge: Path) -> Path:
-    """Where a tenant's defender lessons live once #1108 P4 has landed (C24 sequencing):
-    `<knowledge>/agent/lessons/`, the corpus's relative shape under the agent root
-    (`_knowledge.KnowledgePaths.lessons_dir`). The ONE place the suite names it."""
-    return Path(knowledge) / "agent" / "lessons"
+LESSON_CHECKOUT: ContextVar[Path | None] = ContextVar("lesson_checkout_1222", default=None)
+
+
+def checkout_defender() -> Path:
+    """The test's real product checkout, never a tenant-owned corpus."""
+    return LESSON_CHECKOUT.get() or DEFENDER
+
+
+def checkout_lessons() -> Path:
+    return sym("_knowledge", "KnowledgePaths").of_defender_dir(checkout_defender()).lessons_dir
+
+
+def prepare_checkout(defender_dir: Path) -> Path:
+    """Copy the real product into an isolated checkout, preserving any curator-written lessons.
+
+    The shims run the copied implementation in a child process; no corpus reader is patched.
+    Large test/eval artifacts and caches are irrelevant to this runtime fixture.
+    """
+    shutil.copytree(DEFENDER, defender_dir, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(".venv", "tests", "evals", "fixtures-e2e",
+                                                 "__pycache__", "*.pyc", "lessons"))
+    (defender_dir / ".venv").symlink_to(DEFENDER / ".venv", target_is_directory=True)
+    corpus = sym("_knowledge", "KnowledgePaths").of_defender_dir(defender_dir).lessons_dir
+    corpus.mkdir(exist_ok=True)
+    return defender_dir
 
 
 def lesson_text(name: str, *, source_signature: Sequence[str] | None = (),  # noqa: PLR0913 — one lesson's frontmatter, each part overridable
@@ -866,9 +884,9 @@ def lesson_text(name: str, *, source_signature: Sequence[str] | None = (),  # no
     return "\n".join(lines)
 
 
-def plant_lesson(knowledge: Path, name: str, *, text: str | None = None,
+def plant_lesson(name: str, *, text: str | None = None,
                  source_signature: Sequence[str] | None = ()) -> Path:
-    corpus = tenant_lessons_dir(knowledge)
+    corpus = checkout_lessons()
     corpus.mkdir(parents=True, exist_ok=True)
     path = corpus / f"{name}.md"
     path.write_text(text if text is not None else lesson_text(
@@ -1705,6 +1723,8 @@ def drive_run(d: Drive, run_dir: Path, *, tenant: Any = None, verbs: Any = ..., 
     """`_replay_harness.drive` over `run_dir` with `d`'s fakes. `verbs=...` means `d.backend`'s
     registry; `None` drives with NO registry (p172: withheld)."""
     kw: dict[str, Any] = {}
+    if defender_dir is None and LESSON_CHECKOUT.get() is not None:
+        defender_dir = checkout_defender()
     registry = d.backend.registry() if verbs is ... else verbs
     if registry is not None:
         kw["verbs"] = registry

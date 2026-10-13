@@ -15,7 +15,9 @@
 #   deadline before MAIN's opening message is built (A4, A7); its stored goal is a contract and a
 #   run-relative pointer (A3); its every ending reaches MAIN as one fixed sentence (A2).
 #   Tests guard behaviour, never absence (D6). Runs recorded before the change need not load (N13).
-#   Implementation is sequenced after #1108 P4 (C24).
+#   Scope correction (user, 2026-10-13): retain the checkout corpus until #1108 P4 atomically
+#   migrates writers, data, all retrieval paths, mounts and read permissions. #1222 adds no
+#   tenant-corpus selection. Recorded-signature matching remains in scope.
 #
 # demands — three blocks (counts are in 75-graph-digest.md, computed from this file):
 #   (D) 20-demands.md's ledger, REWORKED per 45-dispositions' "For phase D" list, A1-A8 and the
@@ -2803,14 +2805,16 @@ demands:
 - id: p081_another_tenants_lesson_matches_this_tenants_sign
   kind: behavior
   form: test
-  discharged_by: test_p081_another_tenants_lesson_matches_this_tenants_sign
+  discharged_by: test_checkout_corpus_stays_authoritative_until_atomic_tenant_migration
   binds:
   - interacts(cmd_grep->lessons_dir)
   - lessons_dir.identity
   settled_premise: p081
-  seed_docstring: 'Tenant B''s orientation lists only tenant B''s lessons. This guard holds once #1108 P4 has put
-    lessons under the tenant; #1222 adds no scoping code.'
-  closer: 'C24 (human: sequencing), X18.'
+  seed_docstring: 'Until #1108 P4, discovery uses the curator''s checkout corpus for every tenant. A tenant-local
+    lesson folder must not prematurely replace that corpus. Tenant isolation is deferred to the atomic writer,
+    reader, mount and permissions migration in P4.'
+  closer: 'Scope correction requested by the user on 2026-10-13: retain the existing corpus until the atomic P4 migration.'
+  deferred_requirement: 'Strict tenant isolation remains #1108 P4 work; this test guards the retained checkout boundary.'
   binds_from: premise-file, translated
   cites:
   - PR-08
@@ -2818,7 +2822,7 @@ demands:
   - id: X18
     nl: '#1222 does not go live with a lessons lookup that returns another tenant''s lessons.'
     reading: 'accept that the lessons lookup returns other tenants'' lessons until #1108 lands.'
-    outside: 'the in-force #1085 (lessons are strictly per tenant).'
+    outside: 'Superseded for this PR by the user scope correction on 2026-10-13; #1085 tenant isolation moves with the complete P4 cutover.'
 - id: p082_signature_with_spaces_or_commas_as_a_ticket_labe
   kind: behavior
   form: test
@@ -12638,8 +12642,8 @@ handoff:
     shims, no guard no obligation calls for.'
   - 'Design decisions D1-D6 (user, 2026-10-07). D6: tests guard behaviour, never absence — no demand asserts that
     removed code, symbols, fields or files are gone (m1_item1_deleted carries the rejected reading).'
-  - '#1085: lessons are strictly per tenant. Sequencing (C24, human): #1222''s implementation lands after #1108
-    P4 (lessons under the tenant); #1222 adds no lessons-scoping code; p081 guards the result.'
+  - 'User scope correction, 2026-10-13: #1222 retains the curator-owned checkout corpus. #1085 tenant isolation
+    is deferred to #1108 P4 as one writer, reader, data, mount and permissions cutover; p081 guards against a partial cutover.'
   - 'N13: runs (and episodes) recorded before the change need not load anywhere; recognising old shapes, even to
     refuse them, is compatibility work (X03, X04). A8''s ''a folder without a record is not a run'' is a rule about
     a missing record, not about old runs.'
@@ -12757,7 +12761,7 @@ handoff:
   - 'C21 unmapped event_time and summary: empty, never a vendor default (X16; p054). resolved_by: human (X16)'
   - 'C22 corpus and the mapping: dissolved by T1 (p063, p065). resolved_by: human (T1)'
   - 'C23 matching semantics: dissolved by T6 (p064, p080; p089 -> C43). resolved_by: human (T6)'
-  - 'C24 lessons checkout-global: sequencing after #1108 P4 (p081). resolved_by: human'
+  - 'C24 scope correction, user 2026-10-13: retain the checkout corpus in #1222; defer tenant isolation to the atomic #1108 P4 migration (p081).'
   - 'C25 shipped lessons after a remap: not found (X01; p084). resolved_by: human (X01)'
   - 'C26 alert claims another rule''s signature: no defence (X02; p088 dropped). resolved_by: human (X02)'
   - 'C28 lesson author''s signature: the queue row carries the recorded signature; no source_signature when the
@@ -12905,9 +12909,9 @@ handoff:
   - 'ASSEMBLER: `tests: defender/tests/alert_front_door_1222` — one dedicated flat directory (AD-1). Existing tests
     the demands lean on outside it are re-homed to in-suite names (o2_kibana_fixture_correlation_survives: the e2e/test_808_correlation_lead.py
     test asserts the injected entry A4 retires).'
-  - 'ASSEMBLER: implementation is sequenced after #1108 P4 (C24). Demands that touch the lessons corpus (o8_*lessons*,
-    a6_exact_lookup_at_every_sink, p081 and the lesson premises) assume lessons under the tenant when phase E writes
-    them; lessons_dir''s evidence names both layouts.'
+  - 'Scope correction, user 2026-10-13: lesson signature semantics (o8_*lessons*, a6_exact_lookup_at_every_sink
+    and the lesson premises) are tested against the curator-owned checkout corpus. Tenant isolation (p081) is
+    deferred to the complete #1108 P4 cutover; no partial tenant corpus selection ships in #1222.'
   - 'ASSEMBLER: accepted limits RF-S1 (a bash call can overrun the deadline by up to 120 s) and RF-S2 (a cut backend
     call runs on up to 40 s and leaves no executed row) are modelled as stated in A7 — a7_one_deadline_bounds_the_correlation_phase
     allows the 120 s, and no demand asserts an executed row for a cut call.'

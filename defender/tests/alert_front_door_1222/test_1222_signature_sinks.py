@@ -134,7 +134,7 @@ def _ticketed(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR0
     planted = tenant if tenant is not None else S.plant_tenant(
         alert_mapping=mapping, case_mapping=_signed_case_mapping())
     for name, entries in (lessons or {}).items():
-        S.plant_lesson(planted.knowledge, name, source_signature=list(entries))
+        S.plant_lesson(name, source_signature=list(entries))
     sink = store if store is not None else S.TicketStore()
     d = S.run_alert(tmp_path, alert=alert, tenant=planted, tickets=S.ticket_writer(sink),
                     update_ticket=True, orient_shim=shim,
@@ -178,7 +178,8 @@ class _MainRunsOrientationLookup(S.MainScript):
 
 
 def _main_reads(*paths: Path) -> list[S.Turn]:
-    return [S.call("read_file", path=str(p)) for p in paths]
+    return [S.call("read_file", path=str(S.checkout_defender() / p.relative_to(S.DEFENDER)))
+            for p in paths]
 
 
 ADVISORY_SKILL = S.DEFENDER / "skills" / "advisory" / "SKILL.md"

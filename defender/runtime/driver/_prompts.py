@@ -46,7 +46,7 @@ def _main_instructions(defender_dir: Path) -> str:
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
     run_dir: Path, alert_path: Path, defender_dir: Path,
     *, systems: Sequence[str], correlation_section: str | None,
-    orient_shim: orient.ShimRunner | None = None, agent_root: Path | None = None,
+    orient_shim: orient.ShimRunner | None = None,
 ) -> str:
     """The fresh run's opening prompt, carrying the one correlation section.
 
@@ -56,7 +56,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
     lead at all)."""
     orientation = orient.orientation(
         run_dir, defender_dir, alert_path, systems=systems,
-        lead_zero_section=correlation_section, shim=orient_shim, agent_root=agent_root,
+        lead_zero_section=correlation_section, shim=orient_shim,
     )
     return f"Begin the investigation.\n\n{_coordinates(run_dir, alert_path)}\n{orientation}"
 
@@ -73,7 +73,7 @@ def _coordinates(run_dir: Path, alert_path: Path) -> str:
 def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
     resume: Any, run_dir: Path, alert_path: Path, defender_dir: Path,
     *, systems: Sequence[str], correlation_section: str | None,
-    orient_shim: orient.ShimRunner | None = None, agent_root: Path | None = None,
+    orient_shim: orient.ShimRunner | None = None,
 ) -> str:
     """MAIN's first message — for a fresh run or a resumed one.
 
@@ -88,7 +88,7 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
     if resume is None:
         return _user_prompt(
             run_dir, alert_path, defender_dir, systems=systems,
-            correlation_section=correlation_section, orient_shim=orient_shim, agent_root=agent_root,
+            correlation_section=correlation_section, orient_shim=orient_shim,
         )
     return (
         f"{resume.continuation_prompt}\n\n"

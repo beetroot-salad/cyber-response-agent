@@ -107,16 +107,3 @@ class KnowledgePaths:
 #: module-level default, a `git` pathspec, a spelling in model-facing text) goes through this
 #: one value, so #1108's move re-points them in one place.
 CHECKOUT_KNOWLEDGE = KnowledgePaths.of_defender_dir(REPO_ROOT / "defender")
-
-
-AGENT_ROOT_ENV = "DEFENDER_AGENT_ROOT"
-
-
-def runtime_knowledge() -> KnowledgePaths:
-    """The run's tenant corpus, or checkout knowledge for standalone tooling."""
-    import os
-
-    if os.environ.get("DEFENDER_BOX") and Path("/tenant/agent").is_dir():
-        return KnowledgePaths(Path("/tenant/agent"), "agent")
-    agent = os.environ.get(AGENT_ROOT_ENV)
-    return KnowledgePaths(Path(agent), "agent") if agent else CHECKOUT_KNOWLEDGE

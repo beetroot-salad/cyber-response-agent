@@ -323,14 +323,10 @@ def provider_scrubbed_environ() -> dict[str, str]:
     return env
 
 
-def run_env(defender_dir: Path, run_dir: Path, *, agent_root: Path | None = None) -> dict[str, str]:
+def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     env = provider_scrubbed_environ()
     env["DEFENDER_DIR"] = str(defender_dir)
     env["DEFENDER_RUN_DIR"] = str(run_dir)
-    from defender._knowledge import AGENT_ROOT_ENV
-    env.pop(AGENT_ROOT_ENV, None)
-    if agent_root is not None:
-        env[AGENT_ROOT_ENV] = str(agent_root)
     env["DEFENDER_RUNS_BASE"] = RunPaths(run_dir).runs_base_export()
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
     # Prepended: host subprocesses also need the operator's own PYTHONPATH entries.

@@ -26,10 +26,13 @@ HOW EACH ACTOR IS REACHED (no attribute is ever patched):
   production controls, and what these tests pin, is what it is handed and what becomes of the
   file it writes.
 
-RED AT BASE: (1) the lessons lookups read the checkout's corpus until #1108 P4 (C24), so a
-lesson planted in the tenant's corpus is not found — a lookup test is red partly for that;
-where possible a test checks the exactness half against the SHIPPED corpus first (at base the
-case-insensitive substring regex over-matches it). (2) `S.plant_run(record=…)` and
+SCOPE (user correction, 2026-10-13): the curator and runtime retain one checkout-owned
+corpus until #1108 P4 migrates writers, data, all retrieval paths, mounts and permissions
+atomically. These tests run real shims in isolated product checkouts; they do not patch a
+reader or redirect only discovery into a tenant folder.
+
+BASE REGRESSIONS: (1) case-insensitive substring matching over-matches signatures.
+(2) `S.plant_run(record=…)` and
 `S.plant_episode_copy` fail at base on the coined record accessors; `_with_record` plants the
 record AFTER the folder (alert, investigation, report) so the behavioural observation comes
 first, and every test asserts the record was planted only after its behavioural assertions.
@@ -74,8 +77,6 @@ def _shipped_corpus() -> Path:
     checkout = getattr(knowledge, "CHECKOUT_KNOWLEDGE", None)
     if checkout is not None:
         candidates.append(Path(checkout.lessons_dir))
-    for tenant in ("tenant-fixture", "tenant-template"):
-        candidates.append(S.tenant_lessons_dir(S.REPO_ROOT / "knowledge" / tenant))
     for corpus in candidates:
         if corpus.is_dir() and any(corpus.glob("*.md")):
             return corpus
@@ -92,13 +93,13 @@ def _declared(text: str) -> list[str]:
 
 
 def _plant_shipped(planted: S.Planted) -> dict[str, list[str]]:
-    """Copy the shipped corpus into the tenant's corpus; return stem -> declared entries."""
+    """Copy the shipped corpus into the isolated checkout corpus; return stem -> declared entries."""
     shipped: dict[str, list[str]] = {}
     for path in sorted(_shipped_corpus().glob("*.md")):
         if path.name.startswith("_"):
             continue
         text = path.read_text(encoding="utf-8")
-        S.plant_lesson(planted.knowledge, path.stem, text=text)
+        S.plant_lesson(path.stem, text=text)
         shipped[path.stem] = _declared(text)
     assert shipped, "the shipped corpus holds no lesson"
     return shipped
@@ -470,7 +471,7 @@ def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
     Observed: the first run of a committed Kibana fixture alert on a tenant whose mapping takes
     the signature from `alert_id` records that value; the lesson the author writes from the run
     (that recorded signature, unquoted) and a decoy keyed on the alert's `rule.id` sit in the
-    tenant's corpus; a later run of the same alert lists the first in orientation's hits and not
+    isolated checkout corpus; a later run of the same alert lists the first in orientation's hits and not
     the decoy. The author's own leg — queue row to lesson file — is p074's and p077's.
     """
     alert = S.fixture_alert("v2-sshd-success-after-failures")
@@ -479,8 +480,8 @@ def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
     first = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="o8-first",
                         orient_shim=S.RecordingShim())
     assert first.rc == 0, (first.rc, first.refusal, first.raised)
-    S.plant_lesson(planted.knowledge, "fd-o8-mapped", source_signature=[alert_id])
-    S.plant_lesson(planted.knowledge, "fd-o8-rule-id", source_signature=[rule_id])
+    S.plant_lesson("fd-o8-mapped", source_signature=[alert_id])
+    S.plant_lesson("fd-o8-rule-id", source_signature=[rule_id])
 
     later = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="o8-later",
                         orient_shim=S.RecordingShim())
@@ -492,6 +493,35 @@ def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
         f"orientation listed the lesson keyed on the vendor field rule.id {rule_id!r}: {hits}")
     assert first.recorded("signature") == alert_id, (
         "the first run's record does not hold the alert_id the lesson was authored with")
+
+
+def test_curated_checkout_lesson_is_discovered_and_read_by_main(tmp_path):
+    """A real curator drain and MAIN use the same corpus, including readable lesson bodies.
+
+    The committed lesson is read in place: no copy into a tenant corpus or lookup fixture.
+    Both read_file and cat must reach the body that discovery advertises.
+    """
+    sig, name, finding = "R-FEEDBACK", "fd-feedback", "feedback/b/0"
+    marker = "CURATOR-FEEDBACK-BODY-1222"
+    lesson = _author_lesson(name, [sig], [finding]) + "\n" + marker + "\n"
+    paths = _drain(tmp_path / "author", _Curator({name: lesson}),
+                   extra_rows=[_queued_row(finding, sig)])
+    committed = _committed(paths)[name].path
+    assert committed.parent == paths.lessons_dir
+    assert marker in committed.read_text(encoding="utf-8")
+    product = S.prepare_checkout(Path(paths.repo_root) / "defender")
+    main = S.MainScript([
+        S.call("read_file", path=str(committed)),
+        S.call("bash", command=f"cat {shlex.quote(str(committed))}"),
+        S.text(S.DONE),
+    ])
+    d = S.run_alert(tmp_path / "later", alert=_lesson_alert(sig), main=main,
+                    defender_dir=product, orient_shim=S.RecordingShim())
+    assert d.rc == 0, (d.refusal, d.raised)
+    assert _listed(_lessons_section(d)) == [name]
+    returned = main.seen[-1].tool_returns
+    assert len(returned) == 2, returned
+    assert all(marker in text for text in returned), returned
 
 
 _GOOD_ENTRY = "R-good-1"
@@ -520,13 +550,13 @@ def test_r6_a_hostile_source_signature_entry_is_inert_in_every_lesson_listing(tm
     count.
 
     Observed: the tags listing and the hit listing as orientation hands them to MAIN (the real
-    `defender-lessons` subprocesses), and `build_corpus_manifest` over the tenant's corpus.
+    `defender-lessons` subprocesses), and `build_corpus_manifest` over the isolated checkout corpus.
     """
     lessons = {name: S.lesson_text(name, raw_signature_line=f"source_signature: [{entry}, {_GOOD_ENTRY}]")
                for name, entry in _HOSTILE_ENTRIES.items()}
     lessons["fd-r6-good"] = S.lesson_text("fd-r6-good", source_signature=[_GOOD_ENTRY])
     planted = S.plant_tenant(lessons=lessons)
-    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(planted.lessons)
+    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(S.checkout_lessons())
     for ch in ("\x1b", "\r"):
         assert ch not in manifest, f"a raw control character {ch!r} reached the manifest"
     sections = re.split(r"(?m)^## ", manifest)[1:]
@@ -665,7 +695,7 @@ def test_r8_each_shipped_lesson_is_found_by_exact_lookup_of_its_declared_signatu
     change, prefix, suffix) finds none. Positive control: the result is non-empty for every
     declared signature.
 
-    Observed: the shipped corpus (resolved where production keeps it) in the tenant's corpus; one
+    Observed: the shipped corpus (resolved where production keeps it) in the isolated checkout corpus; one
     run per signature and per near miss, orientation's hits and MAIN's taught lookup each read.
     """
     planted = S.plant_tenant(alert_mapping=S.DEFAULT_MAPPING)
@@ -1090,7 +1120,7 @@ def test_p187_lesson_authored_with_no_source_signature_meets_c(tmp_path):
              signed: S.lesson_text(signed, source_signature=[sig])}
     planted = S.plant_tenant(lessons=texts)
 
-    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(planted.lessons)
+    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(S.checkout_lessons())
     sections = {chunk.partition("\n")[0].strip(): chunk.partition("\n")[2]
                 for chunk in re.split(r"(?m)^## ", manifest)[1:]}
     assert set(sections) == {unsigned, signed}, f"the manifest lost a lesson: {sorted(sections)}"
@@ -1148,7 +1178,7 @@ def test_p064_in_box_lessons_grep_with_a_mapped_signature(tmp_path):
     assert _declaring(shipped, shipped_sig), f"no shipped lesson declares {shipped_sig!r}"
     for name, entries in {"fd-p064-mapped": [sig], "fd-p064-second": ["R-other", sig],
                           "fd-p064-longer": [sig + "-x"], "fd-p064-case": [sig.upper()]}.items():
-        S.plant_lesson(planted.knowledge, name, source_signature=entries)
+        S.plant_lesson(name, source_signature=entries)
     alert = _lesson_alert(shipped_sig, uuid=sig)
     main = _TaughtLookups([sig])
     S.run_alert(tmp_path, alert=alert, tenant=planted, main=main)
@@ -1171,7 +1201,7 @@ def test_p183_main_runs_its_taught_lessons_lookup_in_the_box(tmp_path):
     for name, entries in {"fd-p183-exact": ["R-183"], "fd-p183-second": ["Z-1", "R-183"],
                           "fd-p183-case": ["r-183"], "fd-p183-longer": ["R-1830"],
                           "fd-p183-dot": ["R.183"], "fd-p183-dot-as-pattern": ["RX183"]}.items():
-        S.plant_lesson(planted.knowledge, name, source_signature=entries)
+        S.plant_lesson(name, source_signature=entries)
     case_miss = declared[0].upper()
     want = {case_miss: [], "R-183": ["fd-p183-exact", "fd-p183-second"], "R.183": ["fd-p183-dot"],
             "R-18": []}
@@ -1197,7 +1227,7 @@ def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
     _plant_shipped(planted)
     for name, entries in {"fd-p080-r": ["R"], "fd-p080-second": ["Q", "R"],
                           "fd-p080-longer": ["R-1001"], "fd-p080-lower": ["r"]}.items():
-        S.plant_lesson(planted.knowledge, name, source_signature=entries)
+        S.plant_lesson(name, source_signature=entries)
     recorded = [_past_run(planted.runs, f"past-{tag}", tag=tag, rule_id=sig, signature=sig)
                 for tag, sig in (("pr", "R"), ("plonger", "R-1001"), ("plower", "r"))]
 
@@ -1215,24 +1245,24 @@ def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
     assert all(recorded), "the past runs' records could not be planted (S.COINED accessors)"
 
 
-def test_p081_another_tenants_lesson_matches_this_tenants_sign(tmp_path):
-    """Tenant B's orientation lists only tenant B's lessons. This guard holds once #1108 P4 has
-    put lessons under the tenant; #1222 adds no scoping code.
+def test_checkout_corpus_stays_authoritative_until_atomic_tenant_migration(tmp_path):
+    """Until #1108 P4, discovery uses the curator's checkout corpus for every tenant.
 
-    Observed: two tenants under one data root, each holding a lesson keyed on the same
-    signature; a run of tenant B, its orientation's hits and MAIN's in-box lookup.
+    A tenant-local lesson folder must not prematurely replace that corpus. Tenant isolation
+    is deferred to the atomic writer, reader, mount and permissions migration in P4.
     """
     sig = "R-P081"
-    tenant_a, tenant_b = S.plant_tenant("acme-a"), S.plant_tenant("acme-b")
-    S.plant_lesson(tenant_a.knowledge, "fd-p081-tenant-a", source_signature=[sig])
-    S.plant_lesson(tenant_b.knowledge, "fd-p081-tenant-b", source_signature=[sig])
+    tenant = S.plant_tenant("acme-b")
+    private = S.sym("_knowledge", "KnowledgePaths")(tenant.agent, "agent").lessons_dir
+    private.mkdir(parents=True)
+    (private / "fd-p081-private.md").write_text(
+        S.lesson_text("fd-p081-private", source_signature=[sig]), encoding="utf-8")
+    S.plant_lesson("fd-p081-checkout", source_signature=[sig])
     main = _TaughtLookups([sig])
-    d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=tenant_b, main=main,
+    d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=tenant, main=main,
                     orient_shim=S.RecordingShim())
-    assert _listed(_lessons_section(d)) == ["fd-p081-tenant-b"], (
-        f"tenant B's orientation listed {_listed(_lessons_section(d))}")
-    assert _listed(main.results()[sig]) == ["fd-p081-tenant-b"], (
-        f"tenant B's in-box lookup returned {_listed(main.results()[sig])}")
+    assert _listed(_lessons_section(d)) == ["fd-p081-checkout"]
+    assert _listed(main.results()[sig]) == ["fd-p081-checkout"]
 
 
 def test_p084_lessons_authored_before_the_change_under_a_remap(tmp_path):
@@ -1246,7 +1276,7 @@ def test_p084_lessons_authored_before_the_change_under_a_remap(tmp_path):
     """
     old, new = "R-OLD84", "U-NEW84"
     planted = S.plant_tenant(alert_mapping=_UUID_MAPPING)
-    S.plant_lesson(planted.knowledge, "fd-p084-old", source_signature=[old])
+    S.plant_lesson("fd-p084-old", source_signature=[old])
     alert = _lesson_alert(old, uuid=new)
     before = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="p084-before",
                          orient_shim=S.RecordingShim())
@@ -1256,7 +1286,7 @@ def test_p084_lessons_authored_before_the_change_under_a_remap(tmp_path):
         f"the host's lessons prose names the old value {old!r}: {_naming(section, old, before)}")
     assert "fd-p084-old" not in S.harness_text(section), "the host's prose points at the old lesson"
 
-    S.plant_lesson(planted.knowledge, "fd-p084-new", source_signature=[new])
+    S.plant_lesson("fd-p084-new", source_signature=[new])
     after = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="p084-after",
                         orient_shim=S.RecordingShim())
     assert _listed(_lessons_section(after)) == ["fd-p084-new"], (
@@ -1302,9 +1332,9 @@ def test_p182_lesson_signature_entry_that_frontmatter_reads_as(tmp_path):
     """
     name = "fd-p182-retyped"
     planted = S.plant_tenant()
-    S.plant_lesson(planted.knowledge, name, source_signature=_WRITTEN_P182)
+    S.plant_lesson(name, source_signature=_WRITTEN_P182)
 
-    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(planted.lessons)
+    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(S.checkout_lessons())
     entries = _manifest_entries(manifest)
     assert entries is not None, f"the manifest lists no source_signature:\n{manifest}"
     shown = [ln.strip().removeprefix("- ").strip().strip("'\"") for ln in entries]
@@ -1341,11 +1371,11 @@ def _later_hits(tmp_path: Path, planted: S.Planted, sig: str, run_id: str) -> li
 
 
 def _adopt(planted: S.Planted, paths: Any, *names: str) -> dict[str, Any]:
-    """Put the lessons the drain committed into the tenant's corpus, as written; return them."""
+    """Put the lessons the drain committed into the isolated checkout corpus, as written; return them."""
     committed = _committed(paths)
     for name in names:
         assert name in committed, f"the drain did not commit {name!r}: {sorted(committed)}"
-        S.plant_lesson(planted.knowledge, name,
+        S.plant_lesson(name,
                        text=committed[name].path.read_text(encoding="utf-8"))
     return committed
 
@@ -1362,7 +1392,7 @@ def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
     one signature, whose world copies' alerts carry another rule id, and a queued finding
     recorded under a second signature; the rows and user turn the curator is handed; the lessons
     it writes from them (each with its own finding's signature, unquoted) as the drain commits
-    them; and a later run of each signature with those lessons in the tenant's corpus.
+    them; and a later run of each signature with those lessons in the isolated checkout corpus.
     """
     sig_a, sig_b, world = "SIG-P072-A", "SIG-P072-B", "R-P072-WORLD"
     rows_a, copied = _judged(tmp_path, signature=sig_a, world_rule=world)
@@ -1480,7 +1510,7 @@ def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path):
     Observed: the REAL judge's findings for an episode recorded under a signature a slug would
     rewrite (case, `:`, `/`, `@`); the keys and user turn the curator is handed; the lesson it
     writes with that value (unquoted) as the drain commits it; a later run of an alert whose
-    `rule.id` is that signature, with the committed lesson in the tenant's corpus.
+    `rule.id` is that signature, with the committed lesson in the isolated checkout corpus.
     """
     sig = "Rule:Brute/Force@v2"
     rows, copied = _judged(tmp_path, signature=sig, world_rule="R-P074-WORLD")
@@ -1507,7 +1537,7 @@ def test_p077_signature_carries_frontmatter_significant_charac(tmp_path):
     `:`, which an unquoted inline list reads as a mapping key) and a queued finding recorded
     under a value using every other punctuation the allow-list admits; the keys the curator is
     handed; the lessons it writes with each value unquoted, as the drain commits them; later
-    runs of each signature with those lessons in the tenant's corpus.
+    runs of each signature with those lessons in the isolated checkout corpus.
     """
     colon, mixed = "R-P077:", "k8s_x:pod/exec@ns=prod+v1.2-x"
     rows, copied = _judged(tmp_path, signature=colon, world_rule="R-P077-WORLD")
@@ -1538,7 +1568,7 @@ def test_p111_lesson_author_runs_for_a_run_whose_alert_is_unma(tmp_path):
     alert was unmapped) while its world copies' alerts carry a rule id; the keys, user turn and
     instructions the curator is handed; the lesson it writes with no source_signature, as the
     drain commits it; later runs of that rule id and of a signature spelled `unkeyed`, with the
-    lesson in the tenant's corpus beside a control keyed on the rule id.
+    lesson in the isolated checkout corpus beside a control keyed on the rule id.
     """
     world = "R-P111-WORLD"
     rows, copied = _judged(tmp_path, signature=None, world_rule=world)
@@ -1556,7 +1586,7 @@ def test_p111_lesson_author_runs_for_a_run_whose_alert_is_unma(tmp_path):
         "source_signature")
     planted = S.plant_tenant()
     _adopt(planted, paths, "fd-p111")
-    S.plant_lesson(planted.knowledge, "fd-p111-control", source_signature=[world])
+    S.plant_lesson("fd-p111-control", source_signature=[world])
     assert _later_hits(tmp_path, planted, world, "p111-later-rule") == ["fd-p111-control"]
     assert _later_hits(tmp_path, planted, S.UNKEYED, "p111-later-unkeyed") == []
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
