@@ -742,7 +742,7 @@ def test_1105_layout_lint_flags_a_re_exports_own_import(tmp_path):
 # ==========================================================================================
 
 def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp_path):
-    """The lint's category table places each of the 56 non-owner production importers of the
+    """The lint's category table places each of the 54 non-owner production importers of the
     layout (57 at 80888efb; #1105 PR 2's F-09 moves; #1234 took `learning/judge/run.py` off
     the helpers-only row) in exactly one row as D7's table lists
     them, the owners in their own row, and exempts layout names exactly in the running-investigation, names-only, run-lifecycle,
@@ -756,7 +756,7 @@ def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp
         f"{sorted(r for r in EXPECTED_CATEGORIES if table.get(r) != EXPECTED_CATEGORIES[r])}")
     every = [m for mods in table.values() for m in mods]
     assert len(every) == len(set(every)), "a module sits in more than one row"
-    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 55  # #1235: runtime/circuit_breaker.py and hooks/budget_enforcer.py no longer import the layout
+    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 54  # #1235 removed two importers; #1234 removed judge/run.py from the helpers-only row
     root = _planted(tmp_path)
     for module in _ROW_SAMPLE.values():
         _add(root, module, "from defender.run_repository import RunPaths  # noqa: F401\n\n\n"
