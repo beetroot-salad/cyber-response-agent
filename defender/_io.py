@@ -471,6 +471,18 @@ class RecordRead(_Read):
             raise ValueError("a refused RecordRead names what refused it, and only a refused one")
 
 
+@dataclasses.dataclass(frozen=True)
+class BytesRead(_Read):
+    """A bound file's original bytes, with the same absence/refusal states as `RecordRead`."""
+
+    data: bytes | None
+    refused_by: RefusalKind | None = None
+
+    def __post_init__(self) -> None:
+        if (self.reason is None) != (self.refused_by is None):
+            raise ValueError("a refused BytesRead names what refused it, and only a refused one")
+
+
 #: What one entry of a listed directory is, judged without following it: a regular file (hard
 #: links included — `read` refuses those), a real directory, or anything else.
 ENTRY_FILE, ENTRY_DIR, ENTRY_OTHER = "file", "dir", "other"
@@ -788,31 +800,44 @@ class Bound:
         """The file at `name`, as a `RecordRead`. `max_bytes` bounds the bytes taken off the
         file (`_read_plain_fd`'s prefix mode): its text is the first `max_bytes` bytes decoded,
         newlines kept as they are. Without it the read is whole."""
-        spelling, parts = _parse_name(name)
+        data, absent, reason, refused_by = self._read(
+            name, binary=False, errors=errors, max_bytes=max_bytes)
+        assert data is None or isinstance(data, str)
+        return RecordRead(name=name.as_posix() if isinstance(name, PurePath) else name,
+                          text=data, absent=absent, reason=reason, refused_by=refused_by)
+
+    def read_bytes(self, name: str | PurePath) -> BytesRead:
+        """Read original bytes whole, with the same size limit and path guards as `read`."""
+        data, absent, reason, refused_by = self._read(name, binary=True)
+        assert data is None or isinstance(data, bytes)
+        return BytesRead(name=name.as_posix() if isinstance(name, PurePath) else name,
+                         data=data, absent=absent, reason=reason, refused_by=refused_by)
+
+    def _read(self, name: str | PurePath, *, binary: bool, errors: str = "strict",
+              max_bytes: int | None = None,
+              ) -> tuple[str | bytes | None, bool, str | None, RefusalKind | None]:
+        _, parts = _parse_name(name)
         if errors not in _ERRORS_VALUES:
             raise ValueError("errors must be 'strict' or 'replace'")
         if max_bytes is not None and (isinstance(max_bytes, bool) or not isinstance(
                 max_bytes, int) or max_bytes < 0):
             raise ValueError("max_bytes must be a non-negative int")
         if self._absent:
-            return RecordRead(name=spelling, text=None, absent=True, reason=None)
+            return None, True, None, None
         if self._error is not None:
-            return RecordRead(name=spelling, text=None, absent=False, reason=self._error,
-                              refused_by=REFUSED_FAULT)
+            return None, False, self._error, REFUSED_FAULT
         where = PurePath(*self._prefix, *parts)
         try:
             # A closed root is the dup's `EBADF`, answered as a refusal like any other.
             with self._handle.dup() as root_fd, _descend(
                     self._os, root_fd, self._prefix + parts[:-1], Path(".")) as dir_fd:
-                text = _read_leaf(self._os, dir_fd, parts[-1], Path(where), binary=False,
+                data = _read_leaf(self._os, dir_fd, parts[-1], Path(where), binary=binary,
                                   errors=errors, max_bytes=max_bytes)
         except FileNotFoundError:
-            return RecordRead(name=spelling, text=None, absent=True, reason=None)
+            return None, True, None, None
         except TEXT_READ_ERRORS as e:
-            return RecordRead(name=spelling, text=None, absent=False, reason=_read_reason(e),
-                              refused_by=_refused_by(e))
-        assert isinstance(text, str)
-        return RecordRead(name=spelling, text=text, absent=False, reason=None)
+            return None, False, _read_reason(e), _refused_by(e)
+        return data, False, None, None
 
     def read_jsonl(self, name: str | PurePath) -> tuple[list[dict], int, RecordRead]:
         rec = self.read(name, errors="replace")

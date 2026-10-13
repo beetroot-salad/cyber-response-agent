@@ -39,7 +39,6 @@ from defender.learning.judge.family import (
     discriminator_of,
     episode_id_of,
     json_mapping,
-    json_mapping_of,
     has_refusals,
     _repository_leads,
     lead_chain,
@@ -244,11 +243,8 @@ def episode_record(bound: Bound) -> _alert_input.AlertRecord | None:
 def episode_alert(bound: Bound) -> dict[str, Any]:
     """The alert document the episode's copy holds, for display; `{}` when there is none, it is
     not one JSON object, or its bytes are not the record's digest."""
-    record = episode_record(bound)
-    read = bound.read(LAYOUT.source_alert)
-    if record is None or not read.text or _alert_input.digest_of(read.text.encode("utf-8")) != record.digest:
-        return {}
-    return json_mapping_of(read.text) or {}
+    return _alert_input.verified_document(
+        bound, LAYOUT.source_alert, LAYOUT.source_record) or {}
 
 
 def _render_samples(samples_doc: dict[str, Any], served: list[str]) -> str:

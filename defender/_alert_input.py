@@ -22,7 +22,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
 import yaml
@@ -384,6 +384,32 @@ def read_record(record_path: Path) -> AlertRecord | None:
     return None if text is None else parse_alert_record(text)
 
 
+def _matches_record(raw: bytes | None, record: AlertRecord | None) -> bool:
+    """Integrity is always measured on original bytes, before decoding or parsing."""
+    return raw is not None and record is not None and digest_of(raw) == record.digest
+
+
+def verified_document(bound: _io.Bound, alert_name: str | PurePath,
+                      record_name: str | PurePath) -> dict[str, Any] | None:
+    """Load an archived alert once, verify its original bytes, then decode and parse them.
+
+    Missing, unreadable, damaged or malformed input has no displayable document.
+    """
+    text = bound.read(record_name).text
+    record = None if text is None else parse_alert_record(text)
+    if record is None:
+        return None
+    raw = bound.read_bytes(alert_name).data
+    if not _matches_record(raw, record):
+        return None
+    assert raw is not None
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
 def verified_input(alert_path: Path, record_path: Path, *, run_name: str) -> tuple[bytes, str]:
     """The stored alert's bytes and the text of the record they match: both read once, the
     bytes' digest compared with the record's. Raises `AlertReplaced` (a fixed reason naming
@@ -398,8 +424,9 @@ def verified_input(alert_path: Path, record_path: Path, *, run_name: str) -> tup
     if text is None or record is None:
         raise refusal
     raw, _reason = _io.read_bytes_guarded(alert_path)
-    if raw is None or digest_of(raw) != record.digest:
+    if not _matches_record(raw, record):
         raise refusal
+    assert raw is not None
     return raw, text
 
 

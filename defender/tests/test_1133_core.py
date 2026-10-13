@@ -697,7 +697,7 @@ def test_o3_the_view_is_a_bound_over_the_same_handle_owning_nothing(tree, tmp_pa
         view = held.view()
         assert isinstance(view, _io.Bound), f"view() is {type(view).__name__}, not a Bound"
         public = {n for n in dir(view) if not n.startswith("_")}
-        assert public == {"read", "read_jsonl", "entries", "under", "close"}, sorted(public)
+        assert public == {"read", "read_bytes", "read_jsonl", "entries", "under", "close"}, sorted(public)
 
         moved = tmp_path / "moved"
         root.rename(moved)
