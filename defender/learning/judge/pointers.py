@@ -201,7 +201,7 @@ def _plan_pointer(scope: PointerScope, pointer: str, fragment: str | None) -> Re
     return None
 
 
-def _parse(pointer: Any) -> tuple[list[str], str | None] | None:
+def _parse_pointer(pointer: Any) -> tuple[list[str], str | None] | None:
     """Parse one episode-relative pointer, including its canonical path, once."""
     if not isinstance(pointer, str) or not pointer.strip() or len(pointer) > _MAX_POINTER:
         return None
@@ -325,12 +325,12 @@ def assess(pointers: Iterable[Any], scope: PointerScope) -> Assessment:
     resolving = []
     prohibited_sample = False
     for pointer in filed:
-        parsed = _parse(pointer)
+        parsed = _parse_pointer(pointer)
         if parsed is None:
             continue
         parts, fragment = parsed
         if parts == [str(LAYOUT.samples)]:
-            section = (scope.samples or {}).get(fragment)
+            section = (scope.samples or {}).get(fragment) if fragment is not None else None
             if not (fragment in scope.served_systems and isinstance(section, dict)
                     and isinstance(section.get("verbs"), dict)):
                 prohibited_sample = True
