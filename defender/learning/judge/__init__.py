@@ -651,7 +651,7 @@ class _Pass:
         alert_record = render_mod.episode_record(bound)
         if alert_record is None:
             raise JudgeRefused(enqueue_mod.no_record_reason())
-        self.alert_record = alert_record
+        self.alert_identity = alert_record
         self.served_systems = run_mod.served_systems_of(manifest)
         self.samples = family_mod.read_samples_record(bound)
         # The noise context: pre-flight's record (its failed worlds named there once), then
@@ -694,9 +694,9 @@ class _Pass:
             self._judge_family()
         return self._write()
 
-    def _alert_key(self, labels: list[str]) -> str | None:
-        """The rule key of `labels`' alert (OB14: a row's own world's), `None` with none."""
-        return enqueue_mod.rule_key_of(self.alert_record)
+    def _alert_key(self) -> str | None:
+        """The copied source record's signature, or its explicit unkeyed fallback (#1222)."""
+        return enqueue_mod.rule_key_of(self.alert_identity)
 
     def _judge_world(self, label: str) -> None:
         row = self.rows[label]
@@ -743,7 +743,7 @@ class _Pass:
                 row["not_measured_reason"] = f"no draw completed: {cause}"
             row.pop(STATE_KEY, None)
             return
-        alert_key = self._alert_key([label])
+        alert_key = self._alert_key()
         defender_rows: list[dict[str, Any]] = []
         world_rows: list[dict[str, Any]] = []
         # The world's user-record entries reach the record at its flip, not before (A6).
@@ -776,7 +776,7 @@ class _Pass:
                 run_id=self.run_id, label=label, draw=str(item.draw), index=item.index,
                 subject=run_mod.SUBJECT_DEFENDER if defender else run_mod.SUBJECT_WORLD,
                 finding=finding, alert_rule_key=alert_key, citations=a.citations,
-                recorded_signature=self.alert_record.facts.signature,
+                recorded_signature=self.alert_identity.facts.signature,
                 contrast=a.contrast,
                 world_label_doubted=bool(verdict.doubted) if verdict is not None else False)
             try:
@@ -879,7 +879,7 @@ class _Pass:
             return
         scope = self.run_set.scope(self.bound, manifest=self.manifest, outcome=self.record,
                                 samples=None, focus=None)
-        alert_key = self._alert_key(self.run_set.planted)
+        alert_key = self._alert_key()
         world_rows: list[dict[str, Any]] = []
         pending = _empty_user()
         for n in sorted(documents):

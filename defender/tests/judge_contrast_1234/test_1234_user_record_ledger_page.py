@@ -296,6 +296,9 @@ def test_1234_user_record_lists_every_archived_gap_for_every_run(
     expected = {_denied("a"): 1, _denied("b"): 1, _denied("c"): 1, NOT_REPLAYABLE_KEY: 1}
     if pass_kind == "graded":
         expected[J3_KEY] = 1
+        # The failed append replaced c's ledger with a directory: its old rows are no
+        # longer readable, so the user receives the explicit unread-ledger entry instead.
+        expected.pop(_denied("c"))
         assert _counts(built) == expected, "nobody named a gap; every blocked call is listed"
         assert "c" in _unread(built), "the damaged ledger is reported by run"
         cut_row = _text(S.row(built, "c"))
@@ -407,7 +410,7 @@ def test_1234_stamped_family_with_gaps_in_its_archive(tmp_path: Path, stamp: str
         assert judge.calls == 0, "a stamp makes no model call"
         assert _counts(built) == {_denied("a"): 1, _denied("b"): 1, _denied("c"): 1,
                                   J3_KEY: 1, NOT_REPLAYABLE_KEY: 1}
-        assert "c" in _unread(built), "the damaged ledger is reported by run"
+        assert _unread(built) == {}
         return
     worlds = S.triad(b={"calls": [*_shown("b"), _refused({"entity": "b-refused"})]})
     built = S.family(tmp_path, worlds, not_replayable=[_not_replayable()])

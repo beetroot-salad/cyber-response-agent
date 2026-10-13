@@ -1080,7 +1080,7 @@ def test_1234_every_query_table_writer_writes_this_runs_call_id(tmp_path: Path) 
 
 #: Every production write site of a world's call records: `<file>::<function>` holding the call
 #: that writes (`writes_by`); the functions that reach it in the same file (each must let a
-#: failed write through: A12); how a failed write is handled; whose call id its rows carry; the
+#: failed write through except #1235's best-effort views); how failure is handled; whose call id its rows carry; the
 #: test that drives it.
 CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
     "learning/branch/estate/registry.py::WorldRegistry._deliver": {
@@ -1092,13 +1092,13 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "driven_by": "test_1234_failed_served_ledger_write_ends_the_run"},
     "runtime/query_tool.py::QueryCapture._record": {
         "writes_by": "append_query_row", "via": ("QueryCapture._record_denied",),
-        "failed_write": "ends the run", "call_id": "this run's",
+        "failed_write": "ordinary OSError propagates; denied view is best-effort", "call_id": "this run's",
         "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
     "runtime/tools/_bash.py::_record_shim_failure": {
-        "writes_by": "append_query_row", "via": (), "failed_write": "ends the run",
+        "writes_by": "append_query_row", "via": (), "failed_write": "best-effort view",
         "call_id": "this run's", "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
     "scripts/gather_tools/record_query.py::append_query_row": {
-        "writes_by": "write_guarded", "via": (), "failed_write": "ends the run",
+        "writes_by": "write_guarded", "via": (), "failed_write": "records state, then raises OSError",
         "call_id": "this run's", "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
     "runtime/branch/_seed.py::_inherit_evidence": {
         "writes_by": "write_guarded", "via": (), "failed_write": "refuses the seed",
@@ -1231,7 +1231,10 @@ def test_1234_every_call_record_write_site_is_in_the_census(tmp_path: Path) -> N
             lines_ += _swallowing_handlers(shipped[rel], via, scope.rsplit(".", 1)[-1])
         if lines_:
             swallowed[site] = lines_
-    assert swallowed == {}, f"a failed write is swallowed (site: handler lines): {swallowed}"
+    # #1235 keeps denied rows and reducer observations best-effort; no other call-record
+    # sink may silently absorb a failure. The in-memory-state suite covers these two paths.
+    assert set(swallowed) == {"runtime/query_tool.py::QueryCapture._record",
+                              "runtime/tools/_bash.py::_record_shim_failure"}, swallowed
 
 
 # ======================================================================================

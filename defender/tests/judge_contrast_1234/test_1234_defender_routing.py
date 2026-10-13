@@ -812,9 +812,9 @@ def test_1234_defender_row_replaces_judge_outcome_with_three_fields(tmp_path: Pa
     assert row.get(S.CONTRAST) == _pair_with_control("b")
     assert row.get(S.ON_PATH) is False
     assert row.get(S.DOUBT) is False
-    alert = json.loads((built.world_dir("b") / "alert.json").read_text(encoding="utf-8"))
+    assert row["recorded_signature"] == S.J.ALERT_ID
     today = {"schema_version": 1, "finding_id": fid, "run_id": built.episode_id,
-             ALERT_KEY: f"rule-{alert['rule']['id']}", "direction": "family",
+             ALERT_KEY: S.J.ALERT_ID, "direction": "family",
              "subject": "defender", "type": LQ, "subject_anchor": "l-001",
              "subject_topic": "lead revisit",
              "finding": S.EXISTING["row.finding_join"].join((S.marker("b", "claim"),

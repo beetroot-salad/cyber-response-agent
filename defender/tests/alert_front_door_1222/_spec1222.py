@@ -1902,7 +1902,7 @@ def titled_bodies(text: str, title: str) -> list[str]:
     for start, open_end, close_start, end in untrusted_frames(text):
         if start < cursor:
             continue
-        headings = re.findall(r"(?m)^## (.+)$", text[cursor:start])
+        headings = re.findall(r"(?m)^#{2,3} (.+)$", text[cursor:start])
         if headings:
             current = headings[-1]
         if title in current:
