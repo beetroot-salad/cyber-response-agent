@@ -4,7 +4,8 @@
 The check is delimiter-independent: it does not carry a list of known tags,
 headings, or prose labels. Instead it enforces the construction boundary.
 Section arguments sent to ``stage_user_message`` must already be ``wrap``
-results, and module-level interpolated strings cannot establish an unreviewed
+results (or ``titled_section`` results: a host-grammar title outside one ``wrap``
+frame), and module-level interpolated strings cannot establish an unreviewed
 boundary grammar outside that API.
 """
 from __future__ import annotations
@@ -36,8 +37,13 @@ def _call_name(node: ast.Call) -> str | None:
     return None
 
 
+#: The calls that render a framed section: `wrap` itself, and the shared contract's
+#: `titled_section`, which puts a host-grammar title outside one `wrap` frame (#1234 A10).
+_FRAMING_CALLS = frozenset({"wrap", "titled_section"})
+
+
 def _is_wrap_call(node: ast.AST) -> bool:
-    return isinstance(node, ast.Call) and _call_name(node) == "wrap"
+    return isinstance(node, ast.Call) and _call_name(node) in _FRAMING_CALLS
 
 
 def _suppressed(node: ast.AST, lines: list[str]) -> bool:

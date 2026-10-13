@@ -502,7 +502,7 @@ tests:
       - old: "with pytest.raises(W.refusals())"
         new: same
   - file: "defender/tests/test_1007_partition.py"
-    test: "test_a_world_row_type_is_not_gated_against_the_defender_vocabulary"
+    test: "test_a_world_row_type_is_not_gated_against_the_defender_vocabulary"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
     reaches:
       - "queue_dir= (enqueue.append_rows)"
       - "queue_dir= (enqueue.append_world_rows)"
@@ -547,7 +547,7 @@ tests:
       - old: "assert [r['finding_id'] for r in rows] == [f'{W.EPISODE_ID}/b/0/0'], f'one finding id landed twice: {rows}'"
         new: same
   - file: "defender/tests/test_1007_partition.py"
-    test: "test_a_world_bucket_spelled_like_a_defender_bucket_is_admitted_and_read_by_subject"
+    test: "test_a_world_bucket_spelled_like_a_defender_bucket_is_admitted_and_read_by_subject"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
     fixture-only: true
     reaches:
       - "queue_dir= (enqueue.append_rows)"
@@ -562,7 +562,7 @@ tests:
       - old: "assert len(W.queue_rows(paths.findings)) == 1"
         new: same
   - file: "defender/tests/test_1007_partition.py"
-    test: "test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim"
+    test: "test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
     reaches:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
@@ -652,7 +652,7 @@ tests:
       - old: "assert len(mech) == 1, f'a re-grade minted a second mechanical row: {mech}'"
         new: same
   - file: "defender/tests/test_1007_partition.py"
-    test: "test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings"
+    test: "test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
     fixture-only: true
     reaches:
       - "queue_dir= (judge_mod.grade_episode)"
@@ -716,18 +716,18 @@ tests:
       - old: "assert coord in page.text_of(row_id), page.text_of(row_id)"
         new: same
   - file: "defender/tests/test_1025_page_borrows.py"
-    test: "test_1025_route_finding_is_the_rule_enqueue_report_walks"
+    test: "test_1025_route_finding_is_the_rule_enqueue_report_walks"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
     fixture-only: true
     reaches:
       - "queue_dir= (enqueue.enqueue_report)"
     asserts:
       - old: "assert report.appended == 4, report"
         new: same
-      - old: "assert sum((1 for lane in routed.values() if lane == enqueue.ROUTE_DEFENDER)) == 4"
+      - old: "assert sum((1 for lane in routed.values() if lane == enqueue.ROUTE_DEFENDER)) == 4"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
         new: same
       - old: "assert report.appended == 0, report"
         new: same
-      - old: "assert sum((1 for lane in routed.values() if lane == enqueue.ROUTE_NEVER_ELIGIBLE)) == 4"
+      - old: "assert sum((1 for lane in routed.values() if lane == enqueue.ROUTE_NEVER_ELIGIBLE)) == 4"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
         new: same
       - old: "assert len(report.withheld_findings) == 4, report.withheld_findings"
         new: same
@@ -737,12 +737,12 @@ tests:
         new: same
       - old: "assert coord in unqueueable_ids, (coord, lane)"
         new: same
-      - old: "assert lane == enqueue.ROUTE_DEFENDER, (coord, lane)"
+      - old: "assert lane == enqueue.ROUTE_DEFENDER, (coord, lane)"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
         new: same
       - old: "assert coord not in world_ids | withheld_ids | unqueueable_ids, (coord, lane)"
         new: same
   - file: "defender/tests/test_1025_page_borrows.py"
-    test: "test_1025_a_record_naming_one_world_twice_never_files_its_world_finding_as_a_defender_lesson"
+    test: "test_1025_a_record_naming_one_world_twice_never_files_its_world_finding_as_a_defender_lesson"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
     fixture-only: true
     reaches:
       - "queue_dir= (enqueue.enqueue_report)"
@@ -751,7 +751,7 @@ tests:
         new: same
       - old: "assert not [r for r in report.world_rows if r['finding_id'] == coord], report.world_rows"
         new: same
-      - old: "assert any((line.startswith(coord) and 'ungradable' in line for line in report.unqueueable)), report.unqueueable"
+      - old: "assert any((line.startswith(coord) and 'ungradable' in line for line in report.unqueueable)), report.unqueueable"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
         new: same
       - old: "assert 'about the world' not in row_file.read_text(encoding='utf-8'), row_file"
         new: same
@@ -765,9 +765,9 @@ tests:
         new: same
       - old: "assert [w['finding_id'] for w in report.withheld_findings] == [w['finding_id'] for w in doc['withheld_findings']]"
         new: same
-      - old: "assert report.unqueueable == doc['unqueueable_findings'] == []"
+      - old: "assert report.unqueueable == doc['unqueueable_findings'] == []"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
         new: same
-      - old: "assert report.dispositions == E.block_defender_lane(E.sample_grade(), 'discard')['dispositions']"
+      - old: "assert report.dispositions == E.block_defender_lane(E.sample_grade(), 'discard')['dispositions']"  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
         new: same
   - file: "defender/tests/test_1025_page_borrows.py"
     test: "test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_filed"
@@ -2486,7 +2486,7 @@ via_shared_helpers_only:   # reach a removed name ONLY through a shared test mod
   - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_commit_message_contains_a_path_like_string_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_commit_message_contains_a_traversal_sequence_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_consumed_skip_reason_contains_a_path_like_string_773", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_observability_gaps_carries_adversarial_content_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_observability_gaps_carries_adversarial_content_773", reaches: ["graveyard_file via _spec773.build_scene"]}  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
   - {file: "defender/tests/test_773_inputs.py", test: "test_queue_row_run_id_contains_path_traversal_characters_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/test_773_inputs.py", test: "test_queue_row_is_missing_its_run_id_field_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/test_773_inputs.py", test: "test_queue_row_direction_is_an_unrecognized_value_773", reaches: ["graveyard_file via _spec773.build_scene"]}
@@ -2547,7 +2547,7 @@ via_shared_helpers_only:   # reach a removed name ONLY through a shared test mod
   - {file: "defender/tests/test_773_tool_removal.py", test: "test_author_result_carries_an_unrecognized_bucket_key_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/test_773_tool_removal.py", test: "test_author_result_consumed_skip_bucket_is_missing_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/test_773_tool_removal.py", test: "test_the_curator_prompts_account_of_a_mixed_file_after_the_change_773", reaches: ["graveyard_file via _spec773.build_scene"]}
-  - {file: "defender/tests/test_773_tool_removal.py", test: "test_the_author_result_still_carries_observability_gaps_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_the_author_result_still_carries_observability_gaps_773", reaches: ["graveyard_file via _spec773.build_scene"]}  # lint-stale-ref: ok — historical #1135 migration evidence, not a live reference
   - {file: "defender/tests/test_773_tool_removal.py", test: "test_a_citation_of_an_earlier_batch_finding_is_not_verified_773", reaches: ["graveyard_file via _spec773.build_scene"]}
   - {file: "defender/tests/test_773_tool_removal.py", test: "test_a_questioner_tick_runs_vouching_and_no_verdict_step_773", reaches: ["graveyard_file via _spec773.build_questioner_scene"]}
   - {file: "defender/tests/test_773_tool_removal.py", test: "test_the_questioner_channel_still_refuses_an_unvouched_file_773", reaches: ["graveyard_file via _spec773.build_questioner_scene"]}

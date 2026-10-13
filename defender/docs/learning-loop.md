@@ -257,31 +257,55 @@ questioner's definition until then, which is why some older prose pairs the two.
    reason; then `outcome.yaml` must say exactly `accepted` (an absent or torn
    record is its own "no record" state, never `accepted`); then two or more failed
    worlds — pre-flight's plus every world's own record — make the family
-   `unusable`, recorded with no model call. No code path computes a bucket.
+   `unusable`, recorded with no model call; the family stamp must certify the
+   siblings comparable, and the control run must be usable. No code path
+   computes a bucket.
 
-2. **Model pass** — the judge model decides each world's bucket (`lead-set`,
-   `lead-quality`, `analyze-discipline`, `decision-discipline`, `observability`,
-   or none), the `systems` the world's facts touched, and its findings. It reads
-   the world's facts and declared verdict, the sibling's calls with the verified
-   claims, the sibling's verdict and `served_systems`. One call per graded world
-   per draw (`JUDGE_DRAWS`, default **1**) into `worlds/<X>/judge/<n>.yaml`. A failed draw does not unwind the
-   pass.
+2. **One call per planted world, against references** (#1234) — every run goes
+   through one usability read; a world is judged against the control (and any
+   other usable sibling as a reference) through computed contrast sections: the
+   joined call lists, the contrast table, the fact surfaces. One model call per
+   planted world per draw (`JUDGE_DRAWS`, default **1**) into
+   `worlds/<X>/judge/<n>.yaml`; the payload is capped (`JUDGE_PAYLOAD_CAP`), and
+   run text reaches the model framed as untrusted data. A failed draw does not
+   unwind the pass.
 
-3. **Episode outcome** — `gradable`, `discard` (measurement spoilt) or
-   `corpus-contradiction` (archive disagrees with itself). A world the model
-   calls spoilt spoils the family; `discard` wins over `corpus-contradiction`, so
-   the answer does not depend on manifest order.
+3. **What a draw files** — the world's bucket (one of the four investigator
+   buckets `lead-set`, `lead-quality`, `analyze-discipline`,
+   `decision-discipline`, or none) and its `systems`, then three lists:
+   investigator findings (each resting on a two-run `contrast_evidence` pair and
+   an `on_verdict_path` flag), world findings (`unreachable`, `incoherent`,
+   `mislabelled`: what is wrong with the world itself) and deployment gaps.
+   Every pointer is resolved by code, never trusted; a finding whose pointers do
+   not resolve is dropped with its reason on the ledger.
 
-4. **Enqueue** (`judge/enqueue.py`) — for `gradable` only, one row per surviving
-   finding. `discard`/`corpus-contradiction` enqueue nothing: the family record
-   is the artifact. A finding with an empty anchor is dropped and named on the
-   report rather than discarding its siblings' good ones.
+4. **Unanimity and measurement** (`judge/route.py`) — draws combine only when
+   they agree. Draws that disagree (on the outcome or the `systems`) leave the
+   world `draws_disagree` and its investigator findings off the queue. Agreeing
+   draws make it *measured*, unless they file `unreachable`/`incoherent` or a gap
+   that kept the facts from the investigator: then it is *not measured*, its
+   reason recorded. A `mislabelled` finding marks the world's rows
+   `world_label_doubted`. No model
+   word spoils the family: each world stands or falls on its own record.
 
-5. **`judge.yaml`** — written **last**, carrying enqueued row count and per-world
-   completed draws, so its presence certifies the whole pass.
+5. **Routing and the per-world commit** — code decides each finding's lane from
+   its resolved pointers (`route.fate`): an investigator finding of a measured
+   world goes to the defender queue, a design world finding (one citing the
+   plan) to the questioner queue, a gap to the user record (named and found
+   gaps, the serving findings); every finding gets one ledger entry. A world's
+   row is written `queueing`, its rows appended, then written `queued`, before
+   the next world is judged; a re-run carries `queued` rows and refuses a row
+   left `queueing`. The family call runs once after the worlds and files world
+   findings only, committed the same way.
 
-Queueable types: `lead-set`, `lead-quality`, `analyze-discipline`,
-`observability`, `decision-discipline` (`core/config.py`).
+6. **`judge.yaml`** — rewritten at every commit with the user record's found
+   gaps recomputed. A record carrying a name #1234 retired
+   (`learning/core/retired.py`) is refused by that name, for the re-run and the
+   episode page alike.
+
+Queueable defender types: `lead-set`, `lead-quality`, `analyze-discipline`,
+`decision-discipline` (`core/config.py`). A deployment gap is reported to the
+user, never queued as a lesson.
 
 ## Lesson Delivery
 
@@ -413,3 +437,12 @@ the one-sided loop demonstrably moving the needle first.
   the golden-case eval judge (`evals/oracle_golden/judge.py`) — so setting either
   retargets both. Inherited, not designed; separating them means a knob name of
   this judge's own.
+
+The #1235 integration keeps call-ID allocation on the run's in-memory `RunState`, under its
+lock, alongside the authoritative query rows. The writable query-table view never supplies
+sequence state or call IDs. A refused denied-row or reducer-row view write stays best-effort;
+#1234's earlier requirement to stamp a query-table recording cut is superseded. The offline
+judge still refuses an incomplete or malformed archive rather than treating missing evidence
+as a complete measurement. Alert attribution comes from #1222's copied source alert record:
+queue rows carry its signature verbatim (and the explicit unkeyed fallback when absent),
+independently of edited world alert copies.

@@ -947,8 +947,6 @@ _TEXT_TYPES = frozenset({"str", "bytes"})
 #: D6' parameter allowlist `(module, function, parameter, reason)`: the O5 carve-outs, and the
 #: path-typed functions D3' keeps that do no episode write. Every row must still be flagged.
 _CARVE_READ = "O5 carve-out: a path-taking reader of a run-shaped tree or a base file"
-_CARVE_ARITH = ("O5 carve-out: the judge's pointer-containment arithmetic, which resolves a "
-                "model-cited pointer and reads nothing")
 _GIT = "a path inside a git revision (`git show <rev>:<path>`), not a file on disk"
 _ALERT = "the investigation's alert input, a run file read before any episode exists"
 #: Rev 3 (R1) removes `episode._answers(path)`'s row: `_answers` takes the rows `delta_o` read
@@ -956,8 +954,9 @@ _ALERT = "the investigation's alert input, a run file read before any episode ex
 PARAM_ALLOWLIST = frozenset({
     ("learning.branch.ledger", "Ledger._absorb", "path", _CARVE_READ),
     ("learning.judge.family", "leads_by_id", "world_dir", _CARVE_READ),
-    ("learning.judge.run", "_resolves", "world_dir", _CARVE_ARITH),
-    ("learning.judge.run", "_draw_document", "world_dir", _CARVE_ARITH),
+    # (#1234 removed `run._resolves(world_dir, …)` and `run._draw_document(world_dir, …)`: the
+    # one pointer resolver is `pointers._resolves` over the episode's bound view, and the draw
+    # document is built from the validated reply alone — neither takes a path.)
     ("learning.judge", "_memoized_show.invoke", "path", _GIT),
     ("learning.judge.render", "_git_show_default", "path", _GIT),
     ("run", "_Investigate.__call__", "alert_path", _ALERT),
@@ -1007,8 +1006,6 @@ NB_READERS = frozenset({
     ("learning.branch.ledger", "Ledger._absorb"),
     ("learning.judge.family", "leads_by_id"),
     ("scripts.visualize.visualize_episode", "_load_world_leads"),
-    ("learning.judge.run", "_resolves"),
-    ("learning.judge.run", "_draw_document"),
 })
 _O5_CALLS = frozenset({"EpisodePaths", "base_file", "staged_path"})
 

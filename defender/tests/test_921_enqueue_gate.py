@@ -62,12 +62,18 @@ def _family_row(fid: str = "ep-1/b/0/0", **over) -> dict:
 
     `subject="defender"` overrides `D.finding_row`'s own placeholder `"subj"` value — that
     fixture predates #1007's `subject` partition and this suite is entirely about the DEFENDER
-    lane.
+    lane. #1234 (d00d): no `judge_outcome` (A4), and the three fields the family partition
+    reads as the row's ground truth — `contrast_evidence`, `on_verdict_path`,
+    `world_label_doubted`.
     """
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"),
-               type="decision-discipline", judge_outcome="survived", subject="defender",
+               type="decision-discipline", subject="defender",
                subject_anchor="l-001", subject_topic="holding-system coverage",
-               source_run_dir="episodes/ep-1/worlds/b")
+               source_run_dir="episodes/ep-1/worlds/b",
+               contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
+               on_verdict_path=True, world_label_doubted=False)
+    # `D.finding_row` is the adversarial channel's shape, which still spells the retired word.
+    row.pop("judge_outcome")
     row.update(over)
     return row
 
@@ -91,8 +97,8 @@ def _graded(tmp_path, **kw):
 
 def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
     """A `direction: family` row with NO `source_refs.yaml` behind it is ADMITTED by
-    `_gate_family` on the ground truth the family record carries (`disposition_declared`), where
-    `_gate_findings` would hold it `no_ground_truth` forever.
+    `_gate_family` on the ground truth the row itself carries (#1234: its contrast evidence and
+    its two booleans), where `_gate_findings` would hold it `no_ground_truth` forever.
 
     The HELD-FOREVER state is the observable driven here, not a mocked gate: the row is seeded
     into the real findings channel and the real drain tick is run, so the assertion is about
@@ -141,42 +147,48 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
 
 
 def test_921_gate_family_authors_a_survived_row(tmp_path):
-    """A family row whose `judge_outcome` is `survived` is admitted for authoring."""
+    """A family row in the #1234 shape (the judge queues one only for an investigator finding of
+    a measured, unanimous world, A7/A13) is admitted for authoring. (Pre-#1234 this was the
+    row whose `judge_outcome` said `survived`; the family word is retired, A4.)"""
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
-    D.seed(paths, channel, [_family_row(judge_outcome="survived")])
+    D.seed(paths, channel, [_family_row()])
     agent = D.recording(D.committing("survived"))
 
     assert J.mod("learning.author.drain").run_batch(
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
-    assert agent.calls, "the `survived` row authored nothing; it was held, not admitted"
+    assert agent.calls, "the new-shape row authored nothing; it was held, not admitted"
     assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/0"]
 
 
 def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
-    """`caught` and `undecidable` rows are SKIPPED, not held.
-
-    A skip is terminal and a hold is forever, and the two are different rows in the drain's own
-    report — a row held on a word that will never change is a queue entry no operator can ever
-    clear. Positive control in the same tick: a `survived` row beside them IS authored, so the
-    skip cannot pass on a gate that admits nothing.
+    """#1234 rewrite (A4, I10): the family words `caught` / `undecidable` / `survived` are
+    retired, so the partition no longer skips on a word. A pre-#1234 row carrying
+    `judge_outcome` (whatever its word), or a row missing one of the three new fields, is HELD
+    naming why — never authored and never consumed as though it meant what the retired design
+    meant. Positive control in the same tick: a new-shape row beside them IS authored, so the
+    hold cannot pass on a gate that admits nothing.
     """
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
+    missing = _family_row("ep-1/c/0/1")
+    del missing["world_label_doubted"]
     D.seed(paths, channel, [
         _family_row("ep-1/b/0/0", judge_outcome="caught"),
         _family_row("ep-1/c/0/0", judge_outcome="undecidable"),
-        _family_row("ep-1/b/0/1", judge_outcome="survived"),
+        missing,
+        _family_row("ep-1/b/0/1"),
     ])
-    agent = D.recording(D.committing("skip-vs-author"))
+    agent = D.recording(D.committing("hold-vs-author"))
 
     assert J.mod("learning.author.drain").run_batch(
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
-    assert agent.calls, "the positive control failed: the `survived` row authored nothing"
+    assert agent.calls, "the positive control failed: the new-shape row authored nothing"
     assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/1"]
-    assert D.pending(paths, channel) == [], "a skipped row was HELD instead; a hold is forever"
-    assert {r["finding_id"] for r in D.consumed(paths, channel)} == {
-        "ep-1/b/0/0", "ep-1/c/0/0", "ep-1/b/0/1"}
+    held = {r["finding_id"] for r in D.pending(paths, channel)}
+    assert held == {"ep-1/b/0/0", "ep-1/c/0/0", "ep-1/c/0/1"}, (
+        f"a retired-word or incomplete row was consumed or authored instead of held: {held}")
+    assert {r["finding_id"] for r in D.consumed(paths, channel)} == {"ep-1/b/0/1"}
 
 
 def test_921_gate_family_is_idempotent_over_a_replayed_batch(tmp_path):
@@ -213,18 +225,34 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     findings suppresses real ones. Both halves are driven: re-enqueue the same replies and
     observe the same ids, and enqueue two different findings and observe two.
     """
-    enqueue = _enqueue()
     ep, record = _graded(tmp_path)
 
     first = J.enqueued_rows(record)
     ids = [row["finding_id"] for row in first]
+    assert ids, "the graded episode enqueued nothing, so there is no id to compare"
     assert len(ids) == len(set(ids)), f"colliding finding ids inside one pass: {ids}"
 
-    retried = enqueue.enqueue(ep, J.mod("learning.judge").read_grade(ep), state=env_state())
-    again = [row["finding_id"] for row in J.enqueued_rows(record)][len(ids):]
-    assert retried == len(ids)
+    # #1234 A8: the bare re-enqueue path (`enqueue.enqueue` over the record) is gone — rows
+    # are built only from the replies a pass just drew. The retry is therefore a second pass
+    # over the same episode and the same replies (a scratch copy, its own queue), and it must
+    # mint the same ids.
+    import shutil
+
+    retry = tmp_path / "retry"
+    retry.mkdir()
+    ep_retry = retry / ep.name
+    shutil.copytree(ep, ep_retry, symlinks=True)
+    (ep_retry / "judge.yaml").unlink()
+    shutil.rmtree(ep_retry / "worlds" / "b" / "judge")
+    shutil.rmtree(ep_retry / "worlds" / "c" / "judge")
+    retry_root = retry / "queue"
+    retry_root.mkdir()
+    retry_state = LearningState.open(LoopPaths(repo_root=retry, state_dir=retry_root))
+    J.grade_at(ep_retry, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
+               draws=1, state=retry_state)
+    again = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep_retry))]
     assert again == ids, (
-        "a retried enqueue minted new ids; the guard keys on the id alone, so a fresh id per "
+        "a retried pass minted new ids; the guard keys on the id alone, so a fresh id per "
         "retry defeats it entirely")
 
     two = J.as_reply_text(J.reply_doc(findings=[
@@ -246,30 +274,30 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
 
 
 def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
-    """An episode whose `episode_outcome` is `discard` or `corpus-contradiction` appends NOTHING
-    to `findings.jsonl` — the refusal is M5's, AT THE APPENDER, not the gate's. The family
-    record is the whole artifact.
-
-    At the appender because a `discard` row that reaches the queue is already a row an operator
-    has to clear: D6 routes on `judge_outcome`, and neither of these two words is a defender
-    failure to author from. Both words are driven, because they are two members of the
-    vocabulary and a refusal written against one is silent about the other.
+    """#1234 rewrite (A7, A16, A17): the episode words `discard` / `corpus-contradiction` are
+    retired; a world that cannot measure the investigator is said by the world's OWN draws
+    filing an `unreachable` or `incoherent` world finding. Such a world is not measured, and its
+    investigator findings take the `not_measured` lane: NOTHING reaches the defender queue,
+    while the world row keeps its bucket — the record is the artifact. Both words are driven,
+    because they are two members of the vocabulary and a refusal written against one is silent
+    about the other.
     """
-    for word in ("discard", "corpus-contradiction"):
+    for word in ("unreachable", "incoherent"):
         ep = J.accepted_episode(tmp_path / word, ledgers={"b": [J.staged_row("b")], "c": []})
-        # `accepted_episode` drives `report.md`'s disposition and the manifest's
-        # `disposition_declared` off the same value by default, so a doctored world (the
-        # `staged_row` on H) buckets `None` on agreement — write the mismatch this assertion
-        # needs explicitly, the standard idiom other bucket tests already use.
-        (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-        J.grade_at(
-            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(episode_outcome=word))),
-            draws=1, state=env_state())
+        reply = J.reply_doc(findings=[J.finding_doc(),
+                                      J.finding_doc(subject="world", bucket=word)])
+        J.grade_at(ep, judge=J.FakeJudge(default=J.as_reply_text(reply)),
+                   draws=1, state=env_state())
         record = J.judge_record(ep)
-        assert record["episode_outcome"] == word
+        rows = J.world_rows(record)
+        assert rows["b"]["measured"] is False
+        assert word in rows["b"]["not_measured_reason"]
         assert record["enqueued_rows"] == 0
-        assert J.enqueued_rows(record) == [], f"a {word} episode appended rows"
-        assert J.world_rows(record)["b"]["bucket"], (
+        assert J.enqueued_rows(record) == [], f"a world filing {word} appended defender rows"
+        lanes = {e["lane"] for e in record["dispositions"]
+                 if e["finding_id"].endswith("/b/0/0")}
+        assert lanes == {"not_measured"}, f"the investigator finding took {lanes}"
+        assert rows["b"]["bucket"], (
             "the family record is the artifact, and it lost its per-world grading")
 
 
@@ -291,7 +319,7 @@ def test_921_gradable_episode_appends_one_row_per_finding(tmp_path):
 
     record = J.judge_record(ep)
     rows = J.enqueued_rows(record)
-    assert record["episode_outcome"] == "gradable"
+    assert all(row["measured"] for row in record["worlds"]), "a world was not measured"
     assert len(rows) == 2 * 2 * 2, f"two worlds x two draws x two findings gave {len(rows)} rows"
     assert record["enqueued_rows"] == len(rows)
 
@@ -388,10 +416,11 @@ def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
 
 
 def test_921_finding_row_carries_the_twelve_keys_persist_writes(tmp_path):
-    """One row per finding carrying the TWELVE keys `persist.py:315-330` writes:
+    """One row per finding carrying the keys `persist.py:315-330` writes:
     `schema_version, finding_id, run_id, alert_rule_key, direction="family", type=<bucket>,
-    subject_anchor, subject_topic, finding, judge_outcome=<verdict_word>, citations=<evidence>,
-    source_run_dir=<archived world dir>`.
+    subject_anchor, subject_topic, finding, citations=<resolving pointers>,
+    source_run_dir=<archived world dir>` — #1234 (d00d) drops `judge_outcome` (A4) and adds
+    `contrast_evidence`, `on_verdict_path` and `world_label_doubted` (`J.ROW_KEYS`).
 
     A row missing a key the queue's validator reads is O6's stated failing mode — and P6 makes
     two of those keys load-bearing well past validation, because `run_id` and `direction` are
@@ -413,7 +442,11 @@ def test_921_finding_row_carries_the_twelve_keys_persist_writes(tmp_path):
         assert set(row) - {"recorded_signature"} == set(J.ROW_KEYS), (
             f"row keys differ from the queue's shape: {sorted(set(row) ^ set(J.ROW_KEYS))}")
         assert row["direction"] == "family"
-        assert row["judge_outcome"] == record["verdict_word"]
+        assert "judge_outcome" not in row
+        assert isinstance(row["contrast_evidence"], list)
+        assert row["contrast_evidence"]
+        assert isinstance(row["on_verdict_path"], bool)
+        assert isinstance(row["world_label_doubted"], bool)
         assert row["type"] in J.mod("learning.core.config").QUEUEABLE_FINDING_TYPES
         assert row["source_run_dir"] in expected_dirs, (
             f"source_run_dir must be exactly the row's own archived world dir "
@@ -571,26 +604,22 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
 
 
 # ---------------------------------------------------------------------------------------
-# O7 — discard and corpus-contradiction
+# O7 — what keeps an episode's findings off the defender queue (#1234: the world's own draws)
 # ---------------------------------------------------------------------------------------
 
 
 def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifact(tmp_path):
-    """A self-contradicting episode yields `discard`, no defender finding is authored, and the
-    family record is the artifact.
-
-    A finding row authored against a `discard` episode is O7's stated failing mode. #1224
-    retired the mechanical arm (the review's control-drift keys): pre-flight records the calls
-    whose live answer drifted from the capture on `outcome.yaml`, the host renders that list
-    into the judge's prompt, and the word comes from the family call. Both halves are pinned:
-    the recorded drift reaches the model as host text, and the model's `discard` closes the
-    defender lane while the per-world grading stays on the record.
+    """#1234 rewrite (A17, I2/P-c): the family word `discard` is retired, and the family call
+    can never close any world's defender lane. What survives of the pre-#1224 arm: pre-flight's
+    recorded drift reaches the model as host text. What the family call files instead is a
+    family-scope world finding (`incoherent` here), which goes to the questioner — and the
+    worlds' own measured, unanimous draws still queue their defender rows, with the per-world
+    grading on the record.
     """
     from defender._episode_handle import Episode
     from defender.learning.branch.outcome import write_outcome
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     (ep / "outcome.yaml").unlink()
     with Episode.open(ep) as handle:
         write_outcome(handle, "accepted", reason="", drift=[{
@@ -598,47 +627,48 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
             "params": {"query": f"FROM {J.EVENTS_PATTERN} | LIMIT 5"},
             "reason": "DRIFT-MARKER-921"}])
 
-    judge = J.scripted_judge(
-        family_default=J.as_reply_text(J.family_reply(verdict_word="discard",
-                                                      episode_outcome="discard")))
-    J.grade_at(
-        ep, judge=judge, draws=1, state=env_state())
+    judge = J.scripted_judge(family_default=J.as_reply_text(J.family_reply(
+        findings=[J.finding_doc(subject="world", bucket="incoherent")])))
+    J.grade_at(ep, judge=judge, draws=1, state=env_state())
 
     assert any("DRIFT-MARKER-921" in p for p in judge.prompts), (
-        "pre-flight's recorded drift never reached the judge, so its `discard` is a guess")
+        "pre-flight's recorded drift never reached the judge")
     record = J.judge_record(ep)
-    assert record["episode_outcome"] == "discard"
-    assert J.enqueued_rows(record) == []
+    family_lanes = [e["lane"] for e in record["dispositions"]
+                    if "/family/" in e["finding_id"]]
+    assert family_lanes == ["world"], f"the family's world finding took {family_lanes}"
+    assert J.enqueued_rows(record), (
+        "the family call's world finding closed the worlds' defender lane (I2: it never may)")
     assert J.world_rows(record)["b"]["bucket"], "the family record lost its per-world grading"
 
 
 def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
-    """A defender that held an environment fact the served world CONTRADICTS yields
-    `corpus-contradiction`, not a defender failure — a defect in the experiment, not in the
-    analyst.
-
-    N5 records that the defender has no channel of its own to RAISE one, so the word can only
-    arrive through the judge's reply; the majority requirement is what keeps one draw from
-    minting it. Positive control: the same episode with a `gradable` majority is graded normally
-    and enqueues.
+    """#1234 rewrite (A16, F-14): the episode word `corpus-contradiction` is retired. A defect in
+    the experiment rather than in the analyst is now said by the world's own draws — here a
+    deployment gap flagged `kept_facts_from_investigator` in every draw: the world is not
+    measured, the reason names the gap, the gap goes to the user record, and no defender row is
+    authored from the world. Positive control: the same episode with an unflagged reply is
+    graded normally and enqueues.
     """
-    contradiction = J.as_reply_text(J.reply_doc(
-        episode_outcome="corpus-contradiction",
-        findings=[J.finding_doc(evidence=["report.md", "investigation.md#l-001"])]))
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    J.grade_at(
-        ep, judge=J.FakeJudge(default=contradiction), draws=2, state=env_state())
+    gap = {"what": "elastic esql", "how": "the served system does not hold the field",
+           "evidence": ["worlds/b/report.md"], "kept_facts_from_investigator": True}
+    kept = J.as_reply_text(J.reply_doc(gaps=[gap]))
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
+                            labels=("a", "b"))
+    J.grade_at(ep, judge=J.FakeJudge(default=kept, family_default=J.as_reply_text(
+        J.family_reply())), draws=2, state=env_state())
 
     record = J.judge_record(ep)
-    assert record["episode_outcome"] == "corpus-contradiction"
-    assert record["verdict_word"] == "corpus-contradiction", (
-        "`corpus-contradiction` is the family's verdict word when it applies, not a note "
-        "beside one")
-    assert J.enqueued_rows(record) == [], "a corpus contradiction was authored as a lesson"
+    row = J.world_rows(record)["b"]
+    assert row["measured"] is False
+    assert "kept the facts" in row["not_measured_reason"]
+    lanes = {e["finding_id"].rsplit("/", 1)[1]: e["lane"] for e in record["dispositions"]
+             if "/b/0/" in e["finding_id"]}
+    assert lanes == {"0": "not_measured", "1": "user_record"}, lanes
+    assert J.enqueued_rows(record) == [], "a world the gap kept facts from was authored"
 
     ok = J.accepted_episode(tmp_path / "ok", ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ok / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.grade_at(
         ok, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         draws=2, state=env_state())
@@ -646,40 +676,39 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
 
 
 def test_921_discard_needs_a_majority_of_draws(tmp_path):
-    """`discard` needs a MAJORITY of a world's draws answering it (#1224 retired the
-    mechanical control-drift arm and its review pointer: drift now reaches the model as host
-    text, see the test above).
-
-    A MINORITY answering `discard` does not meet the bar and the episode stays `gradable`; one
-    draw's say-so never suppresses an episode. The majority's denominator is COMPLETED draws
-    (J6).
+    """#1234 rewrite (A7): the majority rule is replaced by UNANIMITY over a world's completed
+    draws. One draw of three filing an `incoherent` world finding makes the draws disagree: the
+    world is withheld (`draws_disagree`), neither measured nor not-measured, and none of its
+    investigator findings reaches the defender queue (lane `draws_disagree`). Positive control:
+    all three draws filing it make the world not measured (lane `not_measured`).
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
-                            dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    minority = J.FakeJudge(
-        replies=[J.as_reply_text(J.reply_doc(episode_outcome="discard")),
-                 J.as_reply_text(J.reply_doc()), J.as_reply_text(J.reply_doc())],
-        default=J.as_reply_text(J.reply_doc()),
-        family_default=J.as_reply_text(J.family_reply()))
-    J.grade_at(
-        ep, judge=minority, draws=3, state=env_state())
+                            labels=("a", "b"))
+    incoherent = J.as_reply_text(J.reply_doc(findings=[
+        J.finding_doc(), J.finding_doc(subject="world", bucket="incoherent")]))
+    plain = J.as_reply_text(J.reply_doc())
+    minority = J.FakeJudge(replies=[incoherent, plain, plain], default=plain,
+                           family_default=J.as_reply_text(J.family_reply()))
+    J.grade_at(ep, judge=minority, draws=3, state=env_state())
 
     record = J.judge_record(ep)
-    assert record["episode_outcome"] == "gradable", (
-        "one draw of three suppressed the whole episode's findings")
-    assert J.enqueued_rows(record), "a gradable episode enqueued nothing"
+    row = J.world_rows(record)["b"]
+    assert row["draws_disagree"] is True, row
+    assert row["measured"] is None, row
+    assert J.enqueued_rows(record) == [], "a world whose draws disagree queued defender rows"
+    assert {e["lane"] for e in record["dispositions"]
+            if e["finding_id"].rsplit("/", 1)[1] == "0"} == {"draws_disagree"}
 
-    majority = J.accepted_episode(tmp_path / "majority",
-                                  ledgers={"b": [J.staged_row("b")], "c": []})
-    discard = J.as_reply_text(J.reply_doc(episode_outcome="discard"))
-    J.grade_at(
-        majority, judge=J.FakeJudge(replies=[discard, discard, J.as_reply_text(J.reply_doc())],
-                                    default=J.as_reply_text(J.reply_doc()),
-                                    family_default=J.as_reply_text(J.family_reply())),
-        draws=3, state=env_state())
-    assert J.judge_record(majority)["episode_outcome"] == "discard", (
-        "positive control: two draws of three answering `discard` did not spoil the episode")
+    unanimous = J.accepted_episode(tmp_path / "unanimous",
+                                   ledgers={"b": [J.staged_row("b")], "c": []},
+                                   labels=("a", "b"))
+    J.grade_at(unanimous, judge=J.FakeJudge(default=incoherent, family_default=J.as_reply_text(
+        J.family_reply())), draws=3, state=env_state())
+    row = J.world_rows(J.judge_record(unanimous))["b"]
+    assert row["draws_disagree"] is False, row
+    assert row["measured"] is False, (
+        "positive control: three draws agreeing on `incoherent` did not take the world out of "
+        "measurement")
 
 
 # ---------------------------------------------------------------------------------------

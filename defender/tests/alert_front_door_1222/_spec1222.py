@@ -1894,6 +1894,23 @@ def framed_bodies(text: str, tag: str = "untrusted") -> list[str]:
             for _s, open_end, close_start, _e in tagged_frames(text, tag)]
 
 
+def titled_bodies(text: str, title: str) -> list[str]:
+    """Bodies of outer frames whose preceding host title names this section (#1234 A10)."""
+    out: list[str] = []
+    cursor = 0
+    current = ""
+    for start, open_end, close_start, end in untrusted_frames(text):
+        if start < cursor:
+            continue
+        headings = re.findall(r"(?m)^#{2,3} (.+)$", text[cursor:start])
+        if headings:
+            current = headings[-1]
+        if title in current:
+            out.append(text[open_end:close_start])
+        cursor = end
+    return out
+
+
 def outer_frames(text: str) -> list[str]:
     """The bodies of the OUTERMOST closed untrusted frames of `text`, in order: a frame nested
     inside another (a summary persisted already framed, then framed again) is part of its

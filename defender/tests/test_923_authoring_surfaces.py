@@ -91,11 +91,12 @@ _VOCABULARY_READERS = {
     # it owes an in-or-out verdict and nothing else — and it gives one: a value outside the
     # vocabulary makes that world `ungradable`, named on the record, never coerced.
     "learning/judge/family.py",                 # the family judge's per-world row
-    # READER: #1224's judge pass writes the row of a world O5 counts as failed (`_failed_row`),
-    # carrying the manifest's `disposition_declared` through the owner's normalizer exactly as
-    # `family.read_world` does for a judged world. It authors no disposition: a value outside
-    # the vocabulary lands on the row as `None`, never coerced into a member.
-    "learning/judge/__init__.py",               # a failed world's row
+    # READER: #1224's judge pass writes the row of a world O5 counts as failed (since #1234
+    # `runs.failed_row`), carrying the manifest's `disposition_declared` through the owner's
+    # normalizer exactly as `family.read_world` does for a judged world. It authors no
+    # disposition: a value outside the vocabulary lands on the row as `None`, never coerced
+    # into a member.
+    "learning/judge/runs.py",                   # a failed world's row
     # READER, and the counterpart of the manifest surface above: #920's archive reader takes
     # each world's headline from that world's OWN committed `report.md` — written by the host's
     # report gate, never by this module — and asks the owner whether it is in the vocabulary. A

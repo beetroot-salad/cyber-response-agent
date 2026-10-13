@@ -507,7 +507,7 @@ def judge_grade(tmp: Path, label: str) -> Any:
 
 
 def judged(grade: Any) -> tuple[str, dict[str, Any]]:
-    return J.word_of(grade), {w: row.get("bucket") for w, row in J.rows(grade).items()}
+    return grade.validity, {w: row.get("bucket") for w, row in J.rows(grade).items()}
 
 
 # =================================================================================================

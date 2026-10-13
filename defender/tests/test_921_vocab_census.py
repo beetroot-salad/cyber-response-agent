@@ -11,6 +11,7 @@ artifact in the tree. J14, settled: declare it in the census and note in the sam
 it is already denied to the model, so the fix is a census correction rather than a mechanism.
 
 RED against `d1b8b06a`: `_vocab.py` has no `JUDGE_OUTCOME_ENUM` and no normalizer for one.
+(#1234 retired both, A4/A18; their one-home successor is `learning/core/retired.py`.)
 """
 from __future__ import annotations
 
@@ -41,110 +42,59 @@ def _vocab():
 
 
 # ---------------------------------------------------------------------------------------
-# D1 / M4 — the vocabulary and its normalizer
+# D1 / M4 — the vocabulary (#1234: `JUDGE_OUTCOME_ENUM` and its normalizer are retired, A4/A18)
 # ---------------------------------------------------------------------------------------
 
 
-def test_921_judge_outcome_enum_and_its_normalizer_ship_in_defender_vocab(tmp_path):
-    """`JUDGE_OUTCOME_ENUM` and its normalizer live in `defender/_vocab.py`, whose admission
-    rule is "more than one schema has to agree on it" — the queue row, the family record and the
-    curator gate all do.
-
-    Shipping the normalizer BESIDE it is what self-arms `lint_borrowed_vocabulary` against every
-    other module's borrowed `x in JUDGE_OUTCOME_ENUM`: the gate flags a borrowed membership test
-    against a vocabulary whose defining module has an armed normalizer, and does not flag
-    re-exports. So the normalizer is not a convenience — it is what makes the vocabulary's one
-    home enforceable, and the lint run is the witness.
-    """
-    from defender.tests._by_path import load_lint_gate
-
-    vocab = _vocab()
-    assert vocab.JUDGE_OUTCOME_ENUM == frozenset(  # noqa: SIM300 — the vocabulary is the SUBJECT
-        {"caught", "survived", "undecidable", "discard", "corpus-contradiction"})
-    assert callable(vocab.normalized_judge_outcome)
-
-    gate = load_lint_gate("lint_borrowed_vocabulary")
-    synthetic = tmp_path / "synthetic"
-    defender_dir = synthetic / "defender"
-    tree = defender_dir / "learning" / "judge"
-    tree.mkdir(parents=True, exist_ok=True)
-    # `gate._scan(root)` builds its corpus ONLY from files under `root` (arming is a
-    # whole-corpus property, deliberately, so a scenario can show both arming and disarming
-    # without touching the real tree) — so the file that ARMS `JUDGE_OUTCOME_ENUM` has to be
-    # IN this synthetic tree too, not just real `defender/_vocab.py`. This is a trimmed copy of
-    # its actual shape: the owned vocabulary plus a function testing membership on it beside it.
-    (defender_dir / "_vocab.py").write_text(
-        "JUDGE_OUTCOME_ENUM = frozenset(\n"
-        "    {'caught', 'corpus-contradiction', 'discard', 'survived', 'undecidable'})\n"
-        "\n"
-        "\n"
-        "def normalized_judge_outcome(value):\n"
-        "    return value if value in JUDGE_OUTCOME_ENUM else None\n", encoding="utf-8")
-    (tree / "borrowed.py").write_text(
-        "from defender._vocab import JUDGE_OUTCOME_ENUM\n"
-        "\n"
-        "def route(word):\n"
-        "    return word in JUDGE_OUTCOME_ENUM\n", encoding="utf-8")
-    borrowed = {str(f) for f in gate._scan(synthetic)}
-    assert any("borrowed.py" in name for name in borrowed), (
-        "the normalizer does not arm the gate, so nothing stops a second membership test")
-
-
 def test_921_every_surface_tests_membership_through_the_shipped_normalizer(tmp_path):
-    """`_gate_family`'s routing, M5's refusal and the reply's validation ALL go through the
-    shipped normalizer, not a bare `x in JUDGE_OUTCOME_ENUM`.
+    """#1234 rewrite (A4, A18): the family word and its normalizer are retired, and the name
+    `judge_outcome` has ONE home (`learning/core/retired.py`) that every reader refuses it
+    through. What this pinned survives as the cross-surface agreement: the SAME row carrying
+    the retired name — in any spelling of its value — gets ONE answer at every surface. The
+    reply's validator refuses the reply word by name, the appender refuses the row by name and
+    writes nothing, and the gate holds the row naming it (never authors it). A row admitted at
+    one surface and refused at its sibling is the canonical fail-open, the #785 shape — one
+    parser, six interpreters, three of which disagreed.
 
-    Exercise the SAME case/whitespace variant at every surface and assert one answer: a variant
-    admitted at one surface and refused at its sibling is the canonical fail-open, and it is the
-    #785 shape — one parser, six interpreters, three of which disagreed.
+    Positive control: the same row without the retired key is appended and authored.
     """
-    vocab = _vocab()
     variant = "  Survived "
-    assert vocab.normalized_judge_outcome(variant) == "survived"
+    JudgeRefused = J.sym("learning.judge", "JudgeRefused")
 
     # 1. the reply's validation
     run_mod = J.mod("learning.judge.run")
-    reply = run_mod.validate_reply(J.as_reply_text(J.reply_doc(episode_outcome=" Gradable ")))
-    assert reply.episode_outcome == "gradable"
+    with pytest.raises(JudgeRefused, match="episode_outcome"):
+        run_mod.validate_reply(J.as_reply_text(J.reply_doc(episode_outcome=" Gradable ")))
 
     # 2. the appender's refusal
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    J.grade_at(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        draws=1,
-        state=_state1135.env_state())
+    J.grade_at(ep, judge=J.scripted_judge(), draws=1, state=_state1135.env_state())
     enqueue = J.mod("learning.judge.enqueue")
     row = dict(D.finding_row("ep-1/b/0/0", run_id="ep-1", direction="family"),
-               type="lead-set", subject="defender", judge_outcome=variant,
+               type="lead-set", subject="defender",
                subject_anchor="l-001", subject_topic="topic",
-               source_run_dir="episodes/ep-1/worlds/b")
-    assert enqueue.append_rows(ep, [row], state=_state1135.env_state()) == 1, (
-        "the appender refused a case variant the shipped normalizer admits")
+               source_run_dir="episodes/ep-1/worlds/b",
+               contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
+               on_verdict_path=True, world_label_doubted=False)
+    retired = dict(row, judge_outcome=variant)
+    with pytest.raises(JudgeRefused, match="judge_outcome"):
+        enqueue.append_rows(ep, [retired], state=_state1135.env_state())
+    clean = {k: v for k, v in row.items() if k != "judge_outcome"}
+    assert enqueue.append_rows(ep, [clean], state=_state1135.env_state()) == 1, (
+        "the positive control failed: the appender refused the row without the retired name")
 
     # 3. the gate's routing
     paths = D.make_paths(tmp_path / "gate")
     channel = D.channel_of("findings")
-    D.seed(paths, channel, [dict(row, finding_id="ep-1/b/0/1")])
+    D.seed(paths, channel, [dict(retired, finding_id="ep-1/b/0/1"),
+                            dict(clean, finding_id="ep-1/b/0/2")])
     agent = D.recording(D.committing("variant"))
     assert J.mod("learning.author.drain").run_batch(
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
-    assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/1"], (
-        "the gate refused a variant the appender admitted; that disagreement IS the fail-open")
-
-
-def test_921_a_garbage_outcome_value_fails_the_normalizer(tmp_path):
-    """The paired negative control for the membership demand above, which exercises only case
-    variants and known aliases: a value that is NOT AN OUTCOME AT ALL — not a case variant, not
-    an alias — is REJECTED by the normalizer, not silently coerced to the nearest member.
-
-    Without it the membership demand certifies that the normalizer normalizes, never that it
-    refuses; a normalizer that returned its nearest member for everything would pass it.
-    """
-    vocab = _vocab()
-    for garbage in ("", "   ", "outcome", "survived-ish", "SURVIVEDD", None, 7, ["survived"]):
-        assert vocab.normalized_judge_outcome(garbage) is None, (
-            f"{garbage!r} was coerced to a member instead of being refused")
-    assert vocab.normalized_judge_outcome("CAUGHT") == "caught"
+    assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/2"], (
+        "the gate authored a row the appender refused; that disagreement IS the fail-open")
+    assert [r["finding_id"] for r in D.pending(paths, channel)] == ["ep-1/b/0/1"], (
+        "the retired-name row was consumed rather than held")
 
 
 # ---------------------------------------------------------------------------------------
@@ -175,7 +125,7 @@ def test_921_the_three_judge_write_sinks_are_the_only_ones_and_land_on_distinct_
     after = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
     created = sorted(after - before)
 
-    sinks = {"judge.yaml": [], "worlds": [], "wire_logs": []}
+    sinks: dict[str, list[Path]] = {"judge.yaml": [], "worlds": [], "wire_logs": []}
     for rel in created:
         if rel == Path("judge.yaml"):
             sinks["judge.yaml"].append(rel)

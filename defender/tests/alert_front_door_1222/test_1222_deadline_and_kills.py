@@ -237,8 +237,7 @@ def _judge_lead_blocks(run_dir: Path) -> dict[str, list[str]]:
     by_id = family.leads_by_id(run_dir)
     with S.sym("_io", "bind")(run_dir) as world:
         chains = {lid: family.lead_chain(world, lid, {}, leads=by_id) for lid in sorted(by_id)}
-    view = S.sym("learning.judge.render", "JudgeInput")(
-        world_label="w", discriminator={}, leads=chains).as_prompt_sections()["leads"]
+    view = S.sym("learning.judge.render", "_render_leads")(chains)
     blocks: dict[str, list[str]] = {}
     for chunk in S.normalize(view).split("### ")[1:]:
         head, _, body = chunk.partition("\n")

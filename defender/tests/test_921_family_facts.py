@@ -96,9 +96,10 @@ def test_921_served_nothing_reads_x_own_rows_off_the_composed_token(tmp_path):
     the short manifest label, the ledger on the composed token, so a reader that opens
     `served/<label>.jsonl` reads the wrong file.
 
-    J2, settled: the file INTERLEAVES two populations — X's own decision rows (`world_id == X`)
-    and family-tier `base` rows spelled `world_id: null`. Filter on the composed token first: a
-    `base` row is evidence of a FAMILY-TIER read and is not the world's own.
+    J2 is AMENDED by #1234 (A3, A12): the grading read requires every row of X's ledger to
+    name X's run (`world_id`) and carry a call id of it, so a family-tier `base` row spelled
+    `world_id: null` in X's file is no longer filtered out silently — it makes the world
+    MALFORMED, its reason naming the row; it is never counted as the world's own served call.
     """
     ep = J.accepted_episode(tmp_path, ledgers={
         # b: one family-tier base row and nothing of its own — J2's whole case.
@@ -107,8 +108,10 @@ def test_921_served_nothing_reads_x_own_rows_off_the_composed_token(tmp_path):
         "c": [J.ledger_row(source="passthrough", world_label="c")],
     })
     rows = _rows(ep)
-    assert rows["b"]["served_nothing"] is True, (
+    assert rows["b"].get("served_nothing") is not False, (
         "a family-tier `base` row was counted as the world's own served call")
+    assert rows["b"]["malformed"] is True
+    assert "names another run" in rows["b"]["ungradable_reason"], rows["b"]["ungradable_reason"]
     assert rows["c"]["served_nothing"] is False
 
     # And the file the reader must open is the COMPOSED token's, not the label's.
@@ -392,14 +395,12 @@ def test_921_a_world_label_equal_to_a_real_run_id_grades(tmp_path):
 
 
 def test_921_the_family_pass_reader_takes_the_first_row_and_counts_a_torn_line(tmp_path):
-    """J3, settled: the ledger reader inherits `_absorb`'s FIRST-ROW-WINS on a duplicate
-    pair-key, RE-VALIDATES `source` against the ledger's words on read, and SKIPS a malformed
-    line WHILE RECORDING THE COUNT on the world's row.
-
-    G15's own words are the reason: "two readers resolving a duplicate key in opposite
-    directions is how one file gets read as two different recordings". Losing a row is less bad
-    than losing a grade here, because the count itself is evidence; a torn line that fails the
-    world would throw away every other fact the file carries.
+    """J3 AMENDED by #1234 (A2, A3). The LENIENT reader (`read_world_ledger`, the page's)
+    keeps EVERY row in ledger order — two rows for one pair-key are two calls (A2; first-row-
+    wins is retired) — and still RE-VALIDATES `source` against the ledger's words, skipping and
+    COUNTING a torn or out-of-vocabulary line. The GRADING read is strict (A3): such a ledger
+    makes the world malformed, its reason naming the file, and the rest of the family is still
+    graded — a world's measurement is never taken off a partly-read record.
     """
     from defender._io import bind
 
@@ -417,14 +418,13 @@ def test_921_the_family_pass_reader_takes_the_first_row_and_counts_a_torn_line(t
     with bind(ep) as bound:
         kept, malformed, _read = _family().read_world_ledger(
             bound, "b", episode_token=J.EPISODE_TOKEN)
-    assert [row["source"] for row in kept] == ["oracle"], (
-        "the LATER row won a duplicate pair-key; `_absorb` takes the first and the two readers "
-        "must not disagree about the same bytes")
-    assert malformed == 2
+    assert [row["source"] for row in kept] == ["oracle", "passthrough"], (
+        "a row of a repeated pair-key was dropped; each row is its own call (A2)")
+    assert malformed == 2, (
+        "the torn line and the out-of-vocabulary `source` were dropped without a count")
 
-    row = _rows(ep)["b"]
-    assert row["malformed_rows"] == 2, (
-        "the torn line and the out-of-vocabulary `source` were dropped without a count; the "
-        "count is the evidence that the measurement was partial")
-    assert row["served_nothing"] is False
-    assert row.get("ungradable") is not True, "a torn line took the whole world's grade with it"
+    rows = _rows(ep)
+    assert rows["b"]["malformed"] is True, "a partly-read ledger was graded (A3)"
+    assert J.world_token("b") in rows["b"]["ungradable_reason"], (
+        "the refusal does not name the ledger file it refused")
+    assert rows["c"].get("ungradable") is not True, "world b's torn ledger took world c's grade"

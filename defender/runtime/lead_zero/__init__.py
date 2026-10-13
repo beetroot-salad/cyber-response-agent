@@ -245,7 +245,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
             return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
         _stamp_timed_out(store, session_id)
         return CorrelationOutcome(ending=ENDING_TIMED_OUT, system=system)
-    except (BudgetKill, circuit_breaker.RunAborted, session_store.StoreError, sqlite3.Error,
+    except (BudgetKill, circuit_breaker.RunAborted, run_end.CallRecordWriteFailed, session_store.StoreError, sqlite3.Error,
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
     except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run

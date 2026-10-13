@@ -35,11 +35,14 @@ from defender.learning.core.config import OracleSettings
 from defender.hooks.budget_enforcer import oracle_turn_closed, oracle_turn_opened
 from defender.runtime.verbs import (
     CALL_DELIVERY,
+    CALL_ID,
     DENIED,
     TABLE_POINTER,
     ModuleVerbRegistry,
     VerbDecision,
 )
+
+from defender.runtime.run_end import TRUNCATED_BY_SERVED_LEDGER, CallRecordWriteFailed
 
 from ..outcome import BUDGET, ORACLE_UNSERVABLE
 from ..ledger import (
@@ -104,7 +107,7 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
     if not registry.world_facts:
         return registry._deliver(ServedCall(
             system=system, verb=verb, params=asked, payload_text=base_text, source=PASSTHROUGH,
-            world_id=registry.world.world_id))
+            world_id=registry.world.world_id, call_id=CALL_ID.get()))
     with registry._turn(ctx, pauses_clock=True):
         hit = registry.store.answers.get(key)
         if hit is None:
@@ -343,6 +346,12 @@ class WorldRegistry(ModuleVerbRegistry):
             self.oracle.unservable = recorded
         self._wrapped: dict[str, dict[str, Any]] = {}
 
+    @property
+    def call_run(self) -> str:
+        """How this world's call ids name its run (`record_query.bind_call_ids`): the world
+        token every served-ledger row of the world carries as `world_id`."""
+        return str(self.world.world_id)
+
     # -- the grant door -------------------------------------------------------------------------
 
     def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
@@ -353,8 +362,9 @@ class WorldRegistry(ModuleVerbRegistry):
         like any other refusal, against the params as asked.
 
         An adapter that cannot load raises out of `decide` and is filed `fault`, matching what
-        the base world records for the same failure, then re-raised untouched. Rows go through
-        `_record_beside` so a failed write never replaces the decision or exception.
+        the base world records for the same failure, then re-raised untouched — unless the
+        row's write fails, whose `CallRecordWriteFailed` ends the run instead (A12). Every row
+        carries the call's id (`CALL_ID`, set by the query tool before it asked).
 
         A call no row could carry is refused first (`_refuse_unstorable`), so neither row is
         ever attempted for it.
@@ -366,14 +376,14 @@ class WorldRegistry(ModuleVerbRegistry):
             _record_beside(self.ledger, ServedCall(
                 system=system, verb=verb, params=dict(params),
                 payload_text=f"{type(failure).__name__}: {failure}", source=FAULT,
-                world_id=self.world.world_id,
+                world_id=self.world.world_id, call_id=CALL_ID.get(),
             ))
             raise
         if decision.outcome == DENIED:
             _record_beside(self.ledger, ServedCall(
                 system=system, verb=verb, params=dict(params),
                 payload_text=decision.refusal or f"denied: {system}.{verb}", source=REFUSED,
-                world_id=self.world.world_id,
+                world_id=self.world.world_id, call_id=CALL_ID.get(),
             ))
         return decision
 
@@ -420,7 +430,7 @@ class WorldRegistry(ModuleVerbRegistry):
             _record_beside(self.ledger, ServedCall(
                 system=system, verb=verb, params=dict(params),
                 payload_text=str(failure) or type(failure).__name__, source=REAL_ERROR,
-                world_id=self.world.world_id))
+                world_id=self.world.world_id, call_id=CALL_ID.get()))
             raise
         text = payload_text(answer)
         self.store.keep_base(system, verb, params, text)
@@ -436,15 +446,21 @@ class WorldRegistry(ModuleVerbRegistry):
             payload_text=payload_text(answer.get("served")),
             source=answer.get("decision") or ORACLE, world_id=self.world.world_id,
             base_digest=answer.get("base_digest"), claim=answer.get("claim"),
-            verifier_verdict=answer.get("verifier_verdict"), attempts=answer.get("attempts")))
+            verifier_verdict=answer.get("verifier_verdict"), attempts=answer.get("attempts"),
+            # This call's id, never the stored answer's: a repeat is its own call (A12).
+            call_id=CALL_ID.get()))
 
     def _deliver(self, call: ServedCall) -> Any:
         """`call`'s payload, handed to the caller and recorded as served — unless its caller
         stopped waiting (the lead was ended mid-call): an undelivered call leaves no row (N12).
-        The one writer of a delivered call's row, whatever served it."""
+        The one writer of a delivered call's row, whatever served it. A failed write is
+        `CallRecordWriteFailed` and nothing is delivered: the run ends (A12)."""
         delivery = CALL_DELIVERY.get()
         if delivery is None or not delivery.abandoned:
-            self.ledger.record(call)
+            try:
+                self.ledger.record(call)
+            except OSError as failed:
+                raise _ledger_write_failed(call, failed) from failed
         return json.loads(call.payload_text)
 
     @contextlib.contextmanager
@@ -625,19 +641,25 @@ def _refuse_unstorable(system: str, verb: str, params: Mapping[str, Any]) -> Non
 
 
 def _record_beside(ledger: Ledger, call: ServedCall) -> None:
-    """Record `call` without letting the write displace the exception already in flight.
+    """Record the row of a call that is failing (`refused`, `fault`, `real-error`) beside the
+    decision or exception its caller then returns or re-raises.
 
-    Callers record why something failed and then re-raise. If the append itself fails (read-only
-    root, full disk), that `OSError` would propagate instead; unlike a `StagingError`
-    (`USAGE_EXIT_CODE`), it is filed as an infra code, tripping the circuit breaker in the
-    sibling and not its base. So the write failure is logged and dropped: the call is already
-    failing and reaching the model as a fault.
-    """
+    A failed write is not dropped: the ledger's `OSError` becomes `CallRecordWriteFailed`,
+    which replaces the call's own failure and ends the run (A12, #1234). The query tool lets it
+    through as control flow, so it is never filed as a fault row or charged to the breaker."""
     try:
         ledger.record(call)
-    except Exception as write_failed:  # noqa: BLE001 — never displace the in-flight raise
-        _logger.warning(f"could not record the {call.source} row for {call.system}.{call.verb} "
-                        f"({write_failed!r}); the call's own failure is what propagates")
+    except OSError as failed:
+        raise _ledger_write_failed(call, failed) from failed
+
+
+def _ledger_write_failed(call: ServedCall, failed: OSError) -> CallRecordWriteFailed:
+    """What a failed write of `call`'s served-ledger row raises: the run ends, naming the
+    record (A12). The ledger's own `OSError` is kept as the cause."""
+    return CallRecordWriteFailed(
+        TRUNCATED_BY_SERVED_LEDGER,
+        f"the {call.source} row of {call.system}.{call.verb} "
+        f"({call.call_id or 'no call id'}): {failed!r}")
 
 
 def _carrying(ctx: Any, **values: Any) -> Any:

@@ -5,10 +5,11 @@ Demand #0's return-value contract and its round trip. Every test drives the real
 reply alone.
 
 #1224 removed the judge's code half — the withholding ladder (O4/M3), the reachability block it
-read off the replay review, and the mechanical `unreachable-difference` finding ("No mechanical
-bucket": a world whose change never reached the investigator is the judge model's finding, not
-withheld). The tests of those went with it; what survives here is the record's family-level
-world fields and the per-world bucket and systems the model answers with.
+read off the replay review, and the mechanical `unreachable-difference` finding. #1234 then
+retired the family's own word (`family_outcome`, `verdict_word`) and the record's
+`world_findings` list: what a pass did with each finding is the record's ledger
+(`dispositions`), and the family call has its own row (`family`). What survives here is the
+record's family-level fields and the per-world bucket and systems the model answers with.
 """
 from __future__ import annotations
 
@@ -16,40 +17,17 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests import _judge_921 as J
 from defender.tests import _world_1007 as W
-from defender.tests._state1135 import env_state
+from defender.tests.judge_contrast_1234 import _spec1234 as S
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 
-# ---------------------------------------------------------------------------------------
-# The scene: an archived, accepted episode with samples and one graded world.
-# ---------------------------------------------------------------------------------------
-
-
-def graded_episode(tmp_path: Path, monkeypatch, *, worlds=("b",)) -> Path:
-    """One episode dir carrying everything the grading pass reads: the v2 manifest, one
-    archived world dir per label (the control `a` included), one served ledger per world,
-    `samples.yaml`, and pre-flight's `outcome.yaml` saying `accepted`."""
-    _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
-    docs = [W.base_world()] + [
-        W.world_doc(label, facts=[W.fact(f"f-{label}")]) for label in worlds]
-    ep = W.episode(tmp_path, doc=W.family_doc(worlds=docs), root=root)
-    for label in ("a", *worlds):
-        W.archived_world(ep, label)
-        W.write_served(ep, label, [W.served_row(world=label)])
-    W.write_samples(ep)
-    W.write_outcome(ep)
-    return ep
-
-
-def grade(ep: Path, *, judge=None, **kw):
-    """`judge.grade_episode` through its own injection seams — never a live provider — over the
-    episode at `ep`, by id (#1105 PR 2: `_judge_921.grade_at`)."""
-    kw.setdefault("state", env_state())
-    return J.grade_at(
-        ep, judge=judge if judge is not None else W.FakeJudge(W.reply_document()), **kw)
+def graded_reply() -> dict:
+    """World b's reply: the model's own bucket and systems, one investigator finding and one
+    design world finding."""
+    return S.world_reply("lead-quality", ["idp"], investigator=[S.inv()],
+                         world=[S.wf("mislabelled")])
 
 
 def rows_of(grade_result) -> dict[str, dict]:
@@ -65,29 +43,28 @@ def test_grade_episode_returns_extended_record(tmp_path, monkeypatch):
     """`grade_episode` hands back the family-level record CARRYING the world fields, not a
     record a caller has to re-read `judge.yaml` to see.
 
-    Observably true: the returned `EpisodeGrade` exposes the family-level additions — the family
-    draw's own outcome, the world findings it built, the second channel it enqueued them to —
-    and the graded world's row carries the model's own `bucket` and `systems` (#1224: those
-    replaced the reachability and withholding fields this once named).
+    Observably true: the returned `EpisodeGrade` exposes the family-level additions — the
+    family call's own row, the ledger lane each world finding took, the second channel it
+    enqueued them to — and the graded world's row carries the model's own `bucket` and
+    `systems` (#1224: those replaced the reachability and withholding fields this once named).
 
     What failure looks like: a pass that writes the fields into `judge.yaml` but not onto its
-    return value. Every in-process consumer (the launcher's own stamp, `enqueue`) then reads a
-    record that is missing exactly the fields this change exists to add, and the only artifact
-    that has them is the file on disk.
+    return value. Every in-process consumer then reads a record that is missing exactly the
+    fields this change exists to add, and the only artifact that has them is the file on disk.
     """
-    ep = graded_episode(tmp_path, monkeypatch)
+    built = W.contrast_family(tmp_path, monkeypatch)
 
-    result = grade(ep, judge=W.FakeJudge(W.reply_document(
-        findings=[W.world_finding(bucket="an-unlisted-world-bucket")])))
+    result = S.grade(built, S.judge({"b": graded_reply()}))
 
-    assert result.family_outcome == "survived", (
-        f"the family draw's outcome did not reach the return value: {result.family_outcome!r}")
+    assert (result.family or {}).get("completed_draws") == 1, (
+        f"the family call's own row did not reach the return value: {result.family!r}")
     assert result.world_enqueued_to, "the return value names no channel world rows went to"
-    assert [f["type"] for f in result.world_findings if f["world"] == "b"] == [
-        "an-unlisted-world-bucket"], (
-        f"the world finding built for b is not on the return value: {result.world_findings}")
+    assert result.world_enqueued_rows == 1, result.world_enqueued_rows
+    lanes = {e["finding_id"]: e["lane"] for e in result.dispositions or []}
+    assert lanes.get(built.finding_id("b", 0, 1)) == S.LANES["questioner"], (
+        f"the world finding built for b is not on the return value's ledger: {lanes}")
     row = rows_of(result)["b"]
-    assert (row["bucket"], row["systems"]) == ("lead-set", [W.SYSTEM]), (
+    assert (row["bucket"], row["systems"]) == ("lead-quality", ["idp"]), (
         f"the per-world row does not carry the model's own bucket and systems: {sorted(row)}")
 
 
@@ -103,18 +80,19 @@ def test_judge_yaml_round_trips_every_new_field(tmp_path, monkeypatch):
     defaulted, so a re-read episode grades as if it had measured nothing — and every reader
     downstream of the re-read path sees a different episode from the one that was graded.
     """
-    ep = graded_episode(tmp_path, monkeypatch)
-    judge = W.FakeJudge(W.reply_document(findings=[W.world_finding()]))
+    built = W.contrast_family(tmp_path, monkeypatch)
+    judge = S.judge({"b": graded_reply()})
 
-    first = grade(ep, judge=judge)
-    second = grade(ep, judge=judge)   # the existing-record path: reads judge.yaml, does not re-draw
+    first = S.grade(built, judge)
+    second = S.grade(built, judge)   # the existing-record path: every row `queued`, no re-draw
 
-    assert (ep / W.JUDGE_NAME).is_file(), "the pass wrote no judge.yaml to round-trip"
-    assert first.world_findings, "the first pass built no world finding, so nothing round-trips"
+    assert (built.ep / W.JUDGE_NAME).is_file(), "the pass wrote no judge.yaml to round-trip"
+    assert first.dispositions, "the first pass routed no finding, so nothing round-trips"
     assert rows_of(second) == rows_of(first), (
         "a per-world field written to judge.yaml did not survive the re-read — "
         f"{rows_of(first)} != {rows_of(second)}")
-    for field in ("family_outcome", "world_findings", "world_enqueued_to", "verdict_word"):
+    for field in ("family", "dispositions", "user", "world_enqueued_rows", "world_enqueued_to",
+                  "enqueued_rows", "enqueued_to", "validity"):
         assert getattr(second, field) == getattr(first, field), (
             f"{field!r} is written to judge.yaml and not read back off it")
 

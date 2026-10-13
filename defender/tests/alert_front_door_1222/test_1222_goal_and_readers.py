@@ -423,14 +423,13 @@ class _Views:
         return prompts[0]
 
     def questioner_section(self) -> str:
-        bodies = [b for b in S.framed_bodies(self.questioner_prompt)
-                  if b.lstrip("\n").startswith(f"## {QUESTIONER_LEADS_TITLE}")]
+        bodies = S.titled_bodies(self.questioner_prompt, QUESTIONER_LEADS_TITLE)
         assert len(bodies) == 1, f"the questioner's leads section is in {len(bodies)} frames"
         return bodies[0]
 
     def questioner_leads(self) -> list[dict]:
         body = self.questioner_section().strip()
-        leads = json.loads(body.split("\n\n", 1)[1])
+        leads = json.loads(body)
         assert isinstance(leads, list), leads
         return leads
 
@@ -563,7 +562,8 @@ class _Views:
         summary = self.run_dir / "gather_summaries" / f"{S.L3}.md"
         if summary.is_file():
             shutil.copy2(summary, summaries / f"{S.L3}.md")
-        rows = [json.dumps(r) for r in self.d.rows_for(S.L3)]
+        rows = [json.dumps({**r, "call_id": f"{J.world_token('b')}/{n}"})
+                for n, r in enumerate(self.d.rows_for(S.L3), start=100)]
         table = world / "executed_queries.jsonl"
         table.write_text(table.read_text(encoding="utf-8") + "".join(f"{r}\n" for r in rows),
                          encoding="utf-8")
@@ -581,9 +581,9 @@ class _Views:
 
     def judge_leads_view(self) -> str:
         """The leads view (VIEW 3) of the judge prompt that shows l-00c, its frame removed."""
-        title = S.sym("learning.judge.run", "SECTION_TITLES")["leads"]
-        views = [b for p in self.judge_prompts for b in S.framed_bodies(p)
-                 if b.lstrip("\n").startswith(f"## {title}") and f"### {S.L3}\n" in b]
+        title = S.sym("learning.judge.layout", "FOCUS_VIEW_TITLES")["leads"]
+        views = [b for p in self.judge_prompts for b in S.titled_bodies(p, title)
+                 if f"### {S.L3}\n" in b]
         assert views, (f"no judge prompt's leads view shows {S.L3} — a lead silently missing "
                        f"from the judge's view ({len(self.judge_prompts)} prompts)")
         return views[0]

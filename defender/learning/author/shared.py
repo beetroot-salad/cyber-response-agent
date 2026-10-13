@@ -160,8 +160,8 @@ def _result_entry_id(bucket: str, entry: Any, id_key: str) -> str:
 
 
 #: Fields an AUTHOR_RESULT may carry beyond its declared buckets: `commit_message`, read
-#: elsewhere, and `observability_gaps`, intentionally unread.
-_NON_BUCKET_RESULT_KEYS = frozenset({"commit_message", "observability_gaps"})
+#: elsewhere.
+_NON_BUCKET_RESULT_KEYS = frozenset({"commit_message"})
 
 
 def validate_agent_result_partition(
@@ -412,7 +412,9 @@ def write_disposition_report(
 
     Shared by both curators: a skip is terminal, so this line is the only trace that a
     skipped finding was ever seen. Labels are the caller's and never merged, since each
-    implies a different recovery. Counts first, then ids, in the caller's order.
+    implies a different recovery. Counts first, then ids, in the caller's order; then, for each
+    label whose rows carry a gate's `held_reason`, `<label>_reasons={id: reason}` — a held row
+    stays queued tick after tick, so the line is where an operator reads why.
 
     Nothing is written when the tick declined nothing.
     """
@@ -421,4 +423,8 @@ def write_disposition_report(
     counts = " ".join(f"{label}={len(rows)}" for label, rows in groups.items())
     ids = " ".join(
         f"{label}_ids={[r.get('finding_id') for r in rows]}" for label, rows in groups.items())
-    state.disposition_report(channel, f"{now_iso()} batch={batch_id} {counts} {ids}\n")
+    reasons = "".join(
+        f" {label}_reasons={why}" for label, rows in groups.items()
+        if (why := {r.get("finding_id"): r["held_reason"] for r in rows if "held_reason" in r}))
+    state.disposition_report(
+        channel, f"{now_iso()} batch={batch_id} {counts} {ids}{reasons}\n")

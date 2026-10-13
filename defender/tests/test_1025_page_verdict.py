@@ -37,7 +37,7 @@ from defender.tests import _state1135
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 S = E.SAMPLE
-LEDE_LINE = f"undecidable · {S.queued} findings queued"
+LEDE_LINE = f"{S.queued} findings queued"
 #: Neither sample sibling's report verdict (`inconclusive`) is its declared disposition.
 TILE_ONE = f"{S.graded} worlds judged · verdict = declared on 0 of {S.graded}"
 
@@ -102,9 +102,13 @@ def _heading(group: E.Node) -> str:
 
 
 def _draw_findings(ep: E.Episode, label: str, draw: int = 0) -> list[dict]:
-    """The findings a draw document on disk carries — read back so a scenario can extend them."""
-    return yaml.safe_load(
-        (ep.world(label) / "judge" / f"{draw}.yaml").read_text(encoding="utf-8"))["findings"]
+    """The findings a draw document on disk files, in filing order (investigator findings, then
+    world findings), each tagged with its `subject` so `E.draw_doc` files it back in the same
+    list — read back so a scenario can extend them."""
+    doc = yaml.safe_load(
+        (ep.world(label) / "judge" / f"{draw}.yaml").read_text(encoding="utf-8"))
+    return ([dict(f, subject="defender") for f in doc.get("investigator_findings") or []]
+            + [dict(f, subject="world") for f in doc.get("world_findings") or []])
 
 
 def _tiles(page: E.Page) -> list[E.Node]:
@@ -128,18 +132,12 @@ UNGRADABLE_REASON = E.ungradable_row(E.PASSTHROUGH_WORLD)["ungradable_reason"]
 
 def _live996(tmp_path: Path, **kw) -> E.Episode:
     """The second archive's shape: no family draw, no `samples.yaml`, an ungradable row, a
-    pre-#1007 record (no `family_outcome`, no family call at all)."""
+    record with no family row (the family call never ran) and no ledger."""
     ep = E.sample_episode(tmp_path, family_draw=False, samples=False, judge=False, **kw)
-    doc = E.sample_grade()
+    doc = E.sample_grade(family=False)
     doc["worlds"] = [E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign"),
-                     E.world_row(E.GRADED_WORLD, declared="malicious",
-                                 findings=[E.finding(subject="world")])]
-    doc["verdict_word"] = "survived"
-    doc["world_findings"] = [E.world_finding_queue_row(
-        f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/4", "the world finding")]
-    for key in ("family_outcome", "family_failed_reason", "family_malformed_replies",
-                "family_completed_draws", "world_enqueued_rows", "world_enqueued_to",
-                "dispositions"):
+                     E.world_row(E.GRADED_WORLD, declared="malicious")]
+    for key in ("world_enqueued_rows", "world_enqueued_to", "dispositions"):
         del doc[key]
     E.write_judge(ep.dir, doc)
     return ep
@@ -153,9 +151,10 @@ def _live996(tmp_path: Path, **kw) -> E.Episode:
 def test_1025_the_lede_lists_family_draw_findings_verbatim_grouped_by_draw_or_opens_with_the_templated_line_when_there_is_no_family_draw(
         tmp_path):
     """Sample: the lede's first line carries the three family findings as `topic: claim`
-    escaped, then the templated line "undecidable · 13 findings queued"; a synthetic two-draw family renders two groups in draw order
+    escaped, then the templated line "13 findings queued"; a synthetic two-draw family renders two groups in draw order
     without merging; the live-996 shape (no `worlds/family/`) opens with the templated line; a
-    synthetic `family_failed_reason` renders where the first line would be.
+    family row's `draws_failed_reason` renders where the first line would be. (#1234 retired the
+    family word the templated line used to open with.)
     """
     ep = E.sample_episode(tmp_path)
     band = render(ep).text_of("sec-verdict")
@@ -164,12 +163,9 @@ def test_1025_the_lede_lists_family_draw_findings_verbatim_grouped_by_draw_or_op
     assert LEDE_LINE in band, band
     assert band.index("family topic 0") < band.index(LEDE_LINE), "the templated line came first"
 
-    E.draw_document(ep.dir, E.FAMILY, 1, E.draw_doc(
-        findings=[E.finding(subject="world", topic="second-draw topic", claim="second-draw claim")],
-        episode_outcome="discard"))
-    two_draws = E.sample_grade()
-    two_draws["world_findings"].append(E.family_queue_row(1, 0, topic="second-draw topic",
-                                                          claim="second-draw claim"))
+    E.draw_document(ep.dir, E.FAMILY, 1, E.family_draw_doc(
+        findings=[E.finding(subject="world", topic="second-draw topic", claim="second-draw claim")]))
+    two_draws = E.record_draws(E.sample_grade(), E.FAMILY, (0, 1))
     E.set_lane(two_draws, E.FAMILY, 1, 0, "world")
     E.write_judge(ep.dir, two_draws)
     band = render(ep).text_of("sec-verdict")
@@ -181,46 +177,42 @@ def test_1025_the_lede_lists_family_draw_findings_verbatim_grouped_by_draw_or_op
     assert "findings queued" in live_band, live_band
 
     doc = E.sample_grade()
-    doc["family_failed_reason"] = "the family call faulted: TransportFault"
-    doc["family_outcome"] = None
+    doc["family"] = {"completed_draws": 0, "malformed_replies": 0,
+                     "draws_failed_reason": "the family call faulted: TransportFault"}
     E.write_judge(ep.dir, doc)
     band = render(ep).text_of("sec-verdict")
     assert "the family call faulted: TransportFault" in band
     assert band.index("the family call faulted") < band.index("findings queued")
 
 
-def test_1025_the_badge_is_family_outcome_falling_back_to_verdict_word_and_the_meta_line_carries_episode_outcome_and_verdict_word(
-        tmp_path):
-    """Sample badge reads `discard`, meta `gradable · undecidable · validity usable` (the
-    record's O5 word); the live-996 shape's badge reads `survived` (its `family_outcome` is
-    None), meta `gradable · survived`.
+def test_1025_the_badge_is_the_records_validity_and_names_no_retired_family_word(tmp_path):
+    """#1234 retired the family word (`family_outcome` / `verdict_word`, A4): the badge and the
+    meta line carry the record's own O5 word, `validity` — `usable` on the sample — and no
+    family word appears in the band. The live-996 shape (no family row) reads the same.
     """
     page = render(E.sample_episode(tmp_path))
-    badge = page.elements(cls="vd-badge")
-    assert badge, [b.text() for b in badge]
-    assert "discard" in badge[0].text(), [b.text() for b in badge]
-    meta = page.elements(cls="vd-meta")
-    assert meta, [m.text() for m in meta]
-    assert "gradable · undecidable · validity usable" in meta[0].text(), [m.text() for m in meta]
+    assert page.one(cls="vd-badge").text() == "usable", page.one(cls="vd-badge").text()
+    assert "validity usable" in page.one(cls="vd-meta").text()
+    band = page.text_of("sec-verdict")
+    for retired in ("undecidable", "survived", "caught", "discard"):
+        assert retired not in band, (retired, band)
 
     live = render(_live996(tmp_path / "live"))
-    assert "survived" in live.one(cls="vd-badge").text()
-    assert "gradable · survived" in live.one(cls="vd-meta").text()
+    assert live.one(cls="vd-badge").text() == "usable"
+    assert "survived" not in live.text_of("sec-verdict")
 
 
 def test_1025_the_verdict_tile_carries_judged_and_verdict_equals_declared_counts_on_both_archives(
         tmp_path):
-    """Sample tile 1: "2 worlds judged · verdict = declared on 0 of 2" beside `undecidable`;
-    the live-996 shape (one row ungradable, so not judged): "1 worlds judged · verdict =
-    declared on 0 of 1" beside `survived`.
+    """Sample tile 1: "2 worlds judged · verdict = declared on 0 of 2"; the live-996 shape (one
+    row ungradable, so not judged): "1 worlds judged · verdict = declared on 0 of 1". (#1234
+    retired the family word that sat beside the count.)
     """
     tile = _tile(render(E.sample_episode(tmp_path)), 0)
     assert TILE_ONE in tile.text(), tile.text()
-    assert "undecidable" in tile.text(), tile.text()
 
     live = _tile(render(_live996(tmp_path / "live")), 0)
     assert "1 worlds judged · verdict = declared on 0 of 1" in live.text(), live.text()
-    assert "survived" in live.text()
 
 
 def test_1025_tiles_two_to_four_carry_judged_of_rows_with_reasons_queued_of_total_split_and_cost_with_the_labelled_lower_bound(
@@ -294,62 +286,50 @@ def test_1025_a_not_graded_page_below_the_band(tmp_path):
     assert E.BASE_STORY in page.text_of("sec-records")
 
 
-def test_1025_an_episode_with_no_judge_yaml_still_renders_its_stages_and_worlds_and_says_there_is_no_grade_record(
+def test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_stages_and_worlds_and_says_which_world_is_in_progress(
         tmp_path):
-    """A launcher-produced episode whose judge pass failed after its draws — the findings queue
-    root is a regular file, so the enqueue is refused and `judge.yaml` (written last, c10) never
-    lands — still renders: the band says no grade record, every world is "not graded", the
-    stage table has a row per step, and the draw documents the judge DID write before the enqueue
-    failed (`worlds/b/judge/0.yaml`, `worlds/c/judge/0.yaml`, one `subject: defender` finding
-    each — the state 92-reconciliation F-1 executed) render as J9a says: their rows under ONE
-    group headed "no grade record — not enqueued", no disposition claimed, band unchanged.
+    """A launcher-produced episode whose judge pass failed at the enqueue — the findings queue's
+    holding folder is a regular file, so the append is refused after the draws — still renders.
+    #1234 A6 writes `judge.yaml` BEFORE the appends, with the world being committed in state
+    `queueing` (before #1234 the record was written last and never landed): the page names that
+    world "in progress", the world the pass never reached is ungraded, the stage table has a
+    row per step, and the draw the record names renders its one row.
     """
     # The handle refuses a root that is not a folder up front (before any draw is paid for),
     # so the post-draw refusal this scenario needs is the queue's holding folder being a
     # regular file: the root opens, the draws run, and only the enqueue is refused.
     (tmp_path / "learning-state" / "_pending").write_text("not a directory", encoding="utf-8")
-    # One `subject: defender` finding per world draw; the family scope refuses that subject,
-    # so the family call completes no draw and only the two world documents land.
+    # One investigator finding per world draw; the family scope refuses a world-scope reply,
+    # so the family call completes no draw.
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc(
-        bucket="decision-discipline", systems=["idp"])))
+        bucket="lead-quality", systems=["idp"])))
     launch = ST._launch(tmp_path, judge=judge)
     assert launch.rc == 0
     assert launch.judge.calls > 0
     ep = launch.episode_dir
-    assert not (ep / "judge.yaml").exists(), "the control failed: the judge did not fail"
-    on_disk = sorted(p.parent.parent.name for p in ep.glob("worlds/*/judge/0.yaml"))
-    assert on_disk == ["b", "c"], f"the control failed: draw documents on disk are {on_disk}"
+    record = J.judge_record(ep)
+    assert J.world_rows(record)["b"]["state"] == "queueing", (
+        "the control failed: the pass did not stop while committing world b")
     page = hook_page(ep)
-    assert "no grade record" in page.text_of("sec-verdict")
-    for label in launch.spawn.worlds:
-        assert "not graded" in page.text_of(f"world-{label}")
+    assert "in progress" in page.text_of("world-b"), page.text_of("world-b")
+    assert "ungraded" in page.text_of("world-c"), page.text_of("world-c")
     timing = page.text_of("stage-timing")
     assert all(step in timing for step in ST.EXPECTED_STEPS)
-    rows = _rows(page)
-    assert sorted(rows) == ["f-b-0-0", "f-c-0-0"], rows
-    groups = {_group_id(page, r) for r in rows}
-    assert len(groups) == 1, groups
-    heading = _heading(page.section(groups.pop()))
-    assert "no grade record — not enqueued" in heading, heading
-    assert "enqueued" not in heading.replace("not enqueued", ""), heading
+    assert _rows(page) == ["f-b-0-0"], _rows(page)
 
 
 def test_1025_draw_documents_exist_but_judge_yaml_does_not(tmp_path):
     """The failed-judge snapshot (J9a): every per-draw document is on disk and `judge.yaml` is
-    not. The findings render under ONE group headed "no grade record — not enqueued" with the
-    addressee tables as usual and no disposition claimed; the band still says there is no grade
-    record.
+    not. #1234 A6: the page shows only the draws a record names (`judge.recorded_draws`), and
+    with no record it names none — so no finding row renders and no disposition is claimed;
+    the band says there is no grade record. (Before #1234 the rows rendered under one "no
+    grade record — not enqueued" group.)
     """
     ep = E.sample_episode(tmp_path, judge=False)
     page = render(ep)
     assert "no grade record" in page.text_of("sec-verdict")
-    rows = _rows(page)
-    assert len(rows) == S.findings, rows
-    groups = {_group_id(page, r) for r in rows}
-    assert len(groups) == 1, groups
-    heading = _heading(page.section(groups.pop()))
-    assert "no grade record — not enqueued" in heading, heading
-    assert "enqueued" not in heading.replace("not enqueued", ""), heading
+    assert _rows(page) == []
+    assert "defender claim" not in page.raw
 
 
 # ---------------------------------------------------------------------------------------
@@ -379,21 +359,20 @@ def test_1025_every_finding_across_per_draw_docs_and_family_draws_renders_exactl
 def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_unqueueable_blocked_by_verdict_or_enqueued(
         tmp_path):
     """Sample: both siblings' 4 defender findings read enqueued (the episode has
-    `family_outcome: discard` and `verdict_word: undecidable`, and the rows still read
-    enqueued), the 5 world-author rows read enqueued; a ledger entry re-filed unqueueable
-    marks that id unqueueable with its reason; the record of a discard episode marks every
-    judged world's defender findings "never eligible — verdict discard", never enqueued; counts
-    equal `enqueued_rows`, `world_enqueued_rows`; on that discard episode tile 3's split reads
-    0 defender / 5 world author / 0 unqueueable and gains a fifth part, "8 never eligible".
+    the 5 world-author rows read enqueued; a ledger entry re-filed unqueueable marks that id
+    unqueueable with its reason; the record of a pass whose worlds were not measured (#1234
+    A7: the world gate's `not_measured` lane, which replaced the retired family-word block)
+    groups every judged world's defender findings under "not queued — the world is not
+    measured", never enqueued, and tile 3's split reads 0 defender / 5 world author / 0
+    unqueueable.
 
     EVERY DISPOSITION IS THE RECORD'S LEDGER (`judge.yaml.dispositions`, what the enqueue pass
     wrote down as it filed each finding), never a rule the page runs over the rows: the page
     used to carry a copy of the enqueue's lane rule, then the rule itself fed with inputs it
     rebuilt from the record, and both drifted from the pass at the edges. The enqueue's
-    precedence — subject → blocked → enqueued — is therefore visible here only as the ledger
-    the fixture writes in the pass's shape (`block_defender_lane` re-files the defender
-    entries), and `test_1025_the_fixture_ledger_is_the_passes_own` holds that fixture to the
-    real pass.
+    precedence is therefore visible here only as the ledger the fixture writes in the pass's
+    shape (`E.set_lane` re-files the defender entries), and
+    `test_1025_the_fixture_ledger_is_the_passes_own` holds that fixture to the real pass.
     """
     ep = E.sample_episode(tmp_path)
     page = render(ep)
@@ -401,7 +380,7 @@ def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_unqueueab
         for i in range(4):
             group = _group_of(page, f"f-{label}-0-{i}").text()
             assert "defender: enqueued" in group, group
-            assert "never eligible" not in group, group
+            assert "not measured" not in group, group
     for row in (f"f-{E.PASSTHROUGH_WORLD}-0-4", f"f-{E.GRADED_WORLD}-0-4", f"f-{E.FAMILY}-0-0"):
         assert "world author: enqueued" in _group_of(page, row).text(), row
 
@@ -413,43 +392,25 @@ def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_unqueueab
     assert "unqueueable" in group, group
     assert "the citation names no file" in group, group
 
-    # the record as the enqueue writes it on a discard episode: `enqueued_rows` 0 and the
-    # defender entries re-filed never eligible
-    doc = E.block_defender_lane(E.sample_grade(), "discard")
+    # the record as the pass writes it when no judged world is measured: `enqueued_rows` 0 and
+    # the defender entries filed `not_measured`
+    doc = E.sample_grade()
+    doc["enqueued_rows"] = 0
+    for row in doc["worlds"]:
+        row.update(measured=False, not_measured_reason="a draw files unreachable")
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
+        for i in range(4):
+            E.set_lane(doc, label, 0, i, "not_measured")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
         for i in range(4):
             group = _group_of(page, f"f-{label}-0-{i}").text()
-            assert "never eligible — verdict discard" in group, group
+            assert "not queued — the world is not measured" in group, group
             assert "enqueued" not in group, group
-    # tile 3's split on the discard episode (95-reconciliation-2 N-4, auto-resolved): the split
-    # gains a fifth part, "never eligible", carrying the blocked defender count; the other
-    # parts are the record's — 0 defender enqueued / world author as recorded / unqueueable as
-    # recorded
     three = _tile(page, 2).text()
-    for part in ("0 defender", f"{S.world_author} world author", "0 unqueueable",
-                 f"{S.defender_enqueued} never eligible"):
+    for part in ("0 defender", f"{S.world_author} world author", "0 unqueueable"):
         assert part in three, (part, three)
-
-
-def test_1025_a_non_canonically_spelled_verdict_word_still_blocks_the_judged_worlds_defender_findings(
-        tmp_path):
-    """The O7 gate reads `verdict_word` through `normalized_judge_outcome` — case-folded and
-    trimmed — so a record whose `verdict_word` is `"Discard"` blocks the enqueue pass exactly
-    as `"discard"` does, and the pass writes the word AS SPELLED onto every never-eligible
-    ledger entry. The page shows that ledger word verbatim — "never eligible — verdict
-    Discard" — and runs no gate of its own over the record's word: with the ledger there is
-    no second reading of `verdict_word` left to drift from the pass's.
-    """
-    ep = E.sample_episode(tmp_path)
-    doc = E.block_defender_lane(E.sample_grade(), "Discard")
-    E.write_judge(ep.dir, doc)
-    page = render(ep)
-    for i in range(4):
-        group = _group_of(page, f"f-{E.GRADED_WORLD}-0-{i}").text()
-        assert "never eligible — verdict Discard" in group, group
-        assert "enqueued" not in group, group
 
 
 def test_1025_findings_render_one_table_per_addressee_with_the_seven_columns_family_rows_at_family_level_and_dropped_counts_per_draw(
@@ -458,8 +419,9 @@ def test_1025_findings_render_one_table_per_addressee_with_the_seven_columns_fam
     rows sit in disjoint groups whose headings name their addressee, and every row carries its
     world, bucket, disposition (on the row or its group), claim, root cause, anchor and
     evidence; the three family rows sit under world `family` with their `anchor` verbatim and
-    no parsed world; each draw's `dropped_findings` count (0 on the sample; 2 on a synthetic
-    draw) is shown per draw.
+    no parsed world. (#1234 A13 retired the draw's `dropped_findings` count: a dropped finding
+    is its own ledger entry, so it renders as a row under its drop lane's group and tile 3
+    counts it as dropped.)
     """
     ep = E.sample_episode(tmp_path)
     page = render(ep)
@@ -472,21 +434,28 @@ def test_1025_findings_render_one_table_per_addressee_with_the_seven_columns_fam
     graded_findings = _draw_findings(ep, E.GRADED_WORLD)
     for i, row in enumerate(graded_findings):
         text = page.text_of(f"f-{E.GRADED_WORLD}-0-{i}")
+        pointers = row.get("contrast_evidence") or row["evidence"]
         for fact in (E.GRADED_WORLD, row["bucket"], row["claim"], row["root_cause"],
-                     row["anchor"], row["evidence"][0]):
+                     row["anchor"], pointers[0]):
             assert fact in text, (fact, text)
         assert "enqueued" in text or "enqueued" in _group_of(page, f"f-{E.GRADED_WORLD}-0-{i}").text()
     for i, row in enumerate(E.family_findings()):
         text = page.text_of(f"f-{E.FAMILY}-0-{i}")
         assert row["anchor"] in text, text
         assert "family" in text, text
-        assert E.PASSTHROUGH_WORLD not in text.replace(row["anchor"], ""), text
-    assert "0 dropped" in page.text_of("sec-findings")
+        assert E.PASSTHROUGH_WORLD not in text.replace(row["anchor"], "").replace(
+            row["evidence"][0], ""), text
+    assert "0 dropped" in _tile(page, 2).text()
 
-    E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=graded_findings, dropped=2))
-    findings = render(ep).text_of("sec-findings")
-    assert "2 dropped" in findings, findings
-    assert "0 dropped" in findings, findings
+    doc = E.sample_grade()
+    E.set_lane(doc, E.GRADED_WORLD, 0, 0, "dropped_unresolved")
+    E.set_lane(doc, E.GRADED_WORLD, 0, 1, "dropped_no_pair")
+    E.write_judge(ep.dir, doc)
+    page = render(ep)
+    assert "dropped — no pointer resolves" in _heading(_group_of(page, f"f-{E.GRADED_WORLD}-0-0"))
+    assert "dropped — no two-run contrast pair" in _heading(
+        _group_of(page, f"f-{E.GRADED_WORLD}-0-1"))
+    assert "2 dropped" in _tile(page, 2).text(), _tile(page, 2).text()
 
 
 def test_1025_a_world_drawn_twice_renders_both_draws_findings_once_each_in_numeric_draw_order_via_draws_on_disk(
@@ -502,6 +471,8 @@ def test_1025_a_world_drawn_twice_renders_both_draws_findings_once_each_in_numer
             findings=[E.finding(subject="defender", claim=f"draw {draw} claim")]))
     E.draw_document(ep.dir, E.GRADED_WORLD, "01", E.draw_doc(
         findings=[E.finding(subject="defender", claim="NON-CANONICAL STEM")]), check=False)
+    # #1234 A6: the page shows the draws the record names, so the record names all three
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1, 10)))
     page = render(ep)
     rows = [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]
     assert f"f-{E.GRADED_WORLD}-1-0" in rows, rows
@@ -520,8 +491,9 @@ def test_1025_a_world_drawn_twice_renders_both_draws_findings_once_each_in_numer
 def test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_unqueueable_malformed_and_dropped_counts(
         tmp_path):
     """The collapsed details carry "defender: 8 enqueued to <the recorded path>" (the path as
-    recorded, escaped, not a link), "questioner: 5 enqueued to …", unqueueable 0, malformed
-    0 / 0 and dropped 0 per draw.
+    recorded, escaped, not a link), "questioner: 5 enqueued to …", unqueueable 0, the family
+    row's malformed replies 0 and dropped 0. (#1234: the record's two queue-malformed counts
+    are gone; the family row carries its own malformed replies.)
     """
     page = render(E.sample_episode(tmp_path))
     acct = page.elements(cls="vd-acct")
@@ -530,7 +502,7 @@ def test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_unqu
     assert f"defender: {S.defender_enqueued} enqueued to {E.ENQUEUED_TO}" in text, text
     assert f"questioner: {S.world_author} enqueued to {E.WORLD_ENQUEUED_TO}" in text, text
     assert "unqueueable 0" in text, text
-    assert "malformed 0 / 0" in text, text
+    assert "family malformed replies 0" in text, text
     assert "dropped 0" in text, text
     assert not [h for h in page.hrefs if "_pending/findings.jsonl" in h], "the path became a link"
 
@@ -592,54 +564,35 @@ def test_1025_no_hand_written_sentence_from_the_artifact_appears_while_every_tem
 
 def test_1025_a_finding_id_recorded_in_judge_yaml_names_a_world_draw_index_triple_absent_from_every_draw_document(
         tmp_path):
-    """A record row whose draw document is gone (J9b): `judge.yaml.world_findings` carries its
-    own `finding` text, so the page renders a stub row from the record — that text, its
-    recorded disposition, and a "draw document absent" marker — and tile 3 counts it; a
-    defender entry, whose text the record does not carry, renders no stub; an
-    `unqueueable_findings` line with no document renders in queue accounting only. The
-    recorded `world_findings` row keeps its `f-<world>-<draw>-<index>` id from the recorded
-    id's suffix.
+    """A ledger entry whose draw document is gone (J9b): #1234's record carries lanes, never a
+    finding's text (the retired `world_findings` copy), so no stub row is synthesised for it —
+    tile 3 counts only what is on disk and the queue accounting says the record and the page
+    disagree.
 
-    THE GRAIN IS THE DOCUMENT (92-reconciliation F-5): a stub is rendered iff the draw DOCUMENT
-    named by the recorded triple is absent; a triple missing from a PRESENT document — a
-    document rewritten with fewer findings than the record names — renders no stub and no
-    row, and tile 3 counts only what is on disk (the rule `identical_findings_under_two_draws`,
-    `a_draw_document_is_missing_its_findings_key_entirely` and `the_same_finding_id_string…`
-    already depend on).
+    THE GRAIN IS THE DOCUMENT (92-reconciliation F-5): a triple missing from a PRESENT document
+    — a document rewritten with fewer findings than the record names — renders no row either.
     """
     ep = E.sample_episode(tmp_path)
     (ep.world(E.GRADED_WORLD) / "judge" / "0.yaml").unlink()
     (ep.world(E.PASSTHROUGH_WORLD) / "judge" / "0.yaml").unlink()
-    doc = E.sample_grade()
-    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/7: no document either"]
-    E.write_judge(ep.dir, doc)
     page = render(ep)
-    stub = page.text_of(f"f-{E.GRADED_WORLD}-0-4")
-    assert "draw document absent" in stub, stub
-    assert doc["world_findings"][4]["finding"] in stub, stub
-    assert "enqueued" in _group_of(page, f"f-{E.GRADED_WORLD}-0-4").text()
-    assert "draw document absent" in page.text_of(f"f-{E.PASSTHROUGH_WORLD}-0-4")
     rows = _rows(page)
-    assert not [r for r in rows if r.endswith(tuple(f"-0-{i}" for i in range(4)))
-                and not r.startswith(f"f-{E.FAMILY}-")], rows
+    assert not [r for r in rows if not r.startswith(f"f-{E.FAMILY}-")], rows
     assert "defender claim 0" not in page.text_of("sec-findings")
-    assert f"f-{E.GRADED_WORLD}-0-7" not in rows, rows
-    # family 3 + the recorded prior/0/4 stub + no_remote_session's 0/4 stub
-    assert f"of {3 + 1 + 1}" in _tile(page, 2).text(), _tile(page, 2).text()
-    assert "no document either" in page.one(cls="vd-acct").text()
+    assert "of 3" in _tile(page, 2).text(), _tile(page, 2).text()
+    acct = page.one(cls="vd-acct").text()
+    assert f"record and page disagree by {S.defender_enqueued}" in acct, acct
 
     # the grain: the graded world's document is back with ONE finding while the record still
-    # names `<ep>/prior_fake_key_precedent/0/4` — a present document, a missing triple, no stub
+    # names `<ep>/prior_fake_key_precedent/0/4` — a present document, a missing triple, no row
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(
         findings=[E.finding(subject="defender", claim="THE ONLY FINDING LEFT")]))
     page = render(ep)
     graded_rows = [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]
     assert graded_rows == [f"f-{E.GRADED_WORLD}-0-0"], graded_rows
     assert "THE ONLY FINDING LEFT" in page.text_of(f"f-{E.GRADED_WORLD}-0-0")
-    assert "draw document absent" not in page.text_of(f"f-{E.GRADED_WORLD}-0-0")
-    # family 3 + the one row on disk + no_remote_session's 0/4 stub — not 6: no stub for the
-    # recorded `prior_fake_key_precedent/0/4`
-    assert f"of {3 + 1 + 1}" in _tile(page, 2).text(), _tile(page, 2).text()
+    # family 3 + the one row on disk
+    assert "of 4" in _tile(page, 2).text(), _tile(page, 2).text()
 
 
 def test_1025_top_level_enqueue_counts_disagree_with_the_rows_the_page_walks(tmp_path):
@@ -713,9 +666,8 @@ def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
     """
     ep = E.sample_episode(tmp_path)
     doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable", "a reason")
-    for row in doc["world_findings"] + doc["dispositions"]:
+    for row in doc["dispositions"]:
         row["finding_id"] = row["finding_id"].replace(E.EPISODE_ID, "old-name-before-repair")
-    doc["unqueueable_findings"] = [f"old-name-before-repair/{E.GRADED_WORLD}/0/1: a reason"]
     E.write_judge(ep.dir, doc)
     page = render(ep)
     text = page.text_of(f"f-{E.GRADED_WORLD}-0-4")
@@ -732,13 +684,13 @@ def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
 
 
 def test_1025_a_draw_document_is_missing_its_findings_key_entirely(tmp_path):
-    """A draw document without a `findings` key is zero findings for that draw — no distinct
-    sentence, no error: the world's other draw renders, tile 3's total drops by the five rows
-    the document no longer carries.
+    """A draw document without its finding lists (#1234: `investigator_findings` and
+    `world_findings`) is zero findings for that draw — no distinct sentence, no error: tile 3's
+    total drops by the five rows the document no longer carries.
     """
     ep = E.sample_episode(tmp_path)
     doc = E.draw_doc()
-    del doc["findings"]
+    del doc["investigator_findings"], doc["world_findings"]
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, doc)
     page = render(ep)
     assert not [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]
@@ -755,6 +707,7 @@ def test_1025_the_same_finding_id_string_appears_in_two_different_draw_documents
     for draw in (0, 1):
         E.draw_document(ep.dir, E.GRADED_WORLD, draw, E.draw_doc(findings=[
             E.finding(subject="defender", claim=f"draw {draw} claim", finding_id="SHARED-ID")]))
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1)))
     rows = _rows(render(ep))
     assert f"f-{E.GRADED_WORLD}-0-0" in rows, rows
     assert f"f-{E.GRADED_WORLD}-1-0" in rows, rows
@@ -762,51 +715,30 @@ def test_1025_the_same_finding_id_string_appears_in_two_different_draw_documents
 
 def test_1025_draw_index_beyond_the_recorded_completed_draw_count(tmp_path):
     """A draw document whose index exceeds `knobs.draws` / `draws.completed` renders like any
-    other draw — every per-draw file is a source and no cross-check against the knobs is made.
+    other draw the world's row records (#1234 A6: the record's `draws` are what the page shows)
+    — no cross-check against the knobs is made.
     """
     ep = E.sample_episode(tmp_path)
     E.draw_document(ep.dir, E.GRADED_WORLD, 5, E.draw_doc(
         findings=[E.finding(subject="defender", claim="OVER-INDEX CLAIM")]))
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 5)))
     page = render(ep)
     assert f"f-{E.GRADED_WORLD}-5-0" in _rows(page)
     assert "OVER-INDEX CLAIM" in page.text_of(f"f-{E.GRADED_WORLD}-5-0")
 
 
-def test_1025_subject_field_holds_a_value_outside_defender_and_world(tmp_path):
-    """A finding whose `subject` is neither `defender` nor `world` takes the record's
-    disposition (the enqueue filed it unqueueable): it renders in its world's table under an
-    "unqueueable — <reason>" group with the subject shown verbatim, and tile 3 counts it.
-    """
-    ep = E.sample_episode(tmp_path)
-    findings = _draw_findings(ep, E.GRADED_WORLD)
-    findings.append(E.finding(subject="oracle", claim="ORACLE CLAIM"))
-    E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings))
-    doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 5, "unqueueable",
-                     "subject 'oracle' is not an addressee")
-    E.write_judge(ep.dir, doc)
-    page = render(ep)
-    row = f"f-{E.GRADED_WORLD}-0-5"
-    assert row in _rows(page)
-    assert "oracle" in page.text_of(row)
-    assert "ORACLE CLAIM" in page.text_of(row)
-    heading = _heading(_group_of(page, row))
-    assert "unqueueable" in heading, heading
-    assert "subject 'oracle' is not an addressee" in heading, heading
-    assert f"of {S.findings + 1}" in _tile(page, 2).text()
-
-
 def test_1025_a_finding_that_is_not_a_mapping(tmp_path):
-    """A scalar where a finding mapping belongs is a finding the pass DROPPED and said so
-    (`enqueue_report` files it unqueueable, "not a mapping"), so the page renders it as the
-    ledger has it: a row with no claim under the "unqueueable — not a mapping" group, counted
-    on tile 3's total and its unqueueable part, and in the queue accounting through the
-    record's own line. Before the ledger the page skipped it in silence and tile 3 read
-    "0 unqueueable" over a record line that said otherwise (#1042 review).
+    """A scalar where a finding mapping belongs, whose ledger entry files it unqueueable ("not a
+    mapping"), renders as the ledger has it: a row with no claim under the "unqueueable — not a
+    mapping" group, counted on tile 3's total and its unqueueable part, and in the queue
+    accounting's unqueueable count (#1234 retired the record's own `unqueueable_findings`
+    line). Before the ledger the page skipped it in silence and tile 3 read "0 unqueueable"
+    over a record line that said otherwise (#1042 review).
     """
     ep = E.sample_episode(tmp_path)
-    findings: list = _draw_findings(ep, E.GRADED_WORLD)
-    findings.append("just a bare string, not a finding")
-    E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings))
+    draw = E.draw_doc(findings=_draw_findings(ep, E.GRADED_WORLD))
+    draw["world_findings"].append("just a bare string, not a finding")
+    E.draw_document(ep.dir, E.GRADED_WORLD, 0, draw)
     doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 5, "unqueueable",
                      "the draw's finding[5] is str, not a mapping")
     E.write_judge(ep.dir, doc)
@@ -819,36 +751,33 @@ def test_1025_a_finding_that_is_not_a_mapping(tmp_path):
     assert "not a mapping" in heading, heading
     assert f"of {S.findings + 1}" in _tile(page, 2).text()
     assert "1 unqueueable" in _tile(page, 2).text()
-    assert "not a mapping" in page.one(cls="vd-acct").text()
+    assert "unqueueable 1" in page.one(cls="vd-acct").text()
 
 
 def test_1025_a_draw_document_that_is_only_a_failure_reason(tmp_path):
-    """A `{failure_reason: …}` draw document renders its `failure_reason` verbatim-escaped on
-    that draw's line with the dropped count shown as "—", contributes no rows, and the other
-    draws render as usual.
+    """A `{failure_reason: …}` draw document is a draw that did not complete: the pass leaves it
+    out of the world row's recorded `draws` (#1234 A6, `judge.recorded_draws`), so it
+    contributes no rows and its text never reaches the page, while the recorded draw renders
+    as usual. (Before #1234 the page walked every file and showed the reason on the draw's
+    line; the failure now stays on the record's row.)
     """
     ep = E.sample_episode(tmp_path)
     E.draw_document(ep.dir, E.GRADED_WORLD, 1,
                     {"failure_reason": "the judge reply <b>did not parse</b>"})
     page = render(ep)
-    findings = page.text_of("sec-findings")
-    assert "the judge reply <b>did not parse</b>" in findings, findings
-    assert "&lt;b&gt;did not parse" in page.raw
+    assert "did not parse" not in page.raw
     assert not [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-1-")]
-    line = findings[findings.index("did not parse"):][:200]
-    assert "—" in line, line
+    assert len([r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-0-")]) == 5
 
 
 def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path):
-    """A world finding the enqueue refused for citing a samples section the record marks
-    `unavailable` (`cites_sample`; absent from `world_findings`, present in
-    `unqueueable_findings` with that reason) renders in the world-author table under an
-    "unqueueable — <reason>" group — never dropped from the table (O2).
+    """A world finding the pass refused for citing a samples section the record marks
+    `unavailable` (pointer assessment; its ledger entry `unqueueable` with that reason) renders in
+    the world-author table under an "unqueueable — <reason>" group — never dropped from the
+    table (O2).
     """
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["world_findings"] = [r for r in doc["world_findings"]
-                             if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
     reason = "cites samples.yaml#identity, whose section holds no real answers"
     E.set_lane(doc, E.GRADED_WORLD, 0, 4, "unqueueable", reason)
     doc["world_enqueued_rows"] = 4
@@ -867,30 +796,16 @@ def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path)
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_the_episode_level_verdicts_justification(tmp_path):
-    """The episode-level words are justified from record values only (J10): each draw group in
-    the lede and in the findings section carries that draw's own `episode_outcome` word.
-    """
-    page = render(E.sample_episode(tmp_path))
-    band = page.text_of("sec-verdict")
-    family_group = _group_of(page, f"f-{E.FAMILY}-0-0").text()
-    assert "discard" in family_group, family_group
-    world_group = _group_of(page, f"f-{E.GRADED_WORLD}-0-0").text()
-    assert "gradable" in world_group, world_group
-    lede = band[: band.index(LEDE_LINE)]
-    assert "discard" in lede, lede
-
-
 def test_1025_record_fields_no_slot_binds(tmp_path):
     """Bound slots only (J10): the record fields no slot names — the draw's `noise_floor_note`,
     the row's `integrity_notes` — do not reach the page; the raw-record fold is a
-    recorded follow-up, not this page. Positive control: the draw's own `episode_outcome` word,
-    which the resolution binds, does render with its group.
+    recorded follow-up, not this page. Positive control: the draw's finding, which a slot binds,
+    renders with its group. (#1234 retired the draw's `episode_outcome` word the positive
+    control used to read.)
     """
     ep = E.sample_episode(tmp_path)
-    doc = E.draw_doc(findings=[E.finding(subject="defender")],
-                     noise_floor_note="NOISE-FLOOR-NOTE-UNBOUND",
-                     episode_outcome="gradable")
+    doc = E.draw_doc(findings=[E.finding(subject="defender", claim="BOUND-CLAIM")],
+                     noise_floor_note="NOISE-FLOOR-NOTE-UNBOUND")
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, doc)
     grade = E.sample_grade()
     grade["worlds"][1]["integrity_notes"] = ["INTEGRITY-NOTE-UNBOUND"]
@@ -898,20 +813,19 @@ def test_1025_record_fields_no_slot_binds(tmp_path):
     page = render(ep)
     for unbound in ("NOISE-FLOOR-NOTE-UNBOUND", "INTEGRITY-NOTE-UNBOUND"):
         assert unbound not in page.raw, unbound
-    assert "gradable" in _group_of(page, f"f-{E.GRADED_WORLD}-0-0").text()
+    assert "BOUND-CLAIM" in _group_of(page, f"f-{E.GRADED_WORLD}-0-0").text()
 
 
 def test_1025_family_drawn_several_times_with_a_dissenting_draw(tmp_path):
-    """A family drawn twice whose draws disagree on the outcome word renders two groups in draw
-    order, each carrying its own `episode_outcome` word beside its findings, never merged; the
-    badge stays the record's majority word `family_outcome`.
+    """A family drawn twice whose draws file different findings renders two groups in draw
+    order, never merged: each draw's findings under its own draw. (#1234 retired the per-draw
+    outcome word and the family's majority badge word this pinned beside them; the family's
+    draws combine by union, each finding its own ledger entry.)
     """
     ep = E.sample_episode(tmp_path)
-    E.draw_document(ep.dir, E.FAMILY, 1, E.draw_doc(
-        findings=[E.finding(subject="world", topic="dissent topic", claim="dissent claim")],
-        episode_outcome="gradable"))
-    doc = E.sample_grade()
-    doc["world_findings"].append(E.family_queue_row(1, 0, topic="dissent topic", claim="dissent claim"))
+    E.draw_document(ep.dir, E.FAMILY, 1, E.family_draw_doc(
+        findings=[E.finding(subject="world", topic="dissent topic", claim="dissent claim")]))
+    doc = E.record_draws(E.sample_grade(), E.FAMILY, (0, 1))
     E.set_lane(doc, E.FAMILY, 1, 0, "world")
     E.write_judge(ep.dir, doc)
     page = render(ep)
@@ -919,11 +833,8 @@ def test_1025_family_drawn_several_times_with_a_dissenting_draw(tmp_path):
     first = band.index("family topic 0")
     second = band.index("dissent topic: dissent claim")
     assert first < second, band
-    assert "discard" in band[first:second], band
-    assert "gradable" in band[second:second + 400], band
-    assert "discard" in page.one(cls="vd-badge").text()
-    assert "gradable" in _group_of(page, f"f-{E.FAMILY}-1-0").text()
-    assert "discard" in _group_of(page, f"f-{E.FAMILY}-0-0").text()
+    assert f"f-{E.FAMILY}-1-0" in _rows(page)
+    assert f"f-{E.FAMILY}-0-0" in _rows(page)
 
 
 def test_1025_manifest_fields_the_slot_bindings_never_name(tmp_path):
@@ -951,21 +862,19 @@ def _class_carries(page: E.Page, word: str) -> list[str]:
             if word.lower() in (n.attrs.get("class") or "").lower()]
 
 
-def test_1025_verdict_word_outside_the_five_known_values(tmp_path):
-    """A `verdict_word` outside {undecidable, caught, survived, discard, corpus-contradiction}
-    renders as its raw word, escaped, in the meta line and tile 1, tile 1 carries "(not a
-    family word)" as it does for any word outside the vocabulary (fk-9), and the word drives no
-    class. Positive control: `undecidable` carries no such note.
+def test_1025_validity_word_outside_the_known_values(tmp_path):
+    """#1234 retired `verdict_word`; the band's one record word is `validity` (O5). A word
+    outside {usable, unusable} renders as its raw word, escaped, in the badge and the meta
+    line, and drives no class. Positive control: the sample's `usable`.
     """
     ep = E.sample_episode(tmp_path)
-    assert "(not a family word)" not in _tile(render(ep), 0).text()
+    assert render(ep).one(cls="vd-badge").text() == "usable"
     doc = E.sample_grade()
-    doc["verdict_word"] = "mystery<word>"
+    doc["validity"] = "mystery<word>"
     E.write_judge(ep.dir, doc)
     page = render(ep)
+    assert "mystery<word>" in page.one(cls="vd-badge").text()
     assert "mystery<word>" in page.one(cls="vd-meta").text()
-    assert "mystery<word>" in _tile(page, 0).text()
-    assert "(not a family word)" in _tile(page, 0).text(), _tile(page, 0).text()
     assert "&lt;word&gt;" in page.raw
     assert _class_carries(page, "mystery") == []
 
@@ -1024,7 +933,8 @@ def test_1025_judge_yaml_is_present_with_an_empty_worlds_array_and_no_not_graded
     doc = E.sample_grade()
     doc["worlds"] = []
     doc["enqueued_rows"] = 0
-    doc["world_findings"] = doc["world_findings"][:3]
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
+        E.drop_lanes(doc, label)
     doc["world_enqueued_rows"] = 3
     E.write_judge(ep.dir, doc)
     page = render(ep)
@@ -1040,7 +950,7 @@ def test_1025_judge_yaml_carries_a_top_level_field_this_readers_schema_has_never
     same record without the key.
     """
     ep = E.sample_episode(tmp_path)
-    assert "undecidable" in render(ep).text_of("sec-verdict"), "positive control: the record renders"
+    assert "usable" in render(ep).text_of("sec-verdict"), "positive control: the record renders"
     baseline = ep.page.read_bytes()
     doc = E.sample_grade()
     doc["never_seen_field"] = {"planted": "NEVER-SEEN-VALUE"}
@@ -1079,6 +989,7 @@ def test_1025_draw_directory_holds_both_1_yaml_and_01_yaml(tmp_path):
         findings=[E.finding(subject="defender", claim="CANONICAL ONE")]))
     E.draw_document(ep.dir, E.GRADED_WORLD, "01", E.draw_doc(
         findings=[E.finding(subject="defender", claim="LEADING ZERO")]), check=False)
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1)))
     page = render(ep)
     rows = [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-1-")]
     assert rows == [f"f-{E.GRADED_WORLD}-1-0"], rows
@@ -1123,9 +1034,10 @@ def test_1025_a_finding_row_carries_a_non_null_world_field_that_disagrees_with_i
 
 def test_1025_malformed_replies_and_gaps_in_draw_numbering(tmp_path):
     """Draws render under their real stems (0 and 2), ids `f-<world>-0-<i>` / `f-<world>-2-<i>`,
-    never renumbered; tile 3 counts the rows on disk; all three judge traces render — the trace
-    for draw 1 exists and is enumerated as roster label × stems present even though draw 1 has
-    no document.
+    never renumbered; tile 3 counts the rows on disk. The judge traces render for the draws the
+    record names (0 and 2); draw 1's trace — a call that never completed a draw, so the record
+    names no draw 1 — is not shown (#1234 A6: transcripts follow `judge.recorded_draws`; the
+    failure stays on the row).
     """
     ep = E.sample_episode(tmp_path)
     E.draw_document(ep.dir, E.GRADED_WORLD, 2, E.draw_doc(
@@ -1133,48 +1045,47 @@ def test_1025_malformed_replies_and_gaps_in_draw_numbering(tmp_path):
     for n in (1, 2):
         E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:{n}")
         E.write_framed(ep.dir, f"judge:{E.GRADED_WORLD}:{n}")
+    doc = E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 2))
+    doc["worlds"][1]["malformed_replies"] = 1
+    E.write_judge(ep.dir, doc)
     page = render(ep)
     rows = [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]
     assert f"f-{E.GRADED_WORLD}-2-0" in rows, rows
     assert not [r for r in rows if r.startswith(f"f-{E.GRADED_WORLD}-1-")], rows
     assert f"of {S.findings + 1}" in _tile(page, 2).text()
-    for n in (0, 1, 2):
+    for n in (0, 2):
         assert f"tx-judge_{E.GRADED_WORLD}_{n}_trace" in page.by_id, page.ids_with("tx-")
+    assert f"tx-judge_{E.GRADED_WORLD}_1_trace" not in page.by_id
 
 
 def test_1025_unqueueable_reason_text_contains_the_page_join_delimiter(tmp_path):
-    """The split is on the FIRST `": "` (a run id admits no `:`, F9): the reason keeps any later
-    `": "`, rendered escaped; a line with no separator is rendered whole in the queue accounting
-    and joins no row.
+    """A ledger reason carrying `": "` (the old `unqueueable_findings` line's join delimiter)
+    is shown whole, escaped: #1234's ledger carries the reason in its own field, so nothing
+    splits it. (The retired `unqueueable_findings` list, and its separator-less line in the
+    queue accounting, are gone.)
     """
     ep = E.sample_episode(tmp_path)
     doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable",
                      "reason part one: part two <x>")
-    doc["unqueueable_findings"].append("no separator in this line at all")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     group = _group_of(page, f"f-{E.GRADED_WORLD}-0-1").text()
     assert "unqueueable" in group, group
     assert "reason part one: part two <x>" in group, group
-    acct = page.one(cls="vd-acct").text()
-    assert "no separator in this line at all" in acct, acct
     assert "&lt;x&gt;" in page.raw
 
 
 def test_1025_an_unqueueable_line_that_matches_no_rendered_finding(tmp_path):
-    """An `unqueueable_findings` line naming a coordinate with no text appears verbatim
-    (escaped) in the queue-accounting details' unqueueable list; no findings row is synthesised
-    for it. Positive control: the line's own text is on the page.
+    """A ledger entry naming a coordinate with no finding on disk synthesises no findings row
+    (#1234: the record carries lanes, not text). Positive control: every finding on disk still
+    renders.
     """
     ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/9: <no such row>"]
+    doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 9, "unqueueable", "<no such row>")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     assert f"f-{E.GRADED_WORLD}-0-9" not in page.all_ids
-    acct = page.one(cls="vd-acct").text()
-    assert f"{E.GRADED_WORLD}/0/9: <no such row>" in acct, acct
-    assert "&lt;no such row&gt;" in page.raw
+    assert "<no such row>" not in page.raw
     assert len(_rows(page)) == S.findings
 
 
@@ -1187,6 +1098,7 @@ def test_1025_identical_findings_under_two_draws(tmp_path):
     same = [E.finding(subject="defender", claim="IDENTICAL CLAIM")]
     for draw in (0, 1):
         E.draw_document(ep.dir, E.GRADED_WORLD, draw, E.draw_doc(findings=same))
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1)))
     page = render(ep)
     rows = [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]
     assert sorted(rows) == [f"f-{E.GRADED_WORLD}-0-0", f"f-{E.GRADED_WORLD}-1-0"], rows
@@ -1196,13 +1108,12 @@ def test_1025_identical_findings_under_two_draws(tmp_path):
 
 def test_1025_family_call_faulted_after_writing_a_draw(tmp_path):
     """Both render: the family findings that were written (one line per row, grouped by draw in
-    draw order) and `family_failed_reason` (escaped) in the reason slot ahead of the templated
-    line; neither suppresses the other.
+    draw order) and the family row's `draws_failed_reason` (escaped) in the reason slot ahead
+    of the templated line; neither suppresses the other.
     """
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["family_failed_reason"] = "draw 1 failed: <TransportFault>"
-    doc["family_outcome"] = None
+    doc["family"]["draws_failed_reason"] = "draw 1 failed: <TransportFault>"
     E.write_judge(ep.dir, doc)
     band = render(ep).text_of("sec-verdict")
     assert "draw 1 failed: <TransportFault>" in band
@@ -1212,33 +1123,34 @@ def test_1025_family_call_faulted_after_writing_a_draw(tmp_path):
 
 def test_1025_a_gradable_row_whose_draws_never_ran(tmp_path):
     """A gradable row whose draws never ran (no draw document, no trace) is graded on the page
-    (`is_gradable_row`): verdict, bucket, systems and a card render from the row; no
-    transcript block for it and an empty findings group.
+    (`is_gradable_row`): its verdict and a card render from the row; its combined verdict is
+    the zero-draw one the pass writes (#1234 `combine_draws`: no bucket, no systems, not
+    measured, no commit state), no transcript block for it and no findings rows.
     """
     ep = E.sample_episode(tmp_path)
     (ep.world(E.GRADED_WORLD) / "judge" / "0.yaml").unlink()
     for name in (f"judge_{E.GRADED_WORLD}_0_trace.jsonl", f"judge_{E.GRADED_WORLD}_0_framed_trace.jsonl"):
         (ep.dir / "wire_logs" / name).unlink()
-    doc = E.sample_grade()
-    doc["worlds"][1]["completed_draws"] = 0
-    doc["worlds"][1]["draws_failed_reason"] = "no draw completed"
-    doc["worlds"][1]["findings"] = []
-    doc["world_findings"] = [r for r in doc["world_findings"]
-                             if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
+    doc = E.drop_lanes(E.sample_grade(), E.GRADED_WORLD)
+    row = doc["worlds"][1]
+    row.update(completed_draws=0, draws=[], bucket=None, systems=None, measured=False,
+               not_measured_reason="no draw completed",
+               draws_failed_reason="no draw completed", world_label_doubted=False)
+    del row["state"]
+    doc["enqueued_rows"] = 4
     doc["world_enqueued_rows"] = 4
     E.write_judge(ep.dir, doc)
     page = render(ep)
     world = page.text_of(f"world-{E.GRADED_WORLD}")
     assert "inconclusive" in world
-    assert "decision-discipline" in world
-    assert f"systems: {E.SYSTEM}" in world
+    assert "no bucket" in world
     assert any(E.GRADED_WORLD in c.text() for c in _cards(page))
     assert f"tx-judge_{E.GRADED_WORLD}_0_trace" not in page.by_id
     assert not [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]
 
 
 def test_1025_an_episode_with_only_the_control(tmp_path):
-    """Tile 1 "0 worlds judged · verdict = declared on 0 of 0" beside `undecidable`; no cards; the findings section carries family-draw rows
+    """Tile 1 "0 worlds judged · verdict = declared on 0 of 0"; no cards; the findings section carries family-draw rows
     only; the worlds guide names the control alone as "the branch point untouched, not
     graded"; renders without raising.
     """
@@ -1250,12 +1162,12 @@ def test_1025_an_episode_with_only_the_control(tmp_path):
         shutil.rmtree(ep.world(label))
         shutil.rmtree(ep.run(label))
     doc = E.sample_grade()
-    doc["worlds"], doc["enqueued_rows"] = [], 0
-    doc["world_findings"] = doc["world_findings"][:3]
+    doc["worlds"], doc["enqueued_rows"], doc["world_enqueued_rows"] = [], 0, 3
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
+        E.drop_lanes(doc, label)
     E.write_judge(ep.dir, doc)
     page = render(ep)
     assert "0 worlds judged · verdict = declared on 0 of 0" in _tile(page, 0).text()
-    assert "undecidable" in _tile(page, 0).text()
     assert _cards(page) == []
     assert set(_rows(page)) == {f"f-{E.FAMILY}-0-{i}" for i in range(3)}
     worlds = page.text_of("sec-worlds")
@@ -1317,14 +1229,18 @@ def test_1025_tile_one_reads_verdict_and_declared_through_the_vocabularys_normal
     assert f"verdict = declared on 1 of {S.graded}" in tile, tile
 
 
-def test_1025_an_empty_family_outcome_is_the_badge_word_not_an_absence(tmp_path):
-    """`family_outcome` is the record's own `str | None`: the badge shows the recorded word
-    whenever one is recorded, an empty string included — never the verdict word in its place
-    (`is not None`, not `or`)."""
+def test_1025_an_empty_validity_is_the_badge_word_not_an_absence(tmp_path):
+    """`validity` is the record's own `str | None`: the badge shows the recorded word whenever
+    one is recorded, an empty string included — never the absence mark in its place (`is not
+    None`, not `or`); an absent word is the absence mark. (#1234: `validity` replaced the
+    retired `family_outcome` as the badge's word.)"""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["family_outcome"] = ""
+    doc["validity"] = ""
     E.write_judge(ep.dir, doc)
-    page = render(ep)
-    assert page.one(cls="vd-badge").text() == "", page.one(cls="vd-badge").text()
-    assert doc["verdict_word"] in page.one(cls="vd-meta").text()  # positive control
+    assert render(ep).one(cls="vd-badge").text() == ""
+    doc["validity"] = None
+    E.write_judge(ep.dir, doc)
+    assert render(ep).one(cls="vd-badge").text() == "—"
+
+

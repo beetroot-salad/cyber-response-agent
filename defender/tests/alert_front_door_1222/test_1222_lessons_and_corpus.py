@@ -426,7 +426,9 @@ def _queued_row(finding_id: str, key: str, *, pre_change: bool = False, **over: 
         "schema_version": 1, "finding_id": finding_id, "run_id": finding_id.split("/")[0],
         "alert_rule_key": key, "direction": "family", "subject": "defender", "type": "lead-set",
         "subject_anchor": "l-001", "subject_topic": "coverage",
-        "finding": "the holding system was never re-queried", "judge_outcome": "survived",
+        "finding": "the holding system was never re-queried",
+        "contrast_evidence": ["worlds/a/report.md", "worlds/b/report.md"],
+        "on_verdict_path": True, "world_label_doubted": False,
         "citations": ["investigation.md#l-001"],
         "source_run_dir": f"episodes/{finding_id.split('/')[0]}/worlds/b",
     }

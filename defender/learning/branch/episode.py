@@ -32,6 +32,7 @@ import yaml
 from defender import _yaml
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound, bind
+from defender._report import repeats_disposition
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender._episode_paths import LAYOUT
 from defender.learning.branch import outcome as outcome_mod
@@ -175,6 +176,11 @@ def _verdicts(bound: Bound) -> dict[str, str]:
                 "the archived report is the only place this reader may learn what that "
                 "sibling concluded")
         assert rec.text is not None, "present per the state check above"
+        if repeats_disposition(rec.text):
+            # YAML keeps the last copy silently: a report with two headlines has none (A19).
+            raise EpisodeError(
+                f"world {label!r} is archived with a report ({name}) carrying a second "
+                "disposition key — the last copy would win silently, so it declares none")
         raw = _declared_disposition(rec.text)
         disposition = normalized_disposition(raw)
         if disposition is None:

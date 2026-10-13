@@ -1699,7 +1699,9 @@ def test_p014_judge_input_carries_payload_text_from_claims_and_forged_rows(tmp_p
 
     M26=A: frame every model-bound text the host did not author. A verified claim, a served
     answer's forged row and an unservable world's recorded reason all quote attacker-controlled
-    text. Settled regardless: the episode page renders the recorded reason as inert text
+    text. (#1234: the unservable world's recorded detail is no longer bound for the judge at
+    all — it reaches no prompt.) Settled regardless: the episode page renders the recorded
+    reason as inert text
     (escaped, never live markup), and no such text sets a bucket: world b's recorded bucket is
     the judge's reply's.
     """
@@ -1723,8 +1725,11 @@ def test_p014_judge_input_carries_payload_text_from_claims_and_forged_rows(tmp_p
 
     assert judge.prompts, "the judge was never asked"
     prompts = "\n".join(judge.prompts)
-    for token in ("CLAIMHOSTILE-3310", "SERVEDHOSTILE-3311", "REASONHOSTILE-3312"):
+    for token in ("CLAIMHOSTILE-3310", "SERVEDHOSTILE-3311"):
         S.assert_wrapped_untrusted(prompts, token, f"{token} at the judge")
+    # #1234: an unservable world's recorded `detail` reaches no judge prompt at all (the
+    # failed world is listed by label, reason word and call only — `render_family_text`).
+    assert "REASONHOSTILE-3312" not in prompts, "the unservable world's detail reached the judge"
     assert failure is None, f"grading did not complete: {failure!r}"
     assert _bucket(ep, "b") == "lead-quality", "payload text set world b's bucket"
     page = E.build_page(ep, module=S.mod(S.VISUALIZE))  # #1105 PR 2 (declared change 4): by id

@@ -225,8 +225,8 @@ def _checked_statement(statement: Any, at: str) -> str:
 
 
 def _checked_entities(entities: Any, at: str) -> tuple[str, ...]:
-    """A fact's entities: any printable names, bounded. Refused, never dropped, and the refusal
-    names the entity — an entity is data everywhere and is never a path component."""
+    """A fact's entities: any printable non-blank names, bounded. Refused, never dropped, and
+    the refusal names the entity — an entity is data everywhere and is never a path component."""
     if not isinstance(entities, list):
         raise FamilyError(f"{at}.entities must be a list of entity names, got "
                           f"{type(entities).__name__}")
@@ -236,10 +236,15 @@ def _checked_entities(entities: Any, at: str) -> tuple[str, ...]:
         raise FamilyError(f"{at}.entities names {len(entities)} entities, over the "
                           f"{ENTITIES_MAX}-entity bound")
     for entity in entities:
-        if (why := _printable_fault(entity, bound=ENTITY_MAX_LEN)) is not None:
+        why = _printable_fault(entity, bound=ENTITY_MAX_LEN)
+        if why is None and not entity.strip():
+            # The judge matches an entity as a literal substring of a lead's params (#1234 M2):
+            # a whitespace-only one would touch every lead.
+            why = f"{quoted(entity)}, which is only whitespace"
+        if why is not None:
             raise FamilyError(
-                f"{at}.entities names {why} — an entity is any printable name up to "
-                f"{ENTITY_MAX_LEN} characters")
+                f"{at}.entities names {why} — an entity is any printable non-blank name up "
+                f"to {ENTITY_MAX_LEN} characters")
     return tuple(entities)
 
 

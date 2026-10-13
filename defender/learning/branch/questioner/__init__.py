@@ -26,7 +26,8 @@ world calls: the capture (leads, alert, investigation document) was written in a
 and is attacker-reachable, and a model restating it does not clean it.
 
 Messages go through `learning._prompt.stage_user_message` so they carry the reader contract, and
-the frames are passed literally so `scripts/lint/lint_stage_prompt_frames.py` can inspect them.
+each section is a literal `titled_section` call (its host title outside, its body in the frame)
+so `scripts/lint/lint_stage_prompt_frames.py` can inspect them.
 
 One salt per call (`_untrusted.message_salt`), not per family: Call 1's reply is framed into the
 later calls, so a salt Call 1's model had seen would be a delimiter the framed party holds. One
@@ -50,8 +51,8 @@ from defender._env import env_str
 from defender._io import read_guarded, read_text_utf8
 from defender._report import read_report
 from defender.run_repository import RunPaths, artifact_file
-from defender._untrusted import message_salt, wrap
-from defender.learning._prompt import stage_user_message, titled_section
+from defender._untrusted import message_salt
+from defender.learning._prompt import section_text, stage_user_message, titled_section
 from defender.learning.core.validate import MalformedReply, reply_document_text
 from defender.runtime.agent_definition import AgentDefinition, ToolSet
 from defender.runtime.agent_role import AgentRole
@@ -173,10 +174,7 @@ def _samples_section(samples: Any, served_systems: Sequence[str]) -> str:
             for text in texts if isinstance(texts, list) else [texts]:
                 lines.append(f"    {text if isinstance(text, str) else json.dumps(text, default=str)}")
         blocks.append("\n".join(lines))
-    return titled_section(
-        "Real example answers from each served system, taken from the capture, grouped by verb "
-        "— what a fact you author will look like when the investigator asks",
-        "\n\n".join(blocks))
+    return "\n\n".join(blocks)
 
 
 @model(frozen=True)
@@ -184,7 +182,9 @@ class _Capture:
     """The captured inputs as rendered section bodies, ready to be framed.
 
     Every call gets the capture itself, not just Call 1's summary of it. Rendered once (they are
-    large and identical across seats) but framed per call, since each message has its own salt.
+    large and identical across seats) but framed per call, since each message has its own salt:
+    each body goes inside its frame and its title (`_TITLES`) outside it, as host text (#1234
+    A10). An empty `samples` or `lessons` is a section the call omits.
     """
 
     leads: str
@@ -192,6 +192,17 @@ class _Capture:
     frontier: str
     samples: str = ""
     lessons: str = ""
+
+
+#: Each captured section's host title, outside its frame (`titled_section`).
+_TITLES = {
+    "leads": "The joined leads at the branch point",
+    "alert": "The alert this investigation started from",
+    "frontier": "The investigation document at the branch point",
+    "samples": "Real example answers from each served system, taken from the capture, grouped "
+               "by verb — what a fact you author will look like when the investigator asks",
+    "lessons": "Pitfalls this questioner corpus recorded about worlds it authored before",
+}
 
 
 #: Cap on the questioner's own lessons in a prompt (same 20-row convention as the judge's).
@@ -253,9 +264,7 @@ def _questioner_lessons_section(lessons: Any, *, served_systems: Sequence[str]) 
     if not chosen:
         return ""
     capped = [chosen[name] for name in sorted(chosen)][:_QUESTIONER_LESSONS_CAP]
-    return titled_section(
-        "Pitfalls this questioner corpus recorded about worlds it authored before",
-        "\n\n---\n\n".join(capped))
+    return "\n\n---\n\n".join(capped)
 
 
 def _lesson_systems_ok(systems: Any) -> bool:
@@ -267,9 +276,9 @@ def _lesson_systems_ok(systems: Any) -> bool:
 def _capture_sections(*, leads: Any, alert: Any, frontier: str, samples: Any = None,
                       lessons: Any = None, served_systems: Sequence[str] = ()) -> _Capture:
     return _Capture(
-        leads=titled_section("The joined leads at the branch point", leads),
-        alert=titled_section("The alert this investigation started from", alert),
-        frontier=titled_section("The investigation document at the branch point", frontier),
+        leads=section_text(leads),
+        alert=section_text(alert),
+        frontier=section_text(frontier),
         samples=_samples_section(samples, served_systems),
         lessons=_questioner_lessons_section(lessons, served_systems=served_systems),
     )
@@ -378,13 +387,15 @@ def _family_prompt(header: str, capture: _Capture) -> str:
         f"{_prompt('family.md')}\n{header}\n"
         + stage_user_message(
             salt,
-            wrap(capture.leads, UNTRUSTED_TAG, salt),
-            wrap(capture.alert, UNTRUSTED_TAG, salt),
-            wrap(capture.frontier, UNTRUSTED_TAG, salt),
-            *([wrap(capture.samples, UNTRUSTED_TAG, salt)] if capture.samples else []),
+            titled_section(_TITLES["leads"], capture.leads, salt=salt, tag=UNTRUSTED_TAG),
+            titled_section(_TITLES["alert"], capture.alert, salt=salt, tag=UNTRUSTED_TAG),
+            titled_section(_TITLES["frontier"], capture.frontier, salt=salt, tag=UNTRUSTED_TAG),
+            *([titled_section(_TITLES["samples"], capture.samples, salt=salt, tag=UNTRUSTED_TAG)]
+              if capture.samples else []),
             # Lessons go to Call 1 only: it names the discriminator and base story, which is
             # what the lessons are about.
-            *([wrap(capture.lessons, UNTRUSTED_TAG, salt)] if capture.lessons else []),
+            *([titled_section(_TITLES["lessons"], capture.lessons, salt=salt, tag=UNTRUSTED_TAG)]
+              if capture.lessons else []),
         )
     )
 
@@ -395,7 +406,7 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
 
     `family_reply` is re-wrapped as untrusted (Call 1 read attacker-influenced text), in this
     message's own salt, minted after the reply exists so Call 1's model has never seen it."""
-    seeded = titled_section(f"Call 1's output (seat {seat} authors against this)", family_reply)
+    seeded = section_text(family_reply)
     salt = message_salt(seeded, capture.leads, capture.alert, capture.frontier, capture.samples)
     axis_line = f"Your axis, as call 1 named it: {axis}\n" if axis is not None else ""
     return (
@@ -404,12 +415,14 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
         f"{header}\n"
         + stage_user_message(
             salt,
-            wrap(seeded, UNTRUSTED_TAG, salt),
-            wrap(capture.leads, UNTRUSTED_TAG, salt),
-            wrap(capture.alert, UNTRUSTED_TAG, salt),
-            wrap(capture.frontier, UNTRUSTED_TAG, salt),
+            titled_section(f"Call 1's output (seat {seat} authors against this)", seeded,
+                           salt=salt, tag=UNTRUSTED_TAG),
+            titled_section(_TITLES["leads"], capture.leads, salt=salt, tag=UNTRUSTED_TAG),
+            titled_section(_TITLES["alert"], capture.alert, salt=salt, tag=UNTRUSTED_TAG),
+            titled_section(_TITLES["frontier"], capture.frontier, salt=salt, tag=UNTRUSTED_TAG),
             # The seat sees the samples too: its story must be one the served systems can tell.
-            *([wrap(capture.samples, UNTRUSTED_TAG, salt)] if capture.samples else []),
+            *([titled_section(_TITLES["samples"], capture.samples, salt=salt, tag=UNTRUSTED_TAG)]
+              if capture.samples else []),
         )
     )
 

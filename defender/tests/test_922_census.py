@@ -262,20 +262,25 @@ def test_922_the_findings_gate_and_its_family_partition_are_still_the_channels_o
     gate = build_author_config(paths, trees=author_trees(paths), state=open_state(paths)).gate
     assert gate is not None, "the findings channel's config carries no gate"
 
+    # #1234: a family row's ground truth is its own three fields (d00d); a row still carrying
+    # the retired family word (`caught`, any word) is HELD naming it, never consumed (A4, I10).
     family = {"schema_version": 1, "finding_id": "ep/b/0/0", "run_id": "ep",
-              "direction": "family", "type": "decision-discipline",
-              "judge_outcome": "survived", "subject_anchor": "l-001",
-              "subject_topic": "t", "source_run_dir": "episodes/ep/worlds/b"}
+              "direction": "family", "type": "decision-discipline", "subject": "defender",
+              "subject_anchor": "l-001", "subject_topic": "t",
+              "source_run_dir": "episodes/ep/worlds/b",
+              "contrast_evidence": ["worlds/b/report.md", "worlds/a/report.md"],
+              "on_verdict_path": True, "world_label_doubted": False}
     caught = dict(family, finding_id="ep/b/0/1", judge_outcome="caught")
 
     held, consumed, to_author = gate([family, caught],
                                      build_author_config(paths, trees=author_trees(paths), state=open_state(paths)))
     assert [r["finding_id"] for r in to_author] == ["ep/b/0/0"], (
-        f"the shipped gate did not admit the `survived` family row for authoring: "
+        f"the shipped gate did not admit the new-shape family row for authoring: "
         f"{[r['finding_id'] for r in to_author]}")
-    assert [r["finding_id"] for r in consumed] == ["ep/b/0/1"], (
-        f"the shipped gate did not consume the `caught` family row: {consumed}")
-    assert held == [], f"the shipped gate held a well-formed family row: {held}"
+    assert consumed == [], f"the shipped gate consumed a family row: {consumed}"
+    assert [(r["finding_id"], r["held_reason"]) for r in held] == [
+        ("ep/b/0/1", "retired_name(judge_outcome)")], (
+        f"the shipped gate did not hold the retired-word family row naming it: {held}")
 
 
 # ---------------------------------------------------------------------------------------

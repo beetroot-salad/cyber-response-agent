@@ -182,10 +182,12 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     if spawn is None:
         spawn = J.FakeSibling(episode_dir)
     if judge is None:
-        # One reply valid in both scopes: a world draw reads `bucket`/`systems`, the family
-        # draw `verdict_word`, so no draw is refused and asked again.
-        judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc(
-            findings=[], bucket="none", systems=[], verdict_word="survived")))
+        # A valid reply in each scope (#1234: a world reply carries `bucket`/`systems` and the
+        # three filed lists, a family reply world findings only), so no draw is refused and
+        # asked again.
+        judge = J.FakeJudge(
+            default=J.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[])),
+            family_default=J.as_reply_text(J.family_reply()))
     oracle = oracle if oracle is not None else S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM))  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
     verifier = verifier if verifier is not None else S.passing_verifier()  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
     seams.setdefault("questioner", S.questioner_for())
@@ -776,10 +778,12 @@ def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, c
     the four before it, inside the launch's clock bracket.
 
     Two failures, each under its own episodes root. The grade itself fails: the learning state
-    root's pending folder, which the enqueue appends into, is a regular FILE, so the family grade cannot land and
-    `grade_episode` raises into the frame body's catch (control: the launcher reports
-    "the judge pass failed" and writes no `judge.yaml`). The seam fails: the judge's model call
-    raises on every draw, which the grade holds per draw (control: the seam was reached).
+    root's pending folder, which the enqueue appends into, is a regular FILE, so a world's rows
+    cannot land and `grade_episode` raises into the frame body's catch (control: the launcher
+    reports "the judge pass failed", and — #1234 A6 writes `judge.yaml` before the appends —
+    the record holds the world it was committing in state `queueing`). The seam fails: the
+    judge's model call raises on every draw, which the grade holds per draw (control: the seam
+    was reached).
     """
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-grade-failed"))
     # The state root must exist (#1135: nothing creates it, and the handle opens before the
@@ -789,13 +793,17 @@ def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, c
     state_root.mkdir()
     (state_root / "_pending").write_text("not a directory\n", encoding="utf-8")
     monkeypatch.setenv(J.STATE_DIR_ENV, str(state_root))
-    launch = _launch(tmp_path)
+    # One investigator finding per world draw, so the commit has a row to append.
+    launch = _launch(tmp_path, judge=J.FakeJudge(
+        default=J.as_reply_text(J.reply_doc(bucket="lead-quality", systems=["idp"])),
+        family_default=J.as_reply_text(J.family_reply())))
     assert launch.rc == 0, "a failed grade ended the episode instead of being held"
     assert launch.judge.calls > 0, "the control failed: the judge seam was never reached"
     assert "the judge pass failed" in capsys.readouterr().err, (
         "the control failed: the grade did not fail")
-    assert not (launch.episode_dir / "judge.yaml").exists(), (
-        "the control failed: a family grade was written")
+    states = [row.get("state") for row in J.judge_record(launch.episode_dir)["worlds"]]
+    assert "queueing" in states, (
+        f"the control failed: no world was left mid-commit ({states})")
     rows = _raw_rows(launch.episode_dir)
     assert [row["step"] for row in rows] == EXPECTED_STEPS, "a held judge failure lost a row"
     _clocked(rows, before=launch.before, after=launch.after)

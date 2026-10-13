@@ -168,10 +168,13 @@ def launch_source(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tupl
     return est, src
 
 
-def survived_judge() -> Any:
-    """The judge double: one reply valid in both scopes, recording every prompt it is handed."""
-    return J.FakeJudge(default=J.as_reply_text(J.reply_doc(
-        findings=[], bucket="none", systems=[], verdict_word="survived")))
+def quiet_judge() -> Any:
+    """The judge double, recording every prompt it is handed: every world call answered
+    `bucket: none` with nothing filed, the family call with no world finding (#1234: a world
+    reply and a family reply are two shapes, and the family word they once shared is retired)."""
+    return J.FakeJudge(
+        default=J.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[])),
+        family_default=J.as_reply_text(J.family_reply()))
 
 
 @dataclass
@@ -210,7 +213,7 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     # first — the episodes base may be unset on purpose).
     episode_dir = Path(os.environ.get(EPISODES_BASE_ENV, "/nonexistent-episodes")) / EPISODE_ID
     spawn = spawn if spawn is not None else J.FakeSibling(episode_dir)  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
-    judge = judge if judge is not None else survived_judge()  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
+    judge = judge if judge is not None else quiet_judge()  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
     questioner = seams.pop("questioner", None) or CountingQuestioner()
     seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("live_tree", T.source_capture())

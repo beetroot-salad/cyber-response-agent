@@ -24,7 +24,7 @@ leads and queries come off `lead_repository.joined`.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import json
 from dataclasses import field
 from defender._model import model
@@ -32,11 +32,12 @@ from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-from pathlib import Path, PurePath, PurePosixPath
+from pathlib import Path, PurePath
 
 from defender._io import Bound, bind
 from defender._report import ReportRead, parse_report_text
 from defender._run_id import is_valid_run_id
+from defender._text import unwritable_value
 from defender._vocab import normalized_disposition
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
@@ -54,7 +55,12 @@ from defender.runtime.branch._family import (
     world_token_for,
 )
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS, INFRA_ERROR_CLASS
-from defender.runtime.run_end import RunEnd, parse_record
+from defender.runtime.run_end import (
+    TRUNCATED_BY_EXECUTED_QUERIES,
+    TRUNCATED_BY_SERVED_LEDGER,
+    RunEnd,
+    parse_record,
+)
 from defender.runtime.verbs import is_system_name
 from defender._query_rules import (
     ABOVE_GUARD_QUERY_ID,
@@ -330,13 +336,6 @@ def discriminator_of(doc: dict[str, Any]) -> dict[str, Any]:
     return block if isinstance(block, dict) else {}
 
 
-def _control_declared(doc: dict[str, Any]) -> Any:
-    for world in doc.get("worlds") or ():
-        if isinstance(world, dict) and world.get("role") == BASE_ROLE:
-            return world.get("disposition_declared")
-    return None
-
-
 def _non_control_worlds(doc: dict[str, Any]) -> list[dict[str, Any]]:
     raw = doc.get("worlds")
     if not isinstance(raw, list):
@@ -407,13 +406,13 @@ def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
                 "and writes outside the world it names")
 
 
-def mapping_key(mapping: dict[str, Any]) -> str:
+def mapping_key(mapping: Mapping[str, Any]) -> str:
     """The canonical `(system, verb, params)` key of any mapping carrying those three.
 
     Shared by every reader that dedups served ledger rows by call."""
     params = mapping.get("params")
     return request_key(str(mapping.get("system") or ""), str(mapping.get("verb") or ""),
-                       params if isinstance(params, dict) else {})
+                       dict(params) if isinstance(params, Mapping) else {})
 
 
 def names_one_file(lead_id: object) -> bool:
@@ -446,28 +445,122 @@ def scope_params(row: dict[str, Any]) -> dict[str, Any]:
 def _read_world_ledger(
     bound: Bound, name: str, world_token: str,
 ) -> tuple[list[dict[str, Any]], int, Any]:
-    """This world's own decision rows, first-row-wins on a duplicate key; a malformed line
-    (unparseable, or a `source` outside the ledger's decision words) is skipped and counted.
+    """This world's own decision rows, every one kept in ledger order (A2: the ledger is read in
+    full — two rows for one `(system, verb, params)` are two calls). A malformed line
+    (unparseable, or a `source` outside the ledger's decision words) is skipped and counted; a
+    row of another world (or none) is inert here. The lenient read, for the page;
+    `read_call_records` is the grading read, which refuses either instead.
 
     Absent is returned as the read's absent state for the caller to decide; only a refused
     read (e.g. a link at the name) raises `JudgeRefused`."""
     rows, malformed, rec = bound.read_jsonl(name)
     if rec.refusal is not None:
         raise JudgeRefused(f"the ledger could not be read: {rec.refusal}")
-    kept: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
+    kept: list[dict[str, Any]] = []
     for row in rows:
         if normalized_source(row.get("source")) is None:
             malformed += 1
             continue
-        if row.get("world_id") != world_token:
-            # A family-tier row or another world's row: inert here, and not malformed.
+        if row.get("world_id") == world_token:
+            kept.append(row)
+    return kept, malformed, rec
+
+
+def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
+    """World `label`'s archived query table, every line a row; `None` when nothing is at the
+    name (a world not archived); `JudgeRefused` naming the file and the refusal (a link, a
+    FIFO, a directory, an oversize file, a torn line, or malformed call fields).
+
+    Unlike the tolerant lead reader, grading must preserve the raw call identity rather than
+    coerce it. Validate the string fields used by the computed views before admitting any
+    rows, including unserved calls that have no ledger partner to check them against.
+    Params retain the shared reader's tolerant handling of non-mappings."""
+    table_name = LAYOUT.world(label).executed_queries
+    table, torn_table, table_read = bound.read_jsonl(table_name)
+    if table_read.absent:
+        return None
+    if table_read.refusal is not None:
+        raise JudgeRefused(f"world {label!r}: {table_read.refusal}")
+    if torn_table:
+        raise JudgeRefused(f"world {label!r}: {table_name} holds {torn_table} line(s) that do "
+                           "not parse as a row")
+    _refuse_unwritable(table, label=label, name=table_name)
+    for index, row in enumerate(table):
+        for column in ("lead_id", "system", "verb", "query_id"):
+            if not isinstance(row.get(column), str):
+                raise JudgeRefused(
+                    f"world {label!r}: {table_name} row {index} has malformed {column} "
+                    f"({row.get(column)!r}); expected str")
+    return table
+
+
+def read_served_ledger(bound: Bound, label: str, *, episode_token: str) -> list[dict[str, Any]]:
+    """World `label`'s served ledger read whole and required well-formed (A3, A12), or
+    `JudgeRefused` naming the file and the refusal: every line parses, every row carries a
+    decision word, names this run (`world_id`) and carries a call id of this run. An absent
+    ledger is no rows. The ledger half of `read_call_records`, and the found gaps' one read of
+    a run's ledger (A2), which reads it whatever that run's query table holds."""
+    from defender.learning.judge.calls import CALL_ID, call_id_names_run
+
+    token = world_token_for(episode_token, label)
+    ledger_name = world_ledger_name(label, episode_token=episode_token)
+    ledger, torn_ledger, ledger_read = bound.read_jsonl(ledger_name)
+    if ledger_read.refusal is not None:
+        raise JudgeRefused(f"world {label!r}: {ledger_read.refusal}")
+    if torn_ledger:
+        raise JudgeRefused(f"world {label!r}: {ledger_name} holds {torn_ledger} line(s) that "
+                           "do not parse as a row")
+    for i, row in enumerate(ledger):
+        if normalized_source(row.get("source")) is None:
+            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} carries no decision "
+                               f"word ({row.get('source')!r})")
+        if row.get("world_id") != token:
+            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} names another run "
+                               f"({row.get('world_id')!r}), not {token!r}")
+        if not call_id_names_run(row.get(CALL_ID), token):
+            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} carries no {CALL_ID} "
+                               f"of this run ({row.get(CALL_ID)!r})")
+    _refuse_unwritable(ledger, label=label, name=ledger_name)
+    return ledger
+
+
+def read_call_records(
+    bound: Bound, label: str, *, episode_token: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """One run's two call records — its query table and its served ledger — read whole through
+    the bounded no-follow reader and required well-formed (A3, A12), or `JudgeRefused` naming
+    the file and the refusal.
+
+    @owns call_records — the grading pass's one read of `executed_queries.jsonl` and
+    `served/<token>.<X>.jsonl`; the join (`calls.py`), the resolver and the found gaps read
+    these rows and nothing else.
+
+    Well-formed: every line parses; every ledger row names this run (`world_id`), carries a
+    decision word and the call id of this run; no two table rows of this run share an id; a
+    ledger row and the table row its id joins agree on `(system, verb, params)` (A21). An
+    absent table or ledger is no calls (a world whose investigator asked nothing)."""
+    from defender.learning.judge.calls import CALL_ID, call_id_names_run
+
+    token = world_token_for(episode_token, label)
+    table_name = LAYOUT.world(label).executed_queries
+    table = read_query_table(bound, label) or []
+    ledger = read_served_ledger(bound, label, episode_token=episode_token)
+    ledger_name = world_ledger_name(label, episode_token=episode_token)
+    own: dict[str, dict[str, Any]] = {}
+    for i, row in enumerate(table):
+        call_id = row.get(CALL_ID)
+        if not isinstance(call_id, str) or not call_id_names_run(call_id, token):
             continue
-        key = mapping_key(row)
-        if key not in kept:
-            kept[key] = row
-            order.append(key)
-    return [kept[k] for k in order], malformed, rec
+        if call_id in own:
+            raise JudgeRefused(f"world {label!r}: {table_name} rows share the call id "
+                               f"{call_id!r} (row {i})")
+        own[call_id] = row
+    for i, row in enumerate(ledger):
+        partner = own.get(row[CALL_ID])
+        if partner is not None and mapping_key(partner) != mapping_key(row):
+            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} and the {table_name} "
+                               f"row its {CALL_ID} {row[CALL_ID]!r} joins name different calls")
+    return table, ledger
 
 
 def _resolution_facts(
@@ -575,6 +668,14 @@ class WorldFacts:
     #: The world's leads (`leads_by_id`); `{}` unless the caller passes `read_world_facts` a
     #: `leads` callable.
     leads: dict[str, JoinedLead] = field(default_factory=dict)
+    #: The grading read's extras (`read_world`, A3): the query table whole, the oracle store's
+    #: forged rows, and the lead ids whose gather summary read plain. Empty off the page's reads.
+    table_rows: Annotated[list[dict[str, Any]], SkipValidation] = field(default_factory=list)
+    forged_rows: Annotated[list[dict[str, Any]], SkipValidation] = field(default_factory=list)
+    summary_leads: frozenset[str] = frozenset()
+    #: The run's world token (`<episode token>.<label>`): the `world_id` its ledger rows carry
+    #: and the run half of its call ids.
+    token: str = ""
 
     @property
     def referenced_leads(self) -> frozenset[str]:
@@ -652,9 +753,12 @@ def read_world_ledger(bound: Bound, label: str, *, episode_token: str,
                               world_token_for(episode_token, label))
 
 
-def read_world_facts(bound: Bound, label: str, *, episode_token: str,
+def read_world_facts(bound: Bound, label: str, *, episode_token: str,  # noqa: PLR0913 — the grading read's extras ride on the one construction
                      leads: Callable[[], dict[str, JoinedLead]] | None = None,
-                     absent_ledger_ok: bool = False) -> WorldFacts:
+                     absent_ledger_ok: bool = False,
+                     call_records: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None,
+                     forged_rows: list[dict[str, Any]] | None = None,
+                     summary_leads: frozenset[str] = frozenset()) -> WorldFacts:
     """Read one world's archived record — ledger, then document, then report — for the
     grading path. Unlike the standalone readers, an absent input refuses here: grading has
     nothing to return for a world it cannot see.
@@ -668,9 +772,16 @@ def read_world_facts(bound: Bound, label: str, *, episode_token: str,
     first. Set on the one construction because `dataclasses.replace` on a `@model` would copy
     the whole ledger."""
     ledger_name = world_ledger_name(label, episode_token=episode_token)
-    ledger_rows, malformed, ledger_read = read_world_ledger(bound, label, episode_token=episode_token)
-    if ledger_read.absent and not absent_ledger_ok:
-        raise JudgeRefused(f"the ledger ({ledger_name}) could not be read: nothing is at that name")
+    if call_records is not None:
+        table_rows, ledger_rows = call_records
+        malformed = 0
+    else:
+        table_rows = []
+        ledger_rows, malformed, ledger_read = read_world_ledger(
+            bound, label, episode_token=episode_token)
+        if ledger_read.absent and not absent_ledger_ok:
+            raise JudgeRefused(
+                f"the ledger ({ledger_name}) could not be read: nothing is at that name")
     document = read_investigation_facts(bound, world=label)
     if document.absent:
         raise JudgeRefused(
@@ -689,6 +800,8 @@ def read_world_facts(bound: Bound, label: str, *, episode_token: str,
         resolutions_by_lead=document.resolutions_by_lead,
         unlanded_document_rows=document.unlanded_document_rows,
         leads=leads() if leads is not None else {},
+        table_rows=table_rows, forged_rows=list(forged_rows or ()),
+        summary_leads=summary_leads, token=world_token_for(episode_token, label),
     )
 
 
@@ -712,31 +825,23 @@ def _archive_notes(world: Bound, *, facts: WorldFacts) -> list[str]:
     return notes
 
 
-def _missing_required_input(
-    bound: Bound, *, label: str, ledger_name: str, declared: Any, run_inputs_required: bool = True,
-) -> str | None:
-    # Each input must be a regular file in its parent's listing (never followed): the tree is
-    # box-writable, so a link counts as missing. An absent parent means its first input is
-    # missing; a parent that exists but cannot be listed decides nothing here — the read that
-    # follows refuses it as malformed. `run_inputs_required=False` is the pass's own reading:
-    # the served ledger (absent: no call reached it, `read_world_facts`' `absent_ledger_ok`)
-    # and the alert (absent: the rule key falls back) are not required —
-    # whether a world ran is its own record's to say (S8).
-    served_dir = LAYOUT.served
-    served = bound.under(served_dir).entries()
-    if run_inputs_required and (served.absent or (
-            served.entries is not None
-            and not served.has_file(str(PurePosixPath(ledger_name).relative_to(served_dir))))):
-        return f"served ledger ({ledger_name})"
+def _missing_required_input(bound: Bound, *, label: str, declared: Any) -> str | None:
+    """The first file a world's context needs that is not in its parent's listing at all, or
+    `None`. Absent is a state, not a refusal (K2): it marks the world ungradable without
+    `malformed`. A name that IS listed but is not a plain file (a link, a FIFO, a directory)
+    is not missing: the read that follows refuses it as malformed, naming it (A3). An absent
+    world directory means its report is missing; one that exists but cannot be listed decides
+    nothing here — the read refuses it. The served ledger and the alert are not required (no
+    call reached the ledger; the rule key falls back): whether a world ran is its own
+    record's to say (S8)."""
     world = bound.under(LAYOUT.world(label).dir).entries()
-    if world.absent or (world.entries is not None
-                        and not world.has_file(WORLD_LEAVES.report.name)):
+    if world.absent:
         return str(WORLD_LEAVES.report)
     if world.entries is not None:
-        if not world.has_file(WORLD_LEAVES.investigation.name):
-            return str(WORLD_LEAVES.investigation)
-        if run_inputs_required and not world.has_file(WORLD_LEAVES.alert.name):
-            return str(WORLD_LEAVES.alert)
+        for leaf in (WORLD_LEAVES.report, WORLD_LEAVES.investigation,
+                     WORLD_LEAVES.executed_queries):
+            if leaf.name not in world.entries:
+                return str(leaf)
     if not isinstance(declared, str) or not declared:
         return "disposition_declared"
     return None
@@ -754,22 +859,25 @@ def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world i
     label = world["world_id"]
     raw_declared = world.get("disposition_declared")
     row: dict[str, Any] = {"world": label, "declared": normalized_disposition(raw_declared)}
-    ledger_name = world_ledger_name(label, episode_token=episode_token)
 
     # A world the host cut short before the model decided is never graded (its report is the
-    # host's, not a verdict) — unless the model had already closed.
+    # host's, not a verdict) — unless the model had already closed. A cut by a failed write of
+    # a call record names that record's file (A12).
     end = _read_run_end_record(bound.under(LAYOUT.world(label).dir))
     if end is not None and end.truncated_by is not None and not end.closed_before_cut:
+        failed_write = {
+            TRUNCATED_BY_EXECUTED_QUERIES: str(LAYOUT.world(label).executed_queries),
+            TRUNCATED_BY_SERVED_LEDGER: world_ledger_name(label, episode_token=episode_token),
+        }.get(end.truncated_by)
         row["ungradable"] = True
         row["cut_short"] = end.truncated_by
         row["ungradable_reason"] = (
-            f"world {label!r}: its run ended {end.truncated_by!r} — the host's report is not "
-            "a verdict")
+            f"world {label!r}: its run ended {end.truncated_by!r}"
+            + (f" (the write of {failed_write} failed)" if failed_write else "")
+            + " — the host's report is not a verdict")
         return row, None
 
-    missing = _missing_required_input(
-        bound, label=label, ledger_name=ledger_name, declared=raw_declared,
-        run_inputs_required=False)
+    missing = _missing_required_input(bound, label=label, declared=raw_declared)
     if missing is not None:
         row["ungradable"] = True
         row["ungradable_reason"] = f"world {label!r} is missing its {missing}"
@@ -783,10 +891,18 @@ def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world i
 
     world_bound = bound.under(LAYOUT.world(label).dir)
     try:
+        # The usability read (A3): every file this run's context needs, plain, within limits
+        # and well-formed — the call records first, so a damaged table is refused before the
+        # lead reader (which takes a path) ever opens it.
+        call_records = read_call_records(bound, label, episode_token=episode_token)
+        forged = _read_oracle_store(bound, world)
+        summaries = _read_summaries(world_bound, label=label)
+        _read_run_records(world_bound, label=label)
         facts = read_world_facts(
             bound, label, episode_token=episode_token,
             leads=lambda: _repository_leads(world_bound, Path(episode_dir), label),
-            absent_ledger_ok=True)
+            absent_ledger_ok=True, call_records=call_records, forged_rows=forged,
+            summary_leads=summaries)
         _check_gather_summaries(world_bound, label=label, referenced_leads=facts.referenced_leads)
         verdict = _read_verdict(facts.report, world=label)
     except JudgeRefused as malformed:
@@ -801,6 +917,114 @@ def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world i
     if notes:
         row["integrity_notes"] = notes
     return row, facts
+
+
+def _read_oracle_store(bound: Bound, world: dict[str, Any]) -> list[dict[str, Any]]:
+    """A world's frozen forged rows (`oracle/<X>/forged.jsonl`), read whole and well-formed: a
+    planted world with no store is a failed read (A24), and every row must name one of that
+    world's own facts (A3). The control legitimately has no store (its facts are `[]`); one it
+    has is read under the same rule."""
+    label = world["world_id"]
+    name = LAYOUT.oracle_dir(label) / "forged.jsonl"
+    rows, torn, rec = bound.read_jsonl(name)
+    if rec.refusal is not None:
+        raise JudgeRefused(f"world {label!r}: {rec.refusal}")
+    if rec.absent:
+        if world.get("role") == BASE_ROLE:
+            return []
+        # The store is the directory: the oracle leaves `forged.jsonl` out when it froze no row
+        # (K5: its empty records are absent), so a store holding no forged file is an empty
+        # store. No readable directory is a planted world with no store (R6b): a failed read.
+        if bound.under(LAYOUT.oracle_dir(label)).entries().entries is None:
+            raise JudgeRefused(f"world {label!r}: its oracle store ({name}) is absent — a "
+                               "planted world's built layer is part of what it is judged on")
+        return []
+    if torn:
+        raise JudgeRefused(f"world {label!r}: {name} holds {torn} line(s) that do not parse "
+                           "as a row")
+    own = {f.get("fact_id") for f in world.get("facts") or () if isinstance(f, dict)}
+    for index, row in enumerate(rows):
+        if not isinstance(row.get("fact_id"), str):
+            raise JudgeRefused(f"world {label!r}: {name} row {index} has a malformed fact_id "
+                               f"({row.get('fact_id')!r}); expected a string")
+    foreign = [row.get("fact_id") for row in rows if row.get("fact_id") not in own]
+    if foreign:
+        raise JudgeRefused(f"world {label!r}: {name} holds forged rows for facts this world "
+                           f"does not declare ({foreign[:3]!r})")
+    _refuse_unwritable(rows, label=label, name=name)
+    return rows
+
+
+def _read_run_records(world: Bound, *, label: str) -> None:
+    """The run records a world's context reads beside its call records (A3): `alert.json`
+    (the alert the run answered, a JSON mapping) and `lessons_loaded.jsonl` (the lessons it
+    was shown, every line a row). Either may be absent — no alert archived (the rule key falls
+    back), no lesson loaded — but one that is present must read plain, within limits and
+    well-formed, or the world is malformed, naming the file."""
+    alert = world.read(WORLD_LEAVES.alert)
+    if alert.refusal is not None:
+        raise JudgeRefused(f"world {label!r}: {alert.refusal}")
+    if not alert.absent:
+        mapping = json_mapping_of(alert.text)
+        if mapping is None:
+            raise JudgeRefused(f"world {label!r}: {WORLD_LEAVES.alert} is not a JSON mapping")
+        _refuse_unwritable([mapping], label=label, name=str(WORLD_LEAVES.alert))
+    rows, torn, lessons = world.read_jsonl(WORLD_LEAVES.lessons_loaded)
+    if lessons.refusal is not None:
+        raise JudgeRefused(f"world {label!r}: {lessons.refusal}")
+    if torn:
+        raise JudgeRefused(f"world {label!r}: {WORLD_LEAVES.lessons_loaded} holds {torn} "
+                           "line(s) that do not parse as a row")
+    _refuse_unwritable(rows, label=label, name=str(WORLD_LEAVES.lessons_loaded))
+
+
+def _refuse_unwritable(rows: list[dict[str, Any]], *, label: str, name: str | PurePath) -> None:
+    """Refuse a record holding a value no record can carry (`_text.unwritable_value`: a lone
+    surrogate, a non-finite number), naming the file, the row and the cause (A3, well-formed):
+    such a row would fail the pass later, at a canonical key or a write, far from its file."""
+    for i, row in enumerate(rows):
+        bad = unwritable_value(row)
+        if bad is not None:
+            raise JudgeRefused(f"world {label!r}: {name} row {i} carries {bad}, which no "
+                               "record can carry")
+
+
+def _read_summaries(world: Bound, *, label: str) -> frozenset[str]:
+    """The lead ids whose `gather_summaries/<lead>.md` reads plain. A listing or a summary the
+    no-follow reader refuses (a linked folder, a link, a FIFO) is a failed read (A3); an absent
+    folder is `_archive_notes`' business."""
+    folder = world.under(WORLD_LEAVES.gather_summaries)
+    listing = folder.entries()
+    if listing.entries is None:
+        if listing.absent:
+            return frozenset()
+        raise JudgeRefused(f"world {label!r}: {WORLD_LEAVES.gather_summaries} could not be "
+                           f"listed: {listing.reason}")
+    kept: set[str] = set()
+    for name in listing.entries:
+        if not name.endswith(".md") or len(name) <= len(".md"):
+            continue
+        rec = folder.read(name, errors="replace")
+        if rec.text is None:
+            raise JudgeRefused(f"world {label!r}: the gather summary {name!r} in "
+                               f"{WORLD_LEAVES.gather_summaries} could not be read: "
+                               f"{rec.reason}")
+        kept.add(name[:-len(".md")])
+    return frozenset(kept)
+
+
+def control_world(doc: dict[str, Any]) -> dict[str, Any]:
+    """The manifest's control entry (`role` is the base role), its label checked usable as a
+    name like every world's; `JudgeRefused` when the manifest declares none or several."""
+    raw = doc.get("worlds")
+    controls = [w for w in raw if isinstance(w, dict) and w.get("role") == BASE_ROLE] \
+        if isinstance(raw, list) else []
+    if len(controls) != 1:
+        raise JudgeRefused(f"the manifest declares {len(controls)} control worlds, not one")
+    label = controls[0].get("world_id")
+    if not isinstance(label, str) or not world_label_names_directory(episode_id_of(doc), label):
+        raise JudgeRefused(f"the control's label {label!r} cannot name a directory")
+    return controls[0]
 
 
 def non_control_worlds(doc: dict[str, Any]) -> list[dict[str, Any]]:
@@ -831,7 +1055,8 @@ def is_gradable_row(row: Any) -> bool:
 
 
 __all__ = [
-    "InvestigationFacts", "WorldFacts",
+    "InvestigationFacts", "WorldFacts", "control_world", "read_call_records",
+    "read_query_table", "read_served_ledger",
     "discriminator_of", "episode_id_of",
     "is_gradable_row", "json_mapping", "json_mapping_of", "lead_chain", "leads_by_id", "mapping_key",
     "names_one_file", "non_control_worlds", "raw_manifest", "read_manifest",

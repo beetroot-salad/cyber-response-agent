@@ -247,11 +247,6 @@ def _old_pass_draws(ep: Path, label: str = "b") -> dict[str, Any]:
                         "systems": [J.HOLDING_SYSTEM]}]}
 
 
-def _bare_reenqueue(ep: Path, grade: dict[str, Any]) -> Any:
-    """The bare re-enqueue: the episode dir and a grade, no draws handed over, a fresh state
-    handle (a later process)."""
-    enqueue = S.mod(ENQUEUE)
-    return enqueue.enqueue_report(ep, grade, state=env_state())
 
 
 # --- the launcher ----------------------------------------------------------------------------
@@ -368,9 +363,8 @@ def test_o11_episode_without_a_record_is_refused_by_name(tmp_path):
     good, _raw = _episode(tmp_path, "good")
     _grade(good, base)
     assert set(_keys(_rows())) == {"SIG-good"}, "positive control: the recorded episode graded"
-    grade_doc = J.judge_record(good)
     S.episode_record_file(good).unlink()
-    box = _bounded(lambda: _bare_reenqueue(good, grade_doc), what="the bare re-enqueue")
+    box = _bounded(lambda: _grade(good, base), what="the bare re-enqueue")
     assert "raised" in box, "the bare re-enqueue queued an episode whose record is gone"
     assert isinstance(box["raised"], J.refusals()), f"not a refusal: {box['raised']!r}"
     _assert_names_record(str(box["raised"]), "the bare re-enqueue's refusal")
@@ -556,9 +550,9 @@ def test_p067_bare_reenqueue_of_an_episode_without_a_tenant(tmp_path):
     ep, _raw = _episode(tmp_path, "p067", signature="SIG-p067")
     _grade(ep, base)
     before = _rows()
-    _bare_reenqueue(ep, J.judge_record(ep))
+    _grade(ep, base)
     rows = _rows()
-    assert len(rows) > len(before), "the bare re-enqueue queued nothing to observe"
+    assert rows == before, "a bare rerun preserves already queued rows"
     assert set(_keys(rows)) == {"SIG-p067"}, (
         f"rows carry the keys {set(_keys(rows))}, not the episode's recorded signature")
 
@@ -665,7 +659,7 @@ def test_p105_one_episode_graded_twice_across_a_mapping_edit(tmp_path):
     assert set(_keys(first)) == {"SIG-p105"}
     S.remap(planted, {"signature": "user.login", "event_time": "detected_at",
                       "summary": "rule.description"})
-    _bare_reenqueue(ep, J.judge_record(ep))
+    _grade(ep, planted.runs)
     after = _rows()
     assert after[:len(first)] == first, "the hand re-enqueue rewrote an existing row"
     assert set(_keys(after)) == {"SIG-p105"}, "a row after the mapping edit carries another key"
@@ -839,9 +833,9 @@ def test_p159_episode_launched_before_the_change_is_judged_aft(tmp_path):
     ep, _raw = _episode(tmp_path, "p159", copy=False)
     _assert_names_record(_judge_refusal(ep, base), "the judge's refusal")
 
-    grade_doc = _old_pass_draws(ep)
+    _old_pass_draws(ep)
     rows_before = len(_rows())
-    box = _bounded(lambda: _bare_reenqueue(ep, grade_doc), what="the bare re-enqueue")
+    box = _bounded(lambda: _grade(ep, base), what="the bare re-enqueue")
     assert "raised" in box, "the bare re-enqueue queued an episode with no copied record"
     assert isinstance(box["raised"], J.refusals()), f"not a refusal: {box['raised']!r}"
     _assert_names_record(str(box["raised"]), "the bare re-enqueue's refusal")

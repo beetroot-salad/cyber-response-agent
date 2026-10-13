@@ -1095,11 +1095,12 @@ demands:
   source: 20-demands
 - id: d12m_verdict_word_from_the_model
   kind: coherence
-  form: test
+  form: clause
   binds:
   - interacts(grade_episode->family_record)
   - interacts(enqueue->family_record)
-  discharged_by: test_1224_family_verdict_word_comes_from_the_judge_models_output
+  status: retired
+  outcome: {nl: "RETIRED by #1234 — #1234 A17 retired the family record's `verdict_word` and the lane routing that read it: the family call files family-scope world findings only and never gates or spoils a world's defender rows (I2, P-c), pinned by `test_1224_the_family_calls_reply_moves_no_defender_row`; `test_1224_family_verdict_word_comes_from_the_judge_models_output`, which discharged this demand, was rewritten into it."}
   seed_docstring: The family record's verdict_word, read by enqueue's lane routing, is the one taken from the judge model's output, not one computed
     from mechanical rows.
   forks:
@@ -6202,7 +6203,7 @@ demands:
   provisional_lifted: §7 (70-resolutions.md)
 - id: b_p247
   kind: domain-outcome
-  form: test
+  form: clause
   binds:
   - episode_outcome.domain.distinguished[unusable]
   - grade_episode
@@ -6216,7 +6217,8 @@ demands:
   binds_derived: true
   assembly_note: binds derived at assembly from the clause and the premise's obligation tags (none); the premise carried no `# binds:` line
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
-  discharged_by: test_1224_judge_family_word_outside_what_the_queue_accepts
+  status: retired
+  outcome: {nl: "RETIRED by #1234 — #1234 A17/A18 reversed this demand's resolved reading (the family word is kept, emitted from `JUDGE_OUTCOME_ENUM`): the family word and the enum are retired, so every `verdict_word` on a family reply, a former member or a misspelling, is refused by name, pinned by `test_1224_judge_family_reply_carrying_a_family_word_is_refused_by_name`; `test_1224_judge_family_word_outside_what_the_queue_accepts`, which discharged this demand, was rewritten into it."}
   seed_docstring: 'removing the code half must not silently stop lesson authoring or drop a pass without a recorded reason. Resolved reading (M19):
     resolved_by: human | round: R4 | answer: A | reading: the bucket set is O11''s five plus `observability`; `none` is admitted on the defender
     arm of `validate_reply` as an explicit bucket, recorded on the family record and never enqueued (the queue keeps refusing it); the family
@@ -9525,7 +9527,7 @@ demands:
   form: test
   binds:
   - interacts(_gate_family->learning_queue)
-  discharged_by: test_1224_curator_gate_authors_a_lesson_for_the_judge_models_family_word
+  discharged_by: test_1224_curator_gate_authors_a_row_built_from_the_judge_models_output  # renamed by #1234's migration: the family word is retired (A17), so the row the pass builds from the model's output is what `_gate_family` authors; lesson authoring still does not silently stop
   seed_docstring: A model-decided family word from JUDGE_OUTCOME_ENUM, carried through enqueue onto a queue row, is recognised by lessons/run.py::_gate_family
     (a `survived` row is authored, `caught`/`undecidable` consumed) and by enqueue's row validation, so removing the code half does not silently
     stop lesson authoring (M19=A, RF-6).

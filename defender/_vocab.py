@@ -38,22 +38,6 @@ CEILING_DISPOSITION = "inconclusive"
 UNKNOWN_DISPOSITION = "?"
 
 
-#: The family judge's outcome vocabulary, shared by the finding row's `judge_outcome`, the
-#: family record's `verdict_word`, and the findings channel's `_gate_family` partition.
-JUDGE_OUTCOME_ENUM = frozenset(
-    {"caught", "corpus-contradiction", "discard", "survived", "undecidable"})
-
-
-def normalized_judge_outcome(value: object) -> str | None:
-    """A `JUDGE_OUTCOME_ENUM` member, case-insensitive and whitespace-trimmed, or `None`.
-    No fuzzy matching onto near-misses.
-    """
-    if not isinstance(value, str):
-        return None
-    outcome = value.strip().casefold()
-    return outcome if outcome in JUDGE_OUTCOME_ENUM else None
-
-
 def normalized_disposition(value: object) -> str | None:
     """A `DISPOSITION_ENUM` member, or `None` — the single read-side meaning of a disposition
     from report frontmatter, an invlang `conclude` block, or a ticket resolution line.

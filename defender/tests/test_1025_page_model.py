@@ -90,10 +90,12 @@ def test_1025_a_scalar_worlds_field_in_the_manifest_is_refused_by_the_loader_gat
 
 
 def test_1025_a_scalar_findings_field_in_a_draw_document_is_that_draws_own_absence(tmp_path):
-    """`worlds/<label>/judge/1.yaml` with `findings: 5` contributes no rows; the other draws'
-    rows render as usual and the page is written."""
+    """`worlds/<label>/judge/1.yaml` with `investigator_findings: 5` (a recorded draw) contributes
+    no rows; the other draws' rows render as usual and the page is written."""
     ep = E.sample_episode(tmp_path)
-    E.draw_document(ep.dir, E.GRADED_WORLD, 1, {"episode_outcome": "gradable", "findings": 5})
+    E.draw_document(ep.dir, E.GRADED_WORLD, 1, {"bucket": "lead-set", "systems": [E.SYSTEM],
+                                                "investigator_findings": 5})
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1)))
     page = render(ep)
     rows = [i for i in page.ids if i.startswith(f"f-{E.GRADED_WORLD}-")]
     assert not [r for r in rows if r.startswith(f"f-{E.GRADED_WORLD}-1-")], rows
@@ -114,6 +116,8 @@ def test_1025_non_numeric_usage_and_odd_message_shapes_in_a_wire_log_leave_that_
             row["usage"] = {"input_tokens": "abc", "output_tokens": None}
             row["message"] = {"parts": 5}
     E.write_trace(ep.dir, agent_id, rows)
+    # #1234 A6: a transcript shows for a draw the record names
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1)))
     page = render(ep)
     block = page.text_of(f"tx-{E.trace_stem(agent_id)}")
     assert "unpriced" in block, block
@@ -168,53 +172,61 @@ def test_1025_a_finding_with_no_subject_key_is_the_defenders_as_the_enqueue_read
 
 
 def test_1025_the_card_footer_counts_and_links_the_same_defender_rows(tmp_path):
-    """A graded world whose FIRST draw finding is addressed to the world author still has its
+    """A graded world whose FIRST finding row is addressed to the world author still has its
     card footer "4 findings · enqueued" link the group its defender rows sit in — the count
-    and the anchor are one list of rows, never the first row of any subject."""
+    and the anchor are one list of rows, never the first row of any subject. (#1234 files a
+    draw's investigator findings before its world findings, A13, so the world-author row
+    comes first by sitting alone in the earlier draw.)"""
     ep = E.sample_episode(tmp_path)
     findings = E._world_findings_rows()
-    findings.insert(0, findings.pop())  # the world-author finding now comes first
-    E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings))
-    doc = E.sample_grade()
-    doc["world_findings"] = [r for r in doc["world_findings"]
-                             if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
-    doc["world_findings"].append(E.world_finding_queue_row(
-        f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/0", "the world-author claim"))
+    E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings[4:]))
+    E.draw_document(ep.dir, E.GRADED_WORLD, 1, E.draw_doc(findings=findings[:4]))
+    doc = E.drop_lanes(E.sample_grade(), E.GRADED_WORLD)
+    E.record_draws(doc, E.GRADED_WORLD, (0, 1))
     E.set_lane(doc, E.GRADED_WORLD, 0, 0, "world")
-    for i in range(1, 5):
-        E.set_lane(doc, E.GRADED_WORLD, 0, i, "defender")
+    for i in range(4):
+        E.set_lane(doc, E.GRADED_WORLD, 1, i, "defender")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     href, text = _card_link(_card(page, E.GRADED_WORLD))
     assert text == "4 findings · enqueued", text
-    defender_group = page.group_of(f"f-{E.GRADED_WORLD}-0-1").id
+    defender_group = page.group_of(f"f-{E.GRADED_WORLD}-1-0").id
     assert href == f"#{defender_group}", (href, defender_group)
     assert page.group_of(f"f-{E.GRADED_WORLD}-0-0").id != defender_group
 
 
-def test_1025_a_discarded_episodes_card_says_never_eligible_not_enqueued(tmp_path):
-    """With `verdict_word: discard` the graded world's defender rows are never eligible (O7),
-    and its card's footer says so — "4 findings · never eligible" — rather than "enqueued"."""
+def test_1025_a_world_not_measured_card_does_not_say_enqueued(tmp_path):
+    """#1234 retired the `discard` family word and its `never_eligible` lane; the lane that now
+    keeps a judged world's defender rows off the queue is the world gate's (`not_measured`,
+    A7). The card's footer must not call rows the ledger kept off the queue "enqueued", and
+    it links the group those rows sit in."""
     ep = E.sample_episode(tmp_path)
-    E.write_judge(ep.dir, E.block_defender_lane(E.sample_grade(), "discard"))
+    doc = E.sample_grade()
+    doc["worlds"][1].update(measured=False, not_measured_reason="a draw files unreachable")
+    for i in range(4):
+        E.set_lane(doc, E.GRADED_WORLD, 0, i, "not_measured")
+    doc["enqueued_rows"] = 4
+    E.write_judge(ep.dir, doc)
     page = render(ep)
     href, text = _card_link(_card(page, E.GRADED_WORLD))
-    assert text == "4 findings · never eligible", text
-    assert "never eligible" in _heading_of(page, f"f-{E.GRADED_WORLD}-0-0")
+    assert "not measured" in _heading_of(page, f"f-{E.GRADED_WORLD}-0-0")
     assert href == f"#{page.group_of(f'f-{E.GRADED_WORLD}-0-0').id}"
+    assert text.startswith("4 findings · "), text
+    assert "enqueued" not in text, text
 
 
-def test_1025_the_dropped_count_on_the_tile_and_in_the_accounting_is_the_draw_documents_own(tmp_path):
-    """A draw document with `dropped_findings: 2` is counted on tile 3's split ("2 dropped")
-    and in the queue accounting ("dropped 2"), the same figure the findings section shows per
-    draw — never a literal zero."""
+def test_1025_the_dropped_count_on_the_tile_and_in_the_accounting_is_the_ledgers_own(tmp_path):
+    """Two findings the ledger files in drop lanes (#1234 A13: a drop is the finding's own
+    ledger entry; the draw's `dropped_findings` count is retired) are counted on tile 3's split
+    ("2 dropped") and in the queue accounting ("dropped 2") — never a literal zero."""
     ep = E.sample_episode(tmp_path)
-    graded = E._world_findings_rows()
-    E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=graded, dropped=2))
+    doc = E.sample_grade()
+    E.set_lane(doc, E.GRADED_WORLD, 0, 0, "dropped_unresolved")
+    E.set_lane(doc, E.GRADED_WORLD, 0, 1, "dropped_other_run")
+    E.write_judge(ep.dir, doc)
     page = render(ep)
     assert "2 dropped" in _tile(page, 2), _tile(page, 2)
     assert "dropped 2" in page.one(cls="vd-acct").text()
-    assert "2 dropped" in page.text_of("sec-findings")
 
 
 # ---------------------------------------------------------------------------------------
@@ -355,20 +367,6 @@ def test_1025_runs_pruned_and_the_grade_unreadable_keeps_every_archived_world(tm
     assert sorted(page.ids_with("world-")) == sorted(f"world-{w}" for w in E.WORLDS)
     assert page.elements(cls="fr-off-roster") == [], page.text_of("sec-findings")
     assert "grade record unreadable" in page.text
-
-
-def test_1025_the_verdict_word_note_asks_the_outcome_normalizer_not_a_local_list(tmp_path):
-    """`verdict_word: " Survived"` is the family word `survived` as `normalized_judge_outcome`
-    reads it (case-insensitive, trimmed), so tile 1 carries no "not a family word" note; a word
-    the normalizer refuses carries it."""
-    ep = E.sample_episode(tmp_path)
-    grade = E.sample_grade()
-    grade["verdict_word"] = " Survived"
-    E.write_judge(ep.dir, grade, check=False)
-    assert "not a family word" not in _tile(render(ep), 0)
-    grade["verdict_word"] = "survived-ish"
-    E.write_judge(ep.dir, grade, check=False)
-    assert "not a family word" in _tile(render(ep), 0)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permission bits")

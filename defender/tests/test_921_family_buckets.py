@@ -1,11 +1,11 @@
 """#921 — what may move a world's row, and who owns its bucket.
 
 #1224 retired the mechanical bucket table and the computed family word: the judge MODEL decides
-each world's bucket (O11, `run._draw_document` owns it) and the family-scope call gives the
-family's `verdict_word`. What stays is what the record may and may not be moved by: no world's
-row reads another world's archive, nothing reads `served/base.jsonl` or calls the comparator,
-the control gets no row, the bucket is the draws' own (never the findings', never a code
-path's), and the majority is counted over completed draws.
+each world's bucket (O11, `run.draw_document` owns it); #1234 retired the family-scope word
+too (A17) and combines a world's draws by unanimity (A7). What stays is what the record may and
+may not be moved by: no world's per-world facts read another world's archive, nothing reads
+`served/base.jsonl` or calls the comparator, the control gets no row, the bucket is the draws'
+own (never the findings', never a code path's), and the combination is over completed draws.
 """
 from __future__ import annotations
 
@@ -55,26 +55,30 @@ def test_921_control_world_is_graded_per_world_only_and_gets_no_bucket(tmp_path)
 
 def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path):
     """Every per-world fact reads X's own record plus the manifest, so grading the worlds in
-    any order — including a non-control world before the control's own archive write lands —
+    any order — including a world before a sibling's own archive write lands —
     yields the same rows.
 
-    Driven by grading with the control's archived directory absent and then present: if any fact
-    reached across worlds, the two records would differ on the worlds graded both times.
+    Driven by grading with sibling c's archived directory absent and then present: if any fact
+    reached across worlds, world b's row would differ between the two. (#1234 A3: the drive
+    used to stash the CONTROL's archive, but a control that is not usable now stamps the whole
+    family not graded, so the absent archive is a planted sibling's — excluded from b's
+    reference set, which changes b's prompt and none of b's own facts.)
     """
     import shutil
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
                                                "c": [J.ledger_row(source="passthrough",
                                                                   world_label="c")]})
-    control = ep / "worlds" / "a"
-    stash = tmp_path / "control-stash"
-    shutil.move(str(control), str(stash))
+    sibling = ep / "worlds" / "c"
+    stash = tmp_path / "sibling-stash"
+    shutil.move(str(sibling), str(stash))
     early = J.rows(_grade(ep))
-    shutil.move(str(stash), str(control))
+    shutil.move(str(stash), str(sibling))
     late = J.rows(_grade(ep))
 
-    assert set(early) == {"b", "c"}
-    for label in ("b", "c"):
+    assert early["c"].get("ungradable") is True, "the stash did not take world c out"
+    assert late["c"].get("ungradable") is not True
+    for label in ("b",):
         for fact in J.PER_WORLD_FACTS:
             assert early[label][fact] == late[label][fact], (
                 f"{label}.{fact} moved with the CONTROL world's archive write, so some fact "
@@ -92,8 +96,8 @@ def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(
     fail on the first arm and raise on the second.
 
     Positive control: with the base gone the pass still produces a COMPLETE grade from X's own
-    record — every per-world fact, the model's bucket and a family word — so the negative
-    cannot pass on a pass that does nothing.
+    record — every per-world fact, the model's bucket and a completed family call (#1234: the
+    family word is retired, A17) — so the negative cannot pass on a pass that does nothing.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
@@ -111,14 +115,14 @@ def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(
         assert all(fact in rows["b"] for fact in J.PER_WORLD_FACTS)
         assert rows["b"]["verdict"] == "benign"
         assert rows["b"]["bucket"] == J.reply_doc()["bucket"]
-        assert J.word_of(grade) in ("caught", "survived", "undecidable")
+        assert grade.family["completed_draws"] == 1, "the family call did not complete"
     assert J.rows(without)["b"] == J.rows(with_torn)["b"], (
         "the family capture's bytes moved a per-world fact; nothing here may read them")
 
 
 def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
     """A world's bucket is the judge model's own answer for the world — the reply's top-level
-    `bucket` (`run._draw_document` @owns it) — never one its findings claim. Each finding row
+    `bucket` (`run.draw_document` @owns it) — never one its findings claim. Each finding row
     carries its OWN bucket as `type`, because that is what the lesson author acts on.
 
     #1224 inverted the owner (O11): no code path computes a bucket, so where the draws DISAGREE
@@ -130,7 +134,7 @@ def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     loud = J.as_reply_text(J.reply_doc(bucket="decision-discipline", findings=[
-        J.finding_doc(bucket="observability",
+        J.finding_doc(bucket="lead-set",
                       claim="this world is plainly lead-set and nothing else"),
         J.finding_doc(bucket="lead-quality", anchor="l-002", topic="scope"),
     ]))
@@ -140,7 +144,7 @@ def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
     assert J.world_rows(record)["b"]["bucket"] == "decision-discipline", (
         "the findings' buckets moved the world's bucket the reply gave")
     types = {row["type"] for row in J.enqueued_rows(record)}
-    assert types == {"observability", "lead-quality"}, (
+    assert types == {"lead-set", "lead-quality"}, (
         "a finding row did not carry its OWN bucket as `type`")
 
     # Two draws that disagree: the row names no bucket either draw gave, and keeps both.
@@ -157,20 +161,22 @@ def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
 
 
 def test_921_the_majority_denominator_is_completed_draws(tmp_path):
-    """J6, settled with the human: the majority is over COMPLETED draws, both the completed and
-    the configured counts are recorded on the family record, and a draw that fails at any stage
-    writes a DRAW RECORD carrying its failure reason.
+    """J6, settled with the human: a world's draws are combined over COMPLETED draws, both the
+    completed and the configured counts are recorded on the family record, and a draw that fails
+    at any stage writes a DRAW RECORD carrying its failure reason.
 
     The denominator is not a detail: with `draws=4`, two failures and two completed draws that
-    both answer `discard`, the completed denominator suppresses the whole episode's findings and
-    the configured denominator does not.
+    both file an `incoherent` world finding, the completed draws are unanimous and the world is
+    not measured (#1234 A7; the episode word `discard` and its majority are retired, A17) —
+    counting the two failures as draws would make them disagree instead.
 
     P9 (executed) is why the record cannot branch on exception type: a wall-clock timeout and a
     raw transport failure arrive as the same `RunUnprocessable`. And a world with ZERO completed
     draws carries no bucket at all (#1224, O11): nothing but a draw supplies one.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    discard = J.as_reply_text(J.reply_doc(episode_outcome="discard"))
+    discard = J.as_reply_text(J.reply_doc(findings=[
+        J.finding_doc(), J.finding_doc(subject="world", bucket="incoherent")]))
     # Two answers, then the seam degrades: `raise_after=2` is P9's one class, both ways.
     judge = J.FakeJudge(replies=[discard, discard], default=discard,
                         fault=J.Fault(raise_after=2))
@@ -179,9 +185,12 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     record = J.judge_record(ep)
     assert record["draws"] == {"configured": 4, "completed": 2}, (
         "the family record does not carry BOTH counts; the denominator is then unstated")
-    assert record["episode_outcome"] == "discard", (
-        "the majority was counted over configured draws, so two of two agreeing draws did not "
-        "reach the bar")
+    row = J.world_rows(record)["b"]
+    assert row["draws_disagree"] is False, (
+        "the failed draws were counted as draws, so two of two agreeing draws disagreed")
+    assert row["measured"] is False, (
+        "two of two completed draws filing `incoherent` did not take the world out of "
+        "measurement")
 
     failed = [J.draw_doc(ep, "b", n) for n in range(4)
               if (ep / "worlds" / "b" / "judge" / f"{n}.yaml").exists()]

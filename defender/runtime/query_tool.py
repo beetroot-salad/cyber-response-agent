@@ -35,6 +35,8 @@ from defender.scripts.gather_tools.record_query import (
     RejectionBudgetTrip,
     RepeatTrip,
     append_query_row,
+    bind_call_ids,  # noqa: F401 — driver binds the call identity through the query-tool seam
+    next_call_id,
     dead_end_reason,
     names_something_readable,
     payload_digest,
@@ -62,8 +64,10 @@ from defender._query_rules import (
 
 from . import circuit_breaker
 from .run_state import run_state_of
+from .run_end import CallRecordWriteFailed
 from .verbs import (
     CALL_DELIVERY,
+    CALL_ID,
     DENIED,
     GRANTED,
     CallDelivery,
@@ -90,6 +94,7 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ToolRetryError,
     # A served verb that gave up on its world (#1224): the sibling ends, nothing is filed.
     ServingAbort,
+    CallRecordWriteFailed,
 )
 
 DEFAULT_FAULT_EXIT = 2
@@ -511,6 +516,13 @@ class QueryCapture(AbstractCapability[Any]):
     async def wrap_tool_execute(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
+        # Validation refuses a model's too-deep call before it gets here. A call that skipped
+        # validation (lead zero issues host-built calls straight to this hook) is held to the
+        # same rule, loudly and first: host-built params are shallow by construction, and past
+        # here the grant check, the breaker and every row assume params a row can carry.
+        if call_args_too_deep(args):
+            raise ParamsTooDeep(field="the call's arguments")
+        token = CALL_ID.set(next_call_id(run_state_of(ctx.deps)))
         try:
             return await self._execute(ctx, args, handler)
         except GatherDeadEnd as e:
@@ -518,16 +530,12 @@ class QueryCapture(AbstractCapability[Any]):
             if failed is e:
                 raise
             raise failed from e
+        finally:
+            CALL_ID.reset(token)
 
     async def _execute(self, ctx, args, handler):  # noqa: ANN001
         """The call itself. Raises `GatherDeadEnd` for a guard's stop; `wrap_tool_execute` owns
         the door."""
-        # Validation refuses a model's too-deep call before it gets here. A call that skipped
-        # validation (lead zero issues host-built calls straight to this hook) is held to the
-        # same rule, loudly and first: host-built params are shallow by construction, and past
-        # here the grant check, the breaker and every row assume params a row can carry.
-        if call_args_too_deep(args):
-            raise ParamsTooDeep(field="the call's arguments")
         deps = ctx.deps
         system = as_str(args.get("system"))
         verb = as_str(args.get("verb"))
@@ -629,6 +637,7 @@ class QueryCapture(AbstractCapability[Any]):
                     else f"exit={exit_code}; {_model_visible(deps, detail).strip()[:160]}"
                 ),
                 system_key=system_key,
+                call_id=CALL_ID.get(),
             )
         finally:
             circuit_breaker.record_outcome(

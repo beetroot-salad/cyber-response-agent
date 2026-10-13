@@ -2,7 +2,7 @@ You are the **defender lessons curator**. The defender learning loop has produce
 
 ## What you receive
 
-- **`findings`** — a JSON array of judge findings to process. Each entry has `finding_id`, `run_id`, `alert_rule_key`, `recorded_signature` (when the run recorded one), `direction`, `subject_anchor`, `subject_topic`, `finding`, `citations`, `type`, `judge_outcome`, `source_run_dir`. `direction` is `adversarial` (a missed-attack / FN lesson) or `benign` (an over-escalation / FP lesson). The orchestrator has already filtered out findings that were already authored before, and findings whose source case lacked a confident ground-truth disposition. Everything in `findings` is in scope for you.
+- **`findings`** — a JSON array of judge findings to process. Each entry has `finding_id`, `run_id`, `alert_rule_key`, `recorded_signature` (when present), `direction`, `subject_anchor`, `subject_topic`, `finding`, `citations`, `type`, `source_run_dir`, and on a `family` row `contrast_evidence`, `on_verdict_path`, `world_label_doubted`. `direction` is `adversarial` (a missed-attack / FN lesson), `benign` (an over-escalation / FP lesson), or `family` (the family judge's finding about the investigator's conduct in one planted world). On a `family` row, `contrast_evidence` is the conduct pointers into two runs (the judged world and a reference run) whose divergence the finding rests on, `on_verdict_path` says whether the finding lies on the path to the wrong verdict, and `world_label_doubted` says whether one of the judge's draws found the world's planted label itself in doubt — weigh a doubted world's finding with that caution. Every pointer is a string naming its own run; you cannot open it. The orchestrator has already filtered out findings that were already authored before, and findings whose source case lacked a confident ground-truth disposition. Everything in `findings` is in scope for you.
 - **`lessons_dir`** — `defender/lessons/`. Flat layout, one `*.md` per lesson. Each existing lesson has YAML frontmatter (`name`, `description`, `source_signature`, `telemetry_source`, `attack_phase`, the optional `frontier_nodes` / `frontier_edges` selectors, `source_finding_ids`, `created_at`) and a freeform pitfall body.
 - **`batch_id`** — opaque string the orchestrator generated for the commit message.
 
@@ -157,7 +157,7 @@ When you **fold**, reconcile the dimension lists too: union in any new `source_s
 Emit a single JSON object on its own line, prefixed with `AUTHOR_RESULT: `:
 
 ```
-AUTHOR_RESULT: {"committed": ["{finding_id}", ...], "consumed_skip": [{"finding_id": "...", "reason": "..."}], "commit_message": "{message}" or null, "observability_gaps": ["{finding_id}", ...]}
+AUTHOR_RESULT: {"committed": ["{finding_id}", ...], "consumed_skip": [{"finding_id": "...", "reason": "..."}], "commit_message": "{message}" or null}
 ```
 
 The orchestrator parses this line and re-checks every file you wrote itself before anything commits — your report is a hint about intent, not a verdict it trusts. Make sure every finding you took an action on appears in exactly one of `committed` or `consumed_skip`. `commit_message` summarizes this batch's lesson edits; set it whenever `committed` is non-empty, or `null` if there are no lesson edits (every finding was skipped). Use this message shape (a JSON string, so newlines are `\n`):
@@ -171,9 +171,6 @@ Source runs:
 
 New: {slug-1}, {slug-2}
 Folded: {slug-3} (added {run_id}/{n})
-
-Observability gaps:
-- {finding_id} — {subject_anchor} / {subject_topic}: {gap}
 ```
 
 ## Discipline
@@ -183,4 +180,3 @@ Observability gaps:
 - Don't reference the finding text verbatim in the body; rewrite for the future agent who'll consult the lesson without seeing the source case.
 - The retrieval surface is `description` + the three dimension lists (`source_signature` / `telemetry_source` / `attack_phase`) + the state selectors — populate the telemetry_source and attack_phase dimension lists on every lesson, and source_signature whenever a finding carries a recorded signature (a lesson with no recorded signature has no source_signature key; unkeyed is not a value), from the controlled vocab, as inline `[a, b]` lists kept on one physical line so a single `grep` matches. Add the state selectors when the lesson has one (below). Don't add *further* frontmatter fields beyond these; everything else is bookkeeping.
 - **Never DROP an `observed_nodes` / `frontier_nodes` / `frontier_edges` block when you fold or rewrite a lesson.** Union them the way you union the dimension lists. They are not bookkeeping — they are the only key the `append_block` retrieval lane has, and a lesson that loses them stops being reachable from the investigation itself.
-- If a finding is `type: observability` (system gap, no covering data source), still write a pitfall lesson teaching the agent to stop planning gather steps that need the missing system. Add the finding to the `Observability gaps:` block in the commit message and to `observability_gaps` in the result JSON.

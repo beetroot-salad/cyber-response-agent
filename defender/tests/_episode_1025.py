@@ -102,6 +102,11 @@ WORLD_ENQUEUED_TO = ("/workspace/.claude/worktrees/episode-authkeys/defender/lea
 OUTCOME_REASON = "pre-flight calibrated every world against the live estate"
 #: The system every sibling's served call and judge answer names — one of `T.SERVED_SYSTEMS`.
 SYSTEM = "elastic"
+#: #1234 A1: the default `contrast_evidence` of a sample defender finding — each sibling's report
+#: and the control's, so whichever sibling's draw files it, it rests on a two-run conduct pair
+#: (a pointer at the other sibling is merely one more resolving conduct pointer).
+SAMPLE_CONTRAST = (f"worlds/{GRADED_WORLD}/report.md", f"worlds/{PASSTHROUGH_WORLD}/report.md",
+                   f"worlds/{CONTROL}/report.md")
 
 
 @dataclass(frozen=True)
@@ -171,16 +176,21 @@ def plant_raw(path: Path, data: bytes | str) -> Path:
     return path
 
 
-def finding(*, subject: str = "defender", bucket: str = "lead-set",
+def finding(*, subject: str = "defender", bucket: str = "lead-set",  # noqa: PLR0913 — one keyword per finding field a scenario may state
             claim: str = "the holding system was never re-queried",
             root_cause: str = "the lead was set and never revisited", anchor: str = "l-001",
             topic: str = "holding-system coverage", evidence: list[str] | None = None,
             **over: Any) -> dict[str, Any]:
-    """One finding row in a per-draw document — `_judge_921.finding_doc`'s shape plus the
-    two `None` fields every ARCHIVED row carries (`world`, `finding_id`; c23/g11)."""
+    """One filed finding of a per-draw document, tagged with its `subject` for `draw_doc`
+    (`_judge_921.finding_doc`'s #1234 shape): a `defender` finding is an investigator finding
+    whose `contrast_evidence` defaults to `SAMPLE_CONTRAST`; any other subject is a world
+    finding whose `evidence` defaults to `_judge_921.DEFAULT_WORLD_EVIDENCE` and whose
+    `systems` default to `[SYSTEM]`. `over` adds or replaces any key."""
+    if evidence is None and subject == "defender":
+        evidence = list(SAMPLE_CONTRAST)
     row = J.finding_doc(subject=subject, bucket=bucket, claim=claim, root_cause=root_cause,
-                        anchor=anchor, topic=topic, evidence=evidence)
-    row.update({"unresolved_evidence": [], "world": None, "finding_id": None})
+                        anchor=anchor, topic=topic, evidence=evidence,
+                        systems=None if subject == "defender" else [SYSTEM])
     row.update(over)
     return row
 
@@ -203,15 +213,21 @@ def draw_document(episode_dir: Path, label: str, draw: int | str, doc: dict[str,
     return path
 
 
-def draw_doc(*, findings: list[dict[str, Any]] | None = None, episode_outcome: str = "gradable",
-             dropped: int = 0, **over: Any) -> dict[str, Any]:
-    """A per-draw document: `episode_outcome`, `noise_floor_note`, the three pass tables, the
-    findings and `dropped_findings` (a COUNT, amendment 2)."""
-    doc = J.reply_doc(episode_outcome=episode_outcome,
-                      findings=findings if findings is not None else [finding()])
-    doc["dropped_findings"] = dropped
-    doc.update(over)
-    return doc
+def draw_doc(*, findings: list[dict[str, Any]] | None = None, **over: Any) -> dict[str, Any]:
+    """A per-draw document in `run.draw_document`'s #1234 shape: the world's `bucket` and
+    `systems`, `noise_floor_note`, the three pass tables and the three filed lists, `findings`
+    (default one `finding()`) split into `investigator_findings` / `world_findings` by each
+    one's `subject` (`_judge_921.reply_doc`). `over` passes through to `reply_doc` (`bucket=`,
+    `systems=`, `gaps=`, …)."""
+    return J.reply_doc(findings=findings if findings is not None else [finding()], **over)
+
+
+def family_draw_doc(*, findings: list[dict[str, Any]] | None = None,
+                    **over: Any) -> dict[str, Any]:
+    """A family-call draw document (`run.draw_document(scope="family")`): `noise_floor_note`,
+    the three pass tables and `world_findings` only (default `family_findings()`)."""
+    return J.family_reply(findings=findings if findings is not None else family_findings(),
+                          **over)
 
 
 def trace_rows(agent_id: str, *, prompt: str = "the framed prompt", reply: str = "the reply",
@@ -515,45 +531,97 @@ def served_row(label: str | None, source: str, *, system: str = SYSTEM, verb: st
 # --------------------------------------------------------------------------------------
 
 
-def _world_findings_rows() -> list[dict[str, Any]]:
-    """Five per-draw findings for a sibling: four addressed to the defender, one to the world
-    author (the sample's split)."""
+#: The investigator buckets of each sibling's four defender findings. The passthrough world was
+#: never shown its facts (its ledger is all `passthrough`), so the discipline buckets are
+#: unavailable to it (A5) and a real pass would refuse them; the graded world's oracle answered
+#: a call, so it may carry them.
+SIBLING_BUCKETS = {
+    PASSTHROUGH_WORLD: ("lead-set", "lead-quality", "lead-set", "lead-quality"),
+    GRADED_WORLD: ("lead-set", "lead-quality", "decision-discipline", "analyze-discipline"),
+}
+#: Each sibling's world-level bucket (the reply's own, `run._world_verdict`).
+SIBLING_BUCKET = {PASSTHROUGH_WORLD: "lead-set", GRADED_WORLD: "decision-discipline"}
+#: The bucket of each sibling's one world finding: `mislabelled` marks the world's label doubted
+#: and leaves it measured (an `unreachable`/`incoherent` one would take it out of measurement
+#: and keep its defender findings off the queue, A7).
+SIBLING_WORLD_BUCKET = "mislabelled"
+#: The bucket of the family call's three world findings.
+FAMILY_WORLD_BUCKET = "incoherent"
+
+
+def _world_findings_rows(label: str = GRADED_WORLD) -> list[dict[str, Any]]:
+    """Five per-draw findings for sibling `label`, in filing order: four investigator findings
+    (`SIBLING_BUCKETS[label]`), each resting on `label`'s report against the control's, then
+    one design world finding citing `label`'s manifest entry (the sample's split)."""
     rows = [finding(subject="defender", bucket=b, claim=f"defender claim {i}",
                     root_cause=f"defender root cause {i}", topic=f"defender topic {i}",
-                    anchor=f"l-00{i + 1}")
-            for i, b in enumerate(("lead-set", "observability", "decision-discipline",
-                                   "analyze-discipline"))]
-    rows.append(finding(subject="world", bucket="fact-story-gap",
+                    anchor=f"l-00{i + 1}",
+                    evidence=[f"worlds/{label}/report.md", f"worlds/{CONTROL}/report.md"])
+            for i, b in enumerate(SIBLING_BUCKETS[label])]
+    rows.append(finding(subject="world", bucket=SIBLING_WORLD_BUCKET,
                         claim="the fact never reached the defender as a readable answer",
                         root_cause="the oracle served the fact on a call the lead never made",
-                        topic="served fact never retrieved", anchor="l-002"))
+                        topic="served fact never retrieved", anchor="l-002",
+                        evidence=[f"family.yaml#worlds/{label}"]))
     return rows
 
 
 def family_findings() -> list[dict[str, Any]]:
-    return [finding(subject="world", bucket="undiscriminating-family",
+    """The family call's three world findings, each citing the passthrough world's entry."""
+    return [finding(subject="world", bucket=FAMILY_WORLD_BUCKET,
                     claim=f"family claim {i}", root_cause=f"family root cause {i}",
-                    topic=f"family topic {i}",
-                    anchor=f"worlds.{PASSTHROUGH_WORLD}.facts")
+                    topic=f"family topic {i}", anchor=f"worlds.{PASSTHROUGH_WORLD}.facts",
+                    evidence=[f"family.yaml#worlds/{PASSTHROUGH_WORLD}"])
             for i in range(3)]
 
 
 def world_row(label: str, *, declared: str, bucket: str | None = "decision-discipline",
               systems: list[str] | None = None, verdict: str = "inconclusive",
-              resolution_moved: bool = True, findings: list[dict[str, Any]] | None = None,
+              resolution_moved: bool = True, draws: tuple[int, ...] = (0,),
               **over: Any) -> dict[str, Any]:
-    """One `judge.yaml` world row in the shape `family.read_world` and the pass's answer step
-    leave: the archive's verdict facts, the judge model's own `bucket` and `systems`, the
-    draws' findings (each stamped with its `draw`) and the draw counts."""
+    """One `judge.yaml` world row in the shape the pass leaves for a judged, committed world:
+    `family.read_world`'s facts off the archive, the draw counts, the combined verdict
+    (`route.combine_draws`: `bucket`, `systems`, one `draws` entry per recorded draw,
+    `measured`, `draws_disagree`, `world_label_doubted` — set: every sibling files a
+    `mislabelled` finding) and the A6 `state: queued`."""
+    systems = list(systems) if systems is not None else [SYSTEM]
     row: dict[str, Any] = {
         "world": label, "declared": declared, "verdict": verdict,
         "resolution_moved": resolution_moved, "malformed_rows": 0, "served_nothing": False,
-        "completed_draws": 1, "malformed_replies": 0, "bucket": bucket,
-        "systems": systems if systems is not None else [SYSTEM],
-        "findings": [{**f, "draw": 0} for f in findings] if findings is not None else [],
+        "completed_draws": len(draws), "malformed_replies": 0, "bucket": bucket,
+        "systems": systems,
+        "draws": [{"draw": n, "bucket": bucket, "systems": list(systems)} for n in draws],
+        "measured": True, "not_measured_reason": None, "draws_disagree": False,
+        "world_label_doubted": True, "state": "queued",
     }
     row.update(over)
     return row
+
+
+def family_row(*, draws: tuple[int, ...] = (0,), **over: Any) -> dict[str, Any]:
+    """`judge.yaml`'s `family` row for a family call that completed `draws` and committed."""
+    row: dict[str, Any] = {"completed_draws": len(draws), "malformed_replies": 0,
+                           "draws": [{"draw": n} for n in draws], "state": "queued"}
+    row.update(over)
+    return row
+
+
+def record_draws(doc: dict[str, Any], label: str, draws: tuple[int, ...]) -> dict[str, Any]:
+    """`doc` (a `sample_grade()`-shaped record) re-stated as recording `draws` for `label`'s
+    row — a world row's `draws` (each with the row's bucket and systems) and
+    `completed_draws`, or the family row's for `FAMILY` — the record a pass that completed
+    those draws writes. The page shows a draw document only when the record names its draw
+    (#1234 A6: `judge.recorded_draws`), so a scenario adding a draw on disk records it here."""
+    if label == FAMILY:
+        kept = {k: v for k, v in (doc.get("family") or {}).items()
+                if k not in ("draws", "completed_draws")}
+        doc["family"] = family_row(draws=draws, **kept)
+        return doc
+    row = next(r for r in doc["worlds"] if r["world"] == label)
+    row["draws"] = [{"draw": n, "bucket": row.get("bucket"),
+                     "systems": list(row.get("systems") or [])} for n in draws]
+    row["completed_draws"] = len(draws)
+    return doc
 
 
 def ungradable_row(label: str, *, declared: str = "malicious",
@@ -563,31 +631,6 @@ def ungradable_row(label: str, *, declared: str = "malicious",
     findings — the row `family.read_world` or the pass's failed-world arm leaves."""
     return {"world": label, "declared": declared, "ungradable": True,
             "ungradable_reason": reason}
-
-
-def world_finding_queue_row(finding_id: str, text: str, *, anchor: str = "l-002",
-                            topic: str = "served fact never retrieved",
-                            type_: str = "fact-story-gap") -> dict[str, Any]:
-    """One episode-level `world_findings` row — the questioner-queue `FindingRow` shape (g28),
-    joined to the draw by `finding_id` ONLY."""
-    return {"schema_version": 1, "finding_id": finding_id, "run_id": EPISODE_ID,
-            "alert_rule_key": "rule-v2-falco-authorized-keys-modification",
-            "direction": "world", "subject": "world", "type": type_,
-            "subject_anchor": anchor, "subject_topic": topic, "finding": text,
-            "judge_outcome": "discard", "citations": ["investigation.md"],
-            "source_run_dir": f"/runs/{EPISODE_ID}"}
-
-
-def family_queue_row(draw: int, index: int, *, topic: str | None = None,
-                     claim: str | None = None) -> dict[str, Any]:
-    """The episode-level `world_findings` row for family finding `(family, draw, index)` —
-    the record's side of the join a family draw's row needs to reach the lede (J7 ii)."""
-    topic = topic if topic is not None else f"family topic {index}"
-    claim = claim if claim is not None else f"family claim {index}"
-    return world_finding_queue_row(f"{EPISODE_ID}/{FAMILY}/{draw}/{index}",
-                                   f"{claim} — family root cause {index}",
-                                   anchor=f"worlds.{PASSTHROUGH_WORLD}.facts",
-                                   topic=topic, type_="undiscriminating-family")
 
 
 def finding_id(label: str, draw: int | str, index: int) -> str:
@@ -602,24 +645,23 @@ def disposition(label: str, draw: int | str, index: int, lane: str,
 
 
 def sample_dispositions(*, family: bool = True) -> list[dict[str, Any]]:
-    """The ledger the real pass writes for the sample, IN ITS WALK ORDER: the family draw's
-    three world rows first, then each graded row's draw in row order — four defender findings
-    enqueued and the fifth a world row, per sibling.
-    `test_1025_the_fixture_ledger_is_the_passes_own` holds this list to the real
-    `enqueue_report`'s output."""
-    ledger = [disposition(FAMILY, 0, i, "world") for i in range(3)] if family else []
+    """The ledger the real pass writes for the sample, IN ITS WALK ORDER: each sibling in
+    manifest order — its four investigator findings to the defender lane, its world finding to
+    the questioner lane (`world`) — then the family call's three world findings.
+    `test_1025_the_fixture_ledger_is_the_passes_own` holds this list to a real pass's."""
+    ledger: list[dict[str, Any]] = []
     for label in (PASSTHROUGH_WORLD, GRADED_WORLD):
         ledger += [disposition(label, 0, i, "defender") for i in range(4)]
         ledger.append(disposition(label, 0, 4, "world"))
+    if family:
+        ledger += [disposition(FAMILY, 0, i, "world") for i in range(3)]
     return ledger
 
 
 def set_lane(doc: dict[str, Any], label: str, draw: int | str, index: int, lane: str,
              reason: str | None = None) -> dict[str, Any]:
     """Re-file one coordinate on the fixture record's ledger the way the writer would have:
-    the entry replaced in place (appended when new) and, for an unqueueable lane, its
-    `unqueueable_findings` line beside it — the writer derives that list off the ledger, so a
-    fixture that changes one without the other is a record the pass never wrote."""
+    the entry replaced in place (appended when new)."""
     entry = disposition(label, draw, index, lane, reason)
     ledger = doc["dispositions"]
     for n, existing in enumerate(ledger):
@@ -628,11 +670,6 @@ def set_lane(doc: dict[str, Any], label: str, draw: int | str, index: int, lane:
             break
     else:
         ledger.append(entry)
-    doc["unqueueable_findings"] = [
-        line for line in doc["unqueueable_findings"]
-        if not line.startswith(entry["finding_id"] + ": ")]
-    if lane == "unqueueable":
-        doc["unqueueable_findings"].append(f"{entry['finding_id']}: {reason}")
     return doc
 
 
@@ -644,55 +681,34 @@ def drop_lanes(doc: dict[str, Any], label: str) -> dict[str, Any]:
     return doc
 
 
-def block_defender_lane(doc: dict[str, Any], verdict_word: str) -> dict[str, Any]:
-    """The record as the enqueue writes it on a discard / corpus-contradiction episode (O7):
-    the word on `verdict_word`, `enqueued_rows` 0, every defender entry on the ledger
-    re-filed never eligible with that word."""
-    doc["verdict_word"] = verdict_word
-    doc["enqueued_rows"] = 0
-    doc["dispositions"] = [
-        {**e, "lane": "never_eligible", "reason": verdict_word} if e["lane"] == "defender"
-        else e for e in doc["dispositions"]]
-    return doc
-
-
 def _coordinate(finding_id: str) -> tuple[str, str, str]:
     _prefix, label, draw, index = finding_id.rsplit("/", 3)
     return label, draw, index
 
 
 def sample_grade(*, family: bool = True) -> dict[str, Any]:
-    """The sample-shaped `judge.yaml` document: two graded rows, the control absent (no row),
-    `verdict_word: undecidable`, `family_outcome: discard`, `validity: usable`, eight defender
-    rows enqueued, five world-author rows (two without the family's three when `family=False` —
-    the record of an episode whose family call never ran) — and the ledger (`dispositions`)
-    that says so per finding."""
-    passthrough_docs = _world_findings_rows()
-    graded_docs = _world_findings_rows()
-    prefix = f"{EPISODE_ID}"
-    world_rows = ([family_queue_row(0, i) for i in range(3)] if family else []) + [
-        world_finding_queue_row(f"{prefix}/{label}/0/4",
-                                docs[4]["claim"] + " — " + docs[4]["root_cause"])
-        for label, docs in ((PASSTHROUGH_WORLD, passthrough_docs), (GRADED_WORLD, graded_docs))
-    ]
+    """The sample-shaped `judge.yaml` document, in `EpisodeGrade`'s #1234 shape: two judged,
+    committed sibling rows (the control has no row), `validity: usable`, the family call's own
+    row (`None` when `family=False` — the record of an episode whose family call never ran), an
+    empty user record, eight defender rows and five questioner rows enqueued (two without the
+    family's three) — and the ledger (`dispositions`) that says so per finding."""
     return {
         "worlds": [
-            world_row(PASSTHROUGH_WORLD, declared="benign", bucket="lead-set",
-                      resolution_moved=False, findings=passthrough_docs),
-            world_row(GRADED_WORLD, declared="malicious", bucket="decision-discipline",
-                      findings=graded_docs),
+            world_row(PASSTHROUGH_WORLD, declared="benign",
+                      bucket=SIBLING_BUCKET[PASSTHROUGH_WORLD], resolution_moved=False),
+            world_row(GRADED_WORLD, declared="malicious", bucket=SIBLING_BUCKET[GRADED_WORLD]),
         ],
-        "verdict_word": "undecidable", "episode_outcome": "gradable", "validity": "usable",
+        "validity": "usable",
+        "family": family_row() if family else None,
+        "user": {"named_gaps": [], "found_gaps": [], "serving_findings": [],
+                 "unkeyed_named_gaps": [], "gap_findings": []},
+        "dispositions": sample_dispositions(family=family),
         "enqueued_rows": SAMPLE.defender_enqueued, "enqueued_to": ENQUEUED_TO,
+        "world_enqueued_rows": SAMPLE.world_author - (0 if family else 3),
+        "world_enqueued_to": WORLD_ENQUEUED_TO,
         "draws": {"configured": 1, "completed": 1},
         "knobs": {"draws": 1, "model": "kimi-k3", "effort": "medium", "payload_cap": 20000},
         "lessons_commit": LESSONS_COMMIT,
-        "queue_malformed_rows": 0, "world_queue_malformed_rows": 0,
-        "unqueueable_findings": [], "family_outcome": "discard", "family_failed_reason": None,
-        "family_malformed_replies": 0, "family_completed_draws": 1 if family else 0,
-        "world_enqueued_rows": len(world_rows),
-        "world_enqueued_to": WORLD_ENQUEUED_TO, "world_findings": world_rows,
-        "dispositions": sample_dispositions(family=family),
     }
 
 
@@ -764,12 +780,11 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
                                         "name": ALERT_RULE}}).encode("utf-8"))
     for label in WORLDS:
         _leads(ep / "worlds" / label, label)
-    for label, bucket in ((PASSTHROUGH_WORLD, "lead-set"), (GRADED_WORLD, "decision-discipline")):
-        draw_document(ep, label, 0, draw_doc(findings=_world_findings_rows(), bucket=bucket,
-                                             systems=[SYSTEM]))
+    for label in (PASSTHROUGH_WORLD, GRADED_WORLD):
+        draw_document(ep, label, 0, draw_doc(findings=_world_findings_rows(label),
+                                             bucket=SIBLING_BUCKET[label], systems=[SYSTEM]))
     if family_draw:
-        draw_document(ep, FAMILY, 0, draw_doc(findings=family_findings(),
-                                              episode_outcome="discard", verdict_word="discard"))
+        draw_document(ep, FAMILY, 0, family_draw_doc())
     if judge:
         write_judge(ep, sample_grade(family=family_draw))
     if traces:
@@ -1150,10 +1165,9 @@ __all__ = [
     "PASSTHROUGH_WORLD", "SAMPLE", "SYSTEM", "WORLD_ENQUEUED_TO", "WORLDS",
     "Episode", "Node", "Page", "Rescue", "PAGE_FILE", "raise_now", "when_inside",
     "cli", "copy_episode", "draw_doc", "draw_document", "escaped", "every_step",
-    "family_findings", "family_queue_row", "finding", "mod", "page_module", "plant_fifo",
+    "family_draw_doc", "family_findings", "family_row", "finding", "mod", "record_draws", "page_module", "plant_fifo",
     "plant_link", "plant_raw", "read_page", "render", "result_event", "run_dir",
     "sample_episode", "sample_grade", "sample_manifest", "sample_manifest_worlds", "served_row",
-    "snapshot", "sym", "trace_rows", "trace_stem", "ungradable_row", "world_finding_queue_row",
-    "world_row", "write_framed", "write_judge", "write_outcome", "write_samples", "write_stamp",
+    "snapshot", "sym", "trace_rows", "trace_stem", "ungradable_row", "world_row", "write_framed", "write_judge", "write_outcome", "write_samples", "write_stamp",
     "write_timing", "write_tool_trace", "write_trace", "write_world_record",
 ]

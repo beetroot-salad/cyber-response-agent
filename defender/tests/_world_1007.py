@@ -8,23 +8,17 @@ what one world cannot (M5); findings partition by `subject` into a second queue 
 feeding a second authored corpus, `defender/lessons-questioner/`, with its own curator (M7),
 which the questioner reads back at call 1 (M8). The reachability block, the withholding ladder
 and the mechanical world bucket went with the review (#1224 design: "No mechanical bucket").
+#1234 then closed the world-finding vocabulary (`unreachable`, `incoherent`, `mislabelled`),
+made a finding's subject the reply list it is filed under rather than a `subject` key, and
+retired every model word that spoilt a family (`episode_outcome`, the family `verdict_word`).
 
 Every import goes through `mod()` / `sym()` PER TEST (the `_triplet_947` idiom this module
 extends) so a missing target is one failure per test rather than one collection error hiding
 the rest.
 
-TWO THINGS THIS SUITE DELIBERATELY DOES NOT ASSERT, each a decision on the record:
+ONE THING THIS SUITE DELIBERATELY DOES NOT ASSERT, a decision on the record:
 
-1. **The world-finding vocabulary is OPEN** (15-resolutions R2, accepted gap G-3). There is no
-   closed world-finding enum, `validate_reply` refuses no unknown world FINDING bucket, and the
-   prompt's names are EXAMPLES. No test here asserts a closed world set; the positive demand is
-   that an unlisted bucket is ADMITTED.
-   G-3 IS ABOUT ADMISSION AND NOTHING ELSE. Which bucket STRINGS are admitted is the human's
-   open decision and stays open. How an admitted string is SERIALIZED into a document is a
-   different obligation, owed under a closed vocabulary too, and `test_a_lesson_frontmatter_
-   value_cannot_forge_the_key_the_selector_reads` pins it: a model-chosen value may not stop
-   being a value and become a lesson's own structure.
-2. **O5 is scoped to one attempt** (RS-1 / accepted gap G-2). A re-entered `Step.QUESTIONER`
+1. **O5 is scoped to one attempt** (RS-1 / accepted gap G-2). A re-entered `Step.QUESTIONER`
    overwrites `samples.yaml`, so the byte-identity obligation holds WITHIN ONE ATTEMPT, and the
    re-entry's accepted behaviour (the second attempt's samples win) is pinned by its own test.
 
@@ -132,17 +126,6 @@ DEFENDER_CURATOR_MODULE = "author"
 #: selector agree by construction.
 SUBJECT_DEFENDER = "defender"
 SUBJECT_WORLD = "world"
-
-#: The names that reach the per-world prompt as EXAMPLES (#1224's `run.EXAMPLE_WORLD_BUCKETS`).
-#: Listed so a test can assert they are PRESENT AS EXAMPLES; never so a test can assert nothing
-#: else is admitted.
-EXAMPLE_WORLD_BUCKETS = ("shape-invention", "fact-story-gap", "undiscriminating-family")
-
-
-#: The three episode-level files a `subject: world` finding's evidence pointer may name (A3,
-#: cell widening S7; #1224 put pre-flight's `outcome.yaml` where `review.yaml` was). The
-#: defender arm is UNCHANGED and stays world-subtree-only.
-WORLD_EVIDENCE_FILES = ("samples.yaml", "outcome.yaml", "judge.yaml")
 
 SAMPLES_NAME = "samples.yaml"
 JUDGE_NAME = "judge.yaml"
@@ -263,113 +246,25 @@ def write_served(episode_dir: Path, world: str, rows: list[dict]) -> Path:
 
 
 # ---------------------------------------------------------------------------------------
-# The judge's reply, as data. A fake that only returns answers leaves the outbound channel
-# unpinned, so every scenario that scripts a reply also reads `agent.prompts`.
+# The graded episode. #1234 replaced the reply this suite once scripted (`findings` with a
+# `subject` key, `episode_outcome`, the family `verdict_word`) with three filed lists and typed
+# pointers, and made a run usable only through its call-id-joined records (A3, A12) — so a
+# graded scenario here is built and judged by #1234's own builders (`_spec1234`: `family`,
+# `inv`, `wf`, `world_reply`, `family_reply`, `judge`, `grade`), never by a copy of them.
 # ---------------------------------------------------------------------------------------
 
 
-def finding(*, bucket: str = "lead-set", subject: str = SUBJECT_DEFENDER,
-            claim: str = "the sibling never asked the holding system",
-            root_cause: str = "no query named the corpus",
-            anchor: str = "lead l-001", topic: str = "coverage",
-            evidence: list[str] | None = None, **extra: Any) -> dict[str, Any]:
-    """One finding as the model writes it, `subject` included.
+def contrast_family(tmp_path: Path, monkeypatch, worlds: Any = None, **kw: Any) -> Any:
+    """`_spec1234.family(tmp_path, worlds, **kw)` (control `a`, planted `b` and `c` by
+    default), with the episodes root and the learning state root pointed inside `tmp_path` —
+    what #1234's own conftest does for its suite, done here per scenario."""
+    from defender.tests.judge_contrast_1234 import _spec1234 as S
 
-    `subject` is a REQUIRED key on every finding after O1/M6 — the partition is at the
-    validator, and a finding without one is not routable to either channel.
-    """
-    doc: dict[str, Any] = {
-        "bucket": bucket, "subject": subject, "claim": claim, "root_cause": root_cause,
-        "anchor": anchor, "topic": topic,
-        "evidence": list(evidence if evidence is not None else ["report.md#L1"]),
-    }
-    doc.update(extra)
-    return doc
-
-
-def world_finding(*, bucket: str = "fact-story-gap", system: str = SYSTEM,
-                  evidence: list[str] | None = None, **extra: Any) -> dict[str, Any]:
-    """A `subject: world` finding. The systems its queue row is selected by are the DRAW's
-    (`reply_document(systems=)`), never the finding's own key (`run._parse_finding`); `system`
-    only names the samples section the default evidence cites."""
-    return finding(
-        bucket=bucket, subject=SUBJECT_WORLD,
-        claim="the world's story names a field the served answers do not carry",
-        root_cause="the sample was not matched",
-        anchor=f"world {system}", topic="fact shape",
-        evidence=list(evidence if evidence is not None else [f"{SAMPLES_NAME}#{system}"]),
-        **extra)
-
-
-def reply_document(*, findings: list[dict] | None = None, outcome: str = "gradable",
-                   bucket: str | None = "lead-set", systems: list[str] | None = None,
-                   verdict_word: str | None = "survived", **extra: Any) -> dict[str, Any]:
-    """The judge's whole reply as a mapping, before it is dumped to the text a seam returns.
-
-    #1224: a world-scope reply carries the model's own `bucket` and `systems` for its world
-    (`run._world_verdict`); a family-scope one carries the family's `verdict_word`. Both are
-    present by default so one scripted reply answers both scopes; `None` omits either.
-    """
-    doc: dict[str, Any] = {
-        "episode_outcome": outcome,
-        "noise_floor_note": "nothing notable",
-        "correlations": [], "scope_checks": [], "derivations": [],
-        "findings": list(findings if findings is not None else []),
-    }
-    if bucket is not None:
-        doc["bucket"] = bucket
-        doc["systems"] = list(systems if systems is not None else [SYSTEM])
-    if verdict_word is not None:
-        doc["verdict_word"] = verdict_word
-    doc.update(extra)
-    return doc
-
-
-def reply_text(**kw: Any) -> str:
-    """A judge reply as the TEXT a model seam hands back — the shape `validate_reply` parses."""
-    return _yaml.safe_dump(reply_document(**kw), sort_keys=False, allow_unicode=True)
-
-
-class FakeJudge(FakeAgent):
-    """The judge's model seam (`judge=` on `grade_episode`), recording and fault-injecting.
-
-    Inherits `_triplet_947.FakeAgent` rather than restating it: the same recording contract
-    (`prompts`, `kwargs`, `agent_ids`) is what every payload demand in both suites asserts
-    against. `replies` may hold either raw reply TEXT or a mapping this class dumps, so a
-    scenario writes `FakeJudge(reply_document(findings=[...]))` in one line.
-
-    ROUND-ROBIN over the last reply, because a pass makes `draws x (worlds + 1)` calls and a
-    scenario that is not about draw count should not have to spell one reply per call. A
-    scenario that IS about the per-call payload reads `prompts` and asserts per index.
-    """
-
-    def __call__(self, prompt: str, **kw: Any) -> Any:
-
-        if len(self.replies) == 1:
-            reply = self.replies[0]
-            self.prompts.append(prompt)
-            self.kwargs.append(dict(kw))
-            if "agent_id" in kw:
-                self.agent_ids.append(kw["agent_id"])
-            if self.fault.raise_after is not None and len(self.prompts) > self.fault.raise_after:
-                raise RuntimeError("the judge provider degraded mid-fan-out")
-            if self.fault.hits(str(kw.get("agent_id", ""))):
-                raise RuntimeError(f"the judge provider refused {kw.get('agent_id')!r}")
-            return reply if isinstance(reply, str) else _yaml.safe_dump(reply, sort_keys=False)
-        reply = super().__call__(prompt, **kw)
-        return reply if isinstance(reply, str) else _yaml.safe_dump(reply, sort_keys=False)
-
-    def prompt_for(self, agent_id: str) -> str:
-        """The one prompt handed to the call with this agent id — `AssertionError` if the call
-        was never made, which is a demand failing rather than a silence nobody can see."""
-        hits = [p for p, a in zip(self.prompts, self.agent_ids, strict=False) if a == agent_id]
-        assert hits, f"no call was made with agent_id={agent_id!r}; ids seen: {self.agent_ids}"
-        return hits[0]
-
-    @property
-    def family_prompts(self) -> list[str]:
-        return [p for p, a in zip(self.prompts, self.agent_ids, strict=False)
-                if a.startswith("judge:family")]
+    root = tmp_path / "episodes-root"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(S.EPISODES_BASE_ENV, str(root))
+    S.isolate_learning_state(tmp_path, monkeypatch)
+    return S.family(tmp_path, worlds, **kw)
 
 
 @dataclass
@@ -554,21 +449,22 @@ def questioner_lesson_raw(paths: Any, name: str, *, frontmatter: str,
 __all__ = [
     "ALERTS_PATTERN", "AS_OF", "BRANCH_MESSAGE_ID", "CLEAN", "CONFIGURED", "DEFENDER",
     "DEFENDER_CURATOR_MODULE", "EPISODES_BASE_ENV", "EPISODE_ID", "EPISODE_TOKEN",
-    "EVENTS_PATTERN", "EXAMPLE_WORLD_BUCKETS", "JUDGE_NAME", "OUTCOME_NAME",
+    "EVENTS_PATTERN", "JUDGE_NAME", "OUTCOME_NAME",
     "QUESTIONER_CORPUS_DIRNAME", "QUESTIONER_CORPUS_REL", "QUESTIONER_CURATOR_MODULE",
     "QUESTIONER_QUEUE_FILENAME", "RAW_ES_RESPONSE", "RUNS_BASE_ENV", "SERVED_SYSTEMS",
     "SAMPLES_NAME", "SAMPLE_DOCUMENT", "SOURCE_RUN_ID", "SUBJECT_DEFENDER", "SUBJECT_WORLD",
-    "SYSTEM", "WORLDS", "WORLD_EVIDENCE_FILES",
-    "FakeAdapters", "FakeAgent", "FakeJudge", "FakeTransport",
+    "SYSTEM", "WORLDS",
+    "FakeAdapters", "FakeAgent", "FakeTransport",
     "Fault", "RecordingReader",
     "archived_world", "assert_wrapped_untrusted", "base_capture",
-    "base_world", "capture_call", "captured_row", "configured_layout", "elastic_ctx",
+    "base_world", "capture_call", "captured_row", "configured_layout", "contrast_family",
+    "elastic_ctx",
     "episode", "fact", "family_doc",
-    "finding", "loop_paths", "mod",
+    "loop_paths", "mod",
     "outside_untrusted_frames", "provenance_record", "queue_rows",
     "questioner_lesson", "questioner_lesson_raw",
-    "read_yaml", "refusals", "reply_document", "reply_text", "report_text",
+    "read_yaml", "refusals", "report_text",
     "runs_base", "samples_document", "served_row", "sibling_run_dir", "sym",
-    "untrusted_frames", "world_doc", "world_finding", "world_token", "write_family",
+    "untrusted_frames", "world_doc", "world_token", "write_family",
     "write_outcome", "write_samples", "write_served", "write_yaml",
 ]

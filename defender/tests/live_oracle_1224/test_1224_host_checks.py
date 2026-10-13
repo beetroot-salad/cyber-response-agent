@@ -1622,8 +1622,9 @@ def test_p034_placeholder_values_in_id_columns(tmp_path):
 
 #: A judge reply in the coined v2 shape (a world-scope `bucket` and `systems`, the family-scope
 #: `verdict_word`), so one default answers both scopes; its content is not the subject.
-_JUDGE_REPLY = S.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[],
-                                           verdict_word="caught"))
+#: #1234: no `verdict_word` — the family word is retired and a reply carrying it is refused
+#: by that name (A17).
+_JUDGE_REPLY = S.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[]))
 
 
 def _judged_in_place(ep: Path) -> None:
@@ -1639,6 +1640,16 @@ def _judged_in_place(ep: Path) -> None:
                                disposition=world.get("disposition_declared", "malicious"))
         if not S.ledger_path(ep, label).is_file():
             S.write_ledger(ep, label, [])
+        # Direct registry calls have no query-tool host to mint ids. Complete this synthetic
+        # archive with the shared ledger fixture's ids and the matching query-table rows.
+        ledger = S.ledger_rows(ep, label)
+        for row in ledger:
+            if row.get(J.CALL_ID) is None:
+                row.pop(J.CALL_ID, None)
+        S.write_ledger(ep, label, ledger)
+        S.write_call_table(ep, label, S.ledger_rows(ep, label))
+        if world.get("role") != "A":
+            S.oracle_dir(ep, label).mkdir(parents=True, exist_ok=True)
     S.samples_record(ep, {system: {"verbs": {"query": [json.dumps({"rows": []})]}}
                           for system in doc.get("served_systems") or []})
     S.outcome_record(ep)

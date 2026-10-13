@@ -60,90 +60,101 @@ def _grade(tmp_path, ep, judge, **kw):
 # ---------------------------------------------------------------------------------------
 
 
+def _lanes(ep) -> dict[str, str]:
+    """World b's draw-0 ledger, `{finding index: lane}` (A13: one entry per filed finding)."""
+    return {e["finding_id"].rsplit("/", 1)[1]: e["lane"]
+            for e in J.judge_record(ep)["dispositions"] if "/b/0/" in e["finding_id"]}
+
+
 def test_921_finding_whose_pointers_all_miss_the_episode_is_dropped_and_counted(tmp_path):
     """A finding NONE of whose evidence pointers resolves inside the archive is DROPPED, and the
-    drop is COUNTED on the reply record — a silent drop is indistinguishable from a finding the
-    model never emitted.
+    drop is ACCOUNTED for — a silent drop is indistinguishable from a finding the model never
+    emitted.
 
-    J13(a), settled: resolution is scoped to the GRADED WORLD's own subtree, not to the episode.
-    O1's rule is "the archive it was graded from" and O5's whole purpose points the same way; the
-    episode-level phrasing is a failing-mode sentence, not the rule. So a pointer into a SIBLING
-    world's archived bytes does not resolve, even though bytes exist at the target and the
-    literal episode-scoped text would admit it — a finding about world b citing world c's
-    document is a finding about the wrong world.
+    #1234 (A1, A13, A15): the draw document files every finding as replied, and what became of
+    each is its ledger entry — `dropped_unresolved` for a finding with no resolving pointer. J13(a)'s
+    "a finding about world b citing only world c's document is about the wrong world" is now
+    A15's `dropped_other_run`: c is a reference run, so its pointers resolve, but they name
+    only another run.
 
-    Paired positive control: a finding with one resolving pointer SURVIVES, so the drop cannot
-    pass on a reply whose findings all vanish.
+    Paired positive control: a finding with a resolving two-run pair SURVIVES to the defender
+    lane, so the drop cannot pass on a reply whose findings all vanish.
     """
     ep = _episode(tmp_path)
     reply = J.as_reply_text(J.reply_doc(findings=[
-        J.finding_doc(topic="kept", evidence=["investigation.md#l-001"]),
+        J.finding_doc(topic="kept",
+                      evidence=["worlds/b/investigation.md", "worlds/a/report.md"]),
         J.finding_doc(topic="dropped-nowhere", evidence=["there was no evidence, really"]),
         J.finding_doc(topic="dropped-sibling",
-                      evidence=["../c/investigation.md", "../c/report.md"]),
+                      evidence=["worlds/c/investigation.md", "worlds/c/report.md"]),
     ]))
     _grade(tmp_path, ep, J.FakeJudge(default=reply), draws=1)
 
     doc = J.draw_doc(ep, "b", 0)
-    topics = {finding["topic"] for finding in doc["findings"]}
-    assert topics == {"kept"}, f"surviving findings are {sorted(topics)}"
-    assert doc["dropped_findings"] == 2, (
-        "findings were dropped without a count; a silent drop reads as a finding the model "
-        "never emitted")
+    topics = [finding["topic"] for finding in doc["investigator_findings"]]
+    assert topics == ["kept", "dropped-nowhere", "dropped-sibling"], (
+        f"the draw document did not file every finding as replied: {topics}")
+    assert _lanes(ep) == {"0": "defender", "1": "dropped_unresolved",
+                          "2": "dropped_other_run"}, (
+        "findings were dropped without a ledger entry naming why; a silent drop reads as a "
+        "finding the model never emitted")
 
 
 def test_921_pointer_resolving_nowhere_is_recorded_on_the_finding(tmp_path):
     """A SINGLE pointer that resolves nowhere — prose, a URL, a lesson name, a sibling trial id
-    — is RECORDED on the finding rather than dropping it, and the finding stands as long as one
-    other pointer resolves.
+    — is RECORDED with the finding rather than dropping it, and the finding stands as long as
+    its other pointers resolve.
 
-    Prose and a URL are the two shapes exercised: neither is pointer-shaped at all, which is a
-    different failure from a well-formed pointer at a path that does not exist, and a reader
-    that only checked `Path(p).exists()` would answer the same for both by accident.
+    #1234 (A1): the draw document keeps the finding's pointers exactly as filed (the record of
+    what the model cited), and the queue row's `citations` / `contrast_evidence` carry the
+    resolving ones only. Prose and a URL are the two shapes exercised: neither is
+    pointer-shaped at all, which is a different failure from a well-formed pointer at a path
+    that does not exist, and a reader that only checked `Path(p).exists()` would answer the
+    same for both by accident.
     """
     ep = _episode(tmp_path)
-    reply = J.as_reply_text(J.reply_doc(findings=[J.finding_doc(evidence=[
-        "investigation.md#l-001",
-        "the analyst simply never looked at the holding system",
-        "https://example.invalid/runs/abc",
-    ])]))
+    resolving = ["worlds/b/investigation.md", "worlds/a/report.md"]
+    filed = [*resolving, "the analyst simply never looked at the holding system",
+             "https://example.invalid/runs/abc"]
+    reply = J.as_reply_text(J.reply_doc(findings=[J.finding_doc(evidence=filed)]))
     _grade(tmp_path, ep, J.FakeJudge(default=reply), draws=1)
 
-    finding = J.draw_doc(ep, "b", 0)["findings"][0]
-    assert finding["evidence"], "the finding was dropped although one pointer resolved"
-    unresolved = finding["unresolved_evidence"]
-    assert len(unresolved) == 2, f"unresolved pointers recorded: {unresolved}"
-    assert any("never looked" in str(p) for p in unresolved)
-    assert any("example.invalid" in str(p) for p in unresolved)
+    finding = J.draw_doc(ep, "b", 0)["investigator_findings"][0]
+    assert finding["contrast_evidence"] == filed, "the filed pointers were not recorded"
+    assert _lanes(ep) == {"0": "defender"}, "the finding was dropped although a pair resolved"
+    row = next(r for r in J.enqueued_rows(J.judge_record(ep))
+               if r["finding_id"].endswith("/b/0/0"))
+    assert row["citations"] == resolving, f"the row cites {row['citations']}"
+    assert row["contrast_evidence"] == resolving
 
 
 def test_921_a_pointer_climbing_out_of_the_episode_does_not_count_as_resolving(tmp_path):
-    """A pointer that climbs out of the graded world's archive — `../`, an absolute path, a
-    symlink whose target is outside — does NOT count as resolving, WHATEVER BYTES EXIST at the
-    target.
+    """A pointer that climbs out of the episode's archive — `../`, an absolute path, a symlink
+    whose target is outside — does NOT count as resolving, WHATEVER BYTES EXIST at the target.
 
     All three escapes are driven as real bytes on disk, and each target is made to exist, so
-    "does not resolve" cannot pass because the file was missing anyway.
+    "does not resolve" cannot pass because the file was missing anyway. (#1234: pointers are
+    episode-relative, A1; the symlink sits in world b's built layer, `oracle/b/<leaf>`, a
+    pointer class the resolver otherwise admits, so only the no-follow read refuses it.)
 
-    Positive control: the same finding with an in-tree pointer is KEPT — without it,
-    `assert dropped` is also green on a validator that drops everything.
+    Positive control: the same finding with an in-tree pair is KEPT — without it,
+    `dropped_unresolved` is also what a resolver that resolves nothing would say.
     """
     ep = _episode(tmp_path)
     outside = tmp_path / "outside.md"
     outside.write_text("bytes that exist\n", encoding="utf-8")
-    (ep / "worlds" / "b" / "escape.md").symlink_to(outside)
+    (ep / "oracle" / "b" / "notes.jsonl").symlink_to(outside)
 
     reply = J.as_reply_text(J.reply_doc(findings=[
-        J.finding_doc(topic="dotdot", evidence=["../../outside.md"]),
+        J.finding_doc(topic="dotdot", evidence=["worlds/b/../../../outside.md"]),
         J.finding_doc(topic="absolute", evidence=[str(outside)]),
-        J.finding_doc(topic="symlink", evidence=["escape.md"]),
-        J.finding_doc(topic="in-tree", evidence=["report.md"]),
+        J.finding_doc(topic="symlink", evidence=["oracle/b/notes.jsonl"]),
+        J.finding_doc(topic="in-tree", evidence=["worlds/b/report.md", "worlds/a/report.md"]),
     ]))
     _grade(tmp_path, ep, J.FakeJudge(default=reply), draws=1)
 
-    doc = J.draw_doc(ep, "b", 0)
-    assert {f["topic"] for f in doc["findings"]} == {"in-tree"}
-    assert doc["dropped_findings"] == 3
+    assert _lanes(ep) == {"0": "dropped_unresolved", "1": "dropped_unresolved",
+                          "2": "dropped_unresolved", "3": "defender"}
 
 
 def test_921_finding_with_no_bucket_is_refused(tmp_path):
@@ -159,7 +170,7 @@ def test_921_finding_with_no_bucket_is_refused(tmp_path):
     with pytest.raises(J.refusals()) as raised:
         run_mod.validate_reply(J.as_reply_text(J.reply_doc(findings=[naked])))
     assert "bucket" in str(raised.value)
-    assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).findings, (
+    assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).investigator_findings, (
         "the positive control failed: a well-formed reply does not validate either")
 
 
@@ -183,7 +194,7 @@ def test_921_a_lookalike_bucket_is_rejected_not_coerced_to_the_nearest_member(tm
             "lookalike from a transport failure")
     kept = run_mod.validate_reply(
         J.as_reply_text(J.reply_doc(findings=[J.finding_doc(bucket="lead-set")])))
-    assert kept.findings[0].bucket == "lead-set"
+    assert kept.investigator_findings[0].bucket == "lead-set"
 
 
 # ---------------------------------------------------------------------------------------
@@ -210,7 +221,7 @@ def test_921_every_draw_of_every_world_lands_on_its_own_path(tmp_path):
         for n in range(3):
             seen[(label, n)] = J.draw_doc(ep, label, n)
     assert len(seen) == 6
-    topics = [doc["findings"][0]["topic"] for doc in seen.values()]
+    topics = [doc["investigator_findings"][0]["topic"] for doc in seen.values()]
     assert len(set(topics)) == 6, (
         "two (world, draw) pairs hold the same reply; one overwrote the other")
 
@@ -375,7 +386,8 @@ def test_921_a_reply_whose_top_level_is_not_a_mapping_fails_before_anything_read
     for text in (yaml.safe_dump(["gradable"]), "just a sentence\n", "null\n"):
         with pytest.raises(J.refusals()):
             run_mod.validate_reply(text)
-    assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).episode_outcome == "gradable"
+    # Positive control (#1234: `episode_outcome` is retired, A17 — the bucket is the world's).
+    assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).bucket == "lead-set"
 
 
 def test_921_a_zero_finding_reply_is_schema_valid_and_stands_as_one_draws_answer(tmp_path):
@@ -395,7 +407,8 @@ def test_921_a_zero_finding_reply_is_schema_valid_and_stands_as_one_draws_answer
     _grade(tmp_path, ep, judge, draws=2)
 
     empty = J.draw_doc(ep, "b", 0)
-    assert empty["findings"] == []
+    assert empty["investigator_findings"] == []
+    assert empty["world_findings"] == []
     assert "failure_reason" not in empty, "an empty reply was recorded as a failed draw"
     assert J.world_rows(J.judge_record(ep))["b"]["completed_draws"] == 2
 
@@ -424,8 +437,8 @@ def test_921_fenced_reply_with_prose_around_it_is_refused_and_a_bare_one_validat
     # Positive control: the same document bare validates, so the refusal above is about the
     # shape and not about the verdict.
     parsed = run_mod.validate_reply(body)
-    assert parsed.episode_outcome == "gradable"
-    assert parsed.findings
+    assert parsed.bucket == "lead-set"
+    assert parsed.investigator_findings
 
     # Strict at the schema, on an unfenced reply: the parser accepts it, the validator does not.
     with pytest.raises(JudgeRefused):
@@ -495,11 +508,13 @@ def test_921_model_and_effort_come_from_the_judges_env_knobs_not_questioner_mode
 
 
 def test_921_no_prompt_carries_two_trajectories(tmp_path):
-    """The judge never sees two trajectories in one prompt: one call per world per draw, and
-    comparison is the family pass's job.
+    """#1234 rewrite (design M1, M3): the withholding this pinned is REVERSED — a world call is
+    now judged against its reference runs, so it carries them on purpose, each under its own
+    host label. What stays: one call per world per draw, each prompt naming the ONE world it
+    judges, with the control and every other usable planted world named as its references.
 
-    Positive control: two worlds produce TWO prompts, each naming its own world — so the
-    negative cannot pass on a fan-out that makes one call, or none.
+    Positive control: two worlds produce TWO prompts — so the assertion cannot pass on a
+    fan-out that makes one call, or none.
     """
     ep = _episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": [J.staged_row("c")]})
     judge = _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(J.reply_doc())), draws=1)
@@ -512,9 +527,8 @@ def test_921_no_prompt_carries_two_trajectories(tmp_path):
     assert len(world_prompts) == 2, "two worlds did not produce two calls"
     for label, prompt in zip(["b", "c"], world_prompts, strict=True):
         other = "c" if label == "b" else "b"
-        assert f"world {label}" in prompt
-        assert f"{J.world_token(other)}" not in prompt, (
-            "a sibling's own trajectory identity reached the graded world's prompt")
+        assert f"World {label} has run; judge it against its reference runs (a, {other})" \
+            in prompt, f"world {label}'s prompt does not name its world and its references"
 
 
 def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_path,
@@ -565,29 +579,37 @@ def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_p
 # ---------------------------------------------------------------------------------------
 
 
+def _prompt(ep, label: str = "b") -> str:
+    """World `label`'s prompt, built by the real assembler over the real render (#1234:
+    `_build_prompt(ctx, manifest)` returns the prompt and its layout)."""
+    from defender._io import bind
+
+    run_mod = J.mod("learning.judge.run")
+    render = J.mod("learning.judge.render")
+    with bind(ep) as bound:
+        manifest = J.mod("learning.judge.family").read_manifest(bound)
+    return run_mod._build_prompt(render.render(ep, label), manifest)[0]
+
+
 def test_921_the_task_states_that_evidence_is_a_list_of_pointers(tmp_path):
     """The prompt says what an evidence entry IS, not just that the field exists.
 
     The field list named `evidence` and stopped, so the model wrote the English sense of the
-    word: one prose sentence quoting what it had read. `_validate_finding` requires a list and
-    refuses the whole reply, which counts a malformed reply, deletes the draw, and grades the
-    world on nothing — and a list of prose would have been discarded one step later anyway by
-    `_draw_document`, which drops a finding whose pointers all fail to resolve. Both silent
-    above `malformed_replies`.
+    word: one prose sentence quoting what it had read — refused, or dropped one step later as
+    a finding whose pointers all fail to resolve. Both silent above `malformed_replies`.
+    #1234 (A1): the grammar is episode-relative pointers, and the prompt says so.
 
     Observed live: a judge draw whose REASONING was correct — it found that the defender closed
     `benign` where its world called for `inconclusive` and had ridden an earlier precedent —
     produced no finding at all, because every `evidence` value was a quotation.
     """
-    run_mod = J.mod("learning.judge.run")
-    render = J.mod("learning.judge.render")
-    ep = J.accepted_episode(tmp_path)
     # THE PROMPT THE MODEL IS ACTUALLY HANDED, built by the real assembler. Reading run.py's own
     # source instead would pass on a sentence sitting in a docstring or a dead branch — the
     # structural-claim-by-substring shape, which asserts that the words exist somewhere rather
     # than that the model is told them.
-    prompt = run_mod._build_prompt(render.render(ep, "b"))
-    for required in ("`evidence` IS A LIST OF POINTERS", "#fragment", "IS DISCARDED"):
+    prompt = _prompt(J.accepted_episode(tmp_path))
+    for required in ("EVERY EVIDENCE POINTER IS EPISODE-RELATIVE", "never prose", "#fragment",
+                     "IS DROPPED"):
         assert required in prompt, f"the model is never told {required!r}"
 
 
@@ -597,20 +619,22 @@ def test_921_the_evidence_shape_the_prompt_documents_actually_validates(tmp_path
     The companion to the questioner's own prompt-vs-loader guard, and the same failure mode: a
     prompt that describes a shape in prose while the code enforces another is a prompt whose
     every obedient reply is refused. Driven through BOTH gates the reply must pass —
-    `validate_reply`, then the pointer resolution `_draw_document` applies — because a shape
-    that parses and then resolves to nothing still yields no finding.
+    `validate_reply`, then the pointer resolution routing applies (#1234: the one resolver,
+    read off the ledger) — because a shape that parses and then resolves to nothing still
+    yields no finding.
     """
     run_mod = J.mod("learning.judge.run")
-    ep = J.accepted_episode(tmp_path)
-    world_dir = ep / "worlds" / "b"
-
-    documented = J.reply_doc(findings=[J.finding_doc(evidence=["report.md",
-                                                               "investigation.md#ANALYZE"])])
-    reply = run_mod.validate_reply(J.as_reply_text(documented))
-    doc = run_mod._draw_document(reply, world_dir=world_dir)
-    assert doc["findings"], (
+    ep = _episode(tmp_path)
+    pointers = ["worlds/b/report.md", "worlds/b/investigation.md#ANALYZE", "worlds/a/report.md"]
+    prompt = _prompt(ep)
+    for shape in ("worlds/<run>/report.md", "worlds/<run>/investigation.md"):
+        assert shape in prompt, f"the prompt does not document {shape!r}"
+    documented = J.reply_doc(findings=[J.finding_doc(evidence=pointers)])
+    assert run_mod.validate_reply(J.as_reply_text(documented)).investigator_findings
+    _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(documented)), draws=1)
+    assert _lanes(ep) == {"0": "defender"}, (
         "a finding carrying the pointers the prompt documents was dropped as unresolvable")
-    assert doc["findings"][0]["evidence"] == ["report.md", "investigation.md#ANALYZE"]
+    assert J.draw_doc(ep, "b", 0)["investigator_findings"][0]["contrast_evidence"] == pointers
 
 
 def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_path):
@@ -621,85 +645,71 @@ def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_pa
     accept the exact shape that then resolves to nothing.
     """
     run_mod = J.mod("learning.judge.run")
-    prose = J.reply_doc(findings=[J.finding_doc(
-        evidence="report.md says disposition: benign")])
+    prosy = J.finding_doc()
+    prosy["contrast_evidence"] = "report.md says disposition: benign"
     with pytest.raises(J.sym("learning.judge", "JudgeRefused")) as refusal:
-        run_mod.validate_reply(J.as_reply_text(prose))
+        run_mod.validate_reply(J.as_reply_text(J.reply_doc(findings=[prosy])))
     assert "evidence" in str(refusal.value)
 
 
 def test_921_the_task_writes_out_every_episode_outcome_word_it_accepts(tmp_path):
-    """Each accepted `episode_outcome` word appears in the prompt LITERALLY.
-
-    They used to be described instead of written — "the discard word", "the two-word
-    corpus/world contradiction outcome" — so the model had to guess the strings, and with
-    nothing said about when each applies, the criteria too.
-
-    Rendered from `_REPLY_OUTCOME_ENUM`, the same treatment the bucket enum already gets: a word
-    added to the validator that the prompt never names is a word every reply using it is refused
-    for, and a word removed leaves the prompt advertising one that no longer parses.
+    """#1234 rewrite (A17): `episode_outcome` and its words are retired; the words the
+    validator accepts are now the world's `bucket` words and the world-finding buckets. Each
+    appears in the prompt LITERALLY — a word the validator accepts that the prompt never names
+    is a word every reply using it is refused for, and a word removed leaves the prompt
+    advertising one that no longer parses.
     """
     run_mod = J.mod("learning.judge.run")
-    render = J.mod("learning.judge.render")
-    prompt = run_mod._build_prompt(render.render(J.accepted_episode(tmp_path), "b"))
-    for word in run_mod._REPLY_OUTCOME_ENUM:
-        assert word in prompt, f"the validator accepts {word!r} and the prompt never writes it"
+    prompt = _prompt(J.accepted_episode(tmp_path))
+    for word in (*run_mod.WORLD_BUCKETS, *run_mod.WORLD_FINDING_BUCKETS):
+        assert f"`{word}`" in prompt, f"the validator accepts {word!r} and the prompt never writes it"
 
 
 def test_921_the_task_says_a_badly_performing_defender_is_still_gradable(tmp_path):
-    """The prompt separates a fault in the ARCHIVE from a fault in the DEFENDER.
+    """The prompt separates a fault in the WORLD from a fault in the INVESTIGATOR.
 
-    `discard` and `corpus-contradiction` drop every finding (O7), so choosing one as a comment
-    on how the defender did throws away the whole point of the pass. A live draw did exactly
-    that: five sound findings about the defender's gathering, then `corpus-contradiction` over
-    an episode its own note described as the defender never pulling the payload.
+    #1234 rewrite: the degenerate episode words are gone (A17); what a model must not do now is
+    file the investigator's failure as a world finding or a deployment gap (or the reverse), so
+    the prompt says which list is about which. A live draw did exactly that under the old words:
+    five sound findings about the defender's gathering, then a world-level word over an episode
+    its own note described as the defender never pulling the payload.
     """
-    run_mod = J.mod("learning.judge.run")
-    render = J.mod("learning.judge.render")
-    prompt = run_mod._build_prompt(render.render(J.accepted_episode(tmp_path), "b"))
-    assert "DISCARD EVERY FINDING YOU WRITE" in prompt, (
-        "the prompt never says what choosing a degenerate outcome costs")
-    assert "THIS IS THE ORDINARY ANSWER" in prompt, (
-        "the prompt never says that a poorly-performing defender is still gradable")
+    prompt = _prompt(J.accepted_episode(tmp_path))
+    assert "what is wrong with the WORLD itself, never the investigator" in prompt, (
+        "the prompt never says a world finding is about the world, not the investigator")
+    assert "A gap is never an investigator finding" in prompt, (
+        "the prompt never says a deployment gap is not the investigator's failure")
 
 
 def test_921_a_degenerate_outcome_still_discards_the_findings(tmp_path):
-    """Saying it in the prompt does not change the rule — O7 still drops them.
-
-    The positive control: the prompt is guidance about WHICH word to choose, and the enqueue
-    remains the authority on what each word costs. A prompt change that also relaxed the gate
-    would let a judge keep findings by writing prose about them.
+    """#1234 rewrite (A7): the words that keep a world's investigator findings off the queue
+    are the not-measured world-finding buckets, `unreachable` and `incoherent` — and
+    `mislabelled` only marks the rows doubted. The prompt is guidance about WHICH bucket to
+    choose; the route stays the authority on what each costs (driven end to end in
+    `test_921_enqueue_gate.py::test_921_enqueue_refuses_discard_and_corpus_contradiction`).
     """
-    enqueue = J.mod("learning.judge.enqueue")
-    for word in ("discard", "corpus-contradiction"):
-        assert word in enqueue._UNQUEUEABLE_VERDICTS, (
-            f"{word!r} stopped discarding findings; the prompt now describes a cost it has not")
-    assert "gradable" not in enqueue._UNQUEUEABLE_VERDICTS
+    run_mod = J.mod("learning.judge.run")
+    assert set(run_mod.NOT_MEASURED_BUCKETS) == {"unreachable", "incoherent"}
+    assert "mislabelled" not in run_mod.NOT_MEASURED_BUCKETS
 
 
 def test_921_every_accepted_outcome_word_carries_a_criterion(tmp_path):
     """The words and their criteria have ONE owner, keyed by the validator's own set.
 
-    The first version of this guidance spelled each word twice — once rendered from
-    `_REPLY_OUTCOME_ENUM`, once hand-typed in the prose that says when it applies. A word added
-    to the enum would then reach the model named but unexplained, which is the state that made
-    a live draw choose `corpus-contradiction` over a world its own note described as the
-    defender never pulling the payload, discarding five sound findings with it.
-
-    `_outcome_guidance` REFUSES on a member it cannot explain rather than rendering a partial
-    list, so the gap fails here instead of arriving as guesswork.
+    #1234 rewrite: the retired `_OUTCOME_GUIDANCE` is now `_BUCKET_GUIDANCE` (the world bucket)
+    and `_WORLD_FINDING_GUIDANCE`, rendered by `_guidance`. A word added to a set would reach
+    the model named but unexplained, which is the state that made a live draw choose a
+    degenerate word, discarding five sound findings with it. `_guidance` REFUSES on a member it
+    cannot explain rather than rendering a partial list, so the gap fails here instead of
+    arriving as guesswork.
     """
     run_mod = J.mod("learning.judge.run")
-    assert set(run_mod._OUTCOME_GUIDANCE) == set(run_mod._REPLY_OUTCOME_ENUM), (
-        "the criteria and the accepted set have drifted apart")
+    assert set(run_mod._BUCKET_GUIDANCE) == set(run_mod.WORLD_BUCKETS), (
+        "the bucket criteria and the accepted set have drifted apart")
+    assert set(run_mod._WORLD_FINDING_GUIDANCE) == set(run_mod.WORLD_FINDING_BUCKETS)
 
-    widened = dict(run_mod._OUTCOME_GUIDANCE)
-    widened.pop("discard")
-    original = run_mod._OUTCOME_GUIDANCE
-    try:
-        run_mod._OUTCOME_GUIDANCE = widened  # noqa: SLF001 — the seam this invariant is about
-        with pytest.raises(J.sym("learning.judge", "JudgeRefused")) as refusal:
-            run_mod._outcome_guidance()
-        assert "discard" in str(refusal.value)
-    finally:
-        run_mod._OUTCOME_GUIDANCE = original
+    widened = dict(run_mod._BUCKET_GUIDANCE)
+    widened.pop("lead-quality")
+    with pytest.raises(J.sym("learning.judge", "JudgeRefused")) as refusal:
+        run_mod._guidance(run_mod.WORLD_BUCKETS, widened, "bucket")
+    assert "lead-quality" in str(refusal.value)

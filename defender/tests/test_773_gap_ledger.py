@@ -394,10 +394,14 @@ def test_producer_reenqueues_a_finding_id_mid_ledger_write_window_773(tmp_path):
         held["holder"].__exit__()
     assert "f1" in sc.pending_by_id()
     # Drive the REAL appender against the queue as the window left it. `finding_row`'s
-    # producer-side shape carries neither `subject_anchor` nor `subject_topic` — the JUDGE's
-    # own row-shape fields this appender's validation requires — so they are added here only,
-    # at this one call, to reach the append itself.
-    row = {**dict(sc.rows[0]), "subject_anchor": "f1", "subject_topic": "narrative"}
+    # producer-side shape carries neither `subject_anchor` nor `subject_topic` nor #1234's
+    # three new fields — the JUDGE's own row-shape fields this appender's validation requires —
+    # and still carries the retired `judge_outcome` the appender refuses by name, so the row is
+    # brought to the judge's shape here only, at this one call, to reach the append itself.
+    row = {k: v for k, v in dict(sc.rows[0]).items() if k != "judge_outcome"}
+    row.update({"subject_anchor": "f1", "subject_topic": "narrative",
+                "contrast_evidence": ["worlds/b/investigation.md", "worlds/a/investigation.md"],
+                "on_verdict_path": True, "world_label_doubted": False})
     appended = enqueue.append_rows(
         tmp_path / "episode", [row], state=sc.cfg.state
     )

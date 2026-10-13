@@ -1108,10 +1108,11 @@ demands:
 
   - id: vocab_lives_in__vocab_py_with_a_normalizer
     kind: seam
-    form: test
+    form: clause
     source: "D1, M4"
     binds: ['JUDGE_OUTCOME_ENUM', 'JUDGE_OUTCOME_ENUM.domain']
-    discharged_by: test_921_judge_outcome_enum_and_its_normalizer_ship_in_defender_vocab
+    status: retired
+    outcome: {nl: "RETIRED by #1234 — #1234 retired the family verdict word with `JUDGE_OUTCOME_ENUM` and `normalized_judge_outcome` (A4/A18); a retired name now gets one refusal from one home, learning/core/retired.py, pinned by judge_contrast_1234; `test_921_judge_outcome_enum_and_its_normalizer_ship_in_defender_vocab`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       `JUDGE_OUTCOME_ENUM` and its normalizer live in `defender/_vocab.py`, whose admission rule
       is "more than one schema has to agree on it" — the queue row, the family record and the
@@ -1484,10 +1485,11 @@ demands:
 
   - id: outcome_enum_normalizer_rejects_a_non_member_value
     kind: negative
-    form: test
+    form: clause
     source: "gate leaf, R4 (60-residue.md obligation)"
     binds: ['JUDGE_OUTCOME_ENUM.domain.distinguished[not-an-outcome]']
-    discharged_by: test_921_a_garbage_outcome_value_fails_the_normalizer
+    status: retired
+    outcome: {nl: "RETIRED by #1234 — #1234 retired the family verdict word with `JUDGE_OUTCOME_ENUM` and its normalizer (A4/A18), so no outcome vocabulary remains for a non-member to fall outside; `test_921_a_garbage_outcome_value_fails_the_normalizer`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       `membership_goes_through_the_shipped_normalizer` exercises case-variant and known-alias
       members (e.g. `Survived`) but has no assertion for a value outside the whole vocabulary.

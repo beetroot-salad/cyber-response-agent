@@ -351,7 +351,6 @@ pre.story { background: var(--bg-3); }
   scroll-margin-top: 96px;
 }
 .finding-detection-confirmed { border-left-color: var(--good); }
-.finding-observability { border-left-color: var(--warn); }
 .finding-lead-set { border-left-color: var(--accent); }
 .finding-head {
   display: grid;
@@ -364,7 +363,6 @@ pre.story { background: var(--bg-3); }
 }
 .finding-head .ftype { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; color: var(--code); }
 .finding-detection-confirmed .ftype { color: var(--good); }
-.finding-observability .ftype { color: var(--warn); }
 .finding-lead-set .ftype { color: var(--accent); }
 /* Actor observations: what the judge learned about the ACTOR's story, not the defender —
    same card shape as a finding, tinted with the actor accent. */

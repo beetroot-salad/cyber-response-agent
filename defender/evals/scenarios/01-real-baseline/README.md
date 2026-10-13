@@ -8,22 +8,22 @@ end-to-end as of 2026-05-10. No pre-seeded lessons; empty corpus.
 - `livetest-5710/1` — `lead-set`: investigation never tested whether the
   source-IP host (`172.22.0.10`) was itself compromised. Tightening
   variant of the actor story would survive the existing leads.
-- `livetest-5710/2` — `observability`: `defender/skills/` has no system
-  that can attest container/host integrity for internal RFC1918
-  endpoints, so the supply-chain-compromise story is structurally
-  unfalsifiable.
+
+The batch's second finding (a missing system: no way to attest
+container/host integrity for internal RFC1918 endpoints) was dropped from
+the seed by #1234: a deployment gap is reported to the user, never taught
+as a lesson, so it is no longer a finding type the curator receives.
 
 ## What "good" looks like
 
-- Two new lessons (different pitfalls — lead-gap vs missing system).
-- Lesson bodies are **case-agnostic** — no `172.22.0.10`, `livetest-5710`,
+- One new lesson (the lead-gap pitfall).
+- Lesson body is **case-agnostic** — no `172.22.0.10`, `livetest-5710`,
   `wazuh`, etc. The teaching is "for SSH-invalid-user-style bait, verify
-  source-host integrity" and "stop planning gather steps that need
-  container/runtime-integrity systems we don't have".
-- Both `forward-check` gates GOOD → committed.
+  source-host integrity".
+- The `forward-check` gate GOOD → committed.
 
 ## What would be a regression
 
-- Folding two distinct pitfalls into one lesson.
+- Splitting the one pitfall into several lessons.
 - Lesson body verbatim-quoting the finding (translation failure).
 - Lesson framing-as-good-pattern instead of pitfall.

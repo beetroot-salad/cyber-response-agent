@@ -326,6 +326,10 @@ def repo_of(folder: Path, repo: Path) -> Path:
     tenant's own repo, as `scaffold` makes one and the operator pushes it."""
     shutil.copytree(folder, repo, symlinks=True)
     git(repo, "init", "-q", "-b", "main")
+    # Keep the source immutable while a plain local clone hardlinks its objects.
+    # Git's detached auto-maintenance can otherwise repack them during the clone.
+    git(repo, "config", "maintenance.auto", "false")
+    git(repo, "config", "gc.auto", "0")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "tenant")
     return repo

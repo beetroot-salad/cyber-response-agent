@@ -1389,20 +1389,28 @@ def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_pa
     """Sixth-round finding 7: the family text put every failed world's `detail` into every
     judged world's prompt; that detail is the oracle's last refusal, quoting the rows it forged
     for that world's facts. A failed world now shows its label, reason word and failing call,
-    never its detail."""
-    from defender.learning.judge import render as render_mod
+    never its detail.
+
+    #1234: read off the prompts the real pass hands the judge (`render` returns a
+    `JudgeContext`; the prompt is the M3 layout), world c and the family call alike. World c
+    gets an (empty) oracle store: a planted world without one is malformed (A24)."""
+    from defender.tests import _judge_921 as J
 
     ep = S.judged_episode(tmp_path / "judged", labels=("a", "c"))
+    S.oracle_dir(ep, "c").mkdir(parents=True, exist_ok=True)
     S.world_record(ep, "b", call={"system": "idp", "verb": "query",
                                   "params": S.query_params("user:alice")},
                    detail='Submission refused: check 1: an unclaimed row was added '
                           '{"event_id": "e-FORGEDLEAK", "note": "FORGEDLEAK-6"}')
 
-    sections = render_mod.render(ep, "c").as_prompt_sections()
+    judge = J.scripted_judge()
+    J.grade(ep, judge=judge)
 
-    family = sections["family"]
-    assert "world b" in family, family
-    assert "FORGEDLEAK" not in "\n".join(sections.values()), family
+    world_c = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True) if a.startswith("judge:c:")]
+    assert world_c, f"world c was never graded (agent ids: {judge.agent_ids})"
+    assert all("world b" in p for p in world_c), "the failed world is not listed by its label"
+    for agent, prompt in zip(judge.agent_ids, judge.prompts, strict=True):
+        assert "FORGEDLEAK" not in prompt, f"{agent}: a failed world's detail reached the prompt"
 
 
 def test_the_oracle_and_the_verifier_are_told_the_branch_point(tmp_path):

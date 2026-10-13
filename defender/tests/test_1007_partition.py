@@ -1,79 +1,52 @@
 """#1007 — the `subject` partition, the second queue channel, and who owns a row's identity.
 
 O1/M6 splits findings by `subject` into two channels; O8/M10 keeps the DEFENDER vocabulary
-pinned while the world side stays open (15-resolutions R2); A3 settles that the PASS owns a
-row's identity and the model owns only its content.
+pinned; A3 settles that the PASS owns a row's identity and the model owns only its content.
 
-THE WORLD VOCABULARY IS OPEN, BY HUMAN DECISION (accepted gap G-3). No test in this file
-asserts a closed world set. The positive demand is the opposite one: an unlisted world bucket
-is ADMITTED, stored verbatim, and read by `subject` rather than by membership.
-
-RED AGAINST HEAD is the expected state.
+#1234 CHANGED TWO THINGS THIS FILE ONCE PINNED. A finding's subject is now the reply list it is
+filed under (`investigator_findings` -> defender, `world_findings` -> world), not a `subject`
+key the model writes; and the world vocabulary is CLOSED (M4: `unreachable`, `incoherent`,
+`mislabelled`), where #1007's G-3 had kept it open. The per-channel asymmetry is kept: each
+channel's appender admits its own vocabulary and refuses the other's.
 """
 from __future__ import annotations
 
+import inspect
 import json
-import shutil
 import threading
-from pathlib import Path
 
 import pytest
 
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState
-from defender.tests import _judge_921 as J
 from defender.tests import _world_1007 as W
 from defender.tests._curator1134 import author_trees
+from defender.tests.judge_contrast_1234 import _spec1234 as S
 
+#: The finding id every hand-fed row here carries unless a scenario says otherwise.
+FID = f"{W.EPISODE_ID}/b/0/0"
 
-#: A pointer the FAMILY-level call is actually shown. Its default evidence is
-#: `samples.yaml#<system>`, and `_build_family_prompt` renders no sample section at
-#: all — so a family finding citing one is grounded in a document that call never saw,
-#: which `_resolves` now refuses for `scope="family"`. These cells are about `world`,
-#: `source_run_dir` and who mints the id; the pointer is incidental to every one of them.
-FAMILY_EVIDENCE = ["outcome.yaml#outcome"]
-
-
-def episode_with_worlds(tmp_path: Path, monkeypatch, *, labels=("b",)) -> Path:
-    _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
-    docs = [W.base_world()] + [W.world_doc(x) for x in labels]
-    ep = W.episode(tmp_path, doc=W.family_doc(worlds=docs), root=root)
-    for label in labels:
-        W.archived_world(ep, label)
-        W.write_served(ep, label, [W.served_row(world=label)])
-    W.write_outcome(ep)
-    W.write_samples(ep)
-    return ep
+#: The three keys only a DEFENDER row carries (#1234 M7); the rest is the head both share.
+DEFENDER_ONLY = (S.CONTRAST, S.ON_PATH, S.DOUBT)
 
 
 def queue_row(**over) -> dict:
-    """One twelve-key defender queue row, as `enqueue._build_row` mints it, plus `subject`."""
-    row = {
-        "schema_version": 1,
-        "finding_id": f"{W.EPISODE_ID}/b/0/0",
-        "run_id": W.EPISODE_ID,
-        "alert_rule_key": "rule-5710",
-        "direction": "family",
-        "subject": W.SUBJECT_DEFENDER,
-        "type": "lead-set",
-        "subject_anchor": "lead l-001",
-        "subject_topic": "coverage",
-        "finding": "the sibling never asked — no query named the corpus",
-        "judge_outcome": "survived",
-        "citations": [],
-        "source_run_dir": f"episodes/{W.EPISODE_ID}/worlds/b",
-    }
-    row.update(over)
-    return row
+    """One defender queue row as `enqueue.build_finding_row` mints it (#1234's shape:
+    `contrast_evidence`, `on_verdict_path`, `world_label_doubted`; no `judge_outcome`)."""
+    over.setdefault("type", "lead-set")
+    return S.defender_row(over.pop("finding_id", FID), **over)
 
 
 def world_row(**over) -> dict:
-    """One questioner-channel row: a full `FindingRow` plus the four world-lane fields."""
-    row = queue_row(
-        subject=W.SUBJECT_WORLD, direction=W.SUBJECT_WORLD, type="fact-story-gap",
-        finding_id=f"{W.EPISODE_ID}/b/0/0",
-        world="b", systems=[W.SYSTEM], provenance="model")
-    row.update(over)
-    return row
+    """One questioner-channel row: the shared finding-row head plus `world`, `systems`,
+    `provenance` and `subject` — a design world finding (a plan-class citation)."""
+    return S.world_row(over.pop("finding_id", FID), **over)
+
+
+def world_reply(**kw) -> str:
+    """A world-scope reply's TEXT carrying the given filed lists (bucket `none` by default)."""
+    kw.setdefault("bucket", S.NO_BUCKET)
+    kw.setdefault("systems", [])
+    return S.as_text(S.world_reply(**kw))
 
 
 # ---------------------------------------------------------------------------------------
@@ -81,29 +54,32 @@ def world_row(**over) -> dict:
 # ---------------------------------------------------------------------------------------
 
 
-def test_every_finding_carries_a_subject(tmp_path):
-    """A finding without a `subject` is refused; each of the two literals is admitted.
+def test_every_finding_carries_its_subject_by_the_list_it_is_filed_under(tmp_path):
+    """A finding's subject is the reply list it is filed under, and each list admits only its
+    own subject's buckets (#1234 M4 replaced the `subject` key with the three filed lists).
 
-    Observably true: `validate_reply` refuses a reply whose finding names no subject, and
-    admits one naming `defender` and one naming `world`, carrying the value through to the
-    parsed finding. The partition is the whole of M6 — a finding whose subject nobody stated is
-    a finding no channel can route.
+    Observably true: `validate_reply` parses an `investigator_findings` entry as an
+    investigator (defender) finding and a `world_findings` entry as a world finding, each
+    keeping its bucket; a world bucket filed as an investigator finding, and an investigator
+    bucket filed as a world finding, are both refused. The partition is the whole of M6 — a
+    finding no list claims is a finding no channel can route.
 
-    What failure looks like: `subject` defaults to `defender`, and every world finding the
-    judge ever writes is authored into the DEFENDER corpus as advice about an investigation.
+    What failure looks like: one list admits both vocabularies, and a world finding the judge
+    writes is authored into the DEFENDER corpus as advice about an investigation.
     """
     run = W.mod("learning.judge.run")
-    refusals = W.refusals()
 
-    for subject in (W.SUBJECT_DEFENDER, W.SUBJECT_WORLD):
-        parsed = run.validate_reply(W.reply_text(findings=[W.finding(
-            subject=subject, bucket="lead-set" if subject == W.SUBJECT_DEFENDER else "a-bucket")]))
-        assert parsed.findings[0].subject == subject
+    parsed = run.validate_reply(world_reply(investigator=[S.inv("lead-set")],
+                                            world=[S.wf("incoherent")]))
+    assert [f.bucket for f in parsed.investigator_findings] == ["lead-set"]
+    assert [f.bucket for f in parsed.world_findings] == ["incoherent"]
+    assert isinstance(parsed.world_findings[0], run.WorldFinding)
+    assert isinstance(parsed.investigator_findings[0], run.InvestigatorFinding)
 
-    bare = W.finding()
-    bare.pop("subject")
-    with pytest.raises(refusals):
-        run.validate_reply(W.reply_text(findings=[bare]))
+    with pytest.raises(W.refusals()):
+        run.validate_reply(world_reply(investigator=[S.inv("incoherent")]))
+    with pytest.raises(W.refusals()):
+        run.validate_reply(world_reply(world=[S.wf("lead-set")]))
 
 
 def test_world_row_refused_at_the_defender_appender(tmp_path):
@@ -178,30 +154,37 @@ def test_a_defender_row_with_direction_world_is_refused_at_the_appender_too(tmp_
     assert W.queue_rows(paths, FINDINGS) == [], "the disagreeing row still landed"
 
 
-def test_a_world_row_type_is_not_gated_against_the_defender_vocabulary(tmp_path):
-    """The questioner channel's appender does NOT check a row's `type` against
-    `QUEUEABLE_FINDING_TYPES`.
+def test_each_channel_gates_a_row_type_against_its_own_vocabulary(tmp_path):
+    """Each channel's appender checks a row's `type` against ITS OWN vocabulary: the
+    questioner channel admits the world-finding buckets, the defender channel the queueable
+    defender types, and neither admits the other's (#1234 M4 closed the world side; #1007 R2's
+    per-channel asymmetry is kept).
 
-    Observably true: a world row whose `type` is a string no defender vocabulary contains is
-    appended and stored verbatim, while the same string on a `subject: defender` row is
-    refused. The vocabularies are asymmetric on purpose (R2) and the asymmetry has to be
-    enforced per channel, not per row shape.
+    Observably true: a world row typed `incoherent` is appended and stored verbatim, while the
+    same string on a defender row is refused; a world row typed with a defender type, or with
+    a string no vocabulary holds, is refused.
 
-    What failure looks like: the shared validator is reused unchanged, so every world finding
-    the judge writes is refused as an unqueueable type — the open vocabulary closed by
-    accident, one function away from the decision that opened it.
+    What failure looks like: one shared validator, so either every world finding is refused as
+    an unqueueable defender type, or a defender type rides onto the questioner channel and the
+    questioner corpus learns from advice about an investigation.
     """
     enqueue = W.mod("learning.judge.enqueue")
     cfg = W.mod("learning.core.config")
     paths = W.loop_paths(tmp_path)
-    novel = "a-bucket-nobody-listed"
-    assert novel not in cfg.QUEUEABLE_FINDING_TYPES
+    assert "incoherent" not in cfg.QUEUEABLE_FINDING_TYPES
 
-    enqueue.append_world_rows(tmp_path, [world_row(type=novel)], state=W.learning_state(paths))
+    enqueue.append_world_rows(tmp_path, [world_row(type="incoherent")],
+                              state=W.learning_state(paths))
 
-    assert [r["type"] for r in W.queue_rows(paths, QUESTIONER_FINDINGS)] == [novel]
+    assert [r["type"] for r in W.queue_rows(paths, QUESTIONER_FINDINGS)] == ["incoherent"]
     with pytest.raises(W.refusals()):
-        enqueue.append_rows(tmp_path, [queue_row(type=novel)], state=W.learning_state(paths))
+        enqueue.append_rows(tmp_path, [queue_row(type="incoherent")],
+                            state=W.learning_state(paths))
+    for foreign in ("lead-set", "a-bucket-nobody-listed"):
+        with pytest.raises(W.refusals()):
+            enqueue.append_world_rows(tmp_path, [world_row(type=foreign, finding_id="x/b/0/9")],
+                                      state=W.learning_state(paths))
+    assert len(W.queue_rows(paths, QUESTIONER_FINDINGS)) == 1
 
 
 def test_lessons_gate_refuses_direction_world_loudly(tmp_path):
@@ -252,36 +235,39 @@ def test_lessons_gate_still_passes_a_family_row(tmp_path):
 
 
 def test_the_vocabulary_census_pins_the_defender_sets_to_their_members(tmp_path):
-    """The three surviving defender vocabularies keep exactly their current members.
+    """The surviving defender vocabularies keep exactly their members — and `observability` is
+    no longer one (#1234 M7, P-a: a deployment gap is never teachable).
 
     Observably true: `PIPELINE_FINDING_TYPES`, `FAMILY_ONLY_FINDING_TYPES` and their union
-    `QUEUEABLE_FINDING_TYPES` are the exact sets they are today. This is a non-regression pin
-    on a loop already in use: no world bucket joins them, and the two names the design doc also
-    listed (`ALL_FINDING_TYPES`, `BENIGN_ALL_FINDING_TYPES`) do not exist and are not restored.
+    `QUEUEABLE_FINDING_TYPES` are the exact sets below, no world bucket joins them, and the two
+    names the #1007 design doc also listed (`ALL_FINDING_TYPES`, `BENIGN_ALL_FINDING_TYPES`)
+    do not exist.
 
     What failure looks like: a world bucket is added to the queueable set "so the appender lets
-    it through", which re-opens the defender lane to strings the defender curator cannot author
-    from — the exact coupling R2's asymmetry exists to prevent.
+    it through", or `observability` comes back and deployment gaps teach the defender again.
     """
     cfg = W.mod("learning.core.config")
+    run = W.mod("learning.judge.run")
 
-    assert set(cfg.PIPELINE_FINDING_TYPES) == {
-        "lead-set", "lead-quality", "analyze-discipline", "observability"}
+    assert set(cfg.PIPELINE_FINDING_TYPES) == {"lead-set", "lead-quality", "analyze-discipline"}
+    assert "observability" not in cfg.QUEUEABLE_FINDING_TYPES
     assert set(cfg.FAMILY_ONLY_FINDING_TYPES) == {"decision-discipline"}
     assert cfg.QUEUEABLE_FINDING_TYPES == (
         cfg.PIPELINE_FINDING_TYPES | cfg.FAMILY_ONLY_FINDING_TYPES)
+    assert not set(run.WORLD_FINDING_BUCKETS) & set(cfg.QUEUEABLE_FINDING_TYPES)
     for gone in ("ALL_FINDING_TYPES", "BENIGN_ALL_FINDING_TYPES"):
         assert not hasattr(cfg, gone), f"{gone} was restored; R2 declined it"
 
 
-def test_the_bucket_enum_is_selected_by_subject(tmp_path):
-    """`_BUCKET_ENUM` becomes a per-SUBJECT lookup: the defender arm is the queueable set, the
-    world arm admits any string.
+def test_the_bucket_vocabulary_is_selected_by_subject(tmp_path):
+    """The reply's two finding lists have one vocabulary each: the investigator list is the
+    queueable defender set, the world list is #1234's three world-finding buckets.
 
-    Observably true: the selector answers with `frozenset(QUEUEABLE_FINDING_TYPES)` for
-    `defender` and with an arm that admits an arbitrary string for `world`. It is the SELECTOR
-    that is per subject, not two hand-written validators — one lookup means the two arms cannot
-    drift into disagreeing about which subject they are validating.
+    Observably true: `run.INVESTIGATOR_BUCKETS` is `frozenset(QUEUEABLE_FINDING_TYPES)` and
+    `run.WORLD_FINDING_BUCKETS` is exactly `{unreachable, incoherent, mislabelled}` — one lookup
+    per subject, so the validator and the appenders cannot drift into disagreeing about which
+    subject they validate (the questioner appender reads `is_world_finding_bucket`, the same
+    test the reply validator reads).
 
     What failure looks like: two copies of the membership test, one of which keeps checking the
     defender set for a world finding.
@@ -289,10 +275,11 @@ def test_the_bucket_enum_is_selected_by_subject(tmp_path):
     run = W.mod("learning.judge.run")
     cfg = W.mod("learning.core.config")
 
-    assert run._BUCKET_ENUM[W.SUBJECT_DEFENDER] == frozenset(cfg.QUEUEABLE_FINDING_TYPES)
-    world_arm = run._BUCKET_ENUM[W.SUBJECT_WORLD]
-    assert "any-string-at-all" in world_arm, (
-        "the world arm of the selector is a closed set — R2 opened it deliberately")
+    investigator, world = run.INVESTIGATOR_BUCKETS, run.WORLD_FINDING_BUCKETS
+    assert investigator == frozenset(cfg.QUEUEABLE_FINDING_TYPES)
+    assert world == frozenset({"unreachable", "incoherent", "mislabelled"})
+    assert all(run.is_world_finding_bucket(b) for b in run.WORLD_FINDING_BUCKETS)
+    assert not any(run.is_world_finding_bucket(b) for b in run.INVESTIGATOR_BUCKETS)
 
 
 def test_a_defender_family_row_is_gated_exactly_as_today(tmp_path):
@@ -352,12 +339,12 @@ def test_the_questioner_channel_declares_its_own_append_lock_and_shares_the_drai
 
 
 def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
-    """A questioner-channel row is a full `FindingRow` plus `world`, `systems`, `provenance`
-    and `subject` — not a reduced shape of its own (#1224: `systems` replaced `pattern` and
-    `holding_system`).
+    """A questioner-channel row is a full `FindingRow` head plus `world`, `systems`,
+    `provenance` and `subject` — not a reduced shape of its own (#1224: `systems` replaced
+    `pattern` and `holding_system`; #1234: the three defender-only fields stay off it).
 
-    Observably true: the row that lands carries every key the defender row carries (so any
-    reader of a finding row can read it) with `run_id` the episode id, `finding_id` the
+    Observably true: the row that lands carries every key of the head a defender row carries
+    (so any reader of a finding row can read it) with `run_id` the episode id, `finding_id` the
     idempotency key and `direction: world`, plus the four world-lane fields.
 
     What failure looks like: a bespoke five-key row. Every shared reader — the drain's
@@ -371,7 +358,8 @@ def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
 
     landed = W.queue_rows(paths, QUESTIONER_FINDINGS)[0]
     for key in queue_row():
-        assert key in landed, f"the world row is missing the finding-row key {key!r}"
+        if key not in DEFENDER_ONLY:
+            assert key in landed, f"the world row is missing the finding-row key {key!r}"
     assert landed["direction"] == W.SUBJECT_WORLD
     assert landed["run_id"] == W.EPISODE_ID
     for key in ("world", "systems", "provenance", "subject"):
@@ -399,84 +387,90 @@ def test_two_appends_of_one_finding_id_land_once(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# The open world vocabulary, made mechanical
+# The closed world vocabulary (#1234 M4), made mechanical
 # ---------------------------------------------------------------------------------------
 
 
 def test_a_non_string_world_bucket_is_refused(tmp_path):
-    """A world bucket must be a STRING — openness is about which strings, not about which types.
+    """A world bucket must be a STRING of the vocabulary — never a list, number or mapping.
 
-    Observably true: `bucket: ["lead-set"]` on a `subject: world` finding is refused at
-    `validate_reply`. The value becomes a queue row's `type` and a lesson's frontmatter key; an
-    unhashable or non-string value there raises `TypeError` out of a membership test whose
-    whole contract is to answer with this design's refusal.
+    Observably true: `bucket: ["incoherent"]` (and the other non-strings) on a world finding is
+    refused at `validate_reply`. The value becomes a queue row's `type` and a lesson's
+    frontmatter key; an unhashable value there raises `TypeError` out of a membership test
+    whose whole contract is to answer with this design's refusal.
 
-    What failure looks like: the open arm accepts anything, and a list-valued bucket reaches
-    the appender, where `row_type not in QUEUEABLE_FINDING_TYPES` raises the wrong class and
-    takes a whole batch down.
+    What failure looks like: the membership test meets a list-valued bucket and raises the
+    wrong class, taking a whole batch down.
     """
     run = W.mod("learning.judge.run")
 
-    for bad in (["fact-story-gap"], 7, {"a": 1}, None):
+    run.validate_reply(world_reply(world=[S.wf("incoherent")]))      # the control
+    for bad in (["incoherent"], 7, {"a": 1}, None):
         with pytest.raises(W.refusals()):
-            run.validate_reply(W.reply_text(findings=[W.world_finding(bucket=bad)]))
+            run.validate_reply(world_reply(world=[S.wf(bad)]))
 
 
-def test_an_empty_or_whitespace_world_bucket_is_admitted_and_stored_verbatim(tmp_path):
-    """An empty or whitespace-only world bucket is ADMITTED and stored exactly as written.
+def test_an_empty_whitespace_or_unlisted_world_bucket_is_refused_never_normalised(tmp_path):
+    """An empty, whitespace-only or unlisted world bucket is REFUSED — the vocabulary is
+    closed (#1234 M4 replaced #1007's open one), and nothing is trimmed or coerced into it.
 
-    Observably true: `bucket: ""` and `bucket: "   "` both survive `validate_reply` with the
-    string unchanged — no trim, no coercion to a default. The vocabulary is open this round by
-    human decision, and "unusable" is a judgement a later reader makes, not one this validator
-    is authorised to make.
+    Observably true: `""`, `"   "`, `"\t\n"` and a string no list holds are each refused at
+    `validate_reply`, while every one of the three world-finding buckets is admitted and kept
+    exactly as written.
 
-    What failure looks like: the validator normalises or rejects, and the very drift the human
-    wanted to OBSERVE for a few live episodes is filtered out before anyone can see it.
+    What failure looks like: the validator normalises (`"  incoherent "` becomes `incoherent`)
+    or admits a drifting string, and the questioner queue carries a type its routing and its
+    curator have no rule for.
     """
     run = W.mod("learning.judge.run")
 
-    for raw in ("", "   ", "\t\n"):
-        parsed = run.validate_reply(W.reply_text(findings=[W.world_finding(bucket=raw)]))
-        assert parsed.findings[0].bucket == raw, (
-            f"the bucket {raw!r} came back as {parsed.findings[0].bucket!r} — it was "
-            "normalised, which is a vocabulary decision this round declined to take")
+    for bucket in sorted(run.WORLD_FINDING_BUCKETS):
+        parsed = run.validate_reply(world_reply(world=[S.wf(bucket)]))
+        assert parsed.world_findings[0].bucket == bucket
+    for raw in ("", "   ", "\t\n", "shape-invention"):
+        with pytest.raises(W.refusals()):
+            run.validate_reply(world_reply(world=[S.wf(raw)]))
 
 
-def test_a_world_bucket_spelled_like_a_defender_bucket_is_admitted_and_read_by_subject(
+def test_a_world_finding_cannot_borrow_a_defender_bucket_and_the_list_decides_the_channel(
         tmp_path):
-    """A world finding may spell its bucket exactly like a defender one; `subject` — never the
-    string — decides which vocabulary applies.
+    """A world finding may not spell its bucket like a defender one; the LIST a finding is
+    filed under — never the string — decides which channel its row is built for.
 
-    Observably true: `subject: world, bucket: lead-set` validates and routes to the questioner
-    channel, while `subject: defender, bucket: lead-set` routes to the findings channel. The
-    two rows are distinguishable by subject alone.
+    Observably true: a world finding bucketed `lead-set` is refused at `validate_reply`, and
+    the questioner appender refuses a `lead-set` world row; the same `lead-set` filed as an
+    investigator finding validates, and a defender row of that type lands on the findings
+    channel.
 
-    What failure looks like: the bucket string is used to infer the subject. The moment a
-    model spells a world finding `lead-quality`, the row is authored as a defender lesson.
+    What failure looks like: the bucket string is used to infer the subject, and the moment a
+    model spells a world finding `lead-quality` the row is authored as a defender lesson.
     """
     run = W.mod("learning.judge.run")
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
-    parsed = run.validate_reply(W.reply_text(findings=[W.world_finding(bucket="lead-set")]))
-    assert parsed.findings[0].subject == W.SUBJECT_WORLD
-    assert parsed.findings[0].bucket == "lead-set"
+    with pytest.raises(W.refusals()):
+        run.validate_reply(world_reply(world=[S.wf("lead-set")]))
+    parsed = run.validate_reply(world_reply(investigator=[S.inv("lead-set")]))
+    assert [f.bucket for f in parsed.investigator_findings] == ["lead-set"]
 
-    enqueue.append_world_rows(tmp_path, [world_row(type="lead-set")],
-                              state=W.learning_state(paths))
+    with pytest.raises(W.refusals()):
+        enqueue.append_world_rows(tmp_path, [world_row(type="lead-set")],
+                                  state=W.learning_state(paths))
     enqueue.append_rows(tmp_path, [queue_row(type="lead-set")], state=W.learning_state(paths))
-    assert len(W.queue_rows(paths, QUESTIONER_FINDINGS)) == 1
+    assert W.queue_rows(paths, QUESTIONER_FINDINGS) == []
     assert len(W.queue_rows(paths, FINDINGS)) == 1
 
 
-def test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim(tmp_path):
-    """`subject` is exactly two string literals. No case-fold, no trim, anywhere.
+def test_a_near_miss_subject_or_bucket_is_refused_with_no_case_fold_and_no_trim(tmp_path):
+    """`subject` is exactly two string literals, and a world bucket exactly its spelling. No
+    case-fold, no trim, anywhere.
 
-    Observably true: `"World"`, `" world"`, `"world "` and `"DEFENDER"` are all refused at the
-    validator, and the same near-misses are refused at the questioner appender. Refusing at
-    both is the point: the appender is the last screen (the questioner channel's own gate is
-    idempotency-only), and a normalisation at one site and not the other is how the selector
-    and the guard come to disagree about which channel a row belongs on.
+    Observably true: near-miss subjects (`"World"`, `" world"`, `"world "`, `"DEFENDER"`, ...)
+    are refused at the questioner appender, and near-miss buckets (`"Unreachable"`,
+    `" incoherent"`, `"mislabelled "`) at the reply validator. The appender is the last screen
+    (the questioner channel's own gate is idempotency-only), and a normalisation at one site and
+    not the other is how the selector and the guard come to disagree about a row.
 
     What failure looks like: `subject.strip().lower()` at one site. A row then validates as
     `world` and appends as something the defender gate reads.
@@ -487,10 +481,11 @@ def test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim(tmp_path):
 
     for near in ("World", " world", "world ", "DEFENDER", "defender\n", "worlds"):
         with pytest.raises(W.refusals()):
-            run.validate_reply(W.reply_text(findings=[W.finding(subject=near)]))
-        with pytest.raises(W.refusals()):
             enqueue.append_world_rows(tmp_path, [world_row(subject=near)],
                                       state=W.learning_state(paths))
+    for near in ("Unreachable", " incoherent", "mislabelled ", "INCOHERENT"):
+        with pytest.raises(W.refusals()):
+            run.validate_reply(world_reply(world=[S.wf(near)]))
     assert W.queue_rows(paths, QUESTIONER_FINDINGS) == []
 
 
@@ -554,24 +549,27 @@ def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
     """`world` is stamped from the draw's own world directory; a model-supplied `world` is
     ignored.
 
-    Observably true: a per-world finding whose reply claims `world: c` lands on the queue with
-    `world: b`, because b is the world that draw was about. Identity belongs to the pass; the
-    model owns content only.
+    Observably true: b's design finding claiming `world: c`, and c's claiming `world: b`, land
+    on the questioner queue stamped `b` and `c` respectively, each id naming its own world,
+    because those are the worlds the draws were about. Identity belongs to the pass; the model
+    owns content only.
 
     What failure looks like: a model relabels its own finding onto a sibling, and a lesson is
     authored about a world that never had the property described.
     """
-    paths = W.loop_paths(tmp_path)
-    ep = episode_with_worlds(tmp_path, monkeypatch, labels=("b", "c"))
-    judge = W.FakeJudge(W.reply_document(findings=[W.world_finding(world="c")]))
+    built = W.contrast_family(tmp_path, monkeypatch)
+    judge = S.judge({
+        "b": S.world_reply(S.NO_BUCKET, [], world=[S.wf(world="c")]),
+        "c": S.world_reply(S.NO_BUCKET, [], world=[S.wf(evidence=[S.plan_ptr("c")],
+                                                        world="b")])})
 
-    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
+    S.grade(built, judge)
 
-    rows = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS) if r["provenance"] == "model"]
+    rows = [r for r in S.questioner_queue() if r["provenance"] == "model"]
     assert {r["world"] for r in rows} == {"b", "c"}, (
         f"the model's own `world` value reached the row: {[r['world'] for r in rows]}")
     for row in rows:
-        assert row["world"] in row["finding_id"], (
+        assert row["finding_id"].split("/")[1] == row["world"], (
             f"row {row['finding_id']} is stamped for world {row['world']!r} — the id and the "
             "stamp name different worlds")
 
@@ -579,29 +577,23 @@ def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
 def test_every_family_level_finding_carries_a_null_world(tmp_path, monkeypatch):
     """A family-level finding is about the FAMILY, so its `world` is null.
 
-    Observably true: a finding from the family draw lands with `world: None` and
-    `source_run_dir` naming the episode dir rather than a world's archive. This is one of the
-    two structural pins that survive the open vocabulary — the bucket clause of O6's falsifier
-    was struck (A1) because the family reply is itself `subject: world` and takes the freeform
-    arm, so it cannot fire.
+    Observably true: a design finding from the family call (a plan pointer at the family-level
+    part of the manifest) lands with `world: None` and `source_run_dir` naming the episode dir
+    rather than a world's archive.
 
     What failure looks like: the family finding is stamped onto whichever world happened to be
     drawn last, and a family-level observation is authored as a lesson about one world.
     """
-    paths = W.loop_paths(tmp_path)
-    ep = episode_with_worlds(tmp_path, monkeypatch, labels=("b", "c"))
-    judge = W.FakeJudge(W.reply_document(
-        findings=[W.world_finding(bucket="undiscriminating-family",
-                                  evidence=FAMILY_EVIDENCE)]))
+    built = W.contrast_family(tmp_path, monkeypatch)
+    judge = S.judge({S.FAMILY: S.family_reply(world=[S.wf(evidence=[S.plan_ptr()])])})
 
-    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
+    S.grade(built, judge)
 
-    family_rows = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
-                   if "family" in r["finding_id"]]
+    family_rows = [r for r in S.questioner_queue() if r["finding_id"].split("/")[1] == "family"]
     assert family_rows, "the family draw enqueued nothing at all"
     for row in family_rows:
         assert row["world"] is None, f"a family finding is stamped world={row['world']!r}"
-        assert row["source_run_dir"].endswith(ep.name), (
+        assert row["source_run_dir"].endswith(built.ep.name), (
             f"a family finding's source_run_dir is {row['source_run_dir']!r}, not the episode")
 
 
@@ -618,21 +610,18 @@ def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
     same episode produce two ids for one finding — defeating the idempotency the whole queue
     keys on.
     """
-    paths = W.loop_paths(tmp_path)
-    ep = episode_with_worlds(tmp_path, monkeypatch)
-    judge = W.FakeJudge(W.reply_document(findings=[
-        W.world_finding(bucket="undiscriminating-family", evidence=FAMILY_EVIDENCE),
-        W.world_finding(bucket="a-second-family-reading", evidence=FAMILY_EVIDENCE),
-    ]))
+    built = W.contrast_family(tmp_path, monkeypatch)
+    judge = S.judge({S.FAMILY: S.family_reply(world=[
+        S.wf("unreachable", evidence=[S.plan_ptr()]),
+        S.wf("incoherent", evidence=[S.plan_ptr()], finding_id="model-chosen")])})
 
-    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
+    S.grade(built, judge)
 
-    ids = [r["finding_id"] for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
-           if "/family/" in r["finding_id"]]
-    assert ids, "no family-keyed row was enqueued"
+    ids = [r["finding_id"] for r in S.questioner_queue() if "/family/" in r["finding_id"]]
+    assert len(ids) == 2, f"the two family findings did not both reach the queue: {ids}"
     for fid in ids:
         episode_id, label, draw, index = fid.split("/")
-        assert episode_id == ep.name, f"{fid} names episode {episode_id!r}"
+        assert episode_id == built.ep.name, f"{fid} names episode {episode_id!r}"
         assert label == "family", f"{fid} is keyed on world {label!r}, not the family"
         assert draw.isdigit(), f"{fid}'s draw coordinate is {draw!r}"
         assert index.isdigit(), f"{fid}'s finding index is {index!r}"
@@ -653,14 +642,12 @@ def test_direction_is_derived_from_subject_so_disagreement_is_unrepresentable(tm
     places, and a `subject: world` / `direction: family` row is authored as a defender lesson.
     """
     enqueue = W.mod("learning.judge.enqueue")
-    import inspect
 
-    for subject, expected in ((W.SUBJECT_WORLD, W.SUBJECT_WORLD),
-                              (W.SUBJECT_DEFENDER, "family")):
+    for subject, finding, expected in ((W.SUBJECT_WORLD, S.wf(), W.SUBJECT_WORLD),
+                                       (W.SUBJECT_DEFENDER, S.inv(), "family")):
         row = enqueue.build_finding_row(
             run_id=W.EPISODE_ID, label="b", draw="0", index=0, subject=subject,
-            finding=W.finding(subject=subject), alert_rule_key="rule-5710",
-            judge_outcome="survived")
+            finding=finding, alert_rule_key="rule-5710")
         assert row["subject"] == subject
         assert row["direction"] == expected, (
             f"subject={subject!r} built direction={row['direction']!r}")
@@ -704,69 +691,68 @@ def test_a_world_row_naming_no_system_is_refused_at_the_queue(tmp_path):
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
-    with pytest.raises(W.refusals(), match="names no system"):
+    with pytest.raises(W.refusals(), match="name no system"):
         enqueue.append_world_rows(tmp_path, [world_row(systems=[])],
                                   state=W.learning_state(paths))
     assert W.queue_rows(paths, QUESTIONER_FINDINGS) == []
 
 
-def test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings(
+def test_a_not_measured_world_queues_no_defender_row_and_still_queues_its_world_findings(
         tmp_path, monkeypatch):
-    """The world lane does NOT share the defender lane's unqueueable early return.
+    """The world lane does NOT share the defender lane's refusal: a world the judge files
+    `unreachable` is not measured (#1234 I4), so it queues no defender row — and its design
+    world finding still reaches the questioner (I5).
 
-    Observably true: an episode whose defender findings are all unqueueable (a `discard`
-    outcome, which IS the family's verdict word and is never a defender failure to author from)
-    still enqueues its world findings. The two lanes answer different questions and one lane's
-    early return must not take the other with it.
+    Observably true: world b's reply carries an investigator finding and an `unreachable` world
+    finding citing the plan; the defender queue holds no row from b, while the questioner queue
+    holds exactly the `unreachable` one. (#1007 pinned this over the retired `discard` word;
+    #1234's not-measured rule is the per-world rule that replaced it.)
 
-    What failure looks like: `if not defender_rows: return` above both appends. The worlds that
-    produce the most interesting questioner findings — the ones the defender lane declines to
-    grade — are exactly the ones silently dropped.
+    What failure looks like: one early return above both appends. The worlds that produce the
+    most interesting questioner findings — the ones the defender lane declines to grade — are
+    exactly the ones silently dropped.
     """
-    paths = W.loop_paths(tmp_path)
-    ep = episode_with_worlds(tmp_path, monkeypatch)
-    judge = W.FakeJudge(W.reply_document(
-        outcome="discard",
-        findings=[W.finding(), W.world_finding(bucket="a-world-reading")]))
+    built = W.contrast_family(tmp_path, monkeypatch)
+    judge = S.judge({"b": S.world_reply("lead-quality", ["idp"], investigator=[S.inv()],
+                                        world=[S.wf("unreachable")])})
 
-    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
+    S.grade(built, judge)
 
-    assert [r for r in W.queue_rows(paths, FINDINGS)] == [], (
-        "a discard episode still enqueued a defender row")
-    assert [r["type"] for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
-            if r["provenance"] == "model"] == ["a-world-reading"], (
-        "the discard outcome took the world findings with it")
+    assert S.from_world(S.defender_queue(), "b") == [], (
+        "a not-measured world still enqueued a defender row")
+    assert [r["type"] for r in S.from_world(S.questioner_queue(), "b")
+            if r["provenance"] == "model"] == ["unreachable"], (
+        "the not-measured world's design finding was taken with the defender rows")
 
 
 def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkeypatch):
     """A world that cannot be graded at all enqueues no findings of EITHER subject.
 
-    Observably true: a world missing its archived record is `ungradable`, and neither channel
-    receives a row for it — while a gradable sibling on the SAME drive enqueues on both. The
-    control is what makes the emptiness a fact about the ungradable world rather than about a
-    queue nothing ever reaches.
+    Observably true: a world whose archive carries no `report.md` fails the usability read
+    (#1234 A3) and is ungradable, and neither channel receives a row for it — while a gradable
+    sibling on the SAME pass enqueues on both. The control is what makes the emptiness a fact
+    about the ungradable world rather than about a queue nothing ever reaches.
 
     What failure looks like: the world lane runs anyway over an archive that is not there, and
     the questioner corpus learns that a world it cannot read is badly authored.
     """
-    paths = W.loop_paths(tmp_path)
-    ep = episode_with_worlds(tmp_path, monkeypatch, labels=("b", "c"))
-    for stray in (ep / "worlds" / "c").glob("*"):
-        if stray.is_dir():
-            shutil.rmtree(stray)
-        else:
-            stray.unlink()
-    judge = W.FakeJudge(W.reply_document(
-        findings=[W.finding(), W.world_finding(bucket="a-world-reading")]))
+    built = W.contrast_family(tmp_path, monkeypatch, S.triad(c={"reached": None}))
+    reply = S.world_reply("lead-quality", ["idp"], investigator=[S.inv()],
+                          world=[S.wf("mislabelled")])
+    judge = S.judge({"b": reply, "c": reply})
 
-    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
+    S.grade(built, judge)
 
-    for channel in (FINDINGS, QUESTIONER_FINDINGS):
-        rows = [r for r in W.queue_rows(paths, channel) if r.get("world") == "c" or "/c/" in
-                r.get("finding_id", "")]
-        assert rows == [], f"an ungradable world enqueued {rows} on {channel.queue}"
-    assert any("/b/" in r["finding_id"] for r in W.queue_rows(paths, FINDINGS)), (
-        "the control failed — the gradable sibling enqueued nothing either")
+    assert S.row(built, "c").get("ungradable") or S.row(built, "c").get("malformed"), (
+        f"world c without a report was graded: {S.row(built, 'c')}")
+    assert not judge.called("c"), "the ungradable world was put to the judge"
+    for name, queue in (("defender", S.defender_queue()), ("questioner", S.questioner_queue())):
+        rows = [r for r in queue if r.get("world") == "c" or "/c/" in r.get("finding_id", "")]
+        assert rows == [], f"an ungradable world enqueued {rows} on the {name} channel"
+    assert S.from_world(S.defender_queue(), "b"), (
+        "the control failed — the gradable sibling enqueued no defender row")
+    assert S.from_world(S.questioner_queue(), "b"), (
+        "the control failed — the gradable sibling enqueued no questioner row")
 
 
 def test_a_questioner_queue_row_carries_no_defender_verdict_word(tmp_path):
