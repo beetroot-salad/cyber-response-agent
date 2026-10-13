@@ -399,7 +399,7 @@ def verified_document(bound: _io.Bound, alert_name: str | PurePath,
     record = None if text is None else parse_alert_record(text)
     if record is None:
         return None
-    raw = bound.read_bytes(alert_name).data
+    raw = bound.read_bytes(alert_name).data  # lint-whole-read: ok — Bound enforces READ_LIMIT and no-follow guards
     if not _matches_record(raw, record):
         return None
     assert raw is not None

@@ -48,7 +48,7 @@ def test_bound_bytes_preserve_binary_and_newlines(tmp_path):
 
 
 @pytest.mark.parametrize("plant", ["symlink", "hardlink", "fifo", "directory", "missing", "oversize"])
-def test_bound_bytes_enforce_read_guards(tmp_path, monkeypatch, plant):
+def test_bound_bytes_enforce_read_guards(tmp_path, plant):
     source = tmp_path / "source"
     source.write_bytes(b"12345")
     target = tmp_path / "alert"
@@ -61,8 +61,8 @@ def test_bound_bytes_enforce_read_guards(tmp_path, monkeypatch, plant):
     elif plant == "directory":
         target.mkdir()
     elif plant == "oversize":
-        target.write_bytes(b"12345")
-        monkeypatch.setattr(_io, "READ_LIMIT", 4)
+        with target.open("wb") as stream:
+            stream.truncate(_io.READ_LIMIT + 1)
     with _io.bind(tmp_path) as bound:
         read = bound.read_bytes("alert")
         assert read.data is None
