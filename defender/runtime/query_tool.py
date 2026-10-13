@@ -35,11 +35,10 @@ from defender.scripts.gather_tools.record_query import (
     RejectionBudgetTrip,
     RepeatTrip,
     append_query_row,
-    bind_call_ids,
-    dead_end_reason,
-    lead_rows,
-    names_something_readable,
+    bind_call_ids,  # noqa: F401 — driver binds the call identity through the query-tool seam
     next_call_id,
+    dead_end_reason,
+    names_something_readable,
     payload_digest,
     payload_status,
     persist_payload as _persist_payload,  # noqa: F401
@@ -64,6 +63,7 @@ from defender._query_rules import (
 )
 
 from . import circuit_breaker
+from .run_state import run_state_of
 from .run_end import CallRecordWriteFailed
 from .verbs import (
     CALL_DELIVERY,
@@ -94,8 +94,6 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ToolRetryError,
     # A served verb that gave up on its world (#1224): the sibling ends, nothing is filed.
     ServingAbort,
-    # A call record that could not be written (A12, #1234): the run ends, nothing is filed —
-    # a fault row for it would be one more write of the record that just failed.
     CallRecordWriteFailed,
 )
 
@@ -180,7 +178,6 @@ class QueryCapture(AbstractCapability[Any]):
     def __init__(self, registry: Any, role: str = "gather"):
         self._registry = registry
         self._role = role
-        self._seq_lock = asyncio.Lock()
 
     def _denial_logger_for(self, run_dir: Any) -> Any:
         # Per run dir, not per capability: each gather lead has its own QueryCapture over one
@@ -293,12 +290,13 @@ class QueryCapture(AbstractCapability[Any]):
         schema, and the grant check's unresolvable-verb branch); the domains do not overlap.
 
         Identity and `system_key` are extracted by the caller, which holds the right argument
-        surface and the raw string. One `lead_rows` read feeds both predicates so they answer
-        over the same table state. Repeat is asked first because its message is more specific
-        (it names the repeated request). The budget is identity-blind, which is how it catches
-        loops the repeat guard cannot (a new undeclared name each turn, whitespace drift)."""
+        surface and the raw string. One read of the lead's rows on the run's state feeds both
+        predicates so they answer over the same rows. Repeat is asked first because its message
+        is more specific (it names the repeated request). The budget is identity-blind, which is
+        how it catches loops the repeat guard cannot (a new undeclared name each turn,
+        whitespace drift)."""
         lead_id = _dispatched_lead(deps)
-        rows = lead_rows(deps.run_dir, lead_id)
+        rows = run_state_of(deps).lead_rows(lead_id)
         trip = rejection_trip(
             rows, lead_id,
             system=system, verb=verb, params=params, system_key=system_key,
@@ -386,14 +384,21 @@ class QueryCapture(AbstractCapability[Any]):
         It charges nothing: not an infra exit code (no breaker), and outside both guards'
         domains. `system_key=""` because DENIED only occurs for a system the grant names.
 
-        A failed row write is not dropped: it is `CallRecordWriteFailed`, and the run ends
-        (A12) — the call's served-ledger row says it was refused, and a table with no row for
-        it would read as a call never made."""
-        await self._record(
-            deps, system=system, verb=verb, query_id=DENIED_QUERY_ID, params=params,
-            payload=None, exit_code=circuit_breaker.DENIED_EXIT_CODE, detail=refusal,
-            system_key="",
-        )
+        A failed row write is logged and dropped rather than raised: the denial is a business
+        outcome the model must see and continue past, and the audit record already holds it."""
+        try:
+            await self._record(
+                deps, system=system, verb=verb, query_id=DENIED_QUERY_ID, params=params,
+                payload=None, exit_code=circuit_breaker.DENIED_EXIT_CODE, detail=refusal,
+                system_key="",
+            )
+        except CONTROL_FLOW_EXCEPTIONS:
+            raise
+        except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
+            raise
+        except Exception as write_failed:  # noqa: BLE001 — see the docstring
+            _logger.warning(f"could not record the denied row for {system}.{verb} "
+                            f"({write_failed!r}); the refusal itself is what the model sees")
 
     async def _grant_check(
         self, deps, system: str, verb: str, params: dict,
@@ -511,9 +516,7 @@ class QueryCapture(AbstractCapability[Any]):
     async def wrap_tool_execute(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
-        # The call's id, allocated before anything reaches the registry and held until its
-        # row is written: the registry writes it on the call's served-ledger rows (A12).
-        token = CALL_ID.set(next_call_id(ctx.deps.run_dir))
+        token = CALL_ID.set(next_call_id(run_state_of(ctx.deps)))
         try:
             return await self._execute(ctx, args, handler)
         except GatherDeadEnd as e:
@@ -550,7 +553,7 @@ class QueryCapture(AbstractCapability[Any]):
 
         # Repeat guard above `_screen`, so a repeated bad call trips instead of earning yet
         # another identical `ModelRetry`.
-        rows = lead_rows(deps.run_dir, deps.lead_id)
+        rows = run_state_of(deps).lead_rows(deps.lead_id)
         trip = repeat_trip(rows, deps.lead_id, system=system, verb=verb, params=params)
         if trip is not None:
             # A sentinel id, not the model's: offline collectors partition on `query_id`, and a
@@ -598,22 +601,24 @@ class QueryCapture(AbstractCapability[Any]):
     ) -> tuple[dict, str]:
         """Append the row and charge the circuit breaker to its `system`.
 
+        The charge is the call's outcome, not the view's: it lands whether or not the row's
+        view line could be written. A refused write (`append_query_row` has already recorded
+        the row in the run's state) is charged first and then propagates; the run is not told
+        the call was viewed.
+
         A coarsened row charges `""`, which `record_outcome` skips; the rejection guards bound
         those instead. `system_key` has no default so every writer must state it explicitly.
 
-        The row carries the call's id (`CALL_ID`, set by `wrap_tool_execute`); a call refused
-        before execution (`_reject`) has none set and is allocated its own here. A failed
-        append raises `CallRecordWriteFailed` through every caller: the run ends (A12)."""
+        No lock of its own: `append_query_row` takes the seq and records the row under the
+        run state's lock, and nothing here awaits between the two."""
         lead_id = _dispatched_lead(deps)
-        call_id = CALL_ID.get() or next_call_id(deps.run_dir)
+        state = run_state_of(deps)
 
         text = "" if exit_code != 0 else json.dumps(payload, default=str)
-        run_dir = deps.run_dir
 
-        async with self._seq_lock:
-            # Kept locked in case an `await` is ever added inside.
+        try:
             row = append_query_row(
-                run_dir,
+                state,
                 lead_id=lead_id,
                 system=system,
                 verb=verb,
@@ -632,17 +637,19 @@ class QueryCapture(AbstractCapability[Any]):
                     else f"exit={exit_code}; {_model_visible(deps, detail).strip()[:160]}"
                 ),
                 system_key=system_key,
-                call_id=call_id,
+                call_id=CALL_ID.get(),
             )
-
-        circuit_breaker.record_outcome(run_dir, system, exit_code)
+        finally:
+            circuit_breaker.record_outcome(
+                state, system, exit_code,
+                counts_toward_run=not getattr(deps, "harness_lead", False))
         return row, text
 
     def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:
         note = _payload_note(deps, row)
         # Computed for failures too: a lead repeating a failing call is the most likely to loop.
         repeat = repeat_note(
-            deps.run_dir, deps.lead_id, seq=row["seq"], system=row["system"],
+            run_state_of(deps), deps.lead_id, seq=row["seq"], system=row["system"],
             verb=row["verb"], params=row["params"],
             payload_digest=row["payload_digest"], payload_sha256=row["payload_sha256"],
             exit_code=exit_code,
@@ -936,7 +943,7 @@ def register_query_tool(agent, registry) -> None:
         fn = registry.verbs(system)[verb]
         vctx = VerbContext(
             defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
-            tenant=deps.tenant,
+            tenant=deps.tenant, run_state=deps.run_state,
         )
         delivery = CallDelivery()
         token = CALL_DELIVERY.set(delivery)
@@ -975,7 +982,6 @@ from .tools_gather import _payload_note, _tripped_message  # noqa: E402
 __all__ = [
     "CONTROL_FLOW_EXCEPTIONS",
     "DEFAULT_FAULT_EXIT",
-    "bind_call_ids",
     "QueryCapture",
     "TOOL_NAME",
     "UNENFORCED_TYPE",

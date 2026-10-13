@@ -41,6 +41,7 @@ from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 from defender.tests._data_root_1078 import current_data_root, set_up_tenant
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+from defender.run_repository import RunPaths
 
 T_ID = H.VALID_ID
 
@@ -166,7 +167,7 @@ def test_the_tenant_record_is_written_through_write_guarded_and_read_through_rea
     S.tenant().ensure_runs_base_record(base, T_ID, io=writer)
     assert any(op.startswith("write_guarded") for op in writer.ops), (
         f"the create reached {writer.ops}; D2 says `write_guarded`, not a raw `os.open`")
-    assert "write_atomic" not in writer.ops
+    assert "write_atomic" not in writer.ops  # lint-stale-ref: ok — an absence assertion naming the deleted `_io.write_atomic`, still true
     assert "open_guarded" not in writer.ops
 
     reader = S.RecordingIo()
@@ -631,14 +632,14 @@ def test_a_second_materialize_for_one_run_id_finishes_what_the_first_left_undone
     run_dir = base / "run-resumable"
     run_dir.mkdir()                       # the state an interrupted first call leaves
     (run_dir / "gather_raw").mkdir()
-    assert not (run_dir / "alert.json").exists()
+    assert not RunPaths(run_dir).alert.exists()
     assert not (run_dir / "provenance.json").exists()
 
     alert = H.plant_alert(tmp_path / "in")
     again = Path(_materialize(alert, "run-resumable"))
 
     assert again == run_dir, "the second call refused or minted a second directory"
-    assert (run_dir / "alert.json").is_file(), "the alert copy the first call never made"
+    assert RunPaths(run_dir).alert.is_file(), "the alert copy the first call never made"
     assert _stamp(run_dir)["tenant_id"] == _record(base)["tenant_id"], "it re-stamps"
     third = Path(_materialize(alert, "run-resumable"))
     assert third == run_dir
@@ -686,7 +687,7 @@ def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_
     assert _stamp(unforked)["fork_turn"] is None
 
     src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
-    sibling = Path(_arm(src / "alert.json", world, ep))
+    sibling = Path(_arm(RunPaths(src).alert, world, ep))
     assert _stamp(sibling)["world_id"] == world.world_id, (
         "a forked sibling stamps its ResumeWorld token, which is what `served/<token>.jsonl` "
         "keys on and what D3 writes into provenance")
@@ -724,7 +725,7 @@ def test_the_base_role_sibling_of_a_family(tenant_root, tmp_path):
     tokens = {}
     for label in ("a", "b"):          # 'a' is the base role
         world = H.run_py().resume_world(Episode.open(ep), label, tenant=_episode_tenant)
-        run = Path(_arm(src / "alert.json", world, ep))
+        run = Path(_arm(RunPaths(src).alert, world, ep))
         tokens[label] = _stamp(run)["world_id"]
     expected = {label: H.run_py().resume_world(Episode.open(ep), label, tenant=_episode_tenant).world_id
                for label in ("a", "b")}

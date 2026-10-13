@@ -31,6 +31,7 @@ from defender._io import ENTRY_FILE, Bound
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._episode_paths import LAYOUT
+from defender import _alert_input
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
 from defender.learning.core.retired import retired_keys
 from defender.learning.core.state import (
@@ -63,6 +64,19 @@ WORLD_LABEL_DOUBTED = "world_label_doubted"
 LANE_WORLD = LANE_QUESTIONER
 #: The prefix of a plan-class citation (A1): what makes a world row design.
 _PLAN_PREFIX = str(LAYOUT.family) + "#"
+
+
+def rule_key_of(record: _alert_input.AlertRecord | None) -> str:
+    """The recorded signature verbatim, or the explicit unkeyed fallback."""
+    signature = None if record is None else record.facts.signature
+    return signature if signature is not None else "unkeyed"
+
+
+def no_record_reason() -> str:
+    """Refuse an episode with no readable source alert record, without echoing its content."""
+    return (f"the episode holds no readable record of the alert it investigates "
+            f"({LAYOUT.source_record}) — it was launched before the alert's record existed, or "
+            "the record is damaged")
 
 
 def _refusal_prefix(episode_dir: Path | None) -> str:
@@ -246,6 +260,7 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     *, run_id: str, label: str, draw: str, index: int, subject: str, finding: dict[str, Any],
     alert_rule_key: str | None, citations: Sequence[str] = (), contrast: Sequence[str] = (),
     world_label_doubted: bool = False, provenance: str = "model",
+    recorded_signature: str | None = None,
 ) -> dict[str, Any]:
     """The `FindingRow` for one finding of one draw of one world (`label="family"`: the family
     call's).
@@ -253,6 +268,7 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     @owns finding_id
     @owns source_run_dir
     @owns direction
+    @owns recorded_signature
     @owns contrast_evidence
     @owns world_label_doubted
 
@@ -280,6 +296,8 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
         "source_run_dir": (
             f"episodes/{run_id}" if label == "family" else f"episodes/{run_id}/worlds/{label}"),
     }
+    if recorded_signature is not None:
+        row["recorded_signature"] = recorded_signature
     if subject == SUBJECT_WORLD:
         row["world"] = None if label == "family" else label
         row["systems"] = _row_systems(finding.get("systems"))

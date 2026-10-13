@@ -18,6 +18,8 @@ demand carries their intent now.
 """
 from __future__ import annotations
 
+from defender.run_repository import Run
+
 import importlib
 import os
 import subprocess
@@ -26,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._alert_plant import plant_alert
 from defender import _episode_handle as EH
 
 
@@ -101,7 +104,7 @@ def test_an_episode_id_that_is_not_one_safe_component_is_refused_before_priming(
         pytest.fail("prime_base was called before the episode id was validated")
 
     with pytest.raises(SystemExit, match="episode id"):
-        cli.prepare_episode(episode_id, tmp_path / "source", data_root=tenant_paths.data_root,
+        cli.prepare_episode(episode_id, Run(tmp_path / "source", runs_base=None), data_root=tenant_paths.data_root,
                             prime=primed_too_early)
 
     assert not episodes_root.exists()
@@ -148,7 +151,8 @@ def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
         primed.append(claimed.dir)
         return PrimeReport()
 
-    with cli.prepare_episode("episode-001", tmp_path / "source", data_root=tenant_paths.data_root,
+    plant_alert(tmp_path / "source", {"rule": {"id": "r"}})
+    with cli.prepare_episode("episode-001", Run.at(tmp_path / "source"), data_root=tenant_paths.data_root,
                              prime=prime) as fresh:
         assert fresh.dir == episodes_root / "episode-001-r2"
         assert list((fresh.dir / "served").glob("*.jsonl")) == []

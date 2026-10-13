@@ -457,7 +457,9 @@ def run_tree(tmp_path: Path) -> Path:
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     (run / "gather_summaries").mkdir(parents=True)
     (run / "wire_logs").mkdir(parents=True)
-    (run / "alert.json").write_text('{"id": "a-771"}\n', encoding="utf-8")
+    from defender.tests import _alert_plant
+
+    _alert_plant.plant_alert(run, {"id": "a-771"})  # the admitted alert and its record (#1222)
     return run
 
 
@@ -839,18 +841,6 @@ def _invoke_case_pointer(run_dir: Path) -> None:
     session_store.write_case_pointer(run_dir, case_id="c-771", store_path=run_dir / "s.db")
 
 
-def _invoke_budget_locked(run_dir: Path) -> None:
-    from defender.hooks import budget_enforcer
-
-    budget_enforcer.update_budget_locked(run_dir, "r-771", "bash")
-
-
-def _invoke_breaker(run_dir: Path) -> None:
-    from defender.runtime import circuit_breaker
-
-    circuit_breaker.record_outcome(run_dir, "elastic", 2)
-
-
 def _invoke_query_payload(run_dir: Path) -> Any:
     from defender.runtime import query_tool
 
@@ -899,8 +889,13 @@ def _invoke_queries_table(run_dir: Path) -> Any:
 
     # #1106 M4: gather is bound with a RUN's grant (the playground tenant's), never a
     # process-level one carried by `GATHER_DEF`.
+    from defender.runtime.run_state import RunState
+
+    # #1235 round 2: the capture records into the run's `RunState` its deps carry
+    # (`driver.run_investigation` starts it); this writer is driven outside a run, so its deps
+    # carry the state a started run would.
     deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
-                   lead_id="l-001")
+                   lead_id="l-001", run_state=RunState(run_dir, run_dir.name))
     return asyncio.run(QueryCapture(registry=None)._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},
         payload=[{"a": 1}], exit_code=0, detail="", system_key="",
@@ -941,12 +936,6 @@ def _invoke_fault_exit_trace(run_dir: Path) -> None:
     demand asks for; the anti-vacuity guard above (a missing symbol reads as
     `raised:AttributeError`) is what still keeps `None` from meaning "nothing happened"."""
     drive_fault_exit_trace(run_dir)
-
-
-def _invoke_write_atomic(run_dir: Path) -> None:
-    from defender import _io
-
-    _io.write_atomic(run_dir / "budget.json", '{"tool_calls": 1}')
 
 
 def _invoke_write_guarded(run_dir: Path) -> None:
@@ -992,7 +981,8 @@ CENSUS: tuple[Writer, ...] = (
     # this row's own altitude `observe.write_trace` RAISES (IsADirectoryError over a squatted
     # name; the driver is what swallows, one frame up). Re-deriving a ledger label from the
     # nearest census row is how a measurement gets reattached to the wrong site, so this row is
-    # `unmeasured` and X5's swallow-continue is anchored where X5 measured it.
+    # `unmeasured`. (X5's swallow-continue site itself retired with #1235: the accounting
+    # call no longer writes, so there is no failure for it to swallow.)
     Writer("write_trace", "tool_trace.jsonl", "write_text", "unmeasured",
            _invoke_write_trace, "runtime/observe.py", cite="C1,X10"),
     Writer("run_investigation", "tool_trace.jsonl", "write_text", "unmeasured",
@@ -1001,12 +991,15 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_observe_logger, "runtime/observe.py", cite="C1", mkdirs_component=True),
     Writer("denial_logger", "policy_denials.jsonl", "append-open", "unmeasured",
            _invoke_denial_logger, "runtime/observe.py", cite="C1,G12"),
-    Writer("write_case_pointer", "session_store_pointer.json", "write_text", "unmeasured",
+    # #1235 F2: the run -> case pointer left the run dir for a host-only sidecar beside it,
+    # `<run_id>.session-pointer.json` in the runs base — named relative to the run dir the way
+    # the tenant record's row is (`run_tree`'s dir is `run-771`). Still a setup writer, still
+    # required to refuse a planted alias at its own name.
+    Writer("write_case_pointer", "../run-771.session-pointer.json", "write_text", "unmeasured",
            _invoke_case_pointer, "runtime/session_store.py", cite="C1,R4"),
-    Writer("budget_enforcer", "budget.json", "locked-rmw", "unmeasured",
-           _invoke_budget_locked, "hooks/budget_enforcer.py", cite="B3,X12"),
-    Writer("circuit_breaker", "circuit_breaker.json", "locked-rmw", "unmeasured",
-           _invoke_breaker, "runtime/circuit_breaker.py", cite="B3,G17"),
+    # #1235: the `budget_enforcer` and `circuit_breaker` rows retired with their artifacts.
+    # The budget counters and the breaker live in the run process's memory; nothing writes
+    # `budget.json` or `circuit_breaker.json`, so neither module is a writer into the tree.
     Writer("query_tool", "gather_raw/l-001/0.json", "write_text", "return-none",
            _invoke_query_payload, "runtime/query_tool.py", cite="X5,G15",
            mkdirs_component=True),
@@ -1027,8 +1020,8 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_lesson_load, "runtime/tools/", cite="G15"),
     Writer("start_box", ".box-sentinel", "write_text", "fault-startup",
            _invoke_sentinel_plant, "runtime/box/", cite="X5,G10"),
-    Writer("write_atomic", "budget.json", "tmp-then-replace", "unmeasured",
-           _invoke_write_atomic, "_io.py", cite="B4,C3-fix"),
+    # (#1235 deleted `_io.write_atomic`, whose only writer, the budget record, retired with
+    # it — the budget is the run's in-memory state — so its row "write_atomic", B4/C3-fix, left.)
     Writer("write_guarded", "report.md", "guarded", "unmeasured",
            _invoke_write_guarded, "_io.py", cite="F1"),
     # §7 decision 16: a census row for the tenant record's writer, beside the runs base rather
@@ -1046,8 +1039,9 @@ CENSUS: tuple[Writer, ...] = (
 #: The four posture CLASSES X5 measured — the reason F1's "every call site keeps the posture
 #: it has today" is testable at all, and the thing a collapse-to-one-posture implementation
 #: has to break. They are asserted as a SET the census exhibits, never as a per-row
-#: expectation: X5 named four sites, the census has fifteen rows, and assigning a label to the
-#: other eleven would be an author's prior standing in for a measurement.
+#: expectation: X5 named four sites, the census has fourteen rows (fifteen until #1235 deleted
+#: `write_atomic`), and assigning a label to the others would be an author's prior standing in
+#: for a measurement.
 POSTURES = ("swallow-continue", "return-none", "return-zero", "fault-startup")
 
 
@@ -1075,29 +1069,8 @@ class MeasuredSite:
     site: str
     fault: str
     drive: Callable[[Path], object]
-    #: What X5 recorded. Checked against `posture_class` for the return classes; the
-    #: swallow-continue site's second half (the counter advanced) is checked by its own driver.
+    #: What X5 recorded, checked against `posture_class`.
     observed: str
-
-
-def _x5_accounting_site(run_dir: Path) -> object:
-    """`driver._account_executed_call` — X5's swallow-continue site, under a directory
-    squatting the artifact the accounting write lands on.
-
-    Returns the pair the ledger recorded: what the call returned, and whether the silent
-    failure counter advanced. "Returns normally" alone is also true of a call that did
-    nothing at all."""
-    from defender.agents import MAIN_DEF
-    from defender.hooks import budget_enforcer
-    from defender.runtime import driver
-    from defender.runtime.agent_definition import bind
-
-    (run_dir / "budget.json").mkdir()
-    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
-    returned = driver._account_executed_call(
-        deps, "bash", active=True, limits=budget_enforcer.DEFAULT_LIMITS)
-    advanced = budget_enforcer.accounting_failure_state(run_dir)["consecutive_failures"] > 0
-    return (returned, advanced)
 
 
 def _x5_query_payload_site(run_dir: Path) -> object:
@@ -1134,10 +1107,12 @@ def _x5_sentinel_site(run_dir: Path) -> object:
     return box_mod._plant(run_dir / ".box-sentinel", "token-771")
 
 
+#: Three of X5's four sites. The fourth, X5's swallow-continue site (`driver.
+#: _account_executed_call` under a directory squatting `budget.json`), retired with #1235: the
+#: budget is counted in the run process's memory, so that call site has no write left to fail
+#: and no failure counter to advance. `POSTURES` still records the ledger's four classes — it
+#: is what X5 measured, and the census below still exhibits at least four distinct ones.
 X5_MEASURED_SITES: tuple[MeasuredSite, ...] = (
-    MeasuredSite("swallow-continue", "driver._account_executed_call",
-                 "a directory squatting budget.json", _x5_accounting_site,
-                 observed="returned:(None, True)"),
     MeasuredSite("return-none", "query_tool._persist_payload",
                  "a directory squatting gather_raw/l-001/0.json", _x5_query_payload_site,
                  observed="returned:None"),
@@ -1248,33 +1223,6 @@ def drive_normal_exit_trace(run_dir: Path, *, run_id: str = "r-771-happy",
 def is_eexist(exc: BaseException) -> bool:
     """`EEXIST` from an exclusive create — B6's observation, and §7 D1's refusal signal."""
     return isinstance(exc, OSError) and exc.errno == errno.EEXIST
-
-
-# §7 D7 — where the alias-refusal record lives, and where it must NOT
-def accounting_sidecar(run_dir: Path) -> Path:
-    """The accounting-failure sidecar — `<run_dir>.accounting_failures.json`, a SIBLING of the
-    run dir (X6), outside the bind and outside every box mount.
-
-    §7 D7 sites the alias-refusal record HERE and nowhere else. An in-tree sink would be a
-    sixteenth writer into the attacker-controlled tree: absent from the census, absent from
-    the lint's gate list, and reachable by the exact plant this change exists to stop — the box
-    plants an alias at the record's own name, the record write is refused, and D3's accepted
-    cost (a refused write may be swallowed at its site) makes the suppression silent. The
-    mechanism that observes the attack would have been suppressible by the attack."""
-    from defender.hooks import budget_enforcer
-
-    return budget_enforcer._accounting_failure_path(run_dir)
-
-
-def alias_refusals(run_dir: Path) -> list[dict]:
-    """The refusals recorded in the sidecar, as data. AttributeError/KeyError at HEAD.
-
-    Read back through the sidecar's own file rather than through a new reader, so the test
-    observes WHERE the record landed and not merely that some accessor answers."""
-    p = accounting_sidecar(run_dir)
-    if not p.is_file():
-        return []
-    return list(json.loads(p.read_text(encoding="utf-8")).get("alias_refusals", []))
 
 
 # The second shared root's own production writers (F6)

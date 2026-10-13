@@ -5,11 +5,15 @@
     "report.md": "570f1b50d6f17bcf0058fdb08ac50aef56f87652f425e454724bd8a3d926b6a1"
   },
   "entries": {
-    "alert.json": [
+    "alert_input": [
+      "dir",
+      null
+    ],
+    "alert_input/alert.json": [
       "file",
       null
     ],
-    "budget.json": [
+    "alert_input/record.json": [
       "file",
       null
     ],
@@ -34,10 +38,6 @@
       null
     ],
     "review_record.1.json": [
-      "file",
-      null
-    ],
-    "session_store_pointer.json": [
       "file",
       null
     ],

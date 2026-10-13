@@ -34,6 +34,12 @@ OUTCOME_NAME = "outcome.yaml"
 #: name the reason it stamps a stampless family `not comparable`.
 NOT_COMPARABLE_NAME = "not_comparable.yaml"
 LEARNING_HTML_NAME = "learning.html"
+#: The source run's alert and its record, copied into the episode at launch (#1222 A1): the
+#: judge's whole input about the alert, and the sibling runs' own input.
+#: The run's alert record inside a world's archive, beside its `alert.json`.
+ARCHIVED_ALERT_RECORD_NAME = "alert_record.json"
+SOURCE_ALERT_NAME = "source_alert.json"
+SOURCE_RECORD_NAME = "source_record.json"
 
 WORLDS_DIRNAME = "worlds"
 #: Each sibling's own record of why its world ended without a full run (#1224):
@@ -122,6 +128,11 @@ class ArchivedWorldLeaves:
     @property
     def alert(self) -> PurePosixPath:
         return PurePosixPath(ALERT)
+
+    @property
+    def alert_record(self) -> PurePosixPath:
+        """The run's alert record, archived beside the alert it vouches for."""
+        return PurePosixPath(ARCHIVED_ALERT_RECORD_NAME)
 
     @property
     def gather_summaries(self) -> PurePosixPath:
@@ -213,6 +224,10 @@ class WorldLayout:
         return self.dir / WORLD_LEAVES.alert
 
     @property
+    def alert_record(self) -> PurePosixPath:
+        return self.dir / WORLD_LEAVES.alert_record
+
+    @property
     def gather_summaries(self) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.gather_summaries
 
@@ -292,6 +307,14 @@ class EpisodeLayout:
     @property
     def learning_html(self) -> PurePosixPath:
         return PurePosixPath(LEARNING_HTML_NAME)
+
+    @property
+    def source_alert(self) -> PurePosixPath:
+        return PurePosixPath(SOURCE_ALERT_NAME)
+
+    @property
+    def source_record(self) -> PurePosixPath:
+        return PurePosixPath(SOURCE_RECORD_NAME)
 
     @property
     def served(self) -> PurePosixPath:
@@ -487,6 +510,16 @@ class EpisodePaths:
         return self.episode_dir / LAYOUT.staged
 
     @property
+    def source_alert(self) -> Path:
+        """The source run's alert, as launch copied it into the episode (#1222 A1)."""
+        return self.episode_dir / LAYOUT.source_alert
+
+    @property
+    def source_record(self) -> Path:
+        """The source run's record, copied beside `source_alert`."""
+        return self.episode_dir / LAYOUT.source_record
+
+    @property
     def outcome(self) -> Path:
         return self.episode_dir / LAYOUT.outcome
 
@@ -609,6 +642,10 @@ class WorldPaths:
     @property
     def alert(self) -> Path:
         return self._at(self.rel.alert, what="alert")
+
+    @property
+    def alert_record(self) -> Path:
+        return self._at(self.rel.alert_record, what="alert_record")
 
     @property
     def gather_summaries(self) -> Path:

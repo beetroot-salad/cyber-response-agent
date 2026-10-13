@@ -38,6 +38,7 @@ import time
 import types
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping
+import shutil
 from pathlib import Path
 
 from defender import _io, run_common
@@ -283,7 +284,7 @@ def test_1105_the_writer_refuses_every_input_that_would_hide_a_run_or_claim_an_i
         ("labels equal under case folding", "ep", src, {"a": _rid("ep-a"), "A": _rid("ep-a")}),
         # A label the family model admits (no '-'), so only the sidecar clause refuses it.
         ("a sidecar-suffixed arm", "ep", src,
-         {"x.accounting_failures.json": _rid("ep-x.accounting_failures.json")}),
+         {"x.accounting_failures.json": _rid("ep-x.accounting_failures.json")}),  # lint-stale-ref: ok — the reserved sidecar suffix, not the removed `RunPaths.accounting_failures()`
         ("an arm not shaped episode-label", "ep", src, {"a": _rid("other")}),
         # Multi-fault by necessity: two labels give two different f'{episode_id}-{label}' arms.
         ("two labels on one id", "ep", src, {"a": _rid("ep-a"), "b": _rid("ep-a")}),
@@ -306,7 +307,7 @@ def test_1105_the_writer_refuses_every_input_that_would_hide_a_run_or_claim_an_i
     claimer.unlink()
     for what, plant, remove in (
             ("an arm whose name holds a run", lambda: H.make_run(runs, "ep-a"),
-             lambda p: (p / "alert.json").unlink() or p.rmdir()),
+             shutil.rmtree),
             ("an arm whose name holds a sidecar file",
              lambda: H.plant_sidecars(runs, "ep-a", staged=False),
              lambda made: [p.unlink() for p in made])):

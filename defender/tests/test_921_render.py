@@ -306,7 +306,8 @@ def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_p
     (run_dir / "gather_summaries" / "l-001.md").write_text("summary\n", encoding="utf-8")
     (run_dir / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": "L1"}) + "\n", encoding="utf-8")
-    (run_dir / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(run_dir, {"alert_id": J.ALERT_ID})
 
     with Episode.open(ep) as episode:
         archived = archive.archive_episode(episode, {"b": run_dir})

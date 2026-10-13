@@ -20,11 +20,14 @@ import pytest
 
 from defender.tests import _spec1077 as S
 from defender.tests._by_path import DEFENDER
+from defender.tests._alert_plant import plant_alert
 
 
 @pytest.fixture
 def run_dir(tmp_path: Path) -> Path:
-    return S.seed_run_tree(S.make_run_dir(S.make_runs_base(tmp_path)))
+    made = S.seed_run_tree(S.make_run_dir(S.make_runs_base(tmp_path)))
+    plant_alert(made)
+    return made
 
 
 @pytest.fixture
@@ -181,8 +184,9 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
         "N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
         "wire protocol with the model, and the run dir stays its one rw bind")
     readonly = [m for m in mounts if "readonly" in m]
-    assert len(readonly) == 1
-    assert f"target={DEFENDER}" in readonly[0]
+    assert len(readonly) == 2, readonly  # the defender tree and, since #1222, the run's input directory
+    assert any(f"target={DEFENDER}" in m for m in readonly)
+    assert any(f"target={run_dir / 'alert_input'}" in m for m in readonly)
     for m in mounts:
         source = Path(m.split("source=")[1].split(",")[0])
         target = Path(m.split("target=")[1].split(",")[0])

@@ -188,10 +188,11 @@ demands:
      binds: ["tag_tool_results", "interacts(query_tool->wrap)"]}
 
   # --- The surviving module and the accessor set ---------------------------
-  - {id: d21_hooks_run_dir_survives_its_deleted_member, kind: survival, form: test,
-     discharged_by: test_update_json_locked_survives_the_sibling_removal,
+  - {id: d21_hooks_run_dir_survives_its_deleted_member, kind: survival, form: clause,
+     status: retired,
      binds: ["hooks_run_dir", "interacts(budget_enforcer->hooks_run_dir)",
-             "interacts(circuit_breaker->hooks_run_dir)"]}
+             "interacts(circuit_breaker->hooks_run_dir)"],
+     outcome: {nl: "RETIRED by #1235 round 3 — `hooks/_run_dir`'s locked JSON helpers lost their last production caller when the budget, the breaker and the oracle-held credit became the run's in-memory state, and were deleted; `test_update_json_locked_survives_the_sibling_removal`, which discharged this demand, was deleted with them. The step they wrapped (`_io.locked_json_update` / `locked_json_read`) stays pinned in test_1174_bounded_read."}}
 
   # The discharging test was renamed off its literal count when `RunPaths` gained `wire_log`
   # (the run's wire log moved under `<run>/observe/`, out of every reader agent's
@@ -1126,8 +1127,6 @@ handoff:
     - {test: test_every_importer_of_the_relocated_wrap_resolves_after_the_move,
        class: "survival — object identity across importers, true of any wrap incl. the stub;
          the bytes are pinned by d17"}
-    - {test: test_update_json_locked_survives_the_sibling_removal,
-       class: "survival — characterization guard over untouched code (green@HEAD by design)"}
     - {test: test_defender_run_dir_still_crosses_the_subprocess_boundary_for_its_reader,
        class: "survival — characterization guard over untouched code (green@HEAD by design)"}
     - {test: test_learning_curator_leg_mints_a_fresh_uuid4_salt_distinct_from_the_run_token,

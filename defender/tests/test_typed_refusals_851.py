@@ -20,7 +20,6 @@ they trace back to (the #776 hardening precedent).
 """
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -271,62 +270,60 @@ def test_f26_an_undecodable_baseline_denies_rather_than_raising(tmp_path):
     assert "failing closed" in d.reason
 
 
-# F-23 — `_alert_signature` is annotated `-> str | None` and returned the parsed JSON value
-# RAW, so a numeric `rule.id` detonated in `re.escape` on `orientation()`'s unguarded path and
-# killed the run before the first model request — an opaque `TypeError: decoding to str` in
-# place of a legible complaint, and a breach of the module's own "orientation must never break
-# the run" invariant.
+# F-23 — a numeric or malformed `rule.id` must orient instead of raising. The signature is no
+# longer read by orientation: the front door derives it once (#1222 A6, `_alert_input`) and
+# orientation takes it from the run's record. What F-23 pinned — a non-key is "no signature",
+# never a signature-shaped string — is now the signature rule's own.
 
-def _alert(tmp_path: Path, rule_id) -> Path:
-    p = tmp_path / "alert.json"
-    p.write_text(json.dumps({"rule": {"id": rule_id}}), encoding="utf-8")
-    return p
+from defender import _alert_input  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
+from defender.tests._alert_plant import plant_alert  # noqa: E402
+
+
+def _sig(rule_id):
+    """The signature the front door records for an alert carrying `rule_id`."""
+    mapping = _alert_input.parse_mapping("signature: rule.id\n")
+    return _alert_input.derive_facts({"rule": {"id": rule_id}}, mapping).signature
+
+
+def _orient(tmp_path, rule_id):
+    run_dir = tmp_path / "run"  # one level down: `run_env` makes its parent the shims' corpus root
+    run_dir.mkdir()
+    plant_alert(run_dir, {"rule": {"id": rule_id}})
+    return orient.orientation(run_dir, DEFENDER, RunPaths(run_dir).alert, systems=())
 
 
 def test_f23_a_numeric_rule_id_orients_instead_of_raising(tmp_path):
-    """The shape a hand-authored or foreign-SIEM alert file carries. `orientation()` must
-    return its text; the id is a `str` by the time either consumer (`re.escape`, and the
-    `subprocess.run` argv in the corpus-vocab section) sees it."""
-    # The run dir one level down: `run_env` makes its parent the shims' corpus root, and
-    # `tmp_path`'s parent is the xdist worker's whole basetemp.
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    out = orient.orientation(run_dir, DEFENDER, _alert(tmp_path, 5710), systems=())
+    """The shape a hand-authored or foreign-SIEM alert file carries."""
+    out = _orient(tmp_path, 5710)
     assert isinstance(out, str)
     assert "## invlang grammar" in out
-    assert orient._alert_signature(_alert(tmp_path, 5710)) == "5710"
+    assert _sig(5710) == "5710"
 
 
-def test_f23_a_string_rule_id_is_unchanged(tmp_path):
-    """Positive control: the coercion is a no-op for every real alert in the corpus."""
-    assert orient._alert_signature(_alert(tmp_path, "v2-falco-x")) == "v2-falco-x"
+def test_f23_a_string_rule_id_is_unchanged():
+    """Positive control: the rule is a no-op for every real alert in the corpus."""
+    assert _sig("v2-falco-x") == "v2-falco-x"
 
 
 @pytest.mark.parametrize("rule_id", [None, ""])
-def test_f23_an_empty_signature_is_no_signature(rule_id, tmp_path):
+def test_f23_an_empty_signature_is_no_signature(rule_id):
     """`str(None)` would be the literal `"None"` and `""` would build a `source_signature ~ .*`
     pattern matching every lesson row — both are "no signature", not a signature."""
-    assert orient._alert_signature(_alert(tmp_path, rule_id)) is None
+    assert _sig(rule_id) is None
 
 
 @pytest.mark.parametrize("rule_id", [[], {}, ["a"], {"a": 1}, True, False])
-def test_f23_a_non_scalar_signature_is_no_signature(rule_id, tmp_path):
-    """`str()` is total, so the coercion alone turns every malformed id into a signature-shaped
-    string that is not one — `[]` becomes `"[]"`, `false` becomes `"False"` — and hands it to
-    the lessons grep and the shim argv as though the alert had declared it."""
-    assert orient._alert_signature(_alert(tmp_path, rule_id)) is None
+def test_f23_a_non_scalar_signature_is_no_signature(rule_id):
+    """`str()` is total, so a coercion alone turns every malformed id into a signature-shaped
+    string that is not one — `[]` becomes `"[]"`, `false` becomes `"False"`."""
+    assert _sig(rule_id) is None
 
 
-def test_f23_a_signature_carrying_a_nul_orients_instead_of_raising(tmp_path):
-    """F-23's other consumer. Coercing to `str` fixes `re.escape`, but the SAME value is an
-    argv element — and `subprocess.run` raises a bare `ValueError("embedded null byte")`, not
-    an `OSError`, for a NUL in one. `_shim` folded only `OSError`/`TimeoutExpired`, so the
-    signature took `orientation()` down before the first model request through the argv rather
-    than through the regex: the identical invariant breach, one line over."""
-    alert = _alert(tmp_path, "rule\x00id")
-    assert orient._alert_signature(alert) == "rule\x00id"
-    run_dir = tmp_path / "run"  # not `tmp_path`: its parent is the worker's basetemp (see f23 above)
-    run_dir.mkdir()
-    out = orient.orientation(run_dir, DEFENDER, alert, systems=())
+def test_f23_a_signature_carrying_a_nul_is_no_signature_and_orients(tmp_path):
+    """A NUL in a signature was an argv element `subprocess.run` raised a bare `ValueError` on;
+    it is not key-shaped, so it is recorded as no signature and orientation never sees it."""
+    assert _sig("rule\x00id") is None
+    out = _orient(tmp_path, "rule\x00id")
     assert isinstance(out, str)
     assert "## invlang grammar" in out

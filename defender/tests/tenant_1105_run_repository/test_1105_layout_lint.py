@@ -97,7 +97,7 @@ HELPERS = frozenset({"artifact_file", "artifact_dir", "plain_file", "contained_p
 NAMED_GATED = ("RunPaths", "RUN_LAYOUT", "SessionPaths", "WIRE_LOG_NAMES", "GATE_METADATA_KEY",
                "RunLayout", "WireLogNames")
 #: The door's public names that are not layout names (D1.3).
-NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "RunId",
+NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "case_ref_of_digest", "RunId",
                         # #1105 PR 2 (declared change 0): the tenant-scoped repository's names
                         # replace PR 1's four Tenant-taking lookups at the door.
                         "RunsRepository", "EpisodeRuns", "Listed", "RunAddress", "RunAbsent",
@@ -141,8 +141,8 @@ EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
     "owners": frozenset({*(f"run_repository/{f}" for f in _PACKAGE_FILES),
                          "_episode_paths.py", "_episode_handle.py", "_tenant.py"}),
     "running-investigation": frozenset({
-        "hooks/budget_enforcer.py", "hooks/record_lead.py",
-        "runtime/challenge_gate.py", "runtime/circuit_breaker.py", "runtime/close_tool.py",
+        "hooks/record_lead.py",
+        "runtime/challenge_gate.py", "runtime/close_tool.py",
         "runtime/driver/__init__.py", "runtime/driver/_build.py",
         "runtime/lead_zero/__init__.py", "runtime/lead_zero/_capture.py", "runtime/observe.py",
         "runtime/permission/files.py", "runtime/permission/policies/_common.py",
@@ -756,7 +756,7 @@ def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp
         f"{sorted(r for r in EXPECTED_CATEGORIES if table.get(r) != EXPECTED_CATEGORIES[r])}")
     every = [m for mods in table.values() for m in mods]
     assert len(every) == len(set(every)), "a module sits in more than one row"
-    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 56
+    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 55  # #1235: runtime/circuit_breaker.py and hooks/budget_enforcer.py no longer import the layout
     root = _planted(tmp_path)
     for module in _ROW_SAMPLE.values():
         _add(root, module, "from defender.run_repository import RunPaths  # noqa: F401\n\n\n"
@@ -1052,12 +1052,12 @@ def class_level():
     return Tenant.runs
 
 
-def _tenant_of() -> Tenant:
+def _tenant_planted_by() -> Tenant:
     raise NotImplementedError
 
 
 def annotated_return():
-    return _tenant_of().runs
+    return _tenant_planted_by().runs
 
 
 @dataclasses.dataclass

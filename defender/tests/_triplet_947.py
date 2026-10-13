@@ -458,6 +458,13 @@ def write_family(episode_dir: Path, doc: dict | None = None) -> Path:
     return manifest
 
 
+#: Whether the builders here plant what the front door leaves (#1222): a source run's alert
+#: record, and the episode's copies of them. The older suites are written for runs the front door
+#: made, so `tests/conftest.py` turns it on for them; #1222's own suite plants each of those
+#: itself, including their absence, so it runs with it off.
+PLANT_RECORDS = False
+
+
 def episode(tmp_path: Path, *, doc: dict | None = None,
             episode_id: str = EPISODE_ID, root: Path | None = None) -> Path:
     """An episode dir with its manifest and an empty `served/` — the shape `Step.QUESTIONER`
@@ -486,7 +493,36 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
     if not base.exists():
         base.write_text("", encoding="utf-8")
     write_family(ep, doc)
+    if PLANT_RECORDS:
+        _plant_source_input(ep, (doc or {}).get("source_run_dir"), (doc or {}).get("source_run_id"))
     return ep
+
+
+def _plant_source_input(ep: Path, source_run_dir: str | None, source_run_id: str | None = None) -> None:
+    """The source run's alert and record, as a launch copies them into the episode (#1222 A1):
+    the source run's own when it holds them, else a plain one."""
+    from defender._episode_paths import EpisodePaths
+    from defender.run_repository import RunPaths
+    from defender.tests._alert_plant import plant_alert
+
+    if source_run_id:
+        from defender.run_repository import RunId, RunRefused
+        from contextlib import suppress
+        with suppress(RunRefused):
+            source_run_dir = str(current_tenant().runs_repository().open(RunId.parse(source_run_id)).run_dir)
+    mine = EpisodePaths(ep)
+    source = RunPaths(Path(source_run_dir)) if source_run_dir else None
+    if source is not None and source.alert.is_file() and source.alert_record.is_file():
+        mine.source_alert.write_bytes(source.alert.read_bytes())
+        mine.source_record.write_bytes(source.alert_record.read_bytes())
+        return
+    scratch = ep / ".source-input"
+    raw = plant_alert(scratch, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
+    scratch_paths = RunPaths(scratch)
+    mine.source_alert.write_bytes(raw)
+    mine.source_record.write_bytes(scratch_paths.alert_record.read_bytes())
+    import shutil
+    shutil.rmtree(scratch)
 
 
 def branchable_investigation() -> str:
@@ -538,8 +574,12 @@ def current_tenant() -> Any:
 
 
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
-              tenant_id: str | None = None) -> tuple[Path, Path]:
+              tenant_id: str | None = None, recorded: bool | None = None) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
+
+    `recorded=False` is a run from before #1222: its alert at the former place and no record, so
+    it is not a run any reader admits. `recorded=True` is the run the front door makes: the alert
+    and its record in the input directory. Left out, `PLANT_RECORDS` decides (see there).
 
     #1078: `base` is a real tenant's runs base (`<data root>/<tenant>/runs`) — the data root
     the autouse `data_root` fixture already pointed this test's `DEFENDER_DATA_ROOT` at, with a
@@ -569,8 +609,13 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
         _tenant.ensure_runs_base_record(base, tenant_id)
     src = base / source_run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (src / "alert.json").write_text(json.dumps({"rule": {"id": "v2-cross-tier-ssh-pivot"}}),
-                                    encoding="utf-8")
+    if PLANT_RECORDS if recorded is None else recorded:
+        from defender.tests._alert_plant import plant_alert
+
+        plant_alert(src, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
+    else:
+        (src / "alert.json").write_text(json.dumps({"rule": {"id": "v2-cross-tier-ssh-pivot"}}),
+                                        encoding="utf-8")
     (src / "investigation.md").write_text(branchable_investigation(), encoding="utf-8")
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
@@ -590,8 +635,8 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     return base, src
 
 
-#: The case this fixture's source run belongs to. One id, because the case POINTER in the run
-#: dir and the store the pointer names have to agree — that reconciliation is what
+#: The case this fixture's source run belongs to. One id, because the run's case POINTER (the
+#: sidecar beside the run dir) and the store the pointer names have to agree — that reconciliation is what
 #: `open_source_store` checks, and it is the whole reason a branch can find its source's session.
 SOURCE_CASE_ID = "case-947-fresh"
 
@@ -613,12 +658,13 @@ def seed_source_session(base: Path, src: Path) -> None:
     Idempotent: `runs_base` is called more than once in some scenarios, and a second session
     under one case id would make "the run's own main session" ambiguous.
     """
+    from defender.run_repository import RunPaths, SessionPaths
+
     ss = mod("runtime.session_store")
-    if (src / "session_store_pointer.json").exists():
+    # #1235: the case pointer is a host-only sidecar beside the run dir, not a file in it.
+    if RunPaths(src).session_pointer().exists():
         return
     from defender.tests import _session_store_705 as S
-
-    from defender.run_repository import SessionPaths
 
     # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
     store = ss.open_store(case_id=SOURCE_CASE_ID, sessions=SessionPaths(base))
@@ -922,6 +968,12 @@ def corpus_document(run_dir: Path) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "investigation.md"
     path.write_text(GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
+    # A run's record is what makes a folder a run to the corpus reader (#1222 A8).
+    from defender.run_repository import RunPaths
+    from defender.tests._alert_plant import plant_alert
+
+    if PLANT_RECORDS and not RunPaths(run_dir).alert_record.exists():
+        plant_alert(run_dir, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
     return path
 
 
@@ -993,7 +1045,7 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     (J46) — never one the launcher composes.
     """
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "configured-data-root"))
-    base, src = runs_base(tmp_path)
+    base, src = runs_base(tmp_path, recorded=True)
     root = tmp_path / "episodes-root"
     monkeypatch.setenv(RUNS_BASE_ENV, str(base))
     monkeypatch.setenv(EPISODES_BASE_ENV, str(root))

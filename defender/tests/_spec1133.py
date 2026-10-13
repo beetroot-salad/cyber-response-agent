@@ -29,7 +29,7 @@ Core, ``defender._io`` (D1'):
   off a private ``dup`` of the root (through ``os_.dup``, under the shared handle's lock); a
   verb after ``close()`` raises ``OSError(EBADF)``. A durable write of a ``str`` that cannot be
   encoded leaves no descriptor open.
-* ``class Bound`` (the view, R1): ``read`` / ``read_jsonl`` / ``entries`` (and their ``under``
+* ``class Bound`` (the view, R1): ``read`` / ``read_bytes`` / ``read_jsonl`` / ``entries`` (and their ``under``
   derivations) each work off a private ``os_.dup`` of the root taken under the SAME lock
   ``close`` takes, so a close landing mid-read never redirects it; a closed one answers refused
   (``Bad file descriptor``) and never raises.
@@ -713,4 +713,4 @@ def held_verb(held: Any, verb: str, name: Any, payload: str | bytes = "held row\
 #: `Held`'s whole public surface in rev 3 (R1: no `read`).
 HELD_SURFACE = frozenset({"write", "mkdir", "unlink", "view", "close"})
 #: The view's (`Bound`'s) whole public surface (O3).
-VIEW_SURFACE = frozenset({"read", "read_jsonl", "entries", "under", "close"})
+VIEW_SURFACE = frozenset({"read", "read_bytes", "read_jsonl", "entries", "under", "close"})

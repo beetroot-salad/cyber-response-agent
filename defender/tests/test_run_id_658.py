@@ -118,7 +118,7 @@ def test_materialize_accepts_a_valid_run_id(tmp_path, monkeypatch, run_id):
     # renames the file, and this arm is exactly such a second spelling.
     rp = RunPaths(run_dir)
     assert sorted(path.name for path in run_dir.iterdir()) == sorted(
-        p.name for p in (rp.alert, rp.gather_raw, rp.provenance)
+        p.name for p in (rp.alert_input_dir, rp.gather_raw, rp.provenance)
     )
 
 

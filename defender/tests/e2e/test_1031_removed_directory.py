@@ -205,11 +205,12 @@ def test_a_loop_of_rejections_against_a_declared_system_is_ended_by_the_budget(t
     _assert_no_forbidden_pair(r)
 
 
-def _record(capture: QueryCapture, run_dir: Path, *, system: str, exit_code: int, **extra) -> dict:
+def _record(capture: QueryCapture, state, *, system: str, exit_code: int, **extra) -> dict:  # noqa: ANN001
     """One `_record` call the way `_spec771`'s writer probe makes it: real deps bound to the
-    run dir, a dispatched lead id, every row column the caller decides spelled out."""
-    deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
-                   lead_id=LEAD)
+    run dir and carrying the run's state (#1235), a dispatched lead id, every row column the
+    caller decides spelled out."""
+    deps = replace(bind(_tenants1106.fixture_gather_def(), state.run_dir, defender_dir=DEFENDER),
+                   lead_id=LEAD, run_state=state)
     row, _text = asyncio.run(capture._record(
         deps, system=system, verb="query", query_id="elastic.query", params={},
         payload=None, exit_code=exit_code, detail="down", system_key="", **extra,
@@ -220,7 +221,7 @@ def _record(capture: QueryCapture, run_dir: Path, *, system: str, exit_code: int
 def test_record_charges_the_breaker_to_the_rows_own_system(tmp_path):
     """O4/D4 — `_record` has no `breaker_key`: the outcome is charged to the row's `system`.
     Two `infra`-exit rows for `elastic` leave the breaker document keyed on `elastic` alone,
-    with `PER_SYSTEM_FAIL_LIMIT` failures and a trip, and `is_tripped(run_dir, "elastic")` is
+    with `PER_SYSTEM_FAIL_LIMIT` failures and a trip, and `is_tripped(state, "elastic")` is
     True — while no `host:`-prefixed key (the #1017 D4 reserved counter) exists in it. The
     positive controls: before the second row the system is not tripped; an exit-64 row for
     `elastic` charges nothing (`record_outcome` counts infra exits only); and a coarsened
@@ -229,30 +230,35 @@ def test_record_charges_the_breaker_to_the_rows_own_system(tmp_path):
     assertion behind the behavioural one.
 
     Observed failing by (today): `TypeError` on the first call — `breaker_key` is required."""
+    from defender.runtime.run_state import RunState
+
     run_dir = materialize(tmp_path, GOLDEN_AB3)
+    # No driver started this run: start its state as the driver does at run start (#1235) —
+    # `_record` allocates each row's seq from it and charges its breaker.
+    state = RunState(run_dir, run_dir.name)
     capture = QueryCapture(_real_registry(tmp_path)[1])
 
-    row = _record(capture, run_dir, system="elastic", exit_code=DEFAULT_FAULT_EXIT)
+    row = _record(capture, state, system="elastic", exit_code=DEFAULT_FAULT_EXIT)
     assert row["system"] == "elastic"
-    assert breaker_doc(run_dir)["systems"]["elastic"]["failures"] == 1
-    assert not circuit_breaker.is_tripped(run_dir, "elastic"), "one infra row tripped the system"
+    assert breaker_doc(state)["systems"]["elastic"]["failures"] == 1
+    assert not circuit_breaker.is_tripped(state, "elastic"), "one infra row tripped the system"
 
-    _record(capture, run_dir, system="elastic", exit_code=DEFAULT_FAULT_EXIT)
-    doc = breaker_doc(run_dir)
+    _record(capture, state, system="elastic", exit_code=DEFAULT_FAULT_EXIT)
+    doc = breaker_doc(state)
     assert set(doc["systems"]) == {"elastic"}, \
         f"the breaker is keyed on {sorted(doc['systems'])}, not on the row's own system alone"
     assert doc["systems"]["elastic"]["failures"] == PER_SYSTEM_FAIL_LIMIT
     assert "tripped_at" in doc["systems"]["elastic"]
-    assert circuit_breaker.is_tripped(run_dir, "elastic")
+    assert circuit_breaker.is_tripped(state, "elastic")
     assert not any(key.startswith("host:") for key in doc["systems"]), \
         "a reserved host counter is still charged"
 
-    _record(capture, run_dir, system="elastic", exit_code=64)
-    _record(capture, run_dir, system="", exit_code=DEFAULT_FAULT_EXIT)
-    after = breaker_doc(run_dir)
+    _record(capture, state, system="elastic", exit_code=64)
+    _record(capture, state, system="", exit_code=DEFAULT_FAULT_EXIT)
+    after = breaker_doc(state)
     assert after["systems"] == doc["systems"], "a usage row or a systemless row charged the breaker"
     assert after["total_failures"] == PER_SYSTEM_FAIL_LIMIT
 
     with pytest.raises(TypeError):
-        _record(capture, run_dir, system="elastic", exit_code=DEFAULT_FAULT_EXIT,
+        _record(capture, state, system="elastic", exit_code=DEFAULT_FAULT_EXIT,
                 breaker_key="elastic")

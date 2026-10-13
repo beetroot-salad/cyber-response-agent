@@ -13,7 +13,7 @@ pattern: an invariant enforced at a gate, and believed of the artifact.
 What it flags — under ``defender/``, production code only. A function containing both:
 
 - a write — a call resolved by origin to ``defender._io``'s ``write_guarded`` /
-  ``write_atomic`` / ``open_guarded`` / ``append_jsonl``, or the duck-typed
+  ``open_guarded`` / ``append_jsonl``, or the duck-typed
   ``<x>.write_text(...)`` / ``<x>.write_bytes(...)`` (the receiver is a Path value);
 - a gated artifact name — the literals ``"investigation.md"`` / ``"report.md"``, the constant
   spellings of them, or the ``RunPaths`` accessors for them;
@@ -103,7 +103,6 @@ ARTIFACT_ACCESSORS = _artifact_accessors()
 #: write is alias-safe, this one whether its content met a schema.
 WRITE_CALLEES = frozenset({
     "defender._io.write_guarded",
-    "defender._io.write_atomic",
     "defender._io.open_guarded",
     "defender._io.append_jsonl",
 })

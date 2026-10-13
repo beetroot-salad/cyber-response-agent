@@ -413,3 +413,15 @@ def build_questioner_scene():
         return scene
 
     return _factory
+
+
+@pytest.fixture(autouse=True)
+def _records_planted(request):
+    """The older suites build runs and episodes the way the front door leaves them (#1222: each
+    carries its alert's record); #1222's own suite plants those itself, absence included."""
+    from defender.tests import _triplet_947
+
+    own = "alert_front_door_1222" in request.node.nodeid
+    _triplet_947.PLANT_RECORDS = not own
+    yield
+    _triplet_947.PLANT_RECORDS = False

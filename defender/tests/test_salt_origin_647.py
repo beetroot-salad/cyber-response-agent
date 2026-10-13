@@ -156,7 +156,7 @@ def test_materialize_run_dir_returns_only_the_run_dir(tmp_path, monkeypatch):
     assert isinstance(run_dir, Path), "the builder no longer returns a bare run dir"
     assert run_dir.is_dir(), "the builder's returned run dir is not a real directory"
     assert run_dir.name == "origin-647"
-    assert (run_dir / "alert.json").is_file()
+    assert RunPaths(run_dir).alert.is_file()
     assert (run_dir / "gather_raw").is_dir()
 
     src = (DEFENDER / "run_common.py").read_text(encoding="utf-8")
@@ -292,7 +292,7 @@ def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
     and its projected tool trace. The narrowed obligation is exactly this: the same
     investigation artifacts and the same salted surfaces — not the same directory listing."""
     run_dir = build(tmp_path, monkeypatch, golden=GOLDEN, run_id="artifacts-647")
-    assert (run_dir / "alert.json").is_file(), (
+    assert RunPaths(run_dir).alert.is_file(), (
         "the builder did not materialize the copied alert it owns"
     )
     assert (run_dir / "gather_raw").is_dir(), (
@@ -312,8 +312,9 @@ def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
     ])
     drive(run_dir, run_id=run_dir.name, main=replay)
 
-    for name in ("alert.json", "investigation.md", "report.md", "tool_trace.jsonl"):
+    for name in ("investigation.md", "report.md", "tool_trace.jsonl"):
         assert (run_dir / name).is_file(), f"{name} is missing from the run dir"
+    assert RunPaths(run_dir).alert.is_file(), "the alert is missing from the run dir"
     # Named through `RunPaths` and not joined onto the root: the wire log sits under
     # `wire_logs/`, which is what keeps it outside every reader's run-dir read shape.
     assert RunPaths(run_dir).wire_log.is_file(), "the wire log is missing from the run dir"
@@ -395,15 +396,14 @@ def test_replayed_message_zero_listing_matches_the_production_run_dir_file_set(
     assert "meta.json" not in listed, "the replayed message 0 still advertises the removed file"
     production_names = {p.name for p in prod_dir.iterdir()}
     # `production_names` is `materialize_run`'s snapshot, taken BEFORE
-    # `run_investigation` starts; `tool_trace.jsonl` and (#705)
-    # `session_store_pointer.json` are both written by `run_investigation` itself, between
-    # that snapshot and message 0 — present in a real run by the time the model sees the
-    # listing, just not in this earlier snapshot. The wire log is written in that window too
-    # but is NOT allowed for here: it lands under `wire_logs/`, which the map suppresses along
-    # with `gather_raw/` because the read gate refuses both.
-    assert set(listed) <= production_names | {
-        "tool_trace.jsonl", "session_store_pointer.json",
-    }, (
+    # `run_investigation` starts; `tool_trace.jsonl` is written by `run_investigation` itself,
+    # between that snapshot and message 0 — present in a real run by the time the model sees
+    # the listing, just not in this earlier snapshot. The case pointer (#705) used to be the
+    # second such file; #1235 moved it to a host-only sidecar BESIDE the run dir, so it is no
+    # longer allowed for here. The wire log is written in that window too but is NOT allowed
+    # for here: it lands under `wire_logs/`, which the map suppresses along with `gather_raw/`
+    # because the read gate refuses both.
+    assert set(listed) <= production_names | {"tool_trace.jsonl"}, (
         f"the replayed listing names files a production run dir never has: "
         f"{set(listed) - production_names}"
     )
@@ -446,4 +446,4 @@ def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set
         f"harness={sorted(harness_names)}"
     )
     rp = RunPaths(prod_dir)
-    assert prod_names == {rp.alert.name, rp.gather_raw.name, rp.provenance.name}
+    assert prod_names == {rp.alert_input_dir.name, rp.gather_raw.name, rp.provenance.name}

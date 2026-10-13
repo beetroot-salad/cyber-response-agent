@@ -58,6 +58,7 @@ from defender.tests._branch_947 import (  # noqa: E402
     spec_at,
 )
 from defender.tests._session_store_705 import store_mod  # noqa: E402
+from defender.tests._alert_plant import plant_alert
 
 #: The tool a lead is dispatched through. The design calls it `gather_dispatch`; the runtime
 #: registers it as `gather` (`tools_gather.register_gather_tool`, and `driver.py`'s own comment
@@ -176,9 +177,13 @@ def sibling_dir(tmp_path, name: str = "run-sibling") -> Path:
 
 
 def resume(store, run_dir, message_id, target: Path):
-    """Open the sibling the way the driver does, at `message_id`."""
+    """Open the sibling the way the driver does, at `message_id`, on a fresh run state for
+    `target` (#1235 round 2: seeding takes the sibling's `RunState`, not its run dir)."""
+    from defender.runtime.run_state import RunState
+
     branch = branch_mod()
-    return branch.open_main_session(store, spec_at(store, run_dir, message_id), target)
+    return branch.open_main_session(store, spec_at(store, run_dir, message_id),
+                                    RunState(target, target.name))
 
 
 # 1. which leads existed at the branch point
@@ -556,7 +561,7 @@ def test_a_sibling_that_already_has_its_alert_is_not_refused_as_seeded(tmp_path)
     docstring records for an empty `gather_raw/`."""
     store, run_dir, session_id, returns = gathering_source(tmp_path)
     target = sibling_dir(tmp_path)
-    RunPaths(target).alert.write_text(ALERT_DOC, encoding="utf-8")
+    plant_alert(target, ALERT_DOC.encode("utf-8"))
 
     resume(store, run_dir, returns[1], target)
 
@@ -580,7 +585,9 @@ def test_the_sibling_does_not_inherit_the_source_runs_own_account_of_itself(tmp_
     hands the sibling the answer the pair exists to not share, and `run.py` parses that
     frontmatter as the run's headline. The counters (`budget.json`, `circuit_breaker.json`) are
     this run's spend and this run's per-system fault tallies: inherited, a sibling starts
-    pre-tripped or pre-spent for faults it never took. And the wire log is MAIN's whole
+    pre-tripped or pre-spent for faults it never took. (Since #1235 the counters live in the
+    run process's memory and no run writes either file, so these two arms now plant a stray
+    file at the old name; the sibling still must not carry it.) And the wire log is MAIN's whole
     transcript plus every gather payload verbatim — `_layout.WIRE_LOG_DIR` exists precisely
     so it is unreadable to the agents of its own run, and copying it into a fresh run dir
     re-opens that at the one moment the run dir is being assembled.

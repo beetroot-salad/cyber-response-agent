@@ -80,11 +80,10 @@ pytest.importorskip("pydantic_ai")
 from defender.learning.leads.pitfalls_curator import _build_pitfalls_handoffs  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
-from defender.runtime import lead_zero  # noqa: E402
-from defender.tests.e2e._replay_harness import DEFENDER, GOLDEN_AB3, Turn, materialize  # noqa: E402
+from defender.tests.e2e._replay_harness import Turn  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _dispatch, _run  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
-from defender.tests.e2e.test_query_tool_611 import DONE, ROW_KEYS, elastic_ok, q  # noqa: E402
+from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
 # O3's replay parity (live verdict == the companion guard's oracle over the recorded table) is
 # `test_1017_query_row_surface.py::test_the_replay_through_the_surface_agrees_with_the_live_run`'s,
 # which checks it through the typed surface and over the raw rows alike.
@@ -746,41 +745,6 @@ def test_only_a_coarsened_row_carries_a_system_key_and_it_is_a_digest(tmp_path):
         "a digest reached the `system` column, which `_build_pitfalls_handoffs` spends "\
         "verbatim as `defender/skills/<system>/execution.md` — and it is name-shaped enough "\
         "to pass `is_system_name` on the way"
-
-
-def test_the_tables_second_writer_grows_the_column_too(tmp_path):
-    """The fourteenth column is a ROW contract, not a `QueryCapture` one, and the queries table
-    has a second writer: `lead_zero`'s item-1 capture
-    (`runtime/lead_zero/_capture.py:_record_manual_row`). Until #1017 it spelled the keys
-    INLINE — which is why #877 had to reach in there for `payload_sha256` when it added that
-    column, and why this test exists; since #1017 it builds through `append_query_row`, and
-    this test pins that the second writer's rows still carry the column.
-
-    A row missing the key is not a guard bug — `_trip` coerces it to `""` and lead-0's rows are
-    outside the gather lead's count anyway. It is a CONTRACT break: `set(row) == ROW_KEYS` is
-    asserted against this writer's output in #808 and #872, and every reader written against
-    the frozen set reads both writers' rows out of one file. `""` is the honest value here:
-    item 1 dispatches a system of record, so nothing was coarsened away.
-
-    Driven through the production function on a real run dir rather than over a hand-built row,
-    because "the second writer agrees with the first" is exactly the claim a fixture restating
-    the keys cannot make."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    lead_zero._record_manual_row(
-        lead_zero._CaptureDeps(
-            run_dir=run_dir, defender_dir=DEFENDER, run_id="d871-second-writer",
-            lead_id="l-000",
-        ),
-        "search", {"index": "logs"}, {"rows": [{"a": 1}]}, exit_code=0,
-    )
-
-    rows = record_query.lead_rows(run_dir, "l-000")
-    assert len(rows) == 1, "the second writer left no row, so the contract below is vacuous"
-    assert set(rows[0]) == ROW_KEYS, \
-        "the two writers disagree about the row's keys — one file, two shapes"
-    assert rows[0]["system"], "item 1's row names no system, so the claim below is vacuous"
-    assert rows[0]["system_key"] == "", \
-        "item 1 dispatches a system of record; nothing was coarsened, so nothing is keyed"
 
 
 def test_calls_with_no_readable_system_at_all_are_still_one_group(tmp_path):

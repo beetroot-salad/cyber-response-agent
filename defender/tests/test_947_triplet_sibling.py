@@ -27,6 +27,7 @@ import pytest
 
 from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
+from defender.run_repository import RunPaths
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S1224
 
@@ -240,7 +241,7 @@ def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
     # (`tenant_of_run_dir` is gone, F-13); its runs-base record agrees.
     tenant_id = T.mod("_tenant").read_tenant(base).tenant_id
     seen: list[str] = []
-    _run().main([str(src / "alert.json"), "--tenant", tenant_id], lifecycle=_Recorder([]),
+    _run().main([str(RunPaths(src).alert), "--tenant", tenant_id], lifecycle=_Recorder([]),
                 visualize=lambda p, **kw: None, preflight=_no_preflight,
                 enqueue=lambda run, alert, truncated_by=None: seen.append(str(run.id)))
     assert seen, "an ordinary run reached no curation lane"
@@ -274,7 +275,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
     ep = _episode(tmp_path, src)
     seen: dict = {}
     _run()._drive_investigation(
-        alert_path=src / "alert.json", run_dir=src, run_id=src.name,
+        alert_path=RunPaths(src).alert, run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
@@ -301,7 +302,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
             super().__init__(*a, **kw)
 
     _run()._drive_investigation(
-        alert_path=src / "alert.json", run_dir=src, run_id=src.name,
+        alert_path=RunPaths(src).alert, run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
@@ -319,7 +320,7 @@ def test_947_without_a_world_the_production_registry_is_built_exactly_as_now(tmp
     seen: dict = {}
     tenant = T1106.fixture_run_tenant()
     _run()._drive_investigation(
-        alert_path=src / "alert.json", run_dir=src, run_id=src.name,
+        alert_path=RunPaths(src).alert, run_dir=src, run_id=src.name,
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=tenant,
         world=None, investigate=lambda **kw: seen.update(kw) or {})
@@ -481,8 +482,8 @@ def test_947_run_py_screens_the_source_alert_before_reading_it(tmp_path):
     base, src = T.runs_base(tmp_path)
     secret = tmp_path / "secret.json"
     secret.write_text('{"stolen": true}', encoding="utf-8")
-    (src / "alert.json").unlink()
-    (src / "alert.json").symlink_to(secret)
+    RunPaths(src).alert.unlink()
+    RunPaths(src).alert.symlink_to(secret)
     ep = _episode(tmp_path, src)
     with pytest.raises(SystemExit) as bad:
         _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=_Recorder([]),

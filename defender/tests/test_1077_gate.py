@@ -612,8 +612,9 @@ def test_one_package_migrated_while_another_still_spells_the_name(tmp_path: Path
 # ---------------------------------------------------------------------------------------
 
 def test_kinds_tsv_carries_the_tenant_row_and_a_subcollection_for_circuit_breaker():
-    """`run-records-kinds.tsv` carries a `tenant` row filed under table 2 and a non-empty
-    `subcollection` cell for `circuit_breaker`."""
+    """`run-records-kinds.tsv` carries a `tenant` row filed under table 2, and every kind's
+    `subcollection` cell is filled. (Its `circuit_breaker` clause retired with #1235: the
+    breaker is the run process's memory, not a run record, so the table has no row for it.)"""
     rows = {r["kind"]: r for r in S.kinds_rows()}
     assert "tenant" in rows, (
         "D2 mints a new kind; a kind with no row is a kind with no accessor, and O2's count "
@@ -622,8 +623,8 @@ def test_kinds_tsv_carries_the_tenant_row_and_a_subcollection_for_circuit_breake
         "table 2 holds the records that live BESIDE the run dir under the runs base — the "
         "heading D2's placement fits")
     assert rows["tenant"]["path"] == S.TENANT_RECORD_NAME
-    assert rows["circuit_breaker"]["subcollection"].strip(), (
-        "circuit_breaker's subcollection cell is empty today and d8 fills it")
+    assert "circuit_breaker" not in rows, (
+        "#1235: the breaker is the run process's memory; a row would name a record no one writes")
     appendix = S.appendix_only()
     for kind, row in rows.items():
         if kind in appendix:

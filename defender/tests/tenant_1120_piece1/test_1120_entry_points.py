@@ -36,10 +36,8 @@ from defender import _tenant, _tenants
 from defender._episode_handle import Episode
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
-from defender.runtime import lead_zero
 from defender.runtime import run_tenant as run_tenant_mod
 from defender.runtime import session_store
-from defender.runtime.driver import _prompts as driver_prompts
 from defender.scripts import policy_cli
 from defender.scripts import tenant as tenant_py
 from defender.skills.connect import validate_scaffold
@@ -661,10 +659,9 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     pointer names that id. Each is handed the RunTenant run.py itself resolved and must agree
     with the Tenant: the launcher, over a source run under the accepted tenant, runs a whole
     episode and starts every sibling with that Tenant's id and the parent's data root; the
-    opening prompt resolves lead zero from the
-    Tenant's settings — over the fixture's alert it resolves to an empty lead zero, issuing
-    no fetch, where a settings folder it could not read fails — and its table pointer names
-    the tenant's id; run_investigation's reads are the same RunTenant members (driven end to
+    RunTenant's table pointer
+    names the tenant's id (the opening prompt no longer resolves a lead-zero fetch from the
+    Tenant's settings, #1222); run_investigation's reads are the same RunTenant members (driven end to
     end only by the replay suite)."""
     H.adopted(data_root)
     tenant = H.accept(_tenant, data_root, H.TID)
@@ -675,17 +672,8 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     run_tenant = rec.lifecycle_calls[0]["tenant"]
     assert run_tenant.tenant == tenant
 
-    # driver._prompts — lead zero resolves from the Tenant's settings; no fault degrades it.
-    run_dir = tmp_path / "prompt-run"
-    run_dir.mkdir()
-    alert = H.plant_alert(tmp_path / "in-prompt")
-    prompt, _block, status = driver_prompts._user_prompt(  # noqa: SLF001 — the reader itself
-        run_dir, alert, H.DEFENDER, systems=["elastic"], verbs=_UntouchedVerbs(),
-        run_id="r-prompt", tenant=run_tenant)
-    assert status == lead_zero.STATUS_EMPTY, (
-        f"lead zero did not resolve from the Tenant's settings (status {status!r}):\n"
-        f"{prompt[:3000]}")
-    assert "a run-level fault interrupted resolution" not in prompt
+    # driver._prompts — the opening prompt no longer reads the tenant's settings for a lead-zero
+    # fetch (the ancestor fetch is gone, #1222); its table pointer still names the tenant's id.
     assert run_tenant_mod.table_pointer(tenant.id) == run_tenant.table_pointer
 
     # branch.cli.main — one whole episode through the real launcher (every seam it is not

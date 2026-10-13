@@ -16,6 +16,7 @@ from .. import box as box_mod
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 from ..agent_role import AgentRole
+from ..run_state import run_state_of
 
 from defender._untrusted import wrap_fresh
 from defender._env import FatalConfigError
@@ -62,49 +63,44 @@ def _record_shim_failure(
     * the reducer is the terminal stage: the box reports only the last stage's exit code, so
       otherwise the code cannot be attributed to the reducer.
 
-    The row carries its own call id (`record_query.next_call_id`). Its append is not
-    best-effort: a failed write of the query table is `CallRecordWriteFailed`, which ends the
-    run (A12, #1234) rather than leave the table short of a row this run owed it.
+    The run's state is required: gather deps carrying none are a wiring fault, and that
+    `TypeError` (`run_state_of`) propagates. Only the row's append is best-effort — a refused
+    table write (the row is already in the state, `append_query_row`) or any other failure
+    recording it never fails the command it observes.
     """
     if not isinstance(deps, GatherDeps) or deps.lead_id is None or result.rc == 0:
         return
     lead_id: str = deps.lead_id
     if not permission.command_shape.terminal_reducer(list(decision.pipelines or ())):
         return
+    state = run_state_of(deps)
     stderr = result.err.decode("utf-8", "replace")
     recorded_command = command[:record_query.SHIM_COMMAND_MAX_CHARS]
-    record_query.append_query_row(
-        deps.run_dir,
-        lead_id=lead_id,
-        # The payload's system, not the argv's (`sql` is not a system). `""` when no run
-        # payload was opened; routing uses the sentinel `query_id` either way.
-        system=_shim_system(deps, decision),
-        verb=_BASH_VERB,
-        # Nothing to fingerprint: `system` comes from a path this run wrote, not the model.
-        system_key="",
-        query_id=BASH_SHIM_QUERY_ID,
-        params={"command": recorded_command},
-        raw_command=recorded_command,
-        # Empty but present (`extract_from_joined` drops rows without a sidecar); the
-        # shim's stdout is attacker-influenced and not evidence.
-        payload_text="",
-        exit_code=_shim_exit_code(result.rc),
-        payload_status="error",
-        payload_digest=f"exit={result.rc}; {stderr.strip()[:160]}",
-        call_id=record_query.next_call_id(deps.run_dir),
-    )
-
-
-def _shim_system(deps: AgentDeps, decision: permission.BashDecision) -> str:
-    """The failed reducer's system for its row, best-effort: `""` when the payload it read
-    cannot be attributed (an operand that will not resolve, a table that will not read)."""
     try:
-        return record_query.system_for_payload_operands(
-            deps.run_dir, _opened_operands(deps, decision),
+        record_query.append_query_row(
+            state,
+            lead_id=lead_id,
+            # The payload's system, not the argv's (`sql` is not a system). `""` when no run
+            # payload was opened; routing uses the sentinel `query_id` either way.
+            system=record_query.system_for_payload_operands(
+                state, _opened_operands(deps, decision),
+            ),
+            verb=_BASH_VERB,
+            # Nothing to fingerprint: `system` comes from a path this run wrote, not the model.
+            system_key="",
+            query_id=BASH_SHIM_QUERY_ID,
+            params={"command": recorded_command},
+            raw_command=recorded_command,
+            # Empty but present (`extract_from_joined` drops rows without a sidecar); the
+            # shim's stdout is attacker-influenced and not evidence.
+            payload_text="",
+            exit_code=_shim_exit_code(result.rc),
+            payload_status="error",
+            payload_digest=f"exit={result.rc}; {stderr.strip()[:160]}",
         )
-    # `Exception`: the attribution is observability, and must not stop the row being written.
-    except Exception:  # noqa: BLE001 — best-effort attribution
-        return ""
+    # `Exception`, not `OSError`: more than the write can raise, and this must stay best-effort.
+    except Exception:  # noqa: BLE001 — best-effort observability
+        return
 
 
 def _tool_bash(deps: AgentDeps, command: str) -> str:

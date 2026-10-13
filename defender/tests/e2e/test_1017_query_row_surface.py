@@ -32,7 +32,6 @@ pytest.importorskip("pydantic_ai")
 from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.learning.lead_repository import joined, load_queries  # noqa: E402
-from defender.runtime import lead_zero  # noqa: E402
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
 from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
@@ -40,7 +39,6 @@ from defender.scripts.gather_tools.record_query import QUERY_ROW_COLUMNS
 from defender._query_rules import ABOVE_GUARD_QUERY_ID
 from defender.tests import _judge_921 as J  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
-    DEFENDER,
     GOLDEN_AB3,
     VerbRecorder,
     materialize,
@@ -82,13 +80,14 @@ def _corrected(rec: VerbRecorder) -> int:
 
 def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_path):
     """O6/D1 — a live run reaching all three `append_query_row` callers (an executed query, a
-    failed reducer shim on the bash lane, an above-guard rejection) plus lead-0's own row, and
-    `lead_zero._record_manual_row` driven directly: EVERY row's key tuple — order included —
-    equals `record_query.QUERY_ROW_COLUMNS`. Order too, because one constructor leaves one byte
-    order and two hand-spelled literals that agree on the SET can still differ on it.
+    failed reducer shim on the bash lane, an above-guard rejection): EVERY row's key tuple —
+    order included — equals `record_query.QUERY_ROW_COLUMNS`. Order too, because one constructor
+    leaves one byte order and two hand-spelled literals that agree on the SET can still differ
+    on it. (Lead-0's own writer is gone with the ancestor fetch, #1222: every row now comes
+    through `append_query_row`.)
 
     Observed failing by: the declaration missing, or a writer whose row keys (or their order)
-    differ from it — `_record_manual_row`'s inline dict is the writer this exists for."""
+    differ from it."""
     run_dir = materialize(tmp_path / "live", GOLDEN_AB3)
     r = _run(tmp_path / "live", run_dir=run_dir, run_id="d1017-writers", turns=[
         q("elastic", "query", PARAMS), _reduce(run_dir),
@@ -97,24 +96,9 @@ def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_pat
     kinds = {row["query_id"] for row in r.own_rows}
     assert kinds == {"elastic.query", _query_rules.BASH_SHIM_QUERY_ID, ABOVE_GUARD_QUERY_ID}, \
         f"the three writer paths did not all leave a row: {kinds}"
-    assert any(row["lead_id"] in lead_zero.RESERVED_LEAD_IDS for row in r.rows), \
-        "lead-0 left no row, so the universal below does not reach its writer"
     for row in r.rows:
         assert tuple(row) == QUERY_ROW_COLUMNS, \
             f"{row['lead_id']}/{row['query_id']}: keys {tuple(row)} != the declared columns"
-
-    manual = materialize(tmp_path / "manual", GOLDEN_AB3)
-    lead_zero._record_manual_row(
-        lead_zero._CaptureDeps(
-            run_dir=manual, defender_dir=DEFENDER, run_id="d1017-second-writer",
-            lead_id="l-000",
-        ),
-        "search", {"index": "logs"}, {"rows": [{"a": 1}]}, exit_code=0,
-    )
-    rows = record_query.lead_rows(manual, "l-000")
-    assert len(rows) == 1, "the second writer left no row"
-    assert tuple(rows[0]) == QUERY_ROW_COLUMNS, \
-        "the second writer's row is keyed (or ordered) differently from the declaration"
 
 
 def test_the_suites_frozen_key_set_is_the_writers_declaration():
@@ -175,19 +159,28 @@ def test_the_surface_reads_system_key_and_payload_sha256_off_a_real_table(tmp_pa
 
 def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp_path):
     """O2/D2 — `[r.record() for r in load_queries(run_dir) if r.lead_id == LEAD]` is EXACTLY
-    `record_query.lead_rows(run_dir, LEAD)`: same dicts, same order. `lead_rows` is the guard's
-    own live reader (N2), so this is the whole of what lets an offline replay hand the guard's
-    predicates what the run handed them.
+    what the guard read live: same dicts, same order. Since #1235 the guard's live reader is
+    the run's `RunState` (`state.lead_rows`) — whose rows are the lines the writer actually
+    wrote, read back — and never the FILE. So the three must agree byte for byte: the
+    surface's records, the file's rows and the state's rows (`drive()` hands back the state it
+    injected, read post-run in this process). That is the whole of what lets an offline replay
+    hand the guard's predicates what the run handed them.
 
-    Observed failing by: `record()` missing, or any key/value/order difference."""
+    Observed failing by: `record()` missing, or any key/value/order difference between the
+    surface, the file and the host's table."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1017-records", verbs=elastic_ok(rec), turns=[
         _bad_args("ghostone", verb="ghostverb"), q("ghosttwo", "ghostverb", PARAMS),
         q("elastic", "query", PARAMS), DONE,
     ])
-    live = record_query.lead_rows(r.run_dir, LEAD)
-    assert len(live) == 3, "the three calls did not all leave rows"
-    assert [t.record() for t in load_queries(r.run_dir) if t.lead_id == LEAD] == live
+    live = r.state.lead_rows(LEAD)
+    on_file = [row for row in r.rows if row.get("lead_id") == LEAD]
+    assert len(live) == 3, "the three calls did not all leave rows on the run's state"
+    assert json.dumps(live) == json.dumps(on_file), \
+        "the run's state and the file disagree — the guard read rows the file does not hold"
+    records = [t.record() for t in load_queries(r.run_dir) if t.lead_id == LEAD]
+    assert json.dumps(records) == json.dumps(live), \
+        "the surface's records are not what the guard read live"
 
 
 def test_the_replay_through_the_surface_agrees_with_the_live_run(tmp_path):
@@ -219,8 +212,8 @@ def test_the_replay_through_the_surface_agrees_with_the_live_run(tmp_path):
     assert _replay_rejections([t.record() for t in load_queries(same.run_dir)]) \
         == [(LEAD, 2, "repeat")], \
         "a replay through the surface misses the trip the live run took"
-    # And the same answer the raw-dict oracle gives, on both — O2 is parity with the run, and
-    # parity with the reader the run's guard uses is how that is measured.
+    # And the same answer the raw-dict oracle gives, on both — O2 is parity with the run; the
+    # file's rows are what the guard read live (the host's table equals them, the test above).
     for r in (distinct, same):
         assert _replay_rejections([t.record() for t in load_queries(r.run_dir)]) \
             == _replay_rejections(r.rows)

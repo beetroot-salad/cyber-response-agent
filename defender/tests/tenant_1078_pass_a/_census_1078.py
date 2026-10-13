@@ -359,7 +359,7 @@ def _anchored(node: ast.AST, tainted: set[str]) -> bool:
     return False
 
 
-_U6_WRITE_NAMES = re.compile(r"^(copy|copy2|copyfile|copytree|move|write_atomic|write_guarded|"
+_U6_WRITE_NAMES = re.compile(r"^(copy|copy2|copyfile|copytree|move|write_atomic|write_guarded|"  # lint-stale-ref: ok — a census word for the deleted `_io.write_atomic`; a name no module defines matches nothing
                              r"atomic_write|dump)$")
 
 

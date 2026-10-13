@@ -14,6 +14,7 @@ needs at once.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -33,7 +34,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
-from defender._io import read_text_utf8, write_guarded
+from defender._io import write_guarded
 from defender import _git
 from defender._knowledge import KnowledgePaths
 from defender._paths import DefenderPaths, adapters_under
@@ -57,6 +58,7 @@ from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
 from ..permission.policies import _common
 from ..providers import BuiltModel
+from ..run_state import RunState
 from ..tools import (
     AgentDeps,
     GatherDeps,
@@ -91,7 +93,6 @@ from ._prompts import (
 from ._budget import (
     _account_executed_call,
     _budget_short_circuit,
-    _budget_state_for_enforcement,
     _make_hooks,
     _stamp_duration,
 )
@@ -125,13 +126,10 @@ from defender.hooks.budget_enforcer import (
     BudgetKill,
     account_call,
     check_budgets,
-    open_budget,
-    read_budget,
     refusal_message,
     should_refuse,
     tail_exhausted,
     tier,
-    update_budget_locked,
 )
 
 _logger = logging.getLogger(__name__)
@@ -178,12 +176,29 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     """The one shape `run_investigation` returns on every exit, so exits cannot drift apart.
 
     `end` (exit class, and whether the model had already closed) is flattened on so `run.py`'s
-    post-steps read it in-process rather than off disk."""
+    post-steps read it in-process rather than off disk. The run's live state is not on it
+    (#1235): a caller that wants it hands it in (`run_investigation(run_state=…)`) and keeps its
+    own reference."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
         "exit_reason": exit_reason, "case_id": case_id, "store_path": store_path,
     }
+
+
+def _run_state_at_boundary(run_state: RunState | None, run_dir: Path, run_id: str) -> RunState:
+    """The run's one live state (#1235), resolved once: the one the caller handed in, which
+    must be this run's — started for this folder, as spelled, under this run id — or, when
+    handed none, a new one for the run (production's path: `run.py` hands none). Another
+    run's state is a `ValueError`: counting this run on it would charge that run's budget
+    and breaker, and leave this one's decisions reading a state they never wrote."""
+    if run_state is None:
+        return RunState(run_dir, run_id)
+    if (run_state.run_dir, run_state.run_id) != (Path(run_dir), run_id):
+        raise ValueError(
+            f"run_investigation was handed the state of run {run_state.run_id!r} on "
+            f"{run_state.run_dir}, not this run's ({run_id!r} on {run_dir})")
+    return run_state
 
 
 def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | None) -> None:
@@ -216,25 +231,7 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
             _logger.warning(f"truncated_by write skipped: {e!r}")
 
 
-async def _reap_correlation_task(task: Any) -> None:
-    """Cancel and await item 3's fire-and-forget correlation task.
-
-    It is only awaited when MAIN prepares a second request; a run that ends sooner would leave it
-    writing the run dir concurrently with `run.py`'s post-run steps, with its exception never
-    retrieved. No-op if already consumed."""
-    if task is None:
-        return
-    if not task.done():
-        task.cancel()
-    try:
-        await task
-    except Exception as e:  # noqa: BLE001 — this cleanup step must not itself break the run
-        _logger.warning(f"correlation task reaped with an unretrieved fault: {e!r}")
-    except asyncio.CancelledError:
-        pass
-
-
-async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent, prompt, deps, store, bounds; one except arm per exit class
+async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent, prompt, deps, store, bounds
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
     bounds: challenge_gate.Bounds, message_history: list | None = None,
 ) -> tuple[Any, run_end.RunEnd, str | None]:
@@ -306,14 +303,14 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
     return run, end, exit_reason
 
 
-def _bind_call_ids(run_dir: Path, verbs: Any, run_id: str) -> None:
+def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
     """Name the run in every call id its writers allocate (A12, #1234): the registry's own
     `call_run` when it serves a branched world (the world token its served-ledger rows carry
     as `world_id`), else the run id. Bound before any writer runs, lead zero's included."""
     from ..query_tool import bind_call_ids
 
     run = getattr(verbs, "call_run", None)
-    bind_call_ids(run_dir, run if isinstance(run, str) and run else run_id)
+    bind_call_ids(state, run if isinstance(run, str) and run else run_id)
 
 
 def _call_record_failure(exc: BaseException) -> run_end.CallRecordWriteFailed | None:
@@ -435,14 +432,76 @@ def _adapters_at_run_start(
     return roster, verbs
 
 
-def _alert_doc_soft(alert_path: Path) -> dict:
-    """The alert as item 3's contract reads it — `{}` when unreadable or not JSON; the
-    contract's own gate does the refusing."""
+def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
+    *, run_dir: Path, logger: Any, store: Any, session_id: str, truncated_by: str,
+    exit_reason: str, model_name: str | None, case_id: str, wall_ms: float,
+) -> dict:
+    """End a run whose cause of death arrived BEFORE MAIN's first request (a run-level kill
+    while the correlation lead ran): the same exit MAIN's own kill takes — the session and the
+    run-end record name the class, the trace is written, the log is released — with the agent
+    never started, so no output and no forced close."""
+    _flush_run_end(None, store, session_id, truncated_by)
+    end = run_end.RunEnd(truncated_by, closed_before_cut=False)
     try:
-        doc = json.loads(read_text_utf8(alert_path))
-    except (OSError, ValueError):
-        return {}
-    return doc if isinstance(doc, dict) else {}
+        run_end.write_sidecar(run_dir, end)
+    except OSError as e:
+        _logger.warning(f"run-end record write skipped: {e!r}")
+    try:
+        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
+    except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
+        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
+        try:
+            write_guarded(RunPaths(run_dir).tool_trace, "")
+        except OSError as fallback_err:
+            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r})")  # lint-run-records: ok — an operator diagnostic naming the missing record
+    logger.close()
+    return _run_summary(
+        output=None, model_name=model_name, requests=logger.n_requests, end=end,
+        exit_reason=exit_reason, case_id=case_id, store_path=store.path,
+    )
+
+
+async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the run's identity for an early stop
+    correlation: CorrelationDispatch, *, run_dir: Path, defender_dir: Path, run_id: str,
+    verbs: Any, limits: dict, make_model: MakeModel, logger: Any, box: Any, store: Any,
+    session_id: str, case_id: str, model_name: str | None, run_state: RunState,
+    catalog: str | None, tenant: RunTenant, deadline: float, run_started: float,
+) -> tuple[str | None, dict | None]:
+    """Run the correlation lead to its end and return `(the correlation section of MAIN's
+    opening message, None)`, or `(None, the run summary)` when a run-level stop arrived first.
+
+    A run-level kill or a store fault while the lead runs ends the run the way MAIN's own would,
+    with the agent never started. An interrupt, a cancellation or a run folder that refuses the
+    lead's summary releases the wire log and the store, then propagates."""
+    from .. import lead_zero as lead_zero_mod
+
+    def stop(truncated_by: str, exit_reason: str) -> dict:
+        return _stop_before_main(
+            run_dir=run_dir, logger=logger, store=store, session_id=session_id,
+            truncated_by=truncated_by, exit_reason=exit_reason, model_name=model_name,
+            case_id=case_id, wall_ms=(time.monotonic() - run_started) * 1000.0)
+
+    try:
+        outcome = await lead_zero_mod.run_correlation(
+            run_state=run_state, defender_dir=defender_dir, verbs=verbs,
+            limits=limits, make_model=make_model, logger=logger, box=box, store=store,
+            catalog=catalog,
+            dispatch=correlation, tenant=tenant, deadline=deadline)
+    except (BudgetKill, RunAborted) as kill:
+        _logger.warning(f"{kill}; stopping before the agent starts")
+        return None, stop(
+            session_store.TRUNCATED_BY_BUDGET if isinstance(kill, BudgetKill)
+            else session_store.TRUNCATED_BY_ABORTED, type(kill).__name__)
+    except (sqlite3.Error, session_store.StoreError) as e:
+        _logger.error(f"store fault during the correlation lead ({e!r}); ending the run")
+        return None, stop(session_store.TRUNCATED_BY_STORE, "StoreAppendError")
+    except BaseException:
+        logger.close()
+        with contextlib.suppress(Exception):
+            store.close()
+        raise
+    return lead_zero_mod.render_correlation_section(
+        outcome, grant_home=tenant.table_pointer), None
 
 
 async def _drive_releasing_log(logger: Any, *args: Any) -> Any:
@@ -475,9 +534,17 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     resume: Any = None,
     tenant: RunTenant,
     orient_shim: orient.ShimRunner | None = None,
+    run_state: RunState | None = None,
 ) -> dict:
     # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
     # dispatch identity). Required: there is no process-level fallback.
+    #
+    # The run's live decision state (#1235): its budget and clock, its breaker, its queries
+    # rows. Resolved first — a state for another run is refused before anything is read or
+    # driven — and carried by reference to every role of the run; a branch sibling's seeding
+    # records its inherited rows into it. The summary does not hand it out: a caller that wants
+    # it passes its own.
+    state = _run_state_at_boundary(run_state, run_dir, run_id)
     model_name = resolve_main_model(model_name)
     # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not
     # inherit MAIN-gather's default registry.
@@ -487,14 +554,19 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
     roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs, tenant)
-    _bind_call_ids(run_dir, verbs, run_id)
+    _bind_call_ids(state, verbs, run_id)
     correlation = _correlation_dispatch_at_run_start(
         tenant=tenant, resume=resume, lead_zero_verbs=lead_zero_verbs,
     )
     catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster, tenant.grants)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
-    budget_started_monotonic = time.monotonic()
-    open_budget(run_dir, run_id)
+    # A usable deadline or no run: checked before the run folder is touched, never replaced by a
+    # fallback. A lead the table withholds is never run, so it owes no deadline.
+    from ..lead_zero import correlation_deadline as lead_zero_deadline
+
+    correlation_deadline = (
+        lead_zero_deadline(limits) if correlation is not None and correlation.system is not None
+        else 0.0)
     # Under `wire_logs/`, not the run root, so it is outside the agents' one-segment run-dir
     # read shape.
     logger = observe.RequestLogger(observe.wire_log_path(run_dir))
@@ -527,7 +599,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         # A resume joins the source run's case, so the case pointer comes from the store, not
         # the uuid minted above (they match on a fresh run). `run_dir` is passed because a
         # resumed MAIN inherits the investigation document as well as the message history.
-        session_id, resume_history = branch.open_main_session(store, resume, run_dir)
+        session_id, resume_history = branch.open_main_session(store, resume, state)
         # Written after the session opens, so a refused branch leaves no pointer naming the
         # source run's store. Rebound so `_run_summary` names the case this run joined.
         case_id = branch.attach_case_pointer(
@@ -552,58 +624,55 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             exit_reason=type(e).__name__, case_id=case_id, store_path=None,
         )
 
-    prompt, lead_zero_block, lead_zero_status = _opening_prompt(
-        resume, run_dir, alert_path, defender_dir,
-        systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits, run_id=run_id,
-        tenant=tenant, orient_shim=orient_shim,
-    )
+    # One execution clock covers correlation and MAIN, including a stop before MAIN.
+    run_started = time.monotonic()
 
-    # Item 3 is scheduled here (after item 1) and awaited in the store's render processor just
-    # before MAIN's second request. `correlation` is `None` when this run dispatches none.
-    correlation_task: Any = None
+    # The correlation lead runs to its end BEFORE the opening message is built (A4): the message
+    # carries its framed summary or the one sentence naming its ending, and nothing about
+    # correlation arrives later. `correlation` is `None` when this run dispatches none.
+    correlation_section: str | None = None
+    if correlation is None and resume is None:
+        # A fresh drive with no verb registry runs no lead: there is no third state between
+        # "dispatched" and "withheld", so MAIN is told the lead was withheld.
+        from ..lead_zero import CorrelationOutcome, render_correlation_section
+        from ..lead_zero._spec import ENDING_WITHHELD
+
+        correlation_section = render_correlation_section(
+            CorrelationOutcome(ending=ENDING_WITHHELD), grant_home=tenant.table_pointer)
     if correlation is not None:
-        from .. import lead_zero as lead_zero_mod
-
-        contract = lead_zero_mod.prepare_correlation_lead(
-            run_dir, _alert_doc_soft(alert_path), lead_zero_block, lead_zero_status,
-            dispatch=correlation,
-        )
-        if contract is not None:
-            goal, what_to_summarize = contract
-            # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name,
-            # which a harness dispatch never emits.
-            lead_zero_mod._budget_account(run_dir, run_id, "gather", limits)
-            correlation_task = asyncio.ensure_future(lead_zero_mod.dispatch_correlation(
-                run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
-                goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
-                limits=limits, make_model=make_model, logger=logger, box=box, store=store,
-                # Share the run's budget-clock origin rather than a fresh stamp.
-                budget_started_monotonic=budget_started_monotonic,
-                catalog=correlation_catalog, dispatch=correlation,
-                tenant=tenant,
-            ))
+        correlation_section, stopped = await _correlation_phase(
+            correlation, run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
+            verbs=lead_zero_verbs, limits=limits, make_model=make_model, logger=logger, box=box,
+            store=store, session_id=session_id, case_id=case_id, model_name=model_name,
+            catalog=correlation_catalog,
+            tenant=tenant, run_state=state, deadline=correlation_deadline, run_started=run_started)
+        if stopped is not None:
+            return stopped
+    prompt = _opening_prompt(
+        resume, run_dir, alert_path, defender_dir,
+        systems=tuple(roster.accepted), correlation_section=correlation_section,
+        orient_shim=orient_shim,
+    )
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
         store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
-        correlation_task=correlation_task, toolset=toolset, catalog=catalog,
-        gather_grant=tenant.grants.gather,
+        toolset=toolset, catalog=catalog, gather_grant=tenant.grants.gather,
     )
     deps = replace(
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
         run_id=run_id,
-        budget_started_monotonic=budget_started_monotonic,
-        # The run's tenant record rides on MAIN's deps so every gather lead it dispatches
-        # inherits it (`_run_gather` carries it onto the lead's deps) — #1106 M3, #1107.
+        # The run's tenant record and its state ride on MAIN's deps so every gather lead it
+        # dispatches inherits them (`_run_gather` carries both onto the lead's deps) —
+        # #1106 M3, #1107, #1235.
         tenant=tenant,
+        run_state=state,
     )
 
-    t0 = time.time()
     run, end, exit_reason = await _drive_releasing_log(
         logger, agent, prompt, deps, store, session_id, gate_bounds, resume_history,
     )
-    wall_ms = (time.time() - t0) * 1000.0
-    await _reap_correlation_task(correlation_task)
+    wall_ms = (time.monotonic() - run_started) * 1000.0
 
     result = run.result if run is not None else None
     try:
@@ -669,7 +738,6 @@ __all__ = [
     "_affinity_key",
     "_branch_clock",
     "_budget_short_circuit",
-    "_budget_state_for_enforcement",
     "_clock",
     "_common",
     "_compaction_enabled",
@@ -690,7 +758,6 @@ __all__ = [
     "_make_hooks",
     "_make_store_render_processor",
     "_opening_prompt",
-    "_reap_correlation_task",
     "_resolve_store_factory",
     "_run_summary",
     "_stamp_duration",
@@ -711,12 +778,10 @@ __all__ = [
     "gather_model",
     "json",
     "observe",
-    "open_budget",
     "orient",
     "os",
     "permission",
     "providers",
-    "read_budget",
     "refusal_message",
     "register_close_tool",
     "register_gather_tool",
@@ -735,7 +800,6 @@ __all__ = [
     "tier",
     "time",
     "toon_gate_mod",
-    "update_budget_locked",
     "uuid",
     "write_guarded",
 ]

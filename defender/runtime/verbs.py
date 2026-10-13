@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 from pydantic import SkipValidation, field_validator
 
+from .run_state import RunState
 from .verb_grant import GrantError, VerbGrant
 from defender._io import read_bytes_capped
 
@@ -128,6 +129,11 @@ class VerbContext:
     #: imported here (see the import note above); `_tenant_given` still refuses `None`.
     tenant: Annotated[_RunTenant, SkipValidation]
     capture: Any = None
+    #: The run's one live state (#1235), set by the query tool and lead-0 from the deps they
+    #: run under. The world registry pauses its investigator clock for as long as an oracle
+    #: turn holds the call; a context with none (pre-flight's replay, the ticket writer) has no
+    #: clock to pause. `SkipValidation`: the run's object itself, never a copy.
+    run_state: Annotated[RunState | None, SkipValidation] = None
     #: The moment a branched-world call is served as of; `None` for the ordinary run, which
     #: uses the wall clock. Every world of a family, the base included, carries the branch
     #: point's moment, so no branch arm reads the wall clock (that would make it unreplayable).

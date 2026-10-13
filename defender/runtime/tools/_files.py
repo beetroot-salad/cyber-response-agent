@@ -17,6 +17,7 @@ from defender.run_repository import RunPaths
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 
+from defender import _alert_input
 from defender._untrusted import wrap_fresh
 from defender._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
 from defender.hooks.record_lesson_load import LOAD_KIND_READ as _LOAD_KIND_READ
@@ -67,6 +68,18 @@ def _write_operand(deps: AgentDeps, p: Path, path: str, text: str) -> None:
         raise ModelRetry(f"could not write {path}: {e}") from None
 
 
+def _check_alert_digest(deps: AgentDeps, p: Path) -> None:
+    """A read of the run's stored alert re-checks its bytes against the digest the run's record
+    carries (RG1's second line) and refuses a mismatch with a fixed reason naming the run."""
+    paths = RunPaths(deps.run_dir)
+    if p != paths.alert.resolve():
+        return
+    try:
+        _alert_input.verified_alert(paths.alert, paths.alert_record, run_name=Path(deps.run_dir).name)
+    except _alert_input.AlertReplaced as e:
+        raise ModelRetry(str(e)) from None
+
+
 def _gated_read(
     deps: AgentDeps, path: str, *, lesson_corpora: frozenset[str] = _RUNTIME_LESSON_CORPORA
 ) -> tuple[Path, str]:
@@ -78,6 +91,7 @@ def _gated_read(
     if not decision.allow:
         raise ModelRetry(decision.reason)
     _deny_authored_read(deps, p)
+    _check_alert_digest(deps, p)
     text = _read_operand(deps, p, path)
     if text is None:
         raise ModelRetry(f"file not found: {path}")

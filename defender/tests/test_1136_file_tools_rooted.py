@@ -495,7 +495,7 @@ def test_the_write_gate_does_not_take_its_baseline_through_a_hard_link(tmp_path)
 _SEAMS = frozenset({
     "write_guarded", "read_guarded", "read_plain", "read_plain_bytes", "read_bytes_guarded",
     "read_text_utf8", "read_text_soft", "guarded_mkdir", "locked_for_rewrite",
-    "locked_for_read", "open_guarded", "write_atomic", "append_jsonl",
+    "locked_for_read", "open_guarded", "write_atomic", "append_jsonl",  # lint-stale-ref: ok — a census word for the deleted `_io.write_atomic`; a name no module defines adds no seam to the scan
 })
 
 #: Path-following probes and I/O no file tool may call on a model path.

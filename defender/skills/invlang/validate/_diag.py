@@ -136,7 +136,7 @@ def _check_surface(proposed_text: str, current_text: str | None) -> list[str]:
 
 
 #: Repair text for an id the author may declare, shared by both arms that report one. It names
-#: the harness-reserved case: the harness declines to seed `l-000`'s declaring row into an
+#: the harness-reserved case: the harness declines to seed `l-00c`'s declaring row into an
 #: invalid document, so "already claimed" and "undeclared lead" can both be true at once.
 _DECLARE_IT_YOURSELF = (
     ". Declare it in a `:L findings` block and re-send — that holds for a "

@@ -38,7 +38,7 @@ only the inside one reaches a reverted write, and only the handle's no-follow wa
   interleaving, S3).
 - H5 the manifest reader (`load_family`), handed the episode's view, refuses a symlink or a
   hard link at `family.yaml` without reading what it reaches.
-- H7 `defender._io.Bound`'s public surface is exactly `read`, `read_jsonl`, `entries`, `under`,
+- H7 `defender._io.Bound`'s public surface is exactly `read`, `read_bytes`, `read_jsonl`, `entries`, `under`,
   `close` (O3) — for a `bind` and for `episode.view()`.
 
 The census that holds every migrated module to the handle is `test_1133_census.py`.
@@ -881,12 +881,12 @@ def test_h5_the_manifest_reader_refuses_a_link_at_family_yaml_without_reading_it
 def test_h7_bounds_public_surface_is_exactly_its_readers_and_close(tmp_path):
     """O3: a read view stays write-free by type. The public attributes of a `Bound` — from
     `bind(root)`, and from `episode.view()` over the same held handle the episode writes
-    through — are exactly `read`, `read_jsonl`, `entries`, `under` and `close`."""
+    through — are exactly `read`, `read_bytes`, `read_jsonl`, `entries`, `under` and `close`."""
     from defender._io import bind
 
     root = tmp_path / "root"
     root.mkdir()
-    want = {"read", "read_jsonl", "entries", "under", "close"}
+    want = {"read", "read_bytes", "read_jsonl", "entries", "under", "close"}
     with bind(root) as bound:
         public = {name for name in dir(bound) if not name.startswith("_")}
     assert public == want, sorted(public)

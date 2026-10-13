@@ -1,7 +1,7 @@
 """#1017 — the queries row's ONE schema, and the read surface that projects all of it.
 
 Three symptoms with one root: the row's column set was spelled by hand at the writer
-(`record_query.append_query_row`), at the second writer (`lead_zero._record_manual_row`), at the
+(`record_query.append_query_row`), at the second writer (gone with #1222), at the
 read surface (`lead_repository.QueryRow`) and in the judge's raw dump — so a column added at the
 writer reached a reader only when someone remembered each list. `system_key` (#871) reached none
 of them, and it is half the rejection guard's identity.
@@ -39,13 +39,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from defender._io import append_jsonl
+from defender._io import append_jsonl, read_jsonl_rows
 from defender.run_repository import RunPaths
 from defender._text import as_str
 from defender.learning import lead_repository
 from defender.learning.lead_repository import QueryRow, load_queries
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
-from defender.scripts.gather_tools import record_query
 from defender.scripts.gather_tools.record_query import (
     QUERY_ROW_COLUMNS,
     in_rejection_domain,
@@ -114,6 +113,19 @@ def _searchable_row(seq: int, **overrides) -> dict:
         "payload_path": f"gather_raw/l-PAYLOADPATHMARKER{seq}/{seq}.json",
     }
     return _row(seq, **{**marked, **overrides})
+
+
+def _inherited_state(source: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
+    """A branch sibling's run state after seeding inherited `source`'s table for `LEAD` — the
+    one way a run's state holds rows it did not write (#1235 round 2)."""
+    from defender.runtime.branch._seed import _inherit_evidence
+    from defender.runtime.run_state import RunState
+
+    sibling = source / "sibling"
+    sibling.mkdir()
+    state = RunState(sibling, "r1017-sibling")
+    _inherit_evidence(source, state, {LEAD})
+    return state
 
 
 def _table(run_dir: Path, rows: list[dict]) -> Path:
@@ -262,12 +274,14 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
     on a row LACKING the two new columns (no `""` is invented into the record), and on a row
     whose `error_class` key is absent (no derived class is written back into it).
 
-    A replay built from the surface hands the guard exactly what `record_query.lead_rows` hands
-    it live; a re-projection of the typed fields would coerce `None` to `""`, derive
-    `error_class`, and turn `raw_ref` back into a string — each a byte the guard did not see.
+    A replay built from the surface hands the guard exactly what its live table hands it: since
+    #1235 that is the run's `RunState` (`state.lead_rows`), which holds a table's rows read from
+    these very lines only when branch seeding inherits them (`_inherit_evidence`, round 2) — so
+    `record()` must equal the rows seeding put on a sibling's state too. A re-projection of the typed fields would coerce `None` to `""`, derive `error_class`,
+    and turn `raw_ref` back into a string — each a byte the guard did not see.
 
     Observed failing by: `record()` missing, or any key of the returned dict differing from
-    the line on disk."""
+    the line on disk or from the row seeding put on the sibling's state."""
     full = _row(0, system_key=KEY_MARKER)
     pre_871 = _row(1)
     for key in ("system_key", "payload_sha256"):
@@ -285,6 +299,9 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
     rows = load_queries(tmp_path)
     assert [r.record() for r in rows] == [full, pre_871, no_class, odd], \
         "record() is not the row as read"
+    state = _inherited_state(tmp_path)
+    assert json.dumps([r.record() for r in rows]) == json.dumps(state.lead_rows(LEAD)), \
+        "record() is not what seeding put on the guard's state from these lines"
     assert (rows[3].seq, rows[3].system, rows[3].params, rows[3].exit_code) == (3, "None", {}, 64), \
         "the typed view stopped coercing — the equality above is then a tautology"
     assert "system_key" not in rows[1].record(), \
@@ -308,7 +325,9 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
 
     Both halves are asserted on one table: the typed `error_class` IS the derived value (the
     positive control — the surface still derives), and `rejection_trip` over `record()`s is
-    `None`, byte-for-byte what the live guard answered over `lead_rows`.
+    `None`, byte-for-byte what the live guard answers over its own table — the run's state
+    (#1235), here a branch sibling's, whose rows seeding inherited from this file and which are
+    asserted here to equal the file's rows byte for byte.
 
     Observed failing by: `record()` returning the typed fields re-projected, on which the
     predicate trips."""
@@ -322,7 +341,11 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
         rec.pop("error_class")
         rec.pop("system_key")
     _table(tmp_path, old)
-    raw = record_query.lead_rows(tmp_path, LEAD)
+    raw = _inherited_state(tmp_path).lead_rows(LEAD)
+    on_file = [r for r in read_jsonl_rows(RunPaths(tmp_path).executed_queries)
+               if r.get("lead_id") == LEAD]
+    assert json.dumps(raw) == json.dumps(on_file), \
+        "seeding put rows other than the file's on the state — the guard reads what it did not see"
     assert [("error_class" in r) for r in raw] == [False, False], \
         "the fixture did not land as two class-less rows, so the claim below is vacuous"
 

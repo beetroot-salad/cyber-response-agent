@@ -50,7 +50,7 @@ def refuse_bad_run_id(run_id: str) -> None:
 
 
 #: The longest run id, in bytes: NAME_MAX (255) minus the longest name a side-file write puts
-#: beside the run folder — the longest sidecar suffix (`.accounting_failures.json`, 25 bytes)
+#: beside the run folder — the longest sidecar suffix (`.accounting_failures.json`, 25 bytes)  # lint-stale-ref: ok — the reserved suffix (`_layout.ACCOUNTING_FAILURES_SUFFIX`) the bound derives from, not the removed `RunPaths.accounting_failures()`
 #: plus the staged name `write_guarded`'s `replace` mode creates first (`.staged-` and 16 hex
 #: digits, 24 bytes), so 255 - 49 = 206 (#1105 R4-35..R4-37). A filesystem with a smaller
 #: NAME_MAX is not covered: the id has no path to ask.

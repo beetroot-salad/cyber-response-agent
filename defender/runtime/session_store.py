@@ -11,6 +11,7 @@ import contextlib
 import hashlib
 import json
 import math
+import os
 import sqlite3
 import uuid
 from dataclasses import field
@@ -41,6 +42,7 @@ from defender.runtime.run_end import (  # noqa: F401 — re-exports
     TRUNCATED_BY_RETRY_EXHAUSTED,
     TRUNCATED_BY_SERVED_LEDGER,
     TRUNCATED_BY_STORE,
+    TRUNCATED_BY_TIMED_OUT,
     TRUNCATED_BY_VALUES,
     normalized_truncated_by,
 )
@@ -713,11 +715,46 @@ def write_case_pointer(
     body: dict = {"case_id": case_id, "store_path": str(store_path)}
     if session_id is not None:
         body["session_id"] = session_id
-    write_guarded(RunPaths(run_dir).session_pointer, json.dumps(body))
+    write_guarded(RunPaths(run_dir).session_pointer(), json.dumps(body))
+
+
+class LegacyRunLink(StoreError):
+    """A run recorded before #1235: its run -> case link is still the file inside the run
+    folder, and no link sits beside the folder. Refused, never read as "no session": which case
+    the run belongs to is unknown, and the run can be re-run."""
+
+
+#: The run -> case link's name inside the run folder before #1235 moved it beside the folder
+#: (`RunPaths.session_pointer`). Only its presence is ever looked at.
+_LEGACY_LINK_NAME = "session_store_pointer.json"
+
+
+def refuse_legacy_link(run_dir: Path) -> None:
+    """`LegacyRunLink` when `run_dir` still holds the link it was recorded with before #1235.
+
+    For a folder with no link beside it: a link beside the folder always wins, and a folder
+    with neither (a hand-copied run) has no session."""
+    run_dir = Path(run_dir)
+    if os.path.lexists(run_dir / _LEGACY_LINK_NAME):
+        raise LegacyRunLink(
+            f"run {run_dir.name} was recorded before #1235: its run -> case link is still "
+            f"inside the run folder ({_LEGACY_LINK_NAME}) and none sits beside it, so the case "
+            "it belongs to is unknown. Runs recorded before #1235 are not read; re-run it.")
+
+
+def _case_pointer(run_dir: Path) -> Any:
+    """The run -> case link beside `run_dir`, parsed. `FileNotFoundError` when there is none,
+    `LegacyRunLink` when the run was recorded before #1235."""
+    try:
+        text = read_text_utf8(RunPaths(run_dir).session_pointer())
+    except FileNotFoundError:
+        refuse_legacy_link(run_dir)
+        raise
+    return json.loads(text)
 
 
 def resolve_store_path(run_dir: Path) -> Path:
-    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer))
+    data = _case_pointer(run_dir)
     return Path(data["store_path"])
 
 
@@ -725,7 +762,7 @@ def resolve_session_id(run_dir: Path) -> str | None:
     """The session this run owns, or `None` when the pointer names none (a fresh run); the
     caller then falls back to `main_session_id`.
     """
-    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer))
+    data = _case_pointer(run_dir)
     session_id = data.get("session_id")
     return session_id if isinstance(session_id, str) and session_id else None
 

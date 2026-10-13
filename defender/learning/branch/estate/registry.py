@@ -467,30 +467,30 @@ class WorldRegistry(ModuleVerbRegistry):
     def _turn(self, ctx: Any, *, pauses_clock: bool) -> Iterator[None]:
         """One oracle turn at a time in this world (S11), its oracle-side queries run in `ctx`,
         and — for an investigator's call (`pauses_clock`) — the investigator's clock paused for
-        as long as the turn is held (S12-S15). Pre-flight's replay has no investigator clock."""
-        run_dir = getattr(ctx, "run_dir", None) if pauses_clock else None
+        as long as the turn is held (S12-S15). The clock is the run's own, on the run state the
+        call's context carries (#1235); pre-flight's replay carries none and has no clock."""
+        state = getattr(ctx, "run_state", None) if pauses_clock else None
         with self._turn_lock:
             self._turn_ctx = ctx
-            if run_dir is not None:
-                oracle_turn_opened(Path(run_dir))
+            if state is not None:
+                oracle_turn_opened(state)
             ended = False
             try:
                 yield
                 ended = True
             finally:
                 self._turn_ctx = None
-                if run_dir is not None:
+                if state is not None:
                     try:
-                        oracle_turn_closed(Path(run_dir))
+                        oracle_turn_closed(state)
                     except Exception as unclosed:
                         if ended:
                             # Nothing is recorded or delivered inside a turn (`serve_one`
                             # does both after it), so this replaces no answer (N12).
                             raise
                         # The turn's own abort (an unservable world, which ends the sibling)
-                        # is what leaves; a turn left open lives only in this process's memory
-                        # (`budget_enforcer.oracle_held`), so it holds nothing once the process
-                        # is gone, and a run started again here forgets it (`open_budget`).
+                        # is what leaves; a turn left open lives only on the run's state
+                        # (`budget_enforcer.oracle_held`), which ends with the run.
                         _logger.warning(f"the oracle turn's clock mark could not be closed "
                                         f"({unclosed!r}) while the turn was aborting")
 

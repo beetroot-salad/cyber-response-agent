@@ -8,10 +8,12 @@ names. This file is the new observer.
 DECISION 21 REDESIGNED IT, SUPERSEDING DECISION 14 IN FULL. An executed probe — two `_replay()`
 calls against `main`, same run id, diffed — proved the "byte-identical, two exemptions" promise
 false independently of this issue's own code: eight files differ for reasons that predate the
-refactor entirely (wall-clock timestamps in `budget.json` and `tool_trace.jsonl`; a per-run
+refactor entirely (wall-clock timestamps in `budget.json` — no longer written since #1235 —
+and `tool_trace.jsonl`; a per-run
 random security salt inside `review_record.<turn>.json` and the three
 `wire_logs/review_*_trace.jsonl`; random per-run session/case identifiers in
-`session_store_pointer.json` and `tool_trace.jsonl`). So the observer is two checks:
+`session_store_pointer.json` — a sidecar beside the run dir since #1235, so outside this tree —
+and `tool_trace.jsonl`). So the observer is two checks:
 
 * STRUCTURAL, strict and load-bearing — the run directory produces the SAME SET OF NAMES, with
   nothing added, removed, renamed or moved, compared AFTER the run ends so the sandbox alias
@@ -20,7 +22,7 @@ random security salt inside `review_record.<turn>.json` and the three
 * CONTENT, narrow — bytes are compared for `investigation.md` and `report.md` only: the two
   artifacts the model generates from the same fixed replay input and that a human reads.
 
-THERE IS NO EXEMPTION LIST. Everything else in the tree — budget, tool trace, session pointer,
+THERE IS NO EXEMPTION LIST. Everything else in the tree — tool trace,
 the wire logs, the review records and traces — gets no byte assertion at all: not exempted with
 a reason, not normalised, simply not compared, because it was never stable to begin with. That
 also subsumes decision 18's wire-log amendment: the wire log was never byte-compared here, so
@@ -96,9 +98,11 @@ def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Pat
         "`snapshot` grew an `exclude` argument — the structural check admits no exemption, "
         "which is the only thing that makes 'the same set of names' worth asserting")
     # And the per-run-unstable files ARE in the compared name set: their names are pinned even
-    # though their bytes are not.
+    # though their bytes are not. (The case pointer was one until #1235 moved it out of the run
+    # dir into a sidecar beside it; the baseline no longer names it, so a pointer written back
+    # inside the folder is an added name the structural check above reports.)
     names = set(S.snapshot(run_dir))
-    for unstable in ("budget.json", "tool_trace.jsonl", "session_store_pointer.json"):
+    for unstable in ("tool_trace.jsonl",):
         assert unstable in names, (
             f"{unstable} is outside the structural check. Its BYTES are not compared (it "
             "carries a clock or a per-run uuid); its NAME is, and that is the whole point of "
@@ -126,9 +130,7 @@ def test_bytes_are_compared_for_the_investigation_and_the_report_and_nothing_els
     # whose bytes decision 18's writer id changes on every run and which under decision 14
     # would have needed the second exemption decision 21 makes unnecessary.
     for unstable, payload in (
-            ("budget.json", '{"spent_usd": 0.99}\n'),
             ("tool_trace.jsonl", '{"tool": "tampered"}\n'),
-            ("session_store_pointer.json", '{"case_id": "deadbeef"}\n'),
             ("wire_logs/llm_requests.jsonl", '{"writer_id": "main"}\n'),
             ("review_record.0.json", '{"verdict": "tampered"}\n'),
             ("wire_logs/review_support_trace.jsonl", '{"role": "support"}\n')):
@@ -196,8 +198,10 @@ def test_the_tree_comparison_covers_the_run_directory_and_nothing_above_it(tmp_p
 
 
 def test_the_records_beside_the_run_directory_get_their_own_separate_assertion(tmp_path: Path):
-    """The three sidecars and the tenant record, which live beside the run directory rather than
-    inside it, are asserted by their own separate check."""
+    """The sidecars and the tenant record, which live beside the run directory rather than
+    inside it, are asserted by their own separate check. #1235: the run -> case pointer is one
+    of them now (`RunPaths.session_pointer(runs_base)`), and a run that opened a store writes it
+    there, beside the folder, with the case and store it names."""
     run_dir = _replay(tmp_path)
     base = run_dir.parent
     owner = S.RunPaths(run_dir)
@@ -214,6 +218,11 @@ def test_the_records_beside_the_run_directory_get_their_own_separate_assertion(t
         if path.exists():
             assert path.is_file(), f"{name} is not a regular file"
             json.loads(path.read_text(encoding="utf-8"))
+    pointer = beside["session_pointer"]
+    assert pointer.is_file(), "the replayed run wrote no case-pointer sidecar beside its folder"
+    assert {"case_id", "store_path"} <= set(json.loads(pointer.read_text(encoding="utf-8")))
+    assert not (run_dir / "session_store_pointer.json").exists(), \
+        "the case pointer is still written inside the run directory"
     assert S.tenant().record_path(base).name == S.TENANT_RECORD_NAME
 
 
@@ -352,8 +361,9 @@ def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_pa
         claim("challenge_gate", owner.review_trace(role))
     claim("_alias", run_dir / ".alias-probe-deadbeefdeadbeef-symlink")
     claim("box", owner.box_sentinel)
-    for fixed in ("tool_trace", "executed_queries", "policy_denials", "budget",
-                  "circuit_breaker", "lessons_loaded", "wire_log", "provenance"):
+    # #1235: `budget` and `circuit_breaker` are no longer run records (in-memory state).
+    for fixed in ("tool_trace", "executed_queries", "policy_denials", "lessons_loaded",
+                  "wire_log", "provenance"):
         claim("Run", getattr(owner, fixed))
 
     # No key is a PREFIX of another either: a writer whose reserved space is a directory must

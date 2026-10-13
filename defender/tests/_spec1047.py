@@ -483,9 +483,10 @@ def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bo
     F-K's unreachable sub-case has: a forced-close-set exit whose own forced close failed."""
     run_dir = Path(tmp_path) / name
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "alert.json").write_text(
-        json.dumps({"rule": {"id": ALERT_ID, "description": "lateral movement from web1"},
-                    "timestamp": "2026-09-16T11:00:00Z"}), encoding="utf-8")
+    from defender.tests._alert_plant import plant_alert
+
+    plant_alert(run_dir, {"rule": {"id": ALERT_ID, "description": "lateral movement from web1"},
+                          "timestamp": "2026-09-16T11:00:00Z"})
     if report:
         (run_dir / "report.md").write_text(report_text(disposition), encoding="utf-8")
     return run_dir
@@ -569,10 +570,16 @@ def sidecar_doc(run_dir: Path) -> dict | None:
 #: that list, held in one place so a negative that walks it cannot be quietly narrowed.
 FORGEABLE_NAMES = (
     "run_end.json",
+    # Not written inside the run dir since #1235 F2 (the case pointer is a host-only sidecar
+    # beside it now), but the box can still plant a file at the old name; kept, like the two
+    # state names below.
     "session_store_pointer.json",
     "ticket_write.json",
     "provenance.json",
     "lessons_loaded.jsonl",
+    # No host writer since #1235 (the counters and the breaker are in-memory state), but the
+    # box can still plant a file at either name inside its own rw bind, and dropping them
+    # would only narrow every negative that walks this list. Kept deliberately.
     "circuit_breaker.json",
     "budget.json",
     "tool_trace.jsonl",

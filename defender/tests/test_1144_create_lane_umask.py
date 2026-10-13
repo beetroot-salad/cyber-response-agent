@@ -434,8 +434,7 @@ OTHER_LANES: dict[str, Callable[[Path, str], None]] = {
     "rooted-append": lambda root, name: _io.rooted_write(root, name, BODY, mode="append"),
     "rooted-append-durable": lambda root, name: _io.rooted_write(
         root, name, BODY, mode="append", durable=True),
-    "rooted-locked_for_rewrite": lambda root, name: _locked_fd(
-        _io.rooted_locked_for_rewrite(root, name)),
+    # (Its rooted twin's arm left with #1235, which deleted `_io.rooted_locked_for_rewrite`.)
     "held-replace": lambda root, name: _held_write(root, name, mode="replace"),
     "held-append": lambda root, name: _held_write(root, name, mode="append"),
     "held-append-durable": lambda root, name: _held_write(

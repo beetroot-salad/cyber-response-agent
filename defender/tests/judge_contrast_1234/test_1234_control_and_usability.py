@@ -459,8 +459,7 @@ def test_1234_control_not_archived_stamps_the_family_not_graded(tmp_path):
     assert S.from_world(S.defender_queue(), "b"), "control: graded b queued no defender row"
 
 
-@pytest.mark.parametrize("cut", ["before-the-model-closed", "failed-query-table-write",
-                                 "failed-served-ledger-write"])
+@pytest.mark.parametrize("cut", ["before-the-model-closed", "failed-served-ledger-write"])
 def test_1234_control_cut_short_stamps_the_family_not_graded(tmp_path, cut):
     """An accepted, comparable family whose control's run was cut short is stamped not-graded,
     naming the control and the cut. The cut is either before the model closed, or a failed write

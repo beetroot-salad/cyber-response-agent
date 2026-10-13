@@ -23,7 +23,6 @@ from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime import tenant_settings
 from defender.runtime.case_ticket import CaseMapping, CaseTicketError, load_case_mapping
 from defender.runtime.tenant_settings import (
-    ElasticSettings,
     SystemConfig,
 )
 from defender.scripts.adapters.faults import ConfigFault
@@ -67,9 +66,6 @@ class RunTenant:
     #: there is none. A fault is kept, never raised at resolve — that system is down, the run is
     #: not refused (O5). Asking for a system with no folder gets the "not configured" fault.
     systems: Mapping[str, SystemConfig | ConfigFault]
-    #: The named view of the corpus engine's system folder — the one place platform code interprets
-    #: its config keys. `None` when the tenant has no such folder.
-    elastic: ElasticSettings | ConfigFault | None  # lint-shippable: ok — the record's field name (#1107)
     #: `systems/case-history/mapping.yaml`, loaded once; a bad file is kept as its error.
     ticket_mapping: CaseMapping | CaseTicketError
 
@@ -198,14 +194,12 @@ def resolved_settings(tenant: Tenant) -> dict[str, Any]:
         ticket_mapping = CaseTicketError(str(error))
     return {
         "systems": systems,
-        "elastic": tenant_settings.elastic_view(systems),  # lint-shippable: ok — the record's field name (#1107)
         "ticket_mapping": ticket_mapping,
     }
 
 
 __all__ = [
     "CaseMapping",
-    "ElasticSettings",
     "RunReadiness",
     "RunTenant",
     "SystemConfig",

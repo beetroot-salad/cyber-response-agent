@@ -825,7 +825,7 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
         view = tenant.runs_repository().episode(episode.dir.name, held=episode,
                                                 container_required=True)
         run_dir = run_common.materialize_run(
-            src / "alert.json", world.run_id, tenant=tenant, world=world,
+            RunPaths(src).alert, world.run_id, tenant=tenant, world=world,
             episode_runs=view).run_dir
     assert run_dir.parent == episode_dir / "runs", "precondition: the fork path, not a fresh run"
     doc = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))

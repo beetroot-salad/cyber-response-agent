@@ -223,9 +223,12 @@ def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_any
     its `.resolve()` stay.) The positive control is the source's own pointer: it launches."""
     import json
 
+    from defender.run_repository import RunPaths
+
     est, src = P.launch_source(tmp_path)
     beta = P.second_tenant(P.data_root(), "beta")
-    pointer = src / "session_store_pointer.json"
+    # #1235: the case pointer is the host-only sidecar beside the run folder.
+    pointer = RunPaths(src).session_pointer()
     honest = pointer.read_text(encoding="utf-8")
     doc = json.loads(honest)
     foreign = Path(beta.sessions) / Path(doc["store_path"]).name
@@ -259,7 +262,8 @@ def test_g4_a_sibling_refuses_a_source_alert_that_is_a_link_and_never_copies_its
     src, ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
     secret = tmp_path / "secret.json"
     secret.write_text('{"secret": "outside the source run"}\n', encoding="utf-8")
-    alert = src / "alert.json"
+    from defender._episode_paths import EpisodePaths
+    alert = EpisodePaths(ep).source_alert
     plain = alert.read_bytes()
     alert.unlink()
     os.symlink(secret, alert)
@@ -272,7 +276,7 @@ def test_g4_a_sibling_refuses_a_source_alert_that_is_a_link_and_never_copies_its
     assert "lifecycle" not in rec.order
     arm = ep / "runs" / f"{P.EPISODE_ID}-b"
     assert not (arm / "alert.json").exists() or b"outside the source run" not in (
-        arm / "alert.json").read_bytes()
+        arm / "alert_input" / "alert.json").read_bytes()
 
     alert.unlink()
     alert.write_bytes(plain)
@@ -281,7 +285,7 @@ def test_g4_a_sibling_refuses_a_source_alert_that_is_a_link_and_never_copies_its
     assert refused is None, f"the control was refused: {P.refusal_text(refused)} {err}"
     assert rc == 0, f"the control was refused: {P.refusal_text(refused)} {err}"
     assert ok.run_dir is not None
-    assert (ok.run_dir / "alert.json").read_bytes() == plain
+    assert (ok.run_dir / "alert_input" / "alert.json").read_bytes() == plain
 
 
 def test_g5_a_sibling_whose_container_names_another_tenant_is_refused_and_writes_nothing(

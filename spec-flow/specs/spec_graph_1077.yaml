@@ -2743,13 +2743,17 @@ demands:
   - id: h56_write_atomic_carries_the_guarded_lanes_constraints
     kind: coherence
     form: clause
+    status: retired
     source: "§7 final resolutions 2026-09-21; 70-resolutions.md decision 23"
     binds:
       - "_io.access[write_atomic]"
       - "_io.access[write_guarded]"
     outcome:
       nl: >-
-        The guarded lane's three constraints — exclusive create, no symlink-following, staged
+        RETIRED by #1235 — `_io.write_atomic` was deleted: its last production writer, the
+        budget record, became the run process's in-memory state, so the requirement has no
+        subject left. A new wrapper over `write_guarded` reopens decision 23's question. The
+        text below is the pre-#1235 requirement. The guarded lane's three constraints — exclusive create, no symlink-following, staged
         rename — are REQUIRED on `_io.write_atomic`, not merely true of it today. Decision 16
         left this "out of scope, as today"; §7 decision 23 reverses that, because the brief's
         own recommendation was yes and the sub-question was never actually put to the human.

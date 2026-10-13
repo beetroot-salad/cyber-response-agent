@@ -437,3 +437,12 @@ the one-sided loop demonstrably moving the needle first.
   the golden-case eval judge (`evals/oracle_golden/judge.py`) — so setting either
   retargets both. Inherited, not designed; separating them means a knob name of
   this judge's own.
+
+The #1235 integration keeps call-ID allocation on the run's in-memory `RunState`, under its
+lock, alongside the authoritative query rows. The writable query-table view never supplies
+sequence state or call IDs. A refused denied-row or reducer-row view write stays best-effort;
+#1234's earlier requirement to stamp a query-table recording cut is superseded. The offline
+judge still refuses an incomplete or malformed archive rather than treating missing evidence
+as a complete measurement. Alert attribution comes from #1222's copied source alert record:
+queue rows carry its signature verbatim (and the explicit unkeyed fallback when absent),
+independently of edited world alert copies.

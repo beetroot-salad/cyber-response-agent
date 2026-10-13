@@ -171,7 +171,7 @@ def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_pat
 
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    deps = bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER)
+    deps = _with_run_state(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER))
 
     def _never(agent_id, system, request_limit):  # pragma: no cover — reaching it IS the failure
         raise AssertionError(f"a malformed system reached the factory: {system!r}")
@@ -213,10 +213,18 @@ class _StopAfterDispatch:
         raise UsageLimitExceeded("far enough — the dispatch was admitted")
 
 
+def _with_run_state(deps: tools.AgentDeps) -> tools.AgentDeps:
+    """MAIN's deps carrying the run's one `RunState` (#1235 round 2), as the driver hands them:
+    an admitted dispatch's breaker screen reads it."""
+    from defender.runtime.run_state import RunState
+
+    return replace(deps, run_state=RunState(deps.run_dir, "r-seam"))
+
+
 def _seam_deps(tmp_path: Path):
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    return run_dir, bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER)
+    return run_dir, _with_run_state(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER))
 
 
 def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_path):
@@ -384,7 +392,6 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
     alone, so every one of those proceeded exactly as if the row had been written. Driven at
     the claim seam because a caller must not need to know which fault it was: the contract is
     that only `CLAIMED` dispatches."""
-    from pydantic_ai.exceptions import ModelRetry
 
     from defender.hooks.record_lead import NOT_CLAIMED
     from defender.runtime import tools_gather
@@ -396,7 +403,8 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(tools_gather, "_claim_lead", lambda dispatch: NOT_CLAIMED)
-        with pytest.raises(ModelRetry, match="could not be claimed"):
+        # #1222 C40: a host-side write fault ends the run through the store exit; no retry.
+        with pytest.raises(tools_gather.LeadRecordFault, match="could not be claimed"):
             asyncio.run(tools_gather._run_gather(
                 deps, _never, 40,
                 tools_gather.GatherRequest("l-004", "elastic", "a real goal", ("what",)),

@@ -648,6 +648,10 @@ class _Pass:
         self.knobs = {"draws": self.draws, "model": self.model, "effort": self.effort,
                       "payload_cap": self.cap}
         self.manifest, self.record, self.run_set = manifest, record, runs
+        alert_record = render_mod.episode_record(bound)
+        if alert_record is None:
+            raise JudgeRefused(enqueue_mod.no_record_reason())
+        self.alert_record = alert_record
         self.served_systems = run_mod.served_systems_of(manifest)
         self.samples = family_mod.read_samples_record(bound)
         # The noise context: pre-flight's record (its failed worlds named there once), then
@@ -692,10 +696,7 @@ class _Pass:
 
     def _alert_key(self, labels: list[str]) -> str | None:
         """The rule key of `labels`' alert (OB14: a row's own world's), `None` with none."""
-        from defender.learning.core.persist import derive_alert_rule_key
-
-        alert = render_mod.episode_alert(self.bound, labels)
-        return derive_alert_rule_key(alert) if alert else None
+        return enqueue_mod.rule_key_of(self.alert_record)
 
     def _judge_world(self, label: str) -> None:
         row = self.rows[label]
@@ -775,6 +776,7 @@ class _Pass:
                 run_id=self.run_id, label=label, draw=str(item.draw), index=item.index,
                 subject=run_mod.SUBJECT_DEFENDER if defender else run_mod.SUBJECT_WORLD,
                 finding=finding, alert_rule_key=alert_key, citations=a.citations,
+                recorded_signature=self.alert_record.facts.signature,
                 contrast=a.contrast,
                 world_label_doubted=bool(verdict.doubted) if verdict is not None else False)
             try:

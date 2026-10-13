@@ -12,15 +12,10 @@ from typing import Any
 
 
 from .. import orient
-from ..circuit_breaker import RunAborted
 
 from defender import _clock
 from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
-from defender.hooks.budget_enforcer import (
-    DEFAULT_LIMITS,
-    BudgetKill,
-)
 from defender._io import read_text_utf8
 
 _logger = logging.getLogger(__name__)
@@ -50,56 +45,20 @@ def _main_instructions(defender_dir: Path) -> str:
 
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
     run_dir: Path, alert_path: Path, defender_dir: Path,
-    *, systems: Sequence[str], verbs: Any = None, limits: dict = DEFAULT_LIMITS,
-    run_id: str | None = None, tenant: Any, orient_shim: orient.ShimRunner | None = None,
-) -> tuple[str, str, str]:
-    """The fresh run's opening prompt, including lead-0's section.
+    *, systems: Sequence[str], correlation_section: str | None,
+    orient_shim: orient.ShimRunner | None = None,
+) -> str:
+    """The fresh run's opening prompt, carrying the one correlation section.
 
-    A `BudgetKill` or `RunAborted` inside `resolve_lead_zero` degrades the section rather than
-    ending the run before MAIN's first prompt. Returns `(prompt, ancestor_block, status)`; the
-    last two feed item 3's dispatch gate."""
-    from defender import run_common
-
-    from .. import lead_zero as lead_zero_mod
-
-    ancestor_block = ""
-    status = lead_zero_mod.STATUS_FAILED
-    try:
-        # The run's env is built HERE, once, and handed to lead-zero (#1107): nothing in the
-        # lead-zero package builds or reads the environment itself.
-        try:
-            env = run_common.run_env(defender_dir, run_dir)
-        except Exception:  # noqa: BLE001 — orientation-adjacent work must never break the run
-            env = {}
-        result = lead_zero_mod.resolve_lead_zero(
-            run_dir=run_dir, defender_dir=defender_dir, alert_path=alert_path,
-            verbs=verbs, limits=limits, run_id=run_id, tenant=tenant, env=env,
-        )
-        lead_zero_text = lead_zero_mod.render_orient_section(
-            result, run_dir, correlation_system=tenant.grants.correlation_system,
-            grant_home=tenant.table_pointer)
-        ancestor_block = result.text
-        status = result.status
-    except (BudgetKill, RunAborted) as e:
-        _logger.warning(f"lead-0 degraded ({e!r}); continuing without it")
-        degraded = lead_zero_mod.LeadZeroResult(
-            text=lead_zero_mod._render_section(
-                lead_zero_mod._unavailable(f"a run-level fault interrupted resolution: {e!r}"),
-            ),
-            status=lead_zero_mod.STATUS_FAILED,
-        )
-        # `run_dir` here too: an interrupted resolution is when lead-0's declaring row is most
-        # likely missing, so the heading's "declare it yourself" line matters most.
-        lead_zero_text = lead_zero_mod.render_orient_section(
-            degraded, run_dir, correlation_system=tenant.grants.correlation_system,
-            grant_home=tenant.table_pointer)
-
+    The correlation lead has already run to its end (or its absence has been decided) when this
+    is built, so `correlation_section` is final: the lead's framed summary or one fixed
+    sentence, under a host heading naming the reserved id (`None` for a run that dispatches no
+    lead at all)."""
     orientation = orient.orientation(
-        run_dir, defender_dir, alert_path, systems=systems, lead_zero_section=lead_zero_text,
-        shim=orient_shim,
+        run_dir, defender_dir, alert_path, systems=systems,
+        lead_zero_section=correlation_section, shim=orient_shim,
     )
-    prompt = f"Begin the investigation.\n\n{_coordinates(run_dir, alert_path)}\n{orientation}"
-    return prompt, ancestor_block, status
+    return f"Begin the investigation.\n\n{_coordinates(run_dir, alert_path)}\n{orientation}"
 
 
 def _coordinates(run_dir: Path, alert_path: Path) -> str:
@@ -113,13 +72,13 @@ def _coordinates(run_dir: Path, alert_path: Path) -> str:
 
 def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
     resume: Any, run_dir: Path, alert_path: Path, defender_dir: Path,
-    *, systems: Sequence[str], verbs: Any, limits: dict, run_id: str | None,
-    tenant: Any, orient_shim: orient.ShimRunner | None = None,
-) -> tuple[str, str, str]:
+    *, systems: Sequence[str], correlation_section: str | None,
+    orient_shim: orient.ShimRunner | None = None,
+) -> str:
     """MAIN's first message — for a fresh run or a resumed one.
 
-    A resumed run does not orient: lead-0 and the correlation dispatch are turn-0 work its
-    history already holds (`run_investigation` skips the dispatch itself).
+    A resumed run does not orient: the correlation lead is turn-0 work its history already
+    holds (`run_investigation` dispatches none for it).
 
     The coordinate header is always added, though the continuation wording is the caller's: a
     sibling has its own run dir while the inherited prefix names the source's, and a model
@@ -128,13 +87,12 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
     """
     if resume is None:
         return _user_prompt(
-            run_dir, alert_path, defender_dir, systems=systems, verbs=verbs, limits=limits,
-            run_id=run_id, tenant=tenant, orient_shim=orient_shim,
+            run_dir, alert_path, defender_dir, systems=systems,
+            correlation_section=correlation_section, orient_shim=orient_shim,
         )
-    prompt = (
+    return (
         f"{resume.continuation_prompt}\n\n"
         f"{_coordinates(run_dir, alert_path)}{_branch_clock(resume)}")
-    return prompt, "", ""
 
 
 def _branch_clock(resume: Any) -> str:

@@ -26,10 +26,10 @@ def test_an_unreadable_mapping_is_named_by_setup_and_check(tmp_path: Path) -> No
     mapping = H.settings_dir(root) / "systems" / "case-history" / "mapping.yaml"
     mapping.chmod(0)
     try:
-        H.assert_refused(H.setup(tenant_py, root), "[tenant.py]", str(mapping))
+        H.assert_refused(H.setup(tenant_py, root), "[tenant.py]", "systems/case-history/mapping.yaml")
         assert not H.row_path(root).exists(), "the refused setup wrote the row"
         H.plant_row(root)
-        H.assert_refused(H.check(tenant_py, root, H.TID), "[tenant.py]", str(mapping))
+        H.assert_refused(H.check(tenant_py, root, H.TID), "[tenant.py]", "systems/case-history/mapping.yaml")
         H.row_path(root).unlink()
     finally:
         mapping.chmod(0o644)

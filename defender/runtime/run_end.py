@@ -41,10 +41,11 @@ TRUNCATED_BY_DEAD_END = "dead-end"
 #: Each value names its record, so a world cut short by one says which write failed.
 TRUNCATED_BY_SERVED_LEDGER = "served_ledger"
 TRUNCATED_BY_EXECUTED_QUERIES = "executed_queries"
+TRUNCATED_BY_TIMED_OUT = "timed-out"
 TRUNCATED_BY_VALUES = (
     TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_EXHAUSTED, TRUNCATED_BY_ABORTED,
     TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END,
-    TRUNCATED_BY_SERVED_LEDGER, TRUNCATED_BY_EXECUTED_QUERIES,
+    TRUNCATED_BY_SERVED_LEDGER, TRUNCATED_BY_EXECUTED_QUERIES, TRUNCATED_BY_TIMED_OUT,
 )
 
 #: Exits where the model spent its budget without closing, so the host writes an `unresolved`
@@ -142,6 +143,7 @@ __all__ = [
     "TRUNCATED_BY_RETRY_EXHAUSTED",
     "TRUNCATED_BY_SERVED_LEDGER",
     "TRUNCATED_BY_STORE",
+    "TRUNCATED_BY_TIMED_OUT",
     "TRUNCATED_BY_VALUES",
     "RunEnd",
     "normalized_truncated_by",

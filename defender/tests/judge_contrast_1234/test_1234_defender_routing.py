@@ -807,7 +807,7 @@ def test_1234_defender_row_replaces_judge_outcome_with_three_fields(tmp_path: Pa
 
     fid = built.finding_id("b", 0, 0)
     row = _defender_rows("b").get(fid, {})
-    assert set(row) == NEW_ROW_KEYS, (
+    assert set(row) == NEW_ROW_KEYS | {"recorded_signature"}, (
         f"missing {sorted(NEW_ROW_KEYS - set(row))}, extra {sorted(set(row) - NEW_ROW_KEYS)}")
     assert row.get(S.CONTRAST) == _pair_with_control("b")
     assert row.get(S.ON_PATH) is False
@@ -922,8 +922,8 @@ def test_1234_defender_lane_decision_rests_on_world_state_not_a_verdict_word(
 
 
 def test_1234_alert_rule_key_when_rows_are_queued_world_by_world(tmp_path: Path) -> None:
-    """Each row carries the alert_rule_key of its own world's alert, absent when that world has
-    none; the key does not depend on which worlds were graded in the same pass.
+    """Each row carries the source episode's recorded signature (#1222), independent of edited
+    world alert copies and which worlds were graded in the same pass.
 
     b's alert carries a rule and no alert id, c archived no alert, d's carries both. Pass 1's
     call for b fails, so only c and d queue; the bare re-run grades b alone (OB14's two-pass
@@ -941,7 +941,7 @@ def test_1234_alert_rule_key_when_rows_are_queued_world_by_world(tmp_path: Path)
     S.grade(built, S.judge(replies, fail={"b"}), draws=1)
     S.grade(built, S.judge(replies), draws=1)
 
-    expected = {"b": "rule-RULE-B", "c": None, "d": "rule-RULE-D"}
+    expected = dict.fromkeys("bcd", S.J.ALERT_ID)
     for label, key in expected.items():
         rows = list(_defender_rows(label).values())
         assert rows, f"world {label} queued no row (b on the re-run, c and d on pass 1)"

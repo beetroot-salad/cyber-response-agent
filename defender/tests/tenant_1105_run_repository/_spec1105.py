@@ -69,11 +69,13 @@ FIXTURE = WORKTREE / "knowledge" / "tenant-fixture"
 T_ID = "acme"
 U_ID = "beta"
 
-#: The five host-only sidecar suffixes (D2.1, R4-35; #1224 added the oracle-held record),
-#: spelled HERE rather than imported from the layout: the suite pins the design's list, so a
-#: layout that drops one is caught.
+#: The five host-only sidecar suffixes (D2.1, R4-35; #1235 F2 added the run -> case pointer,
+#: moved out of the run folder, and retired #1224's oracle-held record, whose credit is now the
+#: run's in-memory state; the accounting-failures suffix stays reserved after #1235 retired its
+#: record, since the run-id bound is derived from it), spelled HERE rather than imported from
+#: the layout: the suite pins the design's list, so a layout that drops one is caught.
 SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
-                    ".ticket-write.json", ".oracle-held.json")
+                    ".ticket-write.json", ".session-pointer.json")
 #: The staged-name tail a sidecar write creates first (`_io.staged_leaf`: `.staged-` plus 16
 #: lowercase hex digits, R41-23) — the shape MF-21 (DV-5) adds to the sidecar clause.
 STAGED_TAIL = ".staged-0123456789abcdef"
@@ -192,7 +194,8 @@ def make_run(runs: Path, run_id: str, *, alert: str = '{"alert": "seed"}\n') -> 
     """A real run folder `<runs>/<run_id>` holding an `alert.json`."""
     run_dir = Path(runs) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "alert.json").write_text(alert, encoding="utf-8")
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(run_dir, alert.encode("utf-8"))
     return run_dir
 
 

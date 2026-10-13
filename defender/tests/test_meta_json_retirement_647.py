@@ -37,7 +37,6 @@ from pathlib import Path
 import pytest
 
 from defender.run_repository import RunPaths
-from defender.hooks import _run_dir as hooks_run_dir
 from defender.tests._by_path import cached_parse, import_lint_lib
 
 ScanBlind = import_lint_lib("_astlib").ScanBlind
@@ -405,45 +404,6 @@ def test_no_module_in_the_repo_still_imports_the_deleted_hook_module():
 
 
 
-def test_update_json_locked_survives_the_sibling_removal(tmp_path):
-    """The hooks run-dir module loses its salt reader but not itself: the flock'd
-    read-modify-write behind the per-run budget and circuit-breaker files remains importable
-    AND functional. Removing a member is not removing the module.
-
-    It has two live consumers (the budget enforcer, the circuit breaker), asserted below on
-    the BINDING rather than on the module object — a module is truthy whether or not it
-    consumes anything, which made the old assertion vacuous. `resolve_run_dir` was this
-    module's other survivor and the lesson-load recorder its third consumer, until #667
-    deleted the `claude -p` entrypoint that was the only reason either existed; both left
-    d21 with it."""
-    assert not hasattr(hooks_run_dir, "read_meta_salt"), (
-        "read_meta_salt survived — its only caller was the deleted hook entrypoint, and its "
-        "fail-open minted a token no other surface knew"
-    )
-
-    target = tmp_path / "budget.json"
-    hooks_run_dir.update_json_locked(target, lambda s: s.__setitem__("tool_calls", 1))
-    state = hooks_run_dir.update_json_locked(
-        target, lambda s: s.__setitem__("tool_calls", s["tool_calls"] + 1)
-    )
-    assert state["tool_calls"] == 2, "the locked read-modify-write no longer accumulates"
-
-    assert not hasattr(hooks_run_dir, "resolve_run_dir"), (
-        "resolve_run_dir survived — its last consumer was record_lesson_load's deleted "
-        "entrypoint, and the in-process gates take the run dir from AgentDeps"
-    )
-
-    from defender.hooks import budget_enforcer
-    from defender.runtime import circuit_breaker
-
-    assert budget_enforcer.update_json_locked is hooks_run_dir.update_json_locked, (
-        "the budget_enforcer consumer no longer binds update_json_locked"
-    )
-    assert circuit_breaker.update_json_locked is hooks_run_dir.update_json_locked, (
-        "the circuit_breaker consumer no longer binds update_json_locked"
-    )
-
-
 def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor_is_removed(
     tmp_path,
 ):
@@ -472,16 +432,33 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
 
     #1107 moved the ticket receipt out of the run dir to a sidecar in the runs base (beside the
     scrub verdict), so `ticket_write` is now an upward accessor taking the runs base, like
-    `run_end_sidecar`, and no longer a property here."""
+    `run_end_sidecar`, and no longer a property here.
+
+    #1235 removed `budget` and `circuit_breaker` (in-memory state now, no file) and the
+    accounting-failures sidecar's accessor, and moved the run -> case pointer out of the run dir
+    into a sidecar beside it: `session_pointer` is now an upward accessor taking the runs base,
+    like `run_end_sidecar` and `ticket_write`, and no longer a property here (15 left)."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     assert accessors == {
         "alert", "report", "investigation", "executed_queries", "gather_raw", "wire_log",
         "provenance",
         # #1077 D1
         "source_refs", "gather_summaries", "lead_author", "tool_trace", "policy_denials",
-        "budget", "circuit_breaker", "lessons_loaded", "session_pointer",
+        "lessons_loaded",
         "runtime_html", "box_sentinel",
+        # #1222 A1: the read-only input directory, and the record beside the alert
+        "alert_input_dir", "alert_record",
     }, f"the artifact accessor set drifted: {sorted(accessors)}"
+    # #1235 F2: the case pointer is a sidecar beside the run dir — a method taking the runs
+    # base, not a property resolving a name inside the folder.
+    assert callable(vars(RunPaths).get("session_pointer")), (
+        "RunPaths.session_pointer is not the sidecar accessor #1235 made it")
+    assert RunPaths(tmp_path / "run-1").session_pointer() == (
+        tmp_path / "run-1.session-pointer.json"), "the case pointer is not beside the run dir"
+    # #1235: `budget` and `circuit_breaker` left — the counters and the breaker are the run
+    # process's memory, no longer files in the run dir, so no accessor may name them.
+    assert not {"budget", "circuit_breaker"} & set(vars(RunPaths)), (
+        "RunPaths still names the budget or breaker file #1235 retired")
     assert not hasattr(RunPaths(tmp_path), "meta"), "RunPaths still resolves a meta.json path"
 
     doc = " ".join((RunPaths.__doc__ or "").split())

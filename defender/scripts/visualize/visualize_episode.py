@@ -709,13 +709,7 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
         if w is not None:
             w.row = row
 
-    # Every path below is joined from a label, so only labels naming their own directory reach
-    # the disk. Real directory names get the same gate (`..` is a name).
-    nameable = [w.label for w in ep.entries.values() if w.nameable]
-    labels = [w["world_id"] for w in ep.manifest_worlds
-              if isinstance(w.get("world_id"), str) and w["world_id"] in nameable]
-    ep.alert = episode_alert(bound, labels or [
-        n for n in ep.archived_world_dirs if family.world_label_names_directory(ep.episode_id, n)])
+    ep.alert = episode_alert(bound)
 
     for label in [*ep.entries, _FAMILY_LABEL]:
         docs, skipped = (_load_draws(bound, label)

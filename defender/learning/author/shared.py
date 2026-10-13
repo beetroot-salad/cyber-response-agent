@@ -352,6 +352,10 @@ def build_corpus_manifest(
         on_skip=skipped.append,
     ):
         kept = {k: v for k, v in lesson.fm.items() if k not in PROVENANCE_KEYS}  # lint-lesson-text: ok — the manifest reaches the curator only inside its curator_context frame
+        if "source_signature" in kept:
+            # Each entry is one printed line (a break or control in a hand-written entry would
+            # forge a key), shown as the text written.
+            kept["source_signature"] = lesson.lines("source_signature")
         rendered = _yaml.safe_dump(
             kept, sort_keys=True, default_flow_style=False, allow_unicode=True
         )

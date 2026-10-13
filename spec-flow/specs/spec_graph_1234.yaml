@@ -4518,7 +4518,9 @@ demands:
   - s_AN01
 - id: n_t8_table_write_fails_closed
   kind: survival
-  form: test
+  form: clause
+  status: retired
+  outcome: {nl: "Superseded by the owner during the #1235 merge: RunState is authoritative; denied and shim query-table view writes remain best-effort. Call IDs are allocated on RunState, never read from disk. The replacement test verifies no recording-cut stamp and refusal of incomplete archives."}
   binds:
   - _record_denied
   - append_query_row
@@ -4526,7 +4528,6 @@ demands:
   - interacts(_record_denied->executed_queries)
   - interacts(append_query_row->executed_queries)
   - interacts(_record_shim_failure->executed_queries)
-  discharged_by: test_1234_failed_query_table_write_ends_the_run
   seed_docstring: A query-table write that fails (_record_denied's ∅.denied row, append_query_row's row, the shim's
     ∅.bash-shim append, or any other writer of executed_queries.jsonl) ends the run and the world is archived cut
     short naming the failed write (A12; today _record_denied swallows it, JP-02 s_tw_denied).

@@ -310,8 +310,8 @@ demands:
      # are_swept). This retires forks R3, R7, R11's collision half, the duplicate-seq
      # premise and the model-basename-versus-temp-suffix premise together.
 
-  - {id: budget_write_alias_safe_under_the_enforce_flag, kind: domain-outcome, form: test,
-     discharged_by: test_budget_write_is_alias_safe_under_both_enforcement_postures,
+  - {id: budget_write_alias_safe_under_the_enforce_flag, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — the budget is no longer written to a file in the run folder, so there is no budget write for an alias to hijack under either posture; `test_budget_write_is_alias_safe_under_both_enforcement_postures`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["DEFENDER_BUDGET_ENFORCE.domain.distinguished[true]",
              "DEFENDER_BUDGET_ENFORCE.domain.distinguished[unset]",
              "interacts(budget_enforcer->run_dir)", "interacts(write_atomic->run_dir)",
@@ -843,8 +843,8 @@ demands:
      # human's resolution states the sweep is itself a write into the tree and inherits the
      # same primitive, so an alias planted at an orphan's name must not get a deletion outside.
 
-  - {id: alias_refusal_exempt_from_every_failure_circuit, kind: behavior, form: test,
-     discharged_by: test_an_alias_refusal_is_recorded_but_never_ends_the_run,
+  - {id: alias_refusal_exempt_from_every_failure_circuit, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — there is no budget write to refuse, no alias-refusal record and no accounting-failure circuit to exempt it from — the accounting-failure machinery (the <run>.accounting_failures.json sidecar, its alias-refusal log and the accounting kill limbs) is retired; `test_an_alias_refusal_is_recorded_but_never_ends_the_run`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(budget_enforcer->budget_json)", "interacts(budget_enforcer->run_dir)",
              "interacts(write_guarded->run_dir).response", "accounting_failures_json",
              "interacts(write_atomic->accounting_failures_json)"]}
@@ -867,16 +867,16 @@ demands:
      # (D7, above). The test asserts BOTH halves: the record is in the sidecar, and the shared
      # tree gains no new entry.
 
-  - {id: genuine_accounting_failure_still_escalates, kind: behavior, form: test,
-     discharged_by: test_a_genuine_accounting_write_failure_still_kills_on_the_elapsed_limb,
+  - {id: genuine_accounting_failure_still_escalates, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — the accounting kill limbs it was the positive control for are retired with the accounting-failure machinery — the budget is memory, so no accounting write can fail; `test_a_genuine_accounting_write_failure_still_kills_on_the_elapsed_limb`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(budget_enforcer->budget_json)", "accounting_failures_json"]}
      # the POSITIVE CONTROL for the exemption: without it, "no alias refusal ends the run" is
      # also satisfied by an escalation circuit accidentally disabled for everything. Asserts
      # the ELAPSED limb specifically — a test written against "five consecutive" passes while
      # the two-failure path X14 measured stays open.
 
-  - {id: breaker_refused_write_does_not_crash_the_run, kind: behavior, form: test,
-     discharged_by: test_a_refused_circuit_breaker_write_does_not_crash_the_run,
+  - {id: breaker_refused_write_does_not_crash_the_run, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — the circuit breaker is the run process's own memory, not circuit_breaker.json, so there is no breaker write for an alias to refuse; `test_a_refused_circuit_breaker_write_does_not_crash_the_run`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(circuit_breaker->circuit_breaker_json)", "circuit_breaker_json.identity"]}
      # minted: §7 D3's first rider, fixed regardless of the exemption. Fork R24 is settled by
      # the dispatched probe (47-reground Q1, executed): the locked writer opens `r+` with no
@@ -885,8 +885,8 @@ demands:
      # types and crashes the process HARDER than BudgetKill, with no partial-trace branch.
      # This also closes circuit_breaker_json.identity's R2 hole.
 
-  - {id: breaker_refused_read_is_observable, kind: behavior, form: test,
-     discharged_by: test_a_refused_circuit_breaker_read_is_not_silently_reported_as_untripped,
+  - {id: breaker_refused_read_is_observable, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — the circuit breaker is the run process's own memory, so there is no breaker read to refuse or to mistake for an untripped system; `test_a_refused_circuit_breaker_read_is_not_silently_reported_as_untripped`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["circuit_breaker_json.identity", "interacts(circuit_breaker->run_dir)"]}
      # minted: §7 D3's second rider. 47-reground executed it: the read half swallows OSError
      # and returns a blank breaker, so an unreadable state reports "not tripped" and the

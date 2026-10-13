@@ -24,6 +24,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from defender.tests import _spec1077 as S
+from defender.tests._alert_plant import plant_alert
 
 
 @pytest.fixture
@@ -394,6 +395,7 @@ def test_the_run_record_answers_the_twelve_fields_read_only(base, run_dir):
     run = _tenanted(base)
     S.plant_stamp(run_dir, commit="c0ffee", dirty=False, model="m", scope="defender",
                   tenant_id=S.DEFAULT_TENANT_ID, world_id="w0")
+    plant_alert(run_dir, {"rule": {"id": "sig-1077"}})
     record = run.record
 
     assert record.run_id == run_dir.name
@@ -402,7 +404,7 @@ def test_the_run_record_answers_the_twelve_fields_read_only(base, run_dir):
     assert record.model == "m"
     assert record.tenant_id == S.DEFAULT_TENANT_ID
     assert record.world_id == "w0"
-    assert record.alert_ref == S.alert_ref(run_dir / "alert.json")
+    assert record.alert_ref == S.alert_ref(S.RunPaths(run_dir).alert)
     # The records behind the remaining five are absent here, so those fields read None (h16).
     for absent in ("parent_run_id", "fork_turn", "exit_class", "disposition", "review_outcome"):
         assert getattr(record, absent) is None, f"{absent} is not None with its record absent"
@@ -461,7 +463,9 @@ def test_every_writer_method_reaches_todays_seam_unchanged(base, run_dir):
     before — the guarded write (replace for a document, append for a table: what
     `record_query.append_query_row` and `challenge_gate._write_trace_row` reach today, NOT the
     pre-#771 `append_jsonl`, whose `open("a")` follows a planted link), the locked rewrite, the
-    request logger, the session store."""
+    request logger, the session store. (The locked rewrite's arm retired with #1235: its one
+    subject was the budget state, which is the run process's memory now, and no handle member
+    takes `update` any more.)"""
     recorder = S.RecordingIo()
     run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base),
                              io=recorder)
@@ -485,10 +489,6 @@ def test_every_writer_method_reaches_todays_seam_unchanged(base, run_dir):
         "`_io.append_jsonl` is the unguarded pre-#771 primitive `lint_unguarded_tree_write` "
         "flags — a table append through the handle lands through the guarded append lane")
 
-    S.member(run, "observability", "budget").update({"spent": 1})
-    locked = recorder.arguments("rooted_locked_for_rewrite")
-    assert [(Path(a["root"]), PurePosixPath(a["name"])) for a in locked] == [
-        (run_dir, PurePosixPath("budget.json"))], f"the locked state reached {recorder.ops}"
     assert not {"write_guarded", "locked_for_rewrite", "guarded_mkdir"} & set(recorder.ops), (
         f"a writer method still reached a path-based seam: {recorder.ops}")
 
@@ -570,7 +570,7 @@ def test_handle_over_a_companion_corpus_directory_that_is_merely_someones_parent
     companion.write_text("# not a run\n", encoding="utf-8")
 
     # The live site builds from the FILE's parent, which is a directory — unaffected by h09.
-    assert S.RunPaths(companion.parent).alert == corpus / "alert.json", (
+    assert S.RunPaths(companion.parent).alert == corpus / "alert_input" / "alert.json", (
         "RunPaths still composes ad hoc over an arbitrary companion-corpus directory")
     assert S.Run().at(companion.parent).runs_base is None
     gate = S.gate()
@@ -684,8 +684,10 @@ def test_a_handle_built_from_a_bare_directory_lacks_the_input_the_upward_accesso
     bare = S.Run().at(world)
     assert bare.runs_base is None
 
+    # #1235 F2: the run -> case pointer is a sidecar beside the run dir now, so its member is an
+    # upward accessor too and needs the runs base like the facts sidecars.
     for group, name in (("facts", "run_end"), ("facts", "scrub_verdict"),
-                        ("facts", "accounting"), ("session", "session_db")):
+                        ("observability", "session_pointer"), ("session", "session_db")):
         with pytest.raises(Exception) as excinfo:  # noqa: PT011
             S.member(bare, group, name, *S.member_args(name)).path  # noqa: B018
         said = str(excinfo.value)
@@ -698,6 +700,12 @@ def test_a_handle_built_from_a_bare_directory_lacks_the_input_the_upward_accesso
     run_dir = S.seed_run_tree(S.make_run_dir(base))
     tenanted = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
     assert S.member(tenanted, "facts", "run_end").path.parent == base
+    pointer = S.member(tenanted, "observability", "session_pointer").path
+    assert pointer == S.RunPaths(run_dir).session_pointer(base), \
+        "run.observability.session_pointer is not the layout's sidecar accessor"
+    assert pointer.parent == base, "the case pointer member is not beside the run directory"
+    assert not pointer.is_relative_to(run_dir), \
+        "the case pointer member still resolves inside the run directory"
 
 
 # ---------------------------------------------------------------------------------------
@@ -732,7 +740,7 @@ def test_every_sub_collection_reads_everywhere_and_writes_only_where_the_runtime
 
 
 def test_run_facts_group_exposes_no_write_accessor(base, run_dir):
-    """`run.facts` (alert, provenance, run_end, scrub_verdict, accounting) is readable
+    """`run.facts` (alert, provenance, run_end, scrub_verdict) is readable
     everywhere and exposes a write only to the host that produces it — write-once, outside the
     model's reach — per §7 decision 11's uniform rule.
 
@@ -751,7 +759,7 @@ def test_run_facts_group_exposes_no_write_accessor(base, run_dir):
 
     for name in S.GROUP_MEMBERS["facts"]:
         rec = S.member(run, "facts", name, *S.member_args(name)) if name not in (
-            "run_end", "scrub_verdict", "accounting") else None
+            "run_end", "scrub_verdict") else None
         if rec is None:
             continue
         assert not hasattr(rec, "append"), f"run.facts.{name} exposes an append"
@@ -784,8 +792,8 @@ def test_run_documents_group_write_contract_matches_the_design_tables_rewritten_
 
 def test_run_observability_group_stays_append_only_through_the_handle(base, run_dir):
     """`run.observability` (wire_log, review_trace, forward_check_trace, tool_trace,
-    review_record, budget, circuit_breaker, lessons_loaded, ticket_write, runtime_html,
-    box_sentinel, session_pointer) is readable everywhere and append-only for the host that
+    review_record, lessons_loaded, ticket_write, runtime_html, box_sentinel, session_pointer)
+    is readable everywhere and append-only for the host that
     produces it — no accessor exposes an in-place rewrite of an existing entry — per §7
     decision 11's uniform rule.
 
@@ -800,14 +808,9 @@ def test_run_observability_group_stays_append_only_through_the_handle(base, run_
 
     for name in S.GROUP_MEMBERS["observability"]:
         rec = S.member(run, "observability", name, *S.member_args(name))
-        if name in S.LOCKED_STATE_MEMBERS:
-            # The two locked JSON states are a read-modify-write under `flock`, never a blind
-            # replace: their update SEES the prior state rather than discarding it.
-            rec.update({"a": 1})
-            rec.update({"b": 2})
-            assert json.loads(rec.read()) == {"a": 1, "b": 2}, (
-                f"run.observability.{name}'s update discarded the existing entry")
-            continue
+        # No locked JSON state is left in this group (#1235 moved the budget and the breaker
+        # into the run process's memory), so no member takes a read-modify-write `update`.
+        assert not hasattr(rec, "update"), f"run.observability.{name} exposes an update"
         if S.MEMBER_VERB[name] == "append":
             assert not hasattr(rec, "write"), (
                 f"run.observability.{name} exposes a whole-record rewrite of an existing entry")

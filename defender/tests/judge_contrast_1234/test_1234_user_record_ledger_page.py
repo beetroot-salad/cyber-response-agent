@@ -275,14 +275,14 @@ def test_1234_user_record_lists_every_archived_gap_for_every_run(
     short naming the failed write, and a cut-short world's recorded blocked calls are listed
     (AN01).
 
-    graded: c refuses `edr lookup`, then its next call's query-table write fails (a directory
-    planted at the table by the estate adapter, `Estate1234.break_write`) — c is cut short; a
+    graded: c refuses `edr lookup`, then its next call's served-ledger write fails (a directory
+    planted at the ledger by the estate adapter, `Estate1234.break_write`) — c is cut short; a
     and b are archived and readable. stamped: b and c are not archived (no scrub verdict), so O5
     stamps the family unusable and only the control's table is readable.
     """
     if pass_kind == "graded":
         est = S.Estate1234(tmp_path / "estate", withheld=WITHHELD)
-        est.break_write("idp", "query", BOB, "{run_dir}/executed_queries.jsonl")
+        est.break_write("idp", "query", BOB, "{episode}/served/*.{label}.jsonl")
         cut = [*S.default_turns()[:-1], S.query_turn("idp", "query", BOB), S.done_turn()]
         worlds = {"c": S.RealWorld("c", turns=cut)}
     else:
@@ -297,9 +297,9 @@ def test_1234_user_record_lists_every_archived_gap_for_every_run(
     if pass_kind == "graded":
         expected[J3_KEY] = 1
         assert _counts(built) == expected, "nobody named a gap; every blocked call is listed"
-        assert _unread(built) == {}
+        assert "c" in _unread(built), "the damaged ledger is reported by run"
         cut_row = _text(S.row(built, "c"))
-        assert S.word_re(S.COINED["cut.table"]).search(cut_row), (
+        assert S.word_re(S.COINED["cut.ledger"]).search(cut_row), (
             "the cut-short world's row names the failed write")
     else:
         assert S.stamp(built), "the pass stamps the family"
@@ -407,7 +407,7 @@ def test_1234_stamped_family_with_gaps_in_its_archive(tmp_path: Path, stamp: str
         assert judge.calls == 0, "a stamp makes no model call"
         assert _counts(built) == {_denied("a"): 1, _denied("b"): 1, _denied("c"): 1,
                                   J3_KEY: 1, NOT_REPLAYABLE_KEY: 1}
-        assert _unread(built) == {}
+        assert "c" in _unread(built), "the damaged ledger is reported by run"
         return
     worlds = S.triad(b={"calls": [*_shown("b"), _refused({"entity": "b-refused"})]})
     built = S.family(tmp_path, worlds, not_replayable=[_not_replayable()])

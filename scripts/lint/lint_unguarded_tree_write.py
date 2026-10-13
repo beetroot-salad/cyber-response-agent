@@ -4,15 +4,12 @@ worktree's corpus) that bypasses the alias-refusing primitives (``defender._io.w
 / ``guarded_mkdir`` / ``open_guarded``).
 
 A grep over write idioms cannot see a wrapper, so this gate resolves the callee, not the
-spelling: ``from defender._io import write_atomic as wa; wa(...)`` is the same finding as the
+spelling: ``from defender._io import append_jsonl as aj; aj(...)`` is the same finding as the
 unaliased form.
 
-What it flags, inside `SCOPE` (``defender/``): a call to ``defender._io.write_atomic`` or
-``defender._io.append_jsonl`` (``write_atomic`` delegates to ``write_guarded`` and is fine for
-callers outside every box mount, but inside a hard-gated module it is still a finding because
-those modules' artifacts are inside the tree), and the duck-typed ``<x>.write_text(...)`` /
-``<x>.write_bytes(...)`` / ``<x>.mkdir(...)`` shapes (matched like ``opener_slot`` matches
-``<p>.open(...)``).
+What it flags, inside `SCOPE` (``defender/``): a call to ``defender._io.append_jsonl``, and
+the duck-typed ``<x>.write_text(...)`` / ``<x>.write_bytes(...)`` / ``<x>.mkdir(...)`` shapes
+(matched like ``opener_slot`` matches ``<p>.open(...)``).
 
 What it does not flag: ``write_guarded`` / ``guarded_mkdir`` / ``open_guarded`` themselves.
 The modules implementing them get no blanket exemption (``_io.py`` is itself hard-gated):
@@ -44,13 +41,11 @@ BASELINE_PATH = Path(__file__).with_name("lint_unguarded_tree_write_baseline.jso
 
 EXCLUDED_DIRS = (".venv", "__pycache__")
 
-#: Whole-file idioms that bypass the canonical seam. `write_atomic` delegates to
-#: `write_guarded` and is safe, but stays flagged: `write_guarded` is the one seam every
-#: shared-tree writer uses, and going quiet on a wrapper because the wrapped call became safe
-#: recreates the blind spot wrappers cause. A caller that keeps `write_atomic` because it also
-#: serves callers outside every box mount marks the line `# lint-unguarded-tree-write: ok`.
-#: `append_jsonl` is still literally unguarded (`"a"`, no `O_NOFOLLOW`). Both resolved by callee.
-_UNSAFE_CALLEES = frozenset({"defender._io.write_atomic", "defender._io.append_jsonl"})
+#: Whole-file idioms that bypass the canonical seam: `append_jsonl` is literally unguarded
+#: (`"a"`, no `O_NOFOLLOW`). Resolved by callee. A wrapper over `write_guarded` added to `_io`
+#: belongs here too: `write_guarded` is the one seam every shared-tree writer uses, and going
+#: quiet on a wrapper because the wrapped call is safe recreates the blind spot wrappers cause.
+_UNSAFE_CALLEES = frozenset({"defender._io.append_jsonl"})
 
 #: Duck-typed method shapes that write/create without the guarded primitive (the receiver is
 #: a Path value, so there is no import origin to resolve).
@@ -65,8 +60,6 @@ LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
     "runtime/observe.py",
     "runtime/driver/",
     "runtime/session_store.py",
-    "hooks/budget_enforcer.py",
-    "runtime/circuit_breaker.py",
     "runtime/query_tool.py",
     "runtime/tools_gather.py",
     "hooks/record_lead.py",
@@ -210,7 +203,7 @@ def main(
 
     print(
         "Route shared-tree writes through defender._io.write_guarded / guarded_mkdir "
-        "(#771 M3) rather than write_atomic/append_jsonl/write_text/write_bytes/mkdir directly."
+        "(#771 M3) rather than append_jsonl/write_text/write_bytes/mkdir directly."
     )
     print("Mark a sanctioned exception with `# lint-unguarded-tree-write: ok — <reason>`.")
     return gate(findings, baseline, args, label="lint_unguarded_tree_write", header=HEADER)

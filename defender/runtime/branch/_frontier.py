@@ -114,7 +114,8 @@ def session_for_run(store: Any, run_dir: Path) -> str:
         recorded = session_store.resolve_session_id(Path(run_dir))
     except (OSError, ValueError):
         # `open_source_store` already refuses an unreadable pointer on the store-opening path;
-        # elsewhere the root is the fallback.
+        # elsewhere the root is the fallback. A run recorded before #1235
+        # (`session_store.LegacyRunLink`) is not caught: it is refused, never read as the root.
         recorded = None
     return recorded if recorded is not None else main_session(store)
 

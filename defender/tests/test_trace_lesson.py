@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests._by_path import load_trace_lesson
+from defender.tests._alert_plant import plant_alert
 from defender.tests.tenant_1105_run_repository import _spec1105 as H1105
 
 #: The tenant whose natural runs the tracer walks (#1105 PR 2, J8: `--tenant` is required and
@@ -47,6 +48,7 @@ def _opened(tl) -> list:
 def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]):
     rd = runs / name
     rd.mkdir(parents=True)
+    plant_alert(rd)
     (rd / "report.md").write_text(f"---\ndisposition: {disposition}\n---\nbody\n")
     (rd / "lessons_loaded.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in loads)

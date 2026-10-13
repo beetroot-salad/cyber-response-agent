@@ -170,12 +170,11 @@ GROUPS = ("tables", "facts", "documents", "observability", "session")
 #: form decision 1a pinned.
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
-    "facts": ("alert", "provenance", "run_end", "scrub_verdict", "accounting"),
+    "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
     "documents": ("investigation", "report", "gather_summaries", "lead_author", "source_refs"),
     "observability": (
         "wire_log", "review_trace", "forward_check_trace", "tool_trace", "review_record",
-        "budget", "circuit_breaker", "lessons_loaded", "ticket_write", "runtime_html",
-        "box_sentinel", "session_pointer"),
+        "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer"),
     "session": ("session_db",),
 }
 
@@ -188,15 +187,14 @@ GROUP_OF: dict[str, str] = {
 MEMBER_ACCESSOR: dict[str, str] = {
     "queries": "executed_queries", "policy_denials": "policy_denials", "leads": "lead_claim",
     "payloads": "payload", "ticket_reads": "ticket_read",
-    "alert": "alert", "provenance": "provenance", "run_end": "run_end_sidecar",
-    "scrub_verdict": "scrub_verdict", "accounting": "accounting_failures",
+    "alert": "alert", "alert_record": "alert_record", "provenance": "provenance", "run_end": "run_end_sidecar",
+    "scrub_verdict": "scrub_verdict",
     "investigation": "investigation", "report": "report",
     "gather_summaries": "gather_summary", "lead_author": "lead_author",
     "source_refs": "source_refs",
     "wire_log": "wire_log", "review_trace": "review_trace",
     "forward_check_trace": "forward_check_trace", "tool_trace": "tool_trace",
-    "review_record": "review_record", "budget": "budget",
-    "circuit_breaker": "circuit_breaker", "lessons_loaded": "lessons_loaded",
+    "review_record": "review_record", "lessons_loaded": "lessons_loaded",
     "ticket_write": "ticket_write", "runtime_html": "runtime_html",
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
     "session_db": "session_db",
@@ -207,30 +205,31 @@ MEMBER_ACCESSOR: dict[str, str] = {
 #: review): the group says how a record is read and by whom; what a writer may do to it is a
 #: fact of the record's own shape, and a group-wide verb handed the session db an `append`
 #: that would have written JSONL into SQLite. `append` for a JSONL table or trace, `write` for
-#: a whole document or a write-once fact, `update` alone for the two `flock`ed JSON states,
-#: `open` for the session store, `None` for a record nothing in the host writes through the
+#: a whole document or a write-once fact, `update` for a `flock`ed JSON state (none remains
+#: since #1235 moved the budget and breaker into the run process's memory), `open` for the
+#: session store, `None` for a record nothing in the host writes through the
 #: handle. Mirrors `defender.run_repository._handle.MEMBER_VERB`; that module is the shipped shape, this
 #: is the spec.
 MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
     "ticket_reads": "write",
-    "alert": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
-    "accounting": "write",
+    "alert": "write", "alert_record": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
     "investigation": "write", "report": "write", "gather_summaries": "write",
     "lead_author": None, "source_refs": "write",
     "wire_log": "append", "review_trace": "append", "forward_check_trace": "append",
-    "tool_trace": "append", "review_record": "write", "budget": "update",
-    "circuit_breaker": "update", "lessons_loaded": "append", "ticket_write": "write",
+    "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
+    "ticket_write": "write",
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
     "session_db": "open",
 }
 VERBS = ("write", "append", "update", "open")
 
-#: The two `observability` members that are LOCKED JSON STATES rather than logs: their writer
+#: The `observability` members that are LOCKED JSON STATES rather than logs: their writer
 #: method reaches `_io.locked_for_rewrite` (a read-modify-write under `flock`), never a blind
 #: replace — which is what "no accessor exposes an in-place rewrite of an existing entry"
-#: means for them (obligation g08, demand d44).
-LOCKED_STATE_MEMBERS = ("budget", "circuit_breaker")
+#: means for them (obligation g08, demand d44). EMPTY since #1235: the two it held, `budget`
+#: and `circuit_breaker`, are the run process's in-memory state and no longer run records.
+LOCKED_STATE_MEMBERS: tuple[str, ...] = ()
 
 #: D4's twelve descriptive fields, read-only, through readers that already exist. Decision 1b
 #: moved them off `Run` onto a named `RunRecord` value object reached at `run.record`.
@@ -324,8 +323,6 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("review_record", "run", "review_record", (TURN,), composing=True),
     Accessor("tool_trace", "run", "tool_trace"),
     Accessor("policy_denials", "run", "policy_denials"),
-    Accessor("budget", "run", "budget"),
-    Accessor("circuit_breaker", "run", "circuit_breaker"),
     Accessor("lessons_loaded", "run", "lessons_loaded"),
     Accessor("ticket_write", "run", "ticket_write"),
     Accessor("ticket_reads", "run", "ticket_read", (SEQ,), composing=True),
@@ -335,7 +332,6 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("provenance", "run", "provenance"),
     Accessor("run_end", "run", "run_end_sidecar"),
     Accessor("scrub_verdict", "run", "scrub_verdict"),
-    Accessor("accounting", "run", "accounting_failures"),
     Accessor("session_db", "run", "session_db", (LINEAGE_ID,), composing=True),
     Accessor("family", "episode", "family"),
     Accessor("family_stamp", "episode", "family_stamp"),
@@ -359,14 +355,16 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
 
 #: The UPWARD accessors (cluster B, dissolved by decision 10): their root is the runs base, not
 #: the run directory. (#1107 moved the ticket receipt out of the box-writable run dir, making it
-#: the fourth sidecar.) `session_db`'s root is the sessions directory, a sibling of the
-#: runs base (claims C10/C15).
-SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "accounting_failures", "ticket_write")
+#: the fourth sidecar; #1235 retired the accounting-failures sidecar's accessor — its suffix
+#: stays reserved in the layout — and moved the run -> case pointer out of the run dir into a
+#: sidecar of its own, `<run_id>.session-pointer.json`, F2.) `session_db`'s root is the sessions
+#: directory, a sibling of the runs base (claims C10/C15).
+SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer")
 UPWARD_ACCESSORS = (*SIDECAR_ACCESSORS, "sessions_dir", "session_db")
 
 
 def upward_root(attr: str, runs_base: Path) -> Path:
-    """The root an UPWARD accessor is confined to: the four sidecars sit directly in the runs
+    """The root an UPWARD accessor is confined to: the sidecars sit directly in the runs
     base; the sessions directory is its SIBLING (`<runs_base>/../sessions`, claims C10/C15),
     so the session db's root is the runs base's parent — one table, so no test carries its
     own guess."""
@@ -529,7 +527,8 @@ def seed_run_tree(run_dir: Path) -> Path:
 # timestamps (`budget.json`, `tool_trace.jsonl`), a per-run random security salt embedded in
 # otherwise-meaningful text (`review_record.<turn>.json`, the three
 # `wire_logs/review_*_trace.jsonl`) and random per-run session/case identifiers
-# (`session_store_pointer.json`, `tool_trace.jsonl`). So the observer is two checks now:
+# (`session_store_pointer.json` — then in the run dir, a sidecar beside it since #1235 —,
+# `tool_trace.jsonl`). So the observer is two checks now:
 #
 #   STRUCTURAL (strict, load-bearing) — `snapshot` / `tree_diff`: the run directory produces
 #   the SAME SET OF NAMES, with no file or directory added, removed, renamed or moved. A

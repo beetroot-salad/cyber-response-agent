@@ -40,6 +40,7 @@ from defender.tests._spec791 import (
     plant_alert,
     satisfy_entrypoint_keys,
 )
+from defender.run_repository import RunPaths
 from defender.tests.learning_state_1135 import _spec1135 as S
 from defender.learning.core.state import FINDINGS, LEAD_QUEUE_LOCK, PITFALLS, QUESTIONER_FINDINGS
 
@@ -134,7 +135,7 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     run_dir = make_run_dir(S.curation_run_dir("case-1135").parent, name="case-1135",
                            disposition="benign")
     scrub_mod.scrub(run_dir)
-    case_id = case_ref((run_dir / "alert.json").read_bytes())
+    case_id = case_ref(RunPaths(run_dir).alert.read_bytes())
 
     if at == "queue-folder":
         target = tmp_path / "outside" / "queue"

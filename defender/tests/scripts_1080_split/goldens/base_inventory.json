@@ -281,8 +281,6 @@
    "_format",
    "_render",
    "_ctx",
-   "_signature_id",
-   "_event_time",
    "alert_event_time",
    "read_case_record",
    "alert_to_open_payload",

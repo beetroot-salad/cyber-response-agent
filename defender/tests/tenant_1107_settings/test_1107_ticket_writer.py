@@ -786,26 +786,34 @@ def test_s60_ticket_writer_fakes_migrated(tmp_path, monkeypatch):
             f"{name} kept another tenant's record: {[r.settings for r in carried]}")
 
 
-def test_s7_f6_run_env_handed_to_writer_and_lead_zero(tmp_path, monkeypatch):
-    """run.py hands its run env (run_common.run_env's copy) to the ticket writer, and the driver
-    hands the run's env to lead-zero: with a marker variable in that env, the writer's docker child
-    and lead-zero item 1's shell-fetch child both receive it, and neither lane calls run_env() or
-    reads os.environ itself."""
+def test_s7_f6_run_env_handed_to_the_correlation_lead(tmp_path, monkeypatch):
+    """The driver hands the run's env to the correlation lead: with a marker variable in that
+    env, the lead's backend child receives it."""
     marker_var, marker_value = "SPEC1107_RUN_ENV_MARKER", "run-env-marker-7c1"
     monkeypatch.setenv(marker_var, marker_value)
 
-    # Lead-zero's half: item 1's shell fetch is the first backend call the lead makes; the verb
-    # it reaches is the harness's recorder (`_lead_zero_808`), and what it records is the context
-    # lead-zero built — its env is what the child the real verb forks is handed.
-    from defender.tests.e2e import _lead_zero_808 as LZ
+    # The correlation lead's half (item 1 is gone, #1222): the lead's first backend call is the
+    # first call the harness makes; the verb it reaches is the replay's recorder, and what it
+    # records is the context the lead was built with — its env is what the child the real verb
+    # forks is handed.
+    from defender.tests.alert_front_door_1222 import _spec1222 as FD
 
-    res = LZ.run(tmp_path / "lz-run", run_id="lz1107-f6")
-    assert res.rec.calls, "lead-zero issued no backend call — item 1's shell fetch never ran"
-    shell_env = dict(res.rec.calls[0].ctx.env)
+    lead = FD.run_alert(tmp_path / "lz-run", tenant=FD.plant_tenant(), run_id="lz1107-f6",
+                        leads={FD.L3: [FD.query("elastic", "alerts", {"native_query": "*"}),
+                                       FD.text(FD.DEFAULT_CORRELATION_SUMMARY)]})
+    assert lead.backend.rec.calls, "the correlation lead issued no backend call"
+    shell_env = dict(lead.backend.rec.calls[0].ctx.env)
     assert shell_env.get(marker_var) == marker_value, (
-        "lead-zero item 1's shell fetch was not handed the run env's marker")
+        "the correlation lead's backend call was not handed the run env's marker")
 
-    # The writer's half, through run.main.
+
+
+def test_s7_f6_run_env_handed_to_the_ticket_writer(tmp_path, monkeypatch):
+    """run.py hands its run env (run_common.run_env's copy) to the ticket writer: with a marker
+    variable in that env, the writer's docker child receives it, and neither lane (the writer, the
+    correlation lead) calls run_env() or reads os.environ itself."""
+    marker_var, marker_value = "SPEC1107_RUN_ENV_MARKER", "run-env-marker-7c1"
+    monkeypatch.setenv(marker_var, marker_value)
     root, _folder, alert = _world(tmp_path)
     run_id = "r-f6"
     shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))

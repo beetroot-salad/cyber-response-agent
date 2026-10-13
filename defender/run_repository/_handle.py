@@ -14,9 +14,9 @@ never parsed contents. Asking for `.path` creates nothing; writes create the hol
 through the same injected `io=` seam as every read.
 
 Every read and write goes through the rooted seam (`_io.rooted_read`, `rooted_mkdir`,
-`rooted_write`, `rooted_locked_for_rewrite`): the record's trust root, whose spelling is
+`rooted_write`): the record's trust root, whose spelling is
 followed, and its name relative to that root, which never is (#1111). The trust root is the run
-dir; the runs base for the four sidecars; `SessionPaths(runs_base).trust_root` for the session
+dir; the runs base for the sidecars; `SessionPaths(runs_base).trust_root` for the session
 db. The session db itself is opened through `session_store.open_store`. The two model-authored documents are validated against
 `_artifact_schema` at every write, so no writer bypasses the schema.
 """
@@ -24,13 +24,12 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import hashlib
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from defender import _artifact_schema, _episode_paths, _provenance, _report
+from defender import _alert_input, _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
 from defender import _tenant
 from defender.run_repository import _layout
@@ -43,56 +42,53 @@ GROUPS = ("tables", "facts", "documents", "observability", "session")
 #: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table.
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
-    "facts": ("alert", "provenance", "run_end", "scrub_verdict", "accounting"),
+    "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
     "documents": ("investigation", "report", "gather_summaries", "lead_author", "source_refs"),
     "observability": (
         "wire_log", "review_trace", "forward_check_trace", "tool_trace", "review_record",
-        "budget", "circuit_breaker", "lessons_loaded", "ticket_write", "runtime_html",
-        "box_sentinel", "session_pointer"),
+        "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer"),
     "session": ("session_db",),
 }
 MEMBER_ACCESSOR: dict[str, str] = {
     "queries": "executed_queries", "policy_denials": "policy_denials", "leads": "lead_claim",
     "payloads": "payload", "ticket_reads": "ticket_read",
-    "alert": "alert", "provenance": "provenance", "run_end": "run_end_sidecar",
-    "scrub_verdict": "scrub_verdict", "accounting": "accounting_failures",
+    "alert": "alert", "alert_record": "alert_record", "provenance": "provenance", "run_end": "run_end_sidecar",
+    "scrub_verdict": "scrub_verdict",
     "investigation": "investigation", "report": "report",
     "gather_summaries": "gather_summary", "lead_author": "lead_author",
     "source_refs": "source_refs",
     "wire_log": "wire_log", "review_trace": "review_trace",
     "forward_check_trace": "forward_check_trace", "tool_trace": "tool_trace",
-    "review_record": "review_record", "budget": "budget",
-    "circuit_breaker": "circuit_breaker", "lessons_loaded": "lessons_loaded",
+    "review_record": "review_record", "lessons_loaded": "lessons_loaded",
     "ticket_write": "ticket_write", "runtime_html": "runtime_html",
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
     "session_db": "session_db",
 }
 #: The one write verb per member — per record, not per group, since the group only says how a
-#: record is read. `append` (JSONL), `write` (whole document or write-once fact), `update` (the
-#: `flock`ed JSON states), `open` (session store), or none.
+#: record is read. `append` (JSONL), `write` (whole document or write-once fact), `open`
+#: (session store), or none. (No `update` member remains: the two `flock`ed JSON states, the
+#: budget and the breaker, became the run process's memory in #1235.)
 MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
     "ticket_reads": "write",
-    "alert": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
-    "accounting": "write",
+    "alert": "write", "alert_record": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
     "investigation": "write", "report": "write", "gather_summaries": "write",
     "lead_author": None, "source_refs": "write",
     "wire_log": "append", "review_trace": "append", "forward_check_trace": "append",
-    "tool_trace": "append", "review_record": "write", "budget": "update",
-    "circuit_breaker": "update", "lessons_loaded": "append", "ticket_write": "write",
+    "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
+    "ticket_write": "write",
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
     "session_db": "open",
 }
 UPWARD_ACCESSORS = (
-    "run_end_sidecar", "scrub_verdict", "accounting_failures", "ticket_write", "sessions_dir",
+    "run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer", "sessions_dir",
     "session_db")
-#: The four sidecars sit directly in the runs base, so they are anchored there. (The session
-#: db's `open_store` anchors its own directory.)
-_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting", "ticket_write")
+#: The sidecars sit directly in the runs base, so they are anchored there. (The session db's
+#: `open_store` anchors its own directory.)
+_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer")
 #: Written once through the exclusive lane (a second lead claim must collide). The scrub
-#: verdict and accounting counter are facts too but are rewritten, so they use `replace` like
-#: every other `write`.
-_WRITE_ONCE_MEMBERS = frozenset({"alert", "provenance", "run_end", "leads"})
+#: verdict is a fact too but is rewritten, so it uses `replace` like every other `write`.
+_WRITE_ONCE_MEMBERS = frozenset({"alert", "alert_record", "provenance", "run_end", "leads"})
 #: The two model-authored documents, held to their content schema at every write.
 _SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name,
                          "report": RUN_LAYOUT.report.name}
@@ -136,8 +132,6 @@ class RecordHandle:
             self.write = self._do_write
         elif self._verb == "append":
             self.append = self._do_append
-        elif self._verb == "update":
-            self.update = self._do_update
         elif self._verb == "open":
             self.open = self._do_open
 
@@ -195,14 +189,6 @@ class RecordHandle:
             if self._group != "observability" or self._on_partial_failure is None:
                 raise
             self._on_partial_failure(f"{self._member}: append failed")
-
-    def _do_update(self, patch: dict) -> None:
-        root, name = self._address()
-        self._mkdir(root, name)
-        # The `_io` op reads, changes and rewrites the record; the handle never reads it
-        # (#1174 amendment 2), and unusable content starts over from `{}`.
-        self._io.locked_json_update(self._io.rooted_locked_for_rewrite(root, name),
-                                    lambda state: state.update(patch), default=dict)
 
     def _do_open(self):
         # Resolve first so the owner's refusals apply to `.open()` as to `.path`.
@@ -428,8 +414,7 @@ class Run:
         prov = self._provenance(faults)
         exit_class = self._exit_class(owner, faults) if self.runs_base is not None else None
         disposition, review_outcome = self._report_fields()
-        alert_bytes, _reason = self._io.rooted_read(
-            self.run_dir, RUN_LAYOUT.alert, binary=True)
+        alert_ref = self._alert_ref()
         return RunRecord(
             tenant_id=prov.tenant_id if prov is not None else None,
             world_id=prov.world_id if prov is not None else None,
@@ -437,7 +422,7 @@ class Run:
             dirty=prov.dirty if prov is not None else None,
             model=prov.model if prov is not None else None,
             run_id=self.run_dir.name,
-            alert_ref=case_ref(alert_bytes) if alert_bytes is not None else None,
+            alert_ref=alert_ref,
             # Lineage comes from the stamp, never a `family.yaml` guessed from the runs base.
             parent_run_id=prov.parent_run_id if prov is not None else None,
             fork_turn=prov.fork_turn if prov is not None else None,
@@ -446,6 +431,23 @@ class Run:
             review_outcome=review_outcome,
             faults=tuple(faults),
         )
+
+    def _alert_ref(self) -> str | None:
+        """The run's curation key, from its record's digest — `None` for a folder with no
+        record. A stored alert whose bytes no longer match the record is refused
+        (`AlertReplaced`, naming the run): the key must never follow replaced bytes."""
+        record_text, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.alert_record)
+        record = None if record_text is None else _alert_input.parse_alert_record(record_text)
+        if record is None:
+            return None
+        alert_bytes, _reason = self._io.rooted_read(
+            self.run_dir, RUN_LAYOUT.alert, binary=True)
+        if alert_bytes is not None and _alert_input.digest_of(alert_bytes) != record.digest:
+            raise _alert_input.AlertReplaced(
+                f"the alert stored for run {self.run_dir.name} does not match the digest its "
+                "record carries — the run's input was replaced or damaged, and nothing is "
+                "read from it")
+        return case_ref_of_digest(record.digest)
 
     def _provenance(self, faults: list[str]) -> _provenance.RunProvenance | None:
         raw, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.provenance)
@@ -496,9 +498,15 @@ class Run:
         outcome = fm.get("outcome") if isinstance(fm, dict) else None
         return read.disposition, (outcome if isinstance(outcome, str) else None)
 
+def case_ref_of_digest(digest: str) -> str:
+    """The curation key a run is known by: `case-<the alert's sha256 digest>[:16]`, the digest
+    its record carries."""
+    return f"case-{digest[:16]}"
+
+
 def case_ref(alert_bytes: bytes) -> str:
-    """The curation key a run is known by: `case-<sha256 of the alert's bytes>[:16]`."""
-    return f"case-{hashlib.sha256(alert_bytes).hexdigest()[:16]}"
+    """`case_ref_of_digest` for alert bytes in hand."""
+    return case_ref_of_digest(_alert_input.digest_of(alert_bytes))
 
 
 # ---------------------------------------------------------------------------------------

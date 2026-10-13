@@ -50,6 +50,8 @@ review's scratch ledger (its minting patch row).
 """
 from __future__ import annotations
 
+from defender.run_repository import Run
+
 import errno
 import json
 import logging
@@ -70,6 +72,7 @@ from defender.tests import _spec1133 as S
 from defender.tests import _triplet_947 as T
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
 from defender.tests import _state1135
+from defender.run_repository import RunPaths
 
 EPISODE_ID = "ep-1133"
 #: Bytes that are not UTF-8: a plain file holding them is a refused text read.
@@ -967,7 +970,7 @@ def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
     cli, src, tenant, ep = _launcher(tmp_path)
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     caplog.set_level(logging.WARNING)
-    with cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root) as episode:
+    with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root) as episode:
         assert Path(episode.dir) == ep
     base = ep / LAYOUT.served_base
     assert base.read_bytes() == b""
@@ -1085,7 +1088,7 @@ def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_
     with pytest.raises(SystemExit):
         run._resume_target(ns, episode=None, tenant=settings)
 
-    ordinary = run.parse_args([str(src / "alert.json"), "--tenant", T.SOURCE_TENANT])
+    ordinary = run.parse_args([str(RunPaths(src).alert), "--tenant", T.SOURCE_TENANT])
     assert run._resume_target(ordinary, episode=None, tenant=settings) is None
     with S.open_episode(ep) as episode:
         world = run._resume_target(ns, episode=episode, tenant=settings)

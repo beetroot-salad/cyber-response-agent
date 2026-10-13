@@ -17,6 +17,7 @@ from defender.evals.held_out import (
     warn_if_outside_the_net,
 )
 from defender.run_common import HELD_OUT_FIXTURES, _alert_label
+from defender.tests._alert_plant import plant_alert
 
 SLUG = "m05-lsass-access"
 
@@ -26,6 +27,7 @@ def _runs(tmp_path: Path, *names: str) -> Path:
     runs.mkdir(parents=True, exist_ok=True)
     for n in names:
         (runs / n).mkdir()
+        plant_alert(runs / n)
     return runs
 
 

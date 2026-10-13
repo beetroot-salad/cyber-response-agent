@@ -42,6 +42,7 @@ from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_1025_episode_reader as R
+from defender.tests._alert_plant import plant_source_copy
 from defender.tests._by_path import load_lint_gate
 from defender.tests import _state1135
 from defender.tests._state1135 import env_state
@@ -176,9 +177,8 @@ def test_1025_markup_in_every_model_authored_field_renders_as_text_on_every_sect
     (world / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": f"goal {MARKUP}"}), encoding="utf-8")
     (world / "gather_summaries" / "l-001.md").write_text(f"summary {MARKUP}\n", encoding="utf-8")
-    for label in E.WORLDS:
-        (ep.world(label) / "alert.json").write_text(json.dumps(
-            {"alert_id": "id", "rule": {"name": f"rule {MARKUP}"}}), encoding="utf-8")
+    plant_source_copy(ep.dir, json.dumps(
+        {"alert_id": "id", "rule": {"name": f"rule {MARKUP}"}}).encode("utf-8"))
     page = render(ep)
     assert "<script>" not in page.raw
     assert "<img" not in page.raw
@@ -253,8 +253,7 @@ def test_1025_non_ascii_and_control_characters_in_rendered_strings(tmp_path):
                 ' root_cause: "nul\\0here", anchor: l-001, topic: t, contrast_evidence: [e],'
                 ' on_verdict_path: true}\n')
     assert (draws / "0.yaml").read_text(encoding="utf-8")
-    (ep.world(E.CONTROL) / "alert.json").write_text(
-        '{"alert_id": "x", "rule": {"name": "rule\\ud800name"}}', encoding="utf-8")
+    plant_source_copy(ep.dir, b'{"alert_id": "x", "rule": {"name": "rule\\ud800name"}}')
     page = render(ep)
     raw_bytes = ep.page.read_bytes()
     assert b"\x00" not in raw_bytes, "a NUL byte landed in the page"

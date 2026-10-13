@@ -94,8 +94,9 @@ class QueryRow:
         default=None, repr=False, compare=False)
 
     def record(self) -> dict:
-        """The row as read — the parsed JSON record exactly as `record_query.lead_rows` hands
-        the guard live, never a re-projection of the typed fields.
+        """The row as read — the parsed JSON record, the shape the run's `RunState.lead_rows`
+        hands the guard live (each row the parse of its table line), never a re-projection of
+        the typed fields.
 
         The typed view coerces while the guard reads keys verbatim, so a replay over
         re-projected rows could reach a verdict the live run never reached. This is what makes
@@ -316,7 +317,7 @@ def actor_view(run_dir: Path) -> dict:
         entries.append({"query_id": q.query_id, "params": q.params})
     return {
         "case_id": run_dir.name,
-        "alert_ref": RUN_LAYOUT.alert.name,
+        "alert_ref": str(RUN_LAYOUT.alert),
         "leads": [
             {"lead_id": lid, "queries": qs} for lid, qs in grouped.items()
         ],
@@ -436,7 +437,7 @@ def render_joined_yaml(run_dir: Path) -> str:
         lead_fields=("lead_id", "goal", "what_to_summarize"),
         query_fields=("query_id", "verb", "params", "payload_status", "payload_digest"),
     )
-    doc = {"case_id": run_dir.name, "alert_ref": RUN_LAYOUT.alert.name, "leads": leads}
+    doc = {"case_id": run_dir.name, "alert_ref": str(RUN_LAYOUT.alert), "leads": leads}
     return _yaml.safe_dump(doc, sort_keys=False)
 
 

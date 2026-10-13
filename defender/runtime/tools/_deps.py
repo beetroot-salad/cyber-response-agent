@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import time
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
@@ -22,6 +21,7 @@ from defender._paths import PATHS
 from defender._io import write_guarded
 from defender.run_repository import RunPaths
 from .. import box as box_mod
+from ..run_state import RunState
 from .. import permission
 from ..agent_definition import ResolvedRoots
 from ..agent_role import AgentRole
@@ -116,7 +116,6 @@ class AgentDeps:
     #: `BoxLike`, not `BoxExecutor`: only `run_parsed(...)` is called, and a strict concrete
     #: type would refuse duck-typed test doubles.
     box: box_mod.BoxLike = field(kw_only=True, default_factory=box_mod.BoxExecutor)
-    budget_started_monotonic: float = field(kw_only=True, default_factory=time.monotonic)
     #: `SkipValidation` on this and `review_state`: mutable containers shared across
     #: `dataclasses.replace` copies. Validation would rebuild them, silently forking state.
     authored_paths: Annotated[set[Path], SkipValidation] = field(
@@ -136,6 +135,13 @@ class AgentDeps:
     #: `None` is refused by `VerbContext`'s own validation. `SkipValidation`: the record is a
     #: frozen value built once at resolve, never rebuilt by a deps copy.
     tenant: Annotated[_RunTenant | None, SkipValidation] = field(kw_only=True, default=None)
+    #: The run's one live state (#1235): its budget and clock, its breaker, its queries rows.
+    #: Set by the run (`run_investigation` onto MAIN's deps, carried onto each gather lead's by
+    #: reference), so every role of one run counts into one object. `None` for a role with no
+    #: run (the learning stages, the review roles), whose calls the budget hooks leave alone; a
+    #: live operation over it is refused (`run_state.run_state_of`). `SkipValidation`, like
+    #: `tenant`: the object is shared, never rebuilt by a deps copy.
+    run_state: Annotated[RunState | None, SkipValidation] = field(kw_only=True, default=None)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
@@ -184,6 +190,9 @@ class LeadStop:
 
     dead_end: DeadEnd | None = None
     ceiling: int | None = None
+    #: The system whose circuit breaker refused one of this lead's calls, if any. The harness's
+    #: correlation lead reads it to tell "the system was marked down" from "every call failed".
+    breaker_refused: str | None = None
 
     @property
     def door_closed(self) -> bool:
@@ -199,6 +208,10 @@ class LeadStop:
         if self.ceiling is None:
             self.ceiling = request_limit
 
+    def mark_breaker_refused(self, system: str) -> None:
+        if self.breaker_refused is None:
+            self.breaker_refused = system
+
 
 @model(frozen=True)
 class GatherDeps(AgentDeps):
@@ -209,6 +222,10 @@ class GatherDeps(AgentDeps):
     #: Made and read by `_run_gather`. `None` outside a dispatch (e.g. lead zero's harness
     #: calls), where a guard's dead end unwinds as an exception instead.
     stop: LeadStop | None = field(kw_only=True, default=None, compare=False, repr=False)
+    #: True only for the lead the HARNESS dispatches (`l-00c`, #1222), never for a lead MAIN
+    #: dispatches under the same id: its failures mark its system down but are not counted
+    #: toward the run-level failure kill.
+    harness_lead: bool = field(kw_only=True, default=False)
 
 
 def _record_lesson_load(
