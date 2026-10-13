@@ -333,7 +333,7 @@ def test_1234_malformed_forged_fact_id_excludes_only_its_world(tmp_path, fact_id
     assert S.from_world(S.defender_queue(), "b")
 
 
-@pytest.mark.parametrize("field", ["system", "verb", "lead_id", "query_id", "params"])
+@pytest.mark.parametrize("field", ["system", "verb", "lead_id", "query_id"])
 @pytest.mark.parametrize("value", [[], None, 1])
 def test_1234_malformed_unserved_query_excludes_only_its_world(tmp_path, field, value):
     """Unserved calls must pass the archive boundary before computed views use their fields."""

@@ -472,8 +472,9 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
     FIFO, a directory, an oversize file, a torn line, or malformed call fields).
 
     Unlike the tolerant lead reader, grading must preserve the raw call identity rather than
-    coerce it. Validate the fields used by the computed views before admitting any rows,
-    including unserved calls that have no ledger partner to check them against."""
+    coerce it. Validate the string fields used by the computed views before admitting any
+    rows, including unserved calls that have no ledger partner to check them against.
+    Params retain the shared reader's tolerant handling of non-mappings."""
     table_name = LAYOUT.world(label).executed_queries
     table, torn_table, table_read = bound.read_jsonl(table_name)
     if table_read.absent:
@@ -485,12 +486,11 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
                            "not parse as a row")
     _refuse_unwritable(table, label=label, name=table_name)
     for index, row in enumerate(table):
-        for column in ("lead_id", "system", "verb", "query_id", "params"):
-            expected = dict if column == "params" else str
-            if not isinstance(row.get(column), expected):
+        for column in ("lead_id", "system", "verb", "query_id"):
+            if not isinstance(row.get(column), str):
                 raise JudgeRefused(
                     f"world {label!r}: {table_name} row {index} has malformed {column} "
-                    f"({row.get(column)!r}); expected {expected.__name__}")
+                    f"({row.get(column)!r}); expected str")
     return table
 
 
