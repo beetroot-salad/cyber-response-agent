@@ -80,6 +80,8 @@ def test_protection_verification_reads_branch_but_never_changes_rules():
     "https://forge.invalid:3000/api/v1/repos/tenants/blue/pulls?page=2",
     "http://forge.invalid:3001/api/v1/repos/tenants/blue/pulls?page=2",
     "http://forge.invalid:3000/api/v1/repos/tenants/red/pulls?page=2",
+    "http://forge.invalid:bad/api/v1/repos/tenants/blue/pulls?state=open&page=2",
+    "http://[invalid]/api/v1/repos/tenants/blue/pulls?page=2",
 ])
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_pagination_refuses_outside_origin_repository_before_request(next_url, method):
@@ -94,7 +96,7 @@ def test_pagination_refuses_outside_origin_repository_before_request(next_url, m
         return httpx.Response(200, json=[])
     client = httpx.Client(transport=httpx.MockTransport(reply))
     cls = importlib.import_module("defender.learning.author.forge").ForgejoForge
-    with pytest.raises(ForgeError, match="origin|host|repo|page|credential|[Ll]ink|URL"):
+    with pytest.raises(ForgeError, match="origin|host|repo|page|credential|[Ll]ink|URL|[Ii]nvalid (port|IPv6)"):
         getattr(cls(origin=ORIGIN, token=TOKEN, client=client), method)("lessons/a")
     assert len(calls) == 1, "refuse the foreign Link before contacting its target"
     assert TOKEN in calls[0].headers["Authorization"]
