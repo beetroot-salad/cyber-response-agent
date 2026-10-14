@@ -174,16 +174,45 @@ def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
                     unlink_on_fault=False)
 
 
-def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
+def _readonly_probe_file(source: Path) -> Path | None:
+    """Known instruction roots require their fixed file; generic empty data needs no read.
+
+    #665 Decision 9 permits an existing empty data source. Its host inode is the
+    non-absence evidence; code and tenant knowledge always require their fixed probe.
+    """
+    if source.name == "agent":
+        return Path(".tenant-id")
+    if source.name == "defender":
+        return Path("SKILL.md")
+    try:
+        info = source.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise BoxFault(f"read-only mount source is not a real directory: {source}")
+        entries = sorted(source.iterdir(), key=lambda entry: entry.name)
+        if not entries:
+            _logger.debug("empty read-only mount source %s: device=%s inode=%s",
+                          source, info.st_dev, info.st_ino)
+            return None
+        for entry in entries:
+            if stat.S_ISREG(entry.lstat().st_mode):
+                return Path(entry.name)
+    except OSError as e:
+        raise BoxFault(f"could not read mount probe source {source}: {e}") from e
+    raise BoxFault(f"read-only mount has no regular file for its readback probe: {source}")
+
+
+def _check_mount_sentinel(
+    mount: Mount, docker: DockerFn, name: str, *, probe_file: Path | None = None,
+) -> None:
     """Compare an existing read-only file, or plant into a writable source only."""
     if not mount.writable:
         source = Path(mount.source)
-        # Tenant roots have their identity marker; product roots have the runtime prompt.
-        relative = Path(".tenant-id") if source.name == "agent" else Path("SKILL.md")
-        if source.name != "agent" and not (source / relative).exists():
-            # Existing request callers mount the entire product checkout.
-            relative = Path("defender/SKILL.md")
+        relative = probe_file if probe_file is not None else _readonly_probe_file(source)
+        if relative is None:
+            return
         try:
+            if not stat.S_ISREG((source / relative).lstat().st_mode):
+                raise BoxFault(f"mount readback probe is not a regular file: {source / relative}")
             expected = read_text_utf8(source / relative)
             proc = _call(docker, ["docker", "exec", name, "cat", str(Path(mount.target) / relative)])
         except (OSError, UnicodeError) as e:
@@ -359,7 +388,12 @@ def _start_boxed_request(
         )
     try:
         for m in request.mounts:
-            _check_mount_sentinel(m, docker, request.name)
+            # Code remains mandatory even for a legacy whole-checkout mount whose source
+            # basename is not `defender`; generic empty-data semantics never apply to it.
+            probe_file = None
+            if not m.writable and request.code_dir.is_relative_to(m.target):
+                probe_file = request.code_dir.relative_to(m.target) / "SKILL.md"
+            _check_mount_sentinel(m, docker, request.name, probe_file=probe_file)
         _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
     except BaseException as e:
         # The box is ours; best-effort reap, then mark (sentinels were already planted).
