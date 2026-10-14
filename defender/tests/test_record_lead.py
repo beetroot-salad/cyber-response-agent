@@ -325,3 +325,21 @@ def test_a_lead_id_that_is_not_a_plain_string_claims_nothing_and_does_not_raise(
     run_dir = tmp_path / "run-shape"
     assert claim_lead(_dispatch(run_dir, Path("l-a1"), "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not list((run_dir / "gather_raw").glob("*.lead.json")), "a row was written anyway"
+
+
+def test_parent_alias_is_not_a_taken_lead_and_claim_recovers_when_restored(tmp_path, capsys):
+    """#1165: parent preparation failure retains NOT_CLAIMED, unlike a held leaf."""
+    run_dir = tmp_path / "run-parent-alias"
+    run_dir.mkdir()
+    outside = tmp_path / "outside-claims"
+    outside.mkdir()
+    parent = run_dir / "gather_raw"
+    parent.symlink_to(outside, target_is_directory=True)
+    run = fixture_run(run_dir)
+    dispatch = _dispatch(run_dir, "l-001", "g", ["d"])
+    assert claim_lead(dispatch, run=run) == NOT_CLAIMED
+    assert not list(outside.iterdir())
+    assert "append a new :L" not in capsys.readouterr().err
+    parent.unlink()
+    assert claim_lead(dispatch, run=run) == CLAIMED
+    assert json.loads((parent / "l-001.lead.json").read_text())["goal"] == "g"
