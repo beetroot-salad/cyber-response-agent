@@ -132,7 +132,7 @@ async def run_correlation_lead(  # noqa: PLR0913 — the dispatch composition: r
     `tenant` is the run's record (#1107), and `run_state` the run's live state (#1235), both
     carried onto the lead's deps: every verb it dispatches reads that tenant's settings, and
     every call it makes counts into the run's one budget and breaker."""
-    from ..agent_definition import bind
+    from ..agent_definition import RunScope, bind
     from ..agent_role import GATHER_AGENT_ID_PREFIX
     from ..driver import build_gather_agent, gather_def_for
     from ..tools import GatherDeps
@@ -172,7 +172,7 @@ async def run_correlation_lead(  # noqa: PLR0913 — the dispatch composition: r
             _logger.warning(f"correlation lead truncated_by write skipped: {e!r}")
 
     gbase = bind(gather_def_for(dispatch.grant), run_state.run_dir, defender_dir=defender_dir,
-                 box=box)
+                 box=box, scope=RunScope(tenant_agent=tenant.agent))
     assert isinstance(gbase, GatherDeps)
     # Carry the run's budget-clock origin; `bind`'s default would start a fresh clock and
     # overstate the remaining wall-clock budget. `harness_lead`: this lead's failures mark its

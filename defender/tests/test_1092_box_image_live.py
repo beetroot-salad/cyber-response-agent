@@ -16,13 +16,17 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import tomllib
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from defender.runtime import box as box_mod
 from defender.runtime.box import BOX_ENV_ALLOWLIST
+from defender.tests._docker import dood_anchor, is_dood
 from defender.tests._spec1092 import (
     DEFENDER,
     IMAGE_WALK_PROBE,
@@ -111,6 +115,23 @@ print(json.dumps({"pydantic": pydantic.__file__, "duckdb": duckdb.__file__, "pre
 """
 
 
+@pytest.fixture
+def image_run_base(tmp_path: Path) -> Iterator[Path]:
+    """Give only mounted live-image cases a daemon-visible base under DooD."""
+    if not is_dood():
+        yield tmp_path
+        return
+    anchor = dood_anchor()
+    assert anchor is not None, "the real-box guard requires a shared repo mount under DooD"
+    base = anchor / f"t1092-{uuid.uuid4().hex[:12]}"
+    base.mkdir(parents=True)
+    try:
+        yield base
+    finally:
+        # Image probes write as root; cleanup follows the other live shared fixtures.
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def _locked_core_and_box(env: dict) -> dict[str, str]:
     """`uv.lock`'s resolution of the project's core dependencies plus the `box` extra, closed
     over the lock's own dependency graph with each edge's marker evaluated for `env` (the
@@ -152,7 +173,7 @@ def _locked_core_and_box(env: dict) -> dict[str, str]:
 
 # ---- d17 -------------------------------------------------------------------------------------
 @requires_real_box
-def test_defender_model_imports_inside_the_box_from_the_image_site_packages(tmp_path):
+def test_defender_model_imports_inside_the_box_from_the_image_site_packages(image_run_base):
     """Inside a started box, through the mounted tree and the entrypoint, `from defender._model
     import model` succeeds (and with it `defender.runtime.box`, the closure the rule used to
     guard) and `pydantic.__file__` is under `/usr/local/lib/python3.11/site-packages`.
@@ -162,7 +183,7 @@ def test_defender_model_imports_inside_the_box_from_the_image_site_packages(tmp_
     # `defender._model`. O6 (#1077's constants module may import `_model`) is discharged by
     # this same observer on any closure module; no #1077 code is touched here. The new closure
     # under runsc + the alias-deny profile is unexecuted until the first CI run (N12)."""
-    run_dir = make_run_dir(tmp_path)
+    run_dir = make_run_dir(image_run_base)
     with real_box(run_dir) as box:
         seen = box_probe(box, run_dir, "model", _IMPORT_MODEL)
     assert seen["pydantic"].startswith(SITE + "/"), seen
@@ -172,7 +193,7 @@ def test_defender_model_imports_inside_the_box_from_the_image_site_packages(tmp_
 
 # ---- d18 -------------------------------------------------------------------------------------
 @requires_real_box
-def test_duckdb_imports_inside_the_box(tmp_path):
+def test_duckdb_imports_inside_the_box(image_run_base):
     """Inside a started box, bare `python3 -c 'import duckdb'` succeeds, from the image's own
     site-packages.
 
@@ -180,7 +201,7 @@ def test_duckdb_imports_inside_the_box(tmp_path):
     # on the drain lane's read-only worktree cwd fails with EROFS — pre-existing (the host-venv
     # duckdb behaves the same), unchanged here, recorded as a follow-up, not mechanised (rg3).
     # Thread sizing under runsc is out of scope (#66); the wheel's cost is C15's (#10)."""
-    run_dir = make_run_dir(tmp_path)
+    run_dir = make_run_dir(image_run_base)
     with real_box(run_dir) as box:
         res = box_run(box, "python3 -c 'import duckdb'", cwd=run_dir)
         seen = box_probe(box, run_dir, "duckdb", _IMPORTS, "duckdb")
@@ -191,14 +212,14 @@ def test_duckdb_imports_inside_the_box(tmp_path):
 
 # ---- d19 (negative; positive control: pydantic and duckdb DO import, d17/d18) --------------------
 @requires_real_box
-def test_the_runtime_extra_never_enters_the_box(tmp_path):
+def test_the_runtime_extra_never_enters_the_box(image_run_base):
     """Inside a started box, `anthropic`, `pydantic_ai`, `openai` and `mcp` are not
     importable, while `pydantic` and `duckdb` are.
 
     # rejected: the latent exposure that `duckdb` becomes importable by a `python3` the gate
     # COULD grant (`permission/grant.py:71` registers it as an extractor; not in
     # `reader_grants` today) is recorded, not mechanised."""
-    run_dir = make_run_dir(tmp_path)
+    run_dir = make_run_dir(image_run_base)
     with real_box(run_dir) as box:
         seen = box_probe(box, run_dir, "llm", _IMPORTS, "anthropic", "pydantic_ai", "openai", "mcp",
                          "pydantic", "duckdb")
@@ -211,13 +232,13 @@ def test_the_runtime_extra_never_enters_the_box(tmp_path):
 
 # ---- d20 -------------------------------------------------------------------------------------
 @requires_real_box
-def test_the_base_images_own_packages_survive_the_inexact_sync(tmp_path):
+def test_the_base_images_own_packages_survive_the_inexact_sync(image_run_base):
     """Inside a started box, `import packaging` succeeds from the image's own site-packages —
     the `--inexact` sync did not prune the base image's own site-packages.
 
     # rejected: the base's known substitutions (mawk, dash, no `jq`/gawk — #540 M13) are NOT
     # corrected by this image."""
-    run_dir = make_run_dir(tmp_path)
+    run_dir = make_run_dir(image_run_base)
     with real_box(run_dir) as box:
         seen = box_probe(box, run_dir, "packaging", _IMPORTS, "packaging")
     assert seen["packaging"], seen
@@ -269,7 +290,7 @@ def test_every_distribution_in_the_image_is_the_locked_version_or_a_kept_base_pa
 
 # ---- d22 (negative; positive controls: python3 and pydantic work in the same probe) ------------------
 @requires_real_box
-def test_no_uv_binary_and_no_pip_installable_path_remains_in_the_image(tmp_path):
+def test_no_uv_binary_and_no_pip_installable_path_remains_in_the_image(image_run_base):
     """Inside a started box there is no `uv` on `PATH` and no `/bin/uv`, `python3 -m pip
     --version` exits non-zero, `setuptools` and `wheel` do not import, and `python3 -m
     ensurepip --root /tmp/x` FAILS and installs no `pip` into the tmpfs (MF4: the bundled
@@ -278,7 +299,7 @@ def test_no_uv_binary_and_no_pip_installable_path_remains_in_the_image(tmp_path)
     # rejected: O7 is NARROWED to "no `uv`, no pip-installable path"; `apt-get`/`dpkg` ship
     # in the base and stay — the literal "no package installer" cannot hold on any Debian base
     # (F1 settled)."""
-    run_dir = make_run_dir(tmp_path)
+    run_dir = make_run_dir(image_run_base)
     with real_box(run_dir) as box:
         seen = box_probe(box, run_dir, "installers", _NO_INSTALLER)
     assert seen["uv_on_path"] is None, seen
@@ -330,25 +351,30 @@ def test_every_module_under_the_images_site_packages_has_compiled_bytecode():
 
 # ---- d31 -------------------------------------------------------------------------------------
 @requires_real_box
-def test_a_command_inside_the_box_sees_defender_box_1_and_the_env_is_still_exactly_the_allowlist(tmp_path):
+def test_a_command_inside_the_box_sees_defender_box_1_and_the_env_is_still_exactly_the_allowlist(image_run_base):
     """A command run inside the box sees `DEFENDER_BOX=1` in its environment (the entrypoint's
     re-filter passes the allowlisted key through to the command), and the box environment is
-    still exactly `BOX_ENV_ALLOWLIST` plus what the container runtime injects; a second exec
-    in the same box sees the same mark (#51/#52: the container env is fixed at `docker run`)."""
+    exactly the required allowlist keys plus what the runtime injects. Optional
+    `DEFENDER_AGENT_DIR` is absent from this tenant-free fixture; a second exec sees the same
+    mark (#51/#52: the container env is fixed at `docker run`)."""
     daemon_injected = {"HOSTNAME", "HOME", "PWD", "SHLVL", "_", "OLDPWD", "TERM"}
-    run_dir = make_run_dir(tmp_path)
+    run_dir = make_run_dir(image_run_base)
     with real_box(run_dir) as box:
         first = box_probe(box, run_dir, "env1", _ENV_DUMP)
         second = box_probe(box, run_dir, "env2", _ENV_DUMP)
     assert first.get("DEFENDER_BOX") == "1", sorted(first)
     assert second.get("DEFENDER_BOX") == "1", sorted(second)
     assert "DEFENDER_BOX" in BOX_ENV_ALLOWLIST
-    assert set(first) - daemon_injected == set(BOX_ENV_ALLOWLIST), sorted(first)
+    expected = set(BOX_ENV_ALLOWLIST) - {"DEFENDER_AGENT_DIR"}
+    assert set(first) - daemon_injected == expected, sorted(first)
+    assert set(second) - daemon_injected == expected, sorted(second)
+    assert "DEFENDER_AGENT_DIR" not in first
+    assert "DEFENDER_AGENT_DIR" not in second
 
 
 # ---- d35 (M6's observer, re-sited beside test_540's repertoire test) ---------------------------------
 @requires_real_box
-def test_each_granted_shim_run_inside_the_box_takes_an_interpreter_whose_packages_are_the_images(tmp_path):
+def test_each_granted_shim_run_inside_the_box_takes_an_interpreter_whose_packages_are_the_images(image_run_base):
     """Every program the real grant table lets an agent run is present in the box, and each
     granted shim, executed there, runs an interpreter whose `pydantic.__file__` and
     `duckdb.__file__` are under `/usr/local/lib/python3.11/site-packages` — never under
@@ -360,7 +386,7 @@ def test_each_granted_shim_run_inside_the_box_takes_an_interpreter_whose_package
     from defender.runtime.agent_definition import compile_policy_for
     from defender.runtime.driver import MAIN_DEF
 
-    run_dir = make_run_dir(tmp_path)
+    run_dir = make_run_dir(image_run_base)
     policy = compile_policy_for(MAIN_DEF, run_dir, defender_dir=DEFENDER)
     programs = sorted({g.program for g in policy.bash_allow})
     assert set(SHIMS) <= set(programs), programs

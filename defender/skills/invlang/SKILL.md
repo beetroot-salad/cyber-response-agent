@@ -578,8 +578,8 @@ summary                "Login matched established bastion usage"
   `state=nothing-to-try` is the one lane with no call to point at — a
   capability that does not exist in this deployment at all, so nothing
   was dispatchable. It takes `cap=<system>` or `cap=<system.verb>`
-  instead of `ref=`, checked against the same closed roster your `query`
-  calls dispatch through (`skills/gather/verb-roster.md`); naming a
+  instead of `ref=`, checked against the systems and verbs the deployment's
+  adapters declare; naming a
   capability the deployment DOES provide is refused — that names a call
   you should have made, or a lead you should point at instead:
 

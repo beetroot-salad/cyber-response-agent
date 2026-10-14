@@ -4,8 +4,7 @@ The only complete, accurate statement of a verb's param surface a gather lead re
 today is a REJECTION: `validate_params` (`runtime/verbs.py:196`) names the declared set from
 inside `_screen`, one failed call after the model guessed. Every published surface is
 hand-authored prose (`skills/*/execution.md`'s `## Verbs` blocks), the pointer in
-`skills/gather/SKILL.md:104` names a catalog that carries no params at all, and the generated
-`verb-roster.md` is a build-time audit artifact no model reads. Hand-authored prose drifts:
+`skills/gather/SKILL.md:104` names a catalog that carries no params at all. Hand-authored prose drifts:
 #900's C3 measured one live drift already (`ticket.list-tickets` declares four params, its
 `execution.md` documents three and asserts the fourth away).
 

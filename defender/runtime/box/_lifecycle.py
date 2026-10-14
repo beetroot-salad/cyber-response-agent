@@ -5,6 +5,8 @@ box, not properties of one.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import logging
 import os
@@ -16,6 +18,7 @@ from pathlib import Path
 
 from defender._io import READ_LIMIT, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
+from defender._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
 from defender.run_repository import RUN_LAYOUT
 from defender.runtime.box_codec import (
     BOX_ENV_ALLOWLIST,
@@ -39,12 +42,6 @@ from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
 _logger = logging.getLogger(__name__)
-
-
-#: Where the box sees its tenant's model-facing `agent/` half: a fixed target, so the model's
-#: view never depends on where the operator keeps the data root. Read-only; the tenant's
-#: `settings/` half, and its knowledge folder's `.git`, are never mounted.
-TENANT_AGENT_TARGET = Path("/tenant/agent")
 
 
 #: The `docker run` flags every box starts with (#1188). `fsize`: no process in the box can make
@@ -98,6 +95,8 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     # Resolved here, not at BoxSpec construction, which reads nothing off the tree.
     rootfs = resolve_rootfs(spec.rootfs, defender_dir)
     env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV, **_BOX_MARK_ENV}
+    if tenant_agent is not None:
+        env_pairs["DEFENDER_AGENT_DIR"] = str(tenant_agent)
     run_src = _daemon_source(run_dir, mounts)
     input_dir = _input_dir_source(run_dir)
     defender_src = _daemon_source(defender_dir, mounts)
@@ -117,19 +116,20 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
     ]
     if tenant_agent is not None:
-        # Not sentinel-probed (a read-only bind cannot be planted into), so a wrong daemon
-        # mapping of this mount goes unnoticed.
+        # Never plant a sentinel here: it would dirty the tenant clone. Its existing
+        # identity marker is read back through the box before the executor is returned.
         argv += [
             "--mount",
             f"type=bind,source={_daemon_source(tenant_agent, mounts)},"
-            f"target={TENANT_AGENT_TARGET},readonly",
+            f"target={tenant_agent},readonly",
         ]
     argv += [
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
         "--workdir", str(run_dir),
     ]
     for key in BOX_ENV_ALLOWLIST:
-        argv += ["--env", f"{key}={env_pairs[key]}"]
+        if key in env_pairs:
+            argv += ["--env", f"{key}={env_pairs[key]}"]
     argv += [rootfs.image, "sleep", "infinity"]
     return Create(argv, rootfs)
 
@@ -183,9 +183,37 @@ def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
     )
 
 
+def _check_tenant_identity(path: Path, expected: TenantId, docker: DockerFn, name: str) -> None:
+    """Read bounded marker bytes through the bind, then judge them with their sole parser.
+
+    Base64 preserves raw CR and invalid UTF-8 across Docker's text-mode boundary.
+    The in-box reader shares the owner's nonblocking, no-follow, regular-file checks.
+    """
+    command = (
+        "import base64, sys; from pathlib import Path; "
+        "from defender._tenant import read_tenant_id_bytes; "
+        "print(base64.b64encode(read_tenant_id_bytes(Path(sys.argv[1]))).decode('ascii'))"
+    )
+    proc = _call(docker, ["docker", "exec", name, "python3", "-c", command, str(path)])
+    if proc.returncode != 0:
+        raise BoxFault(f"could not read tenant identity {path}: {(proc.stderr or '').strip()}")
+    try:
+        data = base64.b64decode((proc.stdout or "").removesuffix("\n"), validate=True)
+        found = parse_tenant_id_bytes(data, path)
+    except (ValueError, binascii.Error, TenantRefused) as error:
+        raise BoxFault(f"{path}: {error}") from error
+    _require_tenant_identity(path, found, expected)
+
+
+def _require_tenant_identity(path: Path, found: str, expected: TenantId) -> None:
+    if found != expected:
+        raise BoxFault(f"{path} names tenant {found!r}; expected tenant {expected!r}")
+
+
 def _start_boxed(
     run_dir: Path, defender_dir: Path, spec: BoxSpec, docker: DockerFn,
     shared_mounts: SharedMountsFn = _shared_mounts, tenant_agent: Path | None = None,
+    tenant_id: TenantId | None = None,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
@@ -222,6 +250,9 @@ def _start_boxed(
         )
     try:
         _plant_sentinel(run_dir, docker, name)
+        if tenant_agent is not None:
+            assert tenant_id is not None
+            _check_tenant_identity(tenant_agent / ".tenant-id", tenant_id, docker, name)
         _probe_alias_ban(docker, name, run_dir, spec.runtime)
     except BaseException as e:
         # The box is ours (create succeeded); the reap is best-effort so it cannot skip the
@@ -357,6 +388,7 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     from defender.runtime import providers
 
     env = dict(os.environ)
+    env.pop("DEFENDER_AGENT_DIR", None)
     for var in providers.api_key_vars():
         env.pop(var, None)
     env.update({k: v for k, v in request.env.items() if k in BOX_ENV_ALLOWLIST})
@@ -376,10 +408,12 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
 def start_box(
     run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
     spec: BoxSpec | None = None, docker: DockerFn = _docker, tenant_agent: Path | None = None,
+    tenant_id: TenantId | None = None,
 ) -> BoxExecutor:
     """Start the run's box. `tenant_agent` is the resolved tenant `agent/` half, bound
-    read-only at `TENANT_AGENT_TARGET`; illegal with a `BoxRequest`, which carries its own
-    mounts."""
+    read-only at that same path. `tenant_id` is the accepted identity, not a reread of
+    the host marker. Direct callers without an accepted record capture it before create.
+    Both tenant arguments are illegal with a `BoxRequest`, which carries its own mounts."""
     if isinstance(run_dir_or_request, BoxRequest):
         request = run_dir_or_request
         # `is not None`, not a comparison with the env-resolved DEFAULT_SPEC. The env is not
@@ -389,7 +423,7 @@ def start_box(
                 "start_box(request, spec=…) is ambiguous — a BoxRequest carries its own spec; "
                 "set it on the request (BoxRequest(..., spec=…)) instead of the call"
             )
-        if tenant_agent is not None:
+        if tenant_agent is not None or tenant_id is not None:
             raise TypeError(
                 "start_box(request, tenant_agent=…) is ambiguous — a BoxRequest carries its "
                 "own mounts; put the tenant's agent half in them instead of the call"
@@ -405,7 +439,13 @@ def start_box(
             _opt_out_or_raise(e)
         return unboxed_executor(request.spec, env=_host_fallback_env(request))
 
-    run_dir = run_dir_or_request
+    return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent, tenant_id)
+
+
+def _start_run_box(
+    run_dir: Path, defender_dir: Path | None, spec: BoxSpec | None, docker: DockerFn,
+    tenant_agent: Path | None, tenant_id: TenantId | None,
+) -> BoxExecutor:
     if defender_dir is None:
         raise TypeError("start_box(run_dir, defender_dir, ...) needs defender_dir")
     # Default runtime is runsc; runc (weaker isolation) only when the operator sets
@@ -414,12 +454,22 @@ def start_box(
         # lint-default: ok — the env lever is this default's single source; `spec=` must stay
         # distinguishable from unset for the BoxRequest ambiguity check.
         spec = BoxSpec.from_env(os.environ)
+    if tenant_agent is None and tenant_id is not None:
+        raise TypeError("tenant_id needs tenant_agent")
+    if tenant_agent is not None and tenant_id is None:
+        tenant_id = read_tenant_id_file(tenant_agent / ".tenant-id")
     try:
-        return _start_boxed(run_dir, defender_dir, spec, docker, tenant_agent=tenant_agent)
+        return _start_boxed(run_dir, defender_dir, spec, docker,
+                            tenant_agent=tenant_agent, tenant_id=tenant_id)
     except BoxFault as e:
         _opt_out_or_raise(e)
     from defender import run_common
-    return unboxed_executor(spec, env=run_common.run_env(defender_dir, run_dir))
+    if tenant_agent is not None:
+        assert tenant_id is not None
+        path = tenant_agent / ".tenant-id"
+        _require_tenant_identity(path, read_tenant_id_file(path), tenant_id)
+    return unboxed_executor(
+        spec, env=run_common.run_env(defender_dir, run_dir, tenant_agent=tenant_agent))
 
 
 def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:

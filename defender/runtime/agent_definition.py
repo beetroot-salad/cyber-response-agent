@@ -64,6 +64,7 @@ class ResolvedRoots:
     read_confine: tuple[Path, ...]
     scripts: tuple[Path, ...]
     corpus_dir: Path | None = None
+    tenant_agent: Path | None = None
 
 
 @model(frozen=True)
@@ -98,6 +99,7 @@ class RunScope:
     read_confine: tuple[Path, ...] = ()
     scripts: tuple[Path, ...] = ()
     corpus_name: str | None = None
+    tenant_agent: Path | None = None
 
 
 _DEFAULT_SCOPE = RunScope()
@@ -117,7 +119,10 @@ def resolve_roots(
     run_dir: Path, corpus_dirs: tuple[str, ...], scope: RunScope,
     defender_dir: Path = PATHS.defender_dir,
 ) -> ResolvedRoots:
-    corpus_roots = tuple(_resolve_corpus_dir(name, defender_dir) for name in corpus_dirs)
+    tenant_agent = scope.tenant_agent if not scope.read_confine else None
+    bases = (defender_dir,) if tenant_agent is None else (defender_dir, tenant_agent)
+    corpus_roots = tuple(_resolve_corpus_dir(name, base)
+                         for base in bases for name in corpus_dirs)
     corpus_dir = (
         _resolve_corpus_dir(scope.corpus_name, defender_dir)
         if scope.corpus_name is not None else None
@@ -126,7 +131,8 @@ def resolve_roots(
         run_dir=run_dir,
         defender_dir=defender_dir,
         corpus_roots=corpus_roots,
-        read_roots=tuple(scope.add_dirs),
+        read_roots=(*scope.add_dirs, *((tenant_agent,) if tenant_agent is not None else ())),
+        tenant_agent=tenant_agent,
         read_confine=tuple(scope.read_confine),
         scripts=tuple(scope.scripts),
         corpus_dir=corpus_dir,
@@ -218,6 +224,8 @@ def _build_roots(
     _require_absolute_root("run_dir", run_dir)
     if defender_dir is not None:
         _require_absolute_root("defender_dir", defender_dir)
+    if scope.tenant_agent is not None:
+        _require_absolute_root("tenant_agent", scope.tenant_agent)
     for member in (*scope.add_dirs, *scope.read_confine, *scope.scripts):
         _require_absolute_root("scope read root", member)
     if defn.requires_explicit_tree and (

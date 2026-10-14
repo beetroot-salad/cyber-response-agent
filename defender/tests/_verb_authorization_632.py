@@ -350,22 +350,14 @@ def grant_of(role: str, pairs, *, verb_class: str = "r") -> VerbGrant:
 
 
 def shipped_grants() -> dict[str, VerbGrant]:
-    """The role -> grant mapping the real-tree audit is handed: every role that ships a
-    generated roster, keyed by the role its roster is committed under.
+    """The run grants the real-tree model-surface audit is handed, keyed by role.
 
-    Built from the shipped definitions rather than from literals, because what this mapping
-    must cover is "every role with a roster on disk" — a literal list would go stale the
-    first time a second role gets one, and the audit would then score that role's roster
-    against gather's grant and report an offence that is not one.
+    Gather is the only shipped verb-bearing role since #922 retired the judge and
+    its generated guidance, which had advertised ticket verbs after nothing could
+    dispatch them. The audit checks the remaining instruction and query surfaces.
 
-    ONE ENTRY SINCE #922. The judge was the second role with a grant and a committed roster;
-    both went with the pipeline, and `skills/judge/verb-roster.md` — which advertised three
-    ticket verbs to a reader after nothing could dispatch them — went with it. Gather is the
-    only verb-bearing role that ships, so this mapping has one key. The derivation is kept
-    exactly because it is what makes a second key appear on its own when one returns.
-
-    #1106 M4: the grant is a RUN's, projected from its tenant's table — `GATHER_DEF` carries
-    none. The shipped one is the committed playground tenant's."""
+    #1106 M4: the grant is a RUN's, projected from its tenant's table — `GATHER_DEF`
+    carries none. The shipped one is the committed playground tenant's."""
     from defender.tests import _tenants1106 as T1106
 
     return {GATHER_ROLE: T1106.fixture_grants().gather}

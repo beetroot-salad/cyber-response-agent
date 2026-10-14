@@ -26,7 +26,6 @@
     "learning/lead_repository.py:stage_tables": "",
     "learning/leads/_lead_spine.py:_spawn_author_agent": "intentional (#1134 N-e): mkdir of the host-side lead-pending state dir (`PENDING_DIR`), outside every box mount",
     "learning/leads/lead_author/__init__.py:_write_state": "intentional (#1134 N-e): the run dir's `lead_author/` state (mkdir + write), outside the drain's writable trees",
-    "run_common.py:materialize_run": "",
-    "runtime/verb_roster.py:generate_roster": ""
+    "run_common.py:materialize_run": ""
   }
 }

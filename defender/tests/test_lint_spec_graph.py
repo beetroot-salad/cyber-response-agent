@@ -1,13 +1,8 @@
-"""The spec_graph ratchet — the gate that makes the checkers bind after authoring time.
+"""Unit tests for the retained historical spec_graph checker's ratchet and fail-closed result.
 
-The checkers ran only inside write-tests, so a graph merged with its findings intact and
-the mechanical no evaporated the moment it became durable. This gate runs them over the
-committed corpus; the tests here pin its four arms, because the arm that matters most is the
-one that is easy to get backwards: paying debt down must never fail a build.
-
-Findings are injected rather than derived from real graphs — the ratchet's logic is
-(findings, baseline) → exit code, and coupling these to the corpus would make them a
-re-assertion of today's finding counts instead of a test of the rule.
+Findings are injected so these tests verify the rule independently of archived graph
+contents. The whole-corpus CI smoke was retired with the graph pipeline; historical
+investigation remains available through scripts/lint/lint_spec_graph.py.
 """
 from __future__ import annotations
 
@@ -79,13 +74,3 @@ def test_a_gate_that_cannot_look_exits_2(lint, tmp_path):
         raise lint.GateBlind("checkers unavailable")
 
     assert lint.main([], scan=_blind, baseline_path=_baseline(tmp_path, {})) == 2
-
-
-@pytest.mark.gate
-def test_the_committed_corpus_is_at_or_under_its_recorded_ceilings(lint):
-    """Opt-in smoke check of the historical corpus using its archived configuration.
-
-    `gate`-marked so ordinary CI does not maintain retired artifacts. The standalone
-    command remains usable for historical investigation without loading graph configuration
-    into the active project profile."""
-    assert lint.main([]) == 0

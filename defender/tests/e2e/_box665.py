@@ -4,8 +4,8 @@ keeps pytest from collecting it). Imported by the `test_665_*` files.
 Every fake enters the target through a real injection seam (a `docker=` fn, a `box=`
 constructor/param, an injected `start_box`/`stop_box`/`agents`/`branch`) — never a
 monkeypatch (`scripts/lint/lint_monkeypatch.py` is a blocking ratcheted gate). No fake
-classifies or decides policy; each injects faults ONLY and RECORDS what it received, so
-a demand asserts on the captured inbound geography/argv/box rather than a canned answer.
+classifies or decides policy: faults are declarative, requests are recorded, and startup
+readbacks use fixture files. Demands assert on the captured geography/argv/box.
 
 Fault content is DECLARATIVE and cites the ledger claim (see
 `spec_graph_665-box-learning-roles.yaml` `claims:`) that observed the exact failure on a
@@ -32,6 +32,7 @@ from defender.runtime import box as box_mod
 from defender.runtime.scrub import verdict_path
 from defender.tests._alert_plant import plant_alert
 from defender.tests._docker import daemon_reachable, is_dood
+from defender.tests.e2e._local_box_command import run_box_python_command
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -101,11 +102,11 @@ class DockerFault:
 class RecordingDocker:
     """Injectable `docker` fn for `start_box(..., docker=…)`.
 
-    Records every argv and replies with canned `CompletedProcess`. Defaults model a
-    healthy daemon: no same-name container running, create succeeds, and the startup
-    sentinel reads back — the fake echoes the sentinel file box.py just wrote, so
-    `start_box` completes host-side with NO live container and a test can read the
-    captured `create_argv`. Faults are injected per subcommand and cite a claim."""
+    Records every argv and models a healthy daemon unless a declared fault is supplied:
+    no same-name container, successful create and sentinel readback. Tenant-marker reads
+    execute the actual supplied command locally, with the operand translated through the
+    captured bind mounts; the fake neither parses marker bytes nor supplies an identity.
+    Alias probes retain their scripted verdicts. No live container is created."""
 
     def __init__(
         self, *, create: DockerFault | None = None,
@@ -164,6 +165,45 @@ class RecordingDocker:
             token = self.create_label(box_mod.START_TOKEN_LABEL) or "<no value>"
         return _cp(0, f"{token}\n")
 
+    def _read_marker(self, argv: list[str]) -> subprocess.CompletedProcess:
+        """Execute a marker read through the captured bind table, with nested mounts winning."""
+        marker = Path(argv[-1])
+        covering = [
+            mount for mount in self.mounts()
+            if mount["source"] and mount["target"]
+            and marker.is_relative_to(Path(mount["target"]))
+        ]
+        assert covering, f"no captured bind mount covers the marker read at {marker}"
+        mount = max(covering, key=lambda item: len(Path(item["target"]).parts))
+        source = Path(mount["source"]) / marker.relative_to(Path(mount["target"]))
+        command = [*argv[-4:-1], str(source)]
+        return run_box_python_command(command)
+
+    def _exec(self, argv: list[str]) -> subprocess.CompletedProcess:
+        if argv[-4:-2] == ["python3", "-c"] and argv[-1].endswith("/.tenant-id"):
+            return self._read_marker(argv)
+        if "python3" in argv and "-c" in argv:
+            # #771 M2's alias-ban probe (`docker exec -w <cwd> <name> python3 -c <script>`).
+            # A caller that cares about the probe's own verdict uses `AliasProbeDocker`
+            # (`_spec771.py`), which intercepts this shape before it ever reaches here — so
+            # a bare `RecordingDocker` (the pre-#771 fake every test_540/665/747/box_dood
+            # case is built on) has no reason to see this branch except the probe M2 added
+            # to EVERY box start. Defaulting to the healthy verdict keeps those cases
+            # observing what they always observed (mount/env/argv geography) without
+            # needing to know the probe exists.
+            if self._exec_replies:
+                return self._exec_replies.pop(0)
+            return _cp(0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
+        if self.sentinel is not None:
+            return _cp(self.sentinel.rc, self.sentinel.stdout, self.sentinel.stderr)
+        if self._exec_replies:
+            return self._exec_replies.pop(0)
+        path = Path(argv[-1])            # sentinel readback: `cat <sentinel>`
+        try:
+            return _cp(0, path.read_text(encoding="utf-8"))
+        except OSError:
+            return _cp(1, "", "cat: no such file or directory\n")
+
     def __call__(self, argv, **_kw) -> subprocess.CompletedProcess:
         argv = list(argv)
         self.calls.append(argv)
@@ -178,27 +218,7 @@ class RecordingDocker:
             f = self.create
             return _cp(f.rc, f.stdout, f.stderr) if f else _cp(0, "container-id\n")
         if sub == "exec":
-            if "python3" in argv and "-c" in argv:
-                # #771 M2's alias-ban probe (`docker exec -w <cwd> <name> python3 -c <script>`).
-                # A caller that cares about the probe's own verdict uses `AliasProbeDocker`
-                # (`_spec771.py`), which intercepts this shape before it ever reaches here — so
-                # a bare `RecordingDocker` (the pre-#771 fake every test_540/665/747/box_dood
-                # case is built on) has no reason to see this branch except the probe M2 added
-                # to EVERY box start. Defaulting to the healthy verdict keeps those cases
-                # observing what they always observed (mount/env/argv geography) without
-                # needing to know the probe exists.
-                if self._exec_replies:
-                    return self._exec_replies.pop(0)
-                return _cp(0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
-            if self.sentinel is not None:
-                return _cp(self.sentinel.rc, self.sentinel.stdout, self.sentinel.stderr)
-            if self._exec_replies:
-                return self._exec_replies.pop(0)
-            path = Path(argv[-1])            # sentinel readback: `cat <sentinel>`
-            try:
-                return _cp(0, path.read_text(encoding="utf-8"))
-            except OSError:
-                return _cp(1, "", "cat: no such file or directory\n")
+            return self._exec(argv)
         return _cp(0)
 
     # argv readers (parse the captured `docker run` argv)

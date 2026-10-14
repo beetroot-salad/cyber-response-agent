@@ -48,11 +48,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from defender.runtime import bash_exec, box as box_mod
+from defender.tests._docker import dood_anchor, is_dood
 from defender.tests.e2e._spec771 import (
     BAN_ABSENT,
     BAN_IN_FORCE,
@@ -826,8 +830,29 @@ print(json.dumps(out))
 """
 
 
+@pytest.fixture
+def live_run_base(tmp_path: Path) -> Iterator[Path]:
+    """Keep real daemon bind sources on the shared mount under DooD.
+
+    Native runs retain pytest's private temporary directory. Only the three real-box
+    confirmations use this fixture; scripted-daemon tests keep their existing trees.
+    """
+    if not is_dood():
+        yield tmp_path
+        return
+    anchor = dood_anchor()
+    assert anchor is not None, "the real-box guard requires a shared repo mount under DooD"
+    base = anchor / f"t771-{uuid.uuid4().hex[:12]}"
+    base.mkdir(parents=True)
+    try:
+        yield base
+    finally:
+        # The box writes as root; cleanup matches the other live-box shared fixtures.
+        shutil.rmtree(base, ignore_errors=True)
+
+
 @requires_real_box
-def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(tmp_path):
+def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(live_run_base):
     """box_starts_and_creates_ordinarily_under_the_profile — a real box under the exact deny set
     still starts, and ordinary file creation, `mkdir` and AF_UNIX `bind` all still succeed
     inside it.
@@ -844,7 +869,7 @@ def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(tmp_pat
     keeps the probe from demanding a failure that would fault every box at startup. The deny
     set's size is pinned elsewhere; this is the only test that observes the allow side live,
     and it was observing a third of it."""
-    run = run_tree(tmp_path)
+    run = run_tree(live_run_base)
     box = box_mod.start_box(run, DEFENDER)
     try:
         seen = _box_probe(box, run, "ordinary", _ORDINARY_OPS_PROBE)
@@ -864,7 +889,7 @@ def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(tmp_pat
 
 
 @requires_real_box
-def test_no_unobserved_window_between_the_probe_and_the_first_real_write(tmp_path):
+def test_no_unobserved_window_between_the_probe_and_the_first_real_write(live_run_base):
     """ban_in_force_for_the_whole_box_life — the ban observed by the startup probe is still in
     force at the first real driver write: an alias attempted after the probe returned is refused
     exactly as it was during the probe.
@@ -879,7 +904,7 @@ def test_no_unobserved_window_between_the_probe_and_the_first_real_write(tmp_pat
     it runs decides whether it is verified at all. It carries no `live` marker precisely
     because `-m "not live"` would deselect it there and the `box-dood` job never collects this
     file — the property would be specified and exercised by nothing that gates a merge."""
-    run = run_tree(tmp_path)
+    run = run_tree(live_run_base)
     box = box_mod.start_box(run, DEFENDER)
     try:
         seen = _box_probe(box, run, "after_probe", """
@@ -903,7 +928,7 @@ print(json.dumps(out))
 
 
 @requires_real_box
-def test_an_alias_between_two_artifacts_inside_the_tree_is_refused_too(tmp_path):
+def test_an_alias_between_two_artifacts_inside_the_tree_is_refused_too(live_run_base):
     """intra_tree_alias_also_refused — an alias between two artifacts BOTH inside the shared
     tree is refused as well, not merely one pointing outside it.
 
@@ -916,7 +941,7 @@ def test_an_alias_between_two_artifacts_inside_the_tree_is_refused_too(tmp_path)
     SELECTED BY CI'S `test` JOB, for the same reason as its sibling above: this test is the
     only thing pinning the obligation, and a `live` marker would have left it deselected by
     the gate that actually runs."""
-    run = run_tree(tmp_path)
+    run = run_tree(live_run_base)
     first = run / "gather_raw" / "l-001" / "0.json"
     first.write_text("[]", encoding="utf-8")
     second = run / "gather_raw" / "l-001" / "1.json"

@@ -158,11 +158,13 @@ _CORPUS_DIRS = ("lessons", "skills", "examples")
 
 
 def _main_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
-    return _common.reader_grants(roots.run_dir, roots.defender_dir, raw=False)
+    return _common.reader_grants(roots.run_dir, roots.defender_dir, raw=False,
+                                 tenant_agent=roots.tenant_agent)
 
 
 def _gather_bash_shapes(roots: ResolvedRoots) -> tuple[Any, ...]:
-    return _common.reader_grants(roots.run_dir, roots.defender_dir, raw=True)
+    return _common.reader_grants(roots.run_dir, roots.defender_dir, raw=True,
+                                 tenant_agent=roots.tenant_agent)
 
 
 def _main_write_shape(roots: ResolvedRoots) -> tuple[Any, ...]:

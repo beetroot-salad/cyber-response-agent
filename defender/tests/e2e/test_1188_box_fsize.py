@@ -83,6 +83,7 @@ import pytest
 from pydantic import ValidationError
 
 from defender._io import READ_LIMIT
+from defender._tenant import TenantId, tenant_id_file_text
 from defender.learning.core import drains
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.runtime import bash_exec, box as box_mod
@@ -179,6 +180,7 @@ def _tenant_agent(base: Path) -> Path:
     is never started without it, so a limit gated on its absence must not pass."""
     agent = base / f"tenant-agent-{uuid.uuid4().hex[:8]}"
     agent.mkdir(parents=True)
+    (agent / ".tenant-id").write_text(tenant_id_file_text(TenantId("fsize-test")), encoding="utf-8")
     return agent
 
 

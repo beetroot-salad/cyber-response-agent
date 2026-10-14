@@ -1,11 +1,9 @@
 """#1106 — a run's box holds its own tenant's `agent/` half, read-only, and nothing else of any
 tenant's (O1, M6).
 
-M6: one extra READ-ONLY bind, whose source is the accepted `Tenant.agent` and whose target is
-one fixed constant (`box.TENANT_AGENT_TARGET`) outside the `defender_dir` mount target. The
-`settings/` half is never a mount source. The source goes through the existing shared-mount
-coverage check, so a data root on a path the daemon cannot see refuses the box at start
-(C46's refusal) rather than surfacing as docker's "bind source path does not exist".
+#1108 P2 supersedes M6's fixed target: the READ-ONLY bind uses the accepted
+Tenant.agent as both source and target. Settings are never exposed. DooD translates only
+the source, with the existing shared-mount coverage refusal unchanged.
 
 Observed on the REAL `start_box` over the recording docker fake (`_box665.RecordingDocker`):
 the `docker run` argv it composes is the box's mount list. Two tenants live in ONE tmp root so
@@ -23,7 +21,7 @@ import pytest
 
 from defender.tests import _tenants1106 as T
 from defender.tests._spec1092 import STOCK_ROOTFS, make_run_dir, plant_tree
-from defender.tests.e2e._box665 import RecordingDocker
+from defender.tests.tenant_1108_p2._support import AgentReadDocker
 
 pytestmark = pytest.mark.e2e
 
@@ -46,12 +44,12 @@ def two_tenants(tmp_path):
     return root, T.accept(root, "acme"), T.accept(root, "bravo")
 
 
-def _start(tmp_path: Path, agent: Path) -> RecordingDocker:
+def _start(tmp_path: Path, agent: Path) -> AgentReadDocker:
     from defender.runtime import box as box_mod
 
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
     run_dir = make_run_dir(tmp_path / "r")
-    rec = RecordingDocker()
+    rec = AgentReadDocker(agent)
     box = box_mod.start_box(
         run_dir, defender_dir, tenant_agent=agent,
         spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS), docker=rec)
@@ -62,17 +60,15 @@ def _start(tmp_path: Path, agent: Path) -> RecordingDocker:
 @pytest.mark.parametrize(("own", "other"), [("acme", "bravo"), ("bravo", "acme")])
 def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
         tmp_path, two_tenants, own, other):
-    from defender.runtime import box as box_mod
-
     root, acme, bravo = two_tenants
     mine, theirs = {"acme": acme, "bravo": bravo}[own], {"acme": acme, "bravo": bravo}[other]
     rec = _start(tmp_path, mine.agent)
     mounts = rec.mounts()
     joined = " ".join(rec.create_argv or [])
 
-    agent_mounts = [m for m in mounts if m["target"] == str(box_mod.TENANT_AGENT_TARGET)]
+    agent_mounts = [m for m in mounts if m["target"] == str(mine.agent)]
     assert agent_mounts == [{
-        "source": str(mine.agent), "target": str(box_mod.TENANT_AGENT_TARGET), "readonly": True,
+        "source": str(mine.agent), "target": str(mine.agent), "readonly": True,
     }], mounts
     # Nothing of the other tenant, anywhere on the argv; no settings half of ANY tenant.
     assert str(root / other) not in joined, joined
@@ -94,45 +90,32 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
     assert T.exposes([Path(agent_mounts[0]["source"])], mine.agent)
 
 
-def test_the_agent_target_is_a_fixed_absolute_path_outside_the_trees_the_box_already_binds(
-        tmp_path, two_tenants):
-    """A fixed constant (the model's view of "my tenant's knowledge" must not depend on where
-    the operator keeps the root), absolute, and inside neither the `defender_dir` target nor
-    the run dir — a target nested in the read-only tree would shadow part of it."""
-    from defender.runtime import box as box_mod
-
-    target = Path(box_mod.TENANT_AGENT_TARGET)
+def test_the_same_path_agent_target_is_outside_the_other_bound_trees(tmp_path, two_tenants):
+    """#1108 D2: the host path is absolute and does not shadow another bound tree."""
+    target = two_tenants[1].agent
     assert target.is_absolute()
-    assert not target.is_relative_to(T.DEFENDER)
-    assert not T.DEFENDER.is_relative_to(target)
-    rec = _start(tmp_path, two_tenants[1].agent)
-    for m in rec.mounts():
-        if m["target"] != str(target):
-            assert not target.is_relative_to(m["target"]), (target, m)
-            assert not Path(m["target"]).is_relative_to(target), (target, m)
+    rec = _start(tmp_path, target)
+    assert any(m["target"] == str(target) for m in rec.mounts())
+    for mount in rec.mounts():
+        if mount["target"] != str(target):
+            assert not target.is_relative_to(mount["target"]), (target, mount)
+            assert not Path(mount["target"]).is_relative_to(target), (target, mount)
 
 
-def test_the_agent_source_is_translated_through_a_covering_shared_mount(monkeypatch):
-    """Under docker-outside-of-docker the agent half, like every bind source, is handed to the
-    daemon by the path the DAEMON sees; the target stays the fixed constant."""
+def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path):
+    """DooD translates the source while the target remains this run process's agent path."""
     from defender.runtime import box as box_mod
-    from defender.runtime.box import _lifecycle
 
-    # The run dir named below does not exist; its input-directory check has its own tests (#1222).
-    monkeypatch.setattr(  # lint-monkeypatch: ok — the input-directory check has its own tests
-        _lifecycle, "_input_dir_source", lambda run_dir: Path(run_dir) / "alert_input")
-
-    shared = ((Path("/workspace"), Path("/home/dev/projects/repo")),)
+    defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
+    run_dir = make_run_dir(tmp_path / "r")
+    agent = tmp_path / "tenants" / "acme" / "knowledge" / "agent"
+    shared = ((tmp_path, Path("/daemon/shared")),)
     argv = box_mod._create_argv(
-        "defender-run-r1106", Path("/workspace/.runs/r1106"), Path("/workspace/defender"),
-        box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared,
-        tenant_agent=Path("/workspace/.defender-data/acme/knowledge/agent"),
+        "defender-run-r1106", run_dir, defender_dir,
+        box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared, tenant_agent=agent,
     ).argv
-    joined = " ".join(argv)
-    assert (
-        "type=bind,source=/home/dev/projects/repo/.defender-data/acme/knowledge/agent,"
-        f"target={box_mod.TENANT_AGENT_TARGET},readonly"
-    ) in joined, joined
+    source = Path("/daemon/shared") / agent.relative_to(tmp_path)
+    assert f"type=bind,source={source},target={agent},readonly" in argv
 
 
 def test_an_agent_source_on_no_shared_mount_refuses_the_box_naming_it():

@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -42,6 +44,7 @@ from defender.runtime.box import BoxFault
 from defender.tests import _box1195 as X
 from defender.tests._claim1175 import claim_git
 from defender.tests._declared869 import commit_all, init_git
+from defender.tests._docker import dood_anchor, is_dood
 from defender.tests._lead_author_1134 import write
 from defender.tests.e2e._spec771 import DEFENDER, requires_real_box
 
@@ -125,13 +128,30 @@ def _one_run(runs: object, ran: list[bool]) -> None:
         ran.append(True)
 
 
+@pytest.fixture
+def live_worktree_base(tmp_path: Path) -> Iterator[Path]:
+    """Put only this live box's worktree on the daemon-visible shared mount under DooD."""
+    if not is_dood():
+        yield tmp_path
+        return
+    anchor = dood_anchor()
+    assert anchor is not None, "the real-box guard requires a shared repo mount under DooD"
+    base = anchor / f"t1195-{uuid.uuid4().hex[:12]}"
+    base.mkdir(parents=True)
+    try:
+        yield base
+    finally:
+        # A box can write root-owned artifacts; cleanup follows the live shared fixtures.
+        shutil.rmtree(base, ignore_errors=True)
+
+
 @requires_real_box
 @pytest.mark.box
 def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa: PLR0915 — one box's whole life
-        tmp_path: Path, monkeypatch):
+        tmp_path: Path, live_worktree_base: Path, monkeypatch):
     # A startup fault must fail this test, never degrade to a host executor no stop holds.
     X.clear_opt_out(monkeypatch)
-    wt = _worktree(tmp_path)
+    wt = _worktree(live_worktree_base)
     paths = LoopPaths(repo_root=wt, state_dir=tmp_path / "state")
     assert box_mod.image_tag(wt / "defender") == box_mod.image_tag(DEFENDER)
     left = paths.skills_dir / LEFT

@@ -59,7 +59,8 @@ def test_the_run_dir_lane_argv_carries_env_defender_box_1(tmp_path):
     """The run-dir lane's `docker run` argv carries `--env DEFENDER_BOX=1` beside the existing
     allowlisted keys — exactly one such pair, spread from `_BOX_MARK_ENV = {"DEFENDER_BOX":
     "1"}` into `env_pairs` so the allowlist loop finds it (C17) — and `DEFENDER_BOX` is a
-    member of `BOX_ENV_ALLOWLIST`."""
+    member of `BOX_ENV_ALLOWLIST`. This tenant-free fixture omits optional
+    `DEFENDER_AGENT_DIR`."""
     assert box_mod._BOX_MARK_ENV == {"DEFENDER_BOX": "1"}  # type: ignore[attr-defined]
     assert "DEFENDER_BOX" in BOX_ENV_ALLOWLIST
     run_dir = make_run_dir(tmp_path)
@@ -68,7 +69,8 @@ def test_the_run_dir_lane_argv_carries_env_defender_box_1(tmp_path):
     ).argv
     pairs = env_pairs(argv)
     assert pairs.count(("DEFENDER_BOX", "1")) == 1, pairs
-    assert {k for k, _ in pairs} == set(BOX_ENV_ALLOWLIST), pairs
+    assert {k for k, _ in pairs} == set(BOX_ENV_ALLOWLIST) - {"DEFENDER_AGENT_DIR"}, pairs
+    assert "DEFENDER_AGENT_DIR" not in {k for k, _ in pairs}
 
 
 # ---- d30 -------------------------------------------------------------------------------------
