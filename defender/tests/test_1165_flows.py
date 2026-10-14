@@ -130,7 +130,7 @@ def test_actual_driver_gather_query_and_hooks_use_the_passed_run(tmp_path, fault
     if fault:
         # #1235 keeps rows/charges in live state but preserves the append's own failure.
         # No summary or executed_queries recording cut is fabricated from a view failure.
-        with pytest.raises(OSError):
+        with pytest.raises(OSError):  # noqa: PT011 — preserve the backend refusal, including its errno
             drive()
     else:
         summary = drive()
