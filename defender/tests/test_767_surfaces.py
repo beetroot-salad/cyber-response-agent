@@ -495,7 +495,7 @@ def test_767_no_status_or_author_literal_in_writer_or_screen(tmp_path, monkeypat
 
     for n, status in enumerate(("acme-done", CLOSED_STATUS), start=1):
         held = FakeStore(ticket=ticket("any", status=status))
-        held_dir = make_run(tmp_path, name=f"20260101T00000{n}Z-acme")
+        held_dir = make_run(tmp_path, name=f"20260101t00000{n}z-acme")
         record(held_dir, held)
         assert [(c.method, c.path) for c in held.calls] == [
             ("POST", f"{TICKETS_PATH}/{held_dir.name}{COMMENTS_SUFFIX}"),

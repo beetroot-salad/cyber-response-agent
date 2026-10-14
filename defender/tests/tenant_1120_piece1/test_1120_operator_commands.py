@@ -419,7 +419,7 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         run_py._run_investigation_lifecycle,
         investigate=lambda **_kw: {"output": "spec1120", "requests": 0,
                                     "truncated_by": None},
-        start_box=start_box, stop_box=lambda *a, **k: None, scrub=lambda tree: None)
+        start_box=start_box, stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
     rec = H.RunRecorder(tmp_path / "run")
     try:
         rc = run_py.main([str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"],
