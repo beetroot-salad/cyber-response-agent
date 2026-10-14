@@ -2,7 +2,9 @@
 
 Grounding base: `c0ceb90dccb1d87c8c4783000ffbe887d41e46c5`. Original reviewed, immutable tests-only contract: `2c4096df103c65c386446126873e447e8cab547a`. The previously verified executable tests-only amendment is `4f83b634a4a9a21e7f217f532bfd49d1fea355d3`; the original contract and every reviewed repair remain in the contract lineage. Binding intent is in `intent_1165.md`.
 
-Implementation: `80ef1ce47dec250713b81740cde2effbeae11abc`, branch `impl/1165-run-record-io`, isolated worktree `/workspace/issue1165-implementation`. Production changes are separate from the tests-only commits.
+Current reviewed query snapshot contract: `297fa8e72083833696d7c28815a3604cd64e2a62`, independently approved by `seed_review`; honest cherry-pick: `16e15909`. Amended production source: `bee61e0a73a00dec5905be719e45a1be83853c24`.
+
+Prior implementation: `80ef1ce47dec250713b81740cde2effbeae11abc`, branch `impl/1165-run-record-io`, isolated worktree `/workspace/issue1165-implementation`. Production changes are separate from the tests-only commits.
 
 | Obligation | Enforcing evidence |
 |---|---|
@@ -14,7 +16,7 @@ Implementation: `80ef1ce47dec250713b81740cde2effbeae11abc`, branch `impl/1165-ru
 | O6 RunState | Query ordering under the shared lock, retained rows and spent sequences after view failure, poisoned views ignored, payload cap; existing budget/breaker regressions |
 | O7 forks | Current alert wins, verified missing-alert fallback including stale record replacement, canonical opaque evidence, unexpected entries skipped before reading, empty recognized scaffolding preserved, inherited state only after successful snapshot replacement |
 
-## Executed verification
+## Historical verification before the query snapshot amendment
 
 - Final non-live, non-gate suite against the committed source: **20,462 passed, 2 failed, 297 skipped, 17 xfailed** in 1,246.68 seconds. Included the real container-boundary file; no file exclusion. Both failures are mandatory `runsc` prerequisites in `test_1222_alert_place.py`: the reachable Docker daemon registers `runc` and `io.containerd.runc.v2`, but not `runsc`. They are not claimed as passes. The implementation checkout was moved onto the existing shared `/workspace` mount to remove the initial Docker path limitation.
 - Gate-marked suite against the committed source: **46 passed, 1 skipped** in 123.92 seconds.
@@ -23,7 +25,7 @@ Implementation: `80ef1ce47dec250713b81740cde2effbeae11abc`, branch `impl/1165-ru
 
 Every pytest invocation used `/tmp/defender-pytest.lock`; implementation runs used the worktree's `PYTHONPATH`, enforced budgets and at most four workers. Logs and exact commands are recorded locally in the implementation worktree's `.spec-flow/verification-1165.txt` and `/tmp/1165-*.log`.
 
-## Independent adversarial evidence
+## Historical independent adversarial evidence
 
 A separately dispatched worker used its own production adapter and did not inspect the honest implementation. Its amended bounded baseline passed **115 tests, with 14 deselected**, on the final executable contract `4f83b634` in 3.12 seconds. Eight sampled violations were rejected: ceremonial I/O with a path bypass, append replaced by rewrite, wrong seed baseline, report reading an old baseline, held-stream logging, lost live query state, noncanonical inherited payload selection, and a duplicated real I/O occurrence. The counted mutation was rechecked after the alias-classifier correction. No survivor or full-gate finding is claimed; this is bounded evidence, not a correctness proof. Artifacts are under `/tmp/issue1165-adversary/.spec-flow/1165/`.
 
@@ -51,8 +53,36 @@ Owner approval replaces queries.create(text_or_bytes) with queries.seed(rows: li
 | Actual pre-fork freshness rejects populated or linked sibling table | `test_open_main_session_refuses_occupied_queries_before_fork` (unchanged real session count, view bytes and empty state) |
 | Capability/inventory and architectural mirrors expose seed and remove query create | `_spec1077.MEMBER_CAPABILITIES`, `test_generic_records_expose_only_their_added_store_operations`, `test_handled_record_operations_are_not_path_io`, #1234 call-record writer inventory and its synthetic control |
 
-Independent review of this material amendment belongs to the parent before handoff to `write-code-from-tests`. Checks against this contract-only base are expected to fail at absent new record/branch APIs; every new production assertion must subsequently run against the honest implementation. Historical suite and adversarial results above are retained as evidence of the earlier revision only. The amendment does not claim whole-CI verification.
+Independent intent reviewer `seed_review` approved immutable amendment `297fa8e7` before the honest worker implemented it through `write-code-from-tests`. The honest worktree received only the reviewed tests and metadata as `16e15909`, followed by the separate two-file production change `bee61e0a`. Historical suite and adversarial results above describe the earlier revision; current amended verification is recorded below.
 
-Author checks for this amendment: focused collection of `test_1165_records.py`, `test_1165_fork.py` and `test_1165_census.py` collected **117 cases**. The focused amendment/machinery selection (including the #1234 inventory control) produced **2 passed, 17 expected API failures, 124 deselected** on the contract-only base. Five direct record cases stop at missing `RecordHandle.seed`; twelve branch cases stop during the existing Run-aware fixture's session-pointer write because baseline `write_case_pointer` still accepts a path. Their later snapshot, ordering, fault and pre-fork assertions remain unexercised until implementation-stage verification. Ruff over all five changed Python files and `git diff --check` passed. Imports resolved to `/tmp/issue1165-contract` under the shared interpreter, and both pytest calls used the shared lock.
+Author checks for this amendment: focused collection of `test_1165_records.py`, `test_1165_fork.py` and `test_1165_census.py` collected **117 cases**. The focused amendment/machinery selection (including the #1234 inventory control) produced **2 passed, 17 expected API failures, 124 deselected** on the contract-only base. Five direct record cases stop at missing `RecordHandle.seed`; twelve branch cases stop during the existing Run-aware fixture's session-pointer write because baseline `write_case_pointer` still accepts a path. At that authoring checkpoint, their later snapshot, ordering, fault and pre-fork assertions were unexercised; the subsequent honest implementation run below reached and passed them. Ruff over all five changed Python files and `git diff --check` passed. Imports resolved to `/tmp/issue1165-contract` under the shared interpreter, and both pytest calls used the shared lock.
 
-A direct unmodified-base probe, using its actual path signatures rather than implementing new APIs, verified both selected-snapshot fixtures pass branch validation: the nonempty case selects only `l-001`, and the empty case selects no leads despite a real later captured row. The same probe confirmed existing freshness accepts absent/zero-byte tables and refuses populated/symlink tables. These are fixture/base facts, not evidence of the amended production writer. The parent owns independent review, the unchanged-implementation red probe, and subsequent implementation checks.
+A direct unmodified-base probe, using its actual path signatures rather than implementing new APIs, verified both selected-snapshot fixtures pass branch validation: the nonempty case selects only `l-001`, and the empty case selects no leads despite a real later captured row. The same probe confirmed existing freshness accepts absent/zero-byte tables and refuses populated/symlink tables. These are fixture/base facts, not evidence of the amended production writer. The parent subsequently completed independent review, the unchanged-implementation red probe, and the implementation checks recorded below.
+
+## Query snapshot implementation verification
+
+The unchanged honest implementation rejected the amended regression selection with **15 failed, 2 passed, 81 deselected** in **1.83 seconds**. Five direct record cases stopped at the missing query seed API; ten branch/session cases reached behavior or mode assertions or raised FileExistsError over an existing empty scaffold. The two pre-fork refusal cases passed. This distinguishes the implemented branch behavior from the broader fixture API stops on the contract-only base. Raw evidence: `/tmp/1165-seed-red.log`.
+
+After the production repair committed as `bee61e0a73a00dec5905be719e45a1be83853c24`:
+
+- Focused implementation verification passed **787 tests** in **67.14 seconds**. The new actual-session cases reached and passed their zero-byte acceptance and pre-fork refusal assertions. This run streamed through tool output; `/tmp/issue1165-focused-implementation-evidence.txt` reconstructs the exact invocation and observed completion. There is no original raw focused stdout log, and no rerun is represented as that run.
+- Full non-live, non-gate suite: **20,475 passed, 2 failed, 297 skipped, 17 xfailed, 5 warnings** in **1,358.13 seconds**. The failures are the same two mandatory missing-`runsc` prerequisites: `test_a1_runsc_box_cannot_change_the_alert_or_its_record` and `test_p151_production_runtime_meets_every_write_shape` in `tests/alert_front_door_1222/test_1222_alert_place.py`. They remain failures, not passes. Raw evidence: `/tmp/1165-seed-full.log`.
+- Gate-marked suite: **46 passed, 1 skipped** in **148.25 seconds**, exit 0. Raw evidence: `/tmp/1165-seed-gate.log`.
+- Spec-flow checks: **148 passed** in **22.37 seconds**, exit 0. Raw evidence: `/tmp/1165-seed-specflow.log`.
+- Both Ruff checks, mypy over **291 files**, all **34 custom CI lint scripts**, the **37-case oracle check**, tacit check, whitespace check and duplication gate passed. Duplicated tokens remained **0.72%**. Evidence: `/tmp/1165-seed-checks.log`.
+
+Every pytest invocation used the shared `/tmp/defender-pytest.lock`, the applicable worktree's `PYTHONPATH`, and at most four workers. Full, gate and spec-flow runs explicitly set `DEFENDER_BUDGET_ENFORCE=1`; the reconstructed focused command does not record an explicit budget environment setting. No test assertions or production changes accompany this verification metadata update.
+
+## Query snapshot independent bounded adversary
+
+The independent adapter worker did not inspect honest source. Its amended baseline reached and passed **13 direct record/fork seed cases**; **4 actual-session cases** stopped at the old adapter's missing `run`/`source_run` keyword interface, with **81 deselected**, in **4.31 seconds**. The actual-session cases are unexercised by this adversary and are covered by the honest focused verification above. This is bounded amendment evidence, not full-gate acceptance or a complete historical attack-deck replay. Report and reproducible mutation artifacts: `/tmp/issue1165-adversary/.spec-flow/1165-seed/report.md`.
+
+| Sampled mutation | Observed result |
+|---|---|
+| Exclusive create in place of snapshot replace | 13 failed |
+| Append in place of snapshot replace | 13 failed |
+| Empty snapshot performs no write | 7 failed, 6 passed |
+| Query seed repeats whole-Run freshness | 13 failed |
+| Live state inherits before snapshot persistence | 4 failed, 9 passed |
+
+All five sampled violations were rejected by their intended mode, presence, byte or state-order assertions. No surviving exploit was found in this sample. The worker restored its adapter baseline and left test assertions unchanged.
