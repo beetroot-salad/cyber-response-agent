@@ -32,6 +32,7 @@ from defender.runtime import box as box_mod
 from defender.runtime.scrub import verdict_path
 from defender.tests._alert_plant import plant_alert
 from defender.tests._docker import daemon_reachable, is_dood
+from defender.tests.e2e._local_box_command import run_box_python_command
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -176,10 +177,7 @@ class RecordingDocker:
         mount = max(covering, key=lambda item: len(Path(item["target"]).parts))
         source = Path(mount["source"]) / marker.relative_to(Path(mount["target"]))
         command = [*argv[-4:-1], str(source)]
-        return subprocess.run(
-            command, capture_output=True, text=True, check=False,
-            encoding="utf-8", errors="replace", timeout=10,
-        )
+        return run_box_python_command(command)
 
     def _exec(self, argv: list[str]) -> subprocess.CompletedProcess:
         if argv[-4:-2] == ["python3", "-c"] and argv[-1].endswith("/.tenant-id"):
