@@ -7,7 +7,6 @@ every other writer.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -161,7 +160,7 @@ def _inherit_evidence(source_run: Run, run_state: RunState, leads: set[str], *, 
         raise BranchError(f"{source.executed_queries} could not be copied: {result.reason}")
     if not result.absent:
         selected = [row for row in rows if str(row.get("lead_id", "")) in leads]
-        run.tables.queries.create("".join(json.dumps(row) + "\n" for row in selected))
+        run.tables.queries.seed(selected)
         run_state.inherit_rows(selected)
     for src, dst in ((source.gather_raw, sibling.gather_raw),
                      (source.gather_summaries, sibling.gather_summaries)):

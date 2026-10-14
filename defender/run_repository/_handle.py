@@ -84,7 +84,7 @@ MEMBER_VERB: dict[str, str | None] = {
 MEMBER_CAPABILITIES = {name: frozenset((verb,)) if verb else frozenset()
                        for name, verb in MEMBER_VERB.items()}
 for _member, _added in {
-    "queries": ("create",), "alert_record": ("replace",),
+    "queries": ("seed",), "alert_record": ("replace",),
     "payloads": ("ensure_parent",), "gather_summaries": ("ensure_parent",),
     "investigation": ("seed",), "ticket_write": ("delete",),
     "wire_log": ("append_text", "start_stream"),
@@ -115,6 +115,11 @@ _COMPOSING_MEMBERS = frozenset({
 })
 
 
+def _jsonl_text(rows: list[dict]) -> str:
+    """Encode table rows with the same JSON defaults and insertion order for every writer."""
+    return "".join(json.dumps(row) + "\n" for row in rows)  # lint-jsonl-io: ok — serialized rows go whole to the rooted write seam
+
+
 class RecordHandle:
     """A thin per-kind wrapper: `.path` plus read and the record's own verb, delegating to the
     existing seams."""
@@ -143,8 +148,9 @@ class RecordHandle:
             self._lineage_id, self._sessions_runs_base = session_args or (None, None)
         operations = {
             "write": self._do_write, "append": self._do_append, "open": self._do_open,
-            "create": self._do_create, "replace": self._do_replace,
-            "seed": self._do_seed, "delete": self._do_delete,
+            "replace": self._do_replace,
+            "seed": self._do_seed_queries if member == "queries" else self._do_seed,
+            "delete": self._do_delete,
             "append_text": self._do_append_text, "start_stream": self._do_start_stream,
             "ensure_parent": self._do_ensure_parent,
         }
@@ -195,9 +201,6 @@ class RecordHandle:
         self._mkdir(root, name)
         self._io.rooted_write(root, name, text, mode=mode)
 
-    def _do_create(self, text: str | bytes) -> None:
-        self._mutate(text, "create")
-
     def _do_ensure_parent(self) -> None:
         root, name = self._address()
         self._mkdir(root, name)
@@ -210,6 +213,10 @@ class RecordHandle:
 
     def _do_start_stream(self, text: str) -> None:
         self._mutate(text, "replace")
+
+    def _do_seed_queries(self, rows: list[dict]) -> None:
+        """Replace the selected snapshot; sibling freshness belongs to the caller."""
+        self._mutate(_jsonl_text(rows), "replace")
 
     def _do_seed(self, text: str) -> None:
         from defender.runtime.branch._seed import refuse_seeded_run_dir
@@ -270,7 +277,7 @@ class RecordHandle:
         # Outside the `try`: a refused holding folder raises even for observability.
         self._mkdir(root, name)
         # One guarded append for the batch; a plain `open("a")` would follow a planted link.
-        text = "".join(json.dumps(row) + "\n" for row in rows)  # lint-jsonl-io: ok — the rows are handed whole to the guarded append seam, not to a line loop over an open handle  # noqa: E501
+        text = _jsonl_text(rows)
         try:
             self._io.rooted_write(root, name, text, mode="append")
         except OSError:
