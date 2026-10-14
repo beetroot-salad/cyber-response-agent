@@ -24,6 +24,8 @@ demand in its own right.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _view_run_1165
+
 import html
 import json
 import shutil
@@ -226,7 +228,6 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     and `visualize_runtime`'s footer check (the fourth frozen reader) is driven in the same
     page render: the footer's event-presence check must still find its events."""
     from defender import run_common
-    from defender.run_repository import Run
     from defender.scripts.visualize import visualize_run
 
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
@@ -245,7 +246,7 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
         f"the re-minted coordinate must carry the session component; got {ids}")
     assert all("#" in i for i in ids), ids
 
-    run_common.visualize(Run.at(run_dir))
+    run_common.visualize(_view_run_1165(run_dir))
     assert (run_dir / "runtime.html").is_file(), "the post-run step saved no page record"
     footer_page = (run_dir / "runtime.html").read_text(encoding="utf-8")
     assert "result" in footer_page or str(replay.calls) in footer_page, (
@@ -319,7 +320,6 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
     demand while `message`, `wire_log` and `tool_trace` all got one; the rule could not fire
     because the second driver lived only in an `nl:` evidence string (F2)."""
     from defender import run_common
-    from defender.run_repository import Run
     from defender.scripts.visualize import visualize_run
 
     marker = "RENDERED-RUN-MARKER-705-b7c8d9"
@@ -346,7 +346,7 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
         "count comparison below is between two zeroes")
 
     # driver B — the post-run step `run.py main` takes, over the SAME run_id
-    run_common.visualize(Run.at(run_dir))
+    run_common.visualize(_view_run_1165(run_dir))
     after_b = pages()
     for name, page in after_b.items():
         assert marker in page, (
@@ -382,13 +382,12 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     the operator believes succeeded, with nothing in the suite to show it. Positive control:
     the same call over an intact run dir returns normally and writes the page."""
     from defender import run_common
-    from defender.run_repository import Run
 
     run_dir, store, _replay = _driven_run(tmp_path, run_id=f"failclosed-{breakage}")
     tenant, run_dir = _into_tenant_runs(run_dir)
 
     # positive control — intact, the post-run step renders the page and does not raise
-    run_common.visualize(Run.at(run_dir))
+    run_common.visualize(_view_run_1165(run_dir))
     for name in ("runtime.html",):
         assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"
         (run_dir / name).unlink()
@@ -417,7 +416,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
 
     # and the post-run step surfaces it rather than swallowing it to stderr
     with pytest.raises(run_common.VisualizeFailed) as raised:
-        run_common.visualize(Run.at(run_dir))
+        run_common.visualize(_view_run_1165(run_dir))
     assert str(run_dir) in str(raised.value), (
         "the surfaced failure must name the run dir it could not render")
     assert not (run_dir / "runtime.html").is_file(), (
@@ -436,7 +435,6 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
     text is present at all: an escaping assertion over a page that never rendered the
     payload passes vacuously."""
     from defender import run_common
-    from defender.run_repository import Run
 
     payload = crafted_html_payload()
     run_dir = materialize(tmp_path, GOLDEN, run_id='escaping')
@@ -459,7 +457,7 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
         "the crafted payload never reached the store — the fixture, not the renderer, "
         "would be what this test measured")
 
-    run_common.visualize(Run.at(run_dir))
+    run_common.visualize(_view_run_1165(run_dir))
     for page_name in ("runtime.html",):
         page = (run_dir / page_name).read_text(encoding="utf-8")
         assert html.escape(payload) in page or "&lt;script&gt;" in page, (

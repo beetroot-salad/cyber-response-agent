@@ -14,6 +14,9 @@ attribute.
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 from defender.tests._spec1077 import fixture_run
 
 import copy
@@ -96,7 +99,7 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
 
     box = Box(result)
     deps = dataclasses.replace(
-        bind(T1106.fixture_gather_def(), run, defender_dir=dfn, box=box), lead_id=lead_id,
+        _with_live_run_1165(bind(T1106.fixture_gather_def(), run, defender_dir=dfn, box=box), run=_live_run_1165(run)), lead_id=lead_id,
         run_state=RunState(run, "r959-downstream"),
     )
     return deps, box, payload

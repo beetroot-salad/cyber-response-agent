@@ -82,7 +82,7 @@ def _case_record(**kw):
     report body), never the retired single `reason`."""
     cls = require(case_ticket, "CaseRecord", "D3 splits CaseRecord.reason into cause + narrative")
     fields = {
-        "case_id": "20260917T000000Z-sshd",
+        "case_id": "20260917t000000z-sshd",
         "signature_id": "5710",
         "disposition": "benign",
         "cause": HOST_CAUSE,

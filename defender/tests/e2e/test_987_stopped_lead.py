@@ -41,6 +41,9 @@ No `monkeypatch.setattr`: the model enters through `make_model`, the verb regist
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 import asyncio
 from dataclasses import replace
 from pathlib import Path
@@ -202,7 +205,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     from defender.runtime.run_state import RunState
 
     # #1106: a run hands MAIN's deps its tenant's record, which every lead inherits.
-    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
+    deps = replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
                    tenant=T1106.fixture_run_tenant(),
                    run_state=RunState(run_dir, run_dir.name))
     rec = VerbRecorder()

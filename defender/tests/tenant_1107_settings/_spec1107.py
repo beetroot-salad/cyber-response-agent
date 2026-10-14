@@ -610,7 +610,7 @@ class RunRecorder:
         _plant_with_record(run_dir, Path(alert).read_bytes(), mapping={
             "signature": "rule.id", "event_time": "timestamp", "summary": "rule.description"})
         seed_session_store(run_dir)
-        return mod("run_repository._handle").Run.at(run_dir)
+        return _run_handle_1165(run_dir)
 
     def lifecycle(self, **kw: Any) -> dict[str, Any]:
         self.order.append("lifecycle")
@@ -707,7 +707,7 @@ def render_page(run_dir: Path, *, update_ticket: bool) -> str:
     """Render the page the way run.py does after teardown — `run_common.visualize`, the default
     `visualize` seam — handing it run.py's own `--update-ticket` flag as an ARGUMENT (PG-2a,
     coined keyword `update_ticket=`), and return the page's HTML."""
-    mod("run_common").visualize(mod("run_repository._handle").Run.at(Path(run_dir)), update_ticket=update_ticket)
+    mod("run_common").visualize(_run_handle_1165(Path(run_dir)), update_ticket=update_ticket)
     return page_html(run_dir)
 
 

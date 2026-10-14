@@ -314,7 +314,7 @@ def write_report(
     return path
 
 
-def make_run(tmp_path: Path, name: str = "20260917T000000Z-sshd", *, alert: Any = None,
+def make_run(tmp_path: Path, name: str = "20260917t000000z-sshd", *, alert: Any = None,
              **report_kw: Any) -> Path:
     """A run dir carrying the two files the writer reads: `report.md` and `alert.json`."""
     run_dir = tmp_path / name
@@ -579,7 +579,7 @@ def listing(*tickets: dict[str, Any], source: str = "ticket-store") -> dict[str,
     return {"total": len(tickets), "tickets": list(tickets), "source": source}
 
 
-SELF_KEY = "20260917T000000Z-the-current-case"
+SELF_KEY = "20260917t000000z-the-current-case"
 OTHER_KEY = "20260101T000000Z-a-prior-case"
 
 

@@ -477,7 +477,7 @@ def receipt(run_dir: Path) -> dict | None:
 
 
 def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bool = True,
-                   name: str = "2026-09-16T12-00-00Z_case-1047-lotl-web1") -> Path:
+                   name: str = "2026-09-16t12-00-00z_case-1047-lotl-web1") -> Path:
     """A finished run dir as `run.py`'s tail meets it: an alert, and a committed `report.md`
     unless `report=False`.
 

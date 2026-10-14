@@ -63,7 +63,7 @@ def test_writes_lead_id_keyed_sidecar(tmp_path):
 
 
 def test_creates_gather_raw_dir_if_missing(tmp_path):
-    run_dir = tmp_path / "run-C"
+    run_dir = tmp_path / "run-c"
     assert claim_lead(_dispatch(run_dir, "l-002", "g", ["d"]), run=fixture_run(run_dir)) == CLAIMED
     assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()
 

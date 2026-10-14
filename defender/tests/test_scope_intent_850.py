@@ -35,6 +35,8 @@ the corpus and the alert its role IS given.
 
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _writer_run_1165
+
 from defender.tests._spec1077 import fixture_run
 
 from pathlib import Path
@@ -109,7 +111,7 @@ def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
         "goal": "who logged in", "what_to_summarize": ["actor"],
     }, run=fixture_run(env.run)) == CLAIMED, "the claim gate accepts a lettered id — that is the premise, not the defect"
 
-    rel = persist_payload(env.run, LETTERED, 0, '{"hits": []}')
+    rel = persist_payload(_writer_run_1165(env.run), LETTERED, 0, '{"hits": []}')
     assert rel == f"gather_raw/{LETTERED}/0.json", (
         f"the payload the query tool tells gather to read is {rel!r}")
     payload = env.run / rel
@@ -133,7 +135,7 @@ def test_f09_the_gate_and_the_validators_share_one_alphabet(env):
         assert LEAD_ID_RE.match(lead), f"{lead} is outside the lead-id namespace"
         assert claim_lead({"run_dir": str(env.run), "lead_id": lead, "goal": "g",
                            "what_to_summarize": ["x"]}, run=fixture_run(env.run)) == CLAIMED
-        rel = persist_payload(env.run, lead, 3, "{}")
+        rel = persist_payload(_writer_run_1165(env.run), lead, 3, "{}")
         assert _read(env, env.run / rel, gather).allow, f"gather cannot read its own {rel}"
 
 
@@ -156,7 +158,7 @@ def test_f09_main_is_still_denied_the_payload_either_way(env):
     """The direction of the fix matters: it may not turn the fail-closed error into a fail-open
     one. MAIN never carries the raw shape, so the widened alphabet must not reach it."""
     main = compile_policy_for(MAIN_DEF, run_dir=env.run, defender_dir=env.dfn)
-    rel = persist_payload(env.run, LETTERED, 0, "{}")
+    rel = persist_payload(_writer_run_1165(env.run), LETTERED, 0, "{}")
     denial = _read(env, env.run / rel, main)
     assert not denial.allow
     assert "gather_raw" in denial.reason

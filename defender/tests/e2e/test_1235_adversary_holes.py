@@ -17,6 +17,9 @@ Round 2 (#1235, comment 6117481676) moved the state from three folder-keyed tabl
 `RunState` per run; each test reaches the state through that object and keeps its claim."""
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 from defender.tests._spec1077 import fixture_run
@@ -86,7 +89,7 @@ def test_1235_the_query_tool_never_makes_a_state_of_its_own(tmp_path):
 
     run_dir = tmp_path / "run"
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
-    deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
+    deps = replace(_with_live_run_1165(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
                    lead_id="l-001")
     assert deps.run_state is None
 

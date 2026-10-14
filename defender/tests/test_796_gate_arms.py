@@ -7,6 +7,9 @@ which a review role is shown — so these are the arms that live entirely on the
 
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 from defender.tests._spec1077 import fixture_run
 
 import asyncio
@@ -52,7 +55,7 @@ def _deps(tmp_path: Path):
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
+    return _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir)), run_dir
 
 
 def _run(deps, bundle, *, disposition="malicious", bounds=None):

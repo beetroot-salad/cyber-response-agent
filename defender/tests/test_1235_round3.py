@@ -32,6 +32,9 @@ Faults enter through planted entries (a symlink or a directory at the record's n
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 from defender.tests._spec1077 import fixture_run
 
 import asyncio
@@ -98,7 +101,7 @@ def _table_rows(run_dir: Path, lead: str = LEAD) -> list[dict]:
 
 def _gather_deps(run_dir: Path, state: RunState):
     return dataclasses.replace(
-        bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
+        _with_live_run_1165(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
         lead_id=LEAD, run_state=state)
 
 

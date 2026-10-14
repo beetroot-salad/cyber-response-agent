@@ -259,9 +259,9 @@ def test_capability_is_unconditional_with_DEFENDER_COMPACTION_unset(tmp_path, mo
     else:
         monkeypatch.setenv("DEFENDER_COMPACTION", flag)
 
-    run_dir = materialize(tmp_path, GOLDEN, run_id=f"flag-{flag}")
+    run_dir = materialize(tmp_path, GOLDEN, run_id=f"flag-{str(flag).lower()}")
     opened: list = []
-    drive(run_dir, run_id=f"flag-{flag}",
+    drive(run_dir, run_id=f"flag-{str(flag).lower()}",
           main=ReplayFn(_read_alert_turns(run_dir, 3) + [Turn(text="done")]),
           store_factory=store_factory(tmp_path, sink=opened))
 

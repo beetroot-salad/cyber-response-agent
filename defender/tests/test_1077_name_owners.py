@@ -16,6 +16,8 @@ gate's own data file — rather than re-spelled here, and `CASE_ID_RE` is pinned
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _writer_run_1165
+
 import inspect
 import json
 from pathlib import Path
@@ -240,7 +242,7 @@ def test_the_episodes_root_resolver_is_not_moved_into_the_owner(episode_dir):
 def test_the_queries_row_records_the_owners_relative_payload_path(run_dir):
     """The payload path recorded in the queries row is the owner's run-dir-relative string."""
     from defender.scripts.gather_tools import record_query
-    recorded = record_query.persist_payload(run_dir, S.LEAD_ID, S.SEQ, '{"rows": []}')
+    recorded = record_query.persist_payload(_writer_run_1165(run_dir), S.LEAD_ID, S.SEQ, '{"rows": []}')
     assert recorded == S.RunPaths(run_dir).payload_relpath(S.LEAD_ID, S.SEQ), (
         f"the row recorded {recorded!r}; O8 requires it to be the OWNER's relative form, not a "
         "second spelling composed at the call site (claims C11/R4, record_query.py:271)")
@@ -255,7 +257,7 @@ def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admi
     from defender.runtime.agent_definition import compile_policy_for
     from defender.scripts.gather_tools import record_query
 
-    rel = record_query.persist_payload(run_dir, S.LEAD_ID, S.SEQ, '{"rows": []}')
+    rel = record_query.persist_payload(_writer_run_1165(run_dir), S.LEAD_ID, S.SEQ, '{"rows": []}')
     absolute = S.RunPaths(run_dir).payload(S.LEAD_ID, S.SEQ)
     assert run_dir / rel == absolute, (
         "gather's note composes `run_dir / record['payload_path']` (tools_gather.py:70); O8 "

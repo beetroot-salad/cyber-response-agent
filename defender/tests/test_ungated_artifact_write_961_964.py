@@ -28,6 +28,8 @@ at all, so no write-shaped gate could have caught it.
 
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _writer_run_1165
+
 import pytest
 
 from defender.tests._invlang_warn_836 import (
@@ -542,7 +544,7 @@ def test_the_harness_seed_lands_when_it_validates(tmp_path):
 
     run = tmp_path / "run"
     run.mkdir()
-    _declare_l_finding(run, "l-00c", "correlation lead", "elastic")
+    _declare_l_finding(_writer_run_1165(run), "l-00c", "correlation lead", "elastic")
 
     text = (run / "investigation.md").read_text(encoding="utf-8")
     assert "l-00c" in text
@@ -565,7 +567,7 @@ def test_a_seed_that_would_not_validate_is_not_written(tmp_path, capsys):
     run.mkdir()
     (run / "investigation.md").write_text(_ERROR_DOC, encoding="utf-8")
 
-    _declare_l_finding(run, "l-00c", "correlation lead", "elastic")
+    _declare_l_finding(_writer_run_1165(run), "l-00c", "correlation lead", "elastic")
 
     after = (run / "investigation.md").read_text(encoding="utf-8")
     assert after == _ERROR_DOC, "the seed appended to a document that does not validate"
@@ -582,7 +584,7 @@ def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):
     run.mkdir()
     (run / "investigation.md").write_text(_ERROR_DOC, encoding="utf-8")
 
-    _declare_l_finding(run, "l-00c", "correlation lead", "elastic")  # must not raise
+    _declare_l_finding(_writer_run_1165(run), "l-00c", "correlation lead", "elastic")  # must not raise
 
 
 def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_making():

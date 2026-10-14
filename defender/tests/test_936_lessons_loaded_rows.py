@@ -7,6 +7,9 @@ mint — is `test_936_fold_lessons_push.py`. Obligations by name in each docstri
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 import re
 
 import json
@@ -68,7 +71,7 @@ def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
     corpus = dfn / "lessons"
     corpus.mkdir()
     lesson = _write_lesson(corpus, "read-936", nodes=CLASS_SELECTOR)
-    gather = bind(_tenants1106.fixture_gather_def(), run, defender_dir=dfn)
+    gather = _with_live_run_1165(bind(_tenants1106.fixture_gather_def(), run, defender_dir=dfn), run=_live_run_1165(run))
 
     assert "lesson body" in _tool_read_file(main, str(lesson.resolve()))
     assert "lesson body" in _tool_read_file(gather, str(lesson.resolve()))

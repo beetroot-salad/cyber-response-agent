@@ -28,6 +28,8 @@ Underscore helpers here are private to this file; the shared machinery is `_spec
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _writer_run_1165
+
 import ast
 import datetime as _dt
 import hashlib
@@ -663,7 +665,7 @@ def test_request_keys_stored_before_the_move_are_compared_with_keys_computed_aft
     sibling = tmp_path / "resumed"
     sibling.mkdir()
     state = RunState(sibling, "r1080-resumed")
-    _inherit_evidence(run_dir, state, {c["lead_id"] for c in stored_calls()})
+    _inherit_evidence(run_dir, state, {c["lead_id"] for c in stored_calls()}, run=_writer_run_1165(state.run_dir), source_run=_writer_run_1165(run_dir))
     (tmp_path / "episodes").mkdir()
     got = drive_stored_run(run_dir, tmp_path / "episodes" / "ep-1", request_key=request_key,
                            state=state, repeat_trip=repeat_trip, append=append)

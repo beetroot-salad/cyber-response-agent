@@ -40,7 +40,7 @@ NO_FACTS = AlertFacts(signature=None, event_time=None, summary=None)
 
 def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Routine.",
                confidence: str = "high", with_alert: bool = True) -> Path:
-    run_dir = tmp_path / "20260620T000000Z-sshd"
+    run_dir = tmp_path / "20260620t000000z-sshd"
     run_dir.mkdir()
     run_dir.joinpath("report.md").write_text(
         f"---\ncase_id: {run_dir.name}\ndisposition: {disposition}\n"
@@ -78,7 +78,7 @@ def test_read_case_record_parses_internal_model(tmp_path: Path):
 
 
 def test_read_case_record_case_id_is_run_dir_not_frontmatter(tmp_path: Path):
-    run_dir = tmp_path / "20260620T000000Z-sshd"
+    run_dir = tmp_path / "20260620t000000z-sshd"
     run_dir.mkdir()
     run_dir.joinpath("report.md").write_text(
         "---\ncase_id: SOMETHING-ELSE\ndisposition: benign\n"

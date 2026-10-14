@@ -8,6 +8,9 @@ decision/prompt helpers:
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 import asyncio
 from dataclasses import replace
 from pathlib import Path
@@ -171,7 +174,7 @@ def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_pat
 
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    deps = _with_run_state(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER))
+    deps = _with_run_state(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_live_run_1165(run_dir)))
 
     def _never(agent_id, system, request_limit):  # pragma: no cover — reaching it IS the failure
         raise AssertionError(f"a malformed system reached the factory: {system!r}")
@@ -224,7 +227,7 @@ def _with_run_state(deps: tools.AgentDeps) -> tools.AgentDeps:
 def _seam_deps(tmp_path: Path):
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    return run_dir, _with_run_state(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER))
+    return run_dir, _with_run_state(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_live_run_1165(run_dir)))
 
 
 def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_path):
