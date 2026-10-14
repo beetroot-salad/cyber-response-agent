@@ -348,6 +348,8 @@ def test_cli_exits_with_the_gate_status():
 def _independent_census(root: Path) -> list[str]:
     """Written apart from the gate: every attribute named `read_text`/`read_bytes` in `root`'s
     production code (tests, `.venv`, `__pycache__`, the root `_io.py` out), as `rel:line`."""
+    from defender.tests import _1165_census as records
+
     found: list[str] = []
     for path in sorted(root.rglob("*.py")):
         rel = path.relative_to(root).as_posix()
@@ -356,8 +358,15 @@ def _independent_census(root: Path) -> list[str]:
                 or path.name == "conftest.py" or path.name.startswith("test_")
                 or path.name.endswith("_test.py")):
             continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        scan = records.vocabulary._scan(rel, tree)
+        for node in ast.walk(tree):
             if isinstance(node, ast.Attribute) and node.attr in ("read_text", "read_bytes"):
+                # This resolver is test machinery, independent of the production lint gate.
+                # Only a proven repository record delegates to the capped core; .path and
+                # unknown receivers still count as direct whole reads.
+                if node.attr == "read_bytes" and records._record_receiver(node.value, scan):
+                    continue
                 found.append(f"{rel}:{node.lineno}")
     return found
 
@@ -366,6 +375,19 @@ def test_the_independent_census_sees_reads(tmp_path):
     """Control for the real-tree census below: it is not empty because it is blind."""
     tree = _tree(tmp_path, {"prod.py": "def f(p):\n    return p.read_text(), p.read_bytes\n"})
     assert _independent_census(tree) == ["prod.py:2", "prod.py:2"]
+
+
+def test_independent_census_distinguishes_record_reads_from_path_and_unknown_reads(tmp_path):
+    tree = _tree(tmp_path, {"prod.py": """
+from defender.run_repository import Run, RecordHandle
+def f(run: Run, record: RecordHandle, mystery):
+    alias = record
+    alias.read_bytes()
+    run.facts.alert.read_bytes()
+    record.path.read_bytes()
+    mystery.read_bytes()
+"""})
+    assert _independent_census(tree) == ["prod.py:7", "prod.py:8"]
 
 
 #: The production whole reads outside `_io`, each in a stdlib-only module run without `defender`
