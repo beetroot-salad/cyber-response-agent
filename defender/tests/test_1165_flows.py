@@ -123,11 +123,19 @@ def test_actual_driver_gather_query_and_hooks_use_the_passed_run(tmp_path, fault
         Turn(text="Summary with marker forwarded")])
     if fault:
         io.fail = ("rooted_write", "executed_queries.jsonl")
-    summary = drive_run(run, main, gather=gather,
-                        verbs=FakeVerbs({"elastic": {"query": query}}), state=state, toolset=probes)
+    def drive():
+        return drive_run(run, main, gather=gather,
+                         verbs=FakeVerbs({"elastic": {"query": query}}), state=state, toolset=probes)
+
+    if fault:
+        # #1235 keeps rows/charges in live state but preserves the append's own failure.
+        # No summary or executed_queries recording cut is fabricated from a view failure.
+        with pytest.raises(OSError):
+            drive()
+    else:
+        summary = drive()
     assert deps_seen == [(run, state)]
     if fault:
-        assert summary["truncated_by"] == "executed_queries"
         assert not run.tables.queries.path.exists()
         assert state.row_count("l-00c") > 0 or state.row_count(LEAD) > 0
     else:
