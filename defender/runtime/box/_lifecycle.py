@@ -218,7 +218,8 @@ def _check_mount_sentinel(
         except (OSError, UnicodeError) as e:
             raise BoxFault(f"could not read mount probe at {source / relative}: {e}") from e
         if proc.returncode != 0 or proc.stdout != expected:
-            raise BoxFault(f"mount readback does not match the host probe at {source / relative}")
+            raise BoxFault(f"could not read back the startup sentinel at {source / relative} — "
+                           "the mount probe does not match the host")
         return
     _probe_sentinel(
         Path(mount.source), Path(mount.target), docker, name,

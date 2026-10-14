@@ -11,8 +11,10 @@ from collections.abc import Iterator, Sequence
 from dataclasses import field
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
+from typing import TYPE_CHECKING
 
-import httpx
+if TYPE_CHECKING:
+    import httpx
 
 from defender import _git
 from defender._io import read_text_utf8

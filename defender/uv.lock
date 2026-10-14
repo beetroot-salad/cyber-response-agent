@@ -506,7 +506,6 @@ name = "defender"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "httpx" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "typing-extensions" },
@@ -523,6 +522,7 @@ box = [
 ]
 dev = [
     { name = "coverage" },
+    { name = "httpx" },
     { name = "markdown-it-py" },
     { name = "mypy" },
     { name = "pytest" },
@@ -534,6 +534,7 @@ dev = [
 ]
 runtime = [
     { name = "duckdb" },
+    { name = "httpx" },
     { name = "pydantic-ai-slim", extra = ["anthropic", "mcp", "openai"] },
     { name = "pytz" },
     { name = "toons" },
@@ -545,7 +546,8 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'box'", specifier = ">=1.5,<2" },
     { name = "duckdb", marker = "extra == 'runtime'", specifier = ">=1.5,<2" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
-    { name = "httpx" },
+    { name = "httpx", marker = "extra == 'dev'" },
+    { name = "httpx", marker = "extra == 'runtime'" },
     { name = "markdown-it-py", marker = "extra == 'dev'" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "pydantic", specifier = ">=2" },

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import field as dataclass_field
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
 
-import httpx
+if TYPE_CHECKING:
+    import httpx
 from defender._model import model
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -69,13 +69,17 @@ class GhForge:
         return proc.stdout.strip()
 
 
-@model(frozen=True)
 class ForgejoForge:
-    """Host-only Forgejo client for the repository named by its network origin."""
+    """Host-only Forgejo client; importing the legacy forge needs no HTTP stack.
 
-    origin: str
-    token: str = dataclass_field(repr=False)
-    client: httpx.Client = dataclass_field(repr=False)
+    This service owns client dependencies, not a serialized boundary record. Its default
+    object representation exposes no credentials.
+    """
+
+    def __init__(self, *, origin: str, token: str, client: httpx.Client) -> None:
+        self.origin = origin
+        self._token = token
+        self._client = client
 
     @property
     def _repository_url(self) -> str:
@@ -90,9 +94,11 @@ class ForgejoForge:
         return f"{parsed.scheme}://{parsed.netloc}/api/v1/repos/{path}"
 
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        import httpx
+
         try:
-            response = self.client.request(
-                method, url, headers={"Authorization": f"token {self.token}"},
+            response = self._client.request(
+                method, url, headers={"Authorization": f"token {self._token}"},
                 follow_redirects=False, **kwargs,
             )
             response.raise_for_status()
@@ -115,6 +121,8 @@ class ForgejoForge:
             raise ForgeError("main protection must be known and the bot must not be able to push")
 
     def _list(self) -> list[dict]:
+        import httpx
+
         endpoint = f"{self._repository_url}/pulls"
         url = str(httpx.URL(endpoint, params={"state": "open", "page": "1", "limit": "50"}))
         visited: set[str] = set()
@@ -137,7 +145,10 @@ class ForgejoForge:
                              "url": row["html_url"]})
             url = response.links.get("next", {}).get("url", "")
             if url:
-                next_url = httpx.URL(url)
+                try:
+                    next_url = httpx.URL(url)
+                except httpx.InvalidURL as e:
+                    raise ForgeError("Forgejo pagination Link has an invalid URL") from e
                 if str(next_url.copy_with(query=None)) != endpoint or next_url.params.get("state") != "open":
                     raise ForgeError("Forgejo pagination left the repository's open pulls")
         return rows
