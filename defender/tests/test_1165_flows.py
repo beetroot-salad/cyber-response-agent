@@ -149,10 +149,11 @@ def test_actual_driver_gather_query_and_hooks_use_the_passed_run(tmp_path, fault
         assert "executed_queries.jsonl" in writes
         assert "wire_logs/llm_requests.jsonl" in writes
         assert state.budget_snapshot()["tool_calls"] > 0
-    # Host facts are rooted beside the run, through this same passed backend.
-    sidecar = run.facts.run_end.path
-    assert any(root == sidecar.parent and name == sidecar.name
-               for op, root, name, _mode in io.calls if op == "rooted_write")
+    if not fault:
+        # A completed run's host facts are rooted beside it, through the passed backend.
+        sidecar = run.facts.run_end.path
+        assert any(root == sidecar.parent and name == sidecar.name
+                   for op, root, name, _mode in io.calls if op == "rooted_write")
 
 
 def test_driver_refuses_missing_run_before_invoking_a_model(tmp_path):
