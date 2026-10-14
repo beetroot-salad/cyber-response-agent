@@ -31,6 +31,8 @@ GREEN and must stay so.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
@@ -145,7 +147,7 @@ def _rows(state) -> list[dict]:  # noqa: ANN001
 
 def _append(state, params: Any, payload_text: str = "[]") -> dict:  # noqa: ANN001
     return append_query_row(
-        state, lead_id=LEAD, system="elastic", verb="query", query_id="elastic.query",
+        state, run=fixture_run(state.run_dir), lead_id=LEAD, system="elastic", verb="query", query_id="elastic.query",
         params=params, raw_command="elastic query", payload_text=payload_text, exit_code=0,
         payload_status="ok", payload_digest="2 bytes", system_key="",
     )

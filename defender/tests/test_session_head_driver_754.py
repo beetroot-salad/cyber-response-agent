@@ -70,7 +70,7 @@ def test_a_gather_leg_session_carries_its_own_head_like_any_other_session(tmp_pa
     # new_session per dispatched leg (c11, refuted). P93, P91 (two sessions moving their own
     # heads on one shared connection cannot cross-contaminate; the seq-collision rider is
     # settled by PR-23, executed, with zero cross-session interference) and P92.
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='leg-head')
     opened: list = []
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -129,7 +129,7 @@ def test_a_store_error_during_setup_ends_the_run_through_the_handled_exit(tmp_pa
     # provenance: c19/C11. This is the one demand in the spec that binds the driver rather than
     # the store.
     ss = store_mod()
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='stale-setup')
     legacy_v1_store_file(ss.store_path_for("stale-case", sessions=SessionPaths(runs_base(tmp_path))))
     replay = ReplayFn([Turn(text="never reached")])
 
@@ -143,7 +143,7 @@ def test_a_store_error_during_setup_ends_the_run_through_the_handled_exit(tmp_pa
     assert replay.calls == 0, (
         f"setup failed, so no model turn should have been driven; got {replay.calls}")
 
-    control_dir = materialize(tmp_path / "control", GOLDEN)
+    control_dir = materialize(tmp_path / "control", GOLDEN, run_id='fresh-setup')
     control_replay = ReplayFn([Turn(text="Investigation complete.")])
     control = drive(control_dir, run_id="fresh-setup", main=control_replay,
                     store_factory=store_factory(tmp_path, case_id="fresh-case"))

@@ -20,6 +20,10 @@ parser it fed (`extract_dispatch`/`_parse_block`) was deleted with it.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+from defender import _io
+from defender.run_repository import Run
+
 import errno
 import json
 import os
@@ -48,7 +52,7 @@ def test_writes_lead_id_keyed_sidecar(tmp_path):
     dispatch = _dispatch(
         run_dir, "l-001", "Did the FIM fire trace to apt?", ["apt history", "checksum"]
     )
-    assert claim_lead(dispatch) == CLAIMED
+    assert claim_lead(dispatch, run=fixture_run(run_dir)) == CLAIMED
 
     sidecar = run_dir / "gather_raw" / "l-001.lead.json"
     assert sidecar.is_file()
@@ -60,15 +64,15 @@ def test_writes_lead_id_keyed_sidecar(tmp_path):
 
 def test_creates_gather_raw_dir_if_missing(tmp_path):
     run_dir = tmp_path / "run-C"
-    assert claim_lead(_dispatch(run_dir, "l-002", "g", ["d"])) == CLAIMED
+    assert claim_lead(_dispatch(run_dir, "l-002", "g", ["d"]), run=fixture_run(run_dir)) == CLAIMED
     assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()
 
 
 def test_distinct_ids_in_a_batch_both_claim(tmp_path):
     run_dir = tmp_path / "run-batch"
     (run_dir / "gather_raw").mkdir(parents=True)
-    assert claim_lead(_dispatch(run_dir, "l-001", "g1", ["d"])) == CLAIMED
-    assert claim_lead(_dispatch(run_dir, "l-002", "g2", ["d"])) == CLAIMED
+    assert claim_lead(_dispatch(run_dir, "l-001", "g1", ["d"]), run=fixture_run(run_dir)) == CLAIMED
+    assert claim_lead(_dispatch(run_dir, "l-002", "g2", ["d"]), run=fixture_run(run_dir)) == CLAIMED
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file()
     assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()
 
@@ -76,8 +80,8 @@ def test_distinct_ids_in_a_batch_both_claim(tmp_path):
 def test_reused_id_returns_already_claimed_with_remediation(tmp_path, capsys):
     run_dir = tmp_path / "run-reuse"
     (run_dir / "gather_raw").mkdir(parents=True)
-    assert claim_lead(_dispatch(run_dir, "l-001", "first", ["d"])) == CLAIMED
-    assert claim_lead(_dispatch(run_dir, "l-001", "second", ["d"])) == ALREADY_CLAIMED
+    assert claim_lead(_dispatch(run_dir, "l-001", "first", ["d"]), run=fixture_run(run_dir)) == CLAIMED
+    assert claim_lead(_dispatch(run_dir, "l-001", "second", ["d"]), run=fixture_run(run_dir)) == ALREADY_CLAIMED
     err = capsys.readouterr().err
     assert "l-001" in err
     assert "append a new :L" in err
@@ -90,9 +94,9 @@ def test_the_three_codes_are_distinct(tmp_path):
     over the three domains — a good claim, a refused one, a reused one — and the three answers
     are three."""
     run_dir = tmp_path / "run"
-    good = claim_lead(_dispatch(run_dir, "l-001", "g", ["d"]))
-    refused = claim_lead(_dispatch(run_dir, "l-002", "", ["d"]))
-    reused = claim_lead(_dispatch(run_dir, "l-001", "again", ["d"]))
+    good = claim_lead(_dispatch(run_dir, "l-001", "g", ["d"]), run=fixture_run(run_dir))
+    refused = claim_lead(_dispatch(run_dir, "l-002", "", ["d"]), run=fixture_run(run_dir))
+    reused = claim_lead(_dispatch(run_dir, "l-001", "again", ["d"]), run=fixture_run(run_dir))
     assert len({good, refused, reused}) == 3, \
         "two of the claim's outcomes share a code — a caller cannot tell them apart"
     assert (good, refused, reused) == (CLAIMED, NOT_CLAIMED, ALREADY_CLAIMED)
@@ -106,9 +110,9 @@ def test_an_empty_or_whitespace_goal_claims_nothing(tmp_path):
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     for empty in ("", "   ", "\n\t"):
-        assert claim_lead(_dispatch(run_dir, "l-001", empty, ["d"])) == NOT_CLAIMED
+        assert claim_lead(_dispatch(run_dir, "l-001", empty, ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
-    assert claim_lead(_dispatch(run_dir, "l-001", "a real question", ["d"])) == CLAIMED
+    assert claim_lead(_dispatch(run_dir, "l-001", "a real question", ["d"]), run=fixture_run(run_dir)) == CLAIMED
 
 
 def test_an_overlong_lead_id_is_refused_before_os_open(tmp_path):
@@ -118,14 +122,14 @@ def test_an_overlong_lead_id_is_refused_before_os_open(tmp_path):
     bound is what `tools_gather`'s own seam check reads."""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    assert claim_lead(_dispatch(run_dir, "l-" + "a" * 300, "g", ["d"])) == NOT_CLAIMED
+    assert claim_lead(_dispatch(run_dir, "l-" + "a" * 300, "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
 
 
 def test_malformed_lead_id_silently_skips(tmp_path):
     run_dir = tmp_path / "run-bad-id"
     (run_dir / "gather_raw").mkdir(parents=True)
-    assert claim_lead(_dispatch(run_dir, "0", "g", ["d"])) == NOT_CLAIMED
+    assert claim_lead(_dispatch(run_dir, "0", "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
 
 
@@ -133,14 +137,14 @@ def test_missing_lead_id_silently_skips(tmp_path):
     run_dir = tmp_path / "run-no-id"
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = {"run_dir": str(run_dir), "goal": "g", "what_to_summarize": ["d"]}
-    assert claim_lead(dispatch) == NOT_CLAIMED
+    assert claim_lead(dispatch, run=fixture_run(run_dir)) == NOT_CLAIMED
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
 
 
 def test_missing_required_keys_silently_skips_write(tmp_path):
     run_dir = tmp_path / "run-D"
     (run_dir / "gather_raw").mkdir(parents=True)
-    assert claim_lead({"run_dir": str(run_dir), "lead_id": "l-001"}) == NOT_CLAIMED
+    assert claim_lead({"run_dir": str(run_dir), "lead_id": "l-001"}, run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not (run_dir / "gather_raw" / "l-001.lead.json").exists()
 
 
@@ -150,7 +154,7 @@ def test_non_list_what_to_summarize_silently_skips(tmp_path):
     because a non-list is skipped here rather than coerced."""
     run_dir = tmp_path / "run-tuple"
     (run_dir / "gather_raw").mkdir(parents=True)
-    assert claim_lead(_dispatch(run_dir, "l-001", "g", ("d",))) == NOT_CLAIMED
+    assert claim_lead(_dispatch(run_dir, "l-001", "g", ("d",)), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not (run_dir / "gather_raw" / "l-001.lead.json").exists()
 
 
@@ -192,7 +196,7 @@ def test_fdopen_failure_removes_empty_sidecar_and_allows_retry(tmp_path, monkeyp
 
     monkeypatch.setattr(os, "fdopen", boom)
     try:
-        assert claim_lead(dispatch) == NOT_CLAIMED
+        assert claim_lead(dispatch, run=fixture_run(run_dir)) == NOT_CLAIMED
     finally:
         monkeypatch.setattr(os, "fdopen", real_fdopen)
 
@@ -203,12 +207,12 @@ def test_fdopen_failure_removes_empty_sidecar_and_allows_retry(tmp_path, monkeyp
     sidecar = run_dir / "gather_raw" / "l-001.lead.json"
     assert not sidecar.exists()
 
-    assert claim_lead(dispatch) == CLAIMED
+    assert claim_lead(dispatch, run=fixture_run(run_dir)) == CLAIMED
     assert json.loads(sidecar.read_text())["goal"] == "g"
 
 
 def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, monkeypatch):
-    """#878 F-36 — the flush-failure rollback must NOT call `os.close(fd)`.
+    """#878 F-36 — the rooted named-create backend must not double-close on failure.
 
     `os.fdopen` takes ownership, and the `with` block closes the fd on the way out INCLUDING
     when the failure is the implicit flush inside `close()` — the ENOSPC/EDQUOT/EIO case the
@@ -233,6 +237,19 @@ def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, mo
 
     sentinel_path = tmp_path / "sentinel"
     sentinel_path.write_text("intact", encoding="utf-8")
+    # Force the real named-create fallback. The normal unnamed lane deliberately uses
+    # closefd=False and retains descriptor ownership, so file-object closure there cannot
+    # exercise this historical double-close regression.
+    class NamedCreateIo:
+        def __getattr__(self, name):
+            return getattr(_io, name)
+
+        def rooted_write(self, *args, **kwargs):
+            def unavailable(_directory_fd):
+                raise OSError(errno.EOPNOTSUPP, "test named-create fallback")
+            return _io.rooted_write(*args, **kwargs, open_unnamed=unavailable)
+
+    run = Run.under(run_dir.parent, run_dir.name, io=NamedCreateIo())
     real_fdopen = os.fdopen
     handed_out: list[int] = []
     sentinel_fds: list[int] = []
@@ -261,7 +278,7 @@ def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, mo
 
     monkeypatch.setattr(os, "fdopen", owning_but_failing)
     try:
-        assert claim_lead(dispatch) == NOT_CLAIMED
+        assert claim_lead(dispatch, run=run) == NOT_CLAIMED
     finally:
         monkeypatch.setattr(os, "fdopen", real_fdopen)
 
@@ -274,7 +291,7 @@ def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, mo
 
     sidecar = run_dir / "gather_raw" / "l-001.lead.json"
     assert not sidecar.exists(), "a 0-byte sidecar survived the failed write"
-    assert claim_lead(dispatch) == CLAIMED, "the id was not left takeable"
+    assert claim_lead(dispatch, run=run) == CLAIMED, "the id was not left takeable"
     assert json.loads(sidecar.read_text())["goal"] == "g"
 
 
@@ -289,7 +306,7 @@ def test_a_planted_alias_refuses_with_the_same_remedy_the_reuse_gate_gives(tmp_p
     outside.write_text("{}")
     (run_dir / "gather_raw" / "l-001.lead.json").symlink_to(outside)
 
-    assert claim_lead(_dispatch(run_dir, "l-001", "g", ["d"])) == ALREADY_CLAIMED
+    assert claim_lead(_dispatch(run_dir, "l-001", "g", ["d"]), run=fixture_run(run_dir)) == ALREADY_CLAIMED
     err = capsys.readouterr().err
     assert "l-001" in err, "the alias refusal named no id"
     assert "append a new :L" in err, \
@@ -306,5 +323,5 @@ def test_a_lead_id_that_is_not_a_plain_string_claims_nothing_and_does_not_raise(
     NOT_CLAIMED, not ALREADY_CLAIMED: nothing holds the name. This is the caller handing us an
     id we cannot compose, which is a refusal, not a taken id."""
     run_dir = tmp_path / "run-shape"
-    assert claim_lead(_dispatch(run_dir, Path("l-a1"), "g", ["d"])) == NOT_CLAIMED
+    assert claim_lead(_dispatch(run_dir, Path("l-a1"), "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not list((run_dir / "gather_raw").glob("*.lead.json")), "a row was written anyway"

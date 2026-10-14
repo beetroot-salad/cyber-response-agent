@@ -95,7 +95,7 @@ DEADLINE = 3.0
 ROOTED_OPS = frozenset({"rooted_read", "rooted_write", "rooted_mkdir"})
 
 #: Today's write-once members (`create`; a second write is refused). Not #1111's to change.
-WRITE_ONCE = frozenset({"alert", "alert_record", "provenance", "run_end", "leads"})
+WRITE_ONCE = frozenset({"alert", "alert_record", "provenance", "leads"})
 
 #: What a plant can put AT a record's name.
 LEAF_PLANTS = ("hardlink", "symlink", "fifo", "socket", "directory")
@@ -184,7 +184,8 @@ def _run_members() -> tuple[Member, ...]:
         for name in names:
             path = S.member(run, group, name, *S.member_args(name)).path
             root, rel = _address(path, {k: v for k, v in roots.items() if k != "world_dir"})
-            out.append(Member(group, name, H.MEMBER_VERB[name], root, rel))
+            verb = "append_text" if name in {"wire_log", "policy_denials", "review_trace"} else H.MEMBER_VERB[name]
+            out.append(Member(group, name, verb, root, rel))
     return tuple(out)
 
 
@@ -199,7 +200,7 @@ def _archived_members() -> tuple[Member, ...]:
 RUN_MEMBERS = _run_members()
 ARCHIVED_MEMBERS = _archived_members()
 READABLE = (*RUN_MEMBERS, *ARCHIVED_MEMBERS)
-WRITABLE = tuple(m for m in RUN_MEMBERS if m.verb in ("write", "append", "update"))
+WRITABLE = tuple(m for m in RUN_MEMBERS if m.verb in ("write", "append", "append_text", "update"))
 REPLACED = tuple(m for m in WRITABLE if m.verb == "write" and m.name not in WRITE_ONCE)
 
 
@@ -435,6 +436,8 @@ def verb_call(h: Any, m: Member, tag: str) -> Callable[[], Any]:
         return lambda: h.write(document(m, tag))
     if m.verb == "append":
         return lambda: h.append(rows(m, tag))
+    if m.verb == "append_text":
+        return lambda: h.append_text("".join(json.dumps(row) + "\n" for row in rows(m, tag)))
     if m.verb == "update":
         return lambda: h.update(patch(m, tag))
     raise AssertionError(f"{m} has no write verb")
@@ -446,7 +449,7 @@ def assert_landed(path: Path, m: Member, tag: str) -> None:
     text = path.read_text(encoding="utf-8")
     if m.verb == "write":
         assert text == document(m, tag), f"{m}: the write did not land whole"
-    elif m.verb == "append":
+    elif m.verb in ("append", "append_text"):
         assert [json.loads(line) for line in text.splitlines()] == rows(m, tag), (
             f"{m}: the append did not land")
     else:
@@ -825,7 +828,7 @@ def test_o5_run_at_over_a_symlinked_run_dir_reads_and_writes_every_in_run_record
     real.parent.mkdir(parents=True, exist_ok=True)
     real.write_text(PLAIN, encoding="utf-8")
     assert h.read() == PLAIN, f"{m}: a plain read through a symlinked run dir was refused"
-    if m.verb in ("write", "append", "update"):
+    if m.verb in ("write", "append", "append_text", "update"):
         real.unlink()
         verb_call(h, m, "via-alias")()
         assert_landed(real, m, "via-alias")
@@ -855,7 +858,7 @@ def test_o5_a_symlinked_runs_base_or_data_root_keeps_every_record_readable_and_w
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text(PLAIN, encoding="utf-8")
     assert h.read() == PLAIN, f"{m}: a plain read under a symlinked {aliased} was refused"
-    if m.verb in ("write", "append", "update"):
+    if m.verb in ("write", "append", "append_text", "update"):
         record.unlink()
         verb_call(h, m, "via-alias")()
         assert_landed(record, m, "via-alias")
@@ -970,8 +973,8 @@ def test_o8_a_write_crosses_the_io_seam_as_rooted_calls_carrying_root_name_mode_
       whole batch as JSONL. (No member has had an `update` verb since #1235.)
     - Before it, a `rooted_mkdir` on the same root: for a record in a subfolder, of that
       folder. The folder's spelling for a root-level record is left to the implementation.
-    - The two schema-gated documents first read their current text with `rooted_read` of the
-      same name; nothing else reads.
+    - Investigation reads its current text with `rooted_read` before schema validation.
+      Report validates against None, matching close_tool; nothing else reads.
 
     The write really lands."""
     rec = S.RecordingIo()
@@ -995,7 +998,7 @@ def test_o8_a_write_crosses_the_io_seam_as_rooted_calls_carrying_root_name_mode_
         assert a["mode"] == ("create" if m.name in WRITE_ONCE else "replace")
         assert a["text"] == document(m, "seam")
     else:
-        assert m.verb == "append", f"{m}.{m.verb}: no member updates since #1235"
+        assert m.verb in ("append", "append_text"), f"{m}.{m.verb}: no member updates since #1235"
         assert a["mode"] == "append"
         assert a["text"].endswith("\n")
         assert [json.loads(line) for line in a["text"].splitlines()] == rows(m, "seam")
@@ -1008,7 +1011,7 @@ def test_o8_a_write_crosses_the_io_seam_as_rooted_calls_carrying_root_name_mode_
             f"{m}: its holding folder {m.rel.parent} was not made through rooted_mkdir")
 
     reads = [(i, a) for i, (op, a) in enumerate(calls) if op == "rooted_read"]
-    if m.rel in (RUN_LAYOUT.report, RUN_LAYOUT.investigation):
+    if m.rel == RUN_LAYOUT.investigation:
         assert len(reads) == 1, f"{m}: not one schema pre-read: {ops}"
         assert reads[0][0] < at[0], f"{m}: the schema pre-read came after the write: {ops}"
         assert PurePosixPath(reads[0][1]["name"]) == m.rel

@@ -266,7 +266,7 @@ def _finished_run(root: Path, run_id: str) -> Path:
     """A real, finished run with its own case store: one text turn through the real driver and
     the default store factory. Each root is its own container (`<root>/run`), and every root
     under the test's `tmp_path` shares one sessions directory beside them."""
-    run_dir = materialize(root, GOLDEN)
+    run_dir = materialize(root, GOLDEN, run_id=run_id)
     drive(run_dir, run_id=run_id, main=ReplayFn([Turn(text="Investigation complete.")]))
     return run_dir
 

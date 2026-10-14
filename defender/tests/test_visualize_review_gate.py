@@ -16,6 +16,8 @@ machinery.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import json
 from pathlib import Path
 
@@ -50,7 +52,7 @@ def _trace_row(run: Path, role: str, round_no: int, row: dict, reply: str | None
     production writes — including its decision about where a framed reply may live."""
     from defender.runtime.challenge_gate import _write_trace_row
 
-    _write_trace_row(run, role, round_no, row, raw_reply=reply)
+    _write_trace_row(fixture_run(run), role, round_no, row, raw_reply=reply)
 
 
 def _challenged_then_stands(tmp_path: Path) -> Path:

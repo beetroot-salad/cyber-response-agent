@@ -492,8 +492,14 @@ def test_every_writer_method_reaches_todays_seam_unchanged(base, run_dir):
     assert not {"write_guarded", "locked_for_rewrite", "guarded_mkdir"} & set(recorder.ops), (
         f"a writer method still reached a path-based seam: {recorder.ops}")
 
-    assert S.member(run, "observability", "wire_log").logger_factory is S.mod(
-        "runtime.observe").RequestLogger, "the wire log's writer is today's RequestLogger"
+    wire = S.member(run, "observability", "wire_log")
+    assert not hasattr(wire, "logger_factory"), "the record must not couple to the runtime logger"
+    logger = S.mod("runtime.observe").RequestLogger.from_record(wire)
+    try:
+        logger.log_budget_refusal(tool_name="bash")
+    finally:
+        logger.close()
+    assert wire.read(), "the logger writes through its handed wire record"
     assert S.member(run, "session", "session_db", S.LINEAGE_ID).open_store is S.mod(
         "runtime.session_store").open_store, "the session access is today's store seam"
 
@@ -723,11 +729,12 @@ def test_every_sub_collection_reads_everywhere_and_writes_only_where_the_runtime
     for group, names in S.GROUP_MEMBERS.items():
         for name in names:
             rec = S.member(run, group, name, *S.member_args(name))
-            assert callable(getattr(rec, "read", None)), f"run.{group}.{name} is not readable"
-            verb = S.MEMBER_VERB[name]
+            for operation in S.READ_OPERATIONS:
+                assert callable(getattr(rec, operation, None)), f"run.{group}.{name}.{operation}"
+            expected = S.MEMBER_CAPABILITIES[name]
             exposed = {v for v in S.VERBS if callable(getattr(rec, v, None))}
-            assert exposed == ({verb} if verb else set()), (
-                f"run.{group}.{name} exposes {sorted(exposed)}; its producer's verb is {verb!r} "
+            assert exposed == expected, (
+                f"run.{group}.{name} exposes {sorted(exposed)}; expected {sorted(expected)} "
                 "— a verb that does not fit the record's shape corrupts it (JSONL appended into "
                 "a SQLite store, a whole JSON document appended to)")
     # Driven, not merely present: one member per group actually produces its record.
@@ -859,7 +866,7 @@ def test_asking_the_handle_or_the_owner_for_a_name_creates_nothing(base, run_dir
         "decision 9 moves the directory-creation side effect into the write method that "
         "needs it, so a READER resolving a name no longer mutates the run it is reading")
     # Positive control: the write method DOES create what it needs.
-    S.member(run, "observability", "wire_log").append([{"event_type": "message"}])
+    S.member(run, "observability", "wire_log").append_text('{"event_type": "message"}\n')
     assert (run_dir / "wire_logs").is_dir()
 
 
@@ -877,7 +884,7 @@ def test_the_write_method_creates_the_directory_the_path_accessor_no_longer_does
     assert not {"rooted_mkdir", "guarded_mkdir"} & set(recorder.ops), (
         f"the path accessor reached {recorder.ops}")
 
-    trace.append([{"role": S.ROLE}])
+    trace.append_text(json.dumps({"role": S.ROLE}) + "\n")
     assert (run_dir / "wire_logs").is_dir(), "the write method did not create its directory"
     # #1111: through the rooted mkdir, on the run dir, of the record's holding folder.
     made = [(Path(a["root"]), PurePosixPath(a["folder_name"]))

@@ -39,6 +39,8 @@ No `monkeypatch.setattr` (CI ratchets new sites). Every alias is built with the 
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import contextlib
 import errno
 import json
@@ -862,11 +864,11 @@ def test_a_duplicate_lead_id_still_fails_exclusive_create(tmp_path):
     # refusal too, which is exactly the read that let an unclaimed dispatch run. The first
     # claim of this pair is the premise the rest of the demand rests on, so it asserts that
     # the row was WRITTEN.
-    assert record_lead.claim_lead(dispatch) == record_lead.CLAIMED
+    assert record_lead.claim_lead(dispatch, run=fixture_run(run)) == record_lead.CLAIMED
     sidecar = run / "gather_raw" / "l-001.lead.json"
     first = sidecar.read_text(encoding="utf-8")
 
-    assert record_lead.claim_lead({**dispatch, "goal": "second"}) == record_lead.ALREADY_CLAIMED, (
+    assert record_lead.claim_lead({**dispatch, "goal": "second"}, run=fixture_run(run)) == record_lead.ALREADY_CLAIMED, (
         "the duplicate claim did not report reuse"
     )
     assert sidecar.read_text(encoding="utf-8") == first, "the duplicate claim overwrote the first"
@@ -904,7 +906,7 @@ def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_pa
         run = run_tree(d)
         before = {p for p in run.rglob("*") if p.is_file()}
         record_lead.claim_lead(
-            {"run_dir": str(run), "lead_id": lead_id, "goal": "g", "what_to_summarize": []}
+            {"run_dir": str(run), "lead_id": lead_id, "goal": "g", "what_to_summarize": []}, run=fixture_run(run)
         )
         return {p for p in run.rglob("*") if p.is_file()} == before
 

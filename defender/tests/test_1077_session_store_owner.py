@@ -177,7 +177,7 @@ def test_a_fresh_run_handed_a_case_unstable_id_ends_through_the_handled_store_ex
     assert issubclass(InvalidCaseId, StoreError)
     assert issubclass(InvalidCaseId, ValueError), "callers that catch `ValueError` still do"
     runs = tmp_path / "runs"
-    run_dir = replay.materialize(runs, replay.GOLDEN)
+    run_dir = replay.materialize(runs, replay.GOLDEN, run_id='1077-mixed-fresh')
     before = _tree(tmp_path)
 
     def mixed_case_factory(case_id: str, rd: Path):
@@ -202,7 +202,7 @@ def _finished_run(tmp_path_factory) -> tuple[Path, Path]:
     — driven ONCE for the module. `runs/run`, so `open_source_store`'s `runs_base =
     run_dir.parent` is the base the run was handed and its store sits under the returned root."""
     root = tmp_path_factory.mktemp("source")
-    run_dir = replay.materialize(root / "runs", replay.GOLDEN)
+    run_dir = replay.materialize(root / "runs", replay.GOLDEN, run_id='1077-session-owner')
     summary = replay.drive(run_dir, run_id="1077-session-owner", main=replay.ReplayFn([
         replay.Turn(text="Nothing to do; stopping."),
     ]))

@@ -950,7 +950,7 @@ def _harness_drive(tmp_path: Path, *, gather: Any, run_id: str,
     """`_replay_harness.drive` itself (no `run.main`), over the golden sshd alert, on a tenant
     (named after the run) that grants the correlation lead; MAIN dispatches one lead, l-001."""
     planted = S.plant_tenant(run_id.replace("s04-", "t"), alert_mapping=S.DEFAULT_MAPPING)
-    run_dir = H.materialize(tmp_path, H.GOLDEN)
+    run_dir = H.materialize(tmp_path, H.GOLDEN, run_id=run_id)
     main = H.ReplayFn([
         H.Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
                                        "goal": "measure the host",

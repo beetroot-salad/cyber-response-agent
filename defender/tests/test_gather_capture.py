@@ -15,6 +15,8 @@ still owns (`_next_seq` and the truncated in-context view), which the `read_file
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import json
 
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
@@ -57,8 +59,8 @@ def test_claim_lead_claims_then_rejects_reuse(tmp_path):
         "run_dir": str(tmp_path), "lead_id": "l-001",
         "goal": "did the IP resolve?", "what_to_summarize": ["a", "b"],
     }
-    assert claim_lead(dispatch) == CLAIMED
+    assert claim_lead(dispatch, run=fixture_run(tmp_path)) == CLAIMED
     sidecar = tmp_path / "gather_raw" / "l-001.lead.json"
     assert json.loads(sidecar.read_text()) == {
         "goal": "did the IP resolve?", "what_to_summarize": ["a", "b"]}
-    assert claim_lead(dispatch) == ALREADY_CLAIMED
+    assert claim_lead(dispatch, run=fixture_run(tmp_path)) == ALREADY_CLAIMED

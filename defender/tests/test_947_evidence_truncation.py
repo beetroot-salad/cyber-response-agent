@@ -32,6 +32,8 @@ silently skipped artifact is a sibling running without the evidence its prefix n
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import json
 import shutil
 from pathlib import Path
@@ -183,7 +185,7 @@ def resume(store, run_dir, message_id, target: Path):
 
     branch = branch_mod()
     return branch.open_main_session(store, spec_at(store, run_dir, message_id),
-                                    RunState(target, target.name))
+                                    RunState(target, target.name), run=fixture_run(target), source_run=fixture_run(run_dir))
 
 
 # 1. which leads existed at the branch point

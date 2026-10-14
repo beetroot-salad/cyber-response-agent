@@ -521,7 +521,7 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
 
     for n, url in enumerate(("http://cmdb-drive-a:1", "http://cmdb-drive-b:1")):
         S.set_key(folder, "cmdb", "CMDB_URL_BASE", url)
-        run_dir = RH.materialize(tmp_path / f"drive-{n}", RH.GOLDEN_AB3)
+        run_dir = RH.materialize(tmp_path / f"drive-{n}", RH.GOLDEN_AB3, run_id=f"nf4-drive-{n}")
         RH.drive(
             run_dir, run_id=f"nf4-drive-{n}",
             main=RH.ReplayFn([

@@ -51,7 +51,7 @@ def golden_replay(run_dir: Path) -> ReplayFn:
 
 def driven_run(tmp_path: Path):
     """One real hermetic run, driven through the replay harness — the renderer's input."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='cutover-922-render')
     drive(run_dir, run_id="cutover-922-render", main=golden_replay(run_dir))
     return run_dir
 

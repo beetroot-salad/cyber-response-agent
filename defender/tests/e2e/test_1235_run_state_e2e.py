@@ -145,7 +145,7 @@ def _rows(run_dir: Path, lead: str = LEAD) -> list[dict]:
 
 def _real_rows(root: Path, gather_turns: list[Turn]) -> tuple[list[dict], dict[str, bytes]]:
     """`l-001`'s rows and payload files as a fresh real run writes them for `gather_turns`."""
-    run_dir = materialize(root, GOLDEN_AB3)
+    run_dir = materialize(root, GOLDEN_AB3, run_id='r1235-v2-source-rows')
     drive(run_dir, run_id="r1235-v2-source-rows", main=_main(LEAD),
           gather=ReplayFn([*gather_turns, DONE]), verbs=Asked("source").registry())
     rows = _rows(run_dir)
@@ -256,7 +256,7 @@ def test_a_siblings_next_row_takes_the_seq_after_its_inherited_rows(tmp_path):
             f"the sibling's own call overwrote the inherited payload {rel}")
     assert b'"run": "sibling"' in (branched.sibling / own[0]["payload_path"]).read_bytes()
 
-    fresh_dir = materialize(tmp_path / "fresh", GOLDEN_AB3)
+    fresh_dir = materialize(tmp_path / "fresh", GOLDEN_AB3, run_id='r1235-v2-fresh-seq')
     drive(fresh_dir, run_id="r1235-v2-fresh-seq", main=_main(LEAD),
           gather=ReplayFn([q("elastic", "query", _OTHER), DONE]), verbs=Asked("fresh").registry())
     assert [r["seq"] for r in _rows(fresh_dir)] == [0], "the control's first row is not seq 0"

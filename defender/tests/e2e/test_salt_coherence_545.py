@@ -51,7 +51,7 @@ _FRAME = re.compile(r"<run-([0-9a-f]+)-untrusted>\n(.*?)\n</run-\1-untrusted>", 
 def _driven_transcript(tmp_path, run_id: str) -> str:
     """One driven run that emits at least two untrusted frames: orient's inlined raw alert, and
     the tool return from a read of `alert.json`. Exactly the two surfaces #545 compared."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     replay = ReplayFn([
         Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
         Turn(text="Done."),

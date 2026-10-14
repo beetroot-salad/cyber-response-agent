@@ -58,7 +58,7 @@ pytestmark = pytest.mark.e2e
 
 def _replay(tmp_path: Path, run_id: str = "tree-1077") -> Path:
     """One whole replayed fixture run, driven through the real driver, ended normally."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     replay = ReplayFn([
         Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text()})]),
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),

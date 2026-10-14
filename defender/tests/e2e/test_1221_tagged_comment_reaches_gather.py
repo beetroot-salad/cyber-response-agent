@@ -68,7 +68,7 @@ def _q(system: str, verb: str, params: dict) -> Turn:
 
 def _drive(tmp_path: Path, *, verbs: FakeVerbs, turns: list[Turn], system: str) -> tuple[
         Path, ReplayFn, _Reading]:
-    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id=SELF)
     assert run_dir.name != SELF, "the fixture must distinguish the run id from the dir name"
     main = ReplayFn([
         Turn(tool_calls=[("gather", {

@@ -143,7 +143,7 @@ def _screen_leg(tmp_path: Path, root: Path, name: str, tickets: list[dict[str, A
             while_serving()
         return M.listing(*copy.deepcopy(tickets))
 
-    run_dir = materialize(tmp_path / name, GOLDEN_AB3)
+    run_dir = materialize(tmp_path / name, GOLDEN_AB3, run_id=f"r-{name}")
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "ticket",
                                      "goal": "measure the ticket lead",

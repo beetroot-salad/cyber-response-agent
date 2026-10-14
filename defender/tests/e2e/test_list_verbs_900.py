@@ -864,7 +864,7 @@ def test_list_verbs_writes_no_queries_row_and_leaves_the_guards_untouched(tmp_pa
     repeat guard, the third would come back as a `GatherDeadEnd` instead of an answer and the
     lead would be ended by a discovery call. All three must answer, and the table must still be
     empty of this lead's rows — including the `∅.`-prefixed sentinels a trip would write."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='lv900')
 
     def probe(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
         return []

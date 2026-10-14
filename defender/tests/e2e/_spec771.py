@@ -49,6 +49,8 @@ this one did.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import errno
 import json
 import os
@@ -814,13 +816,9 @@ def _invoke_write_trace(run_dir: Path) -> None:
 def _invoke_observe_logger(run_dir: Path) -> None:
     from defender.runtime import observe
 
-    # Constructing the logger IS the write: it opens the wire log mode="w", which is the
-    # truncating open a planted link redirects (B1's shape at C1's row 3). The budget-refusal
-    # record is appended after so the control observes real bytes and not just an empty file.
-    # Driven through `wire_log_path` because that is the production entry point since the log
-    # moved under `<run>/wire_logs/` — and it carries the row's `guarded_mkdir` of that
-    # component, which is what this row's component plant now judges.
-    logger = observe.RequestLogger(observe.wire_log_path(run_dir))
+    # The run-backed logger eagerly initializes the handed wire record. The budget-refusal
+    # row makes the positive control observe real bytes as well as eager file creation.
+    logger = observe.RequestLogger.from_record(fixture_run(run_dir).observability.wire_log)
     try:
         logger.log_budget_refusal(tool_name="bash")
     finally:
@@ -830,7 +828,7 @@ def _invoke_observe_logger(run_dir: Path) -> None:
 def _invoke_denial_logger(run_dir: Path) -> None:
     from defender.runtime import observe
 
-    observe.denial_logger(run_dir).log_policy_denial(
+    observe.denial_logger(fixture_run(run_dir)).log_policy_denial(
         role="main", system="elastic", verb="search", call_id="c1", params={},
     )
 
@@ -838,26 +836,26 @@ def _invoke_denial_logger(run_dir: Path) -> None:
 def _invoke_case_pointer(run_dir: Path) -> None:
     from defender.runtime import session_store
 
-    session_store.write_case_pointer(run_dir, case_id="c-771", store_path=run_dir / "s.db")
+    session_store.write_case_pointer(fixture_run(run_dir), case_id="c-771", store_path=run_dir / "s.db")
 
 
 def _invoke_query_payload(run_dir: Path) -> Any:
     from defender.runtime import query_tool
 
-    return query_tool._persist_payload(run_dir, "l-001", 0, '[{"a": 1}]')
+    return query_tool._persist_payload(fixture_run(run_dir), "l-001", 0, '[{"a": 1}]')
 
 
 def _invoke_gather_summary(run_dir: Path) -> None:
     from defender.runtime import tools_gather
 
-    tools_gather._persist_gather_summary(run_dir, "l-001", "## summary\nfindings\n")
+    tools_gather._persist_gather_summary(fixture_run(run_dir), "l-001", "## summary\nfindings\n")
 
 
 def _invoke_claim_lead(run_dir: Path) -> Any:
     from defender.hooks import record_lead
 
     return record_lead.claim_lead(
-        {"run_dir": str(run_dir), "lead_id": "l-001", "goal": "g", "what_to_summarize": ["x"]}
+        {"run_dir": str(run_dir), "lead_id": "l-001", "goal": "g", "what_to_summarize": ["x"]}, run=fixture_run(run_dir)
     )
 
 
@@ -870,7 +868,9 @@ def _invoke_lesson_load(run_dir: Path) -> None:
     from defender.runtime import tools as runtime_tools
     from defender.runtime.agent_definition import bind
 
-    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
+    from dataclasses import replace
+
+    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=fixture_run(run_dir))
     runtime_tools._record_lesson_load(deps, DEFENDER / "lessons" / "spec-771.md", kind="read")
 
 
@@ -895,7 +895,7 @@ def _invoke_queries_table(run_dir: Path) -> Any:
     # (`driver.run_investigation` starts it); this writer is driven outside a run, so its deps
     # carry the state a started run would.
     deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
-                   lead_id="l-001", run_state=RunState(run_dir, run_dir.name))
+                   lead_id="l-001", run=fixture_run(run_dir), run_state=RunState(run_dir, run_dir.name))
     return asyncio.run(QueryCapture(registry=None)._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},
         payload=[{"a": 1}], exit_code=0, detail="", system_key="",
@@ -1081,7 +1081,7 @@ def _x5_query_payload_site(run_dir: Path) -> object:
     target = run_dir / "gather_raw" / "l-001" / "0.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.mkdir()
-    return query_tool._persist_payload(run_dir, "l-001", 0, '[{"a": 1}]')
+    return query_tool._persist_payload(fixture_run(run_dir), "l-001", 0, '[{"a": 1}]')
 
 
 def _x5_claim_lead_site(run_dir: Path) -> object:
@@ -1098,7 +1098,7 @@ def _x5_claim_lead_site(run_dir: Path) -> object:
         shutil.rmtree(component)          # a live run dir already has it; the fault displaces it
     component.write_text("not a directory\n", encoding="utf-8")
     return record_lead.claim_lead(
-        {"run_dir": str(run_dir), "lead_id": "l-001", "goal": "g", "what_to_summarize": []})
+        {"run_dir": str(run_dir), "lead_id": "l-001", "goal": "g", "what_to_summarize": []}, run=fixture_run(run_dir))
 
 
 def _x5_sentinel_site(run_dir: Path) -> object:

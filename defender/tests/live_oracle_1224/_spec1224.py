@@ -1434,7 +1434,7 @@ def drive_gather_run(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], sys
 def _drive_one_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str,
                       run_id: str, limits: Any, tenant: Any, **kw: Any) -> tuple[Path, Any, dict]:
     H = replay_harness()
-    run_dir = H.materialize(tmp_path / run_id, H.GOLDEN_AB3)
+    run_dir = H.materialize(tmp_path / run_id, H.GOLDEN_AB3, run_id=run_id)
     main = H.ReplayFn([
         H.Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": system, "goal": f"measure the {system} lead",

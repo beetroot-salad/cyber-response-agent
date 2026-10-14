@@ -39,7 +39,7 @@ def _entries(path: Path) -> list[str]:
 
 def main(root: Path) -> int:
     runs_base = root / "runs"
-    run_dir = materialize(runs_base, GOLDEN)
+    run_dir = materialize(runs_base, GOLDEN, run_id='rename-proof-session')
     owner = SessionPaths(runs_base)
     sessions = owner.sessions_dir
     print(f"SESSIONS_DIR_SEEN={sessions.name}", flush=True)

@@ -33,6 +33,8 @@ RED until the round-2 implementation lands: `defender.runtime.run_state` does no
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import threading
 import time
 from datetime import UTC, datetime
@@ -63,7 +65,7 @@ def _run_dir(root: Path, name: str = "run") -> Path:
 def _append(state: RunState, *, params: dict, lead: str = LEAD) -> dict:
     """One executed row through the production writer."""
     return rq.append_query_row(
-        state, lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
+        state, run=fixture_run(state.run_dir), lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
         params=params, raw_command="elastic query", payload_text=_PAYLOAD, exit_code=0,
         payload_status="ok", payload_digest=rq.payload_digest(_PAYLOAD, "", 0), system_key="")
 

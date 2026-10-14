@@ -35,6 +35,8 @@ the corpus and the alert its role IS given.
 
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -105,7 +107,7 @@ def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
     assert claim_lead({
         "run_dir": str(env.run), "lead_id": LETTERED,
         "goal": "who logged in", "what_to_summarize": ["actor"],
-    }) == CLAIMED, "the claim gate accepts a lettered id — that is the premise, not the defect"
+    }, run=fixture_run(env.run)) == CLAIMED, "the claim gate accepts a lettered id — that is the premise, not the defect"
 
     rel = persist_payload(env.run, LETTERED, 0, '{"hits": []}')
     assert rel == f"gather_raw/{LETTERED}/0.json", (
@@ -130,7 +132,7 @@ def test_f09_the_gate_and_the_validators_share_one_alphabet(env):
     for lead in (NUMERIC, LETTERED, "l-auth1", "l-A", "l-0", "l-999", "l-Ab9z"):
         assert LEAD_ID_RE.match(lead), f"{lead} is outside the lead-id namespace"
         assert claim_lead({"run_dir": str(env.run), "lead_id": lead, "goal": "g",
-                           "what_to_summarize": ["x"]}) == CLAIMED
+                           "what_to_summarize": ["x"]}, run=fixture_run(env.run)) == CLAIMED
         rel = persist_payload(env.run, lead, 3, "{}")
         assert _read(env, env.run / rel, gather).allow, f"gather cannot read its own {rel}"
 

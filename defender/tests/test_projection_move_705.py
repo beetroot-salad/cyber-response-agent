@@ -66,7 +66,7 @@ def _load_run_stats():
 
 def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):
     """One real driven run with the store attached, returning (run_dir, store, replay)."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     inv = (GOLDEN / "investigation.md").read_text()
     rep = (GOLDEN / "report.md").read_text()
     scripted = turns if turns is not None else [
@@ -439,7 +439,7 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
     from defender.run_repository import Run
 
     payload = crafted_html_payload()
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='escaping')
     inv = (GOLDEN / "investigation.md").read_text()
     rep = (GOLDEN / "report.md").read_text()
     replay = ReplayFn([

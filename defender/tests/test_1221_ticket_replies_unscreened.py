@@ -145,7 +145,7 @@ def test_1221_get_ticket_on_the_runs_own_key_is_served(tmp_path, key, note):
         rec.record("get-ticket", ctx, {"key": key})
         return copy.deepcopy(case)
 
-    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id=OWN)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "ticket",
                                      "goal": "read the case's own ticket",

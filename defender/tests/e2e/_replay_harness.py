@@ -67,7 +67,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from defender import _provenance  # noqa: E402
 from defender import run_common  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.run_repository import RunPaths  # noqa: E402
+from defender.run_repository import Run, RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
@@ -362,7 +362,7 @@ def load_turns_from_trace(
 
 
 
-def materialize(tmp_path: Path, golden: Path) -> Path:
+def materialize(tmp_path: Path, golden: Path, *, run_id: str = "run") -> Path:
     """The on-disk run dir a driven run starts from: `gather_raw/`, the copied alert, and the
     provenance stamp.
 
@@ -382,7 +382,7 @@ def materialize(tmp_path: Path, golden: Path) -> Path:
     Captured against `run_common.REPO_ROOT` — production's own constant, not a second path
     derived by counting `parents[...]` here — so "like production's" is a fact rather than a
     coincidence of where this file sits in the tree."""
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / run_id
     paths = RunPaths(run_dir)
     paths.gather_raw.mkdir(parents=True)
     plant_alert(run_dir, (golden / "alert.json").read_bytes())
@@ -498,7 +498,7 @@ def _default_tenant() -> Any:
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
-        toolset=None, resume=None, defender_dir: Path | None = None,
+        toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
@@ -605,11 +605,13 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     test reaches a run's state. A scenario whose run ends by RAISING (no result comes back)
     builds the state first and passes it here, so it still holds what the run decided on.
     `driver_summary` is the same drive returning production's summary untouched."""
-    state = run_state if run_state is not None else RunState(run_dir, run_id)
+    # Legacy replay labels are retained in this helper's call shape. The real run identity
+    # comes from its directory; materialize(run_id=...) preserves labels that are asserted.
+    state = run_state if run_state is not None else RunState(run_dir, run_dir.name)
     summary = driver_summary(
         run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, limits=limits, box=box,
         store_factory=store_factory, review_stages=review_stages, bounds=bounds,
-        toolset=toolset, resume=resume, defender_dir=defender_dir, tenant=tenant,
+        toolset=toolset, resume=resume, source_run=source_run, defender_dir=defender_dir, tenant=tenant,
         orient_shim=orient_shim, run_state=state,
     )
     return {**summary, "run_state": state}
@@ -618,7 +620,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
 def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter each
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
-        toolset=None, resume=None, defender_dir: Path | None = None,
+        toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None) -> dict:
     """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
     summary exactly as production's caller gets it. `run_state` is what the run is handed
@@ -665,6 +667,10 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         seams["toolset"] = toolset
     if resume is not None:
         seams["resume"] = resume
+        source = resume.source_run_dir
+        seams["source_run"] = source_run if source_run is not None else Run.under(source.parent, source.name)
+    elif source_run is not None:
+        seams["source_run"] = source_run
     if run_state is not None:
         seams["run_state"] = run_state
     # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
@@ -688,7 +694,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     )
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
-            alert_path=RunPaths(run_dir).alert, run_dir=run_dir, run_id=run_id,
+            alert_path=RunPaths(run_dir).alert, run=Run.under(run_dir.parent, run_dir.name),
             defender_dir=tree, make_model=make_model, tenant=run_tenant,
             orient_shim=orient_shim if orient_shim is not None else no_orient_shims, **seams,
         ))

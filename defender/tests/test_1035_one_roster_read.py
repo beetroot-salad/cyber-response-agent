@@ -938,7 +938,7 @@ def test_the_run_reads_the_roster_before_any_model_call(tmp_path, monkeypatch):
 
     # Control, same read: a run over the readable checkout DOES open its wire log, so the
     # absent log below is "never opened", not a path no run ever writes.
-    control = materialize(tmp_path / "control", GOLDEN_AB3)
+    control = materialize(tmp_path / "control", GOLDEN_AB3, run_id='r-1035-ctl')
     drive(control, run_id="r-1035-ctl", main=ReplayFn([Turn(text="Investigation complete.")]))
     assert (control / "wire_logs").is_dir(), "the control run opened no wire log"
 
@@ -946,7 +946,7 @@ def test_the_run_reads_the_roster_before_any_model_call(tmp_path, monkeypatch):
     root.mkdir()
     assert not _repo_adapters(root).exists()
     _redirect_repo_root(monkeypatch, root)
-    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='r-1035')
     with pytest.raises(RegistryError) as exc:
         drive(run_dir, run_id="r-1035", main=_never_called)
     assert str(_repo_adapters(root)) in str(exc.value), exc.value

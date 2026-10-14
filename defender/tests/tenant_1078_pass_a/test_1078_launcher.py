@@ -15,6 +15,8 @@ episode dir under the episodes root and the data root's census unchanged.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 from datetime import datetime
 
 import json
@@ -894,9 +896,9 @@ def test_o4_fork_store_location(tmp_path, data_root):
                          continuation_prompt=H.CONTINUATION, as_of=as_of)
     sib = tmp_path / "episodes-root" / T.EPISODE_ID / "runs" / f"{T.EPISODE_ID}-b"
     sib.mkdir(parents=True)
-    store = br.store_factory_for(spec)("minted-case", sib)
+    store = br.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))("minted-case", sib)
     try:
-        session_id, _history = br.open_main_session(store, spec, _sibling_state(sib))
+        session_id, _history = br.open_main_session(store, spec, _sibling_state(sib), run=fixture_run(sib), source_run=fixture_run(spec.source_run_dir))
         br.attach_case_pointer(store, spec, sib, case_id="minted-case", session_id=session_id)
     finally:
         store.close()

@@ -40,6 +40,8 @@ signatures, so a rename is loud rather than silently uncovered.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import dataclasses
 import importlib
 import inspect
@@ -235,7 +237,7 @@ def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
     store, run_dir, session_id, path_ids = _source_run(tmp_path)
     spec = spec_at(store, run_dir, path_ids[-1])
 
-    factory = branch.store_factory_for(spec)
+    factory = branch.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))
     sibling_dir = tmp_path / "defender-runs" / "run-sibling-001"
     sibling_dir.mkdir(parents=True, exist_ok=True)
     handle = factory("a-brand-new-case-id", sibling_dir)
@@ -257,7 +259,7 @@ def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
     # provenance: driver.py's `StoreFactory = Callable[[str, Path], Any]`; design M1 reuses it.
     branch = branch_mod()
     store, run_dir, _session_id, path_ids = _source_run(tmp_path)
-    factory = branch.store_factory_for(spec_at(store, run_dir, path_ids[-1]))
+    factory = branch.store_factory_for(spec_at(store, run_dir, path_ids[-1]), source_run=fixture_run(run_dir))
 
     params = list(inspect.signature(factory).parameters.values())
     assert len(params) == 2, f"not (case_id, run_dir)-shaped: {params}"
@@ -422,7 +424,7 @@ def test_a_resumed_run_inherits_the_document_its_history_claims(tmp_path):
     sibling_dir.mkdir(parents=True, exist_ok=True)
 
     branch.open_main_session(store, spec_at(store, run_dir, returns[1]),
-                             _sibling_state(sibling_dir))
+                             _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(run_dir))
 
     seeded = (sibling_dir / "investigation.md").read_text(encoding="utf-8")
     from defender.skills.invlang.parser import INVLANG_FENCE_RE
@@ -469,7 +471,7 @@ def test_a_resumed_run_inherits_the_evidence_its_prefix_names(tmp_path):
     sibling_dir.mkdir(parents=True, exist_ok=True)
     state = _sibling_state(sibling_dir)
 
-    branch.open_main_session(store, spec_at(store, run_dir, returns[1]), state)
+    branch.open_main_session(store, spec_at(store, run_dir, returns[1]), state, run=fixture_run(state.run_dir), source_run=fixture_run(run_dir))
 
     assert (sibling_dir / "executed_queries.jsonl").read_text(encoding="utf-8") == (
         run_dir / "executed_queries.jsonl").read_text(encoding="utf-8")
@@ -508,7 +510,7 @@ def test_a_run_dir_holding_evidence_is_refused_before_anything_forks(tmp_path):
     spec = spec_at(store, run_dir, path_ids[-1])
 
     with pytest.raises(branch.BranchError, match="already holds"):
-        branch.open_main_session(store, spec, _sibling_state(sibling_dir))
+        branch.open_main_session(store, spec, _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(spec.source_run_dir))
 
     assert len(sql(store, "SELECT session_id FROM session WHERE parent_session_id = ?",
                    (session_id,))) == before, (
@@ -528,7 +530,7 @@ def test_a_fresh_run_seeds_no_document(tmp_path):
     fresh = tmp_path / "defender-runs" / "run-fresh"
     fresh.mkdir(parents=True, exist_ok=True)
 
-    assert branch.seed_investigation(None, None, _sibling_state(fresh)) == 0
+    assert branch.seed_investigation(None, None, _sibling_state(fresh), run=fixture_run(fresh), source_run=None) == 0
     assert not (fresh / "investigation.md").exists(), (
         "a fresh run's document was created before its first append")
 
@@ -551,7 +553,7 @@ def test_a_reused_run_dir_is_refused_rather_than_seeded_over(tmp_path):
 
     with pytest.raises(branch.BranchError, match="already holds"):
         branch.seed_investigation(store, spec_at(store, run_dir, returns[0]),
-                                  _sibling_state(sibling_dir))
+                                  _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(run_dir))
 
 
 def test_a_prefix_that_would_not_validate_is_refused_rather_than_seeded(tmp_path):
@@ -596,7 +598,7 @@ def test_a_prefix_that_would_not_validate_is_refused_rather_than_seeded(tmp_path
 
     with pytest.raises(branch.BranchError, match="does not pass validation"):
         branch.seed_investigation(
-            store, spec_at(store, run_dir, returns[1]), _sibling_state(sibling_dir))
+            store, spec_at(store, run_dir, returns[1]), _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(run_dir))
 
     assert not (sibling_dir / "investigation.md").exists(), (
         "the refusal came after the write — the sibling holds a document it can never repair"
@@ -618,7 +620,7 @@ def test_a_prefix_that_validates_is_still_seeded(tmp_path):
     # document, so the branch point maps past it); the claim is that a well-formed prefix is
     # still seeded rather than refused.
     assert branch.seed_investigation(
-        store, spec_at(store, run_dir, returns[0]), _sibling_state(sibling_dir)) > 0
+        store, spec_at(store, run_dir, returns[0]), _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(run_dir)) > 0
     assert (sibling_dir / "investigation.md").is_file()
 
 

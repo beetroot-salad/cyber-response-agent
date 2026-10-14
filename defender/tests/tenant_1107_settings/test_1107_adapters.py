@@ -685,7 +685,7 @@ def _replay(tmp_path: Path, tenant_root: Path, verbs, calls: list[tuple[str, str
     from defender.tests.e2e._replay_harness import (
         GOLDEN_AB3, ReplayFn, Turn, drive, materialize)
 
-    run_dir = materialize(tmp_path / "replay", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "replay", GOLDEN_AB3, run_id='t1107b')
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": "l-001", "system": lead_system, "goal": "measure this lead",

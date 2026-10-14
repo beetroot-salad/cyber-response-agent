@@ -533,7 +533,7 @@ def _drive(  # noqa: PLR0913 — one keyword per piece of investigator text a sc
     dispatches the lead — through `box`, the investigator's executor (the harness's third
     seam), so a scenario can show that box receiving the investigator's own frames."""
     H = S.replay_harness()
-    run_dir = H.materialize(Path(where) / "run-1224", H.GOLDEN_AB3)
+    run_dir = H.materialize(Path(where) / "run-1224", H.GOLDEN_AB3, run_id='run-1224')
     lead = [H.Turn(tool_calls=[("bash", {"command": bash})])] if bash is not None else []
     main = H.ReplayFn([
         *lead,

@@ -99,7 +99,7 @@ def _run(root: Path, *, verbs, turns: list[Turn], run_id: str, tmp_path: Path,
          lead: str = LEAD) -> _Res:
     """A real run WITH a session store — the seam item 1 is about. `store_factory` is the
     production `run_investigation(store_factory=…)` injection point (#705)."""
-    run_dir = materialize(root, GOLDEN_AB3)
+    run_dir = materialize(root, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[_dispatch(lead)]), Turn(text="Investigation complete."),
     ])
@@ -221,7 +221,7 @@ def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(t
 
     Two leads, one run: the first loops itself into the repeat guard's dead end, the second
     measures its lead and stops. One `truncated_by`, one NULL."""
-    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='d826-store')
     rec = VerbRecorder()
     main = ReplayFn([
         Turn(tool_calls=[_dispatch(LEAD)]),
@@ -272,7 +272,7 @@ def test_a_broken_store_cannot_turn_a_lost_terminator_into_a_lost_lead(tmp_path)
     Driven against a real run whose store refuses only `set_truncated_by`: the write is
     attempted (a lost terminator must be a failed write, not a skipped one), and the lead's
     summary survives it."""
-    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='d826-nostamp')
     rec = VerbRecorder()
     main = ReplayFn([
         Turn(tool_calls=[_dispatch(LEAD)]), Turn(text="Investigation complete."),
@@ -313,7 +313,7 @@ def test_both_writers_of_the_column_draw_on_one_vocabulary(tmp_path):
     one closed set."""
     assert len(set(session_store.TRUNCATED_BY_VALUES)) == len(session_store.TRUNCATED_BY_VALUES)
 
-    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='d826-vocab')
     rec = VerbRecorder()
     main = ReplayFn([
         Turn(tool_calls=[_dispatch(LEAD)]), Turn(text="Investigation complete."),
