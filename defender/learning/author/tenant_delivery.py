@@ -143,7 +143,7 @@ class TenantDelivery:
     def _worktree(self, wt: Path) -> Path:
         if not wt.is_relative_to(self.tenant.worktrees) or wt.resolve() != wt:
             raise DeliveryRefused(f"batch worktree is outside tenant worktrees: {wt}")
-        if Path(_git.git(["rev-parse", "--git-common-dir"], cwd=wt,
+        if Path(_git.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=wt,
                          env=_git.env_for_cwd())).resolve() != (self.tenant.knowledge / ".git").resolve():
             raise DeliveryRefused("batch worktree is not owned by the tenant repository")
         return wt / "agent"
