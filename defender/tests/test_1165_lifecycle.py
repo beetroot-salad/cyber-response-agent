@@ -10,6 +10,7 @@ import pytest
 from defender import run as launch
 from defender.runtime import box
 from defender.runtime import scrub as scan
+from defender.tests import _tenants1106 as tenants
 from defender.tests._1165_flows import RecordIO, run_handle
 from defender.tests._alert_plant import plant_alert
 from defender.tests.e2e._replay_harness import DEFENDER
@@ -90,17 +91,19 @@ def test_launch_binds_the_run_verdict_writer_before_startup_can_fail(tmp_path):
     io = RecordIO()
     run = run_handle(tmp_path / "run", io)
     reached = []
+    tenant = SimpleNamespace(agent=Path("tenant-agent"), tenant_id=tenants.fixture_tenant().id)
 
-    def start(tree, _defender, *, tenant_agent, write_verdict):
+    def start(tree, _defender, *, tenant_agent, tenant_id, write_verdict):
         assert tree == run.run_dir
-        assert tenant_agent == Path("tenant-agent")
+        assert tenant_agent == tenant.agent
+        assert tenant_id == tenant.tenant_id
         write_verdict({"ran": False, "reason": "startup refused"})
         raise box.BoxFault("startup refused")
 
     with pytest.raises(box.BoxFault, match="startup refused"):
         launch._run_investigation_lifecycle(
             run=run, model="test", model_override=None, defender_dir=Path("defender"),
-            tenant=SimpleNamespace(agent=Path("tenant-agent")),
+            tenant=tenant,
             start_box=start, investigate=lambda **kw: reached.append(kw))
     assert reached == []
     record = run.facts.scrub_verdict
@@ -141,9 +144,12 @@ def test_launch_forwards_the_same_run_and_binds_both_teardown_callbacks(tmp_path
     io = RecordIO()
     run = run_handle(tmp_path / "run", io)
     seen = []
+    tenant = SimpleNamespace(agent=Path("tenant-agent"), tenant_id=tenants.fixture_tenant().id)
 
-    def start(tree, _defender, *, tenant_agent, write_verdict):
+    def start(tree, _defender, *, tenant_agent, tenant_id, write_verdict):
         assert tree == run.run_dir
+        assert tenant_agent == tenant.agent
+        assert tenant_id == tenant.tenant_id
         assert callable(write_verdict)
         return SimpleNamespace(sandboxed=False)
 
@@ -153,7 +159,7 @@ def test_launch_forwards_the_same_run_and_binds_both_teardown_callbacks(tmp_path
 
     result = launch._run_investigation_lifecycle(
         run=run, model="test", model_override=None, defender_dir=Path("defender"),
-        tenant=SimpleNamespace(agent=Path("tenant-agent")), start_box=start,
+        tenant=tenant, start_box=start,
         investigate=investigate, stop_box=lambda _: None)
     assert result == {"output": "done"}
     assert seen == [run]

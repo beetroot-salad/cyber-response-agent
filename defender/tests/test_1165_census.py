@@ -168,9 +168,6 @@ RESIDUE = {
     ("runtime.tenant_settings", "read_regular_bytes", "os.open"): (1, "nonrecord", ('path',)),
     ("runtime.tools._files", "_write_operand", "hold"): (1, "model_tools", ('root',)),
     ("runtime.verb_roster", "audit_read_surfaces", "read_text_utf8"): (1, "nonrecord", ('path',)),
-    ("runtime.verb_roster", "generate_roster", ".mkdir"): (1, "nonrecord", ('path.parent',)),
-    ("runtime.verb_roster", "generate_roster", ".write_text"): (1, "nonrecord", ('path',)),
-    ("runtime.verb_roster", "load_roster", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("runtime.verbs", "read_roster", "read_bytes_capped"): (1, "nonrecord", ('path',)),
 }
 

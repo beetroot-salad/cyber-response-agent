@@ -86,3 +86,13 @@ The independent adapter worker did not inspect honest source. Its amended baseli
 | Live state inherits before snapshot persistence | 4 failed, 9 passed |
 
 All five sampled violations were rejected by their intended mode, presence, byte or state-order assertions. No surviving exploit was found in this sample. The worker restored its adapter baseline and left test assertions unchanged.
+
+## Main-integration test compatibility repair — 2026-10-14
+
+Current main `d4fea4cfd53a89fcdfff93f1c4ca6ef9c943e490` merged cleanly into the separate contract lineage as `0281def314dee5e7c2538f6d55c2c0a6f10c1377`, preserving the original base and every immutable contract reference. That integration merge is separate from this tests-only repair and must not be cherry-picked into the honest implementation. No production changes are authored by this repair.
+
+The new main P2 startup test wrapper now passes its existing real fixture Run into the required lifecycle `run=` input, asserts the investigate callback receives that same object, and derives the unchanged path-based replay seam's directory/id from it. The shared replay seam has no Run override and is not extended here. Both #1165 lifecycle fixtures obtain an accepted fixture tenant ID and assert startup forwards it beside the tenant agent and verdict callback. Existing identity, message-zero, failure-precedence and verdict assertions remain.
+
+Main removed the generated-roster writer and loader. The counted census removes exactly their three obsolete occurrences: `generate_roster`/`.mkdir`, `generate_roster`/`.write_text`, and `load_roster`/`read_text_utf8`. The retained audit reader and every other count remain unchanged; no new residue allowances are added. Grounding was the exact main removal diff and parent-provided signatures/failure evidence. No honest implementation source files or diffs were inspected by this author.
+
+Parent's pre-repair integration run, `/tmp/1165-merge-tests.log`, recorded **23 failed, 119 passed** in **31.21 seconds**: twenty new main cases used the retired lifecycle directory keyword, two old #1165 fixtures lacked the newly forwarded tenant ID, and the census retained three obsolete roster occurrences. Ruff over the three repaired Python test files and `git diff --check` passed. Behavioral verification is pending the parent's focused run and independent review; the shared pytest lock is occupied by another task's full suite, so no redundant old-API baseline run was queued. This repair does not claim those pending checks passed.
