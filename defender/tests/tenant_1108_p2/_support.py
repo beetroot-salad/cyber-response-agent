@@ -7,6 +7,7 @@ from pathlib import Path
 from defender.runtime import box as box_mod
 from defender.tests._spec1092 import STOCK_ROOTFS
 from defender.tests.e2e._box665 import DockerFault, RecordingDocker
+from defender.tests.e2e._local_box_command import run_box_python_command
 
 
 def tree_bytes(root: Path) -> dict[str, bytes | None]:
@@ -63,8 +64,7 @@ class AgentReadDocker(MountedReadDocker):
             name = self.create_argv[self.create_argv.index('--name') + 1]
             command = argv[argv.index(name) + 1:]
             command[-1] = str(self.inside / '.tenant-id')
-            return subprocess.run(command, capture_output=True, text=True, check=False,
-                                  encoding='utf-8', errors='replace', timeout=10)
+            return run_box_python_command(command)
         return super().__call__(argv, **kw)
 
 
