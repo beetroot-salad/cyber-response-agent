@@ -21,12 +21,13 @@ def test_generic_records_expose_only_their_added_store_operations(tmp_path, grou
     for reader in ("read", "read_result", "read_bytes", "read_rows"):
         assert callable(getattr(record, reader, None)), (name, reader)
     expected = {
+        "payloads": {"ensure_parent"}, "gather_summaries": {"ensure_parent"},
         "alert_record": {"replace"}, "queries": {"create"}, "investigation": {"seed"}, "ticket_write": {"delete"},
         "wire_log": {"append_text", "start_stream"},
         "policy_denials": {"append_text", "start_stream"},
         "review_trace": {"append_text"},
     }.get(name, set())
-    added = {verb for verb in ("create", "seed", "delete", "append_text", "start_stream", "replace")
+    added = {verb for verb in ("create", "seed", "delete", "append_text", "start_stream", "replace", "ensure_parent")
              if callable(getattr(record, verb, None))}
     assert added == expected
     if name == "wire_log":

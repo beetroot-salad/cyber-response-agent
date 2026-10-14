@@ -516,7 +516,7 @@ class RunRecorder:
 
     def lifecycle(self, **kw: Any) -> dict[str, Any]:
         self.order.append("lifecycle")
-        self.lifecycle_calls.append(kw)
+        self.lifecycle_calls.append({**kw, "run_dir": kw["run"].run_dir})
         return {"output": "spec1120", "requests": 0, "truncated_by": None}
 
     def visualize(self, _run: Any, **_kw: Any) -> None:

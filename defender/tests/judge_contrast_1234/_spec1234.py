@@ -1931,7 +1931,7 @@ class InProcessSiblings:
         label = script.label
 
         def lifecycle(**kw: Any) -> Any:
-            run_dir = Path(kw["run_dir"])
+            run_dir = Path(kw["run"].run_dir)
             self.run_dirs[label] = run_dir
             fam = kw["world"].family
             src = Path(kw["source"].run_dir)

@@ -357,7 +357,8 @@ class _ReplayLifecycle:
         self.after = after
         self.run_dirs: list[Path] = []
 
-    def __call__(self, *, run_dir: Path, **_kw: Any) -> dict:
+    def __call__(self, *, run: Any, **_kw: Any) -> dict:
+        run_dir = run.run_dir
         self.run_dirs.append(run_dir)
         drive(run_dir, run_id=run_dir.name, main=golden_replay(run_dir))
         if self.crash_row is not None:

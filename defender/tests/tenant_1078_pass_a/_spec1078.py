@@ -401,7 +401,7 @@ class Recorder:
         self.run_dir_at.mkdir(parents=True, exist_ok=True)
         return SimpleNamespace(run_dir=self.run_dir_at)
 
-    def lifecycle(self, *, run_dir: Path, **_kw: Any) -> dict[str, Any]:
+    def lifecycle(self, *, run: Any, **_kw: Any) -> dict[str, Any]:
         self.order.append("lifecycle")
         return {"output": "spec1078", "requests": 0, "truncated_by": None}
 

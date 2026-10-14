@@ -930,7 +930,8 @@ def _plain_gather_run(tmp_path: Path, scene: _Scene, gather_turns: Sequence[H.Tu
     d = S.Drive(tmp=Path(tmp_path), tenant=scene.tenant, main=main, router=S.LeadRouter(),
                 backend=backend)
 
-    def lifecycle(*, run_dir: Path, tenant: Any, **_kw: Any) -> dict:
+    def lifecycle(*, run: Any, tenant: Any, **_kw: Any) -> dict:
+        run_dir = run.run_dir
         d.run_dir = Path(run_dir)
         d.summary = H.drive(Path(run_dir), run_id=Path(run_dir).name, main=main, gather=gather,
                             verbs=backend.registry(), tenant=tenant.tenant) or {}

@@ -351,9 +351,9 @@ def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkey
     seen: dict = {}
 
     def lifecycle(**kw):
-        seen["run_dir"] = kw["run_dir"]
+        seen["run_dir"] = kw["run"].run_dir
         seen["ctx"] = dict(_log.current_context())
-        (kw["run_dir"] / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
+        (kw["run"].run_dir / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
     T.mod("run").main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],

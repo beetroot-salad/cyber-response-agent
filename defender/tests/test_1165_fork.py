@@ -257,3 +257,16 @@ def test_fork_seed_keeps_document_global_schema_validation(tmp_path):
         seed(store, spec, source, target, state)
     assert not target.documents.investigation.path.exists()
     assert state.lead_rows("l-001") == ()
+
+
+def test_selected_empty_evidence_directories_retain_their_presence(tmp_path):
+    """O2: recognized empty source scaffolding survives the migration through Run."""
+    store, spec, source, target, state, _source_io, target_io = source_and_sibling(tmp_path)
+    (source.run_dir / "gather_raw" / "l-001").mkdir(parents=True, exist_ok=True)
+    (source.run_dir / "gather_summaries").mkdir(exist_ok=True)
+    seed(store, spec, source, target, state)
+    assert (target.run_dir / "gather_raw" / "l-001").is_dir()
+    assert (target.run_dir / "gather_summaries").is_dir()
+    assert not list((target.run_dir / "gather_raw" / "l-001").iterdir())
+    assert not list((target.run_dir / "gather_summaries").iterdir())
+    assert {"gather_raw/l-001", "gather_summaries"} <= set(target_io.names("rooted_mkdir"))

@@ -517,7 +517,7 @@ def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | o
         "D2 renames `close_case_ticket` to `record_case_ticket`: one POST "
         "/tickets/{key}/comments, no transition",
     )
-    return fn(run_dir, writer_deps(store), **_handed(run_dir, config), **kw)
+    return fn(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config), **kw)
 
 
 def open_ticket(

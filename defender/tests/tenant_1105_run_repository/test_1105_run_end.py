@@ -67,7 +67,7 @@ class _Tail(SpecTail):
         self.order.append(name)
 
     def record_case_ticket(self, run: Any, **kw: Any) -> None:
-        super().record_case_ticket(run.run_dir, **kw)
+        super().record_case_ticket(run, **kw)
         if self.fail == TICKET:
             raise OSError(errno.EIO, "spec 1105: the ticket store failed (RG-08-b)")
 

@@ -19,6 +19,8 @@ RED against b8a63e66: `run.py` has no resume argument at all (C3/PO-C29) and
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_lifecycle_1165
+
 import inspect
 import json
 from typing import Any
@@ -84,8 +86,8 @@ class _Recorder:
 
     def __call__(self, **kw):
         self.order.append("lifecycle")
-        self.kwargs = kw
-        run_dir = kw["run_dir"]
+        self.kwargs = {**kw, "run_dir": kw["run"].run_dir}
+        run_dir = kw["run"].run_dir
         (run_dir / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
@@ -439,14 +441,14 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
     run_dir = base / f"{T.EPISODE_ID}-b"
     (run_dir / "gather_raw").mkdir(parents=True)
     _run()._run_investigation_lifecycle(
-        run_dir=run_dir, model="m", model_override=None, defender_dir=T.DEFENDER,
+        run=_run_handle_lifecycle_1165(run_dir), model="m", model_override=None, defender_dir=T.DEFENDER,
         world=_run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant),
         tenant=T1106.fixture_run_tenant(),
         investigate=lambda **kw: events.append("investigate") or {},
         start_box=lambda *a, **kw: events.append("start") or object(),
         stop_box=lambda *a, **kw: events.append("stop"),
-        scrub=lambda tree: events.append("scrub"))
+        scrub=lambda tree, **kw: events.append("scrub"))
     assert events == ["start", "investigate", "stop", "scrub"]
 
 

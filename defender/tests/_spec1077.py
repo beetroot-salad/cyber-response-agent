@@ -229,6 +229,8 @@ MEMBER_CAPABILITIES: dict[str, frozenset[str]] = {
     for name, verb in MEMBER_VERB.items()
 }
 MEMBER_CAPABILITIES.update({
+    "payloads": frozenset({"write", "ensure_parent"}),
+    "gather_summaries": frozenset({"write", "ensure_parent"}),
     "alert_record": frozenset({"write", "replace"}),
     "queries": frozenset({"append", "create"}),
     "policy_denials": frozenset({"append_text", "start_stream"}),
@@ -237,7 +239,7 @@ MEMBER_CAPABILITIES.update({
     "review_trace": frozenset({"append_text"}),
     "ticket_write": frozenset({"write", "delete"}),
 })
-VERBS = ("write", "append", "update", "open", "append_text", "start_stream", "create", "seed", "delete", "replace")
+VERBS = ("write", "append", "update", "open", "append_text", "start_stream", "create", "seed", "delete", "replace", "ensure_parent")
 READ_OPERATIONS = ("read", "read_result", "read_bytes", "read_rows")
 
 #: The `observability` members that are LOCKED JSON STATES rather than logs: their writer

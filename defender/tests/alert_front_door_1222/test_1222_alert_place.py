@@ -452,7 +452,8 @@ def _box_write_run(tmp_path: Path, *, start_box: Callable[..., Any]) -> tuple[_B
     alert = S.alert_bytes(S.generic_alert(message=MARK))
     seen = _BoxSeen()
 
-    def investigate(*, run_dir: Path, box: Any, **_kw: Any) -> dict:
+    def investigate(*, run: Any, box: Any, **_kw: Any) -> dict:
+        run_dir = run.run_dir
         _write_probes(box, Path(run_dir), seen)
         return {}
 
@@ -1061,8 +1062,8 @@ def _start_over(tmp_path: Path, shape: Callable[[Path], None]) -> tuple[Any, Any
     seen: dict[str, Path] = {}
 
     def around(prod: Callable[..., dict], kw: dict) -> dict:
-        seen["run_dir"] = Path(kw["run_dir"])
-        shape(Path(kw["run_dir"]))
+        seen["run_dir"] = Path(kw["run"].run_dir)
+        shape(Path(kw["run"].run_dir))
         return prod(**kw)
 
     try:
@@ -1101,7 +1102,8 @@ def test_p153_box_created_while_the_directory_is_missing_or_no(tmp_path, monkeyp
 
 def _capture_inputs(store: dict[str, Any]) -> Callable[..., dict]:
     """`investigate`: what the input directory holds once the box is up."""
-    def investigate(*, run_dir: Path, **_kw: Any) -> dict:
+    def investigate(*, run: Any, **_kw: Any) -> dict:
+        run_dir = run.run_dir
         store["run_dir"] = Path(run_dir)
         store["alert"] = S.alert_file(run_dir).read_bytes()
         with contextlib.suppress(AssertionError, OSError):
@@ -1181,7 +1183,8 @@ def _gated_run(tmp_path: Path, daemon: Any, caplog: pytest.LogCaptureFixture) ->
     """One production run through the curation enqueue (the learning gate's consumer)."""
     out: dict[str, Any] = {"enqueued": []}
 
-    def investigate(*, run_dir: Path, box: Any, **_kw: Any) -> dict:
+    def investigate(*, run: Any, box: Any, **_kw: Any) -> dict:
+        run_dir = run.run_dir
         out["run_dir"], out["sandboxed"] = Path(run_dir), bool(box.sandboxed)
         return {}
 
@@ -1304,7 +1307,8 @@ def test_p152_host_replaces_a_file_inside_the_directory_mid_ru(tmp_path, monkeyp
             pytest.skip("the 'runc' runtime is not registered with this daemon")
         seen: dict[str, Any] = {}
 
-        def investigate(*, run_dir: Path, box: Any, **_kw: Any) -> dict:
+        def investigate(*, run: Any, box: Any, **_kw: Any) -> dict:
+            run_dir = run.run_dir
             alert = S.alert_file(run_dir)
             _replace_alert(Path(run_dir), replaced)
             seen["box_sees"] = _exec(box, Path(run_dir), "cat", str(alert)).stdout

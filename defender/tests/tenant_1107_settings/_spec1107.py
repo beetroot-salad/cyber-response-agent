@@ -616,7 +616,7 @@ class RunRecorder:
         self.order.append("lifecycle")
         self.lifecycle_calls.append(kw)
         if self.before_lifecycle is not None:
-            self.before_lifecycle(kw["run_dir"])
+            self.before_lifecycle(kw["run"].run_dir)
         return dict(self.summary)
 
     def visualize(self, *args: Any, **kw: Any) -> None:

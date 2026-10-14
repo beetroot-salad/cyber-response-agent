@@ -26,6 +26,8 @@ blind to the misses — `pyrefly-refs` is rooted at `configDir: defender` and si
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_lifecycle_1165
+
 import ast
 import functools
 import os
@@ -219,13 +221,13 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
     arrived: dict = {}
 
     def recording_investigate(**kwargs):
-        arrived.update(kwargs)
+        arrived.update({**kwargs, "run_dir": kwargs["run"].run_dir})
         return {"output": "", "requests": 0}
 
     run_dir = tmp_path / "r-647"
     run_dir.mkdir()
     _run_investigation_lifecycle(
-        run_dir=run_dir, model="m-647", model_override=None, defender_dir=DEFENDER,
+        run=_run_handle_lifecycle_1165(run_dir), model="m-647", model_override=None, defender_dir=DEFENDER,
         tenant=_tenants1106.fixture_run_tenant(),
         investigate=recording_investigate,
         start_box=lambda *_a, **_kw: object(),

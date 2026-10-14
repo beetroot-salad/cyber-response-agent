@@ -298,7 +298,7 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
     sib = _Sibling(ep)
 
     def lifecycle(**kw: Any) -> Any:
-        run_dir = Path(kw["run_dir"])
+        run_dir = Path(kw["run"].run_dir)
         sib.run = _Run(run_dir, _main_fn(), H.ReplayFn(list(turns)))
         reg = S.world_registry(ep, label, est, oracle=oracle, verifier=verifier,
                                world=kw.get("world"), **knobs)

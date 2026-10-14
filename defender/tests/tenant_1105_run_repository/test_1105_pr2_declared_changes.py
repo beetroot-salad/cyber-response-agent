@@ -732,7 +732,7 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
     def scrubbed_lifecycle(**kwargs):
         rec.order.append("lifecycle")
         rec.lifecycle_kwargs = kwargs
-        scrub.scrub(Path(kwargs["run_dir"]))
+        scrub.scrub(Path(kwargs["run"].run_dir))
         return {"output": "ok", "requests": 0, "truncated_by": None}
 
     seams = {k: v for k, v in rec.seams().items() if k != "enqueue"}

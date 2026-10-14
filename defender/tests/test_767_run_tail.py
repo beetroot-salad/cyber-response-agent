@@ -50,9 +50,9 @@ class Tail(SpecTail):
     `tenant`, `defender_dir` and `env` are what `run.py` hands the leg (#1107); `**kw` is #1047's
     exit-class pair, which the tail threads through and this suite does not interpret."""
 
-    def record_case_ticket(self, run_dir, *, tenant, defender_dir, env, **kw) -> None:
+    def record_case_ticket(self, run, *, tenant, defender_dir, env, **kw) -> None:
         self.ticket_tenants.append(tenant)
-        self._note(RECORD_STEP, run_dir)
+        self._note(RECORD_STEP, run.run_dir)
 
 
 @pytest.fixture

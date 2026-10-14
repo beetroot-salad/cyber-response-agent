@@ -109,12 +109,12 @@ class _ReceiptWriter:
         self.receipt = receipt
         self.calls: list[str] = []
 
-    def open_case_ticket(self, run_dir: Path, *_a: Any, **_kw: Any) -> None:
+    def open_case_ticket(self, run: Any, *_a: Any, **_kw: Any) -> None:
         self.calls.append("open")
 
-    def record_case_ticket(self, run_dir: Path, *_a: Any, **_kw: Any) -> None:
+    def record_case_ticket(self, run: Any, *_a: Any, **_kw: Any) -> None:
         self.calls.append("record")
-        _write_receipt(Path(run_dir), self.receipt)
+        _write_receipt(run.run_dir, self.receipt)
 
 
 def _run_world(tmp_path: Path, monkeypatch: Any, name: str) -> tuple[Path, Path, S.DockerShim]:
@@ -635,9 +635,9 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
 
         def lifecycle(**kw: Any) -> dict[str, Any]:
             handed.update(kw)
-            rd = kw["run_dir"]
+            rd = kw["run"].run_dir
             return run._drive_investigation(
-                alert_path=RunPaths(rd).alert, run_dir=rd, run_id=rd.name,
+                alert_path=RunPaths(rd).alert, run=kw["run"],
                 defender_dir=kw["defender_dir"], model_name=kw["model"],
                 model_override=kw["model_override"], box=None, tenant=kw["tenant"],
                 world=kw["world"], episode=kw["episode"], serving=kw["serving"],

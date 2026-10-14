@@ -299,7 +299,7 @@ class _Lifecycle:
         self.run_dir: Path | None = None
 
     def __call__(self, **kw: Any) -> dict[str, Any]:
-        self.run_dir = Path(kw["run_dir"])
+        self.run_dir = Path(kw["run"].run_dir)
         (self.run_dir / "report.md").write_text(T.report_text("benign"), encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
