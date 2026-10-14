@@ -44,7 +44,8 @@ class ForgeHTTP:
         self.requests.append(request)
         path = request.url.path
         if path.endswith("/branches/main"):
-            return httpx.Response(200, json=self.protection)
+            return httpx.Response(200, content=json.dumps(self.protection),
+                                  headers={"Content-Type": "application/json"})
         if path.endswith("/pulls") and request.method == "GET":
             page = int(request.url.params.get("page", "1"))
             headers = {"Link": f'<{request.url.copy_set_param("page", page + 1)}>; rel="next"'} if page + 1 in self.pages else {}

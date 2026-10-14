@@ -1,8 +1,9 @@
 # Issue 1108 P3 executable contract
 
-Status: ready for `write-code-from-tests`; independent review accepted the final 49-case contract. Production implementation is deliberately absent.
+Status: reviewed contract repair ready for `write-code-from-tests` integration and implementation verification. The original 49-case contract is revised on its contract-only lineage after implementation-stage adversarial findings; production implementation is absent from this branch.
 
-- Branch: `spec/1108-p3-delivery`.
+- Branch: `contract/1108-p3-repair`.
+- Original immutable contract: `810b70d8a5c8c9935c5eaeb3bdb9b4b311abbdeb`; this repair descends directly from it and retains the original base.
 - Base: `d4fea4cfd53a89fcdfff93f1c4ca6ef9c943e490` (merged P2).
 - Design: [issue design comment](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6063781627), fetched 2026-10-14, plus the user's session clarification: the tenant bot can read protection but cannot modify it.
 - Workflow: `spec-flow/skills/write-tests/SKILL.md` at base. No production skeleton or policy substitute is included.
@@ -10,6 +11,22 @@ Status: ready for `write-code-from-tests`; independent review accepted the final
 - Next stage: `write-code-from-tests`, beginning from that contract commit. P3 stays dormant; P4 performs production wiring and removes GhForge.
 
 Design snapshot SHA256: `e5b00f610d2faa408f46da6920621272be3ff09c5faea54b9ba7b94ca1fdff26`. Project profile SHA256: `0ed34f09127ea22f8c1fcdf178fbb1f732b5c2b41c4f3ed74688c98439d1941d`. Skill SHA256: `fe077f6f53b31e2aef672e351e442260cfdde16b23ce56ecec9fa1e3c6f095e2`.
+
+## Repair record (2026-10-14)
+
+The repair author read the approved design and original contract, without opening honest or adversary implementation source. After authoring was finalized, adversary failure tracebacks exposed source snippets while classifying the results; no executable expectations were changed afterward. A1–A5 came from independent adversary findings. The root orchestrator also reported G1 after inspecting honest code; its exact filenames were independently translated into O7 cases. These are repairs after implementation exists, not a new pre-implementation run. Current supplied design snapshot SHA256: `da42522d8569964cea03db5a5e4edd0efd0f2e06008996c9c7f51c5b91aa94f7`; the original authoring hash above identifies the earlier snapshot. No behavioral design amendment was adopted. The orchestrator confirmed repository-scoped pagination follows D7/O7, beyond A5's minimum transport-origin comparison.
+
+| Finding / obligation | Repair assertions and complementary control |
+|---|---|
+| A1 / A10, O9: non-object JSON protection escaped normalized refusal | Existing direct ForgeError and delivery DeliveryRefused tests now include literal `null`, array, string, boolean and numeric JSON roots. The HTTP fixture serializes actual JSON bytes, including `null`. Existing valid-protection read and successful delivery remain controls. |
+| A2 / O7: retained delivery skipped commit policy | `test_retained_delivery_refuses_forbidden_commit_added_after_failed_pr`: an allowed commit is pushed, PR creation fails, a real marker/settings/product bypass commit advances the retained branch, and its worktree is removed; retry must refuse, preserve the remote's good SHA and issue no extra PR POST. Existing successful retained retry controls the same flow. |
+| A3 / O7: net diff hid forbidden pushed history | `test_delivery_refuses_forbidden_history_even_when_reverted_before_allowed_lesson`: marker/settings/product bypass commit, revert and allowed lesson leave exactly one allowed net path; finish and retained deliver both refuse before creating a remote branch or PR. Existing valid lesson delivery is the control. |
+| A4 / O8: writable lane escaped agent | `test_drain_request_refuses_writable_lane_outside_agent`: parent traversal, nested traversal, absolute settings path and filesystem symlink all resolve to the existing settings directory and must refuse. Existing exact mount-set test proves a lessons lane succeeds. |
+| A5 / O7, O8: untrusted next-page Link redirected authenticated requests | `test_pagination_refuses_outside_origin_repository_before_request`: scheme/host/port changes and same-origin other-repository Link are refused before any second request, on both prefix and exact-head listing. First page does not satisfy exact head. Existing same-origin prefix pagination and added exact-head pagination authenticate and return the second-page result. MockTransport performs no policy checks. |
+| G1 / O7: Git output trimming normalized forbidden root names | Finish and retained retry bypass cases include exact root names `" agent/rogue"`, `"\tagent/rogue"`, `"\nagent/rogue"`. Real files and Git argv preserve these names; expectations do not use stripped Git output as a filename oracle. The paths must remain outside literal `agent/`. |
+| A6: protection changing after factory open | Deferred design ambiguity. No new timing or revalidation requirement is asserted. The original factory-time protection requirement remains unchanged. |
+
+Independent intent review accepted these exact executable tests and the repair record, without inspecting honest or adversary source. Reviewer Ruff passes, and an independent real-Git byte-level fixture probe confirmed space/tab/newline root names retain their exact bytes. Author Ruff, diff-whitespace checks, tests-only ancestry checks and monkeypatch lint pass (14 historical findings, zero new). Collection succeeds: 87 cases. The repaired full suite against unchanged adversary source reports **35 failed, 52 passed, zero setup errors** in 20.71s. A1 reaches ten wrong-type `AttributeError` failures, including literal null/array at both error boundaries; A2 has six missing refusals; A3 six; A4 four; A5 eight; G1 also rejects the leading-space finish bypass. The original 49 cases, added same-origin exact-head pagination control, and tab/newline finish negatives pass. Evidence: `/tmp/1108-adversary-evidence/repaired-contract.log`, produced with the documented pytest command using the adversary worktree import root. Subsequent honest green and implementation-stage checks below remain required. The adversary's original 49-case green result is not a verdict on this repair. Source implementation remains exclusively on other branches; only tests/test machinery and this declared coverage record belong here.
 
 ## Local test API seams (implementation choices, not new persisted models)
 
@@ -48,7 +65,7 @@ C19: the dev Forgejo swagger lists state/sort/milestone/labels/poster/page/limit
 
 C21: the bot can GET `/repos/tenants/playground/branches/main`, which returns `protected` and `user_can_push`. The protection-management endpoint returns 403 and is not the enforcement interface. Use the read-only branch endpoint. The current lab repo reports `protected=false`, `user_can_push=true`; operator protection setup is required before activation. This stage did not change it.
 
-## Review and validation
+## Original contract review and validation (historical)
 
 The independent intent reviewer derived obligations from the design before reviewing the authored suite. Its findings repaired real-file negative fixtures, staged-file isolation, startup read-back wiring, settings/product bypass commits, and exact credential-helper exclusivity. Runtime single-read auditing and narrow ownership/dormancy censuses cover the remaining architectural commitments. Final independent review: accepted with no remaining material findings. Reviewer inspected the final test revision; execution evidence below comes from the orchestrator.
 

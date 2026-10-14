@@ -47,11 +47,13 @@ def test_commit_gate_refuses_forbidden_paths_before_staging_or_commit(repo, path
     assert git(wt, "diff", "--cached", "--name-only") == ""
 
 
-@pytest.mark.parametrize("path", ["agent/.tenant-id", "settings/rogue.yaml", "product.py"])
+@pytest.mark.parametrize("path", ["agent/.tenant-id", "settings/rogue.yaml", "product.py",
+                                  " agent/rogue", "\tagent/rogue", "\nagent/rogue"])
 def test_finish_refuses_out_of_policy_commit_that_bypassed_gate(repo, path):
     http = ForgeHTTP()
     d = delivery(repo, http)
     wt = d.start_batch("bypass")
+    (wt / path).parent.mkdir(parents=True, exist_ok=True)
     (wt / path).write_text("forbidden bypass edit\n")
     git(wt, "add", ".")
     git(wt, "commit", "-m", "bypass")
@@ -114,7 +116,8 @@ def test_credentials_require_scheme_host_and_port_agreement_before_http(repo, en
     assert http.requests == []
 
 
-@pytest.mark.parametrize("protection", [{"protected": False, "user_can_push": False}, {"protected": True, "user_can_push": True}, {"protected": True}, {"user_can_push": False}, {"protected": "true", "user_can_push": False}, {"protected": True, "user_can_push": 0}])
+@pytest.mark.parametrize("protection", [{"protected": False, "user_can_push": False}, {"protected": True, "user_can_push": True}, {"protected": True}, {"user_can_push": False}, {"protected": "true", "user_can_push": False}, {"protected": True, "user_can_push": 0},
+                                         None, [], "main", 1, True])
 def test_main_requires_known_protected_and_bot_cannot_push(repo, protection):
     http = ForgeHTTP()
     http.protection = protection
@@ -213,3 +216,62 @@ def test_git_operations_explicitly_reset_helpers_and_use_only_tenant_file(repo, 
                    if arg.startswith("credential.helper=")]
         assert helpers == ["", f"store --file={repo[2]}"]
         assert TOKEN not in " ".join(argv)
+
+
+@pytest.mark.parametrize("path", ["agent/.tenant-id", "settings/rogue.yaml", "product.py",
+                                  " agent/rogue", "\tagent/rogue", "\nagent/rogue"])
+def test_retained_delivery_refuses_forbidden_commit_added_after_failed_pr(repo, path):
+    """O7: retry validates the retained branch before its next push, as finish does."""
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    wt = d.start_batch("retry-bypass")
+    (wt / "agent/lessons/new.md").write_text("allowed retained lesson\n")
+    d.commit(wt, ["agent/lessons/new.md"], "allowed")
+    good = git(wt, "rev-parse", "HEAD")
+    http.fail_create = True
+    with pytest.raises(target().DeliveryRefused, match="503|forge|PR|pull"):
+        d.finish_batch("retry-bypass", wt)
+    branch = d.branch.branch_name("retry-bypass")
+    assert git(repo[1], "rev-parse", branch) == good
+    (wt / path).parent.mkdir(parents=True, exist_ok=True)
+    (wt / path).write_text("forbidden retained branch edit\n")
+    git(wt, "add", path)
+    git(wt, "commit", "-m", "bypass retained commit gate")
+    assert git(wt, "rev-parse", "HEAD") != good
+    d.branch.cleanup(wt)
+    http.fail_create = False
+    creates_before = len(http.creates)
+    with pytest.raises(target().DeliveryRefused, match="tenant-id|path|agent"):
+        d.deliver("retry-bypass")
+    assert git(repo[1], "rev-parse", branch) == good
+    assert len(http.creates) == creates_before
+
+
+@pytest.mark.parametrize("path", ["agent/.tenant-id", "settings/rogue.yaml", "product.py"])
+@pytest.mark.parametrize("surface", ["finish", "deliver"])
+def test_delivery_refuses_forbidden_history_even_when_reverted_before_allowed_lesson(repo, path, surface):
+    """O7: every pushed commit is bounded; a clean net diff cannot excuse forbidden history."""
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    wt = d.start_batch("reverted-bypass")
+    base = git(wt, "rev-parse", "HEAD")
+    (wt / path).write_text("forbidden history\n")
+    git(wt, "add", path)
+    git(wt, "commit", "-m", "forbidden bypass")
+    git(wt, "revert", "--no-edit", "HEAD")
+    (wt / "agent/lessons/new.md").write_text("allowed lesson\n")
+    d.commit(wt, ["agent/lessons/new.md"], "allowed lesson")
+    assert git(wt, "diff", "--name-only", base, "HEAD") == "agent/lessons/new.md"
+    assert git(wt, "rev-list", "--count", f"{base}..HEAD") == "3"
+    if surface == "deliver":
+        d.branch.cleanup(wt)
+        action = d.deliver
+        args = ("reverted-bypass",)
+    else:
+        action = d.finish_batch
+        args = ("reverted-bypass", wt)
+    with pytest.raises(target().DeliveryRefused, match="tenant-id|path|agent"):
+        action(*args)
+    assert not http.creates
+    assert git(repo[1], "for-each-ref", "--format=%(refname)",
+               f"refs/heads/{d.branch.branch_name('reverted-bypass')}") == ""

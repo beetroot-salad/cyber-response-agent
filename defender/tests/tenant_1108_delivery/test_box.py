@@ -9,7 +9,7 @@ import pytest
 from defender.runtime import box
 from defender.runtime.box import _lifecycle
 
-from ._support import DEFENDER, TOKEN, ForgeHTTP, delivery, git
+from ._support import DEFENDER, TOKEN, ForgeHTTP, delivery, git, target
 
 
 def test_drain_request_mounts_only_code_agent_and_explicit_lane(repo):
@@ -112,3 +112,20 @@ def test_drain_start_wires_real_lifecycle_readback_before_returning_executor(rep
         assert daemon.names() == [request.name]
         assert git(wt, "status", "--porcelain") == before
     assert reads, "startup must actually read the agent identity through the box"
+
+
+@pytest.mark.parametrize("escape", ["../settings", "lessons/../../settings", "absolute", "symlink"])
+def test_drain_request_refuses_writable_lane_outside_agent(repo, escape):
+    """O8: writable mounts resolve inside the worktree's agent half."""
+    d = delivery(repo, ForgeHTTP())
+    wt = d.start_batch("mount-escape")
+    if escape == "absolute":
+        lane = str(wt / "settings")
+    elif escape == "symlink":
+        (wt / "agent/escape").symlink_to(wt / "settings", target_is_directory=True)
+        lane = "escape"
+    else:
+        lane = escape
+    assert (wt / "agent" / lane).resolve() == (wt / "settings").resolve()
+    with pytest.raises(target().DeliveryRefused, match="path|agent|writ|mount|lane"):
+        d.box_request(wt, "mount-escape", writable_dirs=(lane,))
