@@ -109,7 +109,7 @@ def test_the_reducer_surface_cannot_be_deleted():
 
 def test_the_allowance_is_exactly_one_literal():
     """Every other path under `defender/skills/gather/` is still refused — `gather/SKILL.md`,
-    `gather/verb-roster.md`, `gather/failure-modes.md`, `gather/queries/elastic/x.md` — and so
+    `gather/synthetic-reference.md`, `gather/failure-modes.md`, `gather/queries/elastic/x.md` — and so
     is every near spelling of the allowed one.
 
     The allowance is ONE literal compared as a literal, not a relaxation of the shape rule
@@ -118,7 +118,7 @@ def test_the_allowance_is_exactly_one_literal():
     """
     refused = (
         "defender/skills/gather/SKILL.md",
-        "defender/skills/gather/verb-roster.md",
+        "defender/skills/gather/synthetic-reference.md",
         "defender/skills/gather/failure-modes.md",
         "defender/skills/gather/queries/elastic/x.md",
         "defender/skills/gather/defender-sql.md/x.md",

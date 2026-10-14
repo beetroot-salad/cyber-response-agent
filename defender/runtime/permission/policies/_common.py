@@ -24,7 +24,7 @@ _INERT = ("echo", "true")
 
 
 def read_shapes(
-    run_dir: Path, defender_dir: Path, *, raw: bool
+    run_dir: Path, defender_dir: Path, *, raw: bool, tenant_agent: Path | None = None
 ) -> PathShapes:
     run, dfn = run_dir.resolve(), defender_dir.resolve()
     corpus = "|".join(_CORPUS_SUBDIRS)
@@ -43,12 +43,13 @@ def read_shapes(
         # gather is denied its own payload.
 
         shapes.append(under(run, GATHER_RAW_SHAPE))
-    shapes.append(under(dfn, rf"(?:{corpus})(?:/{SEG})*/{SEG}\.md"))
+    bases = (dfn,) if tenant_agent is None else (dfn, tenant_agent.resolve())
+    shapes.extend(under(base, rf"(?:{corpus})(?:/{SEG})*/{SEG}\.md") for base in bases)
     return PathShapes(shapes)
 
 
-def reader_grants(run_dir: Path, defender_dir: Path, *, raw: bool) -> tuple[Grant, ...]:
-    scope = read_shapes(run_dir, defender_dir, raw=raw)
+def reader_grants(run_dir: Path, defender_dir: Path, *, raw: bool, tenant_agent: Path | None = None) -> tuple[Grant, ...]:
+    scope = read_shapes(run_dir, defender_dir, raw=raw, tenant_agent=tenant_agent)
     return (
         Grant(program="cat", pattern=program_shape("cat"), scope=scope),
         *(Grant(program=v, pattern=program_shape(v)) for v in STDIN_VIEWERS),

@@ -728,7 +728,7 @@ def test_1120_no_test_lint_or_ci_file_reads_knowledge_tenants(tmp_path: Path) ->
 
 #: The C26 test modules whose lab-content assertions move to the fixture in piece 1.
 C26_MODULES = ("test_1106_layout.py", "test_verb_dispositions_995.py",
-               "test_correlation_template_1003.py", "test_verb_roster_632.py",
+               "test_correlation_template_1003.py",
                "test_gather_template_discovery.py", "test_1106_ci_census.py",
                "test_case_ticket.py")
 #: How a test module takes the lab as its subject (C26's sites): the lab's settings and agent

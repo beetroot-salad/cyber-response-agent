@@ -757,17 +757,19 @@ def test_no_host_secret_is_present_in_the_box_env(run_dir, monkeypatch):
 
 @requires_box
 def test_box_env_contains_exactly_the_allowlist(box, run_dir):
-    """The box environment is a positive allowlist, not a strip-list: the
-    variables present are exactly `BOX_ENV_ALLOWLIST` plus what the container
-    runtime itself injects. `DEFENDER_RUNS_BASE` is in the allowlist and names
+    """The tenant-free fixture carries the required box allowlist keys plus what the
+    container runtime injects. The optional `DEFENDER_AGENT_DIR` is absent because
+    this box has no tenant agent mount. `DEFENDER_RUNS_BASE` names
     `run_dir.parent`, which is NOT mounted — so the box is told where runs live
     and still cannot reach them."""
     daemon_injected = {"HOSTNAME", "HOME", "PWD", "SHLVL", "_", "OLDPWD", "TERM"}
 
     box_env = _probe(box, run_dir, "envexact", _ENV_DUMP)
 
-    assert set(box_env) - daemon_injected == set(BOX_ENV_ALLOWLIST), (
-        f"box env is {sorted(box_env)}; allowlist is {sorted(BOX_ENV_ALLOWLIST)}")
+    expected = set(BOX_ENV_ALLOWLIST) - {"DEFENDER_AGENT_DIR"}
+    assert set(box_env) - daemon_injected == expected, (
+        f"box env is {sorted(box_env)}; expected is {sorted(expected)}")
+    assert "DEFENDER_AGENT_DIR" not in box_env
     assert box_env["DEFENDER_RUN_DIR"] == str(run_dir)
     assert box_env["DEFENDER_RUNS_BASE"] == str(run_dir.parent)
 

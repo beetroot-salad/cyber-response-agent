@@ -84,7 +84,7 @@ _BLANKET_SCOPES = frozenset({"*", "all", "any"})
 def registry_path(defender_dir: Path) -> Path:
     """Where the registry lives inside a defender tree.
 
-    Under `skills/` as a system's data (so `runtime.verb_roster.model_read_surfaces` sees it),
+    Under `skills/` as a system's data (so the model-facing instruction audit sees it),
     not a tenant's `settings/systems/{system}/`, which holds endpoints and credentials for live
     services.
     """

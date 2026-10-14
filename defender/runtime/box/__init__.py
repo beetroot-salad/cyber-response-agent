@@ -114,7 +114,6 @@ from ._docker import (
     resolve_rootfs,
 )
 from ._lifecycle import (
-    TENANT_AGENT_TARGET,
     _check_mount_sentinel,
     _create_argv,
     _did_not_run_for_request,
@@ -139,7 +138,6 @@ from ._lifecycle import (
 #: Re-exports: each name's home is the module it is imported from.
 
 __all__ = [
-    "TENANT_AGENT_TARGET",
     "BoxRuns",
     "box_for_run",
     "ALIAS_PROFILE_PATH",

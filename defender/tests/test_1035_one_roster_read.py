@@ -744,9 +744,9 @@ def test_the_read_surface_audit_never_reports_a_tree_it_could_not_read_as_clean(
 
 def test_the_read_surface_audit_refuses_an_absent_adapters_directory(tmp_path):
     """P7 (O7), the absent arm — `audit_read_surfaces(<tree>/nowhere, {})` raises
-    `RosterError` naming the missing adapters directory, matching `generate_roster`'s own
-    "does not exist — refusing" posture for an absent tree; the `if adapters_dir.is_dir()
-    else []` branch goes. Needs no privilege. The positive control is the readable clean tree.
+    `RosterError` naming the missing adapters directory; an absent tree must not
+    report a clean audit. The `if adapters_dir.is_dir() else []` branch goes. Needs no
+    privilege. The positive control is the readable clean tree.
 
     Observed failing by (today): `()` — the tree reported clean."""
     tree = _audit_tree(tmp_path, skill_body="nothing advertised here")

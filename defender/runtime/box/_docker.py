@@ -355,9 +355,9 @@ def _daemon_source(path: Path, mounts: Sequence[tuple[Path, Path]]) -> Path:
     Only the source is translated; `target=`, `--workdir` and `infra_env` keep this process's
     path, which is what the agent records and the learning loop reads back.
 
-    A startup sentinel catches a wrong mapping, except on the read-only binds: `defender_dir`
-    fails on first use, but a wrong mapping of the tenant `agent/` half goes unnoticed (the box
-    just sees a different or empty dir).
+    A startup sentinel catches a wrong run-dir mapping. The tenant agent bind uses its
+    existing identity marker: planting into that source would dirty the clone. The product
+    bind is checked on first use.
     """
     covering = _covering_mount(path, mounts)
     if covering is None:

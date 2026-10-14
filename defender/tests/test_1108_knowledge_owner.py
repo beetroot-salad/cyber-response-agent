@@ -58,8 +58,8 @@ ALLOWED: dict[tuple[str, str], tuple[int, str]] = {
     ("runtime/driver/_build.py", "skills"): (1, "gather's own SKILL.md: a general skill"),
     ("runtime/orient.py", "skills"): (1, "invlang's SKILL.md: a general skill"),
     ("runtime/verb_roster.py", "skills"):
-        (3, "the roster file (gather, a general skill) and the model-read-surface walk, which "
-            "spans general and per-system skills in one tree until #1108 P4 splits it"),
+        (2, "the retained model-read-surface audit walks general and per-system skills "
+            "in one tree until #1108 P4 splits it"),
     ("learning/author/branch.py", "`). Touches `defender/lessons/` only — distinct from the "
      "lead-author PR."): (1, _P4_TEXT),
     ("learning/core/drains.py", "`). May also fold agent-fixable execution failures into "

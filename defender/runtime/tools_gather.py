@@ -507,7 +507,7 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
     if circuit_breaker.is_tripped(state, system):
         return circuit_breaker.down_message(state, system)
 
-    from defender.runtime.agent_definition import bind
+    from defender.runtime.agent_definition import RunScope, bind
     from defender.runtime.driver import gather_def_for
 
     agent_id = f"{GATHER_AGENT_ID_PREFIX}{lead_id}"
@@ -520,6 +520,7 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
     gather_def = gather_def_for(verb_grant)
     gbase = bind(
         gather_def, deps.run_dir, defender_dir=deps.defender_dir, box=deps.box,
+        scope=RunScope(tenant_agent=deps.tenant.agent if deps.tenant is not None else None),
     )
     assert isinstance(gbase, GatherDeps)
     stop = LeadStop()

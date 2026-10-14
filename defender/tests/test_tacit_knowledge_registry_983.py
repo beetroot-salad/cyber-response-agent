@@ -7,7 +7,7 @@ an agent run can reach writes the file. So the suite is three questions —
   1. Does one ENTRY mean what the design says (exactly eight fields, a bounded `review_by`, no
      blanket scope, no fuzzy scope match)?
   2. Is the lookup reachable the way every other system of record is (a rostered gather verb,
-     read-only, digest-guarded roster)?
+     read-only, and explicitly granted)?
   3. Is the file unreachable from the run path (`decide_write` refuses it for MAIN and for
      GATHER, and GATHER has no write scope at all)?
 
@@ -48,9 +48,8 @@ sinking every sanctioned pattern in the estate is a worse failure than one row g
 The malformed-registry fixtures (wildcard scope, over-span `review_by`, missing and unknown
 keys) are written INLINE into `tmp_path` rather than committed as files. That is this tree's
 convention for adapter and registry fixtures — there is no `tests/fixtures/`, and every
-adapter/roster suite builds its tree in `tmp_path` (`test_verb_roster_632._tree`,
-`test_ticket_adapter`). Each bad entry is one keyword away from the good one, which reads far
-better as `_entry(actor_scope="*")` than as a second checked-in YAML file a reader has to diff.
+adapter suite builds its tree in `tmp_path` (for example, `test_ticket_adapter`). Each bad
+entry is one keyword away from the good one, which reads far better as `_entry(actor_scope="*")` than as a second checked-in YAML file a reader has to diff.
 The one registry that IS a committed file is the real one, and
 `test_the_shipped_registry_file_is_human_authored_and_loads` is what reads it.
 """
@@ -68,7 +67,6 @@ from defender.runtime.agent_definition import compile_policy_for
 from defender.runtime.driver import MAIN_DEF
 from defender.tests import _tenants1106
 from defender.runtime.verb_grant import VerbGrant
-from defender.runtime.verb_roster import generate_roster, load_roster, roster_path
 from defender.runtime.verbs import (
     GRANTED,
     ModuleVerbRegistry,
@@ -398,14 +396,9 @@ def test_no_authz_grounding_from_a_past_ai_verdict(tmp_path):
 
 
 def test_registry_lookup_is_a_rostered_gather_verb():
-    """The registry lookup is reachable only as a gather verb through the existing roster and
-    dispatch seam: it appears in the generated `verb-roster.md` under its own system with the
-    roster's digest recomputed, and a lead reaches it the same way it reaches `cmdb.get-host`
-    (demand `registry_lookup_gather_verb`, claim c16).
-
-    The roster file is GENERATED and digest-guarded, so a new verb lands as an adapter plus a
-    declared grant plus a regeneration — never as a hand-edit, which `load_roster` would refuse
-    as drift."""
+    """The registry lookup is declared by its adapter, explicitly granted to gather, and
+    read-only through the existing dispatch seam. #1108 P2 retires the generated roster
+    file while retaining these authorization checks."""
     assert is_system_name(SYSTEM)
     assert registry().SYSTEM == SYSTEM
     assert LOOKUP in registry().VERBS
@@ -426,14 +419,6 @@ def test_registry_lookup_is_a_rostered_gather_verb():
     ), "the registry is a READ — no run-path verb may write it"
 
     assert ModuleVerbRegistry(read_roster(ADAPTERS), grant).decide(SYSTEM, LOOKUP).outcome == GRANTED
-
-    committed = roster_path(DEFENDER, "gather")
-    assert generate_roster(grant, defender_dir=DEFENDER) == \
-        committed.read_text(encoding="utf-8"), (
-            "the committed gather roster is not what its own grant generates — regenerate it "
-            "rather than hand-editing the file, which the digest guard refuses"
-        )
-    assert f"`{SYSTEM}.{LOOKUP}`" in load_roster(DEFENDER, "gather")
 
 
 def test_the_shipped_registry_file_is_human_authored_and_loads(tmp_path):
