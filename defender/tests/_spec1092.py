@@ -652,7 +652,7 @@ def run_shim(shim: str, world: ShimWorld, *, marked: bool) -> str:
 # ---- the drain lane's worktree, as a real git checkout (MF2) -----------------------------------
 class GitWorktreeBranch(RecordingBranch):
     """`RecordingBranch` whose `start_batch` mints a REAL git repo at the worktree path — one
-    commit, holding the three hash inputs under `<wt>/defender` — so `HEAD` there is the
+    commit, holding the three hash inputs and fixed product probe under `<wt>/defender` — so `HEAD` there is the
     commit the drain's fault must name, whatever channel the implementation reads it through
     (the real `AuthorBranch` cuts the worktree from `origin/main`, so its HEAD is that commit).
     `cleanup` destroys the tree, as the real one does (drains.py:776-780)."""
@@ -664,6 +664,7 @@ class GitWorktreeBranch(RecordingBranch):
     def start_batch(self, batch_id: str) -> Path:
         wt = super().start_batch(batch_id)
         plant_tree(wt, copy_code=False)
+        shutil.copyfile(DEFENDER / "SKILL.md", wt / "defender" / "SKILL.md")
         seed_repo(wt)
         self.cut_commit = git_head_sha(wt)
         return wt
