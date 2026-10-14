@@ -9,6 +9,8 @@ writer once asked; the agent tag the writer adds is `test_1221_agent_tag.py`'s).
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 from pathlib import Path
 
 import pytest
@@ -64,7 +66,7 @@ def test_open_payload_stamps_alert_event_time_label():
 
 def test_read_case_record_parses_internal_model(tmp_path: Path):
     run_dir = _write_run(tmp_path, disposition="malicious", reason="Confirmed C2 beacon.")
-    rec = case_ticket.read_case_record(run_dir, mapping=SHIPPED)
+    rec = case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=SHIPPED)
     assert rec.case_id == run_dir.name
     assert rec.signature_id == "5710"
     assert rec.disposition == "malicious"
@@ -82,13 +84,13 @@ def test_read_case_record_case_id_is_run_dir_not_frontmatter(tmp_path: Path):
         "---\ncase_id: SOMETHING-ELSE\ndisposition: benign\n"
         "confidence: high\n---\nRoutine.\n"
     )
-    rec = case_ticket.read_case_record(run_dir, mapping=SHIPPED)
+    rec = case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=SHIPPED)
     assert rec.case_id == run_dir.name
 
 
 def test_read_case_record_signature_unknown_without_alert(tmp_path: Path):
     run_dir = _write_run(tmp_path, with_alert=False)
-    rec = case_ticket.read_case_record(run_dir, mapping=SHIPPED)
+    rec = case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=SHIPPED)
     assert rec.signature_id == "unknown"
 
 
@@ -96,13 +98,13 @@ def test_read_case_record_missing_report_raises(tmp_path: Path):
     run_dir = tmp_path / "empty"
     run_dir.mkdir()
     with pytest.raises(case_ticket.CaseTicketError):
-        case_ticket.read_case_record(run_dir, mapping=SHIPPED)
+        case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=SHIPPED)
 
 
 def test_read_case_record_bad_disposition_raises(tmp_path: Path):
     run_dir = _write_run(tmp_path, disposition="totally-not-a-disposition")
     with pytest.raises(case_ticket.CaseTicketError):
-        case_ticket.read_case_record(run_dir, mapping=SHIPPED)
+        case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=SHIPPED)
 
 
 def test_read_case_record_no_frontmatter_raises(tmp_path: Path):
@@ -110,7 +112,7 @@ def test_read_case_record_no_frontmatter_raises(tmp_path: Path):
     run_dir.mkdir()
     run_dir.joinpath("report.md").write_text("just prose, no fence\n")
     with pytest.raises(case_ticket.CaseTicketError):
-        case_ticket.read_case_record(run_dir, mapping=SHIPPED)
+        case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=SHIPPED)
 
 
 def test_alert_to_open_payload_shape_and_signature_label():

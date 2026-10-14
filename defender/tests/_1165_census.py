@@ -47,6 +47,38 @@ def _reader(node: ast.expr, scan) -> str | None:
     return name if origin.startswith("defender._io.") and name in READERS else None
 
 
+def _typed(node: ast.expr, scan, wanted: str, seen: frozenset[str] = frozenset()) -> bool:
+    """Resolve a local parameter/alias through the shared scan, never its variable spelling."""
+    if not isinstance(node, ast.Name) or node.id in seen:
+        return False
+    fn = scan.innermost_def(node)
+    if fn is None:
+        return False
+    for arg in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs):
+        if arg.arg == node.id and arg.annotation is not None:
+            annotation = scan._annotation(arg.annotation)
+            origin = scan.origin(annotation) if annotation is not None else None
+            if origin in {f"defender.run_repository.{wanted}",
+                          f"defender.run_repository._handle.{wanted}"}:
+                return True
+    bindings = scan.bindings(fn).get(node.id, [])
+    return bool(bindings) and all(binding.value is not None and
+        (_typed(binding.value, scan, wanted, seen | {node.id}) or
+         (wanted == "RecordHandle" and _record_receiver(binding.value, scan, seen | {node.id})))
+        for binding in bindings)
+
+
+def _record_receiver(node: ast.expr, scan, seen: frozenset[str] = frozenset()) -> bool:
+    if _typed(node, scan, "RecordHandle", seen):
+        return True
+    member = node.func if isinstance(node, ast.Call) else node
+    if not isinstance(member, ast.Attribute) or not isinstance(member.value, ast.Attribute):
+        return False
+    group = member.value
+    return (group.attr in {"tables", "facts", "documents", "observability", "session"}
+            and _typed(group.value, scan, "Run", seen))
+
+
 def _target(node: ast.expr | None, scan, seen: frozenset[str] = frozenset()) -> str:
     if node is None:
         return "unresolved"
@@ -88,6 +120,9 @@ def census_source(rel: str, source: str) -> list[Hit]:
         key = vocabulary._call_key(call, scan, aliases) or _reader(call.func, scan)
         if key is None:
             continue
+        if (key in {".read_bytes", "Path.read_bytes"} and isinstance(call.func, ast.Attribute)
+                and _record_receiver(call.func.value, scan)):
+            continue
         # A method's receiver is the target; a resolved module/static primitive uses its
         # first positional argument. Pure load_json_artifact is deliberately not I/O.
         target = call.args[0] if call.args else None
@@ -97,6 +132,9 @@ def census_source(rel: str, source: str) -> list[Hit]:
                        ast.unparse(target) if target is not None else "<no target>"))
     for scope, node in visitor.refs:
         key = vocabulary._ref_key(node, scan, aliases) or _reader(node, scan)
+        if (key in {".read_bytes", "Path.read_bytes"} and isinstance(node, ast.Attribute)
+                and _record_receiver(node.value, scan)):
+            continue
         if key is not None:
             out.append(Hit(module, scope, key, "unresolved"))
     return out

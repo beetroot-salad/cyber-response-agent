@@ -26,6 +26,8 @@ the run loop (G14/F7) and `truncated_by` is written only inside `except BudgetKi
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 from pathlib import Path
 
@@ -179,7 +181,7 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
     assert not (run_dir / "session_store_pointer.json").exists(), (
         "the case pointer is still written inside the box-writable run dir")
 
-    resolved = ss.resolve_store_path(run_dir)
+    resolved = ss.resolve_store_path(_run_handle_1165(run_dir))
     assert Path(resolved) == Path(body["store_path"]) == Path(result["store_path"])
 
 

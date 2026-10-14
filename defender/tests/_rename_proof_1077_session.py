@@ -24,6 +24,8 @@ Run as `python -m defender.tests._rename_proof_1077_session <work dir>`.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import sys
 from pathlib import Path
 
@@ -67,7 +69,7 @@ def main(root: Path) -> int:
     assert _entries(root) == sorted([runs_base.name, sessions.name]), (
         f"session store: the run wrote beside its runs base outside the owner's sessions dir: "
         f"{_entries(root)}")
-    assert session_store.resolve_store_path(run_dir) == want, (
+    assert session_store.resolve_store_path(_run_handle_1165(run_dir)) == want, (
         "session store: the run's case pointer does not name the owner's path")
 
     # WHERE A RESUME FINDS IT: the store a sibling forks into, derived from the pointer alone.
@@ -76,7 +78,7 @@ def main(root: Path) -> int:
     # the path from the owner's one hand-out, so a store module remembering the names is
     # caught by the resume door's `store_path_for`, not by the run's own create.
     try:
-        source = branch.open_source_store(run_dir)
+        source = branch.open_source_store(run_dir, source_run=_run_handle_1165(run_dir))
     except branch.BranchError as refused:
         raise AssertionError(f"session store: a resume refused the run's store: {refused}") from None
     try:

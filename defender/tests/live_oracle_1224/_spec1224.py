@@ -392,6 +392,7 @@ _ADAPTER = '''\
 """Stub adapter for the #1224 fixture tenant: system {system!r}. Planted by _spec1224."""
 from __future__ import annotations
 
+
 import json
 import time
 from pathlib import Path
@@ -1584,12 +1585,13 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
     from defender.runtime import session_store as ss
     from defender.runtime.branch._frontier import session_for_run
     from defender.tests import _session_store_705 as SS
+    from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
     from defender.run_repository import SessionPaths
 
     store = ss.open_store(case_id=T.SOURCE_CASE_ID, sessions=SessionPaths(base))
     try:
-        session_id = session_for_run(store, src)
+        session_id = session_for_run(store, src, source_run=_run_handle_1165(src))
         call_id = f"gather-{lead}-after-branch"
         store.append(session_id, [
             SS.tool_call_response("gather", {

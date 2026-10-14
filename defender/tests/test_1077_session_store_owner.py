@@ -25,6 +25,8 @@ O1 — renaming the owner's constants moves the store — is `test_1077_rename_p
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -249,7 +251,7 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
     _is_the_subject(mixed)
 
     # Positive control: the run's own pointer opens the run's own store, which holds its run.
-    source = branch.open_source_store(run_dir)
+    source = branch.open_source_store(run_dir, source_run=_run_handle_1165(run_dir))
     try:
         assert source.path == recorded == _owner_path(run_dir.parent, case_id)
         assert session_store.main_session_id(source), "the store holds no main session"
@@ -257,13 +259,13 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
         source.close()
 
     session_store.write_case_pointer(
-        run_dir, case_id=mixed, store_path=recorded.with_name(recorded.name.replace(
+        _run_handle_1165(run_dir), case_id=mixed, store_path=recorded.with_name(recorded.name.replace(
             case_id, mixed)),
         session_id=pointer.get("session_id"))
     before = _tree(root)
     raised: BaseException | None = None
     try:
-        handle = branch.open_source_store(run_dir)
+        handle = branch.open_source_store(run_dir, source_run=_run_handle_1165(run_dir))
     except branch.BranchError as exc:
         raised = exc
     else:
@@ -288,12 +290,12 @@ def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(
     root, run_dir = source_run
     pointer_file = RunPaths(run_dir).session_pointer()
     pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
-    branch.open_source_store(run_dir).close()
+    branch.open_source_store(run_dir, source_run=_run_handle_1165(run_dir)).close()
 
     pointer_file.write_text(json.dumps({**pointer, "case_id": None}), encoding="utf-8")
     before = _tree(root)
     with pytest.raises(branch.BranchError) as info:
-        branch.open_source_store(run_dir)
+        branch.open_source_store(run_dir, source_run=_run_handle_1165(run_dir))
     assert isinstance(info.value.__cause__, InvalidCaseId), (
         f"refused, but not as a malformed case id: {info.value.__cause__!r}")
     assert _tree(root) == before

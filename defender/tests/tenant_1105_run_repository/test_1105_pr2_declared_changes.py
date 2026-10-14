@@ -124,6 +124,8 @@ commit edits none of them). Declared change 12's signature families adapt on top
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import copy
 import importlib
 import json
@@ -684,8 +686,8 @@ def test_dc7_the_run_page_takes_a_tenant_and_a_run_id(tmp_path):
     from defender.runtime import session_store
 
     arm = P.T.sibling_run_dir(ep / "runs", "b")
-    session_store.write_case_pointer(arm, case_id=P.T.SOURCE_CASE_ID,
-                                     store_path=session_store.resolve_store_path(src))
+    session_store.write_case_pointer(_run_handle_1165(arm), case_id=P.T.SOURCE_CASE_ID,
+                                     store_path=session_store.resolve_store_path(_run_handle_1165(src)))
     got = P.drive_cli(P.run_page_main(), P.new_run_page_argv(
         P.SIBLING_TENANT, arm.name, episode_id=ep.name))
     assert got.rc == 0, f"--episode ep <arm id> did not render: {got.said}"

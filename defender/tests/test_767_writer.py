@@ -31,6 +31,8 @@ WHAT §7 DECIDED THAT EVERY ASSERTION HERE RESTS ON:
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import inspect
 import json
 import re
@@ -1251,7 +1253,7 @@ def test_767_case_record_splits_cause_from_narrative(tmp_path, monkeypatch):
     use_mapping(monkeypatch, root, mapping_doc(comment_body="{cause}//{narrative}"))
     run_dir = make_run(tmp_path, cause=HOST_CAUSE, body="the model's own notes")
 
-    rec = case_ticket.read_case_record(run_dir, mapping=current_mapping())
+    rec = case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=current_mapping())
     assert rec.cause == HOST_CAUSE
     assert rec.narrative == "the model's own notes"
     assert not hasattr(rec, "reason"), (

@@ -94,3 +94,5 @@ claims:
     observed: Local tool trace upload once at completion and plain-file projection remain described, conflicting with newer live-audit and storage direction.
     verdict: holds
 ```
+
+Compatibility clarification: alert_record retains write-once write and exposes explicit generic replace for the existing missing-alert fork fallback, which replaces a stale sibling record through rooted I/O. Text reads retain the existing universal-newline normalization; byte reads remain opaque.

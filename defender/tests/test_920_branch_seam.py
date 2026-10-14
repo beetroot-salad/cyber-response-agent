@@ -40,6 +40,8 @@ signatures, so a rename is loud rather than silently uncovered.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 from defender.tests._spec1077 import fixture_run
 
 import dataclasses
@@ -209,7 +211,7 @@ def _source_run(tmp_path, *, case_id: str = "case-source"):
     store = make_store(tmp_path, case_id=case_id)
     run_dir = runs_base(tmp_path) / "run-source-001"
     run_dir.mkdir(parents=True, exist_ok=True)
-    ss.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
+    ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     # Every real run dir holds its alert before anything else happens
     # (`run_common.materialize_run`), and the sibling investigates the same one — so a
     # source run without one is not a shape a branch is ever taken from (#947).
@@ -242,9 +244,9 @@ def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
     sibling_dir.mkdir(parents=True, exist_ok=True)
     handle = factory("a-brand-new-case-id", sibling_dir)
 
-    assert Path(handle.path) == ss.resolve_store_path(run_dir), (
+    assert Path(handle.path) == ss.resolve_store_path(_run_handle_1165(run_dir)), (
         f"the sibling opened {handle.path}, not the source run's own store "
-        f"({ss.resolve_store_path(run_dir)}) — its fork would inherit nothing")
+        f"({ss.resolve_store_path(_run_handle_1165(run_dir))}) — its fork would inherit nothing")
     assert ss.main_session_id(handle) == session_id, (
         "the source run's own main session is not reachable through the handle the factory "
         "returned, so there is no lineage to branch from")
@@ -637,7 +639,8 @@ def test_message_zero_is_refused_as_a_branch_point(tmp_path):
 
     with pytest.raises(branch.BranchError):
         branch.validate(store, dataclasses.replace(
-            spec_at(store, run_dir, path_ids[-1]), branch_message_id=0))
+            spec_at(store, run_dir, path_ids[-1]), branch_message_id=0), source_run=_run_handle_1165((dataclasses.replace(
+            spec_at(store, run_dir, path_ids[-1]), branch_message_id=0)).source_run_dir))
 
 
 def test_a_run_that_captured_no_queries_is_refused(tmp_path):
@@ -651,7 +654,7 @@ def test_a_run_that_captured_no_queries_is_refused(tmp_path):
         tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None)
 
     with pytest.raises(branch.BranchError):
-        branch.validate(store, spec_at(store, run_dir, path_ids[-1]))
+        branch.validate(store, spec_at(store, run_dir, path_ids[-1]), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[-1])).source_run_dir))
 
 
 def test_a_branch_point_with_an_empty_frontier_is_refused(tmp_path):
@@ -667,7 +670,7 @@ def test_a_branch_point_with_an_empty_frontier_is_refused(tmp_path):
     store, run_dir, path_ids = _legal_source(tmp_path, investigation=None)
 
     with pytest.raises(branch.BranchError):
-        branch.validate(store, spec_at(store, run_dir, path_ids[-1]))
+        branch.validate(store, spec_at(store, run_dir, path_ids[-1]), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[-1])).source_run_dir))
 
 
 def test_the_frontier_is_read_at_the_branch_point_not_at_the_end_of_the_run(tmp_path):
@@ -692,12 +695,12 @@ def test_the_frontier_is_read_at_the_branch_point_not_at_the_end_of_the_run(tmp_
     def at(message_id: int):
         return spec_at(store, run_dir, message_id)
 
-    assert branch.validate(store, at(path_ids[-1])) is None, (
+    assert branch.validate(store, at(path_ids[-1]), source_run=_run_handle_1165((at(path_ids[-1])).source_run_dir)) is None, (
         "a branch point past the run's own append_block was refused; nothing here is left "
         "to accept and the refusals above are vacuous")
 
     with pytest.raises(branch.BranchError):
-        branch.validate(store, at(path_ids[2]))
+        branch.validate(store, at(path_ids[2]), source_run=_run_handle_1165((at(path_ids[2])).source_run_dir))
 
 
 def test_a_message_that_is_not_on_mains_path_is_refused(tmp_path):
@@ -712,7 +715,8 @@ def test_a_message_that_is_not_on_mains_path_is_refused(tmp_path):
 
     with pytest.raises(branch.BranchError, match="MAIN path"):
         branch.validate(store, dataclasses.replace(
-            spec_at(store, run_dir, path_ids[-1]), branch_message_id=path_ids[-1] + 1000))
+            spec_at(store, run_dir, path_ids[-1]), branch_message_id=path_ids[-1] + 1000), source_run=_run_handle_1165((dataclasses.replace(
+            spec_at(store, run_dir, path_ids[-1]), branch_message_id=path_ids[-1] + 1000)).source_run_dir))
 
 
 def test_a_branch_point_mid_tool_pair_is_refused(tmp_path):
@@ -733,9 +737,9 @@ def test_a_branch_point_mid_tool_pair_is_refused(tmp_path):
         tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
 
     with pytest.raises(branch.BranchError, match="unanswered"):
-        branch.validate(store, spec_at(store, run_dir, path_ids[3]))
+        branch.validate(store, spec_at(store, run_dir, path_ids[3]), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[3])).source_run_dir))
 
-    assert branch.validate(store, spec_at(store, run_dir, path_ids[4])) is None, (
+    assert branch.validate(store, spec_at(store, run_dir, path_ids[4]), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[4])).source_run_dir)) is None, (
         "the tool RETURN one row later was refused too, so the arm above is satisfied by a "
         "guard that refuses every branch point rather than by the pair rule")
 
@@ -769,7 +773,7 @@ def test_a_snapped_frontier_is_refused_by_its_own_name(tmp_path):
     assert tip != path_ids[-1], "the two extra rows did not land"
 
     with pytest.raises(branch.BranchError, match="snapped"):
-        branch.validate(store, spec_at(store, run_dir, tip))
+        branch.validate(store, spec_at(store, run_dir, tip), source_run=_run_handle_1165((spec_at(store, run_dir, tip)).source_run_dir))
 
 
 # the two named seams

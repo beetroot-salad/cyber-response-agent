@@ -51,6 +51,8 @@ renderer for both" comment exists to hold.
 
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import dataclasses
 import datetime as dt
 import json
@@ -294,7 +296,7 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
     (run_dir / "investigation.md").write_text(BENIGN_DOC, encoding="utf-8")
 
     payload = case_ticket.case_record_to_comment(
-        case_ticket.read_case_record(run_dir, mapping=fixture_run_tenant().ticket_mapping),
+        case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=fixture_run_tenant().ticket_mapping),
         mapping=fixture_run_tenant().ticket_mapping)
     wire = json.dumps(payload, sort_keys=True)
     for crossed in ("runtime-evidence", "1500 occurrences", scene.WINDOW_BEFORE_ALERT):

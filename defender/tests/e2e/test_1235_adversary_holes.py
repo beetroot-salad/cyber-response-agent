@@ -17,6 +17,8 @@ Round 2 (#1235, comment 6117481676) moved the state from three folder-keyed tabl
 `RunState` per run; each test reaches the state through that object and keeps its claim."""
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 from defender.tests._spec1077 import fixture_run
 
 import json
@@ -52,22 +54,22 @@ def test_1235_a_hand_copied_folder_has_no_link_at_any_reader(tmp_path):
     copy = tmp_path / "elsewhere" / "run"
     shutil.copytree(run_dir, copy)
     with pytest.raises(FileNotFoundError):
-        session_store.resolve_store_path(copy)
+        session_store.resolve_store_path(_run_handle_1165(copy))
     with pytest.raises(FileNotFoundError):
-        session_store.resolve_session_id(copy)
+        session_store.resolve_session_id(_run_handle_1165(copy))
     with pytest.raises(branch.BranchError):
-        branch.open_source_store(copy)
-    assert branch.source_store_if_any(copy) is None
+        branch.open_source_store(copy, source_run=_run_handle_1165(copy))
+    assert branch.source_store_if_any(copy, source_run=_run_handle_1165(copy)) is None
 
     (copy / OLD_POINTER_NAME).write_text(json.dumps(_pointer(run_dir)), encoding="utf-8")
     for read in (session_store.resolve_store_path, session_store.resolve_session_id):
         with pytest.raises(session_store.LegacyRunLink):
-            read(copy)
+            read(_run_handle_1165(copy))
     for open_store in (branch.open_source_store, branch.source_store_if_any):
         with pytest.raises(branch.BranchError):
-            open_store(copy)
+            open_store(copy, source_run=_run_handle_1165(copy))
     # control: the original resolves
-    assert session_store.resolve_store_path(run_dir) == Path(_pointer(run_dir)["store_path"])
+    assert session_store.resolve_store_path(_run_handle_1165(run_dir)) == Path(_pointer(run_dir)["store_path"])
 
 
 # X3 — the query tool never makes a state of its own: deps that carry no run state are refused

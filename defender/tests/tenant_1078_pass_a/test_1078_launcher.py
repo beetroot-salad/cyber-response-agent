@@ -15,6 +15,8 @@ episode dir under the episodes root and the data root's census unchanged.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 from defender.tests._spec1077 import fixture_run
 
 from datetime import datetime
@@ -275,7 +277,7 @@ def test_pass_a_episode_sibling_bases_carry_a_record_naming_the_tenant(
     assert data_root / TID not in (ep / "runs").parents
     store_check = H.mod("runtime.branch")
     with pytest.raises(store_check.BranchError, match="records its store at"):
-        store_check.open_source_store(sib)
+        store_check.open_source_store(sib, source_run=_run_handle_1165(sib))
     before = {data_root: H.census(data_root), ep: H.census(ep)}
     owner = _repository_refusal(data_root, sib.name)
     result, _spawn, agent = _launch(sib)
@@ -887,9 +889,9 @@ def test_o4_fork_store_location(tmp_path, data_root):
     H.plant_record(base, TID)
     src = H.source_run(base, "r1")
     br = H.mod("runtime.branch")
-    store = br.open_source_store(src)
+    store = br.open_source_store(src, source_run=_run_handle_1165(src))
     try:
-        as_of = br.branch_point_time(store, src, T.BRANCH_MESSAGE_ID)
+        as_of = br.branch_point_time(store, src, T.BRANCH_MESSAGE_ID, source_run=_run_handle_1165(src))
     finally:
         store.close()
     spec = br.BranchSpec(source_run_dir=src, branch_message_id=T.BRANCH_MESSAGE_ID,
@@ -899,7 +901,7 @@ def test_o4_fork_store_location(tmp_path, data_root):
     store = br.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))("minted-case", sib)
     try:
         session_id, _history = br.open_main_session(store, spec, _sibling_state(sib), run=fixture_run(sib), source_run=fixture_run(spec.source_run_dir))
-        br.attach_case_pointer(store, spec, sib, case_id="minted-case", session_id=session_id)
+        br.attach_case_pointer(store, spec, _run_handle_1165(sib), case_id="minted-case", session_id=session_id, source_run=_run_handle_1165((spec).source_run_dir))
     finally:
         store.close()
     from defender.run_repository import RunPaths

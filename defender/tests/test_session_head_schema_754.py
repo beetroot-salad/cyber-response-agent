@@ -19,6 +19,8 @@ tables behind, and one that had run the WAL pragma would have left the file in W
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import sqlite3
 
 import pytest
@@ -262,7 +264,7 @@ def test_the_log_reads_back_identically_from_a_second_process(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    ss.write_case_pointer(run_dir, case_id="case-alpha", store_path=store.path)
+    ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
 
     live_session = store.new_session(agent_id="main")
     linear_turns(store, live_session, 2)
@@ -281,7 +283,7 @@ def test_the_log_reads_back_identically_from_a_second_process(tmp_path):
     }
     store.close()
 
-    resolved = ss.resolve_store_path(run_dir)
+    resolved = ss.resolve_store_path(_run_handle_1165(run_dir))
     elsewhere = fresh_process_readback(resolved, live_session, headless)
 
     for session_id, (head, path, entries) in expected.items():
@@ -643,7 +645,7 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
     run_dir = tmp_path / f"run-{case_id}"
     run_dir.mkdir()
     store = ss.open_store(case_id=case_id, sessions=SessionPaths(base))
-    ss.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
+    ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     return run_dir, store
 
 

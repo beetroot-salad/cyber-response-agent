@@ -38,7 +38,7 @@ def test_scrub_verdict_write_uses_the_injected_record_even_when_it_fails(tmp_pat
     if fault:
         assert not record.path.exists(), "a failed handle write was bypassed by a path write"
     else:
-        assert json.loads(record.path.read_text()) == {"ran": True}
+        assert json.loads(record.path.read_text()) == {"ran": True, "reason": "walk completed"}
 
 
 @pytest.mark.parametrize("in_flight", [False, True])
@@ -81,7 +81,7 @@ def test_unsandboxed_marking_reads_and_writes_through_the_run(tmp_path):
                        stop_box=lambda _: None, scrub_tree=scrub, in_flight=False,
                        read_verdict=read, write_verdict=write)
     record = run.facts.scrub_verdict
-    assert json.loads(record.path.read_text()) == {"ran": True, "sandboxed": False}
+    assert json.loads(record.path.read_text()) == {"ran": True, "reason": "walk completed", "sandboxed": False}
     assert io.names("rooted_write").count(record.path.name) == 2
     assert record.path.name in io.names("rooted_read")
 
@@ -158,6 +158,6 @@ def test_launch_forwards_the_same_run_and_binds_both_teardown_callbacks(tmp_path
     assert result == {"output": "done"}
     assert seen == [run]
     record = run.facts.scrub_verdict
-    assert json.loads(record.path.read_text()) == {"ran": True, "sandboxed": False}
+    assert json.loads(record.path.read_text()) == {"ran": True, "reason": "walk completed", "sandboxed": False}
     assert io.names("rooted_write").count(record.path.name) == 2
     assert record.path.name in io.names("rooted_read")

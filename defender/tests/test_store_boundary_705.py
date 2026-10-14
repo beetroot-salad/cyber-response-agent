@@ -28,6 +28,8 @@ The probes that govern this file, and what they corrected:
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import errno as errno_mod
 import json
 import os
@@ -84,8 +86,8 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
     store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     run_dir = base / "20260718T101500Z-alpha"
     run_dir.mkdir(parents=True)
-    ss.write_case_pointer(run_dir, case_id="case-alpha", store_path=store.path)
-    resolved = Path(ss.resolve_store_path(run_dir))
+    ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
+    resolved = Path(ss.resolve_store_path(_run_handle_1165(run_dir)))
     assert base.resolve() not in resolved.resolve().parents
     # #1235: the case pointer is a host-only sidecar BESIDE the run dir (`<run_id>.session-
     # pointer.json`, like `.run-end.json`), so the runs base holds the run dir and that run's
@@ -382,7 +384,7 @@ def test_two_investigations_of_the_same_case_land_in_one_per_case_database(tmp_p
         run_dir = base / slug
         run_dir.mkdir(parents=True)
         store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-        ss.write_case_pointer(run_dir, case_id="case-alpha", store_path=store.path)
+        ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [user_request(slug), *complete_pair()], agent_id="main")
         sessions.append(session_id)
@@ -407,7 +409,7 @@ def test_run_dir_case_id_and_session_id_deliberately_diverge(tmp_path):
     run_dir = base / "20260718T101500Z-divergent"
     run_dir.mkdir(parents=True)
     store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    ss.write_case_pointer(run_dir, case_id="case-alpha", store_path=store.path)
+    ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
     session_id = store.new_session(agent_id="main")
     r1 = store.append(session_id, [user_request("root")], agent_id="main")[0]
     fork = store.fork(session_id, at_message_id=r1)

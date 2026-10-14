@@ -35,6 +35,23 @@ def f(run):
     assert C.census_source("runtime/planted.py", body) == []
 
 
+def test_resolved_record_byte_reads_are_allowed_but_path_and_unknown_receivers_are_not():
+    source = """
+from defender.run_repository import Run as Investigation, RecordHandle as Record
+def f(run: Investigation, record: Record, mystery):
+    alias = record
+    alias.read_bytes()
+    run.facts.alert.read_bytes()
+    run.tables.payloads('l-001', 0).read_bytes()
+    record.path.read_bytes()
+    mystery.read_bytes()
+"""
+    hits = C.census_source("runtime/planted.py", source)
+    assert len(hits) == 2
+    assert {hit.expression for hit in hits} == {"record.path", "mystery"}
+    assert C.deviations(hits, {})
+
+
 def test_duplicate_bypass_in_an_allowed_scope_is_not_collapsed():
     body = "from defender._io import read_text_utf8\ndef f(path):\n return read_text_utf8(path)\n"
     hits = C.census_source("runtime/planted.py", body)
@@ -136,7 +153,6 @@ RESIDUE = {
     ("runtime.scrub", "mark_unsandboxed", "read_text_utf8"): (1, "non_run", ('p',)),
     ("runtime.scrub", "tree_unsandboxed", "read_text_utf8"): (1, "non_run", ('verdict_path(tree)',)),
     ("runtime.scrub", "tree_verified", "read_text_utf8"): (1, "non_run", ('p',)),
-    ("runtime.session_store", "_case_pointer", "read_text_utf8"): (1, "non_run"),
     ("runtime.session_store", "open_store", "guarded_mkdir"): (1, "session_store", ('path.parent',)),
     # The SQL shim reads the model's file operands and operates only inside the box.
     ("runtime.sql_engine.sql", "_inferred_load", "builtins.open"): (1, "model_tools"),

@@ -47,7 +47,7 @@ def _dispatch(run_dir: Path, lead_id, goal: str, dims: list[str]) -> dict:
 
 
 def test_writes_lead_id_keyed_sidecar(tmp_path):
-    run_dir = tmp_path / "run-A"
+    run_dir = tmp_path / "run-a"
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = _dispatch(
         run_dir, "l-001", "Did the FIM fire trace to apt?", ["apt history", "checksum"]
@@ -142,7 +142,7 @@ def test_missing_lead_id_silently_skips(tmp_path):
 
 
 def test_missing_required_keys_silently_skips_write(tmp_path):
-    run_dir = tmp_path / "run-D"
+    run_dir = tmp_path / "run-d"
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead({"run_dir": str(run_dir), "lead_id": "l-001"}, run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not (run_dir / "gather_raw" / "l-001.lead.json").exists()

@@ -25,6 +25,8 @@ shared `S.Backend` through the real `search_envelope`.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 import re
 import shutil
@@ -1068,7 +1070,7 @@ def test_p012_run_ends_at_mains_first_answer_with_correlation(tmp_path):
     assert S.L3 in joined, "the judge's lead loader does not see l-00c"
     assert joined[S.L3].goal == d.sidecar(S.L3).get("goal")
     assert len(joined[S.L3].queries) == 1
-    page = S.sym("scripts.visualize.visualize_run", "render_page")(d.run_dir)
+    page = S.sym("scripts.visualize.visualize_run", "render_page")(_run_handle_1165(d.run_dir))
     assert S.L3 in page, "the run page does not show l-00c"
 
 
@@ -1160,7 +1162,7 @@ def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
         leads={S.L3: corr, "l-009": [S.query(system, verb, params), S.text("L9 captured.")]})
     _run_with_turns(src)
     assert src.run_dir is not None
-    store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir)
+    store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
     ss = SS.store_mod()
     path = ss.path_row_ids(store, ss.main_session_id(store))
     spec = spec_at(store, src.run_dir, path[2], prompt=CONTINUATION)

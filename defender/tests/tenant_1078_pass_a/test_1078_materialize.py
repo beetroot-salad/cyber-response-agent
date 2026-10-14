@@ -21,6 +21,8 @@ project's harness — so the session store lands where the run itself opens it.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 import os
 import sys
@@ -133,7 +135,7 @@ def test_o4_run_store_location(tmp_path, tenant_root):
     <root>/T/sessions/<case>.db."""
     run_dir = Path(_materialize(_golden_alert(tmp_path), "r1", T_ID))
     _replay(run_dir)
-    store = H.mod("runtime.session_store").resolve_store_path(run_dir)
+    store = H.mod("runtime.session_store").resolve_store_path(_run_handle_1165(run_dir))
     assert store.parent == tenant_root / T_ID / "sessions", f"the store is at {store}"
     assert store.suffix == ".db"
     assert store.is_file()

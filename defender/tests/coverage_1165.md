@@ -22,3 +22,9 @@ Chosen interfaces supplement design: driver run= and source_run=; append_query_r
 ## Independent contract review
 
 Reviewer contract_review cleared the candidate for freeze after CR-1165-02 (real startup callback paths) and CR-1165-03 (unknown-target exemption laundering) were repaired and rechecked. The named-create descriptor fixture was also corrected to exercise the appropriate real core lane. Pure census controls and real-core fixture probes passed. Missing new APIs are expected preimplementation reds; full new-case execution remains mandatory during implementation. No production edits were included.
+
+## Implementation-stage contract repair
+
+Original immutable contract: 2c4096df103c65c386446126873e447e8cab547a. This tests-only follow-up repairs remaining mechanical Run call adapters, a path-oriented observation fake, newline expectations, fresh-scaffold cleanup, and the nonempty oversized-prefix fixture. Census controls now prove annotated record byte reads while rejecting path and unknown receivers; 17 controls passed, one actual production sweep deselected pending implementation. The legacy missing-alert/stale-record fallback is now covered and sanctioned by an explicit generic alert_record.replace operation; write remains exclusive.
+
+These repairs occurred after implementation began. The parent inspected limited honest-source signatures and fork snippets; one compatibility author inspected signatures. Independent reviewer did not inspect honest source. They are disclosed compatibility/fixture repairs, not an independently authored preimplementation contract. Full focused and CI execution remains required on the implementation branch.

@@ -36,6 +36,8 @@ classifies nothing and decides no policy.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -523,7 +525,7 @@ def open_ticket(
 ) -> Any:
     from defender.scripts.case_history import ticket_writer
 
-    return ticket_writer.open_case_ticket(run_dir, writer_deps(store), **_handed(run_dir, config))
+    return ticket_writer.open_case_ticket(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config))
 
 
 def receipt_path(run_dir: Path) -> Path:

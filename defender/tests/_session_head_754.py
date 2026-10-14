@@ -41,6 +41,8 @@ pointer adds:
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 import os
 import sqlite3
@@ -255,9 +257,9 @@ def session_analysis(run_dir: Path) -> list[tuple[Any, str]]:
     caller that still depends on both.
     """
     ss = store_mod()
-    store = ss.open_store_for_read(ss.resolve_store_path(Path(run_dir)))
+    store = ss.open_store_for_read(ss.resolve_store_path(_run_handle_1165(Path(run_dir))))
     try:
-        session_id = ss.resolve_session_id(Path(run_dir)) or ss.main_session_id(store)
+        session_id = ss.resolve_session_id(_run_handle_1165(Path(run_dir))) or ss.main_session_id(store)
         messages = ss.hydrate(store, session_id, role="analysis")
         coords = ss.hydrate(store, session_id, role="actor")
         return list(zip(messages, [c["coord"] for c in coords], strict=True))

@@ -46,6 +46,21 @@ def test_fork_retains_current_alert_bytes_for_the_same_id_and_inherits_verified_
     assert fallback.facts.alert_record.path.read_bytes() == source.facts.alert_record.path.read_bytes()
 
 
+
+def test_missing_alert_fallback_replaces_a_stale_record_through_target_run(tmp_path):
+    """O2/O7: legacy missing-alert fallback replaces an existing stale input record."""
+    store, spec, source, target, state, _source_io, target_io = source_and_sibling(tmp_path)
+    plant_alert(source.run_dir, b'{"id":"source"}\n')
+    plant_alert(target.run_dir, b'{"id":"stale"}\n')
+    target.facts.alert.path.unlink()
+    seed(store, spec, source, target, state)
+    assert target.facts.alert.path.read_bytes() == source.facts.alert.path.read_bytes()
+    assert target.facts.alert_record.path.read_bytes() == source.facts.alert_record.path.read_bytes()
+    name = str(target.facts.alert_record.path.relative_to(target.run_dir))
+    assert any(op == "rooted_write" and relative == name and mode == "replace"
+               for op, _root, relative, mode in target_io.calls)
+
+
 def test_fork_copies_only_canonical_owner_names_as_opaque_bytes(tmp_path):
     """O7: canonical payload/claim/summary bytes survive even when they are not UTF-8."""
     store, spec, source, target, state, source_io, target_io = source_and_sibling(tmp_path)
@@ -236,7 +251,7 @@ def test_fork_seed_keeps_document_global_schema_validation(tmp_path):
     """O4: using a seed as its own baseline never bypasses document-wide size gates."""
     from defender._artifact_schema import INVESTIGATION_FILE_MAX
 
-    document = "x" * (INVESTIGATION_FILE_MAX + 1) + "\n```invlang\n```\n"
+    document = "x" * (INVESTIGATION_FILE_MAX + 1) + "\n```invlang\n:V prologue.vertices\n```\n"
     store, spec, source, target, state, _source_io, _target_io = source_and_sibling(tmp_path, document=document)
     with pytest.raises((ValueError, branch.BranchError), match="limit|validation"):
         seed(store, spec, source, target, state)

@@ -17,6 +17,8 @@ gather panel was always empty. These tests pin the fixed behavior:
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 from pathlib import Path
 
@@ -72,7 +74,7 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
     # cross-test collision.
     store = ss.open_store(
         case_id=f"visualize-runtime-fixture-{run.parent.name}", sessions=SessionPaths(run.parent))
-    ss.write_case_pointer(run, case_id=store.case_id, store_path=store.path)
+    ss.write_case_pointer(_run_handle_1165(run), case_id=store.case_id, store_path=store.path)
     sessions: dict[str, str] = {}
     for rec in messages:
         agent_id = rec.get("agent_id", "main")

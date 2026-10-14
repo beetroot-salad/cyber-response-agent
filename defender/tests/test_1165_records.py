@@ -21,12 +21,12 @@ def test_generic_records_expose_only_their_added_store_operations(tmp_path, grou
     for reader in ("read", "read_result", "read_bytes", "read_rows"):
         assert callable(getattr(record, reader, None)), (name, reader)
     expected = {
-        "queries": {"create"}, "investigation": {"seed"}, "ticket_write": {"delete"},
+        "alert_record": {"replace"}, "queries": {"create"}, "investigation": {"seed"}, "ticket_write": {"delete"},
         "wire_log": {"append_text", "start_stream"},
         "policy_denials": {"append_text", "start_stream"},
         "review_trace": {"append_text"},
     }.get(name, set())
-    added = {verb for verb in ("create", "seed", "delete", "append_text", "start_stream")
+    added = {verb for verb in ("create", "seed", "delete", "append_text", "start_stream", "replace")
              if callable(getattr(record, verb, None))}
     assert added == expected
     if name == "wire_log":
@@ -173,7 +173,7 @@ def test_bytes_are_opaque_text_is_strict_and_jsonl_keeps_existing_tolerance(tmp_
     assert refused.text is None
     assert refused.refused_by == _io.REFUSED_UNDECODABLE
     replaced = record.read_result(errors="replace")
-    assert replaced.text == raw.decode("utf-8", errors="replace")
+    assert replaced.text == '{"seq": 1}\n\nnot json\n[]\n{"text": "\ufffd"}\n'
     rows, malformed, result = record.read_rows()
     assert rows == [{"seq": 1}, {"text": "\ufffd"}]
     assert malformed == 2
@@ -275,6 +275,8 @@ def test_investigation_seed_preserves_fresh_sibling_refusal_for_other_inherited_
     assert not run.documents.investigation.path.exists()
     # Empty scaffolding carries no inherited evidence in the current fresh-sibling rule.
     path.unlink()
+    if occupied == "payloads":
+        path.parent.rmdir()
     run.documents.investigation.path.write_bytes(b"")
     run.documents.investigation.seed("# inherited prose\n")
     assert run.documents.investigation.path.read_text() == "# inherited prose\n"

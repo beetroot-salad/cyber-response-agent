@@ -45,6 +45,8 @@ RED until the round-2 implementation lands: `defender.runtime.run_state` does no
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import gc
 import json
 import weakref
@@ -494,34 +496,34 @@ def test_a_run_recorded_before_1235_refuses_at_every_reader_of_its_case_link(tmp
         assert issubclass(session_store.LegacyRunLink, session_store.StoreError)
         for read in (session_store.resolve_store_path, session_store.resolve_session_id):
             with pytest.raises(session_store.LegacyRunLink) as err:
-                read(run_dir)
+                read(_run_handle_1165(run_dir))
             _says_rerun(err.value, run_dir)
         for open_store in (branch.open_source_store, branch.source_store_if_any):
             with pytest.raises(branch.BranchError) as err:
-                open_store(run_dir)
+                open_store(run_dir, source_run=_run_handle_1165(run_dir))
             _says_rerun(err.value, run_dir)
         with pytest.raises(session_store.LegacyRunLink) as err:
-            branch.session_for_run(store, run_dir)
+            branch.session_for_run(store, run_dir, source_run=_run_handle_1165(run_dir))
         _says_rerun(err.value, run_dir)
 
         # Control: no old file and no sidecar is a folder with no link — "no session".
         (run_dir / OLD_POINTER_NAME).unlink()
         with pytest.raises(FileNotFoundError):
-            session_store.resolve_store_path(run_dir)
+            session_store.resolve_store_path(_run_handle_1165(run_dir))
         with pytest.raises(FileNotFoundError):
-            session_store.resolve_session_id(run_dir)
-        assert branch.source_store_if_any(run_dir) is None
-        assert branch.session_for_run(store, run_dir) == branch.main_session(store)
+            session_store.resolve_session_id(_run_handle_1165(run_dir))
+        assert branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir)) is None
+        assert branch.session_for_run(store, run_dir, source_run=_run_handle_1165(run_dir)) == branch.main_session(store)
     finally:
         store.connection.close()
 
     # Control: the sidecar beside an old file wins.
     (run_dir / OLD_POINTER_NAME).write_text(json.dumps({"case_id": "elsewhere"}), encoding="utf-8")
-    session_store.write_case_pointer(run_dir, case_id=link["case_id"],
+    session_store.write_case_pointer(_run_handle_1165(run_dir), case_id=link["case_id"],
                                      store_path=Path(link["store_path"]),
                                      session_id=link.get("session_id"))
-    assert session_store.resolve_store_path(run_dir) == Path(link["store_path"])
-    handle = branch.source_store_if_any(run_dir)
+    assert session_store.resolve_store_path(_run_handle_1165(run_dir)) == Path(link["store_path"])
+    handle = branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir))
     assert handle is not None
     try:
         assert Path(handle.path).resolve() == Path(link["store_path"]).resolve()
