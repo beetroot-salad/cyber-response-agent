@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run the spec_graph checkers over every committed spec graph, ratcheted.
+"""Historical graph-corpus checker, retired from CI.
+
+Retained for inspecting old artifacts; the active pipeline no longer creates graphs.
+
+Run the spec_graph checkers over every committed spec graph, ratcheted.
 
 The checkers (`spec-graph lint | gate | binds | claims`) ship with the spec-flow plugin and
 run at authoring time in the write-tests flow; without this gate nothing runs them afterwards,
@@ -86,7 +90,7 @@ def _findings_for(mods: dict, path: Path, cfg: dict) -> list[str]:
 
 def _scan() -> dict[str, list[str]]:
     mods = _load_checkers()
-    cfg = mods["config"].load(None)
+    cfg = mods["config"].load(str(REPO_ROOT / "docs" / "archive" / "spec-flow-project-config.json"))
     paths = mods["config"].artifacts(cfg)
     if not paths:
         raise GateBlind("no spec_graph_*.yaml found — nothing to gate is not the same as clean")

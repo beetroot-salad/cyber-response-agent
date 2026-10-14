@@ -1,13 +1,13 @@
 ---
 name: write-code-with-no-spec
-description: "Speedrun the design-to-code lane for a small bug fix or feature that doesn't need write-tests' full demand ledger and spec-coverage graph. Starts from discuss-issue's posted intent+design doc, writes the tests (unit and e2e) directly against it as a discrete pre-implementation commit, looses an adversarial implementer against that commit in parallel with the honest one, implements to green under the same ownership and honest-repair discipline as write-code-from-spec, ships, and hands to finalize. Use only when the design doc is already a single small piece with no material forks left open — kick back to write-tests when the delta needs decomposition or its own graph."
+description: "Legacy combined tests-and-code workflow for resuming existing write-code-with-no-spec runs. Prefer write-tests followed by write-code-from-tests for new work, including small changes."
 argument-hint: "[issue # or design doc path]"
 effort: high
 ---
 
 # Write code with no spec
 
-The full pipeline (`write-tests` then `write-code-from-spec`) pays for a demand ledger and a spec-coverage graph because a design big enough to have material forks and multiple actors needs a machine-checked record of which obligations got discharged where. A small fix doesn't have that shape — one or two obligations, one entry point, nothing to decompose — and building the ledger for it is pure overhead. This skill is the same discipline (tests pin intent before code exists, code is never edited to make a test pass, an adversary checks that the tests actually discriminate) with the ledger and graph removed. What it does **not** remove: the worktree isolation, the tests-before-code ordering, the adversarial check, the ownership rule, and the honest CI-repair loop. Skip those and you're back to writing code and its tests in the same breath, from the same assumptions — which is the exact failure mode the tests-are-the-spec approach exists to prevent.
+This combined lane is retained for existing runs. New work uses `write-tests` followed by `write-code-from-tests`, which consumes the design, committed tests and compact coverage/review record. The instructions below preserve the earlier run's worktree isolation, tests-before-code ordering, adversarial check, ownership and CI-repair discipline.
 
 **Guardrail, checked continuously, not just at the start:** if while working the change turns out to touch more than one entry point, needs a decomposition decision, or opens a fork whose two readings imply a different data model — stop. That's what `discuss-issue` and `write-tests` are for. Kick back rather than improvising a data model at the keyboard.
 
@@ -17,7 +17,7 @@ Both the test writer (§2) and the adversary (§3) dispatch as **Opus subagents 
 
 ## 0. Work in an isolated worktree
 
-Mint a fresh branch off the default branch (`conventions.defaultBranch`, else `main`) — there's no prior spec branch to adopt here, unlike `write-code-from-spec`. `git worktree add ../wt-issue-<n> -b <branch>` (or `EnterWorktree`). Everything below happens inside it; never in the main checkout, since this runs the full gate repeatedly and pushes.
+Mint a fresh branch off the default branch (`conventions.defaultBranch`, else `main`) — there's no prior spec branch to adopt here, unlike `write-code-from-tests`. `git worktree add ../wt-issue-<n> -b <branch>` (or `EnterWorktree`). Everything below happens inside it; never in the main checkout, since this runs the full gate repeatedly and pushes.
 
 ## 1. Read the design
 
@@ -69,5 +69,5 @@ Use `ship`'s branch/commit/push/open-PR mechanics. Additions specific to this sk
 
 ## 8. Exit
 
-- **Succeeded** — PR is green. Hand off to `finalize`, same as `write-code-from-spec` would.
+- **Succeeded** — PR is green. Hand off to `finalize`, same as `write-code-from-tests` would.
 - **Failed to a human** — say what's red and why you stopped; leave the PR/branch intact for `claude --resume`.

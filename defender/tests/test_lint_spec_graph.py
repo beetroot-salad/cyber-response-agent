@@ -83,9 +83,9 @@ def test_a_gate_that_cannot_look_exits_2(lint, tmp_path):
 
 @pytest.mark.gate
 def test_the_committed_corpus_is_at_or_under_its_recorded_ceilings(lint):
-    """The real corpus against the real baseline — the assertion CI makes on every push.
+    """Opt-in smoke check of the historical corpus using its archived configuration.
 
-    `gate`-marked, so the `test` job does not make it a SECOND time: the code-smells step
-    runs this exact entry point over this exact corpus and blocks on its exit code. At 19.5s
-    it was the second-largest test in the suite, and the duplicate bought no coverage."""
+    `gate`-marked so ordinary CI does not maintain retired artifacts. The standalone
+    command remains usable for historical investigation without loading graph configuration
+    into the active project profile."""
     assert lint.main([]) == 0

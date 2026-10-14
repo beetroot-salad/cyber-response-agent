@@ -3,8 +3,9 @@
 
 The checks' method is repo-agnostic; where a project keeps its code, what its entrypoints
 look like, and what its graph calls things live in the target repo's
-`.claude/spec-flow.json`. Missing config is not an error: the defaults below apply, and
-`/spec-flow:init` writes the file.
+an explicitly supplied profile or the historical `specGraph` section of
+`.claude/spec-flow.json`. Missing config uses the defaults below. New `init` runs no
+longer create graph configuration.
 """
 from __future__ import annotations
 

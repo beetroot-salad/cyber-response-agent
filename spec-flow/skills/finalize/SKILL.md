@@ -1,13 +1,13 @@
 ---
 name: finalize
-description: "Close out the green PR that write-code-from-spec shipped: apply every fix you're confident in inline, file the rest as follow-up issues, trace what escaped back to the stage that should have held it, feed process findings back to the human, and re-green the PR before the merge gate. Meets the code cold — it does not read the spec's rationale. Use after write-code-from-spec, as the last stage before a human merges."
+description: "Close out the green PR that write-code-from-tests shipped: apply every fix you're confident in inline, file the rest as follow-up issues, trace what escaped back to the stage that should have held it, feed process findings back to the human, and re-green the PR before the merge gate. Meets the code cold — it does not read the spec's rationale. Use after write-code-from-tests, as the last stage before a human merges."
 argument-hint: "[issue # or PR #]"
 effort: xhigh
 ---
 
 # Finalize
 
-`write-code-from-spec`'s mirror: rather than writing code to satisfy a spec, this reads the shipped PR and makes it better — fixing what it can, filing what it can't, feeding what it learns back into the pipeline, and leaving the PR green for the human who merges it. It is the last stage before the merge gate, and the only one whose job is to *disagree* with what came before.
+`write-code-from-tests`'s mirror: rather than writing code to satisfy a spec, this reads the shipped PR and makes it better — fixing what it can, filing what it can't, feeding what it learns back into the pipeline, and leaving the PR green for the human who merges it. It is the last stage before the merge gate, and the only one whose job is to *disagree* with what came before.
 
 ## Meet the code cold
 
@@ -51,7 +51,7 @@ Fix honestly: never green the build by weakening a test, suppressing a type erro
 
 You just met a class of bug the pipeline shipped green — data no other stage has: the upstream stages argued from inside the design; you were the first reader to see what landed. It shipped because it passed *every* stage that could have stopped it, so before naming a lever, nail down where the defense actually broke.
 
-That diagnosis is a subagent's job, not yours. For each finding that is a real defect the suite let through (not a style nit), spawn a **tracer** on `references/trace.md` (sibling of this file) with the finding, the PR and issue numbers, and the spec ref. It walks the bug back through the record earliest-first — design-doc scope, graph demands, discharging tests, the human's fork resolutions, the write-tests frontier chain, linked transcripts — and returns an attribution *proven by a cited artifact*, or marked provisional where the trail is gone. The tracer reads everything you must not — rationale, handoff notes, transcripts — which is exactly why it is a subagent: dispatch it only after your review findings are settled, and take back its verdict, never the design's argument.
+That diagnosis is a subagent's job, not yours. For each finding that is a real defect the suite let through (not a style nit), spawn a **tracer** on `references/trace.md` (sibling of this file) with the finding, the PR and issue numbers, and the contract ref. It walks the bug back through the record earliest-first — design-doc scope, mapped obligations and enforcing assertions, the human's decisions, review/verification records, linked transcripts — and returns an attribution *proven by a cited artifact*, or marked provisional where the trail is gone. The tracer reads everything you must not — rationale, handoff notes, transcripts — which is exactly why it is a subagent: dispatch it only after your review findings are settled, and take back its verdict, never the design's argument.
 
 Its attributions feed two channels, deliberately different:
 

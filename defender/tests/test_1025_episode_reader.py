@@ -116,13 +116,13 @@ def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
 # Decision 1 — the file names: one home, one spelling
 # ---------------------------------------------------------------------------------------
 
-#: The shipped code roots — the project profile's `specGraph.codeRoots`, READ from the profile
+#: The shipped code roots — the project profile's `sourceRoots`, READ from the profile
 #: rather than re-spelled so a root added there is censused here — relative to the `defender/`
 #: package the code under test is actually IMPORTED from, so a worktree census reads the
 #: worktree, never the checkout the shared venv's editable install points at.
 _CODE_ROOTS = tuple(
     Path(root).relative_to("defender").as_posix()
-    for root in json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))["specGraph"]["codeRoots"])
+    for root in json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))["sourceRoots"])
 #: The ONE home of the three names — `_episode_paths.py`, the episode-layout owner (#1077 D1
 #: re-homed them off `learning/branch/archive.py`, which now binds them by import). The
 #: run-level owner is censused beside it: the family stamp's name is its `PROVENANCE`.

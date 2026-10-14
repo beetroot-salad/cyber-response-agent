@@ -596,7 +596,7 @@ def _module_named(repo_root: Path, ident: str) -> bool:
 
 
 def _path_named(repo_root: Path, ident: str) -> bool:
-    """Whether `ident` still names a tracked directory component or file stem.
+    """Whether `ident` still names a tracked directory component, filename, or stem.
 
     `_scan` harvests idents from removed paths, which is wrong whenever the name outlives
     those paths — e.g. deleting 24 of 25 files under `held-out/` must not make every
@@ -614,7 +614,7 @@ def _path_named(repo_root: Path, ident: str) -> bool:
         if rel.startswith(_ARCHIVAL_DIRS) or rel in _ARCHIVAL_DIRS:
             continue
         pure = PurePosixPath(rel)
-        if ident in pure.parts[:-1] or pure.stem == ident:
+        if ident in pure.parts[:-1] or pure.stem == ident or pure.name == ident:
             return True
     return False
 
@@ -685,12 +685,16 @@ def _scan(
             if len(component) >= 5 and "." not in component:
                 idents.add(component)
 
-    # The component walk above drops every file basename (they carry a suffix), so take the
-    # stem of deleted (not renamed) paths explicitly.
+    # Deleted Markdown names are document references, not runtime identifiers: keep the
+    # suffix so an ordinary prose word isn't treated as a reference to a deleted file.
+    # Modules and extensionless executables still donate their import/command names.
     for p in deleted_paths:
-        stem = Path(p).stem
-        if len(stem) >= 5 and "." not in stem:
-            idents.add(stem)
+        path = Path(p)
+        if path.suffix.lower() == ".md":
+            if _is_specific(path.stem):
+                idents.add(path.name)
+        elif len(path.stem) >= 5 and "." not in path.stem:
+            idents.add(path.stem)
 
     specific = sorted(i for i in idents if _is_specific(i))
     skipped = sorted(i for i in idents if not _is_specific(i))

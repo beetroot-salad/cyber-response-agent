@@ -1,48 +1,44 @@
 # spec-flow
 
-A spec-first pipeline from GitHub issue to merged PR, as a Claude Code plugin.
+A design-and-tests pipeline from GitHub issue to merged PR, as a Claude Code plugin.
 
-The idea it is built on: **the tests are the spec.** A design written in prose fails three ways —
-it's ambiguous (two defensible readings), incomplete (a case it never mentions), or the code just
-diverges from it. So before any implementation exists, the design is turned into an *executable*
-spec: a list of demands bound to a spec-coverage graph, realized as end-to-end tests — the tests
-committed before implementation, the graph riding along as their machine-checked derivation.
-Then the code is written against it. "Tests green" comes to mean "the code
-follows intent" — which is not what it means when the tests were written afterwards, by the same
-agent, from the same assumptions.
+The design records intended behavior, scope, data models, flows, architecture and trade-offs.
+**The tests are the executable contract between that design and code.** Write them before
+implementation, independently review their fidelity and discrimination, then implement against
+them while an adversary looks for intent violations the tests permit. Findings can improve the
+design, the contract or the code; group them by cause before patching or choosing a dissolving change.
+
+Coverage records are agent scaffolding. `write-tests` starts with a compact map and scales
+investigation/review to uncertainty, coupling and failure consequences. `write-code-from-tests` consumes that compact contract directly. There is no separate formal
+spec artifact: the design records requirements and the tests enforce them. A green suite does
+not prove complete intent.
 
 ```
-                          ┌─▶ write-tests ──▶ write-code-from-spec ─┐
-issue ──▶ discuss-issue ──┤                                        ├─▶ finalize ──▶ merge
-                          └─▶ write-code-with-no-spec ──────────────┘
-                              (small deltas only)
+issue → discuss-issue → write-tests → write-code-from-tests → code review → merge
+             ↑              ↑                  │
+             └──────────────┴── findings ───────┘
 ```
 
-The bottom lane skips the demand ledger and spec-coverage graph — `write-code-with-no-spec` writes
-the tests directly against `discuss-issue`'s design doc, checks them with the same kind of
-adversarial pass, and implements. It's for a delta small enough that write-tests' decomposition and
-material-fork triage would be pure overhead; anything with more than one entry point, or a fork that
-implies a different data model, belongs in the top lane instead.
+The implementation stage dispatches honest workers and contract adversaries against the same
+immutable tests ref. `finalize` remains the plugin's existing post-implementation review stage.
+`write-code-from-spec` is a compatibility entry; `write-code-with-no-spec` is retained for old runs.
+Small changes use the same pipeline with fewer workers and targeted review.
 
-Human judgment enters three times, and the **first one is the one that matters**: before any doc
-compiles, `discuss-issue` puts the decomposition and the data model to a person — the decisions
-nothing downstream can repair. `write-tests` then pauses only for *material* forks (readings that
-imply a different data model, a different set of surfaces, or a different observable outcome);
-everything else auto-resolves to the recommendation with the choice recorded. The merge stays
-human-approved after review.
-
-Everything else runs unattended. One discipline runs the whole pipe: enumerators interpret the
-design's language, executed probes answer every question about existing reality, and humans decide
-only what their judgment is uniquely worth — nothing in between gets to guess.
+Human attention goes to consequential design choices: behavior, scope, models, flows,
+architecture and trade-offs. Agents resolve technical details determined by those decisions.
+Tests and code may expose design defects; `discuss-issue` handles their amendments. Independent
+contract/code review and executed probes provide evidence without making the human adjudicate
+every edge case. The merge remains human-approved.
 
 ## The skills
 
 | Skill | What it does |
 |---|---|
-| `/spec-flow:discuss-issue` | Explains the issue in plain terms, checks it against the real code, surfaces the open questions — and when work heads to implementation, closes by posting the intent+design doc: typed obligations and mechanisms, with probed claims about existing reality. |
-| `/spec-flow:write-tests` | Turns the intent+design doc into the executable spec: situations from the doc's language, mechanics from executed probes, forks to the human — bound through the spec-coverage graph and gate rules into a suite a null-stub run proves can fail. Ships a **tests + spec_graph diff** and a handoff note. |
-| `/spec-flow:write-code-from-spec` | Reads the committed spec, writes real code until it passes, ships a PR, watches CI, repairs to green. Never edits a test to make it pass. |
-| `/spec-flow:write-code-with-no-spec` | Fast lane for a small bug fix or feature: skips the ledger and graph, writes the tests directly against `discuss-issue`'s design doc as a discrete commit, runs an adversarial pass against them alongside the honest implementation, and ships. Kicks back to `write-tests` if the delta turns out to need decomposition. |
+| `/spec-flow:discuss-issue` | Opens with only the problem and open questions, then grounds and reviews a design covering behavior, scope, data models, flows, and architecture. Groups findings into fixes or dissolving design choices; hands off a human-facing intent+design doc with supporting probed claims. Also handles design amendments discovered by tests or code. |
+| `/spec-flow:write-tests` | Authors contract tests early, independently reviews fidelity and discrimination, and iterates through patches or design amendments. Commits tests before implementation with a compact coverage/review record. Known blockers prevent a ready handoff. |
+| `/spec-flow:write-code-from-tests` | Dispatches honest implementers and test-breaking adversaries from the same committed contract. Reconciles findings, completes deferred verification, ships and repairs CI. |
+| `/spec-flow:write-code-from-spec` | Compatibility entry delegating to write-code-from-tests for older invocations and historical resumes. |
+| `/spec-flow:write-code-with-no-spec` | Legacy combined lane for existing runs; new small changes use write-tests then write-code-from-tests. |
 | `/spec-flow:finalize` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, feeds process findings back to the human, and re-greens the PR. |
 | `/spec-flow:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |
 | `/spec-flow:handoff` | Writes the terse note that lets a cold session resume the work. |
@@ -55,7 +51,7 @@ the pipeline resumable and inspectable, and it is why `write-tests` ends by post
 
 ### The one rule about who reads what
 
-`write-tests` writes its handoff note **for the implementer**. `write-code-from-spec` reads it.
+`write-tests` writes its handoff note **for the implementer**. `write-code-from-tests` reads it.
 **`finalize` deliberately does not.**
 
 A reviewer who has read the rationale behind every decision will confirm those decisions — the
@@ -94,11 +90,11 @@ The method is portable; a project's gate is not. Everything repo-specific lives 
   and the traps that make a green local run a lie.
 - `tests` — where tests live, the existing fake/replay harness to build on, and how fakes are meant
   to enter the code (what the project's CI forbids).
-- `specGraph` — read as data by the two checkers: the project's source roots and entrypoint stems.
-  (The alias maps are an escape hatch, normally empty — a spec graph is supposed to name things what
-  the code names them, and a private synonym silently disables the check for that concept.)
+- `sourceRoots` — source directories and standalone entrypoints used by repository code censuses.
+- `codeGraph` — optional Python source-reference lookup configuration for `symbol-refs`;
+  it does not model feature requirements.
 - `conventions` — the default branch, the **danger lens** (what kind of hostile reality this system
-  faces; `write-tests` always enumerates through it), and a pointer to the project's **principles** document (what every fork
+  faces; `write-tests` selects focused review where relevant), and a pointer to the project's **principles** document (what every fork
   is judged against — the project owns it; asked of the owner, never guessed).
 
 `/spec-flow:init` derives it from the repo and then *runs* what it wrote — a profile that has never
@@ -122,6 +118,10 @@ thing driving it can stay dumb.
 
 ## Requirements
 
-`git` and the `gh` CLI (authenticated). The spec_graph checks need a Python with PyYAML; the
-bundled `spec-graph` command finds one (or falls back to `uv run --with pyyaml python`), so there is
-nothing to configure.
+`git` and the `gh` CLI (authenticated). The optional Python suite checks (`spec-graph calls`
+and `spec-graph nullstub`) use the tests directly and need Python with PyYAML; the bundled
+command discovers an interpreter or falls back to `uv run --with pyyaml python`.
+
+The requirements graph is retired from the pipeline. Existing committed graphs and their
+checkers remain available for historical investigation; the graph-maintenance CI gate is retired and its project configuration is archived under `docs/archive/`. new work does not create, read, or maintain
+them. Historical graph documentation lives under `scripts/spec_graph/references/`.

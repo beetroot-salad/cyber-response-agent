@@ -33,7 +33,7 @@ from defender.tests._by_path import load_lint_gate
 
 
 from defender.tests._spec791 import (  # noqa: E402
-    PROJECT_PROFILE,
+    HISTORICAL_GRAPH_PROFILE,
     RETIRED_DEAD_SYMBOLS,
     RETIRED_TELEMETRY_WRITER,
     VULTURE_BASELINE,
@@ -118,7 +118,7 @@ def _load_lint_ratchet():
 
 
 def test_791_the_project_profile_census_drops_the_retired_writer(tmp_path):
-    """profile_census_drops_the_retired_writer — the project profile's shared-root census no
+    """profile_census_drops_the_retired_writer — the archived profile's shared-root census no
     longer names the projected-telemetry writer this change deletes.
 
     A stale census entry fails open BY CONSTRUCTION: a symbol that resolves to nothing reads
@@ -134,7 +134,7 @@ def test_791_the_project_profile_census_drops_the_retired_writer(tmp_path):
     writers it does not touch stay, so a census emptied into green fails here. The control was
     the pipeline judge's per-lead writer until #922 deleted that judge — and with it the whole
     `learning_run_dir` census — so it now names a writer outside the learning tree entirely."""
-    profile = json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))
+    profile = json.loads(HISTORICAL_GRAPH_PROFILE.read_text(encoding="utf-8"))
     resources = profile["specGraph"]["resources"]
     census = json.dumps(resources)
 

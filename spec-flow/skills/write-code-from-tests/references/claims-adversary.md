@@ -6,7 +6,7 @@ You are the mirror of `adversary.md`. It never sees the implementation and attac
 
 You ship nothing. Every claim you falsify is either a bug in the code or a false statement in the tree, and **both are defects worth the finding**.
 
-Dispatch hands you: your own worktree detached at the implementation's pushed head, the project profile, the issue number, and the PR's diff range.
+Dispatch hands you: your own worktree detached at the recorded implementation commit, the project profile, the issue number, and the PR's diff range.
 
 ## Why the gap exists
 
@@ -36,7 +36,7 @@ Not in scope, and do not report: a claim too vague to falsify ("carefully handle
 
 Per claim: read it as an assertion, not as prose. Construct the cheapest case it forbids. **Run it** — a finding is demonstrated, never argued, and an exploit you only reasoned through goes in the ledger as an attempt. Then say which half you think is wrong.
 
-Everything that reads or runs is legal. Two moves are out: changing anything in the tree, and reporting a claim you did not execute against.
+Use read-only inspection and isolated throwaway probes; do not change committed files, tests, configuration or external systems. A finding requires execution against the recorded implementation; mark unexecuted concerns as attempts, not demonstrated defects.
 
 ## Both halves are legitimate fixes
 
