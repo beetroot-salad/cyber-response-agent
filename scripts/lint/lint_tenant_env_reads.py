@@ -22,7 +22,7 @@ _os`, `from os import environ as e`, `os.path.os.environ`):
   * `env_str`, `env_int`, `env_bool` and `env_choice` (the platform's typed accessors);
   * on any expression ending in `.env` (`ctx.env`, `deps.ctx.env`), on a name bound from one
     (`env = ctx.env`, annotated, or walrus), on a function parameter named `env` (the run's
-    environment handed in: `record_case_ticket(env=...)`, `resolve_lead_zero(env=...)`), and on
+    environment handed in: `record_case_ticket(env=...)`, `run_correlation(...)`'s run env), and on
     a direct copy of any of these (`dict(ctx.env)`, a
     lone `{**ctx.env}`): `.get(...)` and the other mapping reads, a subscript, an `in` test, and
     iteration. Not followed: tuple-unpacked bindings, `.copy()`, `list(...)`/`sorted(...)`,

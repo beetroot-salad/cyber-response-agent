@@ -34,6 +34,7 @@ from defender.tests import _triplet_947 as P
 from defender.tests._data_root_1078 import DATA_ROOT_ENV, current_data_root
 from defender.tests.live_oracle_1224 import _spec1224 as O
 from defender.tests.tenant_1107_settings import _spec1107 as S
+from defender.run_repository import RunPaths
 
 
 @pytest.fixture(autouse=True)
@@ -352,7 +353,7 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
         grants = record.grants
         seen: dict = {}
         run._drive_investigation(
-            alert_path=src / "alert.json", run_dir=src, run_id=src.name,
+            alert_path=RunPaths(src).alert, run_dir=src, run_id=src.name,
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
             tenant=record,
             world=run.resume_world(Episode.open(ep), "b", tenant=lambda r=record: r),

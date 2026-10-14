@@ -194,7 +194,9 @@ def test_d2_the_episode_and_its_worlds_expose_only_the_designs_surface(opened):
            if not k.startswith("world.") and k not in S.PRIVATE_FOLDERS}
     in_world = {k.removeprefix("world.") for k in (*S.RECORD_VERBS, *S.FOLDERS)
                 if k.startswith("world.")}
-    episode_class = {"open", "create", "close", "view", "world", "box_mounted_container", *top}
+    # `source_alert` / `source_record`: the copies a launch puts in the episode (#1222 A1).
+    episode_class = {"open", "create", "close", "view", "world", "source_alert",
+                     "source_record", "box_mounted_container", *top}
     assert S.public_names(S.Episode()) == episode_class, (
         f"the Episode class exposes {sorted(S.public_names(S.Episode()) - episode_class)} "
         f"beyond the design's surface, and lacks {sorted(episode_class - S.public_names(S.Episode()))}")
@@ -618,7 +620,7 @@ def test_o6_a_handle_whose_dir_was_renamed_writes_into_the_moved_folder(tree, ke
 # =======================================================================================
 
 def test_o3_the_view_is_a_bound_with_the_readers_surface_reading_through_the_same_handle(tree):
-    """`episode.view()` is a `Bound` whose public surface is exactly `read`, `read_jsonl`,
+    """`episode.view()` is a `Bound` whose public surface is exactly `read`, `read_bytes`, `read_jsonl`,
     `entries`, `under`, `close` — write-free by type. It reads through the episode's own held
     handle: after the episode dir is renamed it still reads the record the episode just wrote.
     Its `close()` releases nothing (the episode still writes)."""
@@ -627,10 +629,11 @@ def test_o3_the_view_is_a_bound_with_the_readers_surface_reading_through_the_sam
         view = episode.view()
         assert isinstance(view, _io.Bound), f"view() is {type(view).__name__}"
         public = {n for n in dir(view) if not n.startswith("_")}
-        assert public == {"read", "read_jsonl", "entries", "under", "close"}, sorted(public)
+        assert public == {"read", "read_bytes", "read_jsonl", "entries", "under", "close"}, sorted(public)
         tree.ep.rename(moved)
         episode.review.write("review: after the rename\n")
         assert view.read(LAYOUT.review).text == "review: after the rename\n"
+        assert view.read_bytes(LAYOUT.review).data == b"review: after the rename\n"
         view.close()
         episode.samples.write("samples: still held\n")
     assert (moved / LAYOUT.samples).read_text(encoding="utf-8") == "samples: still held\n"

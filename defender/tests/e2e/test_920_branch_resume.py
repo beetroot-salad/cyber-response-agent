@@ -9,27 +9,22 @@ model newly produced. Observed failing by `IngestTailUnderflow` — which the dr
 and reports as `truncated_by="store"` rather than as a crash, so the assertion is on the
 summary rather than on a raised exception — or by prefix rows appearing twice under the child.
 
-**A resumed run does not re-orient.** Lead-0 and its correlation lead are turn-0 work: they
-read the alert cold to resolve its ancestors, and a branch point is by construction past that.
+**A resumed run does not re-orient.** The correlation lead is turn-0 work: it reads the alert
+cold and reports before MAIN's first message, and a branch point is by construction past that.
 The discriminator is that the sibling IS handed a verb registry — the same `elastic_backend`
-whose recorder catches every call lead-0 makes on the source run — and still issues nothing.
+whose recorder catches the call `l-00c` makes on the source run — and still issues nothing.
 Without that arm the property would be satisfied by a run with no backend to call.
 
 THE SOURCE RUN IS DRIVEN, NOT LOADED. `sessions/` is gitignored, so a store read off disk
 would be a store nobody built; and the branch-point checks read the source run's captured
 queries and its invlang document, which a hand-planted store would not have. Both come from a
-real run through the #808 lead-0 scenario builder, whose lead-0 resolves for real against an
-injected elastic backend. The document is authored one `append_block` per fence, because that
-is the authoring path `frontier_at` describes and the only one under which the branch point's
-message index says anything about how much of the document had landed.
+real run through the #808 scenario builder, whose correlation lead issues one real call
+against an injected elastic backend. The document is authored one `append_block` per fence,
+because that is the authoring path `frontier_at` describes and the only one under which the
+branch point's message index says anything about how much of the document had landed.
 
-TWO SOURCE RUNS, deliberately. Lead-0's item 3 writes a SYNTHESIZED `ModelRequest` straight
-into MAIN's session, landing next to the tool-return `ModelRequest` before it — and pydantic_ai
-normalises a history by merging consecutive trailing requests, so a prefix carrying one is a
-strictly harder resume than a prefix without. The first scenario has no correlation lead (item
-1 resolves no ancestor document, so item 3 never dispatches) and pins the core contract; the
-second has one and pins that the contract survives it. Folding them into one test would make
-the ordinary case unreachable until the harder one lands.
+Since #1222 the correlation summary rides MAIN's opening message instead of being injected as
+a synthesized row, so there is no longer a "prefix carrying a synthesized turn" scenario.
 
 The unit-level halves — that `fork` and `hydrate(role="send")` truncate through one function,
 and which branch points are legal at all — live in `tests/test_920_branch_seam.py`.
@@ -44,13 +39,13 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
+from defender.runtime.lead_zero import CORRELATION_HEADING  # noqa: E402
 from defender.tests._branch_947 import spec_at  # noqa: E402
 from defender.tests._session_head_754 import message_ids  # noqa: E402
 from defender.tests._session_store_705 import sql, store_factory, store_mod  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
-    L0,
+    CORRELATION_SUMMARY,
     L3,
-    LEAD_ZERO_HEADING,
     VerbRecorder,
     alert_doc,
     answer_hits,
@@ -78,9 +73,7 @@ CONTINUATION = (
     "Continue this investigation from where it stands. Do not restate what you already hold."
 )
 
-#: The ancestor documents item 1's second call returns. `[]` is item 1 resolving nothing, which
-#: is what turns item 3's dispatch away (`prepare_correlation_lead` gates on the status), so
-#: the two scenarios below differ by this one value and nothing else.
+#: What the source run's backend returns for `l-00c`'s one call.
 DOCS = [hit(ts="2026-05-25T15:20:00.000Z"), hit(ts="2026-05-25T15:21:00.000Z")]
 NO_DOCS: list = []
 
@@ -102,6 +95,14 @@ def _source_run(tmp_path, sink, *, docs):
     return run(
         tmp_path / "source", run_id="branch-920-source",
         answer=answer_hits(docs), stores=sink,
+        # `l-00c` is the only query a source run makes before MAIN: one real call, so the
+        # prefix has a query that reached a system (a branch needs one) and the lead's end
+        # is its own summary.
+        gather_turns=[
+            Turn(tool_calls=[("query", {"system": "elastic", "verb": "alerts",
+                                        "params": {"native_query": "user.name:dev.dana"}})]),
+            Turn(text=CORRELATION_SUMMARY),
+        ],
         store_factory=store_factory(tmp_path, sink=sink),
         main_turns=[
             *[Turn(tool_calls=[("append_block", {"text": chunk})])
@@ -227,7 +228,7 @@ def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
     spec, _prefix_ids = _spec(source, sink[0])
     inherited = (source.run_dir / "investigation.md").read_text(encoding="utf-8")
     # `FENCES` counts the model's own `append_block` TURNS; the document also carries the
-    # harness-authored lead-0 block in front of them, so the file's own count is the baseline
+    # harness-authored lead block in front of them, so the file's own count is the baseline
     # to compare against rather than that constant.
     landed = inherited.count("```invlang")
     assert landed > FENCES, (
@@ -263,26 +264,26 @@ def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
 
 
 def test_a_resumed_run_does_not_orient_again(tmp_path):
-    """    A resumed run skips lead-0 entirely: no ancestor resolution, no `l-000` leads row, no
-    query rows under a reserved id — even though the sibling is handed the same kind of verb
-    registry the source run resolved lead-0 through.
+    """    A resumed run skips the correlation lead entirely: no new `l-00c` leads row, no new
+    query rows under the reserved id — even though the sibling is handed the same kind of verb
+    registry the source run dispatched `l-00c` through.
 
-    The source run is the control in the same test, deliberately: it claims `l-000` and issues
-    real backend calls through its own recorder, so "the sibling issued none" is measured
+    The source run is the control in the same test, deliberately: it claims `l-00c` and issues
+    a real backend call through its own recorder, so "the sibling issued none" is measured
     against a demonstrated capability rather than against an assumption. The prompt half is
-    the mirror — the ORIENT scaffold and the ancestors heading appear exactly ONCE in the
+    the mirror — the ORIENT scaffold and the correlation heading appear exactly ONCE in the
     sibling's first request, inherited through `message_history`, not rebuilt in front of it.
     """
     # provenance: the discussion's second corrected premise — "`_user_prompt` unconditionally
-    # resolves lead-0 and builds a fresh orientation prompt, which is wrong on a resume where
-    # the continuation prompt is a parameter and part of the measured instrument".
+    # builds a fresh orientation prompt, which is wrong on a resume where the continuation
+    # prompt is a parameter and part of the measured instrument".
     sink: list = []
-    source = _source_run(tmp_path, sink, docs=NO_DOCS)
+    source = _source_run(tmp_path, sink, docs=DOCS)
     assert source.rec.calls, (
-        "lead-0 issued no backend call on the SOURCE run — the sibling's silence below would "
-        "then be the fixture's, not the resume's")
-    assert source.has_sidecar(L0), "the source run claimed no l-000 leads row"
-    assert source.rows_for(L0), "the source run captured no query rows under l-000"
+        "the correlation lead issued no backend call on the SOURCE run — the sibling's silence "
+        "below would then be the fixture's, not the resume's")
+    assert source.has_sidecar(L3), "the source run claimed no l-00c leads row"
+    assert source.rows_for(L3), "the source run captured no query rows under l-00c"
 
     spec, _prefix_ids = _spec(source, sink[0])
     sibling_dir = materialize_alert(tmp_path / "sibling", alert_doc())
@@ -294,20 +295,20 @@ def test_a_resumed_run_does_not_orient_again(tmp_path):
 
     assert rec.calls == [], (
         f"the resumed run reached the backend {len(rec.calls)} time(s) before its first model "
-        f"turn ({rec.verbs}) — lead-0 resolved again over evidence the prefix already holds")
-    # The l-000 sidecar is INHERITED, not claimed: a sibling gets the source's captured
+        f"turn ({rec.verbs}) — the correlation lead ran again over evidence the prefix holds")
+    # The l-00c sidecar is INHERITED, not claimed: a sibling gets the source's captured
     # evidence in its own run dir, and `claim_lead` raises on id reuse — so the inherited
     # claim is itself what stops a resumed run redoing turn-0 work. Byte-identical is the
     # observable that separates the two; a re-claim would rewrite it.
-    inherited = sibling_dir / "gather_raw" / f"{L0}.lead.json"
+    inherited = sibling_dir / "gather_raw" / f"{L3}.lead.json"
     assert inherited.read_bytes() == (
-        source.run_dir / "gather_raw" / f"{L0}.lead.json").read_bytes(), (
-        "the resumed run rewrote the l-000 leads row; a branch point is past turn-0 work by "
+        source.run_dir / "gather_raw" / f"{L3}.lead.json").read_bytes(), (
+        "the resumed run rewrote the l-00c leads row; a branch point is past turn-0 work by "
         "construction")
     rows = read_jsonl_rows(RunPaths(sibling_dir).executed_queries)
     source_rows = read_jsonl_rows(RunPaths(source.run_dir).executed_queries)
-    assert [r for r in rows if r.get("lead_id") in (L0, L3)] == [
-        r for r in source_rows if r.get("lead_id") in (L0, L3)], (
+    assert [r for r in rows if r.get("lead_id") == L3] == [
+        r for r in source_rows if r.get("lead_id") == L3], (
         f"the sibling's reserved-id query rows are not exactly the ones it inherited: {rows}")
 
     assert sibling.seen, "the resumed run never reached the model"
@@ -317,65 +318,6 @@ def test_a_resumed_run_does_not_orient_again(tmp_path):
     assert opening.count(OPENING_LINE) == 1, (
         f"the ORIENT scaffold appears {opening.count(OPENING_LINE)} time(s): one copy is the "
         "inherited prefix, a second is a fresh orientation built in front of it")
-    assert opening.count(LEAD_ZERO_HEADING) == 1, (
-        f"the ancestors section appears {opening.count(LEAD_ZERO_HEADING)} time(s) — a "
+    assert opening.count(CORRELATION_HEADING) == 1, (
+        f"the correlation section appears {opening.count(CORRELATION_HEADING)} time(s) — a "
         "resumed run must not put a second one in front of the history that holds the first")
-
-
-def test_a_prefix_carrying_a_synthesized_turn_resumes_too(tmp_path):
-    """    A branch point whose inherited prefix carries lead-0's SYNTHESIZED correlation turn
-    resumes like any other, and the sibling does not re-dispatch that lead.
-
-    This is the ordinary production shape, not an edge case: item 3 writes its summary as a
-    `ModelRequest` straight into MAIN's session, and it lands immediately after the
-    tool-return `ModelRequest` of the turn before it. pydantic_ai normalises a history it is
-    handed by merging consecutive requests, so the list the framework gives the store's render
-    processor is SHORTER than the row count `fork` charged the child for — and `ingest`'s tail
-    slice then measures the live list against a length that counts rows the framework has
-    already folded together. The symmetry between `fork` and `hydrate(role="send")` is exact
-    and still does not settle this: both count store rows, and the framework does not.
-
-    The source run is the control again: it DOES claim `l-00c` and it DOES carry the
-    synthesized row, so neither half below can pass by the prefix simply not having one."""
-    # provenance: `driver._inject_correlation` — "writes the summary DIRECTLY into MAIN's
-    # session so the store-hydrated list the next render produces carries it"; #920 O1's
-    # done-when is over a REAL run, and this is what real runs' prefixes look like.
-    ss = store_mod()
-    sink: list = []
-    source = _source_run(tmp_path, sink, docs=DOCS)
-    assert source.has_sidecar(L3), (
-        "the source run dispatched no correlation lead, so its prefix carries no synthesized "
-        "turn and this test is a duplicate of the one above")
-    store = sink[0]
-    source_session = ss.main_session_id(store)
-    spec, prefix_ids = _spec(source, store)
-    synthesized = ss.synthesized_flags(store, source_session, "send")
-    assert any(synthesized), (
-        "no synthesized row is on the inherited path; item 3's injection is what this test is "
-        "about and it is not there")
-
-    sibling_dir = materialize_alert(tmp_path / "sibling", alert_doc())
-    rec = VerbRecorder()
-    sibling = ReplayFn([Turn(text="Resumed and stopping.")])
-
-    summary = _resume(spec, sibling_dir, main=sibling,
-                      verbs=elastic_backend(rec, answer_hits(DOCS)))
-
-    assert summary.get("truncated_by") is None, (
-        f"the resumed run was cut short ({summary}) over a prefix carrying a synthesized turn")
-    children = [row[0] for row in sql(
-        store, "SELECT session_id FROM session WHERE parent_session_id = ?", (source_session,))]
-    assert len(children) == 1, f"the resume did not fork exactly one child session: {children}"
-    child_path = ss.path_row_ids(store, children[0])
-    assert child_path[:len(prefix_ids)] == prefix_ids, (
-        "the resumed path does not open on the inherited prefix")
-    assert message_ids(store, children[0]) == child_path[len(prefix_ids):], (
-        "the child owns rows off its own path — the prefix was copied, not inherited")
-
-    # INHERITED, not dispatched — same reading as the l-000 sidecar above. The sibling gets
-    # the source's captured evidence in its own run dir, so the observable that separates a
-    # re-dispatch from an inheritance is whether the bytes moved.
-    assert (sibling_dir / "gather_raw" / f"{L3}.lead.json").read_bytes() == (
-        source.run_dir / "gather_raw" / f"{L3}.lead.json").read_bytes(), (
-        "the sibling dispatched its own correlation lead over ancestors the prefix already "
-        "carries the answer to")

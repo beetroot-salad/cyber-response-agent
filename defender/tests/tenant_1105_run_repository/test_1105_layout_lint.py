@@ -97,7 +97,7 @@ HELPERS = frozenset({"artifact_file", "artifact_dir", "plain_file", "contained_p
 NAMED_GATED = ("RunPaths", "RUN_LAYOUT", "SessionPaths", "WIRE_LOG_NAMES", "GATE_METADATA_KEY",
                "RunLayout", "WireLogNames")
 #: The door's public names that are not layout names (D1.3).
-NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "RunId",
+NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "case_ref_of_digest", "RunId",
                         # #1105 PR 2 (declared change 0): the tenant-scoped repository's names
                         # replace PR 1's four Tenant-taking lookups at the door.
                         "RunsRepository", "EpisodeRuns", "Listed", "RunAddress", "RunAbsent",
@@ -133,7 +133,8 @@ _PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_rec
 #: author read the run folder they were handed (path-taking-readers), the launcher keeps only
 #: the predicates (helpers-only), and the tracer walks the tenant's runs by id and reads each
 #: one's report from the folder it was handed (path-taking-readers); `learning/judge/render.py`
-#: lost its last layout name with J3's union and leaves the table;
+#: lost its last layout name with J3's union and leaves the table, and #1234 took
+#: `learning/judge/run.py` off the helpers-only row (56 non-owner importers);
 #: `runtime/box/_docker.py` joins the running investigation (the box env's runs base comes from
 #: the layout owner).
 EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
@@ -170,8 +171,9 @@ EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
     "not-a-run": frozenset({_VE}),
     "deferred_legacy": frozenset({_LESSONS, _FORWARD}),
     # `learning/judge/enqueue.py` left the row in the merge of #1135, which removed its last use
-    # of the layout (owner ruling: the row is dropped, 57 -> 56).
-    "helpers-only": frozenset({"learning/branch/ledger.py", "learning/judge/run.py", _CLI}),
+    # of the layout (owner ruling: the row is dropped, 57 -> 56). #1234 took
+    # `learning/judge/run.py` off it with its last `artifact_file` import.
+    "helpers-only": frozenset({"learning/branch/ledger.py", _CLI}),
 }
 
 #: One representative module per row, for the planted-tree tests.
@@ -183,7 +185,7 @@ _ROW_SAMPLE = {
     "path-taking-readers": "scripts/visualize/visualize_run.py",
     "not-a-run": _VE,
     "deferred_legacy": _LESSONS,
-    "helpers-only": "learning/judge/run.py",
+    "helpers-only": "learning/branch/ledger.py",
     "uncategorised": "learning/planted_probe.py",
 }
 
@@ -740,8 +742,9 @@ def test_1105_layout_lint_flags_a_re_exports_own_import(tmp_path):
 # ==========================================================================================
 
 def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp_path):
-    """The lint's category table places each of the 56 non-owner production importers of the
-    layout (57 at 80888efb; #1105 PR 2's F-09 moves) in exactly one row as D7's table lists
+    """The lint's category table places each of the 54 non-owner production importers of the
+    layout (57 at 80888efb; #1105 PR 2's F-09 moves; #1234 took `learning/judge/run.py` off
+    the helpers-only row) in exactly one row as D7's table lists
     them, the owners in their own row, and exempts layout names exactly in the running-investigation, names-only, run-lifecycle,
     path-taking-reader, not-a-run and deferred_legacy rows; a module in no row gets no
     exemption. (The deferred_legacy row exempts only its four readers, keyed by (module,
@@ -753,7 +756,7 @@ def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp
         f"{sorted(r for r in EXPECTED_CATEGORIES if table.get(r) != EXPECTED_CATEGORIES[r])}")
     every = [m for mods in table.values() for m in mods]
     assert len(every) == len(set(every)), "a module sits in more than one row"
-    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 55  # #1235: runtime/circuit_breaker.py and hooks/budget_enforcer.py no longer import the layout
+    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 54  # #1235 removed two importers; #1234 removed judge/run.py from the helpers-only row
     root = _planted(tmp_path)
     for module in _ROW_SAMPLE.values():
         _add(root, module, "from defender.run_repository import RunPaths  # noqa: F401\n\n\n"
@@ -1049,12 +1052,12 @@ def class_level():
     return Tenant.runs
 
 
-def _tenant_of() -> Tenant:
+def _tenant_planted_by() -> Tenant:
     raise NotImplementedError
 
 
 def annotated_return():
-    return _tenant_of().runs
+    return _tenant_planted_by().runs
 
 
 @dataclasses.dataclass

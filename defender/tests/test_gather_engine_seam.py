@@ -392,7 +392,6 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
     alone, so every one of those proceeded exactly as if the row had been written. Driven at
     the claim seam because a caller must not need to know which fault it was: the contract is
     that only `CLAIMED` dispatches."""
-    from pydantic_ai.exceptions import ModelRetry
 
     from defender.hooks.record_lead import NOT_CLAIMED
     from defender.runtime import tools_gather
@@ -404,7 +403,8 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(tools_gather, "_claim_lead", lambda dispatch: NOT_CLAIMED)
-        with pytest.raises(ModelRetry, match="could not be claimed"):
+        # #1222 C40: a host-side write fault ends the run through the store exit; no retry.
+        with pytest.raises(tools_gather.LeadRecordFault, match="could not be claimed"):
             asyncio.run(tools_gather._run_gather(
                 deps, _never, 40,
                 tools_gather.GatherRequest("l-004", "elastic", "a real goal", ("what",)),

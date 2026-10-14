@@ -130,7 +130,12 @@ def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
         assert J.draw_files(ep, label), f"world {label} has no per-draw reply on disk"
 
     grade = J.judge_record(ep)
-    assert grade.get("episode_outcome"), "the family record carries no episode outcome"
+    # #1234: the episode word is retired (A17); what the record carries for each graded world
+    # is its row and its A6 commit state.
+    assert [row["world"] for row in grade["worlds"]] == ["b", "c"], (
+        "the family record carries no row per graded world")
+    assert all(row.get("state") == "queued" for row in grade["worlds"]), (
+        "a graded world's row was not committed")
     # #1007 M5 adds ONE MORE caller (the family-level draw) beside the per-world ones — one
     # call per world per draw, PLUS one call per draw for the family.
     assert judge.calls == (len(graded) + 1) * grade["draws"]["configured"], (
@@ -207,12 +212,15 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
     """
     ep = J.accepted_episode(tmp_path)
 
-    first = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
+    # #1234 A6: a re-run keeps every `queued` row verbatim and calls again only for a row
+    # that is not — so the first pass answers the family call with a FAMILY reply (a world
+    # reply there is refused, leaving the family row uncommitted and owed a re-run).
+    first = J.scripted_judge()
     J.grade_at(ep, judge=first, state=env_state())
     assert first.calls > 0, "the control failed: the first pass never reached the model"
     before = (ep / "judge.yaml").read_text(encoding="utf-8")
 
-    second = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
+    second = J.scripted_judge()
     J.grade_at(ep, judge=second, state=env_state())
     assert second.calls == 0, "a second grade ran over an episode already graded"
     assert (ep / "judge.yaml").read_text(encoding="utf-8") == before
@@ -220,7 +228,7 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
     # J11: readability, not just presence — a `judge.yaml` that cannot be read back as a family
     # grade is not evidence that the episode was graded.
     (ep / "judge.yaml").write_text("\x00not: [a, family, grade", encoding="utf-8")
-    third = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
+    third = J.scripted_judge()
     with pytest.raises(J.refusals()):
         J.grade_at(ep, judge=third, state=env_state())
 
@@ -263,18 +271,18 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
 
 
 def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts(tmp_path):
-    """`judge.yaml` is written LAST, after the enqueue, and carries the enqueued row count and
-    the per-world completed-draw counts (J11, settled at the §7 seam).
+    """`judge.yaml` carries the enqueued row count and the per-world completed-draw counts, and
+    its presence never certifies an enqueue that did not happen.
 
-    That one ordering is what makes the presence gate mean something: `judge.yaml`'s presence
-    otherwise says nothing about whether the enqueue ran, and a crash between the family write
-    and the enqueue orphans that episode's findings forever on an episode that cannot be re-run.
-    With the counts on the record, "graded with nothing to report" is distinguishable from
-    "never graded" and a resumed invocation's decision is derivable.
+    #1234 A6 replaces J11's "written last" with a per-row commit: a world's row is written
+    `state: queueing` BEFORE its rows are appended and flipped to `queued` after, so a record
+    whose append failed says so on the row itself — the row stays `queueing`, never `queued` —
+    and a re-run refuses that record naming the row rather than guessing whether the rows
+    landed. With the counts on the record, "graded with nothing to report" is distinguishable
+    from "never graded" and a resumed invocation's decision is derivable.
 
-    Driven by failing the enqueue through the real primitive: the queue's pending directory is
-    made unwritable, so the append raises where it really would, and the assertion is that no
-    `judge.yaml` exists afterwards.
+    Driven by failing the enqueue through the real primitive: the queue's holding folder is a
+    regular file, so the append raises where it really would.
     """
     ep = J.accepted_episode(tmp_path)
 
@@ -301,9 +309,14 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
         J.grade_at(
             ep2, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
             state=refused)
-    assert not (ep2 / "judge.yaml").exists(), (
-        "the family record was written before the enqueue: its presence would then certify an "
-        "enqueue that never happened")
+    states = {row["world"]: row.get("state") for row in J.judge_record(ep2)["worlds"]}
+    assert "queued" not in states.values(), (
+        f"a row whose append failed was committed `queued`: {states} — its presence would then "
+        "certify an enqueue that never happened")
+    assert states.get("b") == "queueing", f"the failed commit is not on world b's row: {states}"
+    with pytest.raises(J.refusals()) as rerun:
+        J.grade_at(ep2, judge=J.scripted_judge(), state=refused)
+    assert "queueing" in str(rerun.value), "the re-run did not refuse the uncommitted row"
 
 
 def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncated_with_a_marker(
@@ -361,7 +374,16 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
     # times the number the operator set, which is the same defect one bounded file was.
     # #1224 (N22): the call list is the one view the cap never cuts — under any cap the judge
     # still gets each call with its decision word — so the bound is over every OTHER view.
-    sections = J.mod("learning.judge.render").render(
-        ep, "b", payload_cap=3000).as_prompt_sections()
-    assert sum(len(body) for name, body in sections.items() if name != "calls") <= 3000, (
-        "the rendered views together exceed the operator's payload cap")
+    # #1234 (A9): the views are the M3 layout's blocks (`layout.world_layout`), measured the way
+    # the cap measures them (host titles and labels outside every frame are not charged).
+    from defender._io import bind
+
+    layout = J.mod("learning.judge.layout")
+    with bind(ep) as bound:
+        manifest = J.mod("learning.judge.family").read_manifest(bound)
+    ctx = J.mod("learning.judge.render").render(ep, "b", payload_cap=3000)
+    blocks = [block for _title, section in layout.world_layout(ctx, manifest).sections
+              for block in section]
+    charged = sum(layout._block_cost(block) for block in blocks
+                  if "VIEW 1" not in str(block[0]))
+    assert charged <= 3000, "the rendered views together exceed the operator's payload cap"

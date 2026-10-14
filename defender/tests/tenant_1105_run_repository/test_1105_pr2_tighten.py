@@ -342,7 +342,11 @@ def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch
     assert bare, "the judge was never asked"
     worlds = [agent for agent in bare if not agent.startswith("judge:family:")]
     assert worlds
-    assert all("THE JUDGED WORLD'S OWN report.md" in bare[agent] for agent in worlds)
+    from defender.learning.judge.layout import FOCUS_VIEW_TITLES
+
+    # #1234 M3/A10: the focus world's report view is titled, in host text, by its world label.
+    assert all(f"world {agent.split(':')[1]} — {FOCUS_VIEW_TITLES['report']}" in bare[agent]
+               for agent in worlds)
     assert sorted(with_prior) == sorted(bare)
     for agent, prompt in sorted(with_prior.items()):
         assert "PRIOR-RUN-ONLY-MARKER" not in prompt
@@ -388,7 +392,7 @@ def test_f4_an_old_source_run_dir_never_stands_in_for_an_absent_source(tmp_path)
     for i, decoy in enumerate((own_decoy, beta_decoy)):
         rec, (rc, refused, err) = sibling(i, decoy, "20260101t000000z-gone")
         steered = rec.run_dir is not None and b"DECOY-ONLY-ALERT" in (
-            rec.run_dir / "alert.json").read_bytes()
+            rec.run_dir / "alert_input" / "alert.json").read_bytes()
         assert not steered, f"the old field stood in for the absent source: {decoy}"
         assert refused is not None or rc not in (0, None), f"{decoy}: the sibling ran: {err}"
         assert "lifecycle" not in rec.order
@@ -396,7 +400,7 @@ def test_f4_an_old_source_run_dir_never_stands_in_for_an_absent_source(tmp_path)
     rec, (rc, refused, err) = sibling(2, own_decoy, P.SOURCE_RUN_ID)
     assert refused is None, f"the control was refused: {P.refusal_text(refused)} {err}"
     assert rc == 0
-    assert (rec.run_dir / "alert.json").read_bytes() == (src / "alert.json").read_bytes()
+    assert (rec.run_dir / "alert_input" / "alert.json").read_bytes() == (src / "alert_input" / "alert.json").read_bytes()
 
 
 # ==========================================================================================
@@ -645,6 +649,8 @@ def test_f7_the_tracer_as_a_process(tmp_path, d9_tenant):
     P.plant_record(runs, d9_tenant)
     run = runs / "20260605t000000z-case-a"
     run.mkdir()
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(run)
     (run / "report.md").write_text("---\ndisposition: benign\n---\nbody\n", encoding="utf-8")
     (run / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}) + "\n",

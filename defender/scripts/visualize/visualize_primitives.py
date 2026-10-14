@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import NoReturn
 
+from defender import _alert_input
 from defender._io import read_text_utf8
 
 
@@ -143,12 +144,18 @@ def parse_report(run_dir: Path) -> ReportRead:
 
 
 def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec-alert") -> str:
-    p = RunPaths(run_dir).alert
-    if not p.is_file():
+    paths = RunPaths(run_dir)
+    if not paths.alert.is_file():
         body = '<div class="empty">no alert.json</div>'  # lint-run-records: ok — page text naming the record for a reader, not a path
     else:
         try:
-            body = pretty_json_html(json.loads(read_text_utf8(p)))
-        except json.JSONDecodeError:
-            body = pre_text(read_text_utf8(p))
+            raw, _record = _alert_input.verified_alert(paths.alert, paths.alert_record, run_name=Path(run_dir).name)
+        except _alert_input.AlertReplaced as refused:
+            return section(anchor, "alert", "Alert", "— input to the defender runtime",
+                           f'<div class="empty">{esc(str(refused))}</div>')
+        text = raw.decode("utf-8", errors="replace")
+        try:
+            body = pretty_json_html(json.loads(text))
+        except (json.JSONDecodeError, RecursionError):
+            body = pre_text(text)
     return section(anchor, "alert", "Alert", "— input to the defender runtime", body)

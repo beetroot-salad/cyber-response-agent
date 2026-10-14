@@ -593,7 +593,8 @@ def test_m1_a_real_denial_inside_a_dispatched_lead_is_that_leads_sentinel_row(tm
     (`QUERY_ROW_COLUMNS`). The positive control that the id is the DISPATCHING lead's and not
     a constant: lead-0's own harness-authored `elastic.alerts` attempt (declared, ungranted
     under this registry, issued before main's first turn) leaves the table's first denied row
-    and it carries `l-000`. The audit record is still written, unchanged in shape — no lead
+    and it carries `l-000`. (Item 1 and that attempt went with #1222; the dispatching lead is
+    now the only writer of a denied row in this run.) The audit record is still written, unchanged in shape — no lead
     column grew on it. And the fixture rows this file hand-writes are keyed exactly as the
     real writer keys its row, so the rendered-view scenarios above are stated over the real
     shape.
@@ -614,9 +615,8 @@ def test_m1_a_real_denial_inside_a_dispatched_lead_is_that_leads_sentinel_row(tm
     assert (r.run_dir / own["payload_path"]).read_bytes() == b"", "a denial persisted a payload"
 
     denied_rows = [row for row in r.rows if row["query_id"] == DENIED_QUERY_ID]
-    assert denied_rows[0]["verb"] == "alerts", "lead-0's attempt is not the table's first denied row"
-    assert denied_rows[0]["lead_id"] == "l-000", f"lead-0's row names {denied_rows[0]['lead_id']!r}"
-    assert {row["lead_id"] for row in denied_rows} == {"l-000", LEAD}
+    assert {row["lead_id"] for row in denied_rows} == {LEAD}, \
+        f"a denied row names a lead that did not dispatch it: {denied_rows}"
 
     assert len(r.own_denials) == 1, "the audit record stopped being written"
     assert "lead_id" not in r.own_denials[0], "the audit record grew a lead column"
@@ -752,61 +752,52 @@ def _prompt_for_world_b(ep: Path, base: Path) -> str:
     return judge.prompts[judge.agent_ids.index("judge:b:0")]
 
 
-def test_m5_the_prompt_states_the_refused_rule_in_host_text(tmp_path, judge_roots):
-    """O2/M5 — the judge's prompt, in its HOST text (outside every untrusted frame), states
-    the rule for `refused:`: an entry with `external=true` on the family's holding system is
-    an `observability` finding, never `lead-set`; `external=false` is the defender's own
-    conduct; `evidence` cites `executed_queries.jsonl`; and the ledger's own `refused` decision
-    word is defined in VIEW 1's host glossary (#1224). Pinned by its load-bearing tokens
-    in ONE host paragraph rather than verbatim, so wording may move and a prompt without the
-    rule still fails. The rule is host text and not a frame title: a heading inside a frame is
-    data by the reader contract. The flag is spelled `external=true`, the form
-    `render_refused` prints, so the model finds in the section what the rule tells it to look
-    for.
+def test_m5_the_prompt_states_a_refused_call_is_a_gap_never_an_investigator_finding(
+        tmp_path, judge_roots):
+    """O2/M5 as #1234 amended it — the judge's prompt, in its HOST text (outside every
+    untrusted frame), states the rule for a `refused` call: the decision glossary defines
+    `refused` as a call turned away before it reached any system, a BLOCKED call; and the one
+    paragraph that defines `gaps` names refused calls as what a gap is, points its `evidence`
+    at the blocked calls, and says a gap is never an investigator finding. (#1234 P-a retired
+    the `observability` defender type this rule once sent `external=true` entries to: a
+    deployment gap is never teachable, so it goes to the user record, never the defender
+    queue.) Pinned by its load-bearing tokens in ONE host paragraph each rather than verbatim,
+    so wording may move and a prompt without the rule still fails. The rule is host text and
+    not a frame title: a heading inside a frame is data by the reader contract.
 
-    Observed failing by: a prompt whose host text names neither `refused` nor `external`, or
-    spells the flag in a form the section never prints."""
+    Observed failing by: a prompt whose host text never calls `refused` a blocked call, or
+    whose gaps paragraph does not name refused calls or allows a gap as an investigator
+    finding, or that still names the retired `observability` type."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     prompt = _prompt_for_world_b(ep, base)
     host = J.outside_untrusted_frames(prompt)
 
-    for token in ("refused", "external=true", "external=false", "observability", "lead-set",
+    for token in ("refused", "BLOCKED", "gaps", "investigator_findings",
                   "executed_queries.jsonl"):
         assert token in host, f"the prompt's host text does not name {token!r}"
+    assert "observability" not in host, "the host text still names the retired defender type"
     assert "policy_denials.jsonl" not in host, \
         "the rule sends the judge to a second stream — a refusal has one evidence pointer"
-    paragraphs = [p for p in host.split("\n\n") if "refused" in p]
-    assert paragraphs, "no host paragraph mentions refused"
-    assert any(
-        "external" in p and "observability" in p and "lead-set" in p for p in paragraphs
-    ), "no single host paragraph relates `refused` to `external`, `observability` and `lead-set`"
-    # THE DIRECTION of the rule, not only its vocabulary (the adversary's H1: the six tokens
-    # co-occur just as well in the inverted instruction — "external=true means the defender
-    # never queried, file lead-set, never observability"). Pinned as ordered phrases: after
-    # `external=true` the first bucket word named is `observability`, and `lead-set` is
-    # reached only through a negation; and `evidence` cites the file, not must not.
-    rule = next(p for p in paragraphs if "external" in p and "observability" in p)
-    after_true = rule[rule.index("external=true"):]
-    assert after_true.index("observability") < after_true.index("lead-set"), \
-        "after `external=true`, `lead-set` is named before `observability` — the polarity is inverted"
-    between = after_true[after_true.index("observability"):after_true.index("lead-set")]
-    assert re.search(r"\b(never|not)\b", between, re.IGNORECASE), \
-        f"`lead-set` is not reached through a negation after `observability`: {between!r}"
-    assert not re.search(r"\b(never|not)\b\W+observability", after_true, re.IGNORECASE), \
-        "`observability` is negated after `external=true`"
-    files = next(p for p in paragraphs if "executed_queries.jsonl" in p)
-    before_files = files[:files.index("executed_queries.jsonl")]
-    assert not re.search(r"\b(never|not|must not)\b[^.]*\bcite\b", before_files), \
-        "the rule forbids citing the table rather than naming it as the pointer"
-    assert re.search(r"\bevidence\b", files), "the files paragraph does not mention `evidence`"
-    # #1224: the ledger's own `refused` is now one of VIEW 1's decision words, defined in its
-    # own host glossary paragraph (a call turned away before it reached any system) — the same
-    # kind of attempt the lead line's entries are, so the rule no longer sets it apart.
-    glossary = [p for p in host.split("\n\n") if "VIEW 1" in p and "decision word" in p]
-    assert len(glossary) == 1, "no single host paragraph glosses VIEW 1's decision words"
-    assert "- `refused`:" in glossary[0], \
-        "the decision glossary does not define VIEW 1's `refused` word"
+    glossary = [p for p in host.split("\n\n") if "decision word" in p and "- `refused`:" in p]
+    assert len(glossary) == 1, "no single host paragraph glosses the ledger's decision words"
+    refused_line = next(line for line in glossary[0].splitlines()
+                        if line.startswith("- `refused`:"))
+    assert "BLOCKED" in refused_line, \
+        f"the glossary does not call a refused call a blocked call: {refused_line!r}"
+    gap_rules = [line for line in host.splitlines() if line.startswith("- `gaps`:")]
+    assert len(gap_rules) == 1, f"no single host line defines the gaps list: {gap_rules}"
+    rule = gap_rules[0]
+    assert "refused" in rule, f"the gaps rule does not name refused calls: {rule!r}"
+    assert re.search(r"\bevidence\b", rule), f"the gaps rule does not name evidence: {rule!r}"
+    # THE DIRECTION of the rule, not only its vocabulary: a gap is NEVER an investigator
+    # finding (the inverted instruction carries the same words).
+    assert re.search(r"\bnever an investigator finding\b", rule), \
+        f"the gaps rule does not keep a gap off the investigator's findings: {rule!r}"
+    pointers = next(p for p in host.split("\n\n") if "executed_queries.jsonl" in p)
+    before_table = pointers[:pointers.index("executed_queries.jsonl")]
+    assert not re.search(r"\b(never|not|must not)\b[^.]*\bcite\b", before_table), \
+        "the pointer rule forbids citing the table rather than naming it as a pointer"
 
 
 def test_m5_every_description_of_the_per_lead_chain_names_its_refused_link(tmp_path, judge_roots):
@@ -814,8 +805,8 @@ def test_m5_every_description_of_the_per_lead_chain_names_its_refused_link(tmp_p
     content stays green while the content moves. The chain now carries `refused`, so every
     trusted sentence that enumerates the chain's links — the task's "per-lead chain (goal,
     params, payload, summary, resolutions)" in the host text, and the chain's own title line
-    inside its frame (`## VIEW 3 — PER-LEAD CHAIN (goal -> params -> ...)` since #1224) — names `refused`
-    too; a description that lists the links and omits the new one tells the judge the line is
+    (`### world <X> — VIEW 3: per-lead chain (goal, params, ...)`, host text outside every frame
+    since #1234 A10) — names `refused` too; a description that lists the links and omits the new one tells the judge the line is
     not part of the view it was told to compare against.
 
     Observed failing by: a host paragraph or the chain's title line that enumerates the links
@@ -832,17 +823,17 @@ def test_m5_every_description_of_the_per_lead_chain_names_its_refused_link(tmp_p
         assert "refused" in paragraph, \
             f"a host description of the per-lead chain omits its refused link:\n{paragraph}"
     titles = [line for line in prompt.splitlines()
-              if line.startswith("## ") and "PER-LEAD CHAIN" in line]
+              if line.startswith("### ") and "per-lead chain" in line]
     assert len(titles) == 1, f"the per-lead chain's title line is not where the port put it: {titles}"
-    assert "goal" in titles[0], f"VIEW 1's title no longer enumerates the chain: {titles[0]}"
+    assert "goal" in titles[0], f"VIEW 3's title no longer enumerates the chain: {titles[0]}"
     assert "refused" in titles[0], \
-        f"VIEW 1's title enumerates the chain without its refused link: {titles[0]}"
+        f"VIEW 3's title enumerates the chain without its refused link: {titles[0]}"
     # The ENUMERATION ITSELF, as the ordered phrase the lines are printed in (the adversary's
     # H7: "resolutions; refused attempts are NOT part of this view" carries the substring and
     # contradicts the content). The title and the task sentence list the links in the order
     # `_render_leads` prints them, `refused` directly after `payload`, as M4 says.
-    assert re.search(r"goal -> params -> payload -> refused -> summary -> resolutions", titles[0]), \
-        f"VIEW 1's title does not list the links in the rendered order: {titles[0]}"
+    assert "goal, params, payload, refused, summary, resolutions" in titles[0], \
+        f"VIEW 3's title does not list the links in the rendered order: {titles[0]}"
     for paragraph in enumerations:
         assert "goal, params, payload, refused, summary, resolutions" in paragraph, \
             f"a host description lists the links out of the rendered order:\n{paragraph}"
@@ -851,6 +842,10 @@ def test_m5_every_description_of_the_per_lead_chain_names_its_refused_link(tmp_p
 # ---------------------------------------------------------------------------------------
 # The key flow, end to end
 # ---------------------------------------------------------------------------------------
+
+
+#: World b's run as its call ids name it (`_triplet_947.world_token`).
+B_RUN = J.world_token("b", episode_token=J.EPISODE_TOKEN)
 
 
 def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, judge_roots):
@@ -871,12 +866,17 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
     r = run_gather(tmp_path / "live", verbs=_registry(rec), turns=[
         q("elastic", "nosuch-verb"), q(*DENIED_PAIR),
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
-    ], run_id="d860-flow")
+    ], run_id=B_RUN)
     assert [row["query_id"] for row in r.own_rows] \
         == [ABOVE_GUARD_QUERY_ID, DENIED_QUERY_ID, "elastic.query"]
     assert len(rec.calls) == 1, "the granted call did not run"
 
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
+    # #1234 A12: the run is world b's, so its call ids name b's run (`<token>/<n>`, the driver's
+    # binding when the registry serves a branched world) and its table rows are b's own, not
+    # inherited rows the A21 check would compare with the siblings' tables. The ledger's oracle
+    # row carries an id no table row holds, so it joins none of the gather's calls.
+    oracle = {**J.oracle_row("b"), J.CALL_ID: f"{B_RUN}/99"}
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [oracle], "c": []})
     base, _src = J.runs_base(tmp_path)
     world = ep / "worlds" / "b"
     # The replay closes no investigation, so the run dir has no report.md of its own; the
@@ -894,8 +894,8 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
         "the archive grew a second stream for what the table already carries"
 
     prompt = _prompt_for_world_b(ep, base)
-    judge_input = J.mod("learning.judge.render").render(ep, "b")
-    chain = judge_input.leads[LEAD]
+    # #1234: `render` returns a `JudgeContext`; world b's per-lead chain is its focus view's.
+    chain = J.mod("learning.judge.render").render(ep, "b").focus.leads[LEAD]
     expected = [
         _entry("rejected-before-dispatch", "elastic", False),
         _entry("denied", "elastic", True, verb="esql"),

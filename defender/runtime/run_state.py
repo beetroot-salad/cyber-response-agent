@@ -66,6 +66,9 @@ class RunState:
         self.breaker: dict = {"systems": {}, "total_failures": 0}
         #: `record_query`: each lead's rows, in append order (an inherited prefix first).
         self.rows: dict[str, list[dict]] = {}
+        #: `record_query`: call identity and the next number, owned by this run alone.
+        self.call_run = run_id
+        self.call_number = 0
         #: `budget_enforcer`: the seconds closed oracle turns held the world, and the
         #: `time.monotonic()` start of the turn open now.
         self.oracle_credited = 0.0

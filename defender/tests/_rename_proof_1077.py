@@ -32,6 +32,7 @@ def main(root: Path) -> int:
     run.report.write_text("---\ndisposition: benign\n---\n\nbody\n", encoding="utf-8")
     run.investigation.write_text("# investigation\n", encoding="utf-8")
     run.provenance.write_text(json.dumps({"commit": "abc"}), encoding="utf-8")
+    run.alert.parent.mkdir(parents=True, exist_ok=True)
     run.alert.write_text(json.dumps({"alert_id": "a1", "rule": {"name": "r"}}), encoding="utf-8")
     run.lessons_loaded.write_text(json.dumps({"kind": "read"}) + "\n", encoding="utf-8")
     run.executed_queries.write_text(json.dumps({"query_id": "q1"}) + "\n", encoding="utf-8")

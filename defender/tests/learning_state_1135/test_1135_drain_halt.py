@@ -3,8 +3,9 @@
 Every test drives the REAL corpus drain, `drains.author_drain`, through the REAL stage runner
 `cli._run_stage`, over a CREATED state root (R15) and a real git repo. The default
 `trigger_author` runs the real curators: the gate, the closing rotation and the stuck recorder
-are production code. Rows are chosen so no model is ever called: a family defender row whose
-`judge_outcome` is `caught` is consumed by the findings gate (`consumed_family_skip`), and a
+are production code. Rows are chosen so no model is ever called: a family defender row a
+committed `lessons/` lesson already cites is consumed by the findings gate
+(`consumed_idempotent`; #1234 retired the `caught` word that used to be skipped, A4), and a
 world row a committed `lessons-questioner/` lesson already cites is consumed by the questioner
 gate (`consumed_idempotent`) — so "the questioner curator ran" is observable as its consumed
 ledger gaining that row. The fakes are `author_drain`'s own seams (`branch=`, `start_box=`,
@@ -29,6 +30,7 @@ from typing import Any
 import pytest
 
 from defender.learning.core import drains
+from defender.tests._alert_plant import plant_alert
 from defender.learning.core.cli import _run_stage
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
@@ -42,6 +44,10 @@ from defender.tests.learning_state_1135 import _spec1135 as S
 
 #: The world row the committed questioner lesson already cites (consumed with no model call).
 SEEN_WORLD_ID = "ep-1/b/0/0"
+#: The defender rows the committed `lessons/` lesson already cites (consumed with no model call,
+#: as a `caught` row was before #1234 retired the family word).
+SEEN_DEFENDER_IDS = ("ep-1/b/0/1", "ep-1/b/0/5", "ep-1/b/0/6", "ep-1/b/0/7", "ep-1/b/0/8",
+                     "ep-1/b/0/9", "ep-1/b/0/10")
 
 #: Lock files a tick creates below an existing root, as today (R15: "lock files and holding
 #: folders below an existing root are still created as today"). Empty files; never data.
@@ -63,7 +69,8 @@ def _git(repo: Path, *args: str) -> str:
 
 def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, LoopPaths]:
     """`(repo, root, paths)`: `_drain719.make_repo` plus a `lessons-questioner/` corpus whose one
-    committed lesson cites `SEEN_WORLD_ID`, and `LoopPaths` over a CREATED root."""
+    committed lesson cites `SEEN_WORLD_ID`, a committed `lessons/` lesson citing
+    `SEEN_DEFENDER_IDS`, and `LoopPaths` over a CREATED root."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
     repo = D.make_repo(tmp_path)
@@ -71,6 +78,10 @@ def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path,
     corpus.mkdir(parents=True, exist_ok=True)
     (corpus / "seen.md").write_text(
         f"---\nname: seen\nsource_finding_ids:\n- {SEEN_WORLD_ID}\n---\n\nbody\n", encoding="utf-8")
+    seen_ids = "".join(f"- {fid}\n" for fid in SEEN_DEFENDER_IDS)
+    (repo / "defender" / "lessons" / "seen-defender.md").write_text(
+        f"---\nname: seen-defender\nsource_finding_ids:\n{seen_ids}---\n\nbody\n",
+        encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "questioner corpus")
     paths = S.built_paths(tmp_path, repo_root=repo)
@@ -78,11 +89,19 @@ def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path,
 
 
 def _defender_row(fid: str, judge_outcome: str) -> dict:
-    """A family defender row (`_gate_family`): `caught` is consumed unauthored, `survived` is
-    admitted for authoring."""
-    return dict(D.finding_row(fid, run_id="ep-1", direction="family"), subject="defender",
-                type="lead-set", judge_outcome=judge_outcome, subject_anchor="l-001",
-                subject_topic="coverage", source_run_dir="episodes/ep-1/worlds/b")
+    """A family defender row in the #1234 shape (`_gate_family`). `judge_outcome` names the
+    pre-#1234 role the row plays and is never written (the word is retired, A4): `caught` is a
+    row the committed `lessons/` lesson already cites (`SEEN_DEFENDER_IDS`), consumed unauthored;
+    `survived` is a fresh row, admitted for authoring."""
+    assert (fid in SEEN_DEFENDER_IDS) is (judge_outcome == "caught"), (
+        f"fixture bug: {fid} plays {judge_outcome!r} but the seen-lesson list says otherwise")
+    row = dict(D.finding_row(fid, run_id="ep-1", direction="family"), subject="defender",
+               type="lead-set", subject_anchor="l-001", subject_topic="coverage",
+               source_run_dir="episodes/ep-1/worlds/b",
+               contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
+               on_verdict_path=True, world_label_doubted=False)
+    row.pop("judge_outcome")
+    return row
 
 
 def _held_row(fid: str) -> dict:
@@ -91,9 +110,11 @@ def _held_row(fid: str) -> dict:
 
 
 def _world_row(fid: str = SEEN_WORLD_ID) -> dict:
-    return dict(D.finding_row(fid, run_id="ep-1", direction="world"), subject="world",
-                type="story-overlay-gap", world="b", judge_outcome="gradable",
-                source_run_dir="episodes/ep-1")
+    row = dict(D.finding_row(fid, run_id="ep-1", direction="world"), subject="world",
+               type="unreachable", world="b", systems=["elastic"],
+               citations=["family.yaml#worlds/b"], source_run_dir="episodes/ep-1")
+    row.pop("judge_outcome")
+    return row
 
 
 def _queue(root: Path) -> Path:
@@ -222,7 +243,7 @@ def test_a_non_refusal_fault_in_the_first_curator_stays_contained(tmp_path, monk
 
     The fault is a real input through real code, in place of the seed's StageAbort-from-the-gate
     (no real input makes the gate raise StageAbort): the tick's one row is admitted for authoring
-    (`judge_outcome: survived`), and `LEARNING_VERIFIER_MODEL` names a model no provider serves,
+    (a fresh new-shape row), and `LEARNING_VERIFIER_MODEL` names a model no provider serves,
     so the drain's verifier-key preflight raises `FatalConfigError` — a SYSTEMIC_FAULTS member —
     inside _tick's body, before any model is spawned (config.source_first_party_key)."""
     caplog.set_level(logging.INFO)
@@ -662,7 +683,7 @@ def cell(name, root):
         if name == "e1":
             os.environ["DEFENDER_LEARNING_STATE_DIR"] = root
             run_dir = Path(spec["run_dir"])
-            out["answer"] = run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json")
+            out["answer"] = run_common.enqueue_curation(S.run_of(run_dir), run_common.RunPaths(run_dir).alert)
             return out
         state = S.LearningState.open(paths)
         if name == "append":
@@ -789,12 +810,12 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
     try:
         # A natural run where run setup leaves one (#1105 PR 2: run end is handed the `Run`, and
         # the row it files is the run's address): `<T>/runs/<id>` under its tenant record.
-        from defender._tenant import ensure_runs_base_record
 
         run_dir = base / "acme" / "runs" / "case-a"
         run_dir.mkdir(parents=True)
+        from defender._tenant import ensure_runs_base_record
         ensure_runs_base_record(run_dir.parent, "acme")
-        (run_dir / "alert.json").write_text('{"rule": {"name": "everyday"}}\n', encoding="utf-8")
+        plant_alert(run_dir, {"rule": {"name": "everyday"}})
         from defender.runtime import scrub as scrub_mod
 
         scrub_mod.scrub(run_dir)  # a certified tree: the enqueue's refusal gate passes it

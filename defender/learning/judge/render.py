@@ -1,27 +1,34 @@
-"""The judge's input: the joined views over one archived world, plus the withholding of every
-other world's facts.
+"""The judge's input (design M2): the computed context of one judged world — every run's
+header, contrast row and joined call list, the fact surfaces and aligned lead rows, the judged
+world's own views, the noise and the questioner inputs — derived on read (`JudgeContext`).
+`layout` turns it into the prompt's sections.
 
-Ported from `experiments/judge-context-921/variants/contexts.py::render_proposed`, the measured
-arm. Reads only `episode_dir` and the checkout at the sibling's recorded commit — never a
-sibling's own run dir, which may be gone, and never the tenant's runs: the judge reads only the
-episode it is handed (#1105 J3 removed the same-alert sibling union and its spread).
+The views over the judged world were ported from
+`experiments/judge-context-921/variants/contexts.py::render_proposed`, the measured arm. Reads
+only `episode_dir` and the checkout at the sibling's recorded commit — never a sibling's own run
+dir, which may be gone, and never the tenant's runs: the judge reads only the episode it is
+handed (#1105 J3 removed the same-alert sibling union and its spread).
 
-Every world but the judged one has its facts withheld in the rendered family, and the lessons
-view likewise excludes the other worlds' contribution. Every model-bound text the
-host did not author arrives inside an untrusted frame (M26).
+A reference run's facts appear only in that run's own labelled blocks (M3); the lessons view
+shows the judged world's own lessons alone. Every model-bound text the host did not author
+arrives inside an untrusted frame (M26, A10: `RunText`).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import SkipValidation
 
 import contextlib
 
+from defender import _alert_input
 from defender._io import Bound, bind
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.hooks.record_lesson_load import (
@@ -47,13 +54,30 @@ from defender.learning.judge.family import (
     read_world_facts,
     summary_lead_ids,
 )
-from defender.learning.branch.ledger import ORACLE
+from defender.learning.branch.ledger import ORACLE, REAL_ERROR
+from defender.learning.judge.calls import (
+    CALL_ID,
+    is_blocked_ledger_row,
+    is_blocked_table_row,
+    is_inherited,
+    ledger_partner,
+)
+from defender.learning.judge.runs import RunSet, read_run_set
 from defender.run_common import REPO_ROOT
 from defender.runtime.branch._family import episode_token_for
 
 #: The frame tag every model-authored body in the judge's prompt is wrapped in — the
 #: questioner's spelling, so one frame regex matches both.
 UNTRUSTED_TAG = "untrusted"
+
+
+@dataclasses.dataclass(frozen=True)
+class RunText:
+    """Run- or manifest-derived text that a host-built row embeds: framed in place, inside its
+    own untrusted frame, wherever the prompt shows it (A10). Host text beside it is a plain
+    `str`."""
+
+    text: str
 
 
 def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
@@ -64,78 +88,24 @@ def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
 
 @model
 class JudgeInput:
-    """The judge's whole rendered input for one (world, pass). Never stored — derived fresh
-    on every `render()` call from the archive and the checkout."""
+    """The judged world's own views for one (world, pass) — its leads, lessons, documents,
+    samples and built layer (section 6 beside the call list and answers its `RunView` holds).
+    Never stored — derived fresh on every `render()` call from the archive and the checkout."""
 
     world_label: str
     discriminator: dict[str, Any]
     leads: dict[str, dict[str, Any]] = field(default_factory=dict)
-    #: Every ledger row of the judged world, in ledger order: its decision word, the call, and
-    #: for an `oracle` row its claim and verifier verdict. The answers render separately.
-    calls: list[dict[str, Any]] = field(default_factory=list)
     lessons: list[dict[str, Any]] = field(default_factory=list)
-    manifest_text: str = ""
     document_text: str = ""
     report_text: str = ""
     #: The per-system samples record, one section per system (O16).
     samples_text: str = ""
-    #: Pre-flight's outcome record and every world's own record (N22: an unservable world is
-    #: an explicit entry here, built from its record).
-    family_text: str = ""
+    #: Served system -> where its section of real answers ends in `samples_text`: a system is
+    #: shown exactly when the prompt carries `samples_text` up to there (A9 may cut the view).
+    samples_ends: dict[str, int] = field(default_factory=dict)
     #: The judged world's frozen telemetry and every collision of a frozen row's identifier
     #: with this world's real data (M12=A), off its oracle-side store.
     oracle_text: str = ""
-
-    #: The operator's `JUDGE_PAYLOAD_CAP`, or `None`. Applied at `as_prompt_sections`, since
-    #: what it bounds is the bytes that reach the prompt.
-    payload_cap: int | None = None
-
-    def as_prompt_sections(self) -> dict[str, str]:
-        """Each view as the text that goes inside its frame. The cap is charged over every
-        view but the call list, which is never cut: under any cap the judge still gets each
-        call with its decision word (N22); the bytes come off the answers and documents."""
-        capped = _cap_sections({
-            "manifest": self.manifest_text,
-            "family": self.family_text,
-            "answers": _render_answers(self.calls),
-            "leads": _render_leads(self.leads),
-            "lessons": _render_lessons(self.lessons),
-            "document": self.document_text,
-            "report": self.report_text,
-            "samples": self.samples_text,
-            "oracle": self.oracle_text,
-        }, self.payload_cap)
-        ordered = {"manifest": capped["manifest"], "family": capped["family"],
-                   "calls": _render_calls(self.calls)}
-        ordered.update((k, v) for k, v in capped.items() if k not in ordered)
-        return ordered
-
-
-def _cap_sections(sections: dict[str, str], payload_cap: int | None) -> dict[str, str]:
-    """The rendered views, trimmed so their total length is at most `payload_cap`.
-
-    Equal share of what is left, smallest section first: a view that fits is never cut and
-    hands its unused share on, so the bytes come off whichever view is actually large (not a
-    small, load-bearing one)."""
-    if payload_cap is None or sum(len(body) for body in sections.values()) <= payload_cap:
-        return sections
-    remaining, left = payload_cap, len(sections)
-    out: dict[str, str] = {}
-    for name, body in sorted(sections.items(), key=lambda item: len(item[1])):
-        share = max(remaining // left, 0)
-        out[name] = body if len(body) <= share else _capped(body, share, name)
-        remaining -= len(out[name])
-        left -= 1
-    return {name: out[name] for name in sections}
-
-
-def _capped(body: str, share: int, name: str) -> str:
-    """One rendered section trimmed to `share` bytes, saying it was cut — a silent truncation
-    reads as complete, and a model fills in unstated absences. The stamp counts against the
-    share, so the bound holds."""
-    # Short, since the stamp is paid for out of the view's own content.
-    stamp = f"\n...[{name} truncated at the payload cap]...\n"
-    return (body[:max(share - len(stamp), 0)] + stamp)[:share]
 
 
 def _render_leads(leads: dict[str, dict[str, Any]]) -> str:
@@ -160,42 +130,6 @@ def _json(value: Any) -> str:
         return json.dumps(value, sort_keys=True, default=str)
     except (TypeError, ValueError):
         return repr(value)
-
-
-def _claim_text(row: dict[str, Any]) -> str:
-    """An `oracle` row's claim and verifier verdict, or the words saying either was never
-    stored — a call with no stored claim is never presented as verified (N22)."""
-    claim = row.get("claim")
-    verdict = row.get("verifier_verdict")
-    if not isinstance(claim, dict):
-        return " — claim unavailable (none was stored for this call; it is not verified)"
-    if not isinstance(verdict, dict):
-        return (f" — claim {_json(claim)}; verifier verdict unavailable (none was stored; the "
-                "claim is not verified)")
-    return f" — claim {_json(claim)}; verifier verdict {_json(verdict)}"
-
-
-def _render_calls(calls: list[dict[str, Any]]) -> str:
-    """VIEW 1: one line per call, numbered, naming its decision word — never cut by the cap."""
-    if not calls:
-        return "This world's investigator made no call that reached the ledger.\n"
-    lines = []
-    for n, row in enumerate(calls, 1):
-        line = (f"- call #{n} [{row.get('source')}] system={row.get('system')} "
-                f"verb={row.get('verb')} params={_json(row.get('params'))}")
-        if row.get("source") == ORACLE:
-            line += _claim_text(row)
-        lines.append(line)
-    return "\n".join(lines) + "\n"
-
-
-def _render_answers(calls: list[dict[str, Any]]) -> str:
-    """VIEW 2: the answer each call was served, by call number (the bulk the cap is charged
-    against)."""
-    if not calls:
-        return "No answer was served to this world.\n"
-    return "".join(f"- call #{n} answer: {row.get('payload_text')}\n"
-                   for n, row in enumerate(calls, 1))
 
 
 def _render_lessons(lessons: list[dict[str, Any]]) -> str:
@@ -230,53 +164,54 @@ def _world_entry(doc: dict[str, Any], label: str) -> dict[str, Any]:
     raise JudgeRefused(f"the manifest declares no world {label!r}")
 
 
-def episode_alert(bound: Bound, labels: list[str]) -> dict[str, Any]:
-    """The alert this episode's worlds all investigate: the first world's `alert.json` that
-    carries an `alert_id`, else the first that parses.
+def episode_record(bound: Bound) -> _alert_input.AlertRecord | None:
+    """The record of the alert this episode's worlds all investigate: the copy launch put in the
+    episode (A1), or `None` when there is none or it is not one.
 
-    The enqueue's `alert_rule_key` keys on it.
-    """
-    fallback: dict[str, Any] = {}
-    for label in labels:
-        # A label off box-writable `judge.yaml` may not be a path component; skip it.
-        try:
-            data = json_mapping(bound, LAYOUT.world(label).alert)
-        except ValueError:
-            continue
-        if data is None:
-            continue
-        if data.get("alert_id") is not None:
-            return data
-        if not fallback:
-            fallback = data
-    return fallback
+    Shared by the sibling union and the enqueue's rule key, so both key on the same record."""
+    read = bound.read(LAYOUT.source_record)
+    return _alert_input.parse_alert_record(read.text) if read.text else None
 
 
-def _render_samples(samples_doc: dict[str, Any], served: list[str]) -> str:
+def episode_alert(bound: Bound) -> dict[str, Any]:
+    """The alert document the episode's copy holds, for display; `{}` when there is none, it is
+    not one JSON object, or its bytes are not the record's digest."""
+    return _alert_input.verified_document(
+        bound, LAYOUT.source_alert, LAYOUT.source_record) or {}
+
+
+def _render_samples(samples_doc: dict[str, Any], served: list[str]) -> tuple[str, dict[str, int]]:
     """The samples record per system (O16): each system's real example answers under its own
     name, per verb, and a system whose section is unavailable shown with its reason. A served
-    system the record has no section for is named as such."""
-    lines: list[str] = []
+    system the record has no section for is named as such. Returns the text and, for each
+    served system with a section of real answers, the offset its section ends at."""
+    text = ""
+    ends: dict[str, int] = {}
+    served_set = set(served)
     for system in sorted({*map(str, samples_doc), *served}):
         section = samples_doc.get(system)
         if isinstance(section, dict) and isinstance(section.get("verbs"), dict):
-            lines.append(f"system {system}:")
+            lines = [f"system {system}:"]
             for verb, answers in sorted(section["verbs"].items(), key=lambda kv: str(kv[0])):
                 lines.append(f"  verb {verb}:")
                 for answer in answers if isinstance(answers, list) else [answers]:
                     lines.append(f"    {answer if isinstance(answer, str) else _json(answer)}")
+            text += "\n".join(lines) + "\n"
+            if system in served_set:
+                ends[system] = len(text)
         elif isinstance(section, dict) and "unavailable" in section:
-            lines.append(f"system {system}: unavailable — {section.get('unavailable')}")
+            text += f"system {system}: unavailable — {section.get('unavailable')}\n"
         else:
-            lines.append(f"system {system}: no samples section is recorded")
-    return "\n".join(lines) + "\n" if lines else "No samples record is archived.\n"
+            text += f"system {system}: no samples section is recorded\n"
+    return (text, ends) if text else ("No samples record is archived.\n", {})
 
 
 def render_oracle_store(bound: Bound, label: str) -> str:
-    """The judged world's oracle-side record as the judge reads it: every frozen forged row
-    (the telemetry its facts were served through) and every collision of a frozen row's
-    identifier with this world's real data (M12=A — the row stayed frozen and was still
-    served)."""
+    """The judged world's oracle-side record as the judge reads it (its built layer): every
+    frozen forged row (the telemetry its facts were served through), every collision of a
+    frozen row's identifier with this world's real data (M12=A — the row stayed frozen and was
+    still served), and pre-flight's calibration result — the facts it recorded and its
+    `preflight` rows of the oracle-side ledger."""
     paths = OracleStorePaths(Path(LAYOUT.oracle_dir(label)))
     forged, _bad, _rec = bound.read_jsonl(paths.forged.as_posix())
     collisions, _bad, _rec = bound.read_jsonl(paths.collisions.as_posix())
@@ -292,6 +227,17 @@ def render_oracle_store(bound: Bound, label: str) -> str:
                          f"= {entry.get('value')}; real row(s): {_json(entry.get('real_rows'))}")
     else:
         lines.append("No frozen row's identifier collided with this world's real data.")
+    # Pre-flight's calibration result (`registry.calibrate_one`): the facts it recorded, and
+    # its replay, logged as `preflight` rows of the oracle-side ledger.
+    recorded, _bad, _rec = bound.read_jsonl(paths.facts.as_posix())
+    ledger, _bad, _rec = bound.read_jsonl(paths.ledger.as_posix())
+    replayed = [row for row in ledger if row.get("actor") == "preflight"]
+    lines.append("pre-flight's calibration — the facts it recorded:" if recorded
+                 else "Pre-flight's calibration recorded no fact for this world.")
+    lines += [f"- {_json(row)}" for row in recorded]
+    lines.append("pre-flight's calibration replay (its rows of the oracle-side ledger):"
+                 if replayed else "No pre-flight replay is on this world's oracle-side ledger.")
+    lines += [f"- {_json(row)}" for row in replayed]
     return "\n".join(lines) + "\n"
 
 
@@ -308,45 +254,68 @@ def family_status(bound: Bound) -> tuple[dict[str, Any] | None, dict[str, dict[s
     return record, outcome_mod.failed_worlds(bound, record)
 
 
-def _render_call(call: Any) -> str:
+#: A run label as the manifest grammar spells one: the only run-named text that may sit in
+#: host text (A10). A label read anywhere else that is not of it is framed like run text.
+_LABEL = re.compile(r"[a-z0-9_]+")
+
+
+def _host_label(label: Any) -> Any:
+    """`label` as host text when it is of the label grammar, else framed (`RunText`)."""
+    return label if isinstance(label, str) and _LABEL.fullmatch(label) else RunText(str(label))
+
+
+def _run_value(value: Any) -> RunText:
+    """A run- or manifest-derived value framed in place: a string verbatim, anything else as
+    canonical JSON."""
+    return RunText(value if isinstance(value, str) else _json(value))
+
+
+def _call_parts(call: Any) -> list[Any]:
     if not isinstance(call, dict):
-        return "(no call recorded)"
-    return (f"system={call.get('system')} verb={call.get('verb')} "
-            f"params={_json(call.get('params'))}")
+        return ["(no call recorded)"]
+    return ["system ", _run_value(call.get("system")), " verb ", _run_value(call.get("verb")),
+            " params ", _run_value(call.get("params"))]
 
 
 def render_family_text(record: dict[str, Any] | None,
-                       failed: dict[str, dict[str, Any]]) -> str:
+                       failed: dict[str, dict[str, Any]]) -> list[Any]:
     """Pre-flight's record of the family and every failed world as an explicit entry (N22):
     each world that could not be judged by its label, its reason word and the investigator's
     call it failed on; the calls pre-flight could not replay; and the calls whose live answer
-    drifted from the capture.
+    drifted from the capture. Host text, every string the record holds framed in place
+    (`RunText`, A10).
 
     A failed world's `detail` is never shown: it is the oracle's last refusal, which can quote
     the rows it forged for that world's facts, or the verifier's reasoning about them, and this
-    text reaches every judged world's prompt, which withholds every other world's facts."""
+    text reaches every judged world's prompt, where only a reference run's own labelled section
+    may hold its facts."""
     if record is None:
-        lines = ["No pre-flight outcome record is readable for this episode."]
+        parts: list[Any] = ["No pre-flight outcome record is readable for this episode.\n"]
     else:
-        lines = [f"outcome: {record.get('outcome')} — {record.get('reason') or '(no reason given)'}"]
+        parts = ["pre-flight outcome: ", _run_value(record.get("outcome")), " — reason: ",
+                 *([_run_value(record.get("reason"))] if record.get("reason") else
+                   ["(no reason given)"]), "\n"]
     if failed:
-        lines.append("worlds that could not be judged (each contributes no findings):")
+        parts.append("worlds that could not be judged (each contributes no findings):\n")
         for label, entry in sorted(failed.items()):
-            lines.append(f"- world {label}: {entry.get('reason') or '(no reason recorded)'}; "
-                         f"call: {_render_call(entry.get('call'))}")
+            parts += ["- world ", _host_label(label), ": ",
+                      *([_run_value(entry.get("reason"))] if entry.get("reason") else
+                        ["(no reason recorded)"]),
+                      "; call: ", *_call_parts(entry.get("call")), "\n"]
     else:
-        lines.append("every world could be judged")
+        parts.append("every world could be judged\n")
     for key, what in (("not_replayable", "calls pre-flight could not replay"),
                       ("drift", "calls whose live answer drifted from the capture")):
         entries = (record or {}).get(key) or []
         if not entries:
-            lines.append(f"{what}: none")
+            parts.append(f"{what}: none\n")
             continue
-        lines.append(f"{what}:")
+        parts.append(f"{what}:\n")
         for entry in entries:
             extra = (entry.get("status") or entry.get("reason")) if isinstance(entry, dict) else None
-            lines.append(f"- {_render_call(entry)}" + (f" ({extra})" if extra else ""))
-    return "\n".join(lines) + "\n"
+            parts += ["- ", *_call_parts(entry),
+                      *([" — ", _run_value(extra)] if extra else []), "\n"]
+    return parts
 
 
 def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that avoids re-reading what the caller has read
@@ -354,63 +323,46 @@ def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that
     git_show: Any = None, lessons_commit: str | None = None, payload_cap: int | None = None,
     facts: WorldFacts | None = None, samples: dict[str, Any] | None = None,
     manifest: dict[str, Any] | None = None, bound: Bound | None = None,
-    family_text: str | None = None,
-) -> JudgeInput:
-    """The judge's rendered input for one non-control world.
+    family_text: list[Any] | None = None, runs: RunSet | None = None,
+) -> JudgeContext:
+    """The judge's computed context for one planted world (design M2, derived on read, P-b):
+    the computed header, contrast table, fact surfaces and aligned lead rows of the focus and
+    every reference run, the reference runs' compressed sections, the focus world's own views,
+    the noise, and the questioner inputs (samples record, base story).
 
     `git_show` is the `(cwd, rev, path) -> str | None` seam for reading a lesson body at a
     recorded commit. `lessons_commit` overrides the per-world provenance read. `facts`,
-    `manifest`, `samples`, `family_text` and `bound` are the caller's already-read per-pass
-    inputs; each is read or computed here only when not handed over.
+    `manifest`, `samples`, `family_text`, `runs` and `bound` are the caller's already-read
+    per-pass inputs; each is read or computed here only when not handed over.
     """
     episode_dir = Path(episode_dir)
     with (contextlib.nullcontext(bound) if bound is not None else bind(episode_dir)) as bound:
-        return _render_bound_world(bound, episode_dir, world_label, git_show=git_show,
-                       lessons_commit=lessons_commit, payload_cap=payload_cap, facts=facts,
-                       samples=samples, manifest=manifest, family_text=family_text)
-
-
-def _manifest_text(doc: dict[str, Any], judged_label: str) -> str:
-    """The family as the judged world may see it: the discriminator, the served systems, the
-    judged world's facts and declared verdict — and every other world with its facts withheld.
-    The judged world last, so a window sliced from its lines never runs into a sibling's."""
-    from defender.learning.judge.run import family_predicate, served_systems_of
-
-    served = served_systems_of(doc)
-    lines = [f"discriminator: {family_predicate(doc)}",
-             "SERVED SYSTEMS (the systems this tenant serves, as the family recorded them): "
-             + (", ".join(served) if served else "(none recorded)")]
-    judged: list[str] = []
-    for world in doc.get("worlds") or ():
-        if not isinstance(world, dict):
-            continue
-        label = world.get("world_id")
-        role = world.get("role")
-        if label != judged_label:
-            lines.append(
-                f"world {label} (role {role}): its facts are withheld — none of them is a fact "
-                "about the judged world")
-            continue
-        judged.append(
-            f"world {label} (role {role}) — JUDGED. story={world.get('story')!r} "
-            f"axis={world.get('axis')!r} declared verdict: {world.get('disposition_declared')}")
-        facts = [f for f in world.get("facts") or () if isinstance(f, dict)]
-        if not facts:
-            judged.append("facts: none (this world serves the capture's own answers)")
-        for fact in facts:
-            entities = fact.get("entities")
-            judged.append(
-                f"fact {fact.get('fact_id')}: {fact.get('statement')}"
-                + (f" (entities: {', '.join(map(str, entities))})"
-                   if isinstance(entities, list) and entities else ""))
-    return "\n".join(lines + judged) + "\n"
+        doc = manifest if manifest is not None else read_manifest(bound)
+        record, failed = family_status(bound)
+        if runs is None:
+            runs = read_run_set(bound, doc, episode_dir=episode_dir, failed=failed)
+        if family_text is None:
+            family_text = render_family_text(record, failed)
+        samples_doc = read_samples_record(bound) if samples is None else samples
+        focus = _render_bound_world(bound, episode_dir, world_label, git_show=git_show,
+                                    lessons_commit=lessons_commit,
+                                    facts=facts if facts is not None else runs.usable.get(
+                                        world_label),
+                                    samples=samples_doc, manifest=doc)
+        labels = [world_label, *runs.references(world_label)]
+        views = [run_view(doc, runs, label) for label in labels]
+        surfaces = fact_surfaces(doc, runs, labels)
+        return JudgeContext(
+            world_label=world_label, run_views=views, fact_surfaces=surfaces, focus=focus,
+            noise=family_text, aligned_rows=aligned_lead_rows(views, surfaces),
+            samples=samples_doc, base_story=doc.get("base_story"), payload_cap=payload_cap)
 
 
 def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     bound: Bound, episode_dir: Path, world_label: str, *,
-    git_show: Any, lessons_commit: str | None, payload_cap: int | None,
+    git_show: Any, lessons_commit: str | None,
     facts: WorldFacts | None, samples: dict[str, Any] | None,
-    manifest: dict[str, Any] | None, family_text: str | None,
+    manifest: dict[str, Any] | None,
 ) -> JudgeInput:
     from defender.learning.judge.run import served_systems_of
 
@@ -435,11 +387,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     report_text = record.report.text
 
     samples_doc = read_samples_record(bound) if samples is None else samples
-    samples_text = _render_samples(samples_doc, served_systems_of(doc))
-    if family_text is None:
-        family_text = render_family_text(*family_status(bound))
-    calls = list(record.ledger_rows)
-
+    samples_text, samples_ends = _render_samples(samples_doc, served_systems_of(doc))
     provenance = _read_provenance(world)
     commit = _usable_commit(
         lessons_commit if lessons_commit is not None else provenance.get("commit"))
@@ -484,10 +432,9 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     return JudgeInput(
         world_label=world_label,
         discriminator=discriminator_of(doc),
-        leads=leads, calls=calls, lessons=lessons,
-        manifest_text=_manifest_text(doc, world_label), document_text=text,
-        report_text=report_text, samples_text=samples_text, family_text=family_text,
-        oracle_text=render_oracle_store(bound, world_label), payload_cap=payload_cap,
+        leads=leads, lessons=lessons, document_text=text,
+        report_text=report_text, samples_text=samples_text, samples_ends=samples_ends,
+        oracle_text=render_oracle_store(bound, world_label),
     )
 
 
@@ -539,4 +486,291 @@ def _usable_commit(commit: Any) -> str | None:
     return commit if isinstance(commit, str) and _COMMIT_RE.match(commit) else None
 
 
-__all__ = ["JudgeInput", "episode_alert", "family_status", "render", "render_family_text"]
+# ------------------------------------------------------------------------------------------
+# The computed context (design M2): every run's header, contrast row and call list, and the
+# fact surfaces — derived on read from the archive, never stored (P-b).
+# ------------------------------------------------------------------------------------------
+
+#: The words every text-matched (not established) row of the context is labelled with.
+HEURISTIC = "heuristic (text-matched, not established)"
+
+
+def call_list(run: WorldFacts, *, j3: frozenset[str]) -> list[dict[str, Any]]:
+    """One run's calls, joined by call id (A12): every query-table row in table order, numbered
+    by its 0-based line index in the table (`call`, the numbering a `#<row>` pointer cites),
+    with its ledger partner's decision (`source`, `None`: inherited or unserved) and whether it is a blocked call; then every UNMAPPED ledger row (an id no table
+    row carries), `call` `None`.
+
+    @owns call — the call numbering every contrast row, call list and blocked list reads."""
+    out: list[dict[str, Any]] = []
+    joined_ids: set[Any] = set()
+    for n, row in enumerate(run.table_rows):
+        partner = ledger_partner(row, run.ledger_rows, run.token)
+        if partner is not None:
+            joined_ids.add(partner.get(CALL_ID))
+        out.append({"call": n, "source": None if partner is None else partner.get("source"),
+                    "blocked": is_blocked_table_row(row, run.ledger_rows, run.token, j3=j3),
+                    "inherited": is_inherited(row, run.token), "lead": row.get("lead_id"),
+                    "system": row.get("system"), "verb": row.get("verb"),
+                    "params": row.get("params"), "query_id": row.get("query_id")})
+    for row in run.ledger_rows:
+        if row.get(CALL_ID) in joined_ids:
+            continue
+        out.append({"call": None, "source": row.get("source"),
+                    "blocked": is_blocked_ledger_row(row), "inherited": False, "lead": None,
+                    "system": row.get("system"), "verb": row.get("verb"),
+                    "params": row.get("params"), CALL_ID: row.get(CALL_ID)})
+    return out
+
+
+def contrast_row(calls: list[dict[str, Any]], run: WorldFacts) -> dict[str, Any]:
+    """One run's contrast row (M2) off its joined call list: whether it was shown its facts
+    (any `oracle` ledger row), its first altered call, the leads served altered answers, its
+    calls counted by system/verb, its blocked, errored, unserved and unmapped calls, and the
+    shared baseline (inherited rows)."""
+    altered = [c for c in calls if c["source"] == ORACLE and c["call"] is not None]
+    counts: dict[str, int] = {}
+    for c in calls:
+        if c["call"] is not None:
+            key = f"{c['system']}.{c['verb']}"
+            counts[key] = counts.get(key, 0) + 1
+    return {
+        "shown_its_facts": any(r.get("source") == ORACLE for r in run.ledger_rows),
+        "first_altered_call": altered[0]["call"] if altered else None,
+        "altered_leads": sorted({str(c["lead"]) for c in altered}),
+        "call_counts": counts,
+        "blocked_calls": [{"call": c["call"], "source": c["source"], "system": c["system"],
+                           "verb": c["verb"], "params": c["params"]}
+                          for c in calls if c["blocked"]],
+        "errored_calls": [c["call"] for c in calls if c["source"] == REAL_ERROR],
+        "unserved_calls": [c["call"] for c in calls if c["call"] is not None
+                           and not c["inherited"] and c["source"] is None],
+        "unmapped_calls": [{"call": None, "source": c["source"], CALL_ID: c.get(CALL_ID)}
+                           for c in calls if c["call"] is None],
+        "shared_baseline": [c["call"] for c in calls if c["inherited"]],
+    }
+
+
+@model
+class RunView:
+    """One run's block of the computed context: its header facts (manifest and archived
+    report), its contrast row and joined call list, and what its reference section shows (its
+    leads, report and calls, A24) — each call's served answer and an altered call's claim and
+    verifier verdict keyed by its call number."""
+
+    label: str
+    role: Any
+    story: Any
+    axis: Any
+    declared: Any
+    label_basis: Any
+    reached: str | None
+    facts: list[dict[str, Any]]
+    contrast: dict[str, Any]
+    calls: list[dict[str, Any]]
+    #: Every lead the run's calls or gather summaries name, sorted, with its goal (`None`: the
+    #: lead's record names none).
+    lead_goals: dict[str, Any]
+    report_text: str
+    #: Call number -> the answer its ledger partner records (`payload_text`; `None`: none).
+    answers: dict[int, Any] = field(default_factory=dict)
+    #: Call number -> an `oracle` partner's `claim` and `verifier_verdict` (each `None` when the
+    #: row stores none).
+    claims: dict[int, dict[str, Any]] = field(default_factory=dict)
+
+
+def run_view(doc: dict[str, Any], runs: RunSet, label: str) -> RunView:
+    """`label`'s block, off the manifest entry and the run's usability read."""
+    entry = _world_entry(doc, label)
+    run = runs.usable[label]
+    calls = call_list(run, j3=runs.j3)
+    leads = sorted({str(c["lead"]) for c in calls if c["lead"] is not None} | run.summary_leads)
+    answers: dict[int, Any] = {}
+    claims: dict[int, dict[str, Any]] = {}
+    for n, row in enumerate(run.table_rows):
+        partner = ledger_partner(row, run.ledger_rows, run.token)
+        if partner is None:
+            continue
+        answers[n] = partner.get("payload_text")
+        if partner.get("source") == ORACLE:
+            claims[n] = {"claim": partner.get("claim"),
+                         "verifier_verdict": partner.get("verifier_verdict")}
+    return RunView(
+        label=label, role=entry.get("role"), story=entry.get("story"), axis=entry.get("axis"),
+        declared=entry.get("disposition_declared"), label_basis=entry.get("label_basis"),
+        reached=run.report.disposition,
+        facts=[f for f in entry.get("facts") or () if isinstance(f, dict)],
+        contrast=contrast_row(calls, run), calls=calls,
+        lead_goals={lead: run.leads[lead].goal if lead in run.leads else None for lead in leads},
+        report_text=run.report.text, answers=answers, claims=claims)
+
+
+def fact_surfaces(doc: dict[str, Any], runs: RunSet, labels: list[str]) -> list[dict[str, Any]]:
+    """Per planted fact of the runs in `labels`: the systems its forged rows were served on
+    (the oracle store), its entities, and per run the leads that queried one of those systems or
+    named one of those entities in their params — every hit text-matched (heuristic)."""
+    out: list[dict[str, Any]] = []
+    for label in labels:
+        run = runs.usable[label]
+        entry = _world_entry(doc, label)
+        for fact in entry.get("facts") or ():
+            if not isinstance(fact, dict):
+                continue
+            systems = sorted({str(r.get("system")) for r in run.forged_rows
+                              if r.get("fact_id") == fact.get("fact_id")})
+            entities = [str(e) for e in fact.get("entities") or ()]
+            hits: dict[str, list[str]] = {}
+            for other in labels:
+                leads = sorted({str(r.get("lead_id")) for r in runs.usable[other].table_rows
+                                if r.get("system") in systems
+                                or any(e and e in _json(r.get("params")) for e in entities)})
+                if leads:
+                    hits[other] = leads
+            out.append({"world": label, "fact_id": fact.get("fact_id"),
+                        "statement": fact.get("statement"), "systems": systems,
+                        "entities": entities, "hits": hits, "heuristic": True})
+    return out
+
+
+#: How an aligned row was matched (M2): through a fact surface, by system and verb, or not at
+#: all (a lead with a row of its own).
+MATCHED_BY_SURFACE = "fact surface"
+MATCHED_BY_SYSTEM_VERB = "system and verb"
+UNMATCHED = "unmatched"
+
+
+def aligned_lead_rows(runs: list[RunView], surfaces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The aligned lead view (M2, F1): leads matched across runs through the fact surfaces
+    first, then by the system and verb of their first call; a lead neither pairs gets a row of
+    its own. A lead is a (run, lead id) pair: one id in two runs names two leads, which only a
+    surface or a system/verb match puts in one row. Every row is heuristic (text-matched, not
+    established). A row holding the judged world's (`runs[0]`) leads whose calls all come before
+    its first altered answer is the shared baseline (noise); with no altered answer, no row is.
+
+    Each row: `leads` (`{"run", "lead"}` entries, in run order), `matched_by`, the `fact_id` or
+    the `system`/`verb` it was matched on, `heuristic` (always `True`) and `shared_baseline`."""
+    first_call, numbers, order = _lead_index(runs)
+    taken: set[tuple[str, str]] = set()
+    rows: list[dict[str, Any]] = []
+    for surface in surfaces:
+        touching = [(label, str(lead)) for label, leads in surface["hits"].items()
+                    for lead in leads if (label, str(lead)) in first_call]
+        fresh = [key for key in touching if key not in taken]
+        if len({label for label, _lead in fresh}) < 2:
+            continue
+        taken.update(fresh)
+        rows.append({"leads": fresh, "matched_by": MATCHED_BY_SURFACE,
+                     "fact_id": surface["fact_id"]})
+    by_key: dict[tuple[Any, Any], list[tuple[str, str]]] = {}
+    for key in order:
+        if key in taken or key not in first_call:
+            continue
+        by_key.setdefault(first_call[key], []).append(key)
+    for (system, verb), keys in by_key.items():
+        if len({label for label, _lead in keys}) < 2:
+            continue
+        taken.update(keys)
+        rows.append({"leads": keys, "matched_by": MATCHED_BY_SYSTEM_VERB, "system": system,
+                     "verb": verb})
+    rows += [{"leads": [key], "matched_by": UNMATCHED} for key in order if key not in taken]
+    return _marked_rows(rows, runs, numbers)
+
+
+_Lead = tuple[str, str]  # (run label, lead id)
+
+
+def _lead_index(runs: list[RunView]) -> tuple[dict[_Lead, tuple[Any, Any]], dict[_Lead, list[int]],
+                                              dict[_Lead, None]]:
+    """Each lead's first call's (system, verb), its call numbers, and every lead (one with no
+    call included) in run then call order."""
+    first_call: dict[_Lead, tuple[Any, Any]] = {}
+    numbers: dict[_Lead, list[int]] = {}
+    order: dict[_Lead, None] = {}
+    for run in runs:
+        for c in run.calls:
+            if c["lead"] is None:
+                continue
+            key = (run.label, str(c["lead"]))
+            first_call.setdefault(key, (c["system"], c["verb"]))
+            order.setdefault(key)
+            if c["call"] is not None:
+                numbers.setdefault(key, []).append(c["call"])
+        for lead in run.lead_goals:
+            order.setdefault((run.label, lead))
+    return first_call, numbers, order
+
+
+def _marked_rows(rows: list[dict[str, Any]], runs: list[RunView],
+                 numbers: dict[_Lead, list[int]]) -> list[dict[str, Any]]:
+    """`rows` with their leads in run order, each labelled heuristic and marked shared baseline
+    when it holds judged-world calls all made before the judged world's first altered answer."""
+    focus = runs[0].label if runs else None
+    first_altered = runs[0].contrast.get("first_altered_call") if runs else None
+    rank = {run.label: i for i, run in enumerate(runs)}
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        keys = sorted(row["leads"], key=lambda k: (rank.get(k[0], len(rank)), k[1]))
+        own = [n for key in keys if key[0] == focus for n in numbers.get(key, [])]
+        baseline = (isinstance(first_altered, int) and bool(own)
+                    and all(n < first_altered for n in own))
+        out.append({**row, "leads": [{"run": label, "lead": lead} for label, lead in keys],
+                    "heuristic": True, "shared_baseline": baseline})
+    return out
+
+
+@model
+class JudgeContext:
+    """The judge's whole input for one planted world (design data model): the focus run's and
+    every reference run's blocks (focus first), the fact surfaces and aligned lead rows, the
+    focus world's own views, the noise (pre-flight's record, as host text and framed run text,
+    `RunText`) and the questioner inputs (the samples record and the base story). Never
+    stored — derived fresh on every `render()` call; persisted only as the prompt in the wire
+    log."""
+
+    world_label: str
+    run_views: list[RunView]
+    fact_surfaces: list[dict[str, Any]]
+    focus: JudgeInput
+    noise: Annotated[list[Any], SkipValidation]
+    aligned_rows: list[dict[str, Any]] = field(default_factory=list)
+    samples: dict[str, Any] = field(default_factory=dict)
+    base_story: Any = None
+    payload_cap: int | None = None
+
+    @property
+    def contrast_rows(self) -> dict[str, dict[str, Any]]:
+        """Run label -> that run's contrast row (the focus's included)."""
+        return {run.label: run.contrast for run in self.run_views}
+
+    @property
+    def focus_calls(self) -> list[dict[str, Any]]:
+        """Section 6's call list: the judged world's joined calls."""
+        return self.run_views[0].calls
+
+    @property
+    def reference_calls(self) -> dict[str, list[dict[str, Any]]]:
+        """Section 5's call lists, by reference run."""
+        return {run.label: run.calls for run in self.run_views[1:]}
+
+    @property
+    def shown_its_facts(self) -> bool:
+        """Was the judged world served any altered answer (its contrast row says)?"""
+        return bool(self.contrast_rows[self.world_label]["shown_its_facts"])
+
+
+def excluded_text(runs: RunSet, failed: dict[str, dict[str, Any]]) -> list[Any]:
+    """The worlds no reference set holds and why — cut short, missing an input, malformed —
+    except the O5-failed ones, which pre-flight's record already lists (each world once). Host
+    text, each reason framed in place (`RunText`)."""
+    parts: list[Any] = []
+    for label, reason in runs.excluded.items():
+        if label not in failed:
+            parts += [f"- world {label}: ", RunText(str(reason)), "\n"]
+    return parts or ["Every world not failed by pre-flight is a run.\n"]
+
+
+__all__ = [
+    "HEURISTIC", "JudgeContext", "JudgeInput", "RunText", "RunView", "aligned_lead_rows", "call_list",
+    "contrast_row", "episode_alert", "excluded_text", "fact_surfaces", "family_status", "render",
+    "render_family_text", "run_view",
+]

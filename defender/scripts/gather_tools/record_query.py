@@ -202,13 +202,36 @@ QUERY_ROW_COLUMNS: tuple[str, ...] = (
     "payload_digest",
     "payload_sha256",
     "system_key",
+    "call_id",
 )
+
+
+def bind_call_ids(state: RunState, run: str) -> None:
+    """Name calls from this run's in-memory state, never from its disk view."""
+    if not run or "/" in run:
+        raise ValueError("a call id's run part must be non-empty and carry no '/'")
+    with state.lock:
+        if state.call_run != run:
+            state.call_run = run
+            state.call_number = 0
+
+
+def next_call_id(state: RunState) -> str:
+    """@owns call_id — allocate one host-written identity under this run's own lock.
+
+    The counter lives only on RunState; model-written rows cannot move it, and another run
+    on the same folder starts with its own state. Both call records carry the allocated id.
+    """
+    with state.lock:
+        number = state.call_number
+        state.call_number += 1
+        return f"{state.call_run}/{number}"
 
 
 def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the caller must decide
     state: RunState, *, lead_id: str, system: str, verb: str, query_id: str, params: dict,
     raw_command: str, payload_text: str, exit_code: int, payload_status: str,
-    payload_digest: str, system_key: str,
+    payload_digest: str, system_key: str, call_id: str | None = None,
 ) -> dict:
     """@owns QUERY_ROW_COLUMNS — the single append to the queries table: allocate the lead's
     next seq, persist the payload sidecar, record the row in the run's state, and append its
@@ -235,6 +258,8 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     # First, so too-deep params are refused before a seq is taken or a sidecar written.
     stored_params = _json_safe_params(dict(params))
     with state.lock:
+        if call_id is None:
+            call_id = next_call_id(state)
         seq = _next_seq(state, lead_id)
         payload_rel = persist_payload(state.run_dir, lead_id, seq, payload_text)
         row: dict[str, Any] = {
@@ -254,6 +279,7 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
             "payload_sha256": payload_sha256(payload_text),
             # Passed in: the raw string it fingerprints must not be on the row.
             "system_key": system_key,
+            "call_id": call_id,
         }
         # Compared as a tuple: the on-disk key order is part of the contract.
         if tuple(row) != QUERY_ROW_COLUMNS:

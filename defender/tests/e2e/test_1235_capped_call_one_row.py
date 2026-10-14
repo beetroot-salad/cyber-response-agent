@@ -1,51 +1,42 @@
-"""#1235 round 3: one backend call is one row, on lead-0's capped path too.
+"""#1235: a refused query view write records one successful call once.
 
-`_CallLedger.call`'s capped branch is `try: envelope = fn(); _record_manual_row(exit 0)
-... except BaseException: _record_manual_row(exit 2)`. Under round 3 the first append records
-the success row in the state and THEN its view write raises; the catch-all treats that OSError as
-the call's own fault and records a second row (exit 2, unmapped fault) for the same call.
-The rule: a refused view write is not the call's fault; the call's row is the one it earned."""
+#1222 retired the ancestor fetch's capped call path. The correlation lead now uses the
+ordinary QueryCapture recorder; a view-write fault still must not turn success into a
+second failure row.
+"""
 from __future__ import annotations
+
+import asyncio
+from dataclasses import replace
 
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
 from defender.run_repository import RunPaths  # noqa: E402
-from defender.scripts.adapters.faults import TransportFault  # noqa: E402
-from defender.tests.e2e import _lead_zero_808 as LZ  # noqa: E402
+from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.runtime.query_tool import QueryCapture  # noqa: E402
+from defender.runtime.run_state import RunState  # noqa: E402
+from defender.tests._tenants1106 import fixture_gather_def  # noqa: E402
+from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 
 
 def test_a_capped_call_whose_view_write_is_refused_is_recorded_once(tmp_path):
-    down = TransportFault("docker exec failed")
+    run_dir = tmp_path / "run"
+    RunPaths(run_dir).gather_raw.mkdir(parents=True)
+    state = RunState(run_dir, "adv3-capped")
+    deps = replace(bind(fixture_gather_def(), run_dir, defender_dir=DEFENDER),
+                   run_state=state, lead_id="l-00c", harness_lead=True)
     outside = tmp_path / "outside.jsonl"
     outside.write_bytes(b"")
-    seen: dict = {}
+    RunPaths(run_dir).executed_queries.symlink_to(outside)
 
-    def answer(name, params):
-        table = RunPaths(seen["run_dir"]).executed_queries
-        table.unlink(missing_ok=True)
-        table.symlink_to(outside)
-        return LZ.envelope([], index=params.get("index"))
+    with pytest.raises(OSError, match="alias|link|regular|plain"):
+        asyncio.run(QueryCapture(registry=None)._record(
+            deps, system="elastic", verb="query", query_id="elastic.probe", params={},
+            payload={"hits": []}, exit_code=0, detail="", system_key=""))
 
-    def before(run_dir):
-        seen["run_dir"] = run_dir
-
-    try:
-        res = LZ.run(tmp_path, run_id="adv3-capped", shell=down, answer=answer, before=before)
-        state = res.state
-        outcome = "run completed"
-    except OSError as e:
-        state = None
-        outcome = f"run raised {e!r}"
-    calls = []
-    print("OUTCOME", outcome)
-    if state is not None:
-        rows = state.lead_rows("l-000")
-        calls = [(r["seq"], r["verb"], r["exit_code"]) for r in rows]
-        print("ROWS", calls)
-        verbs = [c.verb for c in res.rec.calls]
-        print("VERB CALLS", verbs)
     assert outside.read_bytes() == b""
-    query_rows = [c for c in calls if c[1] == "query"]
-    assert len(query_rows) == 1, f"one capped call, rows: {calls}"
+    rows = state.lead_rows("l-00c")
+    assert [(r["seq"], r["verb"], r["exit_code"]) for r in rows] == [(0, "query", 0)]
+    assert state.breaker_snapshot()["total_failures"] == 0

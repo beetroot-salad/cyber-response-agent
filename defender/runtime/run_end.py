@@ -36,9 +36,16 @@ TRUNCATED_BY_ABORTED = "aborted"
 TRUNCATED_BY_BUDGET = "budget"
 TRUNCATED_BY_STORE = "store"
 TRUNCATED_BY_DEAD_END = "dead-end"
+#: A write of one of the run's two call records failed (A12, #1234): the served ledger (a
+#: branched world's `served/<token>.jsonl`) or the query table (`executed_queries.jsonl`).
+#: Each value names its record, so a world cut short by one says which write failed.
+TRUNCATED_BY_SERVED_LEDGER = "served_ledger"
+TRUNCATED_BY_EXECUTED_QUERIES = "executed_queries"
+TRUNCATED_BY_TIMED_OUT = "timed-out"
 TRUNCATED_BY_VALUES = (
     TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_EXHAUSTED, TRUNCATED_BY_ABORTED,
     TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END,
+    TRUNCATED_BY_SERVED_LEDGER, TRUNCATED_BY_EXECUTED_QUERIES, TRUNCATED_BY_TIMED_OUT,
 )
 
 #: Exits where the model spent its budget without closing, so the host writes an `unresolved`
@@ -46,6 +53,24 @@ TRUNCATED_BY_VALUES = (
 #: forced close and the ticket lane, so a failed forced close still escalates. The driver
 #: explains why the breaker, budget kill and store exits are absent.
 FORCED_CLOSE_EXITS = frozenset({TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_EXHAUSTED})
+
+#: The records `CallRecordWriteFailed` may name, each the exit class its failure stamps.
+CALL_RECORDS = frozenset({TRUNCATED_BY_SERVED_LEDGER, TRUNCATED_BY_EXECUTED_QUERIES})
+
+
+class CallRecordWriteFailed(Exception):  # noqa: N818 — named for what it reports, like `RunAborted`
+    """A write of one of a call's two records failed, so the run must end (A12, #1234).
+
+    `record` is the record whose write failed — `TRUNCATED_BY_SERVED_LEDGER` or
+    `TRUNCATED_BY_EXECUTED_QUERIES` — and is the exit class the driver stamps. Raised by the
+    record's own writer (`Ledger.record`, `record_query.append_query_row`), never swallowed on
+    the way up: a call whose record is missing would read as never made, or as unserved."""
+
+    def __init__(self, record: str, detail: str) -> None:
+        if record not in CALL_RECORDS:
+            raise ValueError(f"not a call record: {record!r} (one of {sorted(CALL_RECORDS)})")
+        self.record = record
+        super().__init__(f"the {record} write failed: {detail}; the run ends here")
 
 
 def normalized_truncated_by(value: object) -> str | None:
@@ -107,13 +132,18 @@ def parse_record(doc: object) -> RunEnd | None:
 
 
 __all__ = [
+    "CALL_RECORDS",
+    "CallRecordWriteFailed",
     "FORCED_CLOSE_EXITS",
     "TRUNCATED_BY_ABORTED",
     "TRUNCATED_BY_BUDGET",
     "TRUNCATED_BY_DEAD_END",
+    "TRUNCATED_BY_EXECUTED_QUERIES",
     "TRUNCATED_BY_REQUEST_LIMIT",
     "TRUNCATED_BY_RETRY_EXHAUSTED",
+    "TRUNCATED_BY_SERVED_LEDGER",
     "TRUNCATED_BY_STORE",
+    "TRUNCATED_BY_TIMED_OUT",
     "TRUNCATED_BY_VALUES",
     "RunEnd",
     "normalized_truncated_by",

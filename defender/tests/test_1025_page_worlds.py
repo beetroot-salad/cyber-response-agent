@@ -32,6 +32,7 @@ import pytest
 
 from defender import _episode_handle as EH
 from defender.tests import _episode_1025 as E
+from defender.tests._alert_plant import plant_source_copy
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_1025_stage_timing as ST
@@ -217,15 +218,16 @@ def test_1025_world_chips_carry_the_judge_models_systems_and_every_draws_answer_
     doc = E.sample_grade()
     doc["worlds"][1] = E.world_row(
         E.GRADED_WORLD, declared="malicious", bucket=None, systems=None, draws_disagree=True,
-        draws=[{"draw": 0, "bucket": "lead-quality", "systems": ["identity"]},
-               {"draw": 1, "bucket": "observability", "systems": [E.SYSTEM]}])
+        measured=None)
+    doc["worlds"][1]["draws"] = [{"draw": 0, "bucket": "lead-quality", "systems": ["identity"]},
+                                 {"draw": 1, "bucket": "lead-set", "systems": [E.SYSTEM]}]
     doc["worlds"][1]["systems"] = None
     del doc["worlds"][0]["systems"]
     E.write_judge(ep.dir, doc)
     page = render(ep)
     graded = _world(page, E.GRADED_WORLD)
     assert "no bucket" in graded, graded
-    assert _ordered(graded, "draw 0", "lead-quality", "identity", "draw 1", "observability",
+    assert _ordered(graded, "draw 0", "lead-quality", "identity", "draw 1", "lead-set",
                     E.SYSTEM), graded
     assert "systems:" not in graded, graded
     assert VERDICT_LINE in graded, graded
@@ -370,8 +372,8 @@ def test_1025_the_header_names_the_episode_alert_rule_source_run_and_branch_poin
     """The header's h1 carries the episode id and not "defender run:"; the meta carries the
     alert rule name, the source run id and `branch_message_id` from `family.yaml`, knobs
     `kimi-k3 / medium / cap 20000 / draws 1/1`, and the lessons commit; on the live-996 shape
-    (no `world_findings`) the alert rule still resolves from the worlds' `alert.json` through
-    `episode_alert`.
+    (no family draw, no family row) the alert rule still resolves from the worlds'
+    `alert.json` through `episode_alert`.
     """
     page = render(E.sample_episode(tmp_path))
     header = page.elements("header")
@@ -386,10 +388,7 @@ def test_1025_the_header_names_the_episode_alert_rule_source_run_and_branch_poin
         assert part in text, (part, text)
 
     live = E.sample_episode(tmp_path / "live", family_draw=False, samples=False, judge=False)
-    doc = E.sample_grade()
-    for key in ("world_findings", "family_outcome"):
-        del doc[key]
-    E.write_judge(live.dir, doc)
+    E.write_judge(live.dir, E.sample_grade(family=False))
     assert E.ALERT_RULE in render(live).one("header").text()
 
 
@@ -536,40 +535,35 @@ def test_1025_judge_yaml_worlds_row_names_a_label_absent_from_family_yaml_and_ru
 
 
 def test_1025_ungradable_world_carries_a_populated_judge_directory(tmp_path):
-    """Draw documents under a world the record marks ungradable were never enqueued (g13): they
-    render in the findings section under the distinct group "not enqueued — world ungradable:
-    <reason>", never merged with enqueued rows, and the world's section still
-    shows the row's reason (J7).
+    """Draw documents under a world the record marks ungradable were never enqueued (g13), and
+    the record names none of its draws, so none renders (#1234 A6: the page shows only
+    `judge.recorded_draws`; before #1234 they rendered under a "not enqueued — world
+    ungradable" group). The world's section still shows the row's reason (J7).
     """
     ep = _ungradable_episode(tmp_path)
     page = render(ep)
-    row = f"f-{E.PASSTHROUGH_WORLD}-0-0"
-    assert row in page.ids
-    heading = page.group_of(row).text()
-    assert "not enqueued — world ungradable:" in heading, heading
-    assert "a call on 'elastic' faulted" in heading, heading
-    assert "enqueued —" not in heading.replace("not enqueued —", "")
+    assert not [i for i in page.ids if i.startswith(f"f-{E.PASSTHROUGH_WORLD}-")], page.ids
+    assert "defender claim" in page.text_of("sec-findings"), "positive control: the sibling's rows"
+    world = page.text_of(f"world-{E.PASSTHROUGH_WORLD}")
+    assert "a call on 'elastic' faulted <b>x</b>" in world, world
 
 
 def test_1025_leftover_draw_documents_under_a_world_the_record_excludes(tmp_path):
-    """Draw documents under a manifest world with no `judge.yaml` row render under the distinct
-    group "not enqueued — no grade row" — never as enqueued or unqueueable (J7).
+    """Draw documents under a manifest world with no `judge.yaml` row are never shown as this
+    record's (#1234 A6: no row records no draw) — never as enqueued or unqueueable. (Before
+    #1234 they rendered under a "not enqueued — no grade row" group.)
     """
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"] = doc["worlds"][:1]
-    doc["world_findings"] = [r for r in doc["world_findings"]
-                             if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
     # what the pass enqueues without the graded world: the other sibling's four defender rows,
     # the family's three world rows and the other sibling's one
     doc["enqueued_rows"], doc["world_enqueued_rows"] = 4, 4
     E.drop_lanes(doc, E.GRADED_WORLD)  # no row, so the pass never walked it
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    row = f"f-{E.GRADED_WORLD}-0-0"
-    heading = page.group_of(row).text()
-    assert "not enqueued — no grade row" in heading, heading
-    assert "unqueueable" not in heading
+    assert not [i for i in page.ids if i.startswith(f"f-{E.GRADED_WORLD}-")], page.ids
+    assert f"f-{E.PASSTHROUGH_WORLD}-0-0" in page.ids, "positive control: the walked sibling"
 
 
 def test_1025_phantom_world_judge_dir_absent_from_manifest_and_from_runs(tmp_path):
@@ -587,22 +581,18 @@ def test_1025_phantom_world_judge_dir_absent_from_manifest_and_from_runs(tmp_pat
 
 
 def test_1025_phantom_family_draw_on_an_episode_with_no_family_judge_call(tmp_path):
-    """A family draw document whose findings the record never saw (no `world_findings` entry
-    carries their id) never reaches the lede: the lede opens with the templated line, and the
-    documents render in the findings section under "not on the record — never enqueued" (J7 ii).
+    """A family draw document on an episode whose record has no family row (the family call
+    never ran) is never shown: it never reaches the lede — which opens with the templated line
+    — nor the findings section (#1234 A6: no family row records no family draw; before #1234
+    the documents rendered under "not on the record — never enqueued", J7 ii).
     """
     ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["world_findings"] = [r for r in doc["world_findings"] if f"/{E.FAMILY}/" not in r["finding_id"]]
-    doc["world_enqueued_rows"] = 2
-    E.drop_lanes(doc, E.FAMILY)
-    E.write_judge(ep.dir, doc)
+    E.write_judge(ep.dir, E.sample_grade(family=False))
     page = render(ep)
     band = page.text_of("sec-verdict")
     assert "family topic 0" not in band, band
     assert "findings queued" in band, band
-    heading = page.group_of(f"f-{E.FAMILY}-0-0").text()
-    assert "not on the record — never enqueued" in heading, heading
+    assert not [i for i in page.ids if i.startswith(f"f-{E.FAMILY}-")], page.ids
 
 
 def test_1025_a_judge_trace_for_a_world_or_draw_the_record_lacks(tmp_path):
@@ -635,6 +625,8 @@ def test_1025_a_roster_labels_own_draw_past_a_small_fixed_bound(tmp_path):
     ep = E.sample_episode(tmp_path)
     E.write_trace(ep.dir, f"judge:{E.FAMILY}:50", usage=(100_000, 20_000), duration_ms=1000.0,
                   prompt="A LATE FAMILY DRAW")
+    # #1234 A6: a transcript shows for a draw the record names
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.FAMILY, (0, 50)))
     page = render(ep)
     assert f"tx-judge_{E.FAMILY}_50_trace" in page.by_id
     assert "A LATE FAMILY DRAW" in page.raw
@@ -915,8 +907,7 @@ def test_1025_no_worlds_alert_json_carries_an_alert_id(tmp_path):
     renders.
     """
     ep = E.sample_episode(tmp_path)
-    for label in E.WORLDS:
-        (ep.world(label) / "alert.json").write_text(json.dumps({"rule": {"id": "r1"}}), encoding="utf-8")
+    plant_source_copy(ep.dir, json.dumps({"rule": {"id": "r1"}}).encode("utf-8"))
     header = render(ep).one("header").text()
     assert "not on the record" in header, header
     assert E.EPISODE_ID in header, header
@@ -979,10 +970,9 @@ def test_1025_alert_fields_reach_the_header_frame(tmp_path):
     is visible in the header.
     """
     ep = E.sample_episode(tmp_path)
-    for label in E.WORLDS:
-        (ep.world(label) / "alert.json").write_text(json.dumps(
-            {"alert_id": "id<img src=x onerror=alert(1)>", "rule": {"name": "<b>rule</b> name"}}),
-            encoding="utf-8")
+    plant_source_copy(ep.dir, json.dumps(
+        {"alert_id": "id<img src=x onerror=alert(1)>", "rule": {"name": "<b>rule</b> name"}}
+    ).encode("utf-8"))
     page = render(ep)
     header = page.one("header")
     assert "<b>rule</b> name" in header.text()
@@ -1045,11 +1035,9 @@ def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
     """Only `family.yaml` is fatal (d01). `served/` absent: each world's leads block carries
     `read_world_facts`' refusal (the ledger is absent) and its other blocks render; `wire_logs/`
     absent: no transcript block, every stage cost "no cost recorded"; `worlds/` absent: every
-    archive-derived block reads "not archived", no row comes from a draw document, and every
-    row the record still carries follows J9b — the 5 `world_findings` rows each render as a
-    stub carrying "draw document absent", five `f-` rows in all (a defender entry has no text
-    on the record, so no stub), and tile 3 counts exactly those five (92-reconciliation
-    F-1(b)) — the page is written in every case.
+    archive-derived block reads "not archived" and no row renders — #1234's record carries
+    lanes, never a finding's text, so there is no stub to draw (92-reconciliation F-1(b)) and
+    tile 3 counts none — the page is written in every case.
     """
     base = E.sample_episode(tmp_path)
     no_served = E.copy_episode(base, tmp_path / "no-served")
@@ -1073,16 +1061,11 @@ def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
     page = render(no_worlds)
     for label in E.WORLDS:
         assert "not archived" in _world(page, label), _world(page, label)
-    stubs = [i for i in page.ids if i.startswith("f-")]
-    assert len(stubs) == S.world_author, stubs
-    for row_id in stubs:
-        assert "draw document absent" in page.text_of(row_id), page.text_of(row_id)
+    assert [i for i in page.ids if i.startswith("f-")] == []
     assert "defender claim 0" not in page.text_of("sec-findings"), "a defender stub"
-    assert f"f-{E.FAMILY}-0-0" in stubs, stubs
-    assert f"f-{E.GRADED_WORLD}-0-4" in stubs, stubs
     tiles = page.elements(cls="vd-tile")
     assert len(tiles) == 4, [t.text() for t in tiles]
-    assert f"of {S.world_author}" in tiles[2].text(), tiles[2].text()
+    assert "0 of 0" in tiles[2].text(), tiles[2].text()
     assert page.by_id, "no page"
 
 

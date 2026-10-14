@@ -7,6 +7,7 @@ decisions key off what renders.
 """
 from __future__ import annotations
 
+import math
 import unicodedata
 from typing import Any
 
@@ -57,3 +58,29 @@ def strip_zero_width(text: str) -> str:
         ch for ch in text
         if ch.isspace() or unicodedata.category(ch) not in _INVISIBLE_CATEGORIES
     )
+
+
+def unwritable_value(value: Any, *, _depth: int = 0) -> str | None:
+    """What in `value` (a parsed JSON/YAML value: mappings, lists, strings, numbers) no record
+    can carry, or `None`: a lone surrogate in a string or a key (`json.loads('"\\ud800"')`
+    yields one; UTF-8 cannot encode it, so the write that meets it raises), or a non-finite
+    number (`json.loads` admits `NaN`/`Infinity`; strict JSON cannot carry them). Named, so a
+    reader refuses the record by its cause instead of failing later at an encode or a
+    canonical `json.dumps`. A nesting deeper than 200 is named too."""
+    if _depth > 200:
+        return "nesting deeper than 200 levels"
+    if isinstance(value, str):
+        lone = next((ch for ch in value if 0xD800 <= ord(ch) <= 0xDFFF), None)
+        return None if lone is None else f"a lone surrogate (U+{ord(lone):04X})"
+    if isinstance(value, float):
+        return None if math.isfinite(value) else f"a non-finite number ({value!r})"
+    children: Any = ()
+    if isinstance(value, dict):
+        children = [*value.keys(), *value.values()]
+    elif isinstance(value, (list, tuple)):
+        children = value
+    for child in children:
+        found = unwritable_value(child, _depth=_depth + 1)
+        if found is not None:
+            return found
+    return None

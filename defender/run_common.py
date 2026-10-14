@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import logging
 import os
 import sys
@@ -16,10 +15,11 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _io, _provenance, _tenant  # noqa: E402
+from defender import _alert_input, _io, _provenance, _tenant  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
 from defender.run_repository import (  # noqa: E402
-    Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, case_ref, run_name_fault,
+    RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest,
+    run_name_fault,
 )
 from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
 
@@ -53,7 +53,7 @@ def _setup_state(run: Run) -> str:
         sys.exit(f"{run_dir} could not be listed ({listing.reason}) — refusing to resume it")
     # Everything setup writes; anything else means a run has been here.
     paths = RunPaths(run_dir)
-    setup_names = {paths.alert.name, paths.gather_raw.name, paths.provenance.name}
+    setup_names = {paths.alert_input_dir.name, paths.gather_raw.name, paths.provenance.name}
     extra = sorted(set(listing.entries or {}) - setup_names)
     # The scrub verdict is written at box start, so even a box that died before writing into
     # the tree leaves a sidecar.
@@ -91,6 +91,7 @@ def materialize_run(
         sys.exit(f"alert not found: {alert}")
     pinned = run_id is not None
     admitted = _admit_run_id(alert, run_id)
+    front_door = _admit_input(alert, tenant=tenant, world=world)
     try:
         if world is not None:
             if episode_runs is None:
@@ -118,7 +119,7 @@ def materialize_run(
         _clear_stale_sidecars(run)
     # Judged component by component: a link at the run id or `gather_raw` is refused.
     run.make_run_dir()
-    _write_alert_once(run, alert)
+    _write_input_once(run, front_door)
     # Every executed run is stamped here, by its own process (branched siblings each reach
     # this, and `verify_family` compares their stamps), before the box exists: the run dir is
     # the box's rw bind, so a later stamp could have been moved by the run. There is no seam to
@@ -177,21 +178,109 @@ def _clear_stale_sidecars(run: Run) -> None:
             sys.exit(f"cannot clear a stale sidecar at {sidecar}: {e!r}")
 
 
-def _write_alert_once(run: Run, alert: Path) -> None:
-    """The alert is write-once: written through the guarded exclusive lane when absent;
-    when present it must match byte for byte, or the id is being reused for another case."""
-    alert_bytes = read_bytes_capped(alert)
-    existing, reason = _io.read_bytes_guarded(run.facts.alert.path)
-    if existing is None and _io.entry_present(run.facts.alert.path):
+@_dataclasses.dataclass(frozen=True)
+class _FrontDoor:
+    """What run start settled about the alert before any folder existed: its admitted bytes, and
+    the record text that goes beside them."""
+
+    raw: bytes
+    record: str
+
+
+def _admit_input(alert: Path, *, tenant: _tenant.Tenant, world: ResumeWorld | None) -> _FrontDoor:
+    """Admit the operator's alert (A8) and settle its facts through the tenant's alert mapping,
+    read once (A1) — or exit with the fixed reason, before a run folder exists. A sibling's input
+    is its episode's copy of the source run's alert, carried with the record launch copied
+    beside it; neither is derived again."""
+    try:
+        raw = _alert_input.read_operator_alert(alert)
+        admitted = _alert_input.admit(raw)
+    except _alert_input.AlertRefused as refused:
+        sys.exit(f"[run.py] {refused}")
+    except OSError as e:
+        sys.exit(f"[run.py] the alert {alert} could not be read: {e}")
+    if world is not None:
+        from defender._episode_paths import EpisodePaths
+
+        record_path = EpisodePaths(world.episode_dir).source_record
+        text, reason = _io.read_guarded(record_path)
+        parsed = None if text is None else _alert_input.parse_alert_record(text)
+        if text is None or parsed is None or parsed.digest != admitted.digest:
+            sys.exit(f"[run.py] episode {world.episode_dir.name}: its copy of the source alert does not "
+                     f"match the record beside it "
+                     f"({reason or 'the record is missing, malformed or for another alert'})")
+        return _FrontDoor(raw=raw, record=text)
+    try:
+        mapping = _alert_input.load_alert_mapping(tenant.settings)
+    except _alert_input.AlertMappingFault as fault:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {fault}")
+    facts = _alert_input.derive_facts(admitted.document, mapping)
+    return _FrontDoor(raw=raw, record=_alert_input.record_text(admitted.digest, facts))
+
+
+def _read_input_file(path: Path, what: str) -> bytes | None:
+    """A file of the input directory as found: its bytes, `None` when nothing is there, or the
+    exit when something unreadable stands at its name (a squatting directory, a link)."""
+    data, reason = _io.read_bytes_guarded(path)
+    if data is None and _io.entry_present(path):
+        sys.exit(f"{path} is not a readable plain file ({reason}) — refusing to resume over "
+                 f"the run's {what}")
+    return data
+
+
+def _write_input_once(run: Run, door: _FrontDoor) -> None:
+    """The alert and its record are write-once, in the run's read-only input directory: written
+    through the guarded exclusive lane when absent; when present the alert must agree with what
+    run start admitted, byte for byte, and the record must carry that alert's digest (its facts
+    are not compared), or the id is being reused for another case. Nothing present
+    is rewritten (a restart keeps both files' bytes, inode and mtime), and the record found wins
+    over the one just derived (a mapping edited since stays the operator's business for the next
+    run)."""
+    paths = RunPaths(run.run_dir)
+    held_alert = _read_input_file(paths.alert, "alert")
+    held_record = _read_input_file(paths.alert_record, "record")
+    if held_alert is not None and held_alert != door.raw:
         sys.exit(
-            f"{run.facts.alert.path} is not a readable plain file ({reason}) — refusing to "
-            "resume over it")
-    if existing is None:
-        run.facts.alert.write(alert_bytes)
-    elif existing != alert_bytes:
-        sys.exit(
-            f"run dir {run.run_dir} already holds a different alert than {alert} — a run id "
-            "names one case; pick a fresh id for a different alert")
+            f"run dir {run.run_dir} already holds a different alert than the one given — a run "
+            "id names one case; pick a fresh id for a different alert")
+    if held_record is not None:
+        kept = _alert_input.parse_alert_record(held_record.decode("utf-8", errors="replace"))
+        if kept is None or kept.digest != _alert_input.digest_of(door.raw):
+            sys.exit(
+                f"run dir {run.run_dir} holds a record that is not this alert's "
+                f"({paths.alert_record.name}) — a run id names one case; pick a fresh id")
+    _unseal(paths.alert_input_dir)
+    try:
+        if held_alert is None:
+            run.facts.alert.write(door.raw)
+        if held_record is None:
+            _io.rooted_write(run.run_dir, RUN_LAYOUT.alert_record, door.record, mode="create")
+    except OSError as e:
+        sys.exit(f"cannot write the run's input at {paths.alert_input_dir}: {e!r} — no run "
+                 f"starts without its alert and {paths.alert_record.name}")
+    finally:
+        _seal(paths.alert_input_dir)
+
+
+def _unseal(input_dir: Path) -> None:
+    """Make the input directory (and what it holds) writable for the owner, for the one write
+    run start makes into it. Best effort: the box's read-only bind is the real protection."""
+    with contextlib.suppress(OSError):
+        if artifact_dir(input_dir):
+            input_dir.chmod(0o755)
+
+
+def _seal(input_dir: Path) -> None:
+    """Take the owner's write permission off the input directory and its files, so a host
+    process running as the same user cannot rewrite them by accident. Best effort, like
+    `_unseal`: the box's read-only bind is what holds against the run."""
+    with contextlib.suppress(OSError):
+        if not artifact_dir(input_dir):
+            return
+        for child in input_dir.iterdir():
+            if artifact_file(child):
+                child.chmod(0o444)
+        input_dir.chmod(0o555)
 
 
 def _stamp(
@@ -310,25 +399,16 @@ def held_out_alert_digests(fixtures_dir: Path = HELD_OUT_FIXTURES) -> set[str]:
     if not fixtures_dir.is_dir():
         return out
     for child in sorted(fixtures_dir.iterdir()):
-        alert = RunPaths(child).alert
         try:
-            out.add(hashlib.sha256(read_bytes_capped(alert)).hexdigest())
+            out.add(_alert_input.digest_of(read_bytes_capped(child / "alert.json")))  # lint-run-records: ok — a held-out fixture folder's own file, not a run's record
         except OSError:
             continue
     return out
 
 
-def is_held_out_alert_copy(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) -> bool:
-    try:
-        digest = hashlib.sha256(read_bytes_capped(alert)).hexdigest()
-    except OSError:
-        return False
-    return digest in held_out_alert_digests(fixtures_dir)
-
-
 def learning_refusal_gate(
     run_dir: Path,
-    alert: Path,
+    alert: Path | None = None,
     *,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
     truncated_by: str | None = None,
@@ -336,17 +416,26 @@ def learning_refusal_gate(
     """The refusal predicate every learning enqueue consults: the reason a run must not feed
     a corpus, or `None`.
 
-    Held-out fixtures are checked by content digest (catches copies outside `fixtures_dir`)
-    and by path containment (catches files the digest walk, which reads only
-    `<slug>/alert.json`, never sees)."""
+    Held-out fixtures are checked by the run's RECORDED digest (the alert it admitted at run
+    start, whatever has become of the operator's input file since: catches copies outside
+    `fixtures_dir`) and, when the operator's input path is given, by path containment (catches
+    files the digest walk, which reads only `<slug>/alert.json`, never sees)."""
     if truncated_by is not None:
         return f"run was truncated (truncated_by={truncated_by!r}) — a truncated " \
             "investigation must not train the corpus"
-    if is_held_out_fixture(alert, fixtures_dir) or is_held_out_alert_copy(alert, fixtures_dir):
-        return f"{alert} is a held-out eval fixture (or a copy of one) — its findings must " \
-            "never feed a corpus it is scored against"
+    record = _alert_input.read_record(RunPaths(run_dir).alert_record)
+    if record is None:
+        return f"{run_dir} carries no readable record of its alert — a folder without one is " \
+            "not a run, and nothing is learned from it"
+    held_out_input = alert is not None and is_held_out_fixture(alert, fixtures_dir)
+    if held_out_input or record.digest in held_out_alert_digests(fixtures_dir):
+        return f"{run_dir.name} investigated a held-out eval fixture (or a copy of one) — its " \
+            "findings must never feed a corpus it is scored against"
     from defender.runtime import scrub as _scrub
 
+    if _scrub.tree_unsandboxed(run_dir):
+        return f"{run_dir.name} ran without a sandbox, so its input directory was never bound " \
+            "read-only — nothing is learned from it"
     if not _scrub.tree_verified(run_dir):
         # No completed scan verdict: the crash path most likely to hold what a box planted.
         return f"{run_dir} carries no completed reap-scan verdict — an unverified tree " \
@@ -358,19 +447,15 @@ def learning_refusal_gate(
 
 def enqueue_curation(
     run: Run,
-    alert: Path,
+    alert: Path | None = None,
     *,
     truncated_by: str | None = None,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
 ) -> bool:
-    """Enqueue catalog curation for a natural run, through `learning_refusal_gate` — this hands
-    attacker-influenced content (goal text, bound params, rendered queries) to the curator.
-
-    @owns tenant_id — a curation row's `tenant_id`: the run's address's tenant (`run.tenant_id`,
-    the repository's, never a stamp).
-    @owns run_id — a curation row's `run_id`: the run's address's id. The row is `{case_id,
-    tenant_id, run_id}`, a natural run's `RunAddress` (#1105 PR 2, D-stored; only natural runs
-    enqueue); the drain rehydrates it in that tenant's repository."""
+    """Enqueue catalog curation for a run, through `learning_refusal_gate` — this hands
+    attacker-influenced content (goal text, bound params, rendered queries) to the curator. The
+    request is keyed on the run's recorded digest; `alert`, the operator's input path, is only
+    the held-out gate's path arm."""
     run_dir = run.run_dir
     reason = learning_refusal_gate(
         run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
@@ -386,7 +471,10 @@ def enqueue_curation(
     # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
     # state tree: a refused entry or a missing root costs this request, never the investigation.
     try:
-        case_id = case_ref(read_bytes_capped(alert))
+        record = _alert_input.read_record(RunPaths(run_dir).alert_record)
+        if record is None:
+            raise OSError("the run's record vanished")
+        case_id = case_ref_of_digest(record.digest)
         with LearningState.open(loop_paths()) as state:
             state.enqueue_curation(
                 case_id, {"case_id": case_id, "tenant_id": str(address.tenant_id),

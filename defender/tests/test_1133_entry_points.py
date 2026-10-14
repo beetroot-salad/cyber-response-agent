@@ -38,7 +38,7 @@ only the inside one reaches a reverted write, and only the handle's no-follow wa
   interleaving, S3).
 - H5 the manifest reader (`load_family`), handed the episode's view, refuses a symlink or a
   hard link at `family.yaml` without reading what it reaches.
-- H7 `defender._io.Bound`'s public surface is exactly `read`, `read_jsonl`, `entries`, `under`,
+- H7 `defender._io.Bound`'s public surface is exactly `read`, `read_bytes`, `read_jsonl`, `entries`, `under`,
   `close` (O3) — for a `bind` and for `episode.view()`.
 
 The census that holds every migrated module to the handle is `test_1133_census.py`.
@@ -515,7 +515,7 @@ def test_h1_a_linked_family_draws_folder_is_refused_and_contained_to_the_family_
         tmp_path, roots, host, at, reach):
     """The family-level call makes its folder with `episode.world("family").draws.ensure()`:
     a link at `worlds/family/` or `worlds/family/judge/` is refused and contained to the family
-    call — recorded as `family_failed_reason` — so the judge is never called for it, the folder
+    call — recorded on the family row's `draws_failed_reason` (#1234) — so the judge is never called for it, the folder
     the link reaches gains nothing and the link is left.
 
     A reverted `os.makedirs(draws, exist_ok=True)` makes the draws folder through an inside
@@ -536,7 +536,7 @@ def test_h1_a_linked_family_draws_folder_is_refused_and_contained_to_the_family_
     assert judge.called_for("family") == [], (
         f"the judge was paid for the family call over a linked folder: "
         f"{judge.called_for('family')}")
-    reason = J.judge_record(ep).get("family_failed_reason") or ""
+    reason = (J.judge_record(ep).get("family") or {}).get("draws_failed_reason") or ""
     assert reason.startswith("OSError"), (
         f"the family call's setup refusal was not recorded: {reason!r}")
     assert planted.state() == before, f"the family call wrote through the link at {at}"
@@ -582,7 +582,7 @@ def test_h1_a_link_at_a_draws_name_refuses_the_pass_and_is_written_through_by_no
     regrade(tmp_path, ep, ScriptedJudge())
     draw = ep / "worlds" / "b" / "judge" / "0.yaml"
     assert_plain_file(draw)
-    assert yaml.safe_load(draw.read_text(encoding="utf-8"))["findings"]
+    assert yaml.safe_load(draw.read_text(encoding="utf-8"))["investigator_findings"]
 
 
 FRAMED = WIRE_LOG_NAMES.agent_framed_trace("judge:b:0")
@@ -881,12 +881,12 @@ def test_h5_the_manifest_reader_refuses_a_link_at_family_yaml_without_reading_it
 def test_h7_bounds_public_surface_is_exactly_its_readers_and_close(tmp_path):
     """O3: a read view stays write-free by type. The public attributes of a `Bound` — from
     `bind(root)`, and from `episode.view()` over the same held handle the episode writes
-    through — are exactly `read`, `read_jsonl`, `entries`, `under` and `close`."""
+    through — are exactly `read`, `read_bytes`, `read_jsonl`, `entries`, `under` and `close`."""
     from defender._io import bind
 
     root = tmp_path / "root"
     root.mkdir()
-    want = {"read", "read_jsonl", "entries", "under", "close"}
+    want = {"read", "read_bytes", "read_jsonl", "entries", "under", "close"}
     with bind(root) as bound:
         public = {name for name in dir(bound) if not name.startswith("_")}
     assert public == want, sorted(public)

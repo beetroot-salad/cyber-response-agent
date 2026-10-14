@@ -127,7 +127,7 @@ demands:
   source: 20-demands.md (phase B)
 - id: d_elastic_view
   kind: behavior
-  form: test
+  form: clause
   binds:
   - elastic
   - systems
@@ -140,7 +140,8 @@ demands:
   - ELASTIC_SSL_VERIFY.domain.distinguished[absent]
   - ELASTIC_EVENTS_INDEX.domain.distinguished[absent]
   - ELASTIC_EVENTS_INDEX.domain.distinguished[empty]
-  discharged_by: test_d_elastic_view
+  status: retired
+  outcome: {nl: "RETIRED by #1222 (D1, M1) - lead-zero's item 1 (the only reader of `record.elastic`) and the Elastic view itself (`ElasticSettings`, `elastic_view`) were deleted; the tenant's elastic part is read by the adapter alone, so `test_d_elastic_view` went with them."}
   seed_docstring: 'record.elastic is None when the tenant has no systems/elastic/ folder. It is a ConfigFault when
     that folder''s config.env is missing, or when it lacks any of ELASTIC_EVENTS_INDEX, ELASTIC_ALERTS_INDEX, ELASTICSEARCH_URL,
     ELASTIC_SSL_VERIFY, ELASTIC_ES_CONTAINER, ELASTIC_KIBANA_CONTAINER or ELASTIC_DOCKER_CONTEXT, when any of them
@@ -413,12 +414,13 @@ demands:
   note: 'REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed — the query tool reads no case-history mapping and serves a ticket reply as the store answered it; the estate applier''s comment-patch refusal (`unservable`) went with the release screen it guarded, and WorldRegistry takes no tenant record for it. Was: test_c_estate_registry_reads_record — the registry and the applier judged a comment patch against the record''s ticket_mapping, and a patch releasing only to the edited status was refused. AMENDED by #1224 (live oracle): world patches and the estate applier are retired, so the test builds worlds from facts naming each case and status instead of comment patches; the registry (which takes the tenant record again under #1224, for its own serving context) consults no mapping.'
 - id: c_lead_zero_reads_record
   kind: coherence
-  form: test
+  form: clause
   binds:
   - interacts(resolve_lead_zero->RunTenant)
   - interacts(_capture->RunTenant)
   - interacts(_resolve_item1->elastic)
-  discharged_by: test_c_lead_zero_reads_record
+  status: retired
+  outcome: {nl: "RETIRED by #1222 (D1, M1) - lead-zero's item 1 (the only reader of `record.elastic`) and the Elastic view itself (`ElasticSettings`, `elastic_view`) were deleted; the tenant's elastic part is read by the adapter alone, so `test_c_lead_zero_reads_record` went with them."}
   seed_docstring: resolve_lead_zero takes the record, lead-zero's capture deps carry it, and item 1's alerts-index
     fallback reads record.elastic. With ELASTIC_ALERTS_INDEX edited in the file after the record is built, item
     1's shell fetch still uses the value as built.
@@ -457,13 +459,14 @@ demands:
   source: 20-demands.md (phase B)
 - id: o9_lead_zero_unavailable_explicit
   kind: behavior
-  form: test
+  form: clause
   binds:
   - _resolve_item1
   - elastic
   - elastic.domain.distinguished[None]
   - elastic.domain.distinguished[ConfigFault]
-  discharged_by: test_o9_lead_zero_unavailable_explicit
+  status: retired
+  outcome: {nl: "RETIRED by #1222 (D1, M1) - lead-zero's item 1 (the only reader of `record.elastic`) and the Elastic view itself (`ElasticSettings`, `elastic_view`) were deleted; the tenant's elastic part is read by the adapter alone, so `test_o9_lead_zero_unavailable_explicit` went with them."}
   seed_docstring: With record.elastic None, and separately with it a ConfigFault, an alert that has no signal_index
     gets item 1 reported 'unavailable' through an explicit branch. The note names the cause, 'no elastic system
     configured' or 'elastic config is bad' (F11 resolved auto). No shell fetch is issued, nothing is raised into
@@ -1269,7 +1272,7 @@ demands:
     so an explicit non-empty flag is what keeps the env out.'
 - id: s7_mf7a_launcher_refuses_elastic_without_docker_exec
   kind: behavior
-  form: test
+  form: clause
   binds:
   - branch.cli.main
   - _episode_tenant
@@ -1277,7 +1280,8 @@ demands:
   - TRANSPORT.domain.distinguished[absent]
   - episode_dir
   - _resolve_item1
-  discharged_by: test_s7_mf7a_elastic_without_docker_exec_is_a_fault
+  status: retired
+  outcome: {nl: "RETIRED by #1222 (D1, M1) - lead-zero's item 1 (the only reader of `record.elastic`) and the Elastic view itself (`ElasticSettings`, `elastic_view`) were deleted; the tenant's elastic part is read by the adapter alone, so `test_s7_mf7a_elastic_without_docker_exec_is_a_fault` went with them."}
   seed_docstring: 'A tenant whose elastic config.env carries every listed Elastic key but no ELASTIC_TRANSPORT (or
     one other than docker-exec) has record.elastic a ConfigFault: the branch launcher refuses with "elastic config
     is bad: <fault>" naming the tenant before any episode dir exists, and lead-zero''s item 1 reports unavailable.'
@@ -1291,7 +1295,7 @@ demands:
   - interacts(elastic_adapter.load_config->systems)
   - elastic
   - ELASTIC_KIBANA_CONTAINER.domain.distinguished[absent]
-  discharged_by: test_s7_mf7c_adapter_and_view_judge_independently
+  discharged_by: test_s7_mf7c_the_adapter_judges_its_own_required_keys
   seed_docstring: The read adapter keeps its own required-key check. With ELASTIC_KIBANA_CONTAINER absent, record.elastic
     is a ConfigFault (branching refuses, lead-zero item 1 is unavailable) while the Elasticsearch verbs, whose own
     required keys are present, still answer. Each reader reports its own view.
@@ -1536,7 +1540,7 @@ demands:
   - _verb_context
   - resolve_lead_zero
   - child_env
-  discharged_by: test_s7_f6_run_env_handed_to_writer_and_lead_zero
+  discharged_by: test_s7_f6_run_env_handed_to_the_ticket_writer
   seed_docstring: 'run.py hands its run env (run_common.run_env''s copy) to the ticket writer, and the driver hands
     the run''s env to lead-zero: with a marker variable in that env, the writer''s docker child and lead-zero item
     1''s shell-fetch child both receive it, and neither lane calls run_env() or reads os.environ itself.'
@@ -1656,13 +1660,14 @@ demands:
   - '#109 test_transient_filesystem_error_during_resolve_not_a_named_fault_class'
 - id: s7_nf20_lead_zero_note_names_no_host_path
   kind: negative
-  form: test
+  form: clause
   binds:
   - _resolve_item1
   - interacts(_resolve_item1->model_visible)
   - SETTINGS_POINTER
   - model_visible
-  discharged_by: test_s7_nf20_lead_zero_note_names_no_host_path
+  status: retired
+  outcome: {nl: "RETIRED by #1222 (D1, M1) - lead-zero's item 1 (the only reader of `record.elastic`) and the Elastic view itself (`ElasticSettings`, `elastic_view`) were deleted; the tenant's elastic part is read by the adapter alone, so `test_s7_nf20_lead_zero_note_names_no_host_path` went with them."}
   seed_docstring: Lead-zero item 1's "unavailable" note names the cause class ("no elastic system configured" /
     "elastic config is bad"); any fault text it carries passes the settings-path redaction, so message zero never
     holds the tenant's host settings path, as given or resolved, only SETTINGS_POINTER.

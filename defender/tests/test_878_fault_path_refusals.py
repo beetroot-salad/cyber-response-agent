@@ -132,11 +132,15 @@ def test_a_naive_created_at_does_not_raise_out_of_the_elapsed_check():
     `datetime.now(UTC) - origin` then raised `TypeError: can't subtract offset-naive and
     offset-aware datetimes`.
 
-    This was F-17's UNCONDITIONAL path: `lead_zero._budget_gate` is not gated on
-    `DEFENDER_BUDGET_ENFORCE` and is called inside `resolve_lead_zero`, whose only handler
-    catches `BudgetKill` and `RunAborted`. (#1235: the state no longer comes from a file, so the
-    arm that showed a run's start preserving a planted stamp retired; the check is driven over
-    the state dict directly.)
+    This is F-17's UNCONDITIONAL path: `lead_zero._budget_account` is documented as not gated on
+    `DEFENDER_BUDGET_ENFORCE` (which defaults to False) and is called from `_issue` inside
+    the correlation lead's driver, whose only handler catches `BudgetKill` and `RunAborted` — so the
+    `TypeError` escaped `_user_prompt`, `run_investigation` and `main` before MAIN's first
+    prompt was ever built.
+
+    `open_budget`'s `setdefault` PRESERVES such a stamp rather than replacing it, which is what
+    makes the shape survive into enforcement; the second arm asserts exactly that, so the fix
+    cannot be mistaken for "the open rewrites it".
 
     The stamp is derived from NOW rather than written as a literal date: a literal makes the
     "past the cap" arm a fact about the calendar, so the test is a no-op before that date and a

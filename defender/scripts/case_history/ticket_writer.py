@@ -8,7 +8,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 
-from defender._io import read_text_utf8, write_guarded
+from defender import _alert_input
+from defender._io import read_guarded, write_guarded
 from defender._model import model
 from defender.run_repository import RunPaths
 from defender.runtime import case_ticket, run_end
@@ -95,13 +96,18 @@ def open_case_ticket(
         except AdapterFault as e:
             _logger.warning(f"open: {_reason_of(e, tenant)}; skipping ticket write")
             return
-        alert_path = RunPaths(run_dir).alert
-        if not alert_path.is_file():
-            _logger.warning(f"alert.json not found in {run_dir}; skipping open")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        # The open leg meets the run's RECORD alone: the facts were settled once at run start,
+        # and no byte of the alert is read here.
+        record = _alert_input.read_record(RunPaths(run_dir).alert_record)
+        if record is None:
+            _logger.warning(f"{run_dir.name} has no readable record of its alert; skipping open")
             return
-        alert = json.loads(read_text_utf8(alert_path))
         case_id = run_dir.name
-        payload = case_ticket.alert_to_open_payload(alert, case_id, mapping=tenant.ticket_mapping)
+        payload = case_ticket.alert_to_open_payload(
+            record.facts, case_id, mapping=tenant.ticket_mapping)
+        # A receipt from an earlier attempt must not outlive this open: only a refusal below
+        # leaves one, for the record leg to carry on.
+        clear_receipt(run_dir)
         status, body = deps.request(config, "POST", "/tickets", payload, ctx=ctx)
         if status is None:
             _logger.warning(f"open {case_id}: {body}")
@@ -111,6 +117,11 @@ def open_case_ticket(
             _logger.info(f"open {case_id}: created ({status})")
         else:
             _logger.warning(f"open {case_id}: HTTP {status}: {body}")
+            # A store that REFUSED the ticket is said so where the operator looks (the receipt
+            # and the run page), quoting the store's reason; the record leg keeps it.
+            _write_receipt(
+                run_dir, config, case_id, RECEIPT_ERROR,
+                redact_settings_path(f"{OPEN_REFUSED}: HTTP {status}: {body}", tenant.settings))
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"open raised, ignored: {e!r}")
 
@@ -121,6 +132,8 @@ def open_case_ticket(
 RECEIPT_COMMENTED = "commented"
 RECEIPT_ESCALATED = "escalated"
 RECEIPT_ERROR = "error"
+#: What the open leg's refusal receipt opens with: the store would not take the case ticket.
+OPEN_REFUSED = "the store refused the case ticket"
 _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 
 
@@ -242,11 +255,26 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     if not ok:
         reason = f"{'HTTP ' + status if status else 'transport error'}: {body}"
         reason = redact_settings_path(reason, ctx.tenant.settings)
+        refused = _prior_open_refusal(run_dir)
+        if refused is not None:
+            # The comment fell with the ticket: the cause worth reading is the refusal.
+            reason = f"{refused} (the record comment then failed: {reason})"
         _logger.warning(f"record {case_id}: {reason}")
     else:
         reason = None
         _logger.info(f"record {case_id}: comment posted ({status}, {word})")
     _write_receipt(run_dir, config, case_id, word if ok else RECEIPT_ERROR, reason)
+
+
+def _prior_open_refusal(run_dir: Path) -> str | None:
+    """The open leg's refusal text this attempt left in the receipt, or `None`."""
+    text, _reason = read_guarded(receipt_path(run_dir))
+    try:
+        prior = json.loads(text) if text is not None else None
+    except ValueError:
+        return None
+    reason = prior.get("reason") if isinstance(prior, dict) else None
+    return reason if isinstance(reason, str) and reason.startswith(OPEN_REFUSED) else None
 
 
 def receipt_path(run_dir: Path) -> Path:

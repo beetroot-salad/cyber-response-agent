@@ -232,12 +232,16 @@ def make_run_dir(
     tables (one lead sidecar + one executed-query row + its raw payload per lead)."""
     run_dir = tmp_path / name
     run_dir.mkdir(parents=True, exist_ok=True)
-    run_dir.joinpath("alert.json").write_bytes(
-        alert_bytes if alert_bytes is not None
-        else json.dumps({"rule": {"id": "5710", "key": "spec.rule"}}).encode("utf-8")
-    )
+    plant_alert_in_run(run_dir, alert_bytes if alert_bytes is not None
+                       else json.dumps({"rule": {"id": "5710", "key": "spec.rule"}}).encode("utf-8"))
     populate_run_dir(run_dir, disposition=disposition, leads=leads, payload=payload)
     return run_dir
+
+
+def plant_alert_in_run(run_dir: Path, raw: bytes) -> None:
+    """The run's alert and its record (#1222), where a materialized run holds them."""
+    from defender.tests._alert_plant import plant_alert as plant_in_run
+    plant_in_run(run_dir, raw)
 
 
 def populate_run_dir(

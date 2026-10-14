@@ -74,8 +74,8 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
 
     BOTH ARMS OF THE GATE HOLD, and both must be named. An adversarial finding whose run has
     no resolvable `source_refs.yaml` is held with `no_ground_truth(...)`; a `direction:
-    family` row whose `judge_outcome` is not a word the family partition knows is held with
-    `no_family_ground_truth(...)`. Both are permanent — the facts they wait on have no writer
+    family` row carrying a retired name (here a pre-#1234 `judge_outcome`, #1234 I10/A4) is
+    held by the family partition with `retired_name(...)`. Both are permanent — the facts they wait on have no writer
     any more — so they sit in the queue on every tick from now on, and a report that names
     one arm and not the other is silent about exactly the rows an operator has to move by
     hand. Naming one reason prefix is not naming the gate's holds.
@@ -123,7 +123,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
     )
     assert {r["finding_id"]: r.get("held_reason") for r in h.pending(paths, ch)} == {
         "a/0": "no_ground_truth(direction='adversarial', disposition=None)",
-        "f/0": "no_family_ground_truth(judge_outcome='not-a-word')",
+        "f/0": "retired_name(judge_outcome)",
     }, "the tick did not hold the two rows this test is about"
 
     assert report.is_file(), (
@@ -131,7 +131,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
         "permanent ones, and they are the ones with no written trace"
     )
     first_tick = report.read_text(encoding="utf-8")
-    for held_id, arm in (("a/0", "no_ground_truth"), ("f/0", "no_family_ground_truth")):
+    for held_id, arm in (("a/0", "no_ground_truth"), ("f/0", "retired_name")):
         assert held_id in first_tick, (
             f"the row held on the {arm} arm is not named in the report, although the tick "
             f"committed a row alongside it: {first_tick!r}"

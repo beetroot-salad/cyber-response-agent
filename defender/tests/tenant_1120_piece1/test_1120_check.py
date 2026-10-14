@@ -263,7 +263,7 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
     says the folder's table was not checked, and its cause names the side that failed (#1159
     O1): the adapter the cold reader saw nothing in, under the tmp COPY's root (the running
     checkout, whose path is neither the cwd the command starts in nor the folder's). A folder
-    whose mapping.yaml does not parse still has that finding printed beside it (O2). The
+    whose mapping.yaml does not parse is refused in acceptance, before the census. The
     positive control: the same copy without that module checks the same folder clean."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     folder = _folder(tmp_path, "tenant")
@@ -273,9 +273,11 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
     blind = {"folder": folder, "cause": ADAPTER_CAUSE,
              "names": (BROKEN_SYSTEM, str(checkout.resolve()))}
     _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None), **blind)
-    mapping = _unparseable_mapping(folder)
-    _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None),
-                       **blind, also=(str(mapping),))
+    _unparseable_mapping(folder)
+    # A mapping that does not parse is refused by the one tenant check (#1222 A5) in acceptance,
+    # before any census: a fixed reason naming the file, no host path.
+    H.assert_refused(H.run_script(script, "check", "--folder", str(folder), root=None),
+                     "systems/case-history/mapping.yaml")
 
 
 def test_1120_s6_defender_dir_env_names_another_tree(
@@ -1006,17 +1008,15 @@ def _absent_lead_zero_template(folder: Path) -> str:
     return _lead_zero_disagreement(folder)[1]
 
 
-def _mapping_fault(folder: Path) -> str:
-    return str(_unparseable_mapping(folder))
-
-
 #: Faults in the folder that no census is needed to find (#1159 review: a census that could not
 #: be taken once skipped the table and lead-zero checks with it).
 NO_CENSUS_FAULTS = [
     pytest.param(_unparseable_table, id="verb-grants.yaml-unparseable"),
     pytest.param(_absent_lead_zero_template, id="lead-zero-template-absent"),
-    pytest.param(_mapping_fault, id="mapping.yaml-unparseable"),
 ]
+# A case-history mapping that does not parse is no longer such a fault: the one tenant check
+# (#1222 A5) refuses it in acceptance, before any census, with a fixed reason naming the file
+# and no host path (the spec's tenant-check suite pins that).
 
 
 def _findings_of(text: str) -> set[str]:
@@ -1027,8 +1027,7 @@ def _findings_of(text: str) -> set[str]:
 def test_1159_a_census_not_taken_still_judges_what_needs_none(
         tmp_path: Path, fault: Callable[[Path], str]) -> None:
     """A folder with a fault no census is needed to find — its verb-grants.yaml does not parse,
-    its lead-zero.yaml names a template the running catalog lacks, or its case-history
-    mapping.yaml does not parse. Checked with the census taken, `check --folder` exits 1 naming
+    or its lead-zero.yaml names a template the running catalog lacks. Checked with the census taken, `check --folder` exits 1 naming
     the fault. Checked with no git on PATH (census not taken), it exits exactly 1 printing
     EVERY finding the sighted check printed, plus the census line and nothing else: losing
     the census costs only the judgement that needs it. The oracle is the same command with git

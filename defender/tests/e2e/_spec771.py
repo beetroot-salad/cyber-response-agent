@@ -457,7 +457,9 @@ def run_tree(tmp_path: Path) -> Path:
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     (run / "gather_summaries").mkdir(parents=True)
     (run / "wire_logs").mkdir(parents=True)
-    (run / "alert.json").write_text('{"id": "a-771"}\n', encoding="utf-8")
+    from defender.tests import _alert_plant
+
+    _alert_plant.plant_alert(run, {"id": "a-771"})  # the admitted alert and its record (#1222)
     return run
 
 

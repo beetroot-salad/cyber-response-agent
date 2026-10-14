@@ -485,7 +485,8 @@ def test_a_refused_dict_call_leaves_nothing_deep_in_the_history_the_lead_goes_on
     assert skipped == [], f"the wire log holds lines its reader skips: {skipped}"
     records = [json.loads(line) for line in lines]
     responses = [rec for rec in records
-                 if rec.get("kind") == "response" and str(rec.get("agent_id")).startswith("gather")]
+                 if rec.get("kind") == "response" and str(rec.get("agent_id")).startswith("gather")
+                 and rec.get("agent_id") != "gather:l-00c"]   # the correlation lead's own turns are not the lead under test
     assert len(responses) == 3, \
         f"a response record was dropped: {len(responses)} of the lead's 3 responses logged"
 

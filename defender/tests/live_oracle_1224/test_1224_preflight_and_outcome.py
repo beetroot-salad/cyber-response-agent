@@ -363,7 +363,9 @@ def _capture_row(src: Path, *, system: str, verb: str, params: Mapping[str, Any]
            "raw_command": f"{system} {verb}", "payload_path": rel, "exit_code": exit_code,
            "error_class": breaker.error_class_for_exit(exit_code),
            "payload_status": rq.payload_status(exit_code, body), "payload_digest": "",
-           "payload_sha256": rq.payload_sha256(text), "system_key": ""}
+           "payload_sha256": rq.payload_sha256(text), "system_key": "",
+           # The source run's own call id (#1234 A12), as its writer would have named it.
+           "call_id": f"{Path(src).name}/{seq}"}
     assert tuple(row) == rq.QUERY_ROW_COLUMNS
     with (Path(src) / "executed_queries.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row) + "\n")

@@ -224,6 +224,10 @@ def lead_zero_text(template_id: str = SHIPPED_CORRELATION_TEMPLATE) -> str:
     return f"correlation_template: {template_id}\n"
 
 
+#: The tenant's alert mapping (#1222): the file every planted tenant carries beside its case-history mapping.
+ALERT_MAPPING_TEXT = "signature: rule.id\nevent_time: timestamp\nsummary: rule.description\n"
+
+
 def mapping_text(reporter: str = "defender", open_status: str = "open") -> str:
     """A complete case-history mapping whose `open.reporter` is the one value a reader test
     watches flow out. `open_status` is written quoted and as given, so a template
@@ -234,10 +238,6 @@ def mapping_text(reporter: str = "defender", open_status: str = "open") -> str:
     accepts it and nothing reads it (#1221, amended), so every tenant planted from this text
     exercises that tolerance."""
     return f"""\
-source:
-  signature: rule.id
-  summary: rule.description
-  event_time: timestamp
 open:
   key: "{{case_id}}"
   summary: "{{summary}}"
@@ -318,6 +318,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
         "verb-grants.yaml": table,
         "lead-zero.yaml": lead_zero if lead_zero is not None else lead_zero_text(),
         "systems/case-history/mapping.yaml": mapping_text(reporter, open_status),
+        "alert-mapping.yaml": ALERT_MAPPING_TEXT,
     }
     for system, text in (configs if configs is not None
                          else config_texts(marker or tenant_id)).items():
@@ -403,7 +404,8 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
                               else rows)):
         folder = repo / "knowledge" / name
         files = {"lead-zero.yaml": lead_zero_text(CENSUS_LEAD_ZERO_ID),
-                 "systems/case-history/mapping.yaml": mapping_text()}
+                 "systems/case-history/mapping.yaml": mapping_text(),
+                 "alert-mapping.yaml": ALERT_MAPPING_TEXT}
         for rel, text in files.items():
             (folder / "settings" / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / "settings" / rel).write_text(text, encoding="utf-8")

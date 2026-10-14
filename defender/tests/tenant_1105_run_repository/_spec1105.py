@@ -194,7 +194,8 @@ def make_run(runs: Path, run_id: str, *, alert: str = '{"alert": "seed"}\n') -> 
     """A real run folder `<runs>/<run_id>` holding an `alert.json`."""
     run_dir = Path(runs) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "alert.json").write_text(alert, encoding="utf-8")
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(run_dir, alert.encode("utf-8"))
     return run_dir
 
 

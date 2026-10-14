@@ -114,10 +114,6 @@ def _run_main_default_writer() -> Any:
 #: committed tenant. Its comment body renders the signature and case id too, so the alert and
 #: the run id reach the outbound comment.
 MAPPING = textwrap.dedent("""\
-    source:
-      signature: rule.id
-      summary: rule.description
-      event_time: timestamp
     open:
       key: "{case_id}"
       summary: "{summary}"

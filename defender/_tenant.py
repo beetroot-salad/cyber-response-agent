@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from pydantic import ValidationError
 from pydantic_core import core_schema
 
+from defender import _alert_input
 from defender import _io as _real_io
 from defender import _paths
 from defender._model import model
@@ -599,6 +600,12 @@ def _check_knowledge(
     for rel in REQUIRED_SETTINGS:
         _required_setting(_real_io.stat_entry(bound, f"{SETTINGS_HALF}/{rel}"),
                           folder / SETTINGS_HALF / rel)
+    # The two mapping files (#1222 A5): every fault, one fixed reason each, in one refusal. Asked
+    # before the link walk, so a link or FIFO at a mapping's name is that mapping's reason (the
+    # reader refuses it without opening it), not the walk's first-found refusal alone.
+    mapping_faults = _alert_input.settings_reasons(bound.under(SETTINGS_HALF))
+    if mapping_faults:
+        raise TenantRefused("; ".join(mapping_faults))
     for name in (SETTINGS_HALF, AGENT_HALF):
         _refuse_links_and_special_files(bound, folder, name)
     tenant_id_file = folder / TENANT_ID_FILE

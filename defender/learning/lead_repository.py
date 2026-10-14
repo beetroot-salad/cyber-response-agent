@@ -84,6 +84,10 @@ class QueryRow:
     #: string the writer coarsened to `system=""`; `""` elsewhere. Coerced as the guard's `_trip`
     #: coerces it, so an older table replays exactly as it ran. For the guard, not a model.
     system_key: str = ""
+    #: The call's host-written id (`record_query.next_call_id`, A12): the key its served-ledger
+    #: rows share. `None` when the row carries no string id (a row older than the column, or
+    #: one seeded from the source run as that run wrote it).
+    call_id: str | None = None
     #: The parsed JSON record this row was read from, by identity — see `record()`. Excluded
     #: from equality and repr; `SkipValidation` because validation would copy it.
     _record: Annotated[dict | None, SkipValidation] = field(
@@ -230,6 +234,7 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
                 # `as_str`: the guard's own coercion (absent / `None` / non-string -> `""`).
                 payload_sha256=as_str(rec.get("payload_sha256")),
                 system_key=as_str(rec.get("system_key")),
+                call_id=cid if isinstance(cid := rec.get("call_id"), str) else None,
                 _record=rec,
             )
         )
@@ -312,7 +317,7 @@ def actor_view(run_dir: Path) -> dict:
         entries.append({"query_id": q.query_id, "params": q.params})
     return {
         "case_id": run_dir.name,
-        "alert_ref": RUN_LAYOUT.alert.name,
+        "alert_ref": str(RUN_LAYOUT.alert),
         "leads": [
             {"lead_id": lid, "queries": qs} for lid, qs in grouped.items()
         ],
@@ -432,7 +437,7 @@ def render_joined_yaml(run_dir: Path) -> str:
         lead_fields=("lead_id", "goal", "what_to_summarize"),
         query_fields=("query_id", "verb", "params", "payload_status", "payload_digest"),
     )
-    doc = {"case_id": run_dir.name, "alert_ref": RUN_LAYOUT.alert.name, "leads": leads}
+    doc = {"case_id": run_dir.name, "alert_ref": str(RUN_LAYOUT.alert), "leads": leads}
     return _yaml.safe_dump(doc, sort_keys=False)
 
 

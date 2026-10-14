@@ -47,7 +47,6 @@ from __future__ import annotations
 
 import gc
 import json
-import shutil
 import weakref
 from pathlib import Path
 from typing import Any
@@ -173,7 +172,8 @@ class Branched:
         store.close()
         self.sibling = tmp_path / "defender-runs" / "run-sibling-1235"
         RunPaths(self.sibling).gather_raw.mkdir(parents=True)
-        shutil.copy(source / "alert.json", self.sibling / "alert.json")
+        from defender.tests._alert_plant import plant_alert
+        plant_alert(self.sibling, RunPaths(source).alert.read_bytes())
 
     def resume(self, *, main: ReplayFn, gather: ReplayFn, verbs: FakeVerbs,
                box: Any = None) -> dict:
@@ -377,7 +377,7 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
     assert state.run_id == "r1235-v2-link"
     assert state.run_dir.resolve() == (real / "run").resolve()
     snapshot = state.budget_snapshot()
-    assert (snapshot["tool_calls"], snapshot["subagent_spawns"]) == (4, 1), snapshot
+    assert (snapshot["tool_calls"], snapshot["subagent_spawns"]) == (5, 2), snapshot
     assert list(state.lead_rows(LEAD)) == _rows(real / "run"), (
         "the state's rows and the table read through the real spelling disagree")
     assert len(state.lead_rows(LEAD)) == 2
@@ -402,7 +402,7 @@ def test_two_runs_with_one_run_id_in_one_process_share_no_state(tmp_path):
 
     assert first is not second
     a, b = first.budget_snapshot(), second.budget_snapshot()
-    assert (a["tool_calls"], a["subagent_spawns"]) == (4, 1), f"the second run moved the first's pool: {a}"
+    assert (a["tool_calls"], a["subagent_spawns"]) == (5, 2), f"the second run moved the first's pool: {a}"
     assert (b["tool_calls"], b["subagent_spawns"]) == (2, 0), f"the second run inherited counts: {b}"
     assert len(first.lead_rows(LEAD)) == 2
     assert list(second.lead_rows(LEAD)) == []
@@ -448,7 +448,7 @@ def test_nothing_holds_the_runs_state_once_the_caller_drops_the_result(tmp_path)
     held = ref()
     assert held is not None
     assert len(held.lead_rows(LEAD)) == 1, "the returned state does not hold the run's row"
-    assert held.budget_snapshot()["tool_calls"] == 2
+    assert held.budget_snapshot()["tool_calls"] == 3
     del held
     del result
     gc.collect()

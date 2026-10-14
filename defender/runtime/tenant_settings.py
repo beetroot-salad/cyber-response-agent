@@ -5,7 +5,7 @@ WHY IT EXISTS. Adapters used to find their URLs, container names and credentials
 called: each parsed its own `config.env` and let the process environment override it, so "whose
 systems does this run talk to" was decided by how the process was launched. Here the file is read
 once, when the run's tenant is resolved (`run_tenant.resolve_run_tenant`), and the values ride the
-run as the record's `systems` / `elastic` fields. Nothing below the entry point reads
+run as the record's `systems` field. Nothing below the entry point reads
 the process environment or the tenant folder for a setting again.
 
 FAULTS ARE VALUES, never raises, at resolve. A system whose `config.env` is missing, unreadable or
@@ -23,7 +23,6 @@ This module is outside `bash_exec`'s per-exec import closure (#1096) and must st
 """
 from __future__ import annotations
 
-import dataclasses
 import errno
 import logging
 import os
@@ -205,53 +204,6 @@ class SystemConfig(Mapping[str, str]):
         return f"SystemConfig(keys={sorted(self._data)})"
 
 
-@dataclasses.dataclass(frozen=True)
-class ElasticSettings:
-    """The named Elastic view of `systems["elastic"]` (D4): the keys platform code reads.
-
-    All-or-nothing over its key set — a tenant that uses only Elasticsearch still names Kibana's
-    container, because this part never degrades half-way (MF-7). Values are carried verbatim:
-    presence and non-blank only, `ssl_verify` the raw string."""
-
-    events_index: str
-    alerts_index: str
-    url: str
-    ssl_verify: str
-    es_container: str
-    kibana_container: str
-    docker_context: str
-
-
-#: `ElasticSettings`' attribute <- the `config.env` key it carries.
-ELASTIC_KEYS: dict[str, str] = {
-    "events_index": "ELASTIC_EVENTS_INDEX",
-    "alerts_index": "ELASTIC_ALERTS_INDEX",
-    "url": "ELASTICSEARCH_URL",
-    "ssl_verify": "ELASTIC_SSL_VERIFY",
-    "es_container": "ELASTIC_ES_CONTAINER",
-    "kibana_container": "ELASTIC_KIBANA_CONTAINER",
-    "docker_context": "ELASTIC_DOCKER_CONTEXT",
-}
-
-
-#: The two causes an unusable Elastic part is reported under — lead-zero's "unavailable" note and
-#: the branch launcher's refusal both say one of them (O9).
-NO_ELASTIC = "no elastic system configured"
-BAD_ELASTIC = "elastic config is bad"
-
-
-def elastic_problem(elastic: ElasticSettings | ConfigFault | None) -> str | None:
-    """Why `record.elastic` cannot be used, or `None` when it can: `NO_ELASTIC` for a tenant with
-    no `systems/elastic/` folder, `BAD_ELASTIC: <fault>` for a part that could not stand. The
-    fault text is the resolver's own and may name a host path: a caller that shows it to a model
-    or writes it into a run passes it through `verbs.redact_settings_path`."""
-    if elastic is None:
-        return NO_ELASTIC
-    if isinstance(elastic, ConfigFault):
-        return f"{BAD_ELASTIC}: {elastic}"
-    return None
-
-
 def system_prefix(system: str) -> str:
     """A system folder's config-key prefix: `case-history` → `CASE_HISTORY`."""
     return system.upper().replace("-", "_")
@@ -292,43 +244,13 @@ def read_systems(settings: Path) -> Mapping[str, SystemConfig | ConfigFault]:
     return MappingProxyType(out)
 
 
-def elastic_view(systems: Mapping[str, SystemConfig | ConfigFault]) -> ElasticSettings | ConfigFault | None:
-    """The Elastic part, or `None` when the tenant has no `systems/elastic/` folder, or the
-    `ConfigFault` for why it cannot stand — a missing file, a key absent or blank, or an access
-    method other than docker-exec. Never raised (O5). @owns elastic
-
-    THE ONE PLACE platform code interprets config keys (D4)."""
-    entry = systems.get("elastic")
-    if entry is None:
-        return None
-    if isinstance(entry, ConfigFault):
-        return ConfigFault(str(entry))
-    bad = [key for key in ("ELASTIC_TRANSPORT", *ELASTIC_KEYS.values())
-           if key not in entry or is_blank(entry[key])]
-    if bad:
-        return ConfigFault(
-            f"elastic config is missing or blank: {', '.join(bad)} — the Elastic part is "
-            "all-or-nothing over these keys")
-    if entry["ELASTIC_TRANSPORT"] != DOCKER_EXEC:
-        return ConfigFault(
-            f"ELASTIC_TRANSPORT={entry['ELASTIC_TRANSPORT']!r} names an access method that is "
-            f"not implemented — only {DOCKER_EXEC!r} is")
-    return ElasticSettings(**{attr: entry[key] for attr, key in ELASTIC_KEYS.items()})
-
-
 __all__ = [
     "DOCKER_EXEC",
-    "ELASTIC_KEYS",
-    "BAD_ELASTIC",
-    "NO_ELASTIC",
     "NOT_CONFIGURED",
     "SETTINGS_MAX_BYTES",
-    "ElasticSettings",
     "SystemConfig",
     "assignments",
     "config_pointer",
-    "elastic_problem",
-    "elastic_view",
     "is_blank",
     "parse_env",
     "pointer_to",

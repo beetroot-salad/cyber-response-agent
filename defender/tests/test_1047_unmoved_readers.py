@@ -89,36 +89,40 @@ def test_enqueue_curation_reads_the_same_truncated_by_value_after_the_change(tmp
         "divergence from the ticket lane as intentional, and this is where it is pinned")
 
 
-def test_route_finding_still_carries_the_cut_short_reason_onto_the_ledger_entry_unchanged(
+def test_a_cut_short_world_files_no_finding_and_its_reason_travels_on_its_row_unchanged(
         tmp_path):
-    """`enqueue.py::route_finding` still carries the third row shape's `ungradable_reason` onto
-    the ledger's disposition entry exactly as it carries today's `ungradable_reason` values —
-    claim n8's passthrough mechanism is untouched by this piece; the new string travels the
-    same path the old ones did.
+    """#1234 retired `enqueue.py::route_finding` (and its `ROUTE_UNGRADABLE` lane): routing is
+    `route.fate`'s over the findings a world's draws FILED, and a cut-short world is excluded
+    by the usability read before any draw, so it files none and the ledger names none of its
+    findings. The third row shape's reason still travels verbatim to where the operator reads
+    it — the row's `ungradable_reason`, and the family call's noise context, which names the
+    excluded world with that reason (never with a verdict).
 
-    The row handed to `route_finding` is a REAL one, built by the real grading pass over a real
-    cut-short world — not a hand-written dict, which would pin the passthrough against a shape
-    the pass may never produce."""
-    enqueue = S.mod("learning.judge.enqueue")
+    The row is a REAL one, built by the real grading pass over a real cut-short world — not a
+    hand-written dict, which would pin the passthrough against a shape the pass may never
+    produce. Positive control in the same pass: world c is judged and its finding IS on the
+    ledger, so "no entry for b" is not an empty ledger."""
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
-    row = S.graded(ep)["b"]
+    judge = S.scripted_judge()
+    record = S.graded_record(ep, judge=judge)
+    row = S.rows(record)["b"]
     reason = row.get("ungradable_reason")
     assert reason, "the control failed: the cut-short row carries no reason to pass through"
+    assert "request-limit" in reason, f"the cut-short reason does not name the exit: {reason!r}"
 
-    lane, carried = enqueue.route_finding(
-        label="b", finding={"subject": "defender"}, kind="draw", world_row=row,
-        defender_blocked=False)
-    assert lane == enqueue.ROUTE_UNGRADABLE, (
-        f"a cut-short row took lane {lane!r}; `is_gradable_row` is truthiness on `ungradable` "
-        "and the third row shape sets it")
-    assert carried == reason, (
-        "the ledger entry does not carry the cut-short reason verbatim; the operator reading "
-        "the record would see the finding refused with no reason naming the exit")
-    # The ledger lane production files it under: `enqueue_report`'s `_drop` folds a
-    # `ROUTE_UNGRADABLE` answer into `LANE_UNQUEUEABLE` with the route's reason — the route
-    # vocabulary and the ledger-lane vocabulary are two sets, and the reader that checks a
-    # ledger back (`check_disposition_entry`) accepts only what the writer writes.
-    assert enqueue.disposition_entry("f-1", enqueue.LANE_UNQUEUEABLE, carried)["reason"] == reason
+    assert S.judge_calls_for(judge, "b") == [], "a cut-short world bought a world call"
+    ledger = [e["finding_id"] for e in record.dispositions or []]
+    assert not [f for f in ledger if f.split("/")[-3] == "b"], (
+        f"the ledger names a finding of the cut-short world: {ledger}")
+    assert [f for f in ledger if f.split("/")[-3] == "c"], (
+        f"the control failed: the judged sibling's finding is not on the ledger: {ledger}")
+
+    family = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True)
+              if str(a).startswith(S.FAMILY_AGENT_PREFIX)]
+    assert family, "the pass never made its family-scope call"
+    assert reason in family[-1].split("## NOISE CONTEXT", 1)[-1], (
+        "the family call's noise context does not carry the cut-short reason verbatim; the "
+        "excluded world would reach it with no reason naming the exit")
 
 
 # ---------------------------------------------------------------------------------------

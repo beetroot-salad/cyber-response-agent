@@ -253,21 +253,36 @@ def graded_record(episode_dir: Path, *, judge: Any = None) -> Any:
 
 
 def graded_with_view(episode_dir: Path) -> tuple[dict[str, dict], dict[str, str]]:
-    """One pass: the per-world rows, and what the family-scope call was shown of each world —
-    its row line in the family prompt (`run._render_family_rows`), keyed by label.
+    """One pass: the per-world rows, and what the family-scope call was shown of each world,
+    keyed by label.
 
-    #1224: the family's `verdict_word` is the family MODEL call's majority, decided from these
-    lines; no code path computes it. "Does X move the family's word" is therefore asked of what
-    X puts in front of that call: a world's line names its reached `verdict`, or says it was NOT
-    JUDGED (the why is the row's `ungradable_reason`, compared on the rows)."""
+    #1234: the family call (`run._build_family_prompt`) is shown every USABLE run under
+    `### run <X>` in its computed header, with the reached verdict its archived `report.md`
+    carries; a run the usability read excluded is shown only as a line of the noise context
+    (`- world <X>: <why>`), never with a verdict. "Does X put a verdict in front of that call"
+    is asked of that text: a usable run's entry reads `verdict='<reached>'`, an excluded run's
+    `NOT JUDGED` (the why is the row's `ungradable_reason`, compared on the rows)."""
     judge = scripted_judge()
     record = graded_record(episode_dir, judge=judge)
     family = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True)
               if str(a).startswith(FAMILY_AGENT_PREFIX)]
     assert family, "the pass never made its family-scope call"
-    view = {label: ("NOT JUDGED" if line.startswith("NOT JUDGED") else line)
-            for label, line in re.findall(r"(?m)^world (\S+): (.*)$", family[-1])}
-    return rows(record), view
+    return rows(record), _family_view_of(family[-1])
+
+
+def _family_view_of(prompt: str) -> dict[str, str]:
+    """`graded_with_view`'s per-world view, read off one family prompt's text."""
+    header = prompt.split("## CONTRAST TABLE", 1)[0]
+    noise = prompt.split("## NOISE CONTEXT", 1)[-1]
+    view: dict[str, str] = {}
+    for label, block in re.findall(r"(?ms)^### run (\S+)\n(.*?)(?=^### run |\Z)", header):
+        reached = re.search(r"reached verdict \(its archived report\.md\): <(run-[0-9a-f]+)-"
+                            r"untrusted>\n(.*?)\n</\1-untrusted>", block, re.S)
+        view[label] = f"verdict={reached.group(2)!r}" if reached else block.strip()
+    for label in re.findall(r"(?m)^- world (\S+): ", noise):
+        assert label not in view, f"world {label} is both a usable run and excluded: {prompt}"
+        view[label] = "NOT JUDGED"
+    return view
 
 
 def family_view(episode_dir: Path) -> dict[str, str]:
@@ -468,9 +483,10 @@ def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bo
     F-K's unreachable sub-case has: a forced-close-set exit whose own forced close failed."""
     run_dir = Path(tmp_path) / name
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "alert.json").write_text(
-        json.dumps({"rule": {"id": ALERT_ID, "description": "lateral movement from web1"},
-                    "timestamp": "2026-09-16T11:00:00Z"}), encoding="utf-8")
+    from defender.tests._alert_plant import plant_alert
+
+    plant_alert(run_dir, {"rule": {"id": ALERT_ID, "description": "lateral movement from web1"},
+                          "timestamp": "2026-09-16T11:00:00Z"})
     if report:
         (run_dir / "report.md").write_text(report_text(disposition), encoding="utf-8")
     return run_dir

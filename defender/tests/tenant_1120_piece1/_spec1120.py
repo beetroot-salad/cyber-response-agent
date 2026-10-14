@@ -326,6 +326,10 @@ def repo_of(folder: Path, repo: Path) -> Path:
     tenant's own repo, as `scaffold` makes one and the operator pushes it."""
     shutil.copytree(folder, repo, symlinks=True)
     git(repo, "init", "-q", "-b", "main")
+    # Keep the source immutable while a plain local clone hardlinks its objects.
+    # Git's detached auto-maintenance can otherwise repack them during the clone.
+    git(repo, "config", "maintenance.auto", "false")
+    git(repo, "config", "gc.auto", "0")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "tenant")
     return repo
@@ -503,6 +507,11 @@ class RunRecorder:
         self.order.append("materialize")
         self.materialize_calls.append({"alert": alert, "run_id": run_id, **kw})
         self.run_dir_at.mkdir(parents=True, exist_ok=True)
+        # Run start settles the alert once (#1222): the folder holds it with its record, which
+        # the box mount needs.
+        from defender.tests._alert_plant import plant_alert as plant_with_record
+
+        plant_with_record(self.run_dir_at, Path(alert).read_bytes())
         return SimpleNamespace(run_dir=self.run_dir_at)
 
     def lifecycle(self, **kw: Any) -> dict[str, Any]:

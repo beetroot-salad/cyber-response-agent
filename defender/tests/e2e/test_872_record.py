@@ -40,7 +40,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 )
 from defender.tests.e2e._toon872 import (  # noqa: E402
     gate_metadata_key,
-    DEFENDER,
     RUN_ID,
     PartRecorder,
     corpus,
@@ -498,16 +497,14 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     the reason coherence always is: the table had THREE independently spelled writers — the
     shared `append_query_row` helper reached by the query tool and the gather bash lane,
     `lead_zero`'s copy of the frozen key set assembled INLINE (folded into `append_query_row`
-    by #1017, which is what makes the two lanes below agree by construction rather than by
-    coincidence), and the judge's closed-ticket tool appending its
+    by #1017, and gone with the ancestor fetch in #1222), and the judge's closed-ticket tool appending its
     own — and a demand at the table's altitude is green when two of the three agree.
 
-    TWO WRITERS ARE DRIVEN AND THE THIRD IS OUT OF REACH BY CONSTRUCTION
+    ONE WRITER IS DRIVEN AND THE OTHER IS OUT OF REACH BY CONSTRUCTION
     (`92-reconciliation.md` F9). The demand states the per-writer rule and this test used to
-    exercise one lane, which is weaker than the altitude the rule was written to avoid. The
-    query tool's lane and `lead_zero._record_manual_row` (its own assembly until #1017, the
-    shared constructor since) both append to THIS
-    run's `executed_queries.jsonl`, so both are inside the differential below. The judge's
+    exercise one lane. The query tool's lane and the gather bash lane both append to THIS
+    run's `executed_queries.jsonl` through the shared constructor, so both are inside the
+    differential below (lead-0's own writer, the one that made it two lanes, left with #1222). The judge's
     appender writes a file of the same NAME in the LEARNING run dir
     (the retired closed-ticket tool, `run_dir / "executed_queries.jsonl"` where `run_dir` is the
     learning run's), which no investigation ever writes and which the gate cannot reach from
@@ -517,29 +514,7 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     Driven as a differential over two runs that differ ONLY in whether a foreign substitution
     happened, so any dependence of a row on the gate's decision shows up as a diff.
     """
-    from defender.runtime import lead_zero
-
-    def _manual_row(run_dir: Path, summary: dict) -> None:
-        """`lead_zero`'s row — the table's second writer — written into the run under test,
-        through that run's own state (the driver summary's `run_state`, #1235), so its seq
-        follows the run's rows.
-
-        Called through the module's own function rather than re-assembled here: until #1017
-        the frozen keys were spelled INLINE at that site (a count this docstring deliberately
-        does not restate, having been stale through two column additions — #877's
-        `payload_sha256`, #871's `system_key`), and a copy in this test would compare the
-        test's idea of the row against itself either way."""
-        deps = lead_zero._CaptureDeps(
-            run_dir=run_dir, defender_dir=DEFENDER, run_id=RUN_ID,
-            lead_id="l-000", run_state=summary["run_state"],
-        )
-        lead_zero._record_manual_row(
-            deps, "search", {"index": "logs"}, {"rows": [{"a": 1}]}, exit_code=0,
-        )
-
-    summaries: list = []
-    gated_dir, main = _substituting_run(tmp_path / "gated", turns=2, gather=True,
-                                        summaries=summaries)
+    gated_dir, main = _substituting_run(tmp_path / "gated", turns=2, gather=True)
     assert _every_view(main, toons.dumps(_payload())), (
         "the gated run did not substitute, so the two runs are the same run"
     )
@@ -553,24 +528,19 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
         })]),
         Turn(text="Complete."),
     ])
-    summaries.append(drive(
+    drive(
         idle_dir, run_id=RUN_ID, main=idle_main,
         gather=ReplayFn([q("elastic", "query", {"native_query": "FROM logs"}), DONE]),
-        verbs=elastic_ok(rec)))
-
-    # The second writer's own spelling, appended to each run's table after the run that
-    # differs is over — so the comparison below spans both lanes rather than one.
-    for run_dir, summary in zip((gated_dir, idle_dir), summaries, strict=True):
-        _manual_row(run_dir, summary)
+        verbs=elastic_ok(rec))
 
     gated_rows = read_jsonl_rows(RunPaths(gated_dir).executed_queries)
     idle_rows = read_jsonl_rows(RunPaths(idle_dir).executed_queries)
     assert gated_rows, "the gated run wrote no queries row"
     assert idle_rows, "the idle run wrote no queries row"
     lanes = {r.get("lead_id") for r in gated_rows}
-    assert {"l-000", "l-001"} <= lanes, (
-        f"only one of the two reachable writers put a row in the table ({sorted(lanes)}), so "
-        "the differential below is at the table's altitude and not per-writer"
+    assert "l-001" in lanes, (
+        f"the dispatched lead put no row in the table ({sorted(lanes)}), so the differential "
+        "below is at the table's altitude and not per-writer"
     )
     assert gated_rows == idle_rows, (
         "an executed-queries row differs between a run where the gate substituted and one "

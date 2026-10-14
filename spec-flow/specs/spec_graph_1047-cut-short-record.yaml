@@ -1532,10 +1532,11 @@ demands:
 
   - id: route_finding_carries_the_cut_short_reason_unchanged         # R7, unmoved reader
     kind: coherence
-    form: test
+    form: clause
     source: "spec-graph gate R7 firing on `interacts(route_finding->world_row)`; claim n8"
     binds: ["interacts(route_finding->world_row)"]
-    discharged_by: test_route_finding_still_carries_the_cut_short_reason_onto_the_ledger_entry_unchanged
+    status: retired
+    outcome: {nl: "RETIRED by #1234 — #1234 retired `enqueue.py::route_finding` and its `ROUTE_UNGRADABLE` lane: routing reads only the findings a world's draws filed, and a cut-short world is never drawn, so the ledger carries no entry for it. The reason's verbatim passthrough survives on the world's row and in the family call's noise context, pinned by `test_a_cut_short_world_files_no_finding_and_its_reason_travels_on_its_row_unchanged`; `test_route_finding_still_carries_the_cut_short_reason_onto_the_ledger_entry_unchanged`, which discharged this demand, was rewritten into it."}
     seed_docstring: >-
       `enqueue.py::route_finding` still carries the third row shape's `ungradable_reason` onto the
       ledger's disposition entry exactly as it carries today's `ungradable_reason` values — claim

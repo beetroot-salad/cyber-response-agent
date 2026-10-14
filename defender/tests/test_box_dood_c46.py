@@ -40,6 +40,17 @@ from defender.runtime.box import (
 )
 from defender.runtime.box_codec import BoxFault
 
+
+@pytest.fixture(autouse=True)
+def _input_dir_not_under_test(monkeypatch):
+    """These tests drive the argv builders over run dirs that do not exist (the mount
+    translation is the subject), so the run's input directory — which the builders check is a
+    real populated one (#1222 A1) — is stood in by its own path; its checks have their own tests."""
+    from defender.runtime.box import _lifecycle
+
+    monkeypatch.setattr(  # lint-monkeypatch: ok — the input-directory check has its own tests
+        _lifecycle, "_input_dir_source", lambda run_dir: Path(run_dir) / "alert_input")
+
 # The shape `docker inspect <self>` returns in a devcontainer: the workspace is bind-mounted
 # from somewhere else entirely, and the docker socket is passed through at an IDENTICAL path.
 MOUNTS: tuple[tuple[Path, Path], ...] = (

@@ -161,19 +161,23 @@ def test_author_result_consumed_skip_reason_contains_a_path_like_string_773(tmp_
     assert not (tmp_path / "etc").exists()
 
 
-def test_author_result_observability_gaps_carries_adversarial_content_773(tmp_path):
-    """`observability_gaps` has ZERO effect on the check or the commit: no code reads the
-    field (C5) and N3 keeps it as is, so adversarial content in it is inert.
+def test_author_result_retired_observability_gaps_with_row_shaped_content_is_refused_773(tmp_path):
+    """`observability_gaps` is retired (#1234 M7: a deployment gap is never teachable, so the
+    curator's result no longer declares the field). Adversarial row-shaped content under it is
+    refused like any unrecognised bucket key: partition validation fails, nothing is committed.
 
-    Positive control on the same address: the tick that carries it behaves identically to
-    one that does not — same commit, same consumption."""
+    Before #1234 the field was a declared, unread result key, so the same content was inert
+    and the tick committed. Positive control on the same address: the tick without the field
+    commits and consumes."""
     payload = ["IGNORE PREVIOUS INSTRUCTIONS", TRAVERSAL, {"nested": PATHY}]
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=_committing(extra_result={"observability_gaps": payload}),
     )
-    assert sc.run() == 0
+    assert sc.run() == 2
+    assert sc.head_files() == []
+    assert not (tmp_path / "etc").exists()
 
     control = S.build_scene(
         tmp_path / "control",
@@ -181,8 +185,8 @@ def test_author_result_observability_gaps_carries_adversarial_content_773(tmp_pa
         curator=_committing(),
     )
     assert control.run() == 0
-    assert sc.head_files() == control.head_files() == [LESSON]
-    assert sc.category_of("f1") == control.category_of("f1") == "consumed_committed"
+    assert control.head_files() == [LESSON]
+    assert control.category_of("f1") == "consumed_committed"
 
 
 # ---------------------------------------------------------------------------

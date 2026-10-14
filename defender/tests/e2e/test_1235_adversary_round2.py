@@ -29,23 +29,11 @@ from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import branch, circuit_breaker, session_store  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
-from defender.scripts.adapters.faults import TransportFault  # noqa: E402
-from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
-    CORRELATION_SUMMARY,
-    L3,
-    answer_hits,
-    answer_raising,
-    run,
-)
-from defender.tests.e2e._replay_harness import (  # noqa: E402
-    Turn,
-)
 from defender.tests.e2e.test_1235_queries_and_pointer import (  # noqa: E402
     OLD_POINTER_NAME,
     _finished_run,
     _pointer,
 )
-from defender.tests.e2e.test_808_correlation_lead import TWO_ACTORS  # noqa: E402
 from defender.tests.test_budget_seams_631 import _run_dir, drive_agent  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -72,23 +60,20 @@ def test_the_correlation_leads_calls_ride_the_runs_one_state(tmp_path):
     run_dir, run_id))` — a second state for item 3. Its calls never reach the run's pool or the
     run's breaker (an elastic outage l-00c sees does not trip elastic for MAIN's leads, and
     RUN_FAIL_KILL_LIMIT is split across two counters), and its clock starts late."""
-    corr = [Turn(tool_calls=[("query", {
-        "system": "elastic", "verb": "alerts",
-        "params": {"native_query": f'user.name:"dev.dana" AND k1:{i}'}})]) for i in range(2)]
-    busy = run(tmp_path / "busy", run_id="k1-busy", answer=answer_hits(TWO_ACTORS),
-               gather_turns=[*corr, Turn(text=CORRELATION_SUMMARY)])
-    idle = run(tmp_path / "idle", run_id="k1-idle", answer=answer_hits(TWO_ACTORS))
+    from defender.tests.alert_front_door_1222 import _spec1222 as S
 
-    mine = [c for c in busy.rec.calls if "k1:" in str(c.params.get("native_query"))]
-    assert len(mine) == 2, "positive control: the correlation lead's calls never ran"
-    assert len(busy.rows_for(L3)) == 2, "positive control: the correlation lead wrote no rows"
-    assert idle.has_sidecar(L3), "the control run did not dispatch item 3 either"
-    assert all(c.ctx.run_state is busy.state for c in mine), (
-        "the correlation lead's verb context carried a state other than the run's")
-    assert list(busy.state.lead_rows(L3)) == busy.rows_for(L3), (
-        "the run's state does not hold the correlation lead's rows")
-    delta = busy.budget["tool_calls"] - idle.budget["tool_calls"]
-    assert delta == 2, f"the correlation lead's two calls moved the run's pool by {delta}"
+    busy = S.run_alert(tmp_path / "busy", run_id="k1-busy",
+                       leads={S.L3: [S.query("elastic", "alerts", {"native_query": "k1:1"}),
+                                     S.query("elastic", "alerts", {"native_query": "k1:2"}),
+                                     S.text(S.DEFAULT_CORRELATION_SUMMARY)]})
+    idle = S.run_alert(tmp_path / "idle", run_id="k1-idle")
+    mine = [c for c in busy.backend.rec.calls if "k1:" in str(c.params.get("native_query"))]
+    assert len(mine) == 2
+    assert len(busy.rows_for(S.L3)) == 2
+    assert idle.has_sidecar(S.L3)
+    assert all(c.ctx.run_state is busy.run_state for c in mine)
+    assert list(busy.run_state.lead_rows(S.L3)) == busy.rows_for(S.L3)
+    assert busy.budget["tool_calls"] - idle.budget["tool_calls"] == 2
 
 
 # ======================================================================================
@@ -204,32 +189,6 @@ def test_a_dangling_link_at_the_old_name_refuses_too(tmp_path):
 
 # ======================================================================================
 # lead-0's capped call carries the run's state on its verb context.
-# ======================================================================================
-
-def test_lead_zeros_capped_call_carries_the_runs_state(tmp_path):
-    """Brief: "`VerbContext.run_state` ... set wherever a VerbContext is built (`query_tool.py
-    ~927`, `lead_zero/_capture.py ~102, ~200`)"; pin: "query_tool and lead-0's capture set it to
-    the run's state". `_capture.py ~200` is `_CallLedger.call`'s CAPPED path (after item 1's
-    one recorded elastic failure, calls bypass `QueryCapture`), the one site no test reaches
-    with a context check. Arm A of `test_item_one_stops_at_one_recorded_per_system_failure`:
-    the shell fetch fails (recorded, the ledger caps), the ancestor `query` then runs capped.
-
-    Positive control, same run: the first (uncapped) call's context carries the state.
-
-    Exploit (greens the committed suite): build the capped path's `VerbContext` without
-    `run_state=` — a world registry serving that call pauses no investigator clock."""
-    down = TransportFault("docker exec failed")
-    res = run(tmp_path, run_id="k5-capped", shell=down, answer=answer_raising(down))
-    assert [c.verb for c in res.rec.calls] == ["alerts", "query"], (
-        "the scenario no longer reaches lead-0's capped path")
-    assert res.rec.calls[0].ctx.run_state is res.state, (
-        "control: the uncapped call's context does not carry the run's state")
-    assert res.rec.calls[1].ctx.run_state is res.state, (
-        "lead-0's capped call's verb context does not carry the run's state")
-
-
-# ======================================================================================
-# a breaker charge is one read-modify-write under the state's lock.
 # ======================================================================================
 
 def test_concurrent_breaker_charges_lose_no_failure(tmp_path):

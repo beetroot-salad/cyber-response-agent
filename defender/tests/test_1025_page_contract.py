@@ -410,7 +410,7 @@ def test_1025_runs_base_and_episodes_base_env_vars_point_at_nonexistent_paths_du
                 monkeypatch.setenv(var, value)
         page = render(ep)
         assert f"world-{E.GRADED_WORLD}" in page.by_id
-        assert "undecidable" in page.text_of("sec-verdict")
+        assert "validity usable" in page.text_of("sec-verdict")
         renders.append(ep.page.read_bytes())
     assert len(set(renders)) == 1, "the environment's roots changed the page"
 
@@ -480,16 +480,14 @@ def test_1025_family_yaml_top_level_document_is_a_list_not_a_mapping(tmp_path, c
 
 
 def _live996_shaped(tmp_path: Path, root: Path) -> E.Episode:
-    """The second archive's shape: no family draw, no `samples.yaml`, a pre-#1007 grade with an
-    ungradable row and `family_outcome` absent."""
+    """The second archive's shape: no family draw, no `samples.yaml`, a grade with an
+    ungradable row, no family row (the family call never ran) and no questioner counts."""
     ep = E.sample_episode(tmp_path, root=root, family_draw=False, samples=False, judge=False)
-    doc = E.sample_grade()
+    doc = E.sample_grade(family=False)
     doc["worlds"] = [E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign"),
                      E.world_row(E.GRADED_WORLD, declared="malicious")]
-    doc["verdict_word"] = "survived"
-    for key in ("family_outcome", "family_failed_reason", "family_malformed_replies",
-                "family_completed_draws", "world_enqueued_rows", "world_enqueued_to",
-                "world_findings"):
+    E.drop_lanes(doc, E.PASSTHROUGH_WORLD)
+    for key in ("world_enqueued_rows", "world_enqueued_to"):
         del doc[key]
     E.write_judge(ep.dir, doc)
     return ep
@@ -528,7 +526,8 @@ def test_1025_repair_and_regrade_leaves_the_page_stale(tmp_path):
     """The page carries NO render-provenance line — no timestamp, no record mtime (J3): two
     renders of one directory at different times are byte-identical and today's date appears
     nowhere in the bytes; a repaired-and-regraded record changes the page only through the
-    record's own values (a new verdict word), never through a "rendered at" stamp.
+    record's own values (a new validity word — #1234 retired the verdict word), never through a
+    "rendered at" stamp.
     """
     ep = E.sample_episode(tmp_path)
     render(ep)
@@ -539,10 +538,10 @@ def test_1025_repair_and_regrade_leaves_the_page_stale(tmp_path):
     render(ep)
     assert ep.page.read_bytes() == first, "a record mtime or a render time reached the page"
     doc = E.sample_grade()
-    doc["verdict_word"] = "survived"
+    doc["validity"] = "unusable"
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    assert "survived" in page.text_of("sec-verdict")
+    assert "validity unusable" in page.text_of("sec-verdict")
     assert ep.page.read_bytes() != first
 
 
@@ -603,23 +602,23 @@ def test_1025_two_renders_in_flight_against_the_same_episode_dir(tmp_path):
 
 
 def test_1025_judge_yaml_replaced_by_a_concurrent_re_grade_partway_through_one_render(tmp_path):
-    """A `judge.yaml` rewritten (verdict `undecidable` → `survived`) while the render is in
-    flight — from a signal handler that fires only inside the page module's frame — costs the
-    render nothing: no error, a whole page carrying one of the two verdicts, and the next
-    render carries the new one (J3: each record is read once per render, no cross-file
-    snapshot is promised).
+    """A `judge.yaml` rewritten (validity `usable` → `unusable`; #1234 retired the verdict word
+    this used to rewrite) while the render is in flight — from a signal handler that fires only
+    inside the page module's frame — costs the render nothing: no error, a whole page carrying
+    one of the two words, and the next render carries the new one (J3: each record is read
+    once per render, no cross-file snapshot is promised).
     """
     ep = E.sample_episode(tmp_path)
     regrade = E.sample_grade()
-    regrade["verdict_word"] = "survived"
+    regrade["validity"] = "unusable"
 
     with E.when_inside(lambda: E.write_judge(ep.dir, regrade, check=False)) as seen:
         page = render(ep)
     assert seen["hit"], "the rewrite never landed inside the render"
     band = page.text_of("sec-verdict")
-    assert ("undecidable" in band) != ("survived" in band), band
+    assert ("validity usable" in band) != ("validity unusable" in band), band
     assert page.raw.rstrip().endswith("</html>"), "the page is not whole"
-    assert "survived" in render(ep).text_of("sec-verdict")
+    assert "validity unusable" in render(ep).text_of("sec-verdict")
 
 
 def test_1025_draw_or_judge_yaml_record_is_rewritten_mid_render(tmp_path):

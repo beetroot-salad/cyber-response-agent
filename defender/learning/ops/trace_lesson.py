@@ -47,6 +47,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _alert_input
 from defender._clock import parse_iso_utc
 from defender._corpus import iter_lessons
 from defender.hooks.record_lesson_load import EVIDENCE_READ, exposures
@@ -133,6 +134,8 @@ def in_context_cases(
 def _run_hits(lesson_name: str, created_at: datetime | None, run: Run) -> list[CaseHit]:
     """One run's exposures to `lesson_name` since `created_at`, read through the run's own
     `lessons_loaded` record, then the report of its folder for the disposition."""
+    if _alert_input.read_record(run.facts.alert_record.path) is None:
+        return []
     loaded = Path(run.observability.lessons_loaded.path)
     if not loaded.is_file():
         return []
@@ -176,7 +179,13 @@ def _scanned_runs(raw_tenant: str) -> list[Run] | None:
     from defender.run_repository import RunRefused
 
     try:
-        return tenant_runs(raw_tenant)
+        runs = tenant_runs(raw_tenant)
+        unrecorded = [run for run in runs
+                      if _alert_input.read_record(RunPaths(run.run_dir).alert_record) is None]
+        if unrecorded:
+            print(f"warn: {len(unrecorded)} run folder(s) with no run record skipped: "
+                  f"{', '.join(one_line(str(run.id)) for run in unrecorded)}", file=sys.stderr)
+        return [run for run in runs if run not in unrecorded]
     except (_tenant.TenantRefused, RunRefused) as refused:
         print(f"error: the runs of tenant {one_line(raw_tenant)} cannot be scanned: "
               f"{one_line(str(refused))}", file=sys.stderr)

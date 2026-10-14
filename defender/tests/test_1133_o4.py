@@ -45,6 +45,8 @@ upper-case-head O4.8.1 rows, and every leaf-plant row checked with `assert_refus
 """
 from __future__ import annotations
 
+from defender.run_repository import Run
+
 import errno
 import json
 import logging
@@ -316,7 +318,7 @@ def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released
     cli, src, tenant, ep = _prime_setup(tmp_path)
     prime = Primed()
     with umask(0o022):
-        got = cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root, prime=prime)
+        got = cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root, prime=prime)
     with got as episode:
         assert isinstance(episode, S.Episode()), f"prepare_episode returned {got!r}"
         assert Path(episode.dir) == ep
@@ -422,7 +424,7 @@ def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_excepti
 
     caplog.set_level(logging.WARNING)
     with pytest.raises(PrimerFailed) as failed:
-        cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root, prime=Primed(swap_then_fail))
+        cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root, prime=Primed(swap_then_fail))
     assert still_planted["check"](), f"the {kind} plant was changed by the claim's release"
     assert S.warned(caplog, ".priming"), "the refused release was not logged"
     assert failed.value is not None
@@ -443,7 +445,7 @@ def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
         claim.symlink_to(target)
 
     caplog.set_level(logging.WARNING)
-    with cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root, prime=Primed(swap)) as got:
+    with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root, prime=Primed(swap)) as got:
         assert Path(got.dir) == ep
     claim = ep / "served" / ".priming"
     assert claim.is_symlink(), "the link planted at the claim was removed"
@@ -541,7 +543,8 @@ def test_o4_6_a_plain_stale_draw_at_a_malformed_index_is_still_removed(tmp_path,
 
 
 def _run_draws(episode: Any, judge: ScriptedJudge) -> Any:
-    """`judge._run_world_draws(episode, "b", ...)`: the draw loop, handed the pass's Episode."""
+    """`judge._run_world_draws(episode, "b", ...)`: the draw loop, handed the pass's Episode.
+    Returns its `(completed, documents, malformed, last refusal's reason)` (#1234)."""
     return J.mod("learning.judge")._run_world_draws(
         episode, "b", judge=judge, draws=2, model="judge-model", effort="low",
         prompt="the framed prompt")
@@ -589,7 +592,7 @@ def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothi
 
     judge = _malformed_first()
     with S.open_episode(ep) as episode:
-        completed, documents, malformed = _run_draws(episode, judge)
+        completed, documents, malformed, _last_refusal = _run_draws(episode, judge)
     assert judge.agent_ids == [*_draw0_asks(), "judge:b:1"]
     assert (completed, malformed) == (1, len(_draw0_asks()))
     assert sorted(documents) == [1]
@@ -610,8 +613,8 @@ def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind
 
     judge = _malformed_first()
     with S.open_episode(ep) as episode:
-        completed, _docs, malformed = S.in_time(lambda: _run_draws(episode, judge),
-                                                         fifo=planted.fifo)
+        completed, _docs, malformed, _last_refusal = S.in_time(
+            lambda: _run_draws(episode, judge), fifo=planted.fifo)
     assert judge.agent_ids == [*_draw0_asks(), "judge:b:1"], (
         "the loop stopped at a contained row")
     assert (completed, malformed) == (1, len(_draw0_asks()))

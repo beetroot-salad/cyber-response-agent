@@ -245,7 +245,9 @@ def test_production_path_carries_one_state_to_lead_zero_and_the_gather_lead(tmp_
             "what_to_summarize": ["host inventory"]})]),
         Turn(text="Investigation complete."),
     ])
-    gather = ReplayFn([q("elastic", "query", {"native_query": "FROM adv3-k7"}), DONE])
+    gather = ReplayFn([q("elastic", "alerts", {"native_query": "corr:adv3-k7"}), DONE,
+                       q("elastic", "query", {"native_query": "FROM adv3-k7"}), DONE])
+    gather.serves_correlation = True
     summary = driver_summary(run_dir, run_id="adv3-k7", main=main, gather=gather, verbs=verbs)
     assert "run_state" not in summary
 
@@ -257,5 +259,5 @@ def test_production_path_carries_one_state_to_lead_zero_and_the_gather_lead(tmp_
     assert isinstance(state, RunState)
     assert all(c.ctx.run_state is state for c in lead_zero), \
         "lead-0's verb contexts carried a state other than the run's"
-    assert state.row_count("l-000") >= 1, "the run's state does not hold lead-0's rows"
+    assert state.row_count("l-00c") >= 1, "the run's state does not hold lead-0's rows"
     assert state.row_count(LEAD) == 1, "the run's state does not hold the gather lead's row"

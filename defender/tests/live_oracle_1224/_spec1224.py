@@ -94,11 +94,12 @@ write-code-from-spec names anything differently it renames it HERE, never in a t
     `discriminator` keeps only `predicate`. `overlay`, `configured_patterns`,
     `captured_patterns`, `discriminator.holding_system` and `discriminator.envelope` refuse the
     manifest naming that it predates the oracle (O15).
-  Judge reply v2: a world-scope reply carries a top-level `bucket` (`lead-set`,
-    `lead-quality`, `analyze-discipline`, `decision-discipline`, `observability`, `none`) and
-    `systems: [..]`; findings carry no `pattern` / `holding_system`. A family-scope reply
-    carries `verdict_word` from `JUDGE_OUTCOME_ENUM`. `judge.yaml` records per world `bucket`,
-    `systems`, findings, and a family `validity: usable|unusable`.
+  Judge reply v2: a world-scope reply carries a top-level `bucket` and `systems: [..]`;
+    findings carry no `pattern` / `holding_system`. #1234 replaced the rest of this reply
+    (the `observability` bucket and the family-scope verdict word are retired names,
+    `learning/core/retired.py`; the reply's three lists and `judge.yaml`'s rows are
+    `judge_contrast_1234/_spec1234.py`'s). `judge.yaml` keeps a family
+    `validity: usable|unusable`.
   Lesson frontmatter: `systems: [..]` replaces `pattern` / `holding_system`.
   Question-writer: `author_family(*, source_run_dir, episode_dir, invoke, leads, alert, frontier,
     served_systems, samples, lessons)` (`stageable_patterns` -> `served_systems`,
@@ -320,10 +321,8 @@ as_reply_text = J.as_reply_text
 
 
 def judge_reply(*, systems: tuple[str, ...] = ("idp",), bucket: str = "lead-set") -> str:
-    """A judge reply in the coined v2 shape: a world-scope `bucket` and `systems`, plus the
-    family-scope `verdict_word`, so one default answers both scopes."""
-    return as_reply_text(J.reply_doc(findings=[], bucket=bucket, systems=list(systems),
-                                     verdict_word="caught"))
+    """A world-scope judge reply with its own bucket and systems (#1234)."""
+    return as_reply_text(J.reply_doc(findings=[], bucket=bucket, systems=list(systems)))
 
 
 def judge_label(agent_id: str) -> str | None:
@@ -1134,6 +1133,44 @@ def write_ledger(ep: Path, label: str, rows: list[dict]) -> Path:
     return J.write_ledger(ep, label, rows)
 
 
+def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
+    """World `label`'s query table (`worlds/<X>/executed_queries.jsonl`) holding one row per
+    served-ledger row, joined to it by the host-written call id (#1234 A12: one investigator
+    call is one table row and the ledger rows that answered it). Each row's id is the one
+    `J.write_ledger` stamps (`<token>/<i>`, or the ledger row's own `call_id`); a ledger row
+    whose `call_id` is `None` gets no table row. Calls are filed under lead `l-001`, in ledger
+    order; a decision other than `passthrough`/`oracle` is a non-zero exit. The payload sidecar
+    each row names is written beside it."""
+    rq = mod("scripts.gather_tools.record_query")
+    breaker = mod("runtime.circuit_breaker")
+    world = Path(ep) / "worlds" / label
+    token = world_token(label)
+    lines: list[str] = []
+    for i, row in enumerate(ledger):
+        cid = row.get(J.CALL_ID, f"{token}/{i}")
+        if cid is None:
+            continue
+        seq = len(lines)
+        exit_code = 0 if row.get("source") in (PASSTHROUGH, ORACLE_DECISION) else 1
+        text = str(row.get("payload_text", ""))
+        body = json.loads(text) if text else {}
+        sidecar = world / "gather_raw" / "l-001" / f"{seq}.json"
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.write_text(text, encoding="utf-8")
+        lines.append(json.dumps({
+            "lead_id": "l-001", "seq": seq, "system": row["system"], "verb": row["verb"],
+            "query_id": f"{row['system']}.{row['verb']}", "params": row["params"],
+            "raw_command": rq.raw_command(row["system"], row["verb"], row["params"]),
+            "payload_path": f"gather_raw/l-001/{seq}.json", "exit_code": exit_code,
+            "error_class": breaker.error_class_for_exit(exit_code),
+            "payload_status": rq.payload_status(exit_code, body), "payload_digest": "",
+            "payload_sha256": rq.payload_sha256(text), "system_key": "",
+            J.CALL_ID: cid}) + "\n")
+    path = world / "executed_queries.jsonl"
+    path.write_text("".join(lines), encoding="utf-8")
+    return path
+
+
 def ledger_row(source: str, *, system: str = "idp", verb: str = "query",
                params: Mapping[str, Any] | None = None, payload: Any = None,
                label: str = "b", **extra: Any) -> dict:
@@ -1172,17 +1209,26 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
                    root: Path | None = None, samples: bool = True, **world_kw: Any) -> Path:
     """A fully archived v2 episode — the judge's and the page's whole input: v2 manifest, a
     base recording, every world archived under `worlds/<X>/` (the #921 archive builder), the
-    world ledgers, and pre-flight's outcome record (`outcome=None` writes none)."""
+    world ledgers with the query-table rows they answered (`write_call_table`), each planted
+    world's oracle store directory, and pre-flight's outcome record (`outcome=None` writes
+    none)."""
     ep = episode_v2(tmp_path, doc=doc, root=root, base_rows=[
         captured("idp", "query", query_params("user:alice"),
                  {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]})])
     manifest = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
     declared = {w["world_id"]: w.get("disposition_declared", "malicious")
                 for w in manifest["worlds"]}
+    planted = {w["world_id"] for w in manifest["worlds"] if w.get("role") != "A"}
     for label in labels:
         J.archived_judge_world(ep, label, disposition=declared.get(label, "malicious"),
                                **world_kw)
-        write_ledger(ep, label, (ledgers or {}).get(label, []))
+        ledger = (ledgers or {}).get(label, [])
+        write_ledger(ep, label, ledger)
+        write_call_table(ep, label, ledger)
+        if label in planted:
+            # #1234 A3: a planted world's built layer (`oracle/<X>/`) is part of what it is
+            # judged on — no directory is a malformed world; an empty one is an empty store.
+            oracle_dir(ep, label).mkdir(parents=True, exist_ok=True)
     if samples:
         # O16: every served system has a samples section (one example per system here).
         samples_record(ep, {system: {"verbs": {"query": [json.dumps({"rows": []})]}}

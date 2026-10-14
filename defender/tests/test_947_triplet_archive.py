@@ -47,6 +47,8 @@ import pytest
 from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
+from defender.run_repository import RunPaths
+from defender.tests._alert_plant import plant_alert
 from defender.tests import _triplet_947 as T
 from defender.tests._data_root_1078 import current_data_root
 
@@ -346,7 +348,7 @@ def test_947_a_runs_base_walk_still_finds_an_ordinary_run(tmp_path, monkeypatch)
     # run-folder-to-tenant derivation `tenant_of_run_dir` is gone, F-13).
     tenant_id = src.parent.parent.name
     ordinary = T.mod("run_common").materialize_run(
-        src / "alert.json", "20260728t170000z-other",
+        RunPaths(src).alert, "20260728t170000z-other",
         tenant=T1106.accept(current_data_root(), tenant_id)).run_dir
     assert ordinary.parent == base
     found = sorted(p.parent.name for p in base.rglob("provenance.json"))
@@ -440,6 +442,7 @@ def test_947_the_held_out_index_never_selects_a_sibling_for_a_fixture_slug(tmp_p
     held_out = T.mod("evals.held_out")
     slug = "web-1-suspicious-binary"
     (base / slug).mkdir(parents=True)
+    plant_alert(base / slug, {"rule": {"id": slug}})
     ep = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     for label in ("a", "b", slug):
         (ep / "runs" / f"{slug}-n3-{label}").mkdir(parents=True)

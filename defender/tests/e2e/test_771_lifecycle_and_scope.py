@@ -48,6 +48,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.run_repository import RunPaths
 from defender.runtime import box as box_mod
 from defender.runtime import scrub as scrub_mod
 from defender.tests.e2e._box665 import reaped_after_create
@@ -208,7 +209,7 @@ def test_an_emptied_artifact_still_leaves_the_tree_verified(tmp_path):
     tree, which reopens NO3's refusal to re-site artifacts, and that refusal is what keeps this
     change narrow. Recorded as D6's cost, and now as a test rather than a sentence."""
     tree = run_tree(tmp_path)
-    victim = tree / "alert.json"
+    victim = RunPaths(tree).alert
     original = victim.read_bytes()
     assert original, "the artifact was already empty, so emptying it below changes nothing"
 
@@ -648,6 +649,8 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     # re-probes the kernel rule on every run rather than pinning a one-time observation of it.
     pinned = os.open(str(first), os.O_RDONLY | os.O_DIRECTORY)
     try:
+        from defender.tests._alert_plant import unseal_fixture_input
+        unseal_fixture_input(first)
         shutil.rmtree(first)
         first.mkdir()
         (first / "report.md").write_text("SECOND RUN\n", encoding="utf-8")

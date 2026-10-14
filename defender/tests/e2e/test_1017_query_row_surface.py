@@ -32,7 +32,6 @@ pytest.importorskip("pydantic_ai")
 from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.learning.lead_repository import joined, load_queries  # noqa: E402
-from defender.runtime import lead_zero  # noqa: E402
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
 from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
@@ -40,7 +39,6 @@ from defender.scripts.gather_tools.record_query import QUERY_ROW_COLUMNS
 from defender._query_rules import ABOVE_GUARD_QUERY_ID
 from defender.tests import _judge_921 as J  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
-    DEFENDER,
     GOLDEN_AB3,
     VerbRecorder,
     materialize,
@@ -82,13 +80,14 @@ def _corrected(rec: VerbRecorder) -> int:
 
 def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_path):
     """O6/D1 — a live run reaching all three `append_query_row` callers (an executed query, a
-    failed reducer shim on the bash lane, an above-guard rejection) plus lead-0's own row, and
-    `lead_zero._record_manual_row` driven directly: EVERY row's key tuple — order included —
-    equals `record_query.QUERY_ROW_COLUMNS`. Order too, because one constructor leaves one byte
-    order and two hand-spelled literals that agree on the SET can still differ on it.
+    failed reducer shim on the bash lane, an above-guard rejection): EVERY row's key tuple —
+    order included — equals `record_query.QUERY_ROW_COLUMNS`. Order too, because one constructor
+    leaves one byte order and two hand-spelled literals that agree on the SET can still differ
+    on it. (Lead-0's own writer is gone with the ancestor fetch, #1222: every row now comes
+    through `append_query_row`.)
 
     Observed failing by: the declaration missing, or a writer whose row keys (or their order)
-    differ from it — `_record_manual_row`'s inline dict is the writer this exists for."""
+    differ from it."""
     run_dir = materialize(tmp_path / "live", GOLDEN_AB3)
     r = _run(tmp_path / "live", run_dir=run_dir, run_id="d1017-writers", turns=[
         q("elastic", "query", PARAMS), _reduce(run_dir),
@@ -97,30 +96,9 @@ def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_pat
     kinds = {row["query_id"] for row in r.own_rows}
     assert kinds == {"elastic.query", _query_rules.BASH_SHIM_QUERY_ID, ABOVE_GUARD_QUERY_ID}, \
         f"the three writer paths did not all leave a row: {kinds}"
-    assert any(row["lead_id"] in lead_zero.RESERVED_LEAD_IDS for row in r.rows), \
-        "lead-0 left no row, so the universal below does not reach its writer"
     for row in r.rows:
         assert tuple(row) == QUERY_ROW_COLUMNS, \
             f"{row['lead_id']}/{row['query_id']}: keys {tuple(row)} != the declared columns"
-
-    manual = materialize(tmp_path / "manual", GOLDEN_AB3)
-    # A folder no driver opened: the writer allocates its seq from the run's own state, never
-    # from the file (#1235), so this direct call builds the state a driver would and threads it.
-    from defender.runtime.run_state import RunState
-
-    state = RunState(manual, "d1017-second-writer")
-    lead_zero._record_manual_row(
-        lead_zero._CaptureDeps(
-            run_dir=manual, defender_dir=DEFENDER, run_id="d1017-second-writer",
-            lead_id="l-000", run_state=state,
-        ),
-        "search", {"index": "logs"}, {"rows": [{"a": 1}]}, exit_code=0,
-    )
-    rows = [row for row in read_jsonl_rows(RunPaths(manual).executed_queries)
-            if row.get("lead_id") == "l-000"]
-    assert len(rows) == 1, "the second writer left no row"
-    assert tuple(rows[0]) == QUERY_ROW_COLUMNS, \
-        "the second writer's row is keyed (or ordered) differently from the declaration"
 
 
 def test_the_suites_frozen_key_set_is_the_writers_declaration():
@@ -307,21 +285,37 @@ def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER")
     base, _src = J.runs_base(tmp_path)
     world = ep / "worlds" / "b"
     _lead_file(world, goal)
-    _table(world, rows)
+    # #1234 A12/A21: a row of world b's own run carries a call id of b's run (an id of no run
+    # is an inherited, pre-branch row, which must match every other table's). Numbered from 1
+    # so none joins the ledger's one oracle row (`<token>/0`, another call).
+    token = J.world_token("b", episode_token=J.EPISODE_TOKEN)
+    _table(world, [{**r, J.CALL_ID: f"{token}/{i + 1}"} for i, r in enumerate(rows)])
     return ep, base, world
 
 
 def _leads_view(ep: Path, base: Path):
-    """The per-lead chain and the rendered leads section — the address every O3 claim is
-    made at, off the REAL `render` with the runs base seam pointed at this test's own."""
-    judge_input = J.mod("learning.judge.render").render(ep, "b")
-    return judge_input.leads, judge_input.as_prompt_sections()["leads"]
+    """The per-lead chain and the rendered leads view — the address every O3 claim is made
+    at, off the REAL `render` (#1234: a `JudgeContext`, its focus view's chain) and the REAL
+    world prompt (`run._build_prompt`), cut to world b's per-lead view: from its host title
+    to the next view's."""
+    from defender._io import bind
+    from defender.learning.judge import family, layout, run
+    from defender.tests.judge_contrast_1234 import _spec1234 as S34
+
+    ctx = S34.render_context(ep, "b")
+    with bind(ep) as bound:
+        manifest = family.read_manifest(bound)
+    prompt, _placed = run._build_prompt(ctx, manifest)
+    title = f"world b — {layout.FOCUS_VIEW_TITLES['leads']}"
+    start = prompt.index(title)
+    end = prompt.find("world b — ", start + len(title))
+    return ctx.focus.leads, prompt[start:end if end != -1 else len(prompt)]
 
 
 def test_the_judges_leads_view_carries_no_column_it_cannot_act_on(tmp_path, judge_roots):
     """O3/D3 — a world whose rows carry `system_key`, `payload_sha256`, `payload_path`,
     `raw_command`, `exit_code` and `error_class` with distinctive values: NONE of those values,
-    and none of those key names (nor `document_rows`), reaches `as_prompt_sections()["leads"]`.
+    and none of those key names (nor `document_rows`), reaches the prompt's per-lead view.
     The positive controls are on the SAME string: the lead's goal, its first query's params and
     every query's payload digest DO appear — VIEW 1's semantic content (N5) is intact, so the
     negatives are not satisfied by an empty section.
@@ -366,15 +360,16 @@ def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots
     and nothing else: a world whose `executed_queries.jsonl` is a SYMLINK to a real table
     elsewhere renders a lead with no params and no payload — AND WITH ITS GOAL, which comes
     off the lead file the same surface read behind its own gate — while the SAME table as a
-    regular file (the positive control, same rows, same lead) renders all three. A world with
-    NO table at all (the shape `archive.py` records for "the run produced none") keeps its
-    goal the same way. `read_jsonl_rows` FOLLOWS a link, so a surface that dropped the check
+    regular file (the positive control, same rows, same lead) renders all three. (#1234 A3,
+    spec AM15: a world with NO table at all is now ungradable, naming the table — it no longer
+    renders a goal-only chain.) `read_jsonl_rows` FOLLOWS a link, so a surface that dropped the check
     would put another tree's rows into VIEW 1 as this world's own conduct; a judge that gated
     the whole join on the table, as it first did, told the judge `goal: None` for every lead
     of such a world.
 
-    Observed failing by: the linked world's chain carrying the target's params or digests, or
-    either refused world's chain losing its goal."""
+    Observed failing by: the linked world's rows reaching a prompt, or either refused world
+    graded. (#1234 A3: the linked world is now refused whole — malformed, naming the table —
+    by the judge's no-follow usability read.)"""
     target_rows = [_world_row(0, params={"native_query": "LINKED_PARAMS"},
                               payload_digest="LINKED_DIGEST")]
     elsewhere = tmp_path / "elsewhere" / "executed_queries.jsonl"
@@ -387,22 +382,29 @@ def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots
     assert table.is_symlink(), "the fixture did not plant a link"
     assert read_jsonl_rows(table) == target_rows, \
         "the link does not resolve to the planted table, so the refusal below is vacuous"
-    leads, text = _leads_view(ep, base)
-    assert leads["l-001"]["params"] is None, "the judge followed a link at the table's name"
-    assert leads["l-001"]["payload"] == []
-    assert leads["l-001"]["goal"] == "GOAL_MARKER", \
-        "refusing the table cost the lead its goal, which the lead file carries"
-    assert "LINKED_PARAMS" not in text
-    assert "LINKED_DIGEST" not in text
-    assert "GOAL_MARKER" in text
+    # #1234 A3: the judge's usability read is no-follow, so a link at the table's name makes
+    # world b malformed (named, ungradable) rather than rendering its rows; no prompt the pass
+    # hands the judge carries the link target's rows.
+    judge = J.scripted_judge()
+    J.grade(ep, judge=judge)
+    row_b = J.world_rows(J.judge_record(ep))["b"]
+    assert row_b.get("malformed") is True, f"the judge read a link at the table's name: {row_b}"
+    assert "executed_queries.jsonl" in str(row_b.get("ungradable_reason")), row_b
+    assert judge.prompts, "control: the pass asked the judge about the other worlds"
+    for prompt in judge.prompts:
+        assert "LINKED_PARAMS" not in prompt, "the judge followed a link at the table's name"
+        assert "LINKED_DIGEST" not in prompt
 
     ep0, base0, world0 = _judge_world(tmp_path / "tableless", [])
     (world0 / "executed_queries.jsonl").unlink()
-    leads0, text0 = _leads_view(ep0, base0)
-    assert leads0["l-001"] == {**leads0["l-001"], "goal": "GOAL_MARKER", "params": None,
-                               "payload": []}, \
-        f"a world without a table lost its lead's goal: {leads0['l-001']!r}"
-    assert "GOAL_MARKER" in text0
+    # #1234 A3 (spec AM15 `missing-query-table`): a missing query table is a missing required
+    # input — the world is ungradable, naming the table, and never reaches the judge.
+    judge0 = J.scripted_judge()
+    J.grade(ep0, judge=judge0)
+    row0 = J.world_rows(J.judge_record(ep0))["b"]
+    assert row0.get("ungradable") is True, f"a world without a table was graded: {row0}"
+    assert "executed_queries.jsonl" in str(row0.get("ungradable_reason")), row0
+    assert not [a for a in judge0.agent_ids if a.startswith("judge:b:")], judge0.agent_ids
 
     ep2, base2, _world2 = _judge_world(tmp_path / "regular", target_rows)
     leads2, text2 = _leads_view(ep2, base2)

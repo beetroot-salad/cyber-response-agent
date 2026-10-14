@@ -30,6 +30,7 @@ import importlib
 from pathlib import Path
 from typing import Any
 
+from defender.tests._alert_plant import plant_alert
 from defender.tests._session_store_705 import (
     complete_pair,
     make_store,
@@ -126,7 +127,7 @@ def legal_source(
     run_dir = runs_base(tmp_path) / name
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
-    (run_dir / "alert.json").write_text(ALERT_DOC, encoding="utf-8")
+    plant_alert(run_dir, ALERT_DOC.encode("utf-8"))
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request("investigate the alert"), *complete_pair()],
                  agent_id="main")

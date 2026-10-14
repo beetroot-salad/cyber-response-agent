@@ -201,10 +201,10 @@ RAW_DENY_REASON = (
 # (`under(run, TREE)`) or the shapeless actor. The component name must stay distinctive: this
 # deny applies inside every read root.
 WIRE_LOG_DENY_REASON = (
-    "Blocked: wire_logs/ holds this run's wire logs — the verbatim request/response stream of "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-    "every agent that shares this root, including payload bytes and transcripts this agent is "
-    "deliberately not shown. It is host-side observability, readable by no agent. Work from "
-    "the artifacts your own role is given."
+    "Blocked: wire_logs/ is not a readable path for any agent — it holds this run's wire logs, "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+    "the verbatim request/response stream of every agent that shares this root, including "
+    "payload bytes and transcripts this agent is deliberately not shown. It is host-side "
+    "observability, readable by no agent. Work from the artifacts your own role is given."
 )
 
 
@@ -280,6 +280,7 @@ def is_untrusted_read(path: Path) -> bool:
     p = Path(path)
     return (
         p.name == RUN_LAYOUT.alert.name
+        or p.parent.name == RUN_LAYOUT.alert_input_dir.name
         or is_captured_payload(p)
         or _names_query_draft(p)
     )

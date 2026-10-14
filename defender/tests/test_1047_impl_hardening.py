@@ -129,6 +129,8 @@ def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path,
     run_dir = run_common.materialize_run(alert, "case-1047-retry", tenant=tenant).run_dir
     S.plant_sidecar(run_dir, truncated_by="aborted")
     import shutil
+    from defender.tests._alert_plant import unseal_fixture_input
+    unseal_fixture_input(run_dir)
     shutil.rmtree(run_dir)
 
     again = run_common.materialize_run(alert, "case-1047-retry", tenant=tenant).run_dir

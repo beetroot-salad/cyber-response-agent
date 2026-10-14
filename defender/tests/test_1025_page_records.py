@@ -42,6 +42,7 @@ from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_1025_episode_reader as R
+from defender.tests._alert_plant import plant_source_copy
 from defender.tests._by_path import load_lint_gate
 from defender.tests import _state1135
 from defender.tests._state1135 import env_state
@@ -176,9 +177,8 @@ def test_1025_markup_in_every_model_authored_field_renders_as_text_on_every_sect
     (world / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": f"goal {MARKUP}"}), encoding="utf-8")
     (world / "gather_summaries" / "l-001.md").write_text(f"summary {MARKUP}\n", encoding="utf-8")
-    for label in E.WORLDS:
-        (ep.world(label) / "alert.json").write_text(json.dumps(
-            {"alert_id": "id", "rule": {"name": f"rule {MARKUP}"}}), encoding="utf-8")
+    plant_source_copy(ep.dir, json.dumps(
+        {"alert_id": "id", "rule": {"name": f"rule {MARKUP}"}}).encode("utf-8"))
     page = render(ep)
     assert "<script>" not in page.raw
     assert "<img" not in page.raw
@@ -194,10 +194,11 @@ def test_1025_markup_in_the_records_no_planted_field_covers(tmp_path):
     """Every record string the page renders passes the untrusted escape: markup planted in a
     samples system and answer, a provenance `dirty_paths` entry, a served call's params, the
     outcome record's reason and drift entry, a world record's detail, the continuation prompt,
-    a `noise_floor_note`, an unqueueable reason, `draws_failed_reason`, `family_failed_reason`,
-    an integrity note, a correlation and a derivation is never on the page raw; positive
-    control: the bound ones (samples, dirty path, served params, outcome reason and drift,
-    world record detail, unqueueable reason, `family_failed_reason`) are visible escaped.
+    a `noise_floor_note`, an unqueueable reason (a ledger entry's, #1234), a world row's and the
+    family row's `draws_failed_reason`, an integrity note, a correlation and a derivation is
+    never on the page raw; positive control: the bound ones (samples, dirty path, served
+    params, outcome reason and drift, world record detail, unqueueable reason, the family
+    row's failure) are visible escaped.
     """
     ep = E.sample_episode(tmp_path)
     E.write_samples(ep.dir, {f"system {MARKUP}": {"verbs": {"esql": [f"answer {MARKUP}"]}}})
@@ -216,9 +217,8 @@ def test_1025_markup_in_the_records_no_planted_field_covers(tmp_path):
     doc = E.sample_grade()
     doc["worlds"][1]["integrity_notes"] = [f"integrity {MARKUP}"]
     doc["worlds"][1]["draws_failed_reason"] = f"draws {MARKUP}"
-    doc["family_failed_reason"] = f"family {MARKUP}"
-    doc["family_outcome"] = None
-    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/0: reason {MARKUP}"]
+    doc["family"]["draws_failed_reason"] = f"family {MARKUP}"
+    E.set_lane(doc, E.GRADED_WORLD, 0, 0, "unqueueable", f"reason {MARKUP}")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     assert "<script>" not in page.raw
@@ -248,12 +248,12 @@ def test_1025_non_ascii_and_control_characters_in_rendered_strings(tmp_path):
 
     draws = ep.world(E.GRADED_WORLD) / "judge"
     E.plant_raw(draws / "0.yaml",
-                'episode_outcome: gradable\ndropped_findings: 0\nfindings:\n'
-                '  - {subject: defender, bucket: lead-set, claim: "before\\uD800after",'
-                ' root_cause: "nul\\0here", anchor: l-001, topic: t, evidence: [e]}\n')
+                'bucket: lead-set\nsystems: [elastic]\ninvestigator_findings:\n'
+                '  - {bucket: lead-set, claim: "before\\uD800after",'
+                ' root_cause: "nul\\0here", anchor: l-001, topic: t, contrast_evidence: [e],'
+                ' on_verdict_path: true}\n')
     assert (draws / "0.yaml").read_text(encoding="utf-8")
-    (ep.world(E.CONTROL) / "alert.json").write_text(
-        '{"alert_id": "x", "rule": {"name": "rule\\ud800name"}}', encoding="utf-8")
+    plant_source_copy(ep.dir, b'{"alert_id": "x", "rule": {"name": "rule\\ud800name"}}')
     page = render(ep)
     raw_bytes = ep.page.read_bytes()
     assert b"\x00" not in raw_bytes, "a NUL byte landed in the page"
@@ -276,8 +276,8 @@ def test_1025_the_page_encodes_with_errors_replace_before_the_guarded_write(tmp_
     and carry no 0x00.
     """
     ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/1: x\ud800y and n\x00l"]
+    doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable",
+                     "x\ud800y and n\x00l")
     E.write_judge(ep.dir, doc, check=False)
     E.render_episode(ep.dir, module=visualize_episode())
     raw = ep.page.read_bytes()
@@ -296,17 +296,20 @@ def test_1025_the_page_encodes_with_errors_replace_before_the_guarded_write(tmp_
 def test_1025_judge_yaml_has_invalid_yaml_syntax(tmp_path):
     """A present-but-corrupt `judge.yaml` is a different state from absence: `read_grade`
     raises rather than returning `None` (F25), and the band renders "grade record unreadable"
-    with the reader's reason — never the "no grade record" band — while every other section
-    renders as on the intact episode.
+    with the reader's reason — never the "no grade record" band — while the leads section
+    renders as on the intact episode and the stage table still renders. (The stage section's
+    judge transcripts follow the draws a readable record names, #1234 A6, so with no readable
+    record they are not shown and that section legitimately differs.)
     """
     ep = E.sample_episode(tmp_path)
-    intact = _sections(render(ep))
+    intact_page = render(ep)
+    intact = _sections(intact_page)
     E.plant_raw(ep.dir / "judge.yaml", "worlds: [\n  {world: b")
     page = render(ep)
     band = page.text_of("sec-verdict")
     assert "grade record unreadable" in band, band
     assert "no grade record" not in band, band
-    assert page.text_of("sec-stages") == intact["sec-stages"]
+    assert page.text_of("stage-timing") == intact_page.text_of("stage-timing")
     assert page.text_of("sec-leads") == intact["sec-leads"]
 
 
@@ -729,7 +732,8 @@ def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_pa
     same `read_world_facts`, so it inherits the reader's screen: a FIFO at `investigation.md`
     is refused promptly (`JudgeRefused`, the render returns within two seconds, the FIFO is
     never opened) instead of blocking the pass (p2), and a symlink at `report.md` never puts the
-    target's report into the judge's input.
+    target's report into the judge's input — #1234 A3: the usability read sets that world
+    aside, so it is no reference run of the world that IS judged.
     """
     render_mod = E.mod("learning.judge.render")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [E.served_row("b", "oracle")], "c": []})
@@ -740,11 +744,14 @@ def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_pa
     assert time.monotonic() - started < 2.0, "the input builder blocked on the FIFO"
     assert not rescue.fed, "the input builder blocked on the FIFO"
 
+    ep = J.accepted_episode(tmp_path / "linked",
+                            ledgers={"b": [E.served_row("b", "oracle")], "c": []})
     outside = tmp_path / "outside-report.md"
     outside.write_text(T.report_text("benign", body="OUTSIDE-REPORT-BODY"), encoding="utf-8")
     E.plant_link(ep / "worlds" / "c" / "report.md", outside)
-    rendered = render_mod.render(ep, "c")
+    rendered = render_mod.render(ep, "b")
     assert "OUTSIDE-REPORT-BODY" not in repr(rendered.__dict__)
+    assert "c" not in rendered.contrast_rows, "the linked world is a reference run"
 
 
 def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malformed(tmp_path):
@@ -783,4 +790,4 @@ def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malfor
     band = page.text_of("sec-verdict")
     assert "no grade record" not in band, band
     assert "grade record unreadable" not in band, band
-    assert J.word_of(grade) in band, (J.word_of(grade), band)
+    assert f"validity {grade.validity}" in band, (grade.validity, band)

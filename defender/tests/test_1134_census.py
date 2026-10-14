@@ -1016,11 +1016,10 @@ def test_a_handle_verb_is_exempt_only_on_its_own_class():
     """The Path-verb names among each handle class's public methods, read off the scanned
     `_io.py`: a new one changes what a provable receiver may call without an `attr` hit."""
     assert TREE.verbs["held"] & C.ATTRS == {"mkdir", "unlink"}
-    # No `Bound.read_bytes` (#1134 addendum 3, D1: the curator's comparisons ask git), so a
-    # view has no Path-verb method at all and `.read_bytes()` on one is a Path-verb hit; no
-    # `Bound.kind` / `Bound.walk` (addendum 2, B1): nor is `.walk()`.
-    assert TREE.verbs["bound"] & C.ATTRS == frozenset()
-    assert not {"kind", "walk", "read_bytes"} & TREE.verbs["bound"]
+    # A proven Bound's byte read is guarded; unproven receivers still produce hits.
+    assert TREE.verbs["bound"] & C.ATTRS == {"read_bytes"}
+    assert not {"kind", "walk"} & TREE.verbs["bound"]
+
 
 
 def _class_field(module: str, cls: str, field: str) -> ast.AnnAssign:
@@ -2216,11 +2215,6 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
     "held-verb-on-a-view": (
         _H + "def f(v: Bound, name):\n    v.unlink(name)\n",
         (("f", "attr", "v.unlink(name)"),)),
-    # #1134 addendum 3 (D1): `Bound` has no `read_bytes`, so a provable view's is a Path verb.
-    "read-bytes-on-a-provable-view": (
-        _H + "def f(v: Bound, h: Held, name):\n    v.read_bytes(name)\n"
-        "    return h.view().read_bytes(name)\n",
-        (("f", "attr", "v.read_bytes(name)"), ("f", "attr", "h.view().read_bytes(name)"))),
     "trees-open-on-an-instance": (
         _LT + "def f(trees: DrainTrees, p):\n    return trees.open((p,))\n",
         (("f", "attr", "trees.open((p,))"),)),
@@ -2629,6 +2623,9 @@ _SOURCES = (
     "from defender.learning.author import shared\n")
 
 PROVEN: dict[str, str] = {
+    "read-bytes-on-a-provable-view": (
+        _H + "def f(v: Bound, h: Held, name):\n    v.read_bytes(name)\n"
+        "    return h.view().read_bytes(name)\n"),
     "exact-parameters": (
         _OPT + "def f(corpus: Held, view: Bound):\n    corpus.mkdir('.')\n    corpus.unlink('x')\n"
         "    view.read('x')\n    return list(iter_lessons(corpus.view())), list(iter_lessons(view))\n"),

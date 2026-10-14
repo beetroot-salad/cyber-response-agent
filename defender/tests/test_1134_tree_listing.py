@@ -3,9 +3,10 @@
 and addendum 3's D2: `Bound.entries()` answers a dead folder absent.
 
 The contract is #1134's "Design addendum 2" (owner-approved 2026-10-02), B2, as the step-1
-contract settles it, amended by "Addendum 3" (owner-approved 2026-10-03): no `Bound.read_bytes`
-(D1), a folder deleted under a listing is absent (D2), no hand-rolled AST pin and sound test
-helpers (D3). It replaces v2's `Bound.kind` / `Bound.walk`, whose review findings (#1-#9)
+contract settles it, amended by "Addendum 3" (owner-approved 2026-10-03): a folder deleted
+under a listing is absent (D2), no hand-rolled AST pin and sound test helpers (D3).
+The later episode-integrity reader adds `Bound.read_bytes` and `BytesRead`, independently
+of these listing helpers. It replaces v2's `Bound.kind` / `Bound.walk`, whose review findings (#1-#9)
 this file dissolves: the core gains no walk, no kind and no descriptor chain, and each helper is
 nothing but `entries()` calls, so it answers exactly what those listings answer.
 
@@ -16,8 +17,8 @@ What each section pins:
   in that order. `entry_kind(view, name)`; `list_tree(view, *, depth)` with `depth` required and
   keyword-only. The kinds are `_io`'s `ENTRY_FILE` / `ENTRY_DIR` / `ENTRY_OTHER`.
 - Adds nothing to the core but D2 (v2's findings #1-#9, #11, #12, #15 dissolve by absence):
-  `Bound` has no `walk`, `kind`, `read_bytes` or `_leaf`; `_io` has no `ENTRY_ABSENT`,
-  `ENTRY_UNLISTED`, `WalkRead`, `BytesRead`, `_walk_at`, `_kind_at`, `_list_below`,
+  `Bound` has no `walk`, `kind` or `_leaf`; `_io` has no `ENTRY_ABSENT`,
+  `ENTRY_UNLISTED`, `WalkRead`, `_walk_at`, `_kind_at`, `_list_below`,
   `_folder_parts`, `_reopen_dir`, and no `ENTRY_*` but the three.
 - No I/O of its own (no hand-rolled AST pin over the module: step 7's census scans it with
   `_astlib` resolution; #1140 review finding 15): (b) through a recording `os_` seam, `entry_kind`'s I/O EQUALS (as a sequence) that of the one `entries()` call it is
@@ -397,15 +398,13 @@ def test_entry_kind_takes_a_view_and_a_name_and_list_tree_a_required_keyword_dep
 
 #: v2's additions to `_io`, none of which B1 keeps.
 V2_IO_NAMES = ("ENTRY_ABSENT", "ENTRY_UNLISTED", "WalkRead", "_walk_at", "_kind_at",
-               "_list_below", "_folder_parts", "_reopen_dir", "BytesRead")
+               "_list_below", "_folder_parts", "_reopen_dir")
 
 
 def test_v2s_walk_kind_and_their_helpers_are_not_in_the_core():
-    """The core gains no walk, no kind and no byte read: `Bound` has none of `walk`, `kind`,
-    `read_bytes` (addendum 3, D1) or the `_leaf` that `read_bytes` shared with `read`, and
-    `_io` has none of v2's records, kinds or descriptor-chain helpers, nor `BytesRead`. `_io`'s
-    `ENTRY_*` names are exactly the three listing kinds. (Green on main; it must stay so.)"""
-    for verb in ("walk", "kind", "read_bytes", "_leaf"):
+    """Tree listing adds no walk/kind machinery to the core. The guarded byte reader
+    now serves episode alert integrity and shares the existing read path."""
+    for verb in ("walk", "kind", "_leaf"):
         assert not hasattr(_io.Bound, verb), f"Bound grew {verb}"
     present = [name for name in V2_IO_NAMES if hasattr(_io, name)]
     assert not present, f"_io carries v2's {present}"

@@ -204,9 +204,9 @@ def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
         T6.place_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), S.FIXTURE_TENANT,
                         table=est.table(),
                         configs={"elastic": "ELASTIC_TRANSPORT=carrier-pigeon\n"})
-        assert type(est.run_tenant().elastic).__name__ == "ConfigFault"
+        assert "elastic" in est.run_tenant().systems
     else:
-        assert est.run_tenant().elastic is None
+        assert "elastic" not in est.run_tenant().systems
     assert "elastic" not in est.run_tenant().grants.gather.systems
 
     doc = _family(S.SYSTEMS, S.fact("f1"), S.fact("f2", "bob reset carol's password from "

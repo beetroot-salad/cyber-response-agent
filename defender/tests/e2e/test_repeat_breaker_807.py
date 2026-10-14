@@ -305,7 +305,8 @@ def _run_inherited(
     store.close()
     sibling = root / "defender-runs" / "run-sibling-807"
     RunPaths(sibling).gather_raw.mkdir(parents=True)
-    (sibling / "alert.json").write_bytes((source / "alert.json").read_bytes())
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(sibling, RunPaths(source).alert.read_bytes())
     main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
                      Turn(text="Investigation complete.")])
     gather = ReplayFn(turns)

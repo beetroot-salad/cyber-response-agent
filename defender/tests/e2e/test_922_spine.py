@@ -142,8 +142,9 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
 
     Returns `(episode_dir, family record)`. The model is the only fake — `FakeJudge` records
     the prompts it was handed and answers with the reply document the scenario names. The
-    family's word is the family-scope call's (#1224), scripted `survived` so the rows are ones
-    the `direction: family` partition authors.
+    family-scope call answers a family reply with no findings (#1234: the family word is
+    retired, A17), and the worlds' rows carry the fields the `direction: family` partition
+    authors on (d00d).
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
@@ -154,7 +155,7 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
         J.grade_at(
             ep, judge=J.FakeJudge(
                 default=reply or J.as_reply_text(J.reply_doc()),
-                family_default=J.as_reply_text(J.family_reply(verdict_word="survived"))),
+                family_default=J.as_reply_text(J.family_reply())),
             draws=1, state=state)
     return ep, J.judge_record(ep)
 
@@ -200,7 +201,7 @@ def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tmp_
 
     O4 / D8's real oracle, driven end to end over production entry points: a graded episode's
     findings land on `_pending/findings.jsonl`, `author_drain` picks that batch up, the
-    `direction: family` partition of `_gate_findings` admits the `survived` rows for authoring,
+    `direction: family` partition of `_gate_findings` admits the new-shape rows for authoring,
     and the corpus author's commit lands a lesson in `defender/lessons` as a NEW git commit.
 
     Each hop is asserted at its own address rather than through the last one, because a spine
@@ -227,7 +228,7 @@ def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tmp_
     _ep, record = graded_episode(tmp_path, paths)
     channel = FINDINGS
 
-    assert record["episode_outcome"] == "gradable"
+    assert all(row["measured"] for row in record["worlds"]), "a graded world was not measured"
     queued = [r["finding_id"] for r in D.pending(paths, channel)]
     assert record["enqueued_rows"] == len(queued) == 2, (
         f"the graded episode did not put its rows on the shared queue: {queued}")
@@ -276,16 +277,18 @@ def test_922_a_caught_family_is_consumed_without_authoring(tmp_path):
     """GUARD (green now, must stay green).
 
     The complementary condition on the SAME address, so the spine test above cannot pass
-    vacuously on a partition that admits everything. `_gate_family` is a POSITIVE rule: only
-    `survived` is authored; `caught` is consumed terminally, without a corpus commit.
+    vacuously on a partition that admits everything. `_gate_family` is a POSITIVE rule: only a
+    row carrying its own ground truth (#1234 d00d: `contrast_evidence`, `on_verdict_path`,
+    `world_label_doubted`) is authored. #1234 rewrite: the `caught` word is retired (A4), so a
+    pre-#1234 row carrying `judge_outcome: caught` is no longer skipped as consumed — it is HELD
+    naming the retired name (I10): never authored, no corpus commit, never consumed as though
+    it meant what the retired design meant.
 
     Driven through the same real entry point, so what is asserted is the drain's behaviour and
     not the gate function read in isolation.
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     channel = FINDINGS
-    # The judge's own appender writes the family's verdict word onto every row; a `caught`
-    # family is enqueued exactly like a `survived` one and separated only by this partition.
     D.seed(paths, channel, [
         dict(D.finding_row("ep-caught/b/0/0", run_id="ep-caught", direction="family"),
              type="decision-discipline", judge_outcome="caught", subject_anchor="l-001",
@@ -299,15 +302,13 @@ def test_922_a_caught_family_is_consumed_without_authoring(tmp_path):
 
     assert rc == 0
     assert agent.calls == [], (
-        "a `caught` family reached the curator — the partition authored a row whose whole "
-        "point is that there is nothing to author")
+        "a retired-word family row reached the curator — the partition authored a row the "
+        "retired design would have read")
     assert D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip() == head_before, (
-        "a `caught` family produced a corpus commit")
-    consumed = D.consumed(paths, channel)
-    assert [r["finding_id"] for r in consumed] == ["ep-caught/b/0/0"], (
-        f"the caught row was not consumed terminally: {consumed}")
-    assert consumed[0]["consumed_category"] == "consumed_family_skip"
-    assert D.pending(paths, channel) == [], "the caught row was left queued forever"
+        "a retired-word family row produced a corpus commit")
+    assert D.consumed(paths, channel) == [], "the retired-word row was consumed, not held"
+    assert [r["finding_id"] for r in D.pending(paths, channel)] == ["ep-caught/b/0/0"], (
+        "the retired-word row left the queue instead of being held")
 
 
 # ---------------------------------------------------------------------------------------

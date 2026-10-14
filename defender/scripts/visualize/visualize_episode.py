@@ -41,23 +41,49 @@ from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.run_repository import RUN_LAYOUT, WIRE_LOG_NAMES, RunRefused
-from defender._vocab import normalized_disposition, normalized_judge_outcome
+from defender._vocab import normalized_disposition
 from defender.learning.branch import archive
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.steps import STEPS, Step
-from defender.learning.judge import JudgeRefused, read_grade
+from defender.learning.judge import (
+    QUEUED,
+    QUEUEING,
+    STATE_KEY,
+    JudgeRefused,
+    read_grade,
+    recorded_draws,
+)
 from defender.learning.judge import family
 from defender.learning.judge.enqueue import (
     LANE_DEFENDER,
-    LANE_NEVER_ELIGIBLE,
     LANE_UNQUEUEABLE,
     LANE_WORLD,
     DrawsSkipReport,
     draws_on_disk_report,
 )
+from defender.learning.judge.route import (
+    LANE_DRAWS_DISAGREE,
+    LANE_DROPPED_NO_PAIR,
+    LANE_DROPPED_OTHER_RUN,
+    LANE_DROPPED_UNRESOLVED,
+    LANE_GAP_NOT_UNANIMOUS,
+    LANE_GAP_UNKEYED,
+    LANE_NOT_MEASURED,
+    LANE_UNAUTHORED,
+    LANE_USER_RECORD,
+)
 from defender.learning.judge.render import episode_alert
-from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
+from defender.learning.judge.run import (
+    CONTRAST_EVIDENCE,
+    GAP_HOW,
+    GAP_WHAT,
+    GAPS,
+    INVESTIGATOR_FINDINGS,
+    SUBJECT_DEFENDER,
+    SUBJECT_WORLD,
+    WORLD_FINDINGS,
+)
 from defender.runtime.branch._family import (
     BASE_ROLE, ManifestPredatesOracle, episode_token_for,
 )
@@ -86,7 +112,6 @@ _FAMILY_LABEL = "family"
 #: world-subject finding's free-text bucket) is `bucket-other`.
 _BUCKET_CLASS = {
     "lead-set": "bucket-lead-set",
-    "observability": "bucket-observability",
     "decision-discipline": "bucket-decision-discipline",
     "analyze-discipline": "bucket-analyze-discipline",
     "lead-quality": "bucket-lead-quality",
@@ -524,7 +549,7 @@ def _priced(model: Any, usage: Any) -> float | None:
 class _Finding:
     __slots__ = ("row_id", "label", "draw", "index", "subject", "claim", "root_cause",
                  "anchor", "topic", "bucket", "evidence", "world_field", "disposition",
-                 "reason", "stub", "recorded_id", "outcome", "raw")
+                 "reason", "stub", "recorded_id", "raw")
 
     row_id: Any
     label: Any
@@ -542,7 +567,6 @@ class _Finding:
     reason: Any
     stub: Any
     recorded_id: Any
-    outcome: Any
     raw: Any
 
     def __init__(self, **kw: Any) -> None:
@@ -563,8 +587,7 @@ class _Findings:
 
     def __init__(self) -> None:
         self.rows: list[_Finding] = []
-        self.counts = {"defender": 0, "world_author": 0, "unqueueable": 0,
-                       "dropped": 0, "never_eligible": 0}
+        self.counts = {"defender": 0, "world_author": 0, "unqueueable": 0, "dropped": 0}
         self.world_reports: dict[str, DrawsSkipReport] = {}
         self.draw_failures: list[tuple[str, int, str]] = []
         self.dropped: list[tuple[str, int, int]] = []
@@ -686,18 +709,16 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
         if w is not None:
             w.row = row
 
-    # Every path below is joined from a label, so only labels naming their own directory reach
-    # the disk. Real directory names get the same gate (`..` is a name).
-    nameable = [w.label for w in ep.entries.values() if w.nameable]
-    labels = [w["world_id"] for w in ep.manifest_worlds
-              if isinstance(w.get("world_id"), str) and w["world_id"] in nameable]
-    ep.alert = episode_alert(bound, labels or [
-        n for n in ep.archived_world_dirs if family.world_label_names_directory(ep.episode_id, n)])
+    ep.alert = episode_alert(bound)
 
     for label in [*ep.entries, _FAMILY_LABEL]:
-        ep.draws[label] = (_load_draws(bound, label)
-                           if label == _FAMILY_LABEL or ep.entries[label].nameable
-                           else ({}, DrawsSkipReport()))
+        docs, skipped = (_load_draws(bound, label)
+                         if label == _FAMILY_LABEL or ep.entries[label].nameable
+                         else ({}, DrawsSkipReport()))
+        # Only the draws judge.yaml records for this row (A6): a file a stopped or wider
+        # earlier pass left on disk is never shown as this record's.
+        recorded = recorded_draws(grade, label)
+        ep.draws[label] = ({n: d for n, d in docs.items() if n in recorded}, skipped)
     nameable_worlds = [w for w in ep.entries.values() if w.nameable]
     if view.present:
         _load_arms(nameable_worlds, view, episode_dir, ep.episode_id)
@@ -1013,36 +1034,63 @@ def _ledger_of(grade: Any) -> dict[str, dict[str, Any]] | None:
     return out
 
 
-def _world_findings_lookup(grade: Any) -> dict[str, dict[str, Any]]:
-    """The pass's `world_findings` rows by coordinate — the stub text for a world-lane entry
-    whose draw document is gone."""
-    out: dict[str, dict[str, Any]] = {}
-    for row in _items(grade.world_findings):
-        if isinstance(row, dict):
-            coord = _coordinate_of(row.get("finding_id"))
-            if coord is not None:
-                out.setdefault(coord, row)
-    return out
-
-
 def _bump(counts: dict[str, int], disposition: str) -> None:
-    if disposition in counts:
+    if disposition in _DROPPED_LANES:
+        counts["dropped"] += 1
+    elif disposition in counts:
         counts[disposition] += 1
 
 
 def _finding_fields(finding: Any) -> dict[str, Any]:
-    """One draw finding's fields as `_Finding` kwargs; a non-mapping finding has none."""
+    """One draw finding's fields as `_Finding` kwargs; a non-mapping finding has none. A gap's
+    `what`/`how` stand where a finding's claim and root cause do; an investigator finding's
+    pointers are its `contrast_evidence`."""
     if not isinstance(finding, dict):
         return {"raw": finding}
-    return {"claim": finding.get("claim"), "root_cause": finding.get("root_cause"),
+    claim = finding.get("claim") if "claim" in finding else finding.get(GAP_WHAT)
+    root = finding.get("root_cause") if "root_cause" in finding else finding.get(GAP_HOW)
+    evidence = finding.get(CONTRAST_EVIDENCE) if CONTRAST_EVIDENCE in finding \
+        else finding.get("evidence")
+    return {"claim": claim, "root_cause": root,
             "anchor": finding.get("anchor"), "topic": finding.get("topic"),
-            "bucket": finding.get("bucket"), "evidence": finding.get("evidence"),
+            "bucket": finding.get("bucket"), "evidence": evidence,
             "world_field": finding.get("world"), "raw": finding}
 
 
-#: The ledger's lane → the page's disposition word (`_disposition_heading_raw`).
+#: The subject a deployment gap addresses: the user, never a queue (A2).
+SUBJECT_USER = "user"
+
+#: A draw document's three filed lists, in A13's one index space (investigator, world, gap),
+#: each with the subject its findings address.
+_FILED_LISTS = ((INVESTIGATOR_FINDINGS, SUBJECT_DEFENDER), (WORLD_FINDINGS, SUBJECT_WORLD),
+                (GAPS, SUBJECT_USER))
+
+
+def _filed(doc: dict[str, Any]) -> list[tuple[Any, Any]]:
+    """`(subject, finding)` for every finding one draw filed, indexed as the ledger's ids are:
+    over the three lists in filing order, before any drop (A11, A13)."""
+    return [(subject, finding) for key, subject in _FILED_LISTS for finding in _items(doc.get(key))]
+
+
+#: The ledger's lane → the page's disposition word (`_disposition_heading_raw`); every other
+#: lane is its own word.
 _LANE_WORD = {LANE_DEFENDER: "defender", LANE_WORLD: "world_author",
-              LANE_UNQUEUEABLE: "unqueueable", LANE_NEVER_ELIGIBLE: "never_eligible"}
+              LANE_UNQUEUEABLE: "unqueueable"}
+
+#: The heading of every lane that sends a finding to no queue (A13), one per lane: no two
+#: lanes share one, and none quotes the finding's reason, so a lane's rows share theirs.
+_LANE_HEADING = {
+    LANE_USER_RECORD: "user record — listed for the user, not queued",
+    LANE_NOT_MEASURED: "not queued — the world is not measured",
+    LANE_UNAUTHORED: "not queued — the draw named no bucket",
+    LANE_DRAWS_DISAGREE: "not queued — the world's draws disagree",
+    LANE_GAP_NOT_UNANIMOUS: "not listed — a gap not every draw names",
+    LANE_GAP_UNKEYED: "not listed — a gap naming no blocked call",
+    LANE_DROPPED_UNRESOLVED: "dropped — no pointer resolves",
+    LANE_DROPPED_OTHER_RUN: "dropped — names only another run",
+    LANE_DROPPED_NO_PAIR: "dropped — no two-run contrast pair",
+}
+_DROPPED_LANES = frozenset({LANE_DROPPED_UNRESOLVED, LANE_DROPPED_OTHER_RUN, LANE_DROPPED_NO_PAIR})
 
 
 def _off_ledger_disposition(ep: _Episode, label: str) -> tuple[str, str | None]:
@@ -1096,7 +1144,7 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
             dropped = _count(doc.get("dropped_findings"))
             if dropped is not None:
                 counts["dropped"] += dropped
-            if not _items(doc.get("findings")) and doc.get("failure_reason"):
+            if not _filed(doc) and doc.get("failure_reason"):
                 out.draw_failures.append((label, draw, doc["failure_reason"]))
             elif dropped is not None:
                 out.dropped.append((label, draw, dropped))
@@ -1113,53 +1161,23 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
         entry = ledger.pop(coord, None)
         if entry is None:
             return (*_off_ledger_disposition(ep, label), None)
-        return _LANE_WORD[entry["lane"]], entry.get("reason"), entry["finding_id"]
+        return _LANE_WORD.get(entry["lane"], entry["lane"]), entry.get("reason"), entry["finding_id"]
 
     for label in walked_labels:
         docs, _report = ep.draws[label]
         for draw, doc in docs.items():
-            for index, finding in enumerate(_items(doc.get("findings"))):
+            for index, (subject, finding) in enumerate(_filed(doc)):
                 coord = f"{label}/{draw}/{index}"
                 disposition, reason, recorded_id = _dispose(label, coord)
                 _bump(counts, disposition)
-                # A missing `subject` reads as the defender's, as the enqueue pass reads it.
-                subject = (finding.get("subject", SUBJECT_DEFENDER)
-                           if isinstance(finding, dict) else None)
                 rows.append(_Finding(
                     row_id=f"f-{label}-{draw}-{index}", label=label, draw=draw, index=index,
                     subject=subject, disposition=disposition, reason=reason, stub=False,
-                    recorded_id=recorded_id, outcome=doc.get("episode_outcome"),
-                    **_finding_fields(finding)))
+                    recorded_id=recorded_id, **_finding_fields(finding)))
 
 
-    # Record-only stubs: a ledger entry whose draw document is absent but whose text the
-    # record still carries (`world_findings` for a world-lane entry). Defender or dropped
-    # entries have no text on the record, so they only appear in the queue accounting. The grain is the document: a present document with fewer
-    # findings than the ledger knew renders nothing extra.
-    if ledger:
-        present_docs = {label: set(ep.draws[label][0]) for label in roster_labels}
-        world_rows_by_coord = _world_findings_lookup(grade)
-        for coord, filed in ledger.items():
-            label, draw_s, index_s = coord.rsplit("/", 2)
-            try:
-                draw_i: int | None = int(draw_s)
-            except ValueError:
-                draw_i = None
-            if draw_i is not None and draw_i in present_docs.get(label, set()):
-                continue
-            world_row = world_rows_by_coord.get(coord)
-            if filed["lane"] == LANE_WORLD and world_row is not None:
-                fields: dict[str, Any] = {"claim": world_row.get("finding")}
-                subject = SUBJECT_WORLD
-            else:
-                continue
-            disposition = _LANE_WORD[filed["lane"]]
-            _bump(counts, disposition)
-            rows.append(_Finding(
-                row_id=f"f-{label}-{draw_s}-{index_s}", label=label, draw=draw_s,
-                index=index_s, subject=subject, disposition=disposition,
-                reason=filed.get("reason"), stub=True, recorded_id=filed["finding_id"],
-                **fields))
+    # A ledger entry whose draw document is gone has no text on the record (#1234: the record
+    # carries lanes, not findings), so it shows only in the queue accounting.
 
     out.group_index = _group_numbering(rows)
     return out
@@ -1182,8 +1200,8 @@ def _disposition_heading_raw(f: _Finding) -> str:
     if f.disposition == "unqueueable":
         addressee = "defender" if f.subject == SUBJECT_DEFENDER else "world author"
         return f"{addressee}: unqueueable — {_raw(f.reason)}"
-    if f.disposition == "never_eligible":
-        return f"defender: never eligible — verdict {_raw(f.reason)}"
+    if f.disposition in _LANE_HEADING:
+        return _LANE_HEADING[f.disposition]
     if f.disposition == "world_ungradable":
         return f"not enqueued — world ungradable: {_raw(f.reason)}"
     if f.disposition == "no_grade_row":
@@ -1252,6 +1270,7 @@ def _render_document(ep: _Episode) -> str:
         _render_verdict(ep),
         _render_worlds(ep),
         _render_findings_section(ep),
+        _render_user_section(ep),
         _render_stages(ep),
         _render_leads_section(ep),
         _render_records(ep),
@@ -1378,31 +1397,23 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     for f in rows:
         if f.label == _FAMILY_LABEL and f.disposition != "never_on_record":
             family_groups.setdefault(f.draw, []).append(f)
-    family_docs = ep.draws[_FAMILY_LABEL][0]
     # Draw keys may be `int` (document), `str` (stub) or `None`; the sort key
     # compares across them so a mixed set cannot raise `TypeError` out of the page.
     for draw in sorted(family_groups, key=_draw_sort_key):
-        doc = family_docs.get(draw) if isinstance(draw, int) else None
-        outcome = str(doc.get("episode_outcome", "")) if isinstance(doc, dict) else ""
-        items = "".join(f'<div class="vd-family-item">{_uv(f.topic)}: {_uv(f.claim)}'
-                        f' <span class="vd-outcome">{_uv(outcome)}</span></div>'
+        items = "".join(f'<div class="vd-family-item">{_uv(f.topic)}: {_uv(f.claim)}</div>'
                         for f in family_groups[draw])
         lede_parts.append(f'<div class="vd-family-draw">{items}</div>')
 
-    family_failed = getattr(grade, "family_failed_reason", None)
+    family_failed = (grade.family or {}).get("draws_failed_reason")
     if family_failed:
         lede_parts.append(f'<div class="vd-family-failed">{_uv(family_failed)}</div>')
 
-    # `is not None`, not `or`: an empty `family_outcome` is the record's word, not an absence.
-    family_outcome = getattr(grade, "family_outcome", None)
-    badge_word = family_outcome if family_outcome is not None else grade.verdict_word
+    # #1234 retired the family word: the badge is the record's own validity (O5).
     queued = grade.enqueued_rows + grade.world_enqueued_rows
-    lede_line = f"{_uv(grade.verdict_word)} · {queued} findings queued"
-    lede_parts.append(f'<div class="vd-lede">{lede_line}</div>')
+    lede_parts.append(f'<div class="vd-lede">{queued} findings queued</div>')
 
-    badge = f'<span class="vd-badge">{_uv(badge_word)}</span>'
-    meta = (f'<span class="vd-meta">{_uv(grade.episode_outcome)} · {_uv(grade.verdict_word)}'
-            f' · validity {_uv(grade.validity)}</span>')
+    badge = f'<span class="vd-badge">{_uv(grade.validity)}</span>'
+    meta = f'<span class="vd-meta">validity {_uv(grade.validity)}</span>'
 
     # The record's own partition, never re-derived here.
     graded = grade.graded_worlds
@@ -1413,14 +1424,9 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         if row is not None and _normalized_disposition(row.get("verdict")) == \
                 _normalized_disposition(row.get("declared")):
             agree += 1
-    # Asked of the vocabulary's own normalizer (case-insensitive, trimmed) rather than a local
-    # copy of the enum.
-    verdict_note = ("" if normalized_judge_outcome(grade.verdict_word) is not None
-                    else ' <span class="vd-nonladder">(not a family word)</span>')
     tile1 = (
         f'<div class="vd-tile" id="vd-tile-1">{len(graded)} worlds judged · verdict = '
-        f'declared on {agree} of {len(graded)} '
-        f'<span class="vd-word">{_uv(grade.verdict_word)}</span>{verdict_note}</div>')
+        f'declared on {agree} of {len(graded)}</div>')
 
     unjudged_captions = [f"{_uv(w.label)} — {_uv(w.row.get('ungradable_reason'))}"
                          for w in entries.values()
@@ -1433,8 +1439,6 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     findings_total = len(rows)
     split_parts = [f"{counts['defender']} defender", f"{counts['world_author']} world author",
                   f"{counts['unqueueable']} unqueueable", f"{counts['dropped']} dropped"]
-    if counts["never_eligible"]:
-        split_parts.append(f"{counts['never_eligible']} never eligible")
     # The walk's own count, not `grade.enqueued_rows` (the record's figure, shown separately in
     # the queue accounting).
     tile_queued = counts["defender"] + counts["world_author"]
@@ -1461,10 +1465,9 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         # the count and the anchor refer to the same rows.
         world_group = [f for f in rows if f.label == w.label and f.subject == SUBJECT_DEFENDER]
         n_findings = len(world_group)
-        if world_group and all(f.disposition == "never_eligible" for f in world_group):
-            footer_word = "never eligible"
-        else:
-            footer_word = "enqueued"
+        footer_word = ("not measured" if row.get("measured") is False else
+                       "enqueued" if all(f.disposition == "defender" for f in world_group)
+                       else "not queued")
         group_n = (ep.findings.group_index.get(_disposition_heading_raw(world_group[0]), 1)
                    if world_group else 1)
         off_roster_note = ("" if w.in_manifest or w.run_dir_name is not None
@@ -1501,9 +1504,8 @@ def _render_queue_accounting(grade: Any, counts: dict[str, int]) -> str:
         f'defender: {grade.enqueued_rows} enqueued to {_uv(grade.enqueued_to)}',
         f'questioner: {grade.world_enqueued_rows} enqueued to {_uv(grade.world_enqueued_to)}',
         f'unqueueable {counts["unqueueable"]}',
-        f'malformed {grade.queue_malformed_rows} / {grade.world_queue_malformed_rows}',
         f'dropped {counts["dropped"]}',
-        f'family malformed replies {grade.family_malformed_replies}',
+        f'family malformed replies {_uv(_mapping(grade.family).get("malformed_replies"))}',
     ]
     record_vs_page = f'record: {grade.enqueued_rows} enqueued · page found: {counts["defender"]}'
     if grade.enqueued_rows != counts["defender"]:
@@ -1516,6 +1518,67 @@ def _render_queue_accounting(grade: Any, counts: dict[str, int]) -> str:
 
     return f'<details class="vd-acct"><summary>Queue accounting</summary>' \
           f'{"".join(f"<div>{line_}</div>" for line_ in lines)}</details>'
+
+
+# =========================================================================================
+# The user section (judge.yaml's `user`: design M7, A2, A7, R1 (c))
+# =========================================================================================
+
+#: The user record's lists as the page titles them, in the record's own keys.
+_USER_LISTS = (
+    ("named_gaps", "deployment gaps the judge named (every completed draw names the call)"),
+    ("unkeyed_named_gaps", "named gaps with no blocked call, flagged as why the facts never "
+                           "reached the investigator"),
+    ("found_gaps", "blocked calls the code found in the archive"),
+    ("serving_findings", "serving findings"),
+    ("gap_findings", "findings resting only on blocked calls"),
+)
+
+
+def _user_value(value: Any) -> str:
+    """One field of a user-record entry as text: a string as it is, a mapping as `k=v` pairs
+    and a list item by item (so a quoted string reaches the page unchanged, never re-quoted),
+    escaped once by the caller."""
+    if isinstance(value, dict):
+        return ", ".join(f"{_raw(k)}={_user_value(v)}" for k, v in value.items())
+    if isinstance(value, list):
+        return "; ".join(_user_value(v) for v in value)
+    return _raw(value)
+
+
+def _user_entry_html(entry: Any) -> str:
+    """One entry: a found gap's call and count, or an unread input with its cause; any other
+    entry field by field. Every value is the record's, rendered as text."""
+    if not isinstance(entry, dict):
+        return f'<div class="us-entry">{_uv(_user_value(entry))}</div>'
+    if entry.get("unread"):
+        return (f'<div class="us-entry us-unread">run {_uv(_user_value(entry.get("run")))}: '
+                f'unread — {_uv(_user_value(entry.get("unread")))}</div>')
+    head = ""
+    if "system" in entry:
+        head = (f'run {_user_value(entry.get("run"))}: {_user_value(entry.get("system"))} '
+                f'{_user_value(entry.get("verb"))} {_user_value(entry.get("params"))}')
+        if "count" in entry:
+            head += f' — {_user_value(entry.get("count"))} time(s)'
+    rest = [f"{_raw(k)}: {_user_value(v)}" for k, v in entry.items()
+            if k not in ("run", "system", "verb", "params", "count")]
+    text = " · ".join(part for part in (head, *rest) if part)
+    return f'<div class="us-entry">{_uv(text)}</div>'
+
+
+def _render_user_section(ep: _Episode) -> str:
+    """judge.yaml's user section, every list whole (no cap: N13), each entry as data."""
+    grade = ep.grade
+    if grade is None:
+        return ""
+    user = _mapping(grade.user)
+    parts = []
+    for key, title in _USER_LISTS:
+        entries = _items(user.get(key))
+        body = "".join(_user_entry_html(e) for e in entries) or \
+            '<div class="us-entry">none</div>'
+        parts.append(f'<div class="us-list"><h3>{esc(title)} ({len(entries)})</h3>{body}</div>')
+    return _page_section("sec-user", "User record", "".join(parts))
 
 
 # =========================================================================================
@@ -1568,6 +1631,23 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
     return _render_one_world(ep, item.label)
 
 
+def _commit_state_html(label: str, row: dict[str, Any] | None) -> str:
+    """The world's A6 commit state as judge.yaml records it — read off the row, never the
+    queue: `queueing` is in progress (a pass stopped between this world's appends and its
+    commit; the next grade refuses it until reconciled), `queued` is graded (its commit is
+    complete), and a planted world with no committed row is ungraded. The control is judged
+    against, never graded, so it carries no such line."""
+    state = (row or {}).get(STATE_KEY)
+    if state == QUEUEING:
+        text = (f"in progress — a pass stopped while committing world {label}: its findings "
+                "may be partly on the queues; reconcile them before the next grade")
+    elif state == QUEUED:
+        text = "graded — its commit is complete"
+    else:
+        text = "ungraded — no committed grade for this world"
+    return f'<div class="w-commit">{_uv(text)}</div>'
+
+
 def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, PLR0915 — one world's whole section (state, bucket, facts, calls, archive)
     entry = ep.entries[label]
     # A `not_graded` stamp voids the family's word: every record-derived part (ladder,
@@ -1582,6 +1662,8 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
                    f'unreadable</div>')
     if draws_report.skipped:
         bits.append(f'<div class="w-skipped">{draws_report.skipped} skipped</div>')
+    if label != ep.control_label:
+        bits.append(_commit_state_html(label, entry.row))
 
     manifest_world = ep.manifest_world(label)
     if row is None:
@@ -1728,9 +1810,6 @@ def _finding_row_html(f: _Finding) -> str:  # noqa: C901 — one row's worth of 
             bits.append(f'<span class="fr-world-field">{_uv(f.world_field)}</span>')
     if f.recorded_id is not None:
         bits.append(f'<span class="fr-recorded-id">{_uv(f.recorded_id)}</span>')
-    if f.outcome is not None:
-        # The draw's own `episode_outcome`, beside its findings.
-        bits.append(f'<span class="fr-outcome">{_uv(f.outcome)}</span>')
     # The row id embeds the world label, so a label failing the id grammar gets no id at all.
     id_attr = f' id="{esc(f.row_id)}"' if _safe_id(f.label) else ""
     # Joined with a space: adjacent inline spans would otherwise glue their words together in
@@ -1925,15 +2004,20 @@ def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 �
             blocks.append(_transcript_block(ep.wire.traces[stem]))
     elif step == Step.JUDGE:
         # Family first, then each world in numeric draw order. Stems include framed-only
-        # twins, which is all some judge calls write.
+        # twins, which is all some judge calls write. Only the draws judge.yaml records (A6):
+        # a call log a stopped or wider earlier pass left is never shown as this record's.
         judge_stems = ep.wire.stems_for(Step.JUDGE)
-        family_stems = sorted((s for s in judge_stems if _stem_names_label(s, _FAMILY_LABEL)),
+        family_drawn = recorded_draws(ep.grade, _FAMILY_LABEL)
+        family_stems = sorted((s for s in judge_stems if _stem_names_label(s, _FAMILY_LABEL)
+                               and _draw_key_stem(s, _FAMILY_LABEL) in family_drawn),
                               key=lambda s: _draw_key_stem(s, _FAMILY_LABEL))
         for stem in family_stems:
             blocks.append(_transcript_block(ep.wire.traces[stem]))
         for label in sorted(ep.entries):
             # Not a bare `startswith`: `baseline` would also claim `baseline_2`'s stems.
-            label_stems = sorted((s for s in judge_stems if _stem_names_label(s, label)),
+            drawn = recorded_draws(ep.grade, label)
+            label_stems = sorted((s for s in judge_stems if _stem_names_label(s, label)
+                                  and _draw_key_stem(s, label) in drawn),
                                  key=lambda s: _draw_key_stem(s, label))
             for stem in label_stems:
                 blocks.append(_transcript_block(ep.wire.traces[stem]))

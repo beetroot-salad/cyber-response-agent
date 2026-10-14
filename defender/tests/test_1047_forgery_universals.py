@@ -270,7 +270,8 @@ assert len(INERT_KEY) == len("truncated_by")
 
 
 def _apart_from_the_quoted_line(rows):
-    """Rows with `ungradable_reason` dropped — for the MALFORMED arms only.
+    """Rows with the quoted reason dropped (`ungradable_reason`, and the #1234 row's
+    `not_measured_reason`, which carries the same reason) — for the MALFORMED arms only.
 
     A tier-2 refusal quotes the offending LINE of the document verbatim ("... line 4, column
     15: truncated_by: !!!"), so two documents that differ only in a key's spelling produce two
@@ -281,7 +282,8 @@ def _apart_from_the_quoted_line(rows):
     here and the decision is compared. Recorded rather than silently tolerated: the
     box-chooses-the-reason-text surface predates #1047 and is not widened by it (the new row's
     own reason is host-composed from a label and a vocabulary member, never free text)."""
-    return {label: {k: v for k, v in row.items() if k != "ungradable_reason"}
+    return {label: {k: v for k, v in row.items()
+                    if k not in ("ungradable_reason", "not_measured_reason")}
             for label, row in rows.items()}
 
 

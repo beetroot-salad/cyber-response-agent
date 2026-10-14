@@ -279,7 +279,10 @@ def test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally(tmp_path):
     assert _launched(got), f"the launch did not run: {got.message!r}"
     prompts = got.judge.prompts
     assert prompts, "the judge was never asked"
-    assert any("THE JUDGED WORLD'S OWN report.md" in p for p in prompts)
+    from defender.learning.judge.layout import FOCUS_VIEW_TITLES
+
+    # #1234 M3/A10: the focus world's report view is titled, in host text, by its world label.
+    assert any(f" — {FOCUS_VIEW_TITLES['report']}" in p for p in prompts)
     for prompt in prompts:
         assert "SIBLING TRIALS" not in prompt, "the prompt still carries the sibling view"
         assert "TRIAL SPREAD" not in prompt, "the prompt still carries the trial spread"
@@ -891,7 +894,7 @@ def test_dc9_a_manifest_without_source_run_dir_resumes(tmp_path):
     rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
     assert refused is None, f"refused: {P.refusal_text(refused)} {err}"
     assert rc == 0, f"refused: {P.refusal_text(refused)} {err}"
-    assert (rec.run_dir / "alert.json").read_bytes() == (src / "alert.json").read_bytes()
+    assert (rec.run_dir / "alert_input" / "alert.json").read_bytes() == (src / "alert_input" / "alert.json").read_bytes()
 
 
 def test_dc9_an_old_manifests_source_run_dir_is_never_read(tmp_path):
@@ -917,7 +920,7 @@ def test_dc9_an_old_manifests_source_run_dir_is_never_read(tmp_path):
         rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
         assert refused is None, f"{named}: refused {P.refusal_text(refused)} {err}"
         assert rc == 0, f"{named}: refused {P.refusal_text(refused)} {err}"
-        assert (rec.run_dir / "alert.json").read_bytes() == (src / "alert.json").read_bytes(), (
+        assert (rec.run_dir / "alert_input" / "alert.json").read_bytes() == (src / "alert_input" / "alert.json").read_bytes(), (
             f"the old field steered the source to {named}")
 
 
@@ -998,6 +1001,8 @@ def test_dc10_the_tracer_walks_the_tenants_runs_and_refuses_a_stray(tmp_path, d9
     P.plant_record(runs, d9_tenant)
     run = runs / "20260605t000000z-case-a"
     run.mkdir()
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(run)
     (run / "report.md").write_text("---\ndisposition: benign\n---\nbody\n", encoding="utf-8")
     (run / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}) + "\n",

@@ -57,6 +57,7 @@ Tests -> obligations:
   `PATH` tripwire untouched (`no_path_docker`), so a seam fault never falls back on `PATH`.
 """
 from __future__ import annotations
+from defender.tests._alert_plant import plant_alert
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -608,6 +609,7 @@ def test_start_box_stamps_the_docker_it_created_the_box_with(tmp_path: Path, mon
     assert by_request.docker is daemon, "the request path did not stamp its docker"
     run_dir = tmp_path / "s1195run"
     run_dir.mkdir()
+    plant_alert(run_dir)
     (tmp_path / "defender").mkdir()
     by_run_dir = box_mod.start_box(run_dir, tmp_path / "defender", docker=daemon,
                                    spec=BoxSpec(runtime="runc", rootfs="defender-box:t1195"))

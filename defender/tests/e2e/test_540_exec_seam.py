@@ -54,6 +54,8 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
+from defender.run_repository import RunPaths
+
 import pytest
 
 from _replay_harness import DEFENDER, GOLDEN_AB3, ReplayFn, Turn, drive, materialize
@@ -159,6 +161,10 @@ NAME_COLLISION_FAILURE = box.RawExec(
 
 
 
+#: The stored alert, spelled relative to the run folder (it sits in the read-only input directory, #1222).
+ALERT_REL = RunPaths(Path("run")).alert.relative_to("run").as_posix()
+
+
 def _run_dir(tmp_path: Path) -> Path:
     return materialize(tmp_path, GOLDEN_AB3)
 
@@ -181,7 +187,7 @@ def _bash(deps, command: str) -> str:
 
 
 def _cat_alert(run_dir: Path) -> str:
-    return f"cat {run_dir / 'alert.json'}"
+    return f"cat {RunPaths(run_dir).alert}"
 
 
 
@@ -437,7 +443,7 @@ def test_hostile_argv_crosses_byte_exact(tmp_path):
     and `$(` never reach the box at all: the host gate denies them, which is checked here so
     their absence from this list is a recorded fact rather than an oversight."""
     run_dir = _run_dir(tmp_path)
-    alert = run_dir / "alert.json"
+    alert = RunPaths(run_dir).alert
 
     cases = [
         (f"cat {alert} | grep -n 'a b'", ["grep", "-n", "a b"]),
@@ -522,7 +528,7 @@ def test_box_accepts_no_raw_command_string(tmp_path):
     doubled spaces and quoting that vanish under `parse` — so a raw string riding along would
     be visible in the frame bytes."""
     run_dir = _run_dir(tmp_path)
-    alert = run_dir / "alert.json"
+    alert = RunPaths(run_dir).alert
     command = f"cat   {alert}    |   grep -n   'a b'"
 
     t = RecordingTransport(framed(0, b"", b""))
@@ -568,7 +574,7 @@ def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
     validator/executor differential reopens at the very moment O12 is fixed — the gate would
     resolve `x` against one root while the program opens it from another, so the file
     approved and the file read are different files. Site 1 is observed through the real
-    gate's ALLOW/DENY, which is the only thing it exposes: `cat alert.json` is in the cat
+    gate's ALLOW/DENY, which is the only thing it exposes: `cat <alert>` is in the cat
     grant's scope iff the anchor is the run dir, and `cat defender/lessons/<f>.md` is in
     scope iff the anchor is the repo root — one discriminating pair, both answers required."""
     run_dir = _run_dir(tmp_path)
@@ -579,20 +585,20 @@ def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
     deps = _main_deps(run_dir, t)
 
     assert permission.decide_bash(
-        "cat alert.json", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
+        f"cat {ALERT_REL}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
         "the gate did not rebase a relative operand onto the run dir"
     assert not permission.decide_bash(
         f"cat {lesson_rel}", policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow, \
         "the gate is still rebasing onto the repo root — site 1 did not move"
 
-    _bash(deps, "cat alert.json")
+    _bash(deps, f"cat {ALERT_REL}")
     assert t.only().cwd == run_dir, "the box ran at a different cwd than the gate validated"
 
-    assert runtime_tools._resolve_operand(deps, "alert.json") == run_dir / "alert.json"
+    assert runtime_tools._resolve_operand(deps, ALERT_REL) == RunPaths(run_dir).alert
 
-    assert (run_dir / "alert.json").exists()
-    assert (t.only().cwd / "alert.json").resolve() == \
-        runtime_tools._resolve_operand(deps, "alert.json").resolve()
+    assert (RunPaths(run_dir).alert).exists()
+    assert (t.only().cwd / ALERT_REL).resolve() == \
+        runtime_tools._resolve_operand(deps, ALERT_REL).resolve()
 
 
 def test_cwd_is_reapplied_per_call_and_does_not_persist(tmp_path):
@@ -610,7 +616,7 @@ def test_cwd_is_reapplied_per_call_and_does_not_persist(tmp_path):
     deps = _main_deps(run_dir, t)
 
     _bash(deps, _cat_alert(run_dir))
-    _bash(deps, f"cat {run_dir / 'alert.json'} | wc -l")
+    _bash(deps, f"cat {RunPaths(run_dir).alert} | wc -l")
 
     assert len(t.calls) == 2
     assert [c.cwd for c in t.calls] == [run_dir, run_dir], \
@@ -653,7 +659,7 @@ def test_tool_bash_executes_through_the_injected_box_seam(tmp_path):
     success. It checks for the box's OWN distinctive bytes instead, and for the file's real
     content being absent."""
     run_dir = _run_dir(tmp_path)
-    real_content = (run_dir / "alert.json").read_text()
+    real_content = (RunPaths(run_dir).alert).read_text()
     only_the_box_says = b"<<from-the-box>>\n"
     t = RecordingTransport(framed(0, only_the_box_says, b""))
     deps = _main_deps(run_dir, t)
@@ -661,7 +667,7 @@ def test_tool_bash_executes_through_the_injected_box_seam(tmp_path):
     shown = _bash(deps, _cat_alert(run_dir))
 
     assert len(t.calls) == 1, "the bash tool did not reach the injected box"
-    assert t.argvs() == [["cat", str(run_dir / "alert.json")]]
+    assert t.argvs() == [["cat", str(RunPaths(run_dir).alert)]]
     assert "<<from-the-box>>" in shown
     assert real_content.strip() not in shown, \
         "the host executed the command in-process; the box seam was bypassed"
@@ -739,7 +745,7 @@ def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):
     equal measure. This drives the whole real driver loop (gather dispatch included) with the
     box injected at `drive(box=…)`, so the surviving workflow is the run, not a unit call."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
-    alert = run_dir / "alert.json"
+    alert = RunPaths(run_dir).alert
     t = RecordingTransport(framed(0, b"3\n", b""))
 
     main = ReplayFn([

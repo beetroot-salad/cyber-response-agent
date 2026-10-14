@@ -26,6 +26,7 @@ from defender.tests import _spec1077 as S
 from defender.tests import _triplet_947 as T
 from defender.tests._by_path import DEFENDER, load_module
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests._alert_plant import plant_alert
 from defender.run_repository import SessionPaths
 
 
@@ -690,7 +691,7 @@ def test_corpus_load_ones_runpaths_construction_still_resolves_after_d1(tmp_path
     case.mkdir(parents=True)
     # `RunPaths(run_dir).alert` is how the site names the alert (`corpus.py:124`), and the
     # signature id it reads off it is the observable that tells whether it still resolves.
-    (case / "alert.json").write_text('{"rule": {"id": "sig-9"}}\n', encoding="utf-8")
+    plant_alert(case, {"rule": {"id": "sig-9"}})
     # The COMMITTED companion, not a stub: `load_corpus` only counts a document that PARSES
     # (three required top-level keys inside ```invlang fences), so a stub would make this
     # assertion read 0 == 0 and pass on the absence of the thing it measures.
@@ -698,7 +699,7 @@ def test_corpus_load_ones_runpaths_construction_still_resolves_after_d1(tmp_path
 
     companions, report = corpus.load_corpus(tmp_path / "corpus")
     assert report.scanned == 1, f"the fixture was not scanned: {report}"
-    assert S.RunPaths(case).alert == case / "alert.json", (
+    assert S.RunPaths(case).alert == case / "alert_input" / "alert.json", (
         "the unmoved reader outside the sweep composes the same path after the rewrite")
     assert [c.signature_id for c in companions] == ["sig-9"], (
         f"corpus_load_one no longer reads the alert through the owner: "

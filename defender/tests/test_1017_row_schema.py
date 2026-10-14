@@ -1,7 +1,7 @@
 """#1017 — the queries row's ONE schema, and the read surface that projects all of it.
 
 Three symptoms with one root: the row's column set was spelled by hand at the writer
-(`record_query.append_query_row`), at the second writer (`lead_zero._record_manual_row`), at the
+(`record_query.append_query_row`), at the second writer (gone with #1222), at the
 read surface (`lead_repository.QueryRow`) and in the judge's raw dump — so a column added at the
 writer reached a reader only when someone remembered each list. `system_key` (#871) reached none
 of them, and it is half the rejection guard's identity.
@@ -63,6 +63,8 @@ EXPECTED_COLUMNS = (
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command", "payload_path",
     "exit_code", "error_class", "payload_status", "payload_digest", "payload_sha256",
     "system_key",
+    # #1234 A12: the call's host-written id, the key its served-ledger rows share.
+    "call_id",
 )
 
 #: #1032 O1 — the questioner's "joined leads" section, per lead and per query, as EXACT key
@@ -83,7 +85,7 @@ SHA_MARKER = "5ha256" * 10 + "feed"
 
 
 def _row(seq: int, **overrides) -> dict:
-    """One full fourteen-column row, the shape a real writer leaves — every key present so a
+    """One full row in every writer column (`EXPECTED_COLUMNS`), the shape a real writer leaves — every key present so a
     test that DROPS one is stating something about that key and nothing else."""
     row = {
         "lead_id": LEAD, "seq": seq, "system": "elastic", "verb": "query",
@@ -92,6 +94,8 @@ def _row(seq: int, **overrides) -> dict:
         "payload_path": f"gather_raw/{LEAD}/{seq}.json", "exit_code": 0, "error_class": None,
         "payload_status": "ok", "payload_digest": f"{seq + 10} bytes, 1 line(s)",
         "payload_sha256": SHA_MARKER, "system_key": "",
+        # #1234 A12: the call's host-written id, as `record_query.next_call_id` spells it.
+        "call_id": f"run/{seq}",
     }
     row.update(overrides)
     return row
@@ -163,7 +167,7 @@ def test_the_writer_declares_the_fourteen_columns_once_in_writer_order():
         "the column declaration is not ordered, so it cannot pin the row's byte order"
     assert QUERY_ROW_COLUMNS == EXPECTED_COLUMNS, \
         "the writer's declared column set differs from the fourteen columns rows carry"
-    assert len(set(QUERY_ROW_COLUMNS)) == 14, "a column is declared twice"
+    assert len(set(QUERY_ROW_COLUMNS)) == len(EXPECTED_COLUMNS), "a column is declared twice"
 
 
 # ---------------------------------------------------------------------------------------
@@ -397,6 +401,7 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
     and `orphan`, so the marker half is red on today's code even with the two `repr=False`
     fields still hidden."""
     from defender.learning._prompt import titled_section
+    from defender.learning.branch.questioner import UNTRUSTED_TAG
     from defender.learning.branch.cli import _joined_leads
 
     _lead_file(tmp_path, "GOAL_MARKER")
@@ -422,6 +427,7 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
         "questioner_joined_leads": titled_section(
             "The joined leads at the branch point",
             lead_repository.questioner_leads(_joined_leads(tmp_path, lead_repository.joined)),
+            salt="test1017", tag=UNTRUSTED_TAG,
         ),
     }
     for name, text in renders.items():

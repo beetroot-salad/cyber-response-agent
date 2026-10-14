@@ -20,6 +20,7 @@ from datetime import datetime
 import json
 import shutil
 from pathlib import Path
+from defender.run_repository import RunPaths
 from typing import Any
 
 import pytest
@@ -142,7 +143,7 @@ def _pass_a_sibling(tmp_path: Path, root: Path, episodes: Path) -> tuple[Path, P
     sib = sib_base / f"{T.EPISODE_ID}-b"
     (sib / "gather_raw").mkdir(parents=True)
     H.plant_record(sib_base, TID)
-    shutil.copy(src / "alert.json", sib / "alert.json")
+    shutil.copytree(src / "alert_input", sib / "alert_input")
     shutil.copy(src / "investigation.md", sib / "investigation.md")
     (sib / "provenance.json").write_text(json.dumps(T.provenance_record()), encoding="utf-8")
     # #1235: the case pointer is a host-only sidecar beside each run dir, not a file in it.
@@ -171,7 +172,7 @@ def _materialize_sibling(root: Path, episodes: Path, label: str = "b") -> tuple[
             episode, label, tenant=lambda: H.T1106.run_tenant(accepted))
         view = T.episode_view(episode, tenant=accepted)
         run_dir = H.run_common().materialize_run(
-            src / "alert.json", world.run_id, tenant=accepted, world=world,
+            RunPaths(src).alert, world.run_id, tenant=accepted, world=world,
             episode_runs=view).run_dir
     return ep, Path(run_dir), world
 
@@ -585,7 +586,7 @@ def test_episode_made_between_1077_and_pass_a(tmp_path, monkeypatch, data_root):
     sib = sib_base / f"{T.EPISODE_ID}-b"
     (sib / "gather_raw").mkdir(parents=True)
     H.plant_record(sib_base, "default")
-    shutil.copy(old_src / "alert.json", sib / "alert.json")
+    shutil.copytree(old_src / "alert_input", sib / "alert_input")
     (sib / "provenance.json").write_text(json.dumps(T.provenance_record()), encoding="utf-8")
     record_before = (sib_base / H.RECORD_NAME).read_bytes()
     roots = {data_root: H.census(data_root), old_base: H.census(old_base)}
