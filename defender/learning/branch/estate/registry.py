@@ -29,6 +29,7 @@ from typing import Any
 from defender import _yaml
 from defender._episode_paths import LAYOUT
 from defender.runtime.branch import source_alert
+from defender.run_repository import Run
 from defender._io import read_jsonl_rows, read_text_utf8
 from defender._query_rules import ParamsTooDeep, _json_safe_params
 from defender.learning.core.config import OracleSettings
@@ -159,7 +160,7 @@ def changes_base(served: Any, base: Any) -> bool:
     return canonical_json(served) != canonical_json(base)
 
 
-def prebranch_calls(source_run_dir: Path, branch_message_id: int) -> frozenset[str]:
+def prebranch_calls(source: Run, branch_message_id: int) -> frozenset[str]:
     """The request keys of the calls the source run made before the branch point — the fixed
     prefix of M01=A — derived once by each caller from the source run: pre-flight (each
     replayed call's `fixed`) and the sibling (`WorldRegistry(prebranch=)`). A call is pre-branch
@@ -169,13 +170,13 @@ def prebranch_calls(source_run_dir: Path, branch_message_id: int) -> frozenset[s
     from defender.learning.lead_repository import load_queries_report
     from defender.runtime import branch
 
-    run_dir = Path(source_run_dir)
-    store = branch.source_store_if_any(run_dir)
+    run_dir = source.run_dir
+    store = branch.source_store_if_any(run_dir, source_run=source)
     if store is None:
         return frozenset()
     try:
-        session = branch.session_for_run(store, run_dir)
-        leads = set(branch.leads_at(store, session, branch_message_id, run_dir))
+        session = branch.session_for_run(store, run_dir, source_run=source)
+        leads = set(branch.leads_at(store, session, branch_message_id, run_dir, source_run=source))
     finally:
         store.close()
     rows, _unreadable = load_queries_report(run_dir)
@@ -268,7 +269,7 @@ class WorldRegistry(ModuleVerbRegistry):
                  tenant: Any = None, grant_home: str = TABLE_POINTER,
                  family_answers: Sequence[FamilyAnswer] | None = None,
                  prebranch: Collection[str] = frozenset(),
-                 source_run_dir: Path | None = None):
+                 source_run: Run | None = None):
         """`serving` is the world's settled oracle side (`oracle_serving`), `oracle_dir` its
         oracle-side state (`default_oracle_dir`), `limiter` the process's one rate limiter
         (S16: pre-flight hands every world the launcher's, held at the episode rate; a
@@ -307,7 +308,7 @@ class WorldRegistry(ModuleVerbRegistry):
         self.tenant = tenant
         self.world_facts = tuple(getattr(world, "facts", ()) or ())
         self.prebranch = frozenset(prebranch)
-        self._source_run_dir = None if source_run_dir is None else Path(source_run_dir)
+        self._source_run = source_run
         self.store = OracleStore(Path(oracle_dir))
         self._turn_lock = threading.Lock()
         #: The context of the call whose turn holds the lock: every oracle-side query of that
@@ -536,9 +537,9 @@ class WorldRegistry(ModuleVerbRegistry):
         return out
 
     def _alert(self) -> list[Any]:
-        if self._source_run_dir is None:
+        if self._source_run is None:
             return []
-        alert = source_alert(self._source_run_dir)
+        alert = source_alert(self._source_run)
         return [alert] if alert is not None else []
 
     def close(self) -> None:

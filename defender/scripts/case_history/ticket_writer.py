@@ -9,9 +9,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from defender import _alert_input
-from defender._io import read_guarded, write_guarded
 from defender._model import model
-from defender.run_repository import RunPaths
+from defender.run_repository import Run, RunPaths
 from defender.runtime import case_ticket, run_end
 from defender.runtime.run_tenant import RunTenant
 from defender.runtime.verbs import SETTINGS_POINTER, VerbContext, redact_settings_path
@@ -81,7 +80,7 @@ def _reason_of(fault: BaseException, tenant: RunTenant) -> str:
 
 
 def open_case_ticket(
-    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
+    run: Run, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
     defender_dir: Path, env: Mapping[str, str],
 ) -> None:
     """Open the case for this run. `tenant` is the run's record (#1107): the store's address
@@ -89,6 +88,7 @@ def open_case_ticket(
     resolved once when the run began. `defender_dir` and `env` are run.py's — the code tree and
     the run's environment — never found from the process. The open leg writes no receipt, on any
     path: a store that cannot be reached is a warning here and an error receipt at the record."""
+    run_dir = run.run_dir
     try:
         ctx = _verb_context(tenant, defender_dir, run_dir, env)
         try:
@@ -98,7 +98,7 @@ def open_case_ticket(
             return
         # The open leg meets the run's RECORD alone: the facts were settled once at run start,
         # and no byte of the alert is read here.
-        record = _alert_input.read_record(RunPaths(run_dir).alert_record)
+        record = _alert_input.parse_alert_record(run.facts.alert_record.read() or "")
         if record is None:
             _logger.warning(f"{run_dir.name} has no readable record of its alert; skipping open")
             return
@@ -107,7 +107,7 @@ def open_case_ticket(
             record.facts, case_id, mapping=tenant.ticket_mapping)
         # A receipt from an earlier attempt must not outlive this open: only a refusal below
         # leaves one, for the record leg to carry on.
-        clear_receipt(run_dir)
+        clear_receipt(run)
         status, body = deps.request(config, "POST", "/tickets", payload, ctx=ctx)
         if status is None:
             _logger.warning(f"open {case_id}: {body}")
@@ -120,7 +120,7 @@ def open_case_ticket(
             # A store that REFUSED the ticket is said so where the operator looks (the receipt
             # and the run page), quoting the store's reason; the record leg keeps it.
             _write_receipt(
-                run_dir, config, case_id, RECEIPT_ERROR,
+                run, config, case_id, RECEIPT_ERROR,
                 redact_settings_path(f"{OPEN_REFUSED}: HTTP {status}: {body}", tenant.settings))
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"open raised, ignored: {e!r}")
@@ -138,7 +138,7 @@ _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 
 
 def _build_comment_payload(
-    run_dir: Path, case_id: str, truncated_by: str | None, mapping: case_ticket.CaseMapping | case_ticket.CaseTicketError,
+    run: Run, case_id: str, truncated_by: str | None, mapping: case_ticket.CaseMapping | case_ticket.CaseTicketError,
 ) -> tuple[dict, str]:
     """The outbound `{author, body}` for `record_case_ticket` and its receipt word.
 
@@ -147,7 +147,7 @@ def _build_comment_payload(
     there is no verdict. Any other `CaseTicketError` propagates to the caller's refusal branch
     (no POST, a warning, an `error` receipt)."""
     try:
-        rec = replace(case_ticket.read_case_record(run_dir, mapping=mapping), case_id=case_id)
+        rec = replace(case_ticket.read_case_record(run, mapping=mapping), case_id=case_id)
     except case_ticket.ReportNotParsable:
         if truncated_by in run_end.FORCED_CLOSE_EXITS:
             return (case_ticket.escalation_comment_payload(truncated_by, mapping=mapping),
@@ -157,7 +157,7 @@ def _build_comment_payload(
 
 
 def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record (#1047)
-    run_dir: Path, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
+    run: Run, deps: TicketWriterDeps = DEFAULT_DEPS, *, tenant: RunTenant,
     defender_dir: Path, env: Mapping[str, str],
     key: str | None = None, truncated_by: str | None = None, closed_before_cut: bool = False,
 ) -> None:
@@ -198,12 +198,13 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     unexpected error anywhere in the step — writes an `error` receipt whose `reason` is the failing check's own text with the host's settings
     path redacted (`redact_settings_path`); `url` is null when there was no usable config to
     name a store, and the store's address otherwise."""
+    run_dir = run.run_dir
     case_id = key if key is not None else run_dir.name
     try:
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
         if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE)
                 and not closed_before_cut):
-            clear_receipt(run_dir)
+            clear_receipt(run)
             _logger.info(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")
             return
         ctx = _verb_context(tenant, defender_dir, run_dir, env)
@@ -212,7 +213,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         except AdapterFault as e:
             reason = _reason_of(e, tenant)
             _logger.warning(f"record {case_id}: {reason}; not recording")
-            _write_receipt(run_dir, None, case_id, RECEIPT_ERROR, reason)
+            _write_receipt(run, None, case_id, RECEIPT_ERROR, reason)
             return
         try:
             if truncated_by == run_end.TRUNCATED_BY_ABORTED and not closed_before_cut:
@@ -222,25 +223,25 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
                     RECEIPT_ESCALATED)
             else:
                 payload, word = _build_comment_payload(
-                    run_dir, case_id, truncated_by, tenant.ticket_mapping)
+                    run, case_id, truncated_by, tenant.ticket_mapping)
         except case_ticket.CaseTicketError as e:
             # The mapping (or a template in it) refused: no POST, but the receipt still says
             # so — a WARN, a receipt and a return on every arm that meant to call out.
             reason = redact_settings_path(str(e), tenant.settings)
             _logger.warning(f"record {case_id}: {reason}; not recording")
-            _write_receipt(run_dir, config, case_id, RECEIPT_ERROR, reason)
+            _write_receipt(run, config, case_id, RECEIPT_ERROR, reason)
             return
-        _post_comment(run_dir, deps, config, case_id, payload, word, ctx)
+        _post_comment(run, deps, config, case_id, payload, word, ctx)
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"record raised, ignored: {e!r}")
         # Only the exception's type reaches the receipt (and so the page): its text may carry a
         # host path or a store's body; the log line above has it whole.
-        _write_receipt(run_dir, None, case_id, RECEIPT_ERROR,
+        _write_receipt(run, None, case_id, RECEIPT_ERROR,
                        f"the record step failed unexpectedly ({type(e).__name__}); see the run log")
 
 
 def _post_comment(  # noqa: PLR0913 — one call site's worth of context, threaded not re-derived
-    run_dir: Path, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
+    run: Run, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
     payload: dict, word: str, ctx: VerbContext,
 ) -> None:
     """The one write the host makes to a case: one `POST /tickets/{key}/comments` whose body
@@ -249,13 +250,13 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     person has closed the case changes nothing, since every comment is served to later runs
     and ours are tagged (#1221 A1)."""
     quoted = urllib.parse.quote(case_id, safe="")
-    payload = case_ticket.posted_comment(payload, run_id=run_dir.name)
+    payload = case_ticket.posted_comment(payload, run_id=str(run.id))
     status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload, ctx=ctx)
     ok = status is not None and status.startswith("2")
     if not ok:
         reason = f"{'HTTP ' + status if status else 'transport error'}: {body}"
         reason = redact_settings_path(reason, ctx.tenant.settings)
-        refused = _prior_open_refusal(run_dir)
+        refused = _prior_open_refusal(run)
         if refused is not None:
             # The comment fell with the ticket: the cause worth reading is the refusal.
             reason = f"{refused} (the record comment then failed: {reason})"
@@ -263,12 +264,12 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     else:
         reason = None
         _logger.info(f"record {case_id}: comment posted ({status}, {word})")
-    _write_receipt(run_dir, config, case_id, word if ok else RECEIPT_ERROR, reason)
+    _write_receipt(run, config, case_id, word if ok else RECEIPT_ERROR, reason)
 
 
-def _prior_open_refusal(run_dir: Path) -> str | None:
+def _prior_open_refusal(run: Run) -> str | None:
     """The open leg's refusal text this attempt left in the receipt, or `None`."""
-    text, _reason = read_guarded(receipt_path(run_dir))
+    text = run.observability.ticket_write.read()
     try:
         prior = json.loads(text) if text is not None else None
     except ValueError:
@@ -285,17 +286,17 @@ def receipt_path(run_dir: Path) -> Path:
     return RunPaths(run_dir).ticket_write()
 
 
-def clear_receipt(run_dir: Path) -> None:
+def clear_receipt(run: Run) -> None:
     """Remove the receipt an earlier attempt on this run dir left, if any: a record-step branch
     that writes no receipt must not leave one for the page to show."""
     try:
-        receipt_path(run_dir).unlink(missing_ok=True)
+        run.observability.ticket_write.delete()
     except OSError as e:
         _logger.warning(f"could not clear the stale receipt: {e}")
 
 
 def _write_receipt(
-    run_dir: Path, config: dict[str, str] | None, case_id: str, status: str, reason: str | None,
+    run: Run, config: dict[str, str] | None, case_id: str, status: str, reason: str | None,
 ) -> None:
     """@owns ticket_write receipt — `{key, status, url, ok, reason}`, the one shape the page
     reads. `url` is null when there was no usable config to name a store; `reason` is null on a
@@ -308,6 +309,13 @@ def _write_receipt(
         "reason": reason,
     }
     try:
-        write_guarded(receipt_path(run_dir), json.dumps(receipt, indent=2) + "\n")
+        run.observability.ticket_write.write(json.dumps(receipt, indent=2) + "\n")
     except OSError as e:
         _logger.warning(f"could not write receipt: {e}")
+
+
+# The path accessor remains the public read-side compatibility surface for run pages.
+__all__ = [
+    "TicketWriterDeps", "DEFAULT_DEPS", "open_case_ticket", "record_case_ticket",
+    "receipt_path", "clear_receipt",
+]

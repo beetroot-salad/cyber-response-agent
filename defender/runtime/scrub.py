@@ -119,34 +119,38 @@ def verdict_path(tree: Path) -> Path:
     return RunPaths(tree).scrub_verdict()
 
 
-def _write_verdict(tree: Path, doc: dict) -> None:
+def _write_verdict(tree: Path, doc: dict, *, write_verdict: Callable[[dict], None] | None = None) -> None:
     """Write the verdict sidecar, best-effort: a missing verdict already reads as unverified,
     and a write failure must not replace the signal the caller is holding."""
     try:
-        write_guarded(verdict_path(tree), json.dumps(doc))
+        if write_verdict is not None:
+            write_verdict(doc)
+        else:
+            write_guarded(verdict_path(tree), json.dumps(doc))
     except OSError as e:
         _logger.error(f"could not write the scan verdict for {tree}: {e!r}")
 
 
-def write_did_not_run(tree: Path, reason: str) -> None:
+def write_did_not_run(tree: Path, reason: str, *, write_verdict: Callable[[dict], None] | None = None) -> None:
     """Record that the walk was skipped (the box was not provably dead), so the tree is
     distinguishable from one never judged. Used on teardown and startup faults, per run dir or
     writable mount source. Best-effort."""
-    _write_verdict(tree, {"ran": False, "reason": reason})
+    _write_verdict(tree, {"ran": False, "reason": reason}, write_verdict=write_verdict)
 
 
-def mark_unsandboxed(tree: Path) -> None:
+def mark_unsandboxed(tree: Path, *, read_verdict: Callable[[], str | None] | None = None, write_verdict: Callable[[dict], None] | None = None) -> None:
     """Add `"sandboxed": false` to the tree's verdict: the run had no box, so the read-only
     input directory was never mounted and the alert's bytes are unbound — the learning gate
     reads this and refuses the run (#1222). Best-effort, like every write of the verdict."""
     p = verdict_path(tree)
     try:
-        doc = json.loads(read_text_utf8(p))
+        text = read_verdict() if read_verdict is not None else read_text_utf8(p)
+        doc = json.loads(text) if text is not None else {}
     except (OSError, json.JSONDecodeError):
         doc = {}
     if not isinstance(doc, dict):
         doc = {}
-    _write_verdict(tree, {**doc, "sandboxed": False})
+    _write_verdict(tree, {**doc, "sandboxed": False}, write_verdict=write_verdict)
 
 
 def tree_unsandboxed(tree: Path) -> bool:
@@ -176,7 +180,7 @@ def tree_verified(tree: Path) -> bool:
 Lister = Callable[..., Iterator[tuple[str, list[str], list[str]]]]
 
 
-def scrub(run_dir: Path, *, lister: Lister = os.walk) -> None:
+def scrub(run_dir: Path, *, lister: Lister = os.walk, write_verdict: Callable[[dict], None] | None = None) -> None:
     """Walk `run_dir` and refuse anything that is not a plain regular file or directory.
 
     `lister` is the walk seam, for producing partial walks in tests. Every walk writes a
@@ -202,9 +206,9 @@ def scrub(run_dir: Path, *, lister: Lister = os.walk) -> None:
         _write_verdict(run_dir, {
             "ran": False,
             "reason": "the walk could not finish reliably: an entry became unreadable",
-        })
+        }, write_verdict=write_verdict)
     else:
-        _write_verdict(run_dir, {"ran": True, "reason": "walk completed"})
+        _write_verdict(run_dir, {"ran": True, "reason": "walk completed"}, write_verdict=write_verdict)
 
     if not findings:
         return

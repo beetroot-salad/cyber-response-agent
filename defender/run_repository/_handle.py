@@ -27,7 +27,7 @@ import dataclasses
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender import _alert_input, _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
@@ -80,6 +80,20 @@ MEMBER_VERB: dict[str, str | None] = {
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
     "session_db": "open",
 }
+# The capability table is authoritative; MEMBER_VERB retains the primary-verb API.
+MEMBER_CAPABILITIES = {name: frozenset((verb,)) if verb else frozenset()
+                       for name, verb in MEMBER_VERB.items()}
+for _member, _added in {
+    "queries": ("create",), "alert_record": ("replace",),
+    "payloads": ("ensure_parent",), "gather_summaries": ("ensure_parent",),
+    "investigation": ("seed",), "ticket_write": ("delete",),
+    "wire_log": ("append_text", "start_stream"),
+    "policy_denials": ("append_text", "start_stream"), "review_trace": ("append_text",),
+}.items():
+    MEMBER_CAPABILITIES[_member] |= frozenset(_added)
+for _member in ("wire_log", "policy_denials", "review_trace"):
+    MEMBER_CAPABILITIES[_member] -= frozenset({"append"})
+
 UPWARD_ACCESSORS = (
     "run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer", "sessions_dir",
     "session_db")
@@ -88,7 +102,7 @@ UPWARD_ACCESSORS = (
 _SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer")
 #: Written once through the exclusive lane (a second lead claim must collide). The scrub
 #: verdict is a fact too but is rewritten, so it uses `replace` like every other `write`.
-_WRITE_ONCE_MEMBERS = frozenset({"alert", "alert_record", "provenance", "run_end", "leads"})
+_WRITE_ONCE_MEMBERS = frozenset({"alert", "alert_record", "provenance", "leads"})
 #: The two model-authored documents, held to their content schema at every write.
 _SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name,
                          "report": RUN_LAYOUT.report.name}
@@ -105,10 +119,14 @@ class RecordHandle:
     """A thin per-kind wrapper: `.path` plus read and the record's own verb, delegating to the
     existing seams."""
 
+    if TYPE_CHECKING:
+        write: Callable[[str | bytes], None]
+
     def __init__(
         self, resolve: Callable[[], Path], *, io: Any, root: Callable[[], Path], group: str,
         member: str, on_partial_failure: Any = None,
         session_args: tuple[Any, ...] | None = None,
+        prepare_write: Callable[[], None] | None = None,
     ) -> None:
         self._resolve = resolve
         self._io = io
@@ -116,24 +134,22 @@ class RecordHandle:
         self._root = root
         self._group = group
         self._member = member
-        self._verb = MEMBER_VERB[member]
         self._on_partial_failure = on_partial_failure
-        if member == "wire_log":
-            from defender.runtime import observe
-
-            self.logger_factory = observe.RequestLogger
+        self._prepare_write = prepare_write
         if member == "session_db":
             from defender.runtime import session_store
 
             self.open_store = session_store.open_store
             self._lineage_id, self._sessions_runs_base = session_args or (None, None)
-        # Only the record's own verb is a public attribute; tests check the others are absent.
-        if self._verb == "write":
-            self.write = self._do_write
-        elif self._verb == "append":
-            self.append = self._do_append
-        elif self._verb == "open":
-            self.open = self._do_open
+        operations = {
+            "write": self._do_write, "append": self._do_append, "open": self._do_open,
+            "create": self._do_create, "replace": self._do_replace,
+            "seed": self._do_seed, "delete": self._do_delete,
+            "append_text": self._do_append_text, "start_stream": self._do_start_stream,
+            "ensure_parent": self._do_ensure_parent,
+        }
+        for capability in MEMBER_CAPABILITIES[member]:
+            setattr(self, capability, operations[capability])
 
     @property
     def path(self) -> Path:
@@ -151,26 +167,98 @@ class RecordHandle:
         text, _reason = self._io.rooted_read(root, name)
         return text
 
+    def _read_bound(self, operation: str, **kwargs: Any) -> Any:
+        try:
+            root, name = self._address()
+            with self._io.bind(root) as bound:
+                return getattr(bound, operation)(name, **kwargs)
+        except OSError as error:
+            kind = _real_io._refused_by(error)
+            result = _real_io.RecordRead("", False, str(error), None, kind)
+            if operation == "read_bytes":
+                return _real_io.BytesRead("", False, str(error), None, kind)
+            return ([], 0, result) if operation == "read_jsonl" else result
+
+    def read_result(self, *, errors: str = "strict") -> _real_io.RecordRead:
+        if errors not in ("strict", "replace"):
+            raise ValueError("errors must be strict or replace")
+        return self._read_bound("read", errors=errors)
+
+    def read_bytes(self) -> _real_io.BytesRead:
+        return self._read_bound("read_bytes")
+
+    def read_rows(self) -> tuple[list[dict], int, _real_io.RecordRead]:
+        return self._read_bound("read_jsonl")
+
+    def _mutate(self, text: str | bytes, mode: str) -> None:
+        root, name = self._address()
+        self._mkdir(root, name)
+        self._io.rooted_write(root, name, text, mode=mode)
+
+    def _do_create(self, text: str | bytes) -> None:
+        self._mutate(text, "create")
+
+    def _do_ensure_parent(self) -> None:
+        root, name = self._address()
+        self._mkdir(root, name)
+
+    def _do_replace(self, text: str | bytes) -> None:
+        self._mutate(text, "replace")
+
+    def _do_append_text(self, text: str) -> None:
+        self._mutate(text, "append")
+
+    def _do_start_stream(self, text: str) -> None:
+        self._mutate(text, "replace")
+
+    def _do_seed(self, text: str) -> None:
+        from defender.runtime.branch._seed import refuse_seeded_run_dir
+
+        root, _name = self._address()
+        refuse_seeded_run_dir(root)
+        reason = _artifact_schema.validate_artifact(RUN_LAYOUT.investigation.name, text, text)
+        if reason is not None:
+            raise ValueError(f"run.documents.investigation: {reason}")
+        self._mutate(text, "replace")
+
+    def _do_delete(self) -> None:
+        root, name = self._address()
+        self._io.rooted_unlink(root, name)
+
     def _mkdir(self, root: Path, name: PurePosixPath) -> None:
         self._io.rooted_mkdir(root, name.parent)
 
     def _do_write(self, text: str | bytes) -> None:
+        if self._prepare_write is not None:
+            try:
+                self._prepare_write()
+            except OSError as error:
+                # Keep an existing owner-address refusal's class, errno and alias marker.
+                # Preparation still identifies this as a holding-folder fault to claimers.
+                try:
+                    self._address()
+                except OSError as address_error:
+                    address_error.record_parent_refused = True  # type: ignore[attr-defined]  # OSError carries the same dynamic refusal metadata as write_guarded_alias
+                    raise address_error from error
+                error.record_parent_refused = True  # type: ignore[attr-defined]  # dynamic refusal metadata, as in _io._mark_alias
+                raise
         root, name = self._address()
         schema_name = _SCHEMA_GATED_MEMBERS.get(self._member)
         if schema_name is not None:
-            current, _reason = self._io.rooted_read(root, name)
+            current = self.read() if self._member == "investigation" else None
             proposed = text.decode("utf-8") if isinstance(text, bytes) else text
             reason = _artifact_schema.validate_artifact(schema_name, proposed, current)
             if reason is not None:
                 raise ValueError(f"run.{self._group}.{self._member}: {reason}")
-        self._mkdir(root, name)
+        if self._prepare_write is None:
+            self._mkdir(root, name)
         if self._member in _WRITE_ONCE_MEMBERS:
             # Stays a `FileExistsError` (an `OSError`) so callers' OSError arms still catch it.
             try:
                 self._io.rooted_write(root, name, text, mode="create")
             except FileExistsError as taken:
                 raise FileExistsError(
-                    f"{root / name} already exists — run.{self._group}.{self._member} is "
+                    taken.errno, f"{root / name} already exists — run.{self._group}.{self._member} is "
                     "write-once") from taken
             return
         self._io.rooted_write(root, name, text, mode="replace")
@@ -349,10 +437,17 @@ class Run:
                     return SessionPaths(self._runs_base_for(group, name)).trust_root
                 return self.run_dir
 
+            def prepare_write() -> None:
+                # Claims historically prepare their folder before judging the leaf. Validate
+                # the component first, so an addressing bug still performs no I/O.
+                RUN_LAYOUT.lead_claim(*args)
+                self._io.rooted_mkdir(self.run_dir, RUN_LAYOUT.gather_raw)
+
             session_args = (args[0], self.runs_base) if name == "session_db" and args else None
             return RecordHandle(
                 resolve, io=self._io, root=trust_root, group=group, member=name,
-                on_partial_failure=self._record_partial_failure, session_args=session_args)
+                on_partial_failure=self._record_partial_failure, session_args=session_args,
+                prepare_write=prepare_write if name == "leads" else None)
 
         return build if composing else build()
 

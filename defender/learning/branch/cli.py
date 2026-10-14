@@ -299,7 +299,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     """
     source_run_dir = source.run_dir
     _check_oracle_side(oracle=oracle, verifier=verifier)
-    _check_branch_point(source_run_dir, branch_message_id,
+    _check_branch_point(source, branch_message_id,
                         continuation_prompt=continuation_prompt)
     # The live tree is judged as a one-member family by `verify_family`'s own rules, before the
     # paid role preflight.
@@ -422,7 +422,7 @@ def _source_stamp_agrees(source: Run, tenant_id: _tenant.TenantId) -> None:
 MAX_BRANCH_MESSAGE_ID = 100 * 60
 
 
-def _check_branch_point(source_run_dir: Path, branch_message_id: int, *,
+def _check_branch_point(source: Run, branch_message_id: int, *,
                         continuation_prompt: str) -> None:
     """Refuse a branch point the source run could not have produced.
 
@@ -435,6 +435,7 @@ def _check_branch_point(source_run_dir: Path, branch_message_id: int, *,
     A source with no session store (imported, replayed, pruned) is still branchable; only the
     range check above applies to it.
     """
+    source_run_dir = source.run_dir
     if branch_message_id < 0:
         raise LauncherRefused(
             f"[branch] branch message id {branch_message_id} is negative — it names a message "
@@ -444,11 +445,11 @@ def _check_branch_point(source_run_dir: Path, branch_message_id: int, *,
             f"[branch] branch message id {branch_message_id} is beyond {MAX_BRANCH_MESSAGE_ID}, "
             "the most any one investigation's session could hold — no run produced a message "
             "there, so this is a typo rather than a branch point")
-    store = _source_store(Path(source_run_dir))
+    store = _source_store(source)
     if store is None:
         return
     try:
-        as_of = branch.branch_point_time(store, Path(source_run_dir), branch_message_id)
+        as_of = branch.branch_point_time(store, Path(source_run_dir), branch_message_id, source_run=source)
         # An empty capture is not refused here: pre-flight records it as a `refused` episode
         # (M05=A), so the operator finds the reason in the outcome record.
         branch.validate(store, branch.BranchSpec(
@@ -456,20 +457,20 @@ def _check_branch_point(source_run_dir: Path, branch_message_id: int, *,
             branch_message_id=branch_message_id,
             continuation_prompt=continuation_prompt,
             as_of=as_of,
-        ), require_capture=False)
+        ), source_run=source, require_capture=False)
     except branch.BranchError as bad:
         raise LauncherRefused(f"[branch] {bad}") from bad
     finally:
         store.close()
 
 
-def _source_store(source_run_dir: Path) -> Any:
+def _source_store(source: Run) -> Any:
     """The source run's own session store, or `None` when it does not carry one
     (`branch.source_store_if_any`: a pointer that does not reconcile still refuses)."""
-    return branch.source_store_if_any(Path(source_run_dir))
+    return branch.source_store_if_any(source.run_dir, source_run=source)
 
 
-def branch_point_clock(source_run_dir: Path, branch_message_id: int) -> Any:
+def branch_point_clock(source: Run, branch_message_id: int) -> Any:
     """T0 — the moment every sibling resumes into — derived once for the whole family so the
     siblings share one clock.
 
@@ -479,10 +480,11 @@ def branch_point_clock(source_run_dir: Path, branch_message_id: int) -> Any:
     """
     import datetime as _dt
 
-    store = _source_store(Path(source_run_dir))
+    source_run_dir = source.run_dir
+    store = _source_store(source)
     if store is not None:
         try:
-            return branch.branch_point_time(store, Path(source_run_dir), branch_message_id)
+            return branch.branch_point_time(store, Path(source_run_dir), branch_message_id, source_run=source)
         finally:
             store.close()
     newest = max(
@@ -663,7 +665,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     # The family's base recording, parsed once for every world's registry.
     family_answers = read_family_answers(recording.base_path)
     # M01=A's fixed prefix, by the one rule the sibling's registry is handed too (`run.py`).
-    prebranch = prebranch_calls(source.run_dir, family.branch_message_id)
+    prebranch = prebranch_calls(source, family.branch_message_id)
 
     drift: list[dict[str, Any]] = []
     calibrated: list[tuple[_Original, Any, bool]] = []
@@ -722,7 +724,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
             roster, tenant.grants.gather, world=world, ledger=ledger, as_of=family.as_of,
             serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,
             tenant=tenant, grant_home=tenant.table_pointer, family_answers=family_answers,
-            source_run_dir=source.run_dir)
+            source_run=source)
         try:
             for call, base, fixed in calibrated:
                 if stop.is_set():
@@ -1798,7 +1800,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
     from defender.learning.lead_repository import joined, questioner_leads
 
     source_run_dir = source.run_dir
-    as_of = branch_point_clock(source_run_dir, ns.branch_message_id)
+    as_of = branch_point_clock(source, ns.branch_message_id)
     fences = _fence_count(source, ns.branch_message_id,
                           continuation_prompt=ns.continuation_prompt, as_of=as_of)
     leads = _joined_leads(source_run_dir, joined)
@@ -1815,7 +1817,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
         source_run_dir=source_run_dir, episode_dir=episode.dir,
         invoke=questioner,
         leads=questioner_leads(leads),
-        alert=branch.source_alert(source_run_dir) or {},  # lint-run-records: ok — the branch package's reader of the source run's alert, not the episode's copy accessor
+        alert=branch.source_alert(source) or {},  # lint-run-records: ok — the branch package's reader of the source run's alert, not the episode's copy accessor
         frontier=questioner_mod.read_frontier(source_run_dir, fences_at=fences),
         served_systems=tuple(served),
         samples=samples,
@@ -1857,13 +1859,13 @@ def _fence_count(source: Run, branch_message_id: int, *,
         return 0
     document = read_text_utf8(path)
     total = len(scan_fences(document).bodies)  # lint-row-drop: ok — a count of fences, not a read of their content; `fence_count_at` below answers whenever a session exists  # noqa: E501
-    store = _source_store(source.run_dir)
+    store = _source_store(source)
     if store is None:
         return total
     try:
         spec = BranchSpec(source_run_dir=source.run_dir, branch_message_id=branch_message_id,
                           continuation_prompt=continuation_prompt, as_of=as_of)
-        return fence_count_at(store, source_session(store, spec), branch_message_id, document)
+        return fence_count_at(store, source_session(store, spec, source_run=source), branch_message_id, document)
     finally:
         store.close()
 

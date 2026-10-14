@@ -16,10 +16,9 @@ from pydantic import model_validator
 
 
 
-from defender.run_repository import RunPaths, artifact_file
+from defender.run_repository import Run, RunPaths
 
 from .. import session_store
-from defender._io import read_text_utf8
 
 
 class BranchError(Exception):
@@ -97,7 +96,7 @@ def _field_types() -> dict[str, type]:
 _FIELD_TYPES = _field_types()
 
 
-def open_source_store(run_dir: Path) -> Any:
+def open_source_store(run_dir: Path, *, source_run: Run) -> Any:
     """The finished run's own store, opened for writing.
 
     A sibling forks into the source database, where the prefix rows live. The store's path is
@@ -108,15 +107,15 @@ def open_source_store(run_dir: Path) -> Any:
     macOS).
     """
     # Resolve first: `Path("run-x").parent` is `.`, which would derive the store under the cwd.
-    run_dir = Path(run_dir).resolve()
+    run_dir = source_run.run_dir.resolve()
     sessions = RunPaths(run_dir).session_paths()
-    if not artifact_file(RunPaths(run_dir).session_pointer()):
+    if source_run.observability.session_pointer.read_result().absent:
         _refuse_legacy(run_dir)
     # Every malformed-pointer failure (including `store_path_for`'s `InvalidCaseId`) becomes
     # `BranchError`, which the driver's store-setup handler catches.
     try:
         pointer = json.loads(
-            read_text_utf8(RunPaths(run_dir).session_pointer()))
+            source_run.observability.session_pointer.read())
         recorded = Path(pointer["store_path"]).resolve()
         case_id = pointer["case_id"]
         derived = session_store.store_path_for(case_id, sessions=sessions).resolve()
@@ -132,7 +131,7 @@ def open_source_store(run_dir: Path) -> Any:
     return session_store.open_store(case_id=case_id, sessions=sessions)
 
 
-def source_store_if_any(run_dir: Path) -> Any:
+def source_store_if_any(run_dir: Path, *, source_run: Run) -> Any:
     """The finished run's own store (`open_source_store`), or `None` when it carries no
     session pointer.
 
@@ -142,10 +141,10 @@ def source_store_if_any(run_dir: Path) -> Any:
     (wrong T0, the finished document's frontier, no fixed prefix). So does a run recorded
     before #1235, whose link is still inside its folder: it is not a run with no session.
     """
-    if not artifact_file(RunPaths(Path(run_dir)).session_pointer()):
+    if source_run.observability.session_pointer.read_result().absent:
         _refuse_legacy(Path(run_dir))
         return None
-    return open_source_store(run_dir)
+    return open_source_store(run_dir, source_run=source_run)
 
 
 def _refuse_legacy(run_dir: Path) -> None:
@@ -157,10 +156,10 @@ def _refuse_legacy(run_dir: Path) -> None:
         raise BranchError(str(e)) from e
 
 
-def store_factory_for(spec: BranchSpec):
+def store_factory_for(spec: BranchSpec, *, source_run: Run):
     """A `driver.StoreFactory` that hands back the source run's store; both arguments are
     ignored because a resume joins the source case rather than minting one."""
     def factory(case_id: str, run_dir: Path) -> Any:  # noqa: ARG001 — the factory's shape
-        return open_source_store(spec.source_run_dir)
+        return open_source_store(spec.source_run_dir, source_run=source_run)
 
     return factory

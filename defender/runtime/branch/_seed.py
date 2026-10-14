@@ -14,15 +14,13 @@ from typing import Any
 
 from defender import _alert_input
 from defender._io import (
-    guarded_mkdir, load_json_artifact, read_guarded, read_jsonl_rows, read_plain_bytes,
-    write_guarded,
+    load_json_artifact,
 )
-from defender.run_repository import RUN_LAYOUT, RunPaths, artifact_dir, artifact_file
+from defender.run_repository import RecordHandle, Run, RUN_LAYOUT, RunPaths, artifact_dir
 
 from ..run_state import RunState
 from ._spec import BranchError, BranchSpec
 from ._frontier import _lead_dirs, fence_count_at, leads_at, source_session
-from ._frontier import _lead_of
 
 
 #: Derived from `_lead_dirs()` so the census, the copy and the seeded-dir refusal cannot name
@@ -63,7 +61,7 @@ def _holds_content(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
 
-def seed_investigation(store: Any, spec: BranchSpec | None, run_state: RunState) -> int:
+def seed_investigation(store: Any, spec: BranchSpec | None, run_state: RunState, *, run: Run, source_run: Run | None = None) -> int:
     """Write the sibling's `investigation.md`: the source's document as it stood at the branch,
     then its evidence (`_inherit_evidence`, which records the inherited queries rows into the
     sibling's `run_state`).
@@ -84,13 +82,14 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_state: RunState)
     from defender.skills.invlang.parser import scan_fences
 
     run_dir = run_state.run_dir
-    target = RunPaths(run_dir).investigation
     refuse_seeded_run_dir(run_dir)
     # `read_guarded`, not `read_text_soft`: the source run dir was a box's rw bind, so the
     # document may be a planted link. Unreadable seeds empty, like missing.
-    source_text, _ = read_guarded(RunPaths(Path(spec.source_run_dir)).investigation)
+    if source_run is None:
+        raise BranchError("a resumed run requires its source Run")
+    source_text = source_run.documents.investigation.read()
     text = source_text if source_text is not None else ""
-    fences = fence_count_at(store, source_session(store, spec), spec.branch_message_id, text)
+    fences = fence_count_at(store, source_session(store, spec, source_run=source_run), spec.branch_message_id, text)
     bounds = scan_fences(text).spans
     if fences > len(bounds):
         # `validate` already refuses a snapped frontier; re-checked because a fork separates
@@ -117,125 +116,127 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_state: RunState)
             f"as a whole, and a run started on the prefix could never repair it "
             f"(append-only). {reason}"
         )
-    # `write_guarded` replaces a planted symlink at the target instead of following it.
-    write_guarded(target, seed)
+    # The record retains pristine-sibling refusal and validates the inherited baseline.
+    run.documents.investigation.seed(seed)
     _inherit_evidence(
-        Path(spec.source_run_dir), run_state,
-        leads_at(store, source_session(store, spec), spec.branch_message_id,
-                 Path(spec.source_run_dir)))
+        source_run, run_state,
+        leads_at(store, source_session(store, spec, source_run=source_run), spec.branch_message_id,
+                 Path(spec.source_run_dir), source_run=source_run), run=run)
     return fences
 
 
-def source_alert(source_run_dir: Path) -> dict[str, Any] | None:
+def source_alert(source_run: Run) -> dict[str, Any] | None:
     """The source run's alert (the case input) as a JSON object, or `None` when it is absent,
     not a plain file, or not a JSON object `load_json_artifact` accepts (nested too deep
     included). The one reader of it for the question-writer and the branching oracle's real
     data (#1224): never raises."""
-    source = RunPaths(source_run_dir)
     try:
         # Read only as the run's record vouches for it: a replaced alert is no alert here.
-        raw, _record = _alert_input.verified_alert(
-            source.alert, source.alert_record, run_name=Path(source_run_dir).name)
+        raw, _record = _alert_input.verify_input_bytes(
+            source_run.facts.alert.read_bytes().data, source_run.facts.alert_record.read(),  # lint-whole-read: ok — RecordHandle reads bounded original bytes through the rooted core
+            run_name=str(source_run.id))
         doc, unreadable = load_json_artifact(raw.decode("utf-8"))
     except (OSError, ValueError, BranchError, _alert_input.AlertReplaced):
         return None
     return doc if unreadable is None and isinstance(doc, dict) else None
 
 
-def _inherit_evidence(source_run_dir: Path, run_state: RunState, leads: set[str]) -> None:
-    """Copy the evidence the inherited prefix refers to into the sibling's run dir.
-
-    Copied, not linked: the sibling appends to these and must not write into the source's
-    record. Absent directories are fine (`validate` already refused an empty queries table).
-    Truncated to `leads` held at the branch point, so later evidence does not leak in.
-
-    The inherited queries rows are recorded into the sibling's `run_state` once the table
-    holding them is written, as the lines written, so its live decisions (the repeat guard, the
-    rejection budget, the next seq) count them from its first call.
-    """
-    # The alert (case input) and its record: a sibling `materialize_run` made already holds
-    # them (from the episode's copy); one built any other way gets the source's, checked
-    # against its record's digest on the way. Not in `_inherited()`: a freshly materialised
-    # sibling legitimately holds them.
-    run_dir = run_state.run_dir
+def _inherit_evidence(source_run: Run, run_state: RunState, leads: set[str], *, run: Run) -> None:
+    """Copy only the canonical evidence selected at the branch point, through both Runs."""
+    source_run_dir = source_run.run_dir
+    sibling = RunPaths(run.run_dir)
     source = RunPaths(source_run_dir)
-    sibling = RunPaths(run_dir)
-    if not sibling.alert.exists() and (source.alert.exists() or source.alert.is_symlink()):
-        try:
-            raw, _record = _alert_input.verified_alert(
-                source.alert, source.alert_record, run_name=Path(source_run_dir).name)
-        except _alert_input.AlertReplaced as replaced:
-            raise BranchError(str(replaced)) from replaced
-        record_text, _reason = read_guarded(source.alert_record)
-        guarded_mkdir(sibling.alert_input_dir, base=run_dir)
-        write_guarded(sibling.alert, raw)
-        write_guarded(sibling.alert_record, record_text or "")
-
-    queries = RunPaths(source_run_dir).executed_queries
-    if queries.exists() or queries.is_symlink():
-        # Refused, not skipped: skipping would seed a sibling that looks like it gathered nothing.
-        if not artifact_file(queries):
-            raise BranchError(
-                f"{queries} is not a plain file — following a link at the queries table's own "
-                "name would seed the sibling's evidence from outside the source run")
-        lines = [json.dumps(row) for row in read_jsonl_rows(queries)
-                 if str(row.get("lead_id", "")) in leads]
-        write_guarded(
-            RunPaths(run_dir).executed_queries,
-            # Whole-file rewrite, outside the append-mode JSONL gate's scope; left unmarked so
-            # a future conversion to append would be caught.
-            "".join(line + "\n" for line in lines))
-        run_state.inherit_rows(json.loads(line) for line in lines)
-    for name in _lead_dirs():
-        _inherit_lead_dir(source_run_dir / name, run_dir / name, leads, run_dir)
+    if not sibling.alert.exists():
+        alert = source_run.facts.alert.read_bytes()  # lint-whole-read: ok — RecordHandle delegates to the bounded no-follow core
+        if not alert.absent:
+            try:
+                raw, record_text = _alert_input.verify_input_bytes(
+                    alert.data, source_run.facts.alert_record.read(), run_name=source_run_dir.name)
+            except _alert_input.AlertReplaced as replaced:
+                raise BranchError(str(replaced)) from replaced
+            run.facts.alert.write(raw)
+            run.facts.alert_record.replace(record_text)
+    rows, _malformed, result = source_run.tables.queries.read_rows()
+    if result.reason is not None:
+        raise BranchError(f"{source.executed_queries} could not be copied: {result.reason}")
+    if not result.absent:
+        selected = [row for row in rows if str(row.get("lead_id", "")) in leads]
+        run.tables.queries.create("".join(json.dumps(row) + "\n" for row in selected))
+        run_state.inherit_rows(selected)
+    for src, dst in ((source.gather_raw, sibling.gather_raw),
+                     (source.gather_summaries, sibling.gather_summaries)):
+        _inherit_lead_dir(src, dst, leads, run.run_dir, source_run=source_run, run=run)
 
 
-def _inherit_lead_dir(src: Path, dst: Path, leads: set[str], run_dir: Path) -> None:
-    """Copy the entries of one per-lead directory that belong to `leads`.
-
-    Per entry through the guarded lane, so each is `lstat`-checked and a symlink planted by the
-    model (the run dir is a box's rw bind) is refused rather than followed. Refusals raise:
-    skipping silently would look like a lead that gathered nothing.
-    """
+def _inherit_lead_dir(src: Path, dst: Path, leads: set[str], run_dir: Path,
+                      *, source_run: Run, run: Run) -> None:
+    """Enumerate canonical names before reading or descending into inherited evidence."""
     if not src.exists():
         return
     if not artifact_dir(src):
-        raise BranchError(
-            f"{src} is not a plain directory — a sibling's evidence is copied out of it, and "
-            "following a link here would seed the run from outside the source's own tree")
-    # `write_guarded` does not create parents, so make the destination here, once.
-    guarded_mkdir(dst, base=run_dir)
+        raise BranchError(f"{src} is not a plain directory")
+    raw = src.name == RUN_LAYOUT.gather_raw.name
+    if not raw:
+        # Only the holding folder is prepared; this component creates no summary record.
+        run.documents.gather_summaries(src.name).ensure_parent()
+    names = _lead_record_names(leads, raw=raw)
+    valid_leads = set(names.values())
     for entry in sorted(src.iterdir()):
-        if _lead_of(entry.name) not in leads:
+        if raw and entry.name in valid_leads:
+            _inherit_payload_dir(entry, source_run=source_run, run=run)
             continue
-        if artifact_dir(entry):
-            guarded_mkdir(dst / entry.name, base=run_dir)
-            for payload in sorted(entry.iterdir()):
-                _copy_artifact(payload, dst / entry.name / payload.name)
-        else:
-            _copy_artifact(entry, dst / entry.name)
+        lead = names.get(entry.name)
+        if lead is None:
+            continue
+        source_record = (source_run.tables.leads(lead) if raw
+                         else source_run.documents.gather_summaries(lead))
+        target_record = (run.tables.leads(lead) if raw
+                         else run.documents.gather_summaries(lead))
+        _copy_artifact(source_record, target_record)
 
 
-def _copy_artifact(src: Path, dst: Path) -> None:
-    """Copy one artifact file into the sibling, refusing anything that is not one.
+def _lead_record_names(leads: set[str], *, raw: bool) -> dict[str, str]:
+    """Canonical selected file names, as the layout owner can produce them."""
+    names = {}
+    for lead in leads:
+        try:
+            name = (RUN_LAYOUT.lead_claim(lead).name if raw
+                    else RUN_LAYOUT.gather_summary(lead).name)
+        except ValueError:
+            continue
+        names[name] = lead
+    return names
 
-    Copies bytes, not decoded text, so an invalid UTF-8 payload does not raise mid-copy after
-    the fork has committed. The refusal names what was actually found.
-    """
-    if not artifact_file(src):
-        raise BranchError(f"{src} is {_not_a_plain_file(src)}")
-    write_guarded(dst, _plain_bytes(src))
+
+def _inherit_payload_dir(entry: Path, *, source_run: Run, run: Run) -> None:
+    if not artifact_dir(entry):
+        raise BranchError(f"{entry} is not a plain directory")
+    run.tables.payloads(entry.name, 0).ensure_parent()
+    for payload in sorted(entry.iterdir()):
+        stem = payload.stem
+        if not stem.isascii() or not stem.isdecimal():
+            continue
+        seq = int(stem)
+        if payload.name != RUN_LAYOUT.payload(entry.name, seq).name:
+            continue
+        _copy_artifact(source_run.tables.payloads(entry.name, seq),
+                       run.tables.payloads(entry.name, seq))
 
 
-def _plain_bytes(path: Path) -> bytes:
-    """`path`'s bytes through `read_plain_bytes`: opened no-follow and judged on the descriptor,
-    so a link swapped in after `artifact_file`'s lstat is refused at the open, and capped at
-    `READ_LIMIT` (#1188). Any refusal is this module's `BranchError`, never a raw `OSError`
-    partway through the fork."""
+def _copy_artifact(src: RecordHandle, dst: RecordHandle) -> None:
+    """Copy recognized bytes intact, refusing a missing or unreadable recognized artifact."""
+    data = _plain_bytes(src)
     try:
-        return read_plain_bytes(path)
-    except OSError as e:
-        raise BranchError(f"{path} could not be copied into the sibling: {e}") from e
+        dst.write(data)
+    except OSError as error:
+        raise BranchError(f"the source record could not be copied into the sibling: {error}") from error
+
+
+def _plain_bytes(record: RecordHandle) -> bytes:
+    found = record.read_bytes()  # lint-whole-read: ok — a RecordHandle, whose core enforces READ_LIMIT
+    if found.data is None:
+        raise BranchError(f"the source record could not be copied into the sibling: {found.reason}")
+    return found.data
 
 
 def _not_a_plain_file(path: Path) -> str:

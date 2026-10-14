@@ -186,6 +186,7 @@ def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
 def _start_boxed(
     run_dir: Path, defender_dir: Path, spec: BoxSpec, docker: DockerFn,
     shared_mounts: SharedMountsFn = _shared_mounts, tenant_agent: Path | None = None,
+    write_verdict: Callable[[dict], None] | None = None,
 ) -> BoxExecutor:
     name = container_name(run_dir.name)
     try:
@@ -193,7 +194,7 @@ def _start_boxed(
     except BoxFault as e:
         # Every startup fault path writes the did-not-run marker, so the tree never reads as
         # "not yet judged". This arm fires on any leaked container under a reused name.
-        write_did_not_run(run_dir, f"box start refused before create: {e}")
+        write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
     start_token = uuid.uuid4().hex
     create = _create_argv(
@@ -205,7 +206,7 @@ def _start_boxed(
         # the build remedy) rather than a create fault told apart by its text.
         require_image(docker, create.rootfs)
     except BoxFault as e:
-        write_did_not_run(run_dir, f"box start refused before create: {e}")
+        write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
     created = _call(docker, create.argv)
     if created.returncode != 0:
@@ -214,7 +215,7 @@ def _start_boxed(
         # best-effort and must not replace the create's stderr.
         write_did_not_run(
             run_dir, f"box create faulted before the box was startable: "
-                     f"{(created.stderr or '').strip()}"
+                     f"{(created.stderr or '').strip()}", write_verdict=write_verdict
         )
         _reap_on_fault(docker, name, owned_token=start_token)
         raise BoxFault(
@@ -228,7 +229,8 @@ def _start_boxed(
         # marker or replace `e`.
         _reap_on_fault(docker, name)
         write_did_not_run(
-            run_dir, f"box startup faulted before the reap scan could run: {e}"
+            run_dir, f"box startup faulted before the reap scan could run: {e}",
+            write_verdict=write_verdict
         )
         raise
     return BoxExecutor(
@@ -376,6 +378,7 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
 def start_box(
     run_dir_or_request: Path | BoxRequest, defender_dir: Path | None = None, *,
     spec: BoxSpec | None = None, docker: DockerFn = _docker, tenant_agent: Path | None = None,
+    write_verdict: Callable[[dict], None] | None = None,
 ) -> BoxExecutor:
     """Start the run's box. `tenant_agent` is the resolved tenant `agent/` half, bound
     read-only at `TENANT_AGENT_TARGET`; illegal with a `BoxRequest`, which carries its own
@@ -415,7 +418,8 @@ def start_box(
         # distinguishable from unset for the BoxRequest ambiguity check.
         spec = BoxSpec.from_env(os.environ)
     try:
-        return _start_boxed(run_dir, defender_dir, spec, docker, tenant_agent=tenant_agent)
+        return _start_boxed(run_dir, defender_dir, spec, docker, tenant_agent=tenant_agent,
+                            write_verdict=write_verdict)
     except BoxFault as e:
         _opt_out_or_raise(e)
     from defender import run_common
@@ -547,6 +551,8 @@ def stop_and_scrub(
     stop_box: Callable[..., None],
     scrub_tree: Callable[[Path], None],
     in_flight: bool,
+    read_verdict: Callable[[], str | None] | None = None,
+    write_verdict: Callable[[dict], None] | None = None,
 ) -> None:
     """Reap a boxed run: tear the box down, then walk the tree it could write.
 
@@ -565,7 +571,8 @@ def stop_and_scrub(
         box_down = True
     except BoxFault as e:
         # The scan cannot run either way, so mark before deciding whether to raise.
-        write_did_not_run(tree, f"teardown faulted before the reap scan could run: {e}")
+        write_did_not_run(tree, f"teardown faulted before the reap scan could run: {e}",
+                          write_verdict=write_verdict)
         if not in_flight:
             raise
         _logger.error(
@@ -577,7 +584,7 @@ def stop_and_scrub(
             scrub_tree(tree)
         finally:
             if not getattr(box, "sandboxed", True):
-                mark_unsandboxed(tree)
+                mark_unsandboxed(tree, read_verdict=read_verdict, write_verdict=write_verdict)
         # Crash-orphaned staged files are never overwritten by name, so sweep them. Only after
         # the walk (which must see them); a tainted tree never gets here.
         swept = sweep_staged(tree)

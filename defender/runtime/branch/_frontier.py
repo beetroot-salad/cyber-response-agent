@@ -16,11 +16,7 @@ from typing import Any
 from pydantic_ai.messages import RetryPromptPart, ToolCallPart, ToolReturnPart
 
 from defender import _clock
-from defender._io import (
-    read_jsonl_rows,
-    read_text_soft,
-)
-from defender.run_repository import RUN_LAYOUT, RunPaths, artifact_dir
+from defender.run_repository import Run, RUN_LAYOUT, RunPaths, artifact_dir
 
 from .. import session_store
 from ._spec import BranchError, BranchSpec
@@ -97,7 +93,7 @@ def main_session(store: Any) -> str:
         raise BranchError(f"the source store holds no single root 'main' session: {e}") from e
 
 
-def source_session(store: Any, spec: BranchSpec) -> str:
+def source_session(store: Any, spec: BranchSpec, *, source_run: Run) -> str:
     """The source run's own main session — the lineage root only when the source is not itself
     a sibling.
 
@@ -105,13 +101,13 @@ def source_session(store: Any, spec: BranchSpec) -> str:
     transcript while seeding from the source's document. The case pointer records the run's own
     session; when it names none (fresh runs), the root is correct.
     """
-    return session_for_run(store, Path(spec.source_run_dir))
+    return session_for_run(store, Path(spec.source_run_dir), source_run=source_run)
 
 
-def session_for_run(store: Any, run_dir: Path) -> str:
+def session_for_run(store: Any, run_dir: Path, *, source_run: Run) -> str:
     """`source_session`'s answer for a run dir; T0 is derived before a `BranchSpec` exists."""
     try:
-        recorded = session_store.resolve_session_id(Path(run_dir))
+        recorded = session_store.resolve_session_id(source_run)
     except (OSError, ValueError):
         # `open_source_store` already refuses an unreadable pointer on the store-opening path;
         # elsewhere the root is the fallback. A run recorded before #1235
@@ -120,14 +116,14 @@ def session_for_run(store: Any, run_dir: Path) -> str:
     return recorded if recorded is not None else main_session(store)
 
 
-def branch_point_time(store: Any, run_dir: Path, branch_message_id: int) -> datetime:
+def branch_point_time(store: Any, run_dir: Path, branch_message_id: int, *, source_run: Run) -> datetime:
     """The moment the branch point was written — the clock a sibling resumes into.
 
     Read from the store's message timestamps. The maximum over the prefix, since a resumed
     lineage can interleave and T0 must not precede evidence the sibling inherits. Truncated to
     whole seconds so it round-trips through the `Z`-seconds format `validate` compares against.
     """
-    session = session_for_run(store, run_dir)
+    session = session_for_run(store, run_dir, source_run=source_run)
     path = session_store.path_row_ids(store, session)
     if branch_message_id not in path:
         raise BranchError(
@@ -194,7 +190,7 @@ def _refuse_bad_as_of(spec: BranchSpec, derived: datetime) -> None:
             "other and with nothing else")
 
 
-def frontier_at_branch(store: Any, spec: BranchSpec):
+def frontier_at_branch(store: Any, spec: BranchSpec, *, source_run: Run):
     """The investigation's open state as it stood at the branch point.
 
     `frontier_at` is imported lazily: the driver imports this package, and the invlang frontier
@@ -202,12 +198,12 @@ def frontier_at_branch(store: Any, spec: BranchSpec):
     """
     from defender.skills.invlang.frontier import frontier_at
 
-    text, _ = read_text_soft(RunPaths(Path(spec.source_run_dir)).investigation)
+    text = source_run.documents.investigation.read()
     # No document reads as the empty frontier, which `validate` refuses.
     document = text if text is not None else ""
     return frontier_at(
         document,
-        fence_count_at(store, source_session(store, spec), spec.branch_message_id, document))
+        fence_count_at(store, source_session(store, spec, source_run=source_run), spec.branch_message_id, document))
 
 
 #: The tool whose call/return pair is the only join from a message id to a run's evidence — the
@@ -228,7 +224,7 @@ def _drop_refused_dispatch(
         del dispatches[refused]
 
 
-def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path) -> set[str]:
+def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path, *, source_run: Run) -> set[str]:
     """Which gather leads the run held by `branch_message_id`.
 
     Query rows carry no timestamp or message id, so leads are dated by their `gather`
@@ -270,7 +266,7 @@ def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path)
                 claimed = pending.pop(part.tool_call_id, None)
                 if claimed is not None and row_id <= branch_message_id:
                     landed.add(claimed)
-    return landed | (_known_leads(run_dir) - set(dispatches))
+    return landed | (_known_leads(run_dir, source_run=source_run) - set(dispatches))
 
 
 #: The per-lead evidence directories, shared by the census, the evidence copy and its refusal.
@@ -279,19 +275,19 @@ def _lead_dirs() -> tuple[str, ...]:
     return (RUN_LAYOUT.gather_raw.name, RUN_LAYOUT.gather_summaries.name)
 
 
-def _known_leads(run_dir: Path) -> set[str]:
+def _known_leads(run_dir: Path, *, source_run: Run) -> set[str]:
     """Every lead this run dir names, by any of the three artifacts that name one.
 
     Not just the query table: a lead is claimed (`gather_raw/{lead}.lead.json`) before it runs
     and may have no rows. Missing its claim, the sibling would re-dispatch an id its prefix
     already used and `claim_lead` would refuse the reuse.
     """
-    paths = RunPaths(run_dir)
     known = {
-        str(row.get("lead_id")) for row in read_jsonl_rows(paths.executed_queries)
+        str(row.get("lead_id")) for row in source_run.tables.queries.read_rows()[0]
         if row.get("lead_id")
     }
-    for directory in (run_dir / name for name in _lead_dirs()):
+    paths = RunPaths(source_run.run_dir)
+    for directory in (paths.gather_raw, paths.gather_summaries):
         # `artifact_dir`, not `is_dir()`: a planted link would contribute its target's entries.
         if artifact_dir(directory):
             known |= {_lead_of(entry.name) for entry in directory.iterdir()}

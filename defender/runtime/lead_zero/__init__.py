@@ -189,7 +189,7 @@ def _classify_end(end: LeadEnd, run_state: RunState, system: str) -> str | None:
 
 
 async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit per way the lead fails to start; the dispatch seams
-    *, run_state: RunState, defender_dir: Path, verbs: Any, limits: dict,
+    *, run: Any, run_state: RunState, defender_dir: Path, verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any,
     catalog: str | None, dispatch: CorrelationDispatch, tenant: Any, deadline: float,
 ) -> CorrelationOutcome:
@@ -209,10 +209,10 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     claimed = claim_lead({
         "run_dir": str(run_dir), "lead_id": L3, "goal": goal,
         "what_to_summarize": what_to_summarize, PROVENANCE_KEY: HARNESS_PROVENANCE,
-    })
+    }, run=run)
     if claimed == ALREADY_CLAIMED:
         return CorrelationOutcome(ending=ENDING_CLAIM_COLLIDED, system=system)
-    if claimed != CLAIMED or not _declare_l_finding(run_dir, L3, "correlation lead", system):
+    if claimed != CLAIMED or not _declare_l_finding(run, L3, "correlation lead", system):
         return CorrelationOutcome(ending=ENDING_CLAIM_FAILED, system=system)
     # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name, which a
     # harness dispatch never emits. It spends the run's one budget; nothing is reserved for it.
@@ -234,7 +234,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     try:
         async with asyncio.timeout(deadline) as frame:
             wrapped = await run_correlation_lead(
-                run_state=run_state, defender_dir=defender_dir, goal=goal,
+                run=run, run_state=run_state, defender_dir=defender_dir, goal=goal,
                 what_to_summarize=what_to_summarize, verbs=verbs, limits=limits,
                 make_model=make_model, logger=logger, box=box, store=store,
                 catalog=catalog,

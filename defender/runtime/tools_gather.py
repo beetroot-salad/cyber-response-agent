@@ -1,21 +1,19 @@
-
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
 from dataclasses import replace
-from defender._model import model
-from typing import NamedTuple
+from defender.runtime.tools._deps import run_of
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
-from defender._io import guarded_mkdir, write_guarded
-from defender.run_repository import RunPaths
+from defender._model import model
 from defender.hooks.budget_enforcer import BudgetKill
+from defender.run_repository import Run
 
 from . import circuit_breaker
 from .run_state import run_state_of
@@ -41,7 +39,6 @@ from .verbs import SYSTEM_MAX_LEN, is_system_name
 from defender.runtime.verb_grant import VerbGrant
 
 _logger = logging.getLogger(__name__)
-
 
 
 @model(frozen=True)
@@ -256,7 +253,6 @@ def _gather_prompt(
     return block
 
 
-
 _NO_HITS = (
     "no template matches {pattern!r} (searched {scope}). This means no template's text carries "
     "that text — NOT that the catalog is empty. Try a different keyword (a daemon name, a field, "
@@ -376,11 +372,9 @@ class LeadRecordFault(session_store.StoreError):
     through the store exit rather than asking the model to retry."""
 
 
-def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
+def _persist_gather_summary(run: Run, lead_id: str, wrapped: str) -> None:
     try:
-        target = RunPaths(run_dir).gather_summary(lead_id)
-        guarded_mkdir(target.parent, base=run_dir)
-        write_guarded(target, wrapped)
+        run.documents.gather_summaries(lead_id).write(wrapped)
     except Exception as e:  # noqa: BLE001 — persistence must never break the run
         _logger.warning(f"gather-summary persist skipped for {lead_id}: {e!r}")
 
@@ -501,7 +495,7 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
         claimed = _claim_lead({
             "run_dir": str(deps.run_dir), "lead_id": lead_id,
             "goal": request.goal, "what_to_summarize": list(request.what_to_summarize),
-        })
+        }, run=run_of(deps))
         if claimed == ALREADY_CLAIMED:
             raise ModelRetry(_LEAD_REUSE_RETRY.format(lead_id=lead_id))
         if claimed != CLAIMED:
@@ -535,6 +529,7 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
         lead_id=lead_id,
         # The run's state, by reference: the lead counts into the run's one budget and breaker.
         run_state=deps.run_state,
+        run=run_of(deps),
         stop=stop,
         tenant=deps.tenant,
         harness_lead=getattr(deps, "harness_lead", False),
@@ -601,7 +596,7 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
     terminator, output = _compose(lead_id, stop, summary, fault)
     stamp(terminator)
     wrapped = wrap_fresh(output, "untrusted")
-    _persist_gather_summary(deps.run_dir, lead_id, wrapped)
+    _persist_gather_summary(run_of(deps), lead_id, wrapped)
     return wrapped
 
 

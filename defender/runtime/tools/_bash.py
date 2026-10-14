@@ -24,7 +24,7 @@ from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 from defender.runtime.sql_engine import sql as defender_sql
 from defender.scripts.gather_tools import record_query
 from defender._query_rules import BASH_SHIM_QUERY_ID
-from ._deps import AgentDeps, GatherDeps, _BASH_TIMEOUT_S, _BASH_VERB, _INFRA_EXIT_CODE, _bounded_read, _cap_for, _format_bash_result, _overflow_filter_hint, _read_char_cap
+from ._deps import run_of, AgentDeps, GatherDeps, _BASH_TIMEOUT_S, _BASH_VERB, _INFRA_EXIT_CODE, _bounded_read, _cap_for, _format_bash_result, _overflow_filter_hint, _read_char_cap
 
 
 def _bash_env(deps: AgentDeps) -> dict[str, str]:
@@ -79,6 +79,7 @@ def _record_shim_failure(
     try:
         record_query.append_query_row(
             state,
+            run=run_of(deps),
             lead_id=lead_id,
             # The payload's system, not the argv's (`sql` is not a system). `""` when no run
             # payload was opened; routing uses the sentinel `query_id` either way.

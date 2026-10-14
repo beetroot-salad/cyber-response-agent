@@ -27,9 +27,9 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from defender._io import guarded_mkdir, read_text_utf8, write_guarded
+from defender._io import guarded_mkdir
 from defender._run_id import CASE_ID_RE  # noqa: F401 — re-export; the rule lives with the id rules
-from defender.run_repository import RunPaths, SessionPaths
+from defender.run_repository import Run, SessionPaths
 from defender._store_errors import InvalidCaseId, StoreError  # noqa: F401 — re-exports
 # The `truncated_by` vocabulary and its normalizer are owned by `runtime/run_end.py`;
 # re-exported for the column's writers. Non-store readers import them from the owner.
@@ -703,7 +703,7 @@ def open_store_for_read(store_path: Path) -> StoreHandle:
 
 
 def write_case_pointer(
-    run_dir: Path, *, case_id: str, store_path: Path, session_id: str | None = None,
+    run: Run, *, case_id: str, store_path: Path, session_id: str | None = None,
 ) -> None:
     """Record which database holds this run's messages, and which session in it is the run's.
 
@@ -711,11 +711,10 @@ def write_case_pointer(
     the store's root session is the source run's. Omitted for a fresh run, where readers fall
     back to the root correctly.
     """
-    run_dir = Path(run_dir)
     body: dict = {"case_id": case_id, "store_path": str(store_path)}
     if session_id is not None:
         body["session_id"] = session_id
-    write_guarded(RunPaths(run_dir).session_pointer(), json.dumps(body))
+    run.observability.session_pointer.write(json.dumps(body))
 
 
 class LegacyRunLink(StoreError):
@@ -742,27 +741,32 @@ def refuse_legacy_link(run_dir: Path) -> None:
             "it belongs to is unknown. Runs recorded before #1235 are not read; re-run it.")
 
 
-def _case_pointer(run_dir: Path) -> Any:
+def _case_pointer(run: Run) -> Any:
     """The run -> case link beside `run_dir`, parsed. `FileNotFoundError` when there is none,
     `LegacyRunLink` when the run was recorded before #1235."""
     try:
-        text = read_text_utf8(RunPaths(run_dir).session_pointer())
+        result = run.observability.session_pointer.read_result()
+        if result.absent:
+            raise FileNotFoundError(str(run.observability.session_pointer.path))
+        if result.text is None:
+            raise OSError(result.reason)
+        text = result.text
     except FileNotFoundError:
-        refuse_legacy_link(run_dir)
+        refuse_legacy_link(run.run_dir)
         raise
     return json.loads(text)
 
 
-def resolve_store_path(run_dir: Path) -> Path:
-    data = _case_pointer(run_dir)
+def resolve_store_path(run: Run) -> Path:
+    data = _case_pointer(run)
     return Path(data["store_path"])
 
 
-def resolve_session_id(run_dir: Path) -> str | None:
+def resolve_session_id(run: Run) -> str | None:
     """The session this run owns, or `None` when the pointer names none (a fresh run); the
     caller then falls back to `main_session_id`.
     """
-    data = _case_pointer(run_dir)
+    data = _case_pointer(run)
     session_id = data.get("session_id")
     return session_id if isinstance(session_id, str) and session_id else None
 

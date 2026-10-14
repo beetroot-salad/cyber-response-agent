@@ -34,6 +34,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
+from defender.runtime.tools._deps import run_of
 from defender._io import write_guarded
 from defender import _git
 from defender._knowledge import KnowledgePaths
@@ -74,7 +75,7 @@ from defender.hooks.inject_system_skill_description import descriptor_catalog
 from defender import _clock
 from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
-from defender.run_repository import RunPaths
+from defender.run_repository import Run, RunPaths
 from ..run_tenant import RunTenant
 from ._prompts import (
     BUDGET_ENFORCE_FLAG,
@@ -154,7 +155,7 @@ def _default_store_factory(case_id: str, run_dir: Path) -> Any:
     return session_store.open_store(case_id=case_id, sessions=RunPaths(run_dir).session_paths())
 
 
-def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None) -> StoreFactory:
+def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None, *, source_run: Run | None = None) -> StoreFactory:
     """Which store this run opens, derived from whether it is a resume.
 
     A fresh run mints its own (or takes the injected one); a resume joins the source run's,
@@ -163,7 +164,9 @@ def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None) -> S
     would silently truncate the prefix instead of erroring.
     """
     if resume is not None:
-        return branch.store_factory_for(resume)
+        if source_run is None:
+            raise branch.BranchError("a resumed run requires its source Run")
+        return branch.store_factory_for(resume, source_run=source_run)
     if store_factory is not None:  # lint-default: ok — DI seam owning its default
         return store_factory
     return _default_store_factory
@@ -332,7 +335,7 @@ def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
     report with no record beside it.
     """
     try:
-        run_end.write_sidecar(deps.run_dir, end)
+        run_end.write_sidecar(run_of(deps), end)
         return True
     except OSError as e:
         _logger.warning(f"run-end record write skipped: {e!r}")
@@ -433,7 +436,7 @@ def _adapters_at_run_start(
 
 
 def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
-    *, run_dir: Path, logger: Any, store: Any, session_id: str, truncated_by: str,
+    *, run: Run, run_dir: Path, logger: Any, store: Any, session_id: str, truncated_by: str,
     exit_reason: str, model_name: str | None, case_id: str, wall_ms: float,
 ) -> dict:
     """End a run whose cause of death arrived BEFORE MAIN's first request (a run-level kill
@@ -443,7 +446,7 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
     _flush_run_end(None, store, session_id, truncated_by)
     end = run_end.RunEnd(truncated_by, closed_before_cut=False)
     try:
-        run_end.write_sidecar(run_dir, end)
+        run_end.write_sidecar(run, end)
     except OSError as e:
         _logger.warning(f"run-end record write skipped: {e!r}")
     try:
@@ -462,7 +465,7 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
 
 
 async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the run's identity for an early stop
-    correlation: CorrelationDispatch, *, run_dir: Path, defender_dir: Path, run_id: str,
+    correlation: CorrelationDispatch, *, run: Run, run_dir: Path, defender_dir: Path, run_id: str,
     verbs: Any, limits: dict, make_model: MakeModel, logger: Any, box: Any, store: Any,
     session_id: str, case_id: str, model_name: str | None, run_state: RunState,
     catalog: str | None, tenant: RunTenant, deadline: float, run_started: float,
@@ -477,13 +480,13 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
 
     def stop(truncated_by: str, exit_reason: str) -> dict:
         return _stop_before_main(
-            run_dir=run_dir, logger=logger, store=store, session_id=session_id,
+            run=run, run_dir=run_dir, logger=logger, store=store, session_id=session_id,
             truncated_by=truncated_by, exit_reason=exit_reason, model_name=model_name,
             case_id=case_id, wall_ms=(time.monotonic() - run_started) * 1000.0)
 
     try:
         outcome = await lead_zero_mod.run_correlation(
-            run_state=run_state, defender_dir=defender_dir, verbs=verbs,
+            run=run, run_state=run_state, defender_dir=defender_dir, verbs=verbs,
             limits=limits, make_model=make_model, logger=logger, box=box, store=store,
             catalog=catalog,
             dispatch=correlation, tenant=tenant, deadline=deadline)
@@ -517,8 +520,8 @@ async def _drive_releasing_log(logger: Any, *args: Any) -> Any:
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
     *,
     alert_path: Path,
-    run_dir: Path,
-    run_id: str,
+    run: Run,
+    source_run: Run | None = None,
     defender_dir: Path,
     model_name: str | None = None,
     make_model: MakeModel | None = None,
@@ -544,6 +547,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # driven — and carried by reference to every role of the run; a branch sibling's seeding
     # records its inherited rows into it. The summary does not hand it out: a caller that wants
     # it passes its own.
+    run_dir, run_id = run.run_dir, str(run.id)
     state = _run_state_at_boundary(run_state, run_dir, run_id)
     model_name = resolve_main_model(model_name)
     # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not
@@ -569,7 +573,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         else 0.0)
     # Under `wire_logs/`, not the run root, so it is outside the agents' one-segment run-dir
     # read shape.
-    logger = observe.RequestLogger(observe.wire_log_path(run_dir))
+    logger = observe.RequestLogger.from_record(run.observability.wire_log)
 
     # The live review bundle is built here, after the logger, so review calls are logged and
     # priced with the run's own `RequestLogger`.
@@ -592,18 +596,18 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     case_id = uuid.uuid4().hex
     # Default and resume precedence live in `_resolve_store_factory`.
-    factory = _resolve_store_factory(resume, store_factory)
     store = None
     try:
+        factory = _resolve_store_factory(resume, store_factory, source_run=source_run)
         store = factory(case_id, run_dir)
         # A resume joins the source run's case, so the case pointer comes from the store, not
         # the uuid minted above (they match on a fresh run). `run_dir` is passed because a
         # resumed MAIN inherits the investigation document as well as the message history.
-        session_id, resume_history = branch.open_main_session(store, resume, state)
+        session_id, resume_history = branch.open_main_session(store, resume, state, run=run, source_run=source_run)
         # Written after the session opens, so a refused branch leaves no pointer naming the
         # source run's store. Rebound so `_run_summary` names the case this run joined.
         case_id = branch.attach_case_pointer(
-            store, resume, run_dir, case_id=case_id, session_id=session_id)
+            store, resume, run, case_id=case_id, session_id=session_id)
     # A refused branch point (`BranchError`) is a setup failure like a store fault; letting it
     # escape would leave the connection and the wire log open.
     except (sqlite3.Error, session_store.StoreError, branch.BranchError, OSError) as e:
@@ -641,7 +645,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             CorrelationOutcome(ending=ENDING_WITHHELD), grant_home=tenant.table_pointer)
     if correlation is not None:
         correlation_section, stopped = await _correlation_phase(
-            correlation, run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
+            correlation, run=run, run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
             verbs=lead_zero_verbs, limits=limits, make_model=make_model, logger=logger, box=box,
             store=store, session_id=session_id, case_id=case_id, model_name=model_name,
             catalog=correlation_catalog,
@@ -667,14 +671,15 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         # #1106 M3, #1107, #1235.
         tenant=tenant,
         run_state=state,
+        run=run,
     )
 
-    run, end, exit_reason = await _drive_releasing_log(
+    agent_run, end, exit_reason = await _drive_releasing_log(
         logger, agent, prompt, deps, store, session_id, gate_bounds, resume_history,
     )
     wall_ms = (time.monotonic() - run_started) * 1000.0
 
-    result = run.result if run is not None else None
+    result = agent_run.result if agent_run is not None else None
     try:
         observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
     except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
