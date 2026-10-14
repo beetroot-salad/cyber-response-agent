@@ -95,7 +95,11 @@ def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
     scene = curator_scene(tmp_path)
     (scene.corpus / "curated-936.md").write_text(
         "---\nname: curated-936\n---\nlesson body\n", encoding="utf-8")
+    # This telemetry case explicitly supplies a record owner; ordinary curators need none.
+    from defender.run_repository import Run
+
     deps = curator_deps(scene)
+    deps = _with_live_run_1165(deps, run=Run.at(deps.run_dir))
     assert deps.role is AgentRole.CORPUS_AUTHOR, "control: the deps are the curator's"
 
     assert "lesson body" in _tool_lesson_read(deps, "defender/lessons/curated-936.md")

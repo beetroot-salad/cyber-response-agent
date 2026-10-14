@@ -367,7 +367,7 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
     real.mkdir()
     link = tmp_path / "link"
     link.symlink_to(real, target_is_directory=True)
-    run_dir = materialize(link, GOLDEN_AB3)
+    run_dir = materialize(link, GOLDEN_AB3, run_id="r1235-v2-link")
     probe = Probe()
 
     state = _pool_script(run_dir, run_id="r1235-v2-link", probe=probe)["run_state"]
@@ -377,10 +377,10 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
     assert all(s is state for s in probe.states), (
         "the gather lead's verb context carried a state other than the run's")
     assert state.run_id == "r1235-v2-link"
-    assert state.run_dir.resolve() == (real / "run").resolve()
+    assert state.run_dir.resolve() == (real / "r1235-v2-link").resolve()
     snapshot = state.budget_snapshot()
     assert (snapshot["tool_calls"], snapshot["subagent_spawns"]) == (5, 2), snapshot
-    assert list(state.lead_rows(LEAD)) == _rows(real / "run"), (
+    assert list(state.lead_rows(LEAD)) == _rows(real / "r1235-v2-link"), (
         "the state's rows and the table read through the real spelling disagree")
     assert len(state.lead_rows(LEAD)) == 2
 
