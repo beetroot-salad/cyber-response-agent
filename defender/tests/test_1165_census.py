@@ -41,13 +41,17 @@ from defender.run_repository import Run as Investigation, RecordHandle as Record
 def f(run: Investigation, record: Record, mystery):
     alias = record
     alias.read_bytes()
+    alias.replace("record")
+    run.facts.alert_record.replace("record")
     run.facts.alert.read_bytes()
     run.tables.payloads('l-001', 0).read_bytes()
     record.path.read_bytes()
     mystery.read_bytes()
+    record.path.replace("outside")
+    mystery.replace("outside")
 """
     hits = C.census_source("runtime/planted.py", source)
-    assert len(hits) == 2
+    assert len(hits) == 4
     assert {hit.expression for hit in hits} == {"record.path", "mystery"}
     assert C.deviations(hits, {})
 
@@ -121,6 +125,7 @@ def test_missing_sweep_directory_and_unparseable_modules_fail(tmp_path):
 # Exact residual occurrences are intentionally small, categorized, and not regenerated from
 # implementation. The live-state files and durable record writers are not exemptions.
 RESIDUE = {
+    ("runtime.driver._build", "_fold_decision", "read_text_utf8"): (1, "m_read"),
     ("hooks.inject_system_skill_description", "read_description", "read_text_soft"): (1, "nonrecord", ('skill_path',)),
     ("runtime.bash_policy", "_load_policy", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("runtime.box._docker", "_own_container_ids", "read_text_soft"): (2, "nonrecord", ('hostname_path', 'mountinfo_path')),

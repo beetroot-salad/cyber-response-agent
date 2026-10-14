@@ -120,7 +120,7 @@ def census_source(rel: str, source: str) -> list[Hit]:
         key = vocabulary._call_key(call, scan, aliases) or _reader(call.func, scan)
         if key is None:
             continue
-        if (key in {".read_bytes", "Path.read_bytes"} and isinstance(call.func, ast.Attribute)
+        if (key in {".read_bytes", "Path.read_bytes", ".replace", "Path.replace"} and isinstance(call.func, ast.Attribute)
                 and _record_receiver(call.func.value, scan)):
             continue
         # A method's receiver is the target; a resolved module/static primitive uses its
@@ -132,7 +132,7 @@ def census_source(rel: str, source: str) -> list[Hit]:
                        ast.unparse(target) if target is not None else "<no target>"))
     for scope, node in visitor.refs:
         key = vocabulary._ref_key(node, scan, aliases) or _reader(node, scan)
-        if (key in {".read_bytes", "Path.read_bytes"} and isinstance(node, ast.Attribute)
+        if (key in {".read_bytes", "Path.read_bytes", ".replace", "Path.replace"} and isinstance(node, ast.Attribute)
                 and _record_receiver(node.value, scan)):
             continue
         if key is not None:
