@@ -316,3 +316,38 @@ def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, t
     assert not (foreign / "agent").exists()
     assert git(foreign, "for-each-ref", "--format=%(refname)",
                f"refs/heads/{d.branch.branch_name('ambient')}") == ""
+
+
+def test_commit_refuses_foreign_repository_under_worktree_base_regardless_of_process_cwd(repo, monkeypatch):
+    """O7: sharing a worktree parent and relative Git metadata spelling does not confer ownership."""
+    d = delivery(repo, ForgeHTTP())
+    wt = d.start_batch("repo-owner")
+    tenant = repo[0]
+    tenant_head = git(tenant.knowledge, "rev-parse", "HEAD")
+    foreign = tenant.worktrees / "foreign-repository"
+    (foreign / "agent/lessons").mkdir(parents=True)
+    git(foreign, "init", "-b", d.branch.branch_name("repo-owner"))
+    git(foreign, "config", "user.name", "Foreign")
+    git(foreign, "config", "user.email", "foreign@test.invalid")
+    (foreign / "agent/lessons/seed.md").write_text("foreign seed\n")
+    git(foreign, "add", ".")
+    git(foreign, "commit", "-m", "foreign seed")
+    foreign_head = git(foreign, "rev-parse", "HEAD")
+    (foreign / "outside.txt").write_text("preserve foreign index\n")
+    git(foreign, "add", "outside.txt")
+    (foreign / "agent/lessons/new.md").write_text("foreign authored\n")
+    assert git(foreign, "rev-parse", "--git-common-dir") == ".git"
+    assert git(foreign, "diff", "--cached", "--name-only") == "outside.txt"
+    foreign_index = git(foreign, "ls-files", "--stage")
+    with monkeypatch.context() as process:
+        process.chdir(tenant.knowledge)
+        (wt / "agent/lessons/new.md").write_text("tenant authored\n")
+        d.commit(wt, ["agent/lessons/new.md"], "genuine worktree succeeds")
+        assert git(wt, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD") == "agent/lessons/new.md"
+        assert git(wt, "show", "HEAD:agent/lessons/new.md") == "tenant authored"
+        with pytest.raises(target().DeliveryRefused, match="repo|worktree|tenant|path"):
+            d.commit(foreign, ["agent/lessons/new.md"], "foreign must refuse")
+    assert git(foreign, "rev-parse", "HEAD") == foreign_head
+    assert git(foreign, "diff", "--cached", "--name-only") == "outside.txt"
+    assert git(foreign, "ls-files", "--stage") == foreign_index
+    assert git(tenant.knowledge, "rev-parse", "HEAD") == tenant_head
