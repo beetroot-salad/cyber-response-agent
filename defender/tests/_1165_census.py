@@ -88,10 +88,6 @@ def _target(node: ast.expr | None, scan, seen: frozenset[str] = frozenset()) -> 
         return "tool_trace"
     if "box_sentinel" in attributes:
         return "probe"
-    owned = any(isinstance(part, ast.expr) and astlib.owner_derived(part, scan.env)
-                for part in ast.walk(node))
-    if owned:
-        return "working_file" if attributes & WORKING else "record"
     if isinstance(node, ast.Name) and node.id not in seen:
         fn = scan.innermost_def(node)
         if fn is not None:
@@ -100,6 +96,10 @@ def _target(node: ast.expr | None, scan, seen: frozenset[str] = frozenset()) -> 
                      if binding.value is not None}
             if kinds and kinds != {"unresolved"}:
                 return next(iter(kinds)) if len(kinds) == 1 else "unresolved"
+    owned = any(isinstance(part, ast.expr) and astlib.owner_derived(part, scan.env)
+                for part in ast.walk(node))
+    if owned:
+        return "working_file" if attributes & WORKING else "record"
     if any(isinstance(part, ast.Name) and part.id.endswith("run_dir")
            for part in ast.walk(node)):
         return "record"

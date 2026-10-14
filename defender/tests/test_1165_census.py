@@ -178,3 +178,19 @@ RESIDUE = {
 def test_running_investigation_io_equals_declared_counted_residue():
     package = Path(__file__).resolve().parents[1]
     assert C.deviations(C.collect(package), RESIDUE) == []
+
+
+def test_working_file_alias_keeps_member_classification_without_exempting_fact_reads():
+    body = """
+from defender.run_repository import RunPaths
+from defender._io import read_text_utf8
+def f(run_dir):
+    inv = RunPaths(run_dir).investigation
+    alias = inv
+    read_text_utf8(alias)
+"""
+    hits = C.census_source("runtime/planted.py", body)
+    key = ("runtime.planted", "f", "read_text_utf8")
+    assert C.deviations(hits, {key: (1, "m_read")}) == []
+    fact = C.census_source("runtime/planted.py", body.replace(".investigation", ".alert_record"))
+    assert C.deviations(fact, {key: (1, "m_read")})
