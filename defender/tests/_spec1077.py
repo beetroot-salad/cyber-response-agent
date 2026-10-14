@@ -232,7 +232,7 @@ MEMBER_CAPABILITIES.update({
     "payloads": frozenset({"write", "ensure_parent"}),
     "gather_summaries": frozenset({"write", "ensure_parent"}),
     "alert_record": frozenset({"write", "replace"}),
-    "queries": frozenset({"append", "create"}),
+    "queries": frozenset({"append", "seed"}),
     "policy_denials": frozenset({"append_text", "start_stream"}),
     "investigation": frozenset({"write", "seed"}),
     "wire_log": frozenset({"append_text", "start_stream"}),

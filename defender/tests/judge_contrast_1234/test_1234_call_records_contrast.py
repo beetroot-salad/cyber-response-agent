@@ -1101,7 +1101,7 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "writes_by": "append", "via": (), "failed_write": "records state, then raises OSError",
         "call_id": "this run's", "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
     "runtime/branch/_seed.py::_inherit_evidence": {
-        "writes_by": "create", "via": (), "failed_write": "refuses the seed",
+        "writes_by": "seed", "via": (), "failed_write": "refuses the seed",
         "call_id": "none of this run's (seeded)",
         "driven_by": "test_1234_every_query_table_writer_writes_this_runs_call_id"},
     # The archive's verbatim copy of the run's finished table into `worlds/<X>/`.
@@ -1157,7 +1157,7 @@ def call_record_write_sites(trees: Iterable[tuple[str, ast.AST]]) -> set[str]:
             table = name == "append_query_row" or (
                 name in _WRITE_PRIMITIVES and _mentions([*node.args, *node.keywords],
                                                         "executed_queries"))
-            if isinstance(node.func, ast.Attribute) and name in {"append", "create"}:
+            if isinstance(node.func, ast.Attribute) and name in {"append", "seed"}:
                 receiver = node.func.value
                 table = table or (
                     isinstance(receiver, ast.Attribute) and receiver.attr == "queries"
@@ -1177,10 +1177,11 @@ from defender.run_repository import Run
 def append_row(run: Run):
     run.tables.queries.append([{}])
 def seed_rows(run: Run):
-    run.tables.queries.create('')
+    run.tables.queries.seed([])
 def unrelated(run: Run, mystery):
     run.tables.payloads('l-001', 0).write(b'{}')
     mystery.tables.queries.append([{}])
+    mystery.tables.queries.seed([])
 """
     assert call_record_write_sites([("runtime/planted.py", ast.parse(source))]) == {
         "runtime/planted.py::append_row", "runtime/planted.py::seed_rows"}

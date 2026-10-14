@@ -27,6 +27,7 @@ def test_every_swept_io_shape_is_rejected_without_residue(body):
 def test_handled_record_operations_are_not_path_io():
     body = """
 def f(run):
+    run.tables.queries.seed([{'lead_id': 'l-001'}])
     run.tables.queries.append([{'lead_id': 'l-001'}])
     run.tables.payloads('l-001', 0).write(b'opaque')
     run.documents.report.write('report')

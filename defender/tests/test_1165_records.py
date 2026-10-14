@@ -22,7 +22,7 @@ def test_generic_records_expose_only_their_added_store_operations(tmp_path, grou
         assert callable(getattr(record, reader, None)), (name, reader)
     expected = {
         "payloads": {"ensure_parent"}, "gather_summaries": {"ensure_parent"},
-        "alert_record": {"replace"}, "queries": {"create"}, "investigation": {"seed"}, "ticket_write": {"delete"},
+        "alert_record": {"replace"}, "queries": {"seed"}, "investigation": {"seed"}, "ticket_write": {"delete"},
         "wire_log": {"append_text", "start_stream"},
         "policy_denials": {"append_text", "start_stream"},
         "review_trace": {"append_text"},
@@ -184,24 +184,47 @@ def test_bytes_are_opaque_text_is_strict_and_jsonl_keeps_existing_tolerance(tmp_
         record.read_result(errors="ignore")
 
 
-@pytest.mark.parametrize("seed", ['{"seq": 1, "text": "caf\\u00e9"}\n',
-                                  b'{"seq": 1}\r\n'])
-def test_query_create_is_exclusive_byte_faithful_and_followed_by_normal_append(tmp_path, seed):
-    """O3: one-time inherited table creation neither reencodes nor overwrites its seed."""
+@pytest.mark.parametrize("scaffold", ["absent", "empty"])
+@pytest.mark.parametrize("rows", [[], [{"z": "café", "a": 2}, {"seq": 0, "params": {"tuple": [1, 2]}}]])
+def test_query_seed_serializes_a_snapshot_then_normal_append_continues(tmp_path, scaffold, rows):
+    """O2/O3: seed replaces absent/empty views, including a present empty snapshot."""
     io = S.RecordingIo()
-    record = run_at(tmp_path, io=io).tables.queries
-    record.create(seed)
-    expected = seed.encode("utf-8") if isinstance(seed, str) else seed
+    run = run_at(tmp_path, io=io)
+    record = run.tables.queries
+    if scaffold == "empty":
+        record.path.write_bytes(b"")
+    # The caller has already admitted the sibling and seeded its investigation.
+    run.documents.investigation.path.write_text("# inherited investigation\n", encoding="utf-8")
+    record.seed(rows)
+    expected = "".join(json.dumps(row) + "\n" for row in rows).encode("utf-8")
+    assert record.path.is_file()
     assert record.path.read_bytes() == expected
-    with pytest.raises(FileExistsError):
-        record.create(b"replacement")
-    row = {"z": "caf\u00e9", "a": 2}
+    calls = writes(io, record.path)
+    assert len(calls) == 1
+    assert calls[0]["mode"] == "replace"
+    assert calls[0]["text"] == expected.decode("utf-8")
+    assert not {"write_guarded", "append_jsonl", "rooted_delete"} & set(io.ops)
+
+    row = {"later": "café", "seq": 3}
     record.append([row])
     assert record.path.read_bytes() == expected + (json.dumps(row) + "\n").encode("utf-8")
-    calls = writes(io, record.path)
-    assert calls[0]["mode"] == "create"
-    assert calls[0]["text"] == seed
-    assert calls[-1]["mode"] == "append"
+    assert [call["mode"] for call in writes(io, record.path)] == ["replace", "append"]
+
+
+def test_query_seed_can_replace_a_prior_view_under_caller_owned_freshness(tmp_path):
+    """O3/O4: generic seed has no extra content policy or whole-Run freshness check."""
+    io = S.RecordingIo()
+    run = run_at(tmp_path, io=io)
+    record = run.tables.queries
+    prior = b'{"old": "view"}\n'
+    record.path.write_bytes(prior)
+    run.documents.investigation.path.write_text("# already seeded\n", encoding="utf-8")
+    record.seed([{"sparse": "snapshot", "first_key": 1}])
+    assert record.path.read_bytes() == b'{"sparse": "snapshot", "first_key": 1}\n'
+    record.seed([])
+    assert record.path.is_file()
+    assert record.path.read_bytes() == b""
+    assert [call["mode"] for call in writes(io, record.path)] == ["replace", "replace"]
 
 
 @pytest.mark.parametrize(("member", "args"), [("wire_log", ()), ("policy_denials", ())])

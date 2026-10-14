@@ -116,50 +116,136 @@ def test_recognized_source_payload_refusal_still_fails_fork(tmp_path, kind):
     assert not target.tables.payloads("l-001", 0).path.exists()
 
 
-def test_query_seed_is_created_before_state_inheritance_and_malformed_rows_stay_tolerated(tmp_path):
-    """O4/O6: seed parsing keeps old JSONL tolerance and records rows after create succeeds."""
-    store, spec, source, target, state, source_io, target_io = source_and_sibling(tmp_path)
-    first = {"lead_id": "l-001", "seq": 0, "params": {"tuple": [1, 2]}}
-    later = {"lead_id": "l-002", "seq": 9, "query_id": "other.later"}
-    # A later dispatch exists in the source transcript, past the selected branch point.
-    # Its query must remain outside the inherited prefix, despite being in the source table.
+def query_snapshot_source(tmp_path, *, selected_empty):
+    """A nonempty source capture whose later dispatch lies beyond the chosen branch point."""
     from defender.runtime import session_store
     from defender.tests._session_store_705 import tool_call_response, tool_return_request
 
+    case = source_and_sibling(tmp_path)
+    store, _spec, source, _target, _state, _source_io, _target_io = case
+    first = {"lead_id": "l-001", "seq": 0, "params": {"tuple": [1, 2]}, "text": "café"}
+    later = {"lead_id": "l-002", "seq": 9, "query_id": "other.later"}
     session = session_store.main_session_id(store)
     store.append(session, [tool_call_response("gather", {"lead_id": "l-002"}, tool_call_id="late")],
                  agent_id="main")
     store.append(session, [tool_return_request("gather", "later summary", tool_call_id="late")],
                  agent_id="main")
-    source.tables.queries.path.write_text(json.dumps(first) + "\n{broken\n[]\n" + json.dumps(later) + "\n")
+    selected = [] if selected_empty else [first]
+    source.tables.queries.path.write_text(
+        "".join(json.dumps(row) + "\n" for row in selected) + "{broken\n[]\n" + json.dumps(later) + "\n",
+        encoding="utf-8")
+    return (*case, selected)
+
+
+@pytest.mark.parametrize("scaffold", ["absent", "empty"])
+@pytest.mark.parametrize("selected_empty", [False, True])
+def test_query_seed_replaces_the_snapshot_before_state_inheritance(tmp_path, scaffold, selected_empty):
+    """O2/O4/O6: selected rows, even none, replace scaffolding before entering live state."""
+    store, spec, source, target, state, source_io, target_io, selected = query_snapshot_source(
+        tmp_path, selected_empty=selected_empty)
+    path = target.tables.queries.path
+    if scaffold == "empty":
+        path.write_bytes(b"")
     seen = []
 
     def before(root, relative, data, options):
         if relative == "executed_queries.jsonl":
+            # Refuse unlink/retry substitutions: scaffolding still exists at the backend call.
             seen.append((list(state.lead_rows("l-001")), options["mode"], data))
+            assert path.exists() == (scaffold == "empty")
+            if scaffold == "empty":
+                assert path.read_bytes() == b""
+            assert target.documents.investigation.path.read_bytes(), "the document seeds first"
 
     target_io.before_write = before
     seed(store, spec, source, target, state)
-    assert seen
-    assert seen[0][0] == []
-    assert seen[0][1] == "create"
-    disk = [json.loads(line) for line in target.tables.queries.path.read_text().splitlines()]
-    assert first in disk
-    assert later not in disk
-    assert list(state.lead_rows("l-001")) == [first]
+    expected = "".join(json.dumps(row) + "\n" for row in selected)
+    assert seen == [([], "replace", expected)]
+    assert path.is_file(), "an empty selected snapshot is a present zero-byte table"
+    assert path.read_bytes() == expected.encode("utf-8")
+    assert list(state.lead_rows("l-001")) == selected
     assert state.lead_rows("l-002") == ()
     assert any(relative == "executed_queries.jsonl" for _op, _root, relative, _mode in source_io.calls)
 
 
-def test_query_seed_failure_leaves_live_rows_empty(tmp_path):
-    """O6: a query seed that cannot land must not populate live state."""
-    store, spec, source, target, state, _source_io, target_io = source_and_sibling(tmp_path)
+@pytest.mark.parametrize("scaffold", ["absent", "empty"])
+@pytest.mark.parametrize("selected_empty", [False, True])
+def test_query_seed_failure_preserves_the_original_view_and_empty_live_state(tmp_path, scaffold, selected_empty):
+    """O2/O6: failed replace leaves the zero-byte scaffold intact and inherits no rows."""
+    store, spec, source, target, state, _source_io, target_io, _selected = query_snapshot_source(
+        tmp_path, selected_empty=selected_empty)
+    path = target.tables.queries.path
+    if scaffold == "empty":
+        path.write_bytes(b"")
+    original_inode = path.stat().st_ino if path.exists() else None
+    modes = []
+
+    def before(root, relative, data, options):
+        if relative == "executed_queries.jsonl":
+            modes.append(options["mode"])
+            assert state.lead_rows("l-001") == ()
+            assert path.exists() == (scaffold == "empty")
+            if scaffold == "empty":
+                assert path.read_bytes() == b""
+                assert path.stat().st_ino == original_inode
+
+    target_io.before_write = before
     target_io.fail = ("rooted_write", "executed_queries.jsonl")
     with pytest.raises((OSError, branch.BranchError)):
         seed(store, spec, source, target, state)
     assert state.lead_rows("l-001") == ()
-    assert "executed_queries.jsonl" in target_io.names("rooted_write")
-    assert not target.tables.queries.path.exists()
+    assert state.lead_rows("l-002") == ()
+    assert modes == ["replace"]
+    assert path.exists() == (scaffold == "empty")
+    if scaffold == "empty":
+        assert path.read_bytes() == b""
+        assert path.stat().st_ino == original_inode
+
+
+@pytest.mark.parametrize("selected_empty", [False, True])
+def test_open_main_session_accepts_a_zero_byte_query_scaffold(tmp_path, selected_empty):
+    """O1/O2/O7: the actual pre-fork freshness check admits an empty table and seeds it."""
+    store, spec, source, target, state, _source_io, target_io, selected = query_snapshot_source(
+        tmp_path, selected_empty=selected_empty)
+    target.tables.queries.path.write_bytes(b"")
+    sessions_before = store.connection.execute("SELECT COUNT(*) FROM session").fetchone()[0]
+    session_id, visible = branch.open_main_session(store, spec, state, run=target, source_run=source)
+    assert visible
+    assert store.connection.execute("SELECT COUNT(*) FROM session").fetchone()[0] == sessions_before + 1
+    parent_id, truncated_by = store.connection.execute(
+        "SELECT parent_session_id, truncated_by FROM session WHERE session_id = ?", (session_id,)
+    ).fetchone()
+    assert parent_id is not None
+    assert truncated_by is None
+    assert target.tables.queries.path.read_bytes() == "".join(
+        json.dumps(row) + "\n" for row in selected).encode("utf-8")
+    assert list(state.lead_rows("l-001")) == selected
+    assert [mode for op, _root, relative, mode in target_io.calls
+            if op == "rooted_write" and relative == "executed_queries.jsonl"] == ["replace"]
+
+
+@pytest.mark.parametrize("occupied", ["nonempty", "symlink"])
+def test_open_main_session_refuses_occupied_queries_before_fork(tmp_path, occupied):
+    """O7: an occupied or linked sibling table is refused before a committed child exists."""
+    store, spec, source, target, state, _source_io, target_io = source_and_sibling(tmp_path)
+    path = target.tables.queries.path
+    content = b'{"existing": "sibling evidence"}\n'
+    outside = tmp_path / "existing-queries"
+    outside.write_bytes(content)
+    if occupied == "symlink":
+        path.symlink_to(outside)
+    else:
+        path.write_bytes(content)
+    sessions_before = store.connection.execute("SELECT COUNT(*) FROM session").fetchone()[0]
+    with pytest.raises(branch.BranchError, match="fresh sibling|already holds"):
+        branch.open_main_session(store, spec, state, run=target, source_run=source)
+    assert store.connection.execute("SELECT COUNT(*) FROM session").fetchone()[0] == sessions_before
+    assert path.is_symlink() == (occupied == "symlink")
+    assert path.read_bytes() == content
+    assert outside.read_bytes() == content
+    assert not target.documents.investigation.path.exists()
+    assert state.lead_rows("l-001") == ()
+    assert "executed_queries.jsonl" not in target_io.names("rooted_write")
 
 
 def test_seed_validates_against_itself_and_remains_writable(tmp_path):
