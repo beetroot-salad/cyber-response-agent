@@ -1741,10 +1741,10 @@ REGRESSIONS: dict[str, Regression] = {
          "    revived = [p for p in absent if _on_disk(cwd, p)]\n"
          "    present = [*present, *revived]\n"
          "    if present:\n        git([\"add\", \"--\", *present], cwd=cwd, env=env)\n", 1),
-        ("def git_fetch(cwd: Path) -> None:\n",
+        ("def git_fetch(",
          "_PROBE = \"lstat\"\n\n\ndef _on_disk(cwd: Path, path: str) -> bool:\n    try:\n"
          "        getattr(os, _PROBE)(f\"{cwd}/{path}\")\n    except OSError:\n"
-         "        return False\n    return True\n\n\ndef git_fetch(cwd: Path) -> None:\n", 1),
+         "        return False\n    return True\n\n\ndef git_fetch(", 1),
     ), (("_on_disk", "getattr", "getattr(os, _PROBE)", 1),)),
     # A8: the settle's folder test asks the corpus folder's spelling, following a link.
     "s5v3-A8-settle-folder-test-by-a-plain-isdir": Regression(DRAIN, (

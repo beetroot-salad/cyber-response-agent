@@ -42,7 +42,7 @@ def test_git_credential_location_has_one_production_owner():
                 parent = parents[id(node)]
                 assert (isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Div)) or (
                     isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute)
-                    and parent.func.attr == "joinpath"
+                    and parent.func.attr == "joinpath"  # lint-ast-resolve: ok — path-construction spelling census; no callable-binding claim
                 ), f"{path}:{node.lineno}: layout credential literal must only construct a path"
             else:
                 assert path == _OWNER, f"{path}:{node.lineno}: extra forge credential location owner"
@@ -63,7 +63,7 @@ def test_tenant_delivery_has_no_production_callers_until_p4():
             elif isinstance(node, ast.Attribute):
                 names.append(node.attr)
             elif isinstance(node, ast.alias):
-                names.extend((node.name, node.asname or ""))
+                names.extend((node.name, node.asname or ""))  # lint-ast-resolve: ok — dormant-symbol lexical ban includes aliases, not binding resolution
             elif isinstance(node, ast.ImportFrom):
                 names.append(node.module or "")
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):

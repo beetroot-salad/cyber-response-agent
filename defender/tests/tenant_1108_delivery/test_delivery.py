@@ -275,3 +275,44 @@ def test_delivery_refuses_forbidden_history_even_when_reverted_before_allowed_le
     assert not http.creates
     assert git(repo[1], "for-each-ref", "--format=%(refname)",
                f"refs/heads/{d.branch.branch_name('reverted-bypass')}") == ""
+
+
+@pytest.mark.parametrize("ambient", ["git-dir", "work-tree", "both"])
+def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, tmp_path, monkeypatch, ambient):
+    """O7: accepted tenant geography owns Git, even when the drain inherits Git env vars."""
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    git(foreign, "init", "-b", "main")
+    (foreign / "foreign-only.md").write_text("another repository\n")
+    git(foreign, "add", ".")
+    git(foreign, "commit", "-m", "foreign seed")
+    foreign_head = git(foreign, "rev-parse", "HEAD")
+    expected = git(repo[0].knowledge, "rev-parse", "HEAD")
+    http = ForgeHTTP()
+    with monkeypatch.context() as env:
+        if ambient in {"git-dir", "both"}:
+            env.setenv("GIT_DIR", str(foreign / ".git"))
+        if ambient in {"work-tree", "both"}:
+            env.setenv("GIT_WORK_TREE", str(foreign))
+        d = delivery(repo, http)
+        wt = d.start_batch("ambient")
+        assert (wt / "agent/lessons/seed.md").read_text() == "seed\n"
+        assert not (wt / "foreign-only.md").exists()
+        (wt / "agent/lessons/ambient.md").write_text("tenant authored\n")
+        d.commit(wt, ["agent/lessons/ambient.md"], "tenant ambient context")
+        http.fail_create = True
+        with pytest.raises(target().DeliveryRefused, match="503|forge|PR|pull"):
+            d.finish_batch("ambient", wt)
+        d.branch.cleanup(wt)
+        http.fail_create = False
+        assert d.deliver("ambient").endswith("/pulls/7")
+    branch = d.branch.branch_name("ambient")
+    local_sha = git(repo[0].knowledge, "rev-parse", branch)
+    assert git(repo[1], "rev-parse", branch) == local_sha
+    assert git(repo[1], "rev-parse", "main") == expected
+    assert git(repo[0].knowledge, "show", f"{branch}:agent/lessons/ambient.md") == "tenant authored"
+    assert git(repo[0].knowledge, "diff-tree", "--no-commit-id", "--name-only", "-r", local_sha) == "agent/lessons/ambient.md"
+    assert git(foreign, "rev-parse", "HEAD") == foreign_head
+    assert not (foreign / "agent").exists()
+    assert git(foreign, "for-each-ref", "--format=%(refname)",
+               f"refs/heads/{d.branch.branch_name('ambient')}") == ""
