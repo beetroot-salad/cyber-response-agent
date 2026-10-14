@@ -50,7 +50,7 @@ from .. import run_end
 from .. import selection
 from .. import session_store
 from .. import toon_gate as toon_gate_mod
-from ..agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
+from ..agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
 from .. import review_roles
@@ -651,7 +651,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt = _opening_prompt(
         resume, run_dir, alert_path, defender_dir,
         systems=tuple(roster.accepted), correlation_section=correlation_section,
-        orient_shim=orient_shim,
+        orient_shim=orient_shim, tenant_agent=tenant.agent,
     )
 
     agent = build_agent(
@@ -660,7 +660,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         toolset=toolset, catalog=catalog, gather_grant=tenant.grants.gather,
     )
     deps = replace(
-        bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
+        bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box,
+             scope=RunScope(tenant_agent=tenant.agent)),
         run_id=run_id,
         # The run's tenant record and its state ride on MAIN's deps so every gather lead it
         # dispatches inherits them (`_run_gather` carries both onto the lead's deps) —

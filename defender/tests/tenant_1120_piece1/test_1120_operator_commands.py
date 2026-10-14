@@ -436,7 +436,7 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
         box_mod.DEFAULT_SPEC, (), tenant_agent=agent).argv
     mounts = _mount_specs(argv)
-    agent_mounts = [m for m in mounts if m.get("target") == str(box_mod.TENANT_AGENT_TARGET)]
+    agent_mounts = [m for m in mounts if m.get("target") == str(agent)]
     assert len(agent_mounts) == 1, mounts
     assert Path(agent_mounts[0]["source"]).resolve() == H.agent_dir(data_root).resolve()
     assert "readonly" in agent_mounts[0], agent_mounts
@@ -486,7 +486,8 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
     no key containing TENANT (C13 — a child learns its tenant from --tenant and the data root
     from its own environment, never from the box). The box env rendered from a request env
     that carries DEFENDER_DATA_ROOT and a tenant key drops both, and the docker run argv's
-    --env keys are the allowlist's. The positive control: the allowlist carries DEFENDER_DIR,
+    --env keys are the required allowlist keys; optional DEFENDER_AGENT_DIR is absent in
+    this tenant-free fixture. The positive control: the allowlist carries DEFENDER_DIR,
     and the rendered env keeps it."""
     allow = box_codec.BOX_ENV_ALLOWLIST
     assert "DEFENDER_DIR" in allow
@@ -505,7 +506,8 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
         "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
         box_mod.DEFAULT_SPEC, ()).argv
     env_keys = {v.partition("=")[0] for f, v in zip(argv, argv[1:], strict=False) if f == "--env"}
-    assert env_keys == set(allow), env_keys
+    assert env_keys == set(allow) - {"DEFENDER_AGENT_DIR"}, env_keys
+    assert "DEFENDER_AGENT_DIR" not in env_keys
 
 
 # ======================================================================================

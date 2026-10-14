@@ -69,7 +69,7 @@ _SYSTEMS = ("elastic", "cmdb")
 #: this set against the tree, so a seventh authored directory fails here rather than silently
 #: making every prose copy wrong. Two of these are agent system prompts (`gather/SKILL.md`,
 #: `invlang/SKILL.md`), which is the whole of #772.
-#: `judge` left in #922 with the role: `skills/judge/verb-roster.md` advertised three ticket
+#: `judge` left in #922 with the role: its generated guidance advertised three ticket
 #: verbs to any reader, and nothing could dispatch them once the role was gone.
 _AUTHORED_SURFACES = ("advisory", "connect", "gather", "handbook", "invlang")
 
@@ -136,9 +136,9 @@ def test_the_lane_cannot_write_the_invlang_grammar_main_is_handed(tmp_path: Path
         "handbook/content/design.md",
         "connect/adapter.md",
         "connect/checklist.md",
-        "judge/verb-roster.md",
+        "judge/synthetic-reference.md",
         "gather/failure-modes.md",
-        "gather/verb-roster.md",
+        "gather/synthetic-reference.md",
         "gather/defender-sql.md",
     ],
 )

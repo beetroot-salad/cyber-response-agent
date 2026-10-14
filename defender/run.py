@@ -375,7 +375,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     """Start the box, run the investigation inside it, and reap both on every exit
     (`box_mod.stop_and_scrub` owns the stop/scrub ordering and rules).
     """
-    box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent)
+    box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id)
     investigation_ok = False
     try:
         summary = investigate(
@@ -699,7 +699,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
             if ns.update_ticket:
                 ticket_writer.open_case_ticket(
                     run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
-                    env=_run.run_env(DEFENDER_DIR, run_dir))
+                    env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
 
             _logger.info(f"run_dir={run_dir} model={model}")
             _announce_provenance(run_dir)
@@ -750,7 +750,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
                 # Both inputs come from the driver's summary, not from a possibly stale sidecar.
                 ticket_writer.record_case_ticket(
                     run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
-                    env=_run.run_env(DEFENDER_DIR, run_dir), truncated_by=summary.get("truncated_by"),
+                    env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
                     closed_before_cut=summary.get("closed_before_cut") is True)
 
             # A sibling's evidence was staged on purpose, so it must never feed the catalog.

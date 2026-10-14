@@ -162,14 +162,14 @@ def _build_corpus_vocab_section(
 def orientation(
     run_dir: Path, defender_dir: Path, alert_path: Path,
     *, systems: Sequence[str], lead_zero_section: str | None = None,
-    shim: ShimRunner | None = None,
+    shim: ShimRunner | None = None, tenant_agent: Path | None = None,
 ) -> str:
     """`shim` is the injection seam for the lessons and corpus-vocabulary sections' three
     subprocesses; omitted, they run for real."""
     run_shim = shim if shim is not None else _shim
     try:
         from defender import run_common
-        env = run_common.run_env(defender_dir, run_dir)
+        env = run_common.run_env(defender_dir, run_dir, tenant_agent=tenant_agent)
     except Exception:  # noqa: BLE001 — orientation must never break the run
         env = {}
     # The alert is read once, checked against the digest the run recorded at its start; the

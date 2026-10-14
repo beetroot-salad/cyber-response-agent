@@ -739,6 +739,11 @@ class AliasProbeDocker(RecordingDocker):
 
     def __call__(self, argv, **kw) -> subprocess.CompletedProcess:
         argv = list(argv)
+        if (len(argv) > 1 and argv[1] == "exec"
+                and argv[-4:-2] == ["python3", "-c"] and argv[-1].endswith("/.tenant-id")):
+            # A marker path may itself name a banned shape; only the base's bind-mapped
+            # command execution can answer this read without consuming an alias verdict.
+            return super().__call__(argv, **kw)
         # WHOLE-TOKEN, not substring. Under the old substring test an unrelated `docker exec`
         # whose argv merely contained the letters "link" was counted as a probe; the token
         # reader requires the shape to be named as itself.

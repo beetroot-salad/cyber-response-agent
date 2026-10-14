@@ -1,16 +1,6 @@
-"""The grant-derived model-facing verb roster, and the build-time audit over every artifact
-the model reads.
-
-The roster is generated from a `VerbGrant` as data (no adapter code executed) and carries a
-digest so a hand-edited copy fails to load. The audit scans model-read surfaces for verb names
-the relevant role's grant withholds, in three forms: `query(system=..., verb=...)`, a dotted
-`system.verb`, and a bare verb name (attributed to the file's owning system when it declares
-the name, else to every system that does). Each generated roster is scored against its own
-role's grant, since scoring every surface against one role would flag other roles' rosters.
-"""
+"""Build-time audit over the instruction and query artifacts the model reads."""
 from __future__ import annotations
 
-import hashlib
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -25,7 +15,6 @@ from defender._io import read_text_utf8
 _AUDIT_DEFAULT_ROLE = "gather"
 _ROSTER_FILENAME = "verb-roster.md"
 
-_HEADER_RE = re.compile(r"\A<!-- GENERATED verb-roster role=(\S+) digest=([0-9a-f]{64}) -->\n")
 
 #: Name groups are spelled from `verbs.SYSTEM_PATTERN`. `_QUALIFIED_CALL_RE` is anchored on
 #: `query(system="`, so it takes the full alphabet, digit-leading names included.
@@ -40,66 +29,12 @@ _CALL_ID_RE = re.compile(rf"\b([a-z]{_CALL_ID_TAIL})\.([a-z]{_CALL_ID_TAIL})\b")
 
 
 class RosterError(Exception):
-    """A verb-roster generation or load defect."""
-
-
-def roster_path(defender_dir: Path, role: str) -> Path:
-    return Path(defender_dir) / "skills" / role / _ROSTER_FILENAME
-
-
-def generate_roster(grant: VerbGrant, *, defender_dir: Path) -> str:
-    """Generate the role's roster from `grant`, write it to its committed path, and return it.
-
-    Systems with no granted verb are omitted. A missing or unwritable `defender_dir` raises
-    `RosterError`; there is no fallback to previously written text."""
-    root = Path(defender_dir)
-    if not root.is_dir():
-        raise RosterError(f"{root} does not exist — refusing to generate a roster into it")
-
-    by_system: dict[str, list[str]] = {}
-    for system, verb, _cls in grant.entries:
-        by_system.setdefault(system, []).append(verb)
-
-    body_lines: list[str] = []
-    for system in sorted(by_system):
-        body_lines.append(f"## {system}")
-        body_lines.append("")
-        for verb in sorted(set(by_system[system])):
-            body_lines.append(f"- `{system}.{verb}`")
-        body_lines.append("")
-    body = ("\n".join(body_lines).rstrip() + "\n") if body_lines else ""
-    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
-    text = f"<!-- GENERATED verb-roster role={grant.role} digest={digest} -->\n{body}"
-
-    path = roster_path(root, grant.role)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-    except OSError as e:
-        raise RosterError(f"could not write roster for role {grant.role!r} at {path}: {e}") from e
-    return text
-
-
-def load_roster(defender_dir: Path, role: str) -> str:
-    """The committed roster; raises `RosterError` if the body no longer matches its header digest."""
-    path = roster_path(defender_dir, role)
-    try:
-        text = read_text_utf8(path)
-    except OSError as e:
-        raise RosterError(f"no roster for role {role!r} at {path}: {e}") from e
-    match = _HEADER_RE.match(text)
-    if match is None:
-        raise RosterError(f"{path} carries no recognizable generated-roster header")
-    body = text[match.end():]
-    expected = hashlib.sha256(body.encode("utf-8")).hexdigest()
-    if match.group(2) != expected:
-        raise RosterError(f"{path} has drifted from its generated form — hand-edited?")
-    return text
+    """An unreadable adapter declaration prevents the model-surface audit."""
 
 
 def model_read_surfaces(defender_dir: Path) -> tuple[Path, ...]:
     """Every model-read surface: each skill's `SKILL.md`/`execution.md`, every query template
-    (including `_draft`), and every generated roster. Read off the tree on each call."""
+    (including `_draft`). Read off the tree on each call."""
     root = Path(defender_dir)
     skills = root / "skills"
     out: list[Path] = []
@@ -220,8 +155,5 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
 __all__ = [
     "RosterError",
     "audit_read_surfaces",
-    "generate_roster",
-    "load_roster",
     "model_read_surfaces",
-    "roster_path",
 ]

@@ -684,7 +684,12 @@ def read_tenant_id_file(path: Path) -> TenantId:
     bounded, as UTF-8. Anything else — a BOM, a space, a second line, an empty file, a
     non-file, an oversize file — is `TenantRefused` naming the file.
 
-    @owns tenant-id — the `agent/.tenant-id` file's content, read here and nowhere else."""
+    The byte reader and parser below also serve the read-back from the run box."""
+    return parse_tenant_id_bytes(read_tenant_id_bytes(path), path)
+
+
+def read_tenant_id_bytes(path: Path) -> bytes:
+    """Read a marker without following a link, blocking on a FIFO, or exceeding its cap."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
@@ -700,6 +705,16 @@ def read_tenant_id_file(path: Path) -> TenantId:
         raise TenantRefused(f"{path} could not be read: {unreadable}") from unreadable
     finally:
         os.close(fd)
+    if len(data) > _TENANT_ID_FILE_MAX:
+        raise TenantRefused(
+            f"{path} is larger than {_TENANT_ID_FILE_MAX} bytes — it holds only a tenant id")
+    return data
+
+
+def parse_tenant_id_bytes(data: bytes, path: Path) -> TenantId:
+    """Judge marker bytes read on the host or read back through the run box.
+
+    @owns tenant-id — exactly an id plus at most one LF or CRLF, bounded as UTF-8."""
     if len(data) > _TENANT_ID_FILE_MAX:
         raise TenantRefused(
             f"{path} is larger than {_TENANT_ID_FILE_MAX} bytes — it holds only a tenant id")

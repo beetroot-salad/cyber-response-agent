@@ -20,6 +20,7 @@ BOX_ENV_ALLOWLIST: tuple[str, ...] = (
     "DEFENDER_DIR",
     "DEFENDER_RUN_DIR",
     "DEFENDER_RUNS_BASE",
+    "DEFENDER_AGENT_DIR",
     "PATH",
     "PYTHONPATH",
     "LANG",

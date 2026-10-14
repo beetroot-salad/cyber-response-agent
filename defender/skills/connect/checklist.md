@@ -43,11 +43,10 @@ Two silent gaps to know about, neither of them a FAIL:
   dropped from the corpus by `iter_query_templates` with a `warn:` on stderr
   and is never checked at all. A tree whose ONLY template is malformed
   reports the "no seed query templates" WARN and exits 0.
-- template `id:` frontmatter is not checked here. That invariant
-  (`id` == `{system}.{filename}`) is real and is enforced in CI over the
-  whole committed catalog by `test_d24_every_template_id_matches_its_system_dir_and_filename`
-  and by `test_verb_roster_632.py`'s census (which also fails a template
-  that declares no `id:` at all) — just not by this script.
+- template `id:` frontmatter is not checked here. CI enforces
+  `id` == `{system}.{filename}` for templates yielded by `iter_query_templates`
+  in `test_d24_every_template_id_matches_its_system_dir_and_filename`.
+  An id-less template is dropped with the stderr warning described above.
 
 (For the MCP path there is no adapter module to check —
 `validate_scaffold.py` is adapter-specific. Run the judgment list below
@@ -103,7 +102,7 @@ find and route to the system. Ask:
       (`when_to_use` / `gaps`) without reading anything credentialed?
 - [ ] Does `execution.md` let the gather subagent dispatch without reading
       the adapter source?
-- [ ] Do the seed templates plus the verb roster give a fresh-context Haiku
+- [ ] Do the seed templates plus the adapter declarations give a fresh-context Haiku
       enough to compose a valid first query?
 - [ ] Is anything missing that the offline lead-author would need to start
       extracting templates from a real run?
