@@ -126,7 +126,7 @@ def _inherited_state(source: Path):  # noqa: ANN202 — a `RunState` (#1235: not
     sibling = source / "sibling"
     sibling.mkdir()
     state = RunState(sibling, "r1017-sibling")
-    _inherit_evidence(source, state, {LEAD}, run=_writer_run_1165(state.run_dir), source_run=_writer_run_1165(source))
+    _inherit_evidence(_writer_run_1165(source), state, {LEAD}, run=_writer_run_1165(state.run_dir))
     return state
 
 

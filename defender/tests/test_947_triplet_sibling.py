@@ -19,6 +19,8 @@ RED against b8a63e66: `run.py` has no resume argument at all (C3/PO-C29) and
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
 from defender.tests._spec1077 import fixture_run as _run_handle_lifecycle_1165
 
 import inspect
@@ -277,7 +279,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
     ep = _episode(tmp_path, src)
     seen: dict = {}
     _run()._drive_investigation(
-        alert_path=RunPaths(src).alert, run_dir=src, run_id=src.name,
+        alert_path=RunPaths(src).alert, run=_fixture_run_1165(src),
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
@@ -304,7 +306,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
             super().__init__(*a, **kw)
 
     _run()._drive_investigation(
-        alert_path=RunPaths(src).alert, run_dir=src, run_id=src.name,
+        alert_path=RunPaths(src).alert, run=_fixture_run_1165(src),
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
@@ -322,7 +324,7 @@ def test_947_without_a_world_the_production_registry_is_built_exactly_as_now(tmp
     seen: dict = {}
     tenant = T1106.fixture_run_tenant()
     _run()._drive_investigation(
-        alert_path=RunPaths(src).alert, run_dir=src, run_id=src.name,
+        alert_path=RunPaths(src).alert, run=_fixture_run_1165(src),
         defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
         tenant=tenant,
         world=None, investigate=lambda **kw: seen.update(kw) or {})

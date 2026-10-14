@@ -405,7 +405,7 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
         raise AssertionError("an unwritten claim dispatched gather anyway")
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(tools_gather, "_claim_lead", lambda dispatch: NOT_CLAIMED)
+        mp.setattr(tools_gather, "_claim_lead", lambda dispatch, **kw: NOT_CLAIMED)
         # #1222 C40: a host-side write fault ends the run through the store exit; no retry.
         with pytest.raises(tools_gather.LeadRecordFault, match="could not be claimed"):
             asyncio.run(tools_gather._run_gather(

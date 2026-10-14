@@ -482,8 +482,7 @@ def test_runs_written_records_are_all_slots_bound_and_role_disjoint(tmp_path: Pa
     S.member(handle, "tables", "payloads", S.LEAD_ID, S.SEQ).write('{"rows": []}')
     S.member(handle, "observability", "review_record", S.TURN).write(
         json.dumps({"turn": S.TURN}))
-    S.member(handle, "observability", "wire_log").append(
-        [{"event_type": "message", "agent_id": "main", "seq": 0}])
+    S.member(handle, 'observability', 'wire_log').append_text("".join(json.dumps(row) + "\n" for row in [{'event_type': 'message', 'agent_id': 'main', 'seq': 0}]))
 
     # ALL SLOTS BOUND: no resolved name carries an unsubstituted placeholder.
     written = [p for p in run_dir.rglob("*") if p.is_file()]
@@ -570,8 +569,7 @@ def test_wire_log_writers_stay_distinguishable_under_concurrent_main_and_subagen
     writers = ("MAIN", "gather-l-aaa111", "gather-l-bbb222")
     for i in range(30):
         who = writers[i % len(writers)]
-        wire.append([{"event_type": "message", "writer_id": who, "seq": i,
-                      "message": "x" * 512}])
+        wire.append_text("".join(json.dumps(row) + "\n" for row in [{'event_type': 'message', 'writer_id': who, 'seq': i, 'message': 'x' * 512}]))
 
     text = S.RunPaths(run_dir).wire_log.read_text(encoding="utf-8")
     lines = [line for line in text.splitlines() if line.strip()]

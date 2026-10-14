@@ -488,7 +488,7 @@ def test_767_no_status_or_author_literal_in_writer_or_screen(tmp_path, monkeypat
     use_mapping(monkeypatch, tmp_path / "dfn",
                 mapping_doc(comment_author="acme-bot", released={"status": "acme-done"}))
 
-    run_dir = make_run(tmp_path, name="20260101T000000Z-acme")
+    run_dir = make_run(tmp_path, name="20260101t000000z-acme")
     store = FakeStore()
     record(run_dir, store)
     assert store.only_comment()["author"] == "acme-bot", "the writer did not follow the mapping"

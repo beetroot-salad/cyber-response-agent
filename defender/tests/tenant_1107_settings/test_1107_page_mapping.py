@@ -453,7 +453,7 @@ def test_d_case_ticket_takes_mapping(tmp_path):
     assert "sig:sig-name-1107" in payload["labels"], payload
 
     run_dir = M.make_run(tmp_path / "runs", "case-rec-1107", alert=alert)
-    rec = S.with_mapping(case_ticket.read_case_record, run_dir, mapping=mapping)
+    rec = S.with_mapping(case_ticket.read_case_record, _view_run_1165(run_dir), mapping=mapping)
     assert rec.signature_id == "sig-name-1107", rec
     comment = S.with_mapping(case_ticket.case_record_to_comment, rec, mapping=mapping)
     assert comment["author"] == "author-1107", comment
@@ -492,7 +492,7 @@ def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
     assert again == kept, "an edit to one payload reached the next built from the same mapping"
 
     run_dir = M.make_run(tmp_path / "runs", "case-mf11", alert=first)
-    rec = S.with_mapping(case_ticket.read_case_record, run_dir, mapping=mapping)
+    rec = S.with_mapping(case_ticket.read_case_record, _view_run_1165(run_dir), mapping=mapping)
     comment = S.with_mapping(case_ticket.case_record_to_comment, rec, mapping=mapping)
     comment["author"] = "planted-1107"
     escalation = S.with_mapping(case_ticket.escalation_comment_payload, "aborted", mapping=mapping)

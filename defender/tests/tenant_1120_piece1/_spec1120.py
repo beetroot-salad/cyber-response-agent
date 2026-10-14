@@ -68,7 +68,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -512,7 +511,9 @@ class RunRecorder:
         from defender.tests._alert_plant import plant_alert as plant_with_record
 
         plant_with_record(self.run_dir_at, Path(alert).read_bytes())
-        return SimpleNamespace(run_dir=self.run_dir_at)
+        from defender.tests._spec1077 import fixture_run
+
+        return fixture_run(self.run_dir_at)
 
     def lifecycle(self, **kw: Any) -> dict[str, Any]:
         self.order.append("lifecycle")

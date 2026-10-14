@@ -652,7 +652,7 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     sibling = tmp_path / "sibling"
     sibling.mkdir()
     state = RunState(sibling, "d860-sibling")
-    _inherit_evidence(r.run_dir, state, {LEAD}, run=_writer_run_1165(state.run_dir), source_run=_writer_run_1165(r.run_dir))
+    _inherit_evidence(_writer_run_1165(r.run_dir), state, {LEAD}, run=_writer_run_1165(state.run_dir))
     inherited = {lead.lead_id: lead for lead in joined(sibling)}
     assert set(inherited) == {LEAD}, f"the sibling inherited leads {sorted(inherited)}"
     assert [(row.query_id, row.system, row.verb) for row in inherited[LEAD].sentinels] \

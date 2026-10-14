@@ -22,6 +22,9 @@ of them against a declared system ends the lead as it did before #1030.
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_fixture_run_1165
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
 import asyncio
 import shutil
 from dataclasses import replace
@@ -209,7 +212,7 @@ def _record(capture: QueryCapture, state, *, system: str, exit_code: int, **extr
     """One `_record` call the way `_spec771`'s writer probe makes it: real deps bound to the
     run dir and carrying the run's state (#1235), a dispatched lead id, every row column the
     caller decides spelled out."""
-    deps = replace(bind(_tenants1106.fixture_gather_def(), state.run_dir, defender_dir=DEFENDER),
+    deps = replace(_with_fixture_run_1165(bind(_tenants1106.fixture_gather_def(), state.run_dir, defender_dir=DEFENDER), run=_fixture_run_1165(state.run_dir)),
                    lead_id=LEAD, run_state=state)
     row, _text = asyncio.run(capture._record(
         deps, system=system, verb="query", query_id="elastic.query", params={},

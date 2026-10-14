@@ -124,7 +124,10 @@ def test_947_launcher_returns_episode_dir_and_status(tmp_path):
 def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp_path):
     """An episode whose token cannot be rendered nameable is refused before the questioner is
     called at all: the refusal costs no model call and no primed capture."""
-    base, src = T.runs_base(tmp_path, source_run_id="FRESH CASE")
+    base, src = T.runs_base(tmp_path, source_run_id="fresh-case")
+    invalid = src.with_name("FRESH CASE")
+    src.rename(invalid)
+    src = invalid
     agent = T.FakeAgent()
     with pytest.raises(SystemExit):
         _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),

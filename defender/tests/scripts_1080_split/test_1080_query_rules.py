@@ -372,7 +372,7 @@ def write_calls(append: Any, run: Any, calls: list[dict[str, Any]]) -> list[dict
     for c in calls:
         text = c["payload_text"]
         out.append(append(
-            run, lead_id=c["lead_id"], system=c["system"], verb=c["verb"],
+            run, run=_writer_run_1165(run.run_dir), lead_id=c["lead_id"], system=c["system"], verb=c["verb"],
             query_id=c["query_id"], params=c["params"], raw_command=f"{c['system']} {c['verb']}",
             payload_text=text, exit_code=c.get("exit_code", 0),
             payload_status=c.get("payload_status", "ok"),
@@ -665,7 +665,7 @@ def test_request_keys_stored_before_the_move_are_compared_with_keys_computed_aft
     sibling = tmp_path / "resumed"
     sibling.mkdir()
     state = RunState(sibling, "r1080-resumed")
-    _inherit_evidence(run_dir, state, {c["lead_id"] for c in stored_calls()}, run=_writer_run_1165(state.run_dir), source_run=_writer_run_1165(run_dir))
+    _inherit_evidence(_writer_run_1165(run_dir), state, {c["lead_id"] for c in stored_calls()}, run=_writer_run_1165(state.run_dir))
     (tmp_path / "episodes").mkdir()
     got = drive_stored_run(run_dir, tmp_path / "episodes" / "ep-1", request_key=request_key,
                            state=state, repeat_trip=repeat_trip, append=append)

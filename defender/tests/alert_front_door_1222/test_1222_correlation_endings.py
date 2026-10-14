@@ -29,6 +29,8 @@ gate's. Faults are the shared fakes' data (`S.LeadFault`, `S.Backend` + `T.Fault
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
 import collections
 import re
 import shutil
@@ -248,7 +250,7 @@ def _preclaim(goal: str = "an earlier attempt's correlation goal",
     def plant(run_dir: Path) -> None:
         claimed = S.sym("hooks.record_lead", "claim_lead")({
             "run_dir": str(run_dir), "lead_id": S.L3, "goal": goal,
-            "what_to_summarize": ["what the earlier attempt measured"], "provenance": "harness"})
+            "what_to_summarize": ["what the earlier attempt measured"], "provenance": "harness"}, run=_fixture_run_1165(run_dir))
         assert claimed == S.sym("hooks.record_lead", "CLAIMED"), "the planted claim did not land"
         if summary is not None:
             path = Path(RunPaths(run_dir).gather_summary(S.L3))
