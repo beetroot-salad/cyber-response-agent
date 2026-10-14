@@ -102,7 +102,7 @@ def install(app: FastAPI) -> None:
                         content[PROBLEM_MEDIA_TYPE] = content.pop("application/json")
         return schema
 
-    app.openapi = openapi  # FastAPI's documented hook
+    app.openapi = openapi  # type: ignore[method-assign]  # FastAPI's documented hook
 
 
 def responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
