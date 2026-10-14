@@ -55,6 +55,8 @@ class AuthorBranch:
     #: repo's; #1108 points learning at each tenant's repo, which must carry the same pair.
     branch_base: str = _BRANCH_BASE
     pr_base: str = _PR_BASE
+    #: Command-scoped transport configuration; tenant delivery resets credential helpers.
+    network_config: tuple[str, ...] = ()
 
     @property
     def _forge(self) -> Forge:
@@ -85,7 +87,8 @@ class AuthorBranch:
         return self._worktree_base / f"{slug}-{batch_id}"
 
     def commits_ahead(self, wt: Path) -> int:
-        return _git.git_rev_list_count(wt, rev_range=f"{self.branch_base}..HEAD")
+        return _git.git_rev_list_count(wt, rev_range=f"{self.branch_base}..HEAD",
+                                       env=_git.env_for_cwd())
 
 
     def open_pr_exists(self) -> bool:
@@ -111,15 +114,17 @@ class AuthorBranch:
         return None
 
 
-    def start_batch(self, batch_id: str) -> Path:
+    def start_batch(self, batch_id: str, *, fetch: bool = True) -> Path:
         with contextlib.suppress(GitError):
-            _git.git_worktree_prune(self.repo_root)
+            _git.git_worktree_prune(self.repo_root, env=_git.env_for_cwd())
         wt = self._worktree_path(batch_id)
         try:
-            _git.git_fetch(self.repo_root)
+            if fetch:
+                _git.git_fetch(self.repo_root, config=self.network_config)
             self._worktree_base.mkdir(parents=True, exist_ok=True)
             _git.git_worktree_add(
-                self.repo_root, wt, self.branch_base, branch=self.branch_name(batch_id)
+                self.repo_root, wt, self.branch_base, branch=self.branch_name(batch_id),
+                env=_git.env_for_cwd(),
             )
         except GitError as e:
             self.cleanup(wt)
@@ -135,7 +140,7 @@ class AuthorBranch:
             return None
         branch = self.branch_name(batch_id)
         try:
-            _git.git_push(wt, branch)
+            _git.git_push(wt, branch, config=self.network_config)
             return self._open_pr(batch_id, branch)
         except (GitError, ForgeError) as e:
             raise BranchError(str(e)) from e
@@ -148,16 +153,16 @@ class AuthorBranch:
         `branch_base`); the caller may then forget it."""
         branch = self.branch_name(batch_id)
         if not _git.git_ok(
-            ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=self.repo_root
+            ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=self.repo_root, env=_git.env_for_cwd()
         ):
             return None
         try:
-            _git.git_fetch(self.repo_root)
+            _git.git_fetch(self.repo_root, config=self.network_config)
             if _git.git_rev_list_count(
-                self.repo_root, rev_range=f"{self.branch_base}..{branch}"
+                self.repo_root, rev_range=f"{self.branch_base}..{branch}", env=_git.env_for_cwd()
             ) == 0:
                 return None
-            _git.git_push(self.repo_root, branch)
+            _git.git_push(self.repo_root, branch, config=self.network_config)
             if (existing := self._open_pr_ref(branch)) is not None:
                 return existing
             return self._open_pr(batch_id, branch)
@@ -175,7 +180,7 @@ class AuthorBranch:
         # Best-effort, so it doesn't mask the fault that brought us here, but logged: a leaked
         # worktree may hold box writes the scrub never walked.
         try:
-            _git.git_worktree_remove(self.repo_root, wt, force=True)
+            _git.git_worktree_remove(self.repo_root, wt, force=True, env=_git.env_for_cwd())
         except GitError as e:
             _logger.error(f"worktree cleanup failed: {e} — {wt} leaked")
         # The verdict sidecar sits beside `wt`, so the tree removal leaves it; anything that
@@ -193,19 +198,22 @@ class AuthorBranch:
         with contextlib.suppress(OSError):
             shutil.rmtree(wt)
         with contextlib.suppress(GitError):
-            _git.git_worktree_prune(self.repo_root)
+            _git.git_worktree_prune(self.repo_root, env=_git.env_for_cwd())
         try:
-            _git.git_fetch(self.repo_root)
+            _git.git_fetch(self.repo_root, config=self.network_config)
             if not _git.git_ok(
-                ["cat-file", "-e", f"{self.branch_base}:{lesson_rel_path}"], cwd=self.repo_root
+                ["cat-file", "-e", f"{self.branch_base}:{lesson_rel_path}"], cwd=self.repo_root,
+                env=_git.env_for_cwd(),
             ):
                 raise BranchError(f"no such lesson on {self.branch_base}: {lesson_rel_path}")
             self._worktree_base.mkdir(parents=True, exist_ok=True)
-            _git.git_worktree_add(self.repo_root, wt, self.branch_base, branch=branch)
-            _git.git(["rm", lesson_rel_path], cwd=wt)
-            _git.git(["commit", "-m", f"revert lesson: {lesson_name}"], cwd=wt)
+            _git.git_worktree_add(self.repo_root, wt, self.branch_base, branch=branch,
+                                  env=_git.env_for_cwd())
+            _git.git(["rm", lesson_rel_path], cwd=wt, env=_git.env_for_cwd())
+            _git.git(["commit", "-m", f"revert lesson: {lesson_name}"], cwd=wt,
+                     env=_git.env_for_cwd())
             try:
-                _git.git_push(wt, branch)
+                _git.git_push(wt, branch, config=self.network_config)
             except GitError as e:
                 if _is_non_fast_forward(e):
                     raise BranchError(

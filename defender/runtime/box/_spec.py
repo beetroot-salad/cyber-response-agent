@@ -72,6 +72,11 @@ class Mount:
     writable: bool = False
 
 
+def _code_dir(workdir: Path, explicit: Path | None) -> Path:
+    """Resolve the request code root once, retaining legacy checkout geography."""
+    return explicit if explicit is not None else workdir / "defender"
+
+
 @dataclass(frozen=True)
 class BoxRequest:
 
@@ -79,6 +84,15 @@ class BoxRequest:
     mounts: tuple[Mount, ...] = ()
     workdir: Path = Path(".")
     env: dict[str, str] = field(default_factory=dict)
+    #: Explicit product code root; legacy requests derive it from their checkout workdir.
+    defender_dir: Path | None = None
+    #: Tenant knowledge must never run in the host fallback lane.
+    require_sandbox: bool = False
+
+    @property
+    def code_dir(self) -> Path:
+        return _code_dir(self.workdir, self.defender_dir)
+
     # Resolved here so BoxRequest callers honour DEFENDER_BOX_RUNTIME too.
     spec: BoxSpec = field(default_factory=lambda: BoxSpec.from_env(os.environ))
 

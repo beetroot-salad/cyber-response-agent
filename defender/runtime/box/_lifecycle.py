@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 from pathlib import Path
 
-from defender._io import READ_LIMIT, sweep_staged, write_guarded
+from defender._io import read_text_utf8, READ_LIMIT, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
 from defender.run_repository import RUN_LAYOUT
@@ -175,8 +175,22 @@ def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
 
 
 def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
-    """Probe one mount: a host-planted token read back through the box proves the bind mapped
-    the right tree (an absent source is already caught at create)."""
+    """Compare an existing read-only file, or plant into a writable source only."""
+    if not mount.writable:
+        source = Path(mount.source)
+        # Tenant roots have their identity marker; product roots have the runtime prompt.
+        relative = Path(".tenant-id") if source.name == "agent" else Path("SKILL.md")
+        if source.name != "agent" and not (source / relative).exists():
+            # Existing request callers mount the entire product checkout.
+            relative = Path("defender/SKILL.md")
+        try:
+            expected = read_text_utf8(source / relative)
+            proc = _call(docker, ["docker", "exec", name, "cat", str(Path(mount.target) / relative)])
+        except (OSError, UnicodeError) as e:
+            raise BoxFault(f"could not read mount probe at {source / relative}: {e}") from e
+        if proc.returncode != 0 or proc.stdout != expected:
+            raise BoxFault(f"mount readback does not match the host probe at {source / relative}")
+        return
     _probe_sentinel(
         Path(mount.source), Path(mount.target), docker, name,
         f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
@@ -294,11 +308,11 @@ def _render_argv(
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={request.spec.tmpfs_size}",
         "--workdir", str(request.workdir),
     ]
-    env = _render_env(request.env, Path(request.workdir))
+    env = _render_env(request.env, Path(request.workdir), defender_dir=request.code_dir)
     for key in sorted(env):
         argv += ["--env", f"{key}={env[key]}"]
     # Resolved here, never at BoxRequest construction.
-    rootfs = resolve_rootfs(request.spec.rootfs, Path(request.workdir) / "defender")
+    rootfs = resolve_rootfs(request.spec.rootfs, request.code_dir)
     argv += [rootfs.image, "sleep", "infinity"]
     return Create(argv, rootfs)
 
@@ -392,13 +406,13 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     for var in providers.api_key_vars():
         env.pop(var, None)
     env.update({k: v for k, v in request.env.items() if k in BOX_ENV_ALLOWLIST})
-    defender_dir = Path(request.workdir) / "defender"
+    defender_dir = request.code_dir
     env["DEFENDER_DIR"] = str(defender_dir)
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
     # Prepended, keeping the operator's PYTHONPATH.
     inherited = env.get("PYTHONPATH")
     env["PYTHONPATH"] = (
-        f"{request.workdir}{os.pathsep}{inherited}" if inherited else str(request.workdir)
+        f"{defender_dir.parent}{os.pathsep}{inherited}" if inherited else str(defender_dir.parent)
     )
     # A host lane never carries the in-box mark.
     env.pop("DEFENDER_BOX", None)
@@ -436,6 +450,8 @@ def start_box(
         try:
             return _start_boxed_request(request, docker)
         except BoxFault as e:
+            if request.require_sandbox:
+                raise
             _opt_out_or_raise(e)
         return unboxed_executor(request.spec, env=_host_fallback_env(request))
 
