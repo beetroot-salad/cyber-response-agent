@@ -168,6 +168,10 @@ def test_box_request_and_oracle_lanes_do_not_require_a_run_tenant(tmp_path):
 
     root = tmp_path / 'learning-worktree'
     root.mkdir()
+    # D7 (#1108 P3): a read-only code mount is verified by reading its fixed product file
+    # back, so the legacy drain checkout carries one, as the real learning worktree does.
+    (root / 'defender').mkdir()
+    (root / 'defender' / 'SKILL.md').write_text('made-up product spec\n', encoding='utf-8')
     scratch = tmp_path / 'oracle-scratch'
     runner = tmp_path / 'oracle-runner'
     scratch.mkdir()
