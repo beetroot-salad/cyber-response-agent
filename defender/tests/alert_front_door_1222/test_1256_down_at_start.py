@@ -1,7 +1,7 @@
 """#1256 slice C — a granted system down at run start, seen by lead zero (O-6) and by run start
 (O-8).
 
-The design (#1256 r2): each granted system's adapter judges, at run start, whether the run's
+The design (#1256 r3): each granted system's adapter judges, at run start, whether the run's
 frozen settings make it usable; one that fails is *down for this run* with its cause
 (not configured, or its adapter broken), and every gate refuses it without running the adapter or
 charging the breaker.
@@ -17,11 +17,20 @@ O-8 — a run where no granted system is usable at start is refused at start, na
 system and its reason: the existing "gather can query nothing" refusal (`require_gather_query`),
 applied to the systems granted AND up. Read here, as that rule already reads a health-check-only
 grant, as: gather can query only through a non-health-check verb on a system that is up — so a
-system granted nothing but its health check, though up, does not save the run.
+system granted nothing but its health check, though up, does not save the run. O-8 is a RUN-start
+refusal only (D4): `tenant.py setup` adopts a tenant whose every system is down (setup judges
+structure and grants; settings content may be filled in later), and its runs are refused. Two
+arms discriminate HOW run start judges "down": one whose systems are down only for keys no
+`load_config` reads (the adapters' declared checks, not a load_config/stored-fault pre-check),
+one mixing a broken adapter with a not-configured one (a broken adapter is down too).
 
 HOW EACH IS SEEN. Every scenario goes through the production front door (`S.run_alert`: the real
 `run.main`, the real driver behind `_ReplayLifecycle`), with the REAL adapters under the checkout
-judging the planted tenant's settings (K2). A system is made unusable the way an operator would:
+judging the planted tenant's settings (K2) — except where an adapter must be broken: those
+arms point run start at a planted tree holding only the test's own adapters (`_planted_tree`),
+both the adapter-broken O-6 arm and the mixed O-8 arm through the driver's `defender_dir`
+(`run.main` reads its own checkout's tree; the O-8 arms through `run.main` and the one through
+the driver together cover both entry paths, and none pins where the refusal is raised). A system is made unusable the way an operator would:
 its `config.env` missing a key its adapter requires (`_spec1107.drop_key`), or absent. The
 correlation sentence is read from MAIN's opening message's ONE correlation section
 (`S.correlation_section`), not from the whole-prose diff `_ending` takes against the summary
@@ -41,9 +50,13 @@ from typing import Any
 
 import pytest
 
+from defender.scripts import policy_cli
+from defender.scripts import tenant as tenant_py
 from defender.tests import _tenants1106 as T6
+from defender.tests._data_root_1078 import current_data_root
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 from defender.tests.alert_front_door_1222.test_1222_correlation_endings import (
+    _alert,
     _assert_closed,
     _assert_continued,
     _backend,
@@ -54,7 +67,10 @@ from defender.tests.alert_front_door_1222.test_1222_correlation_endings import (
     _q,
     _Scene,
 )
+from defender.tests.e2e import _lead_zero_808 as LZ
+from defender.tests.e2e import _replay_harness as RH
 from defender.tests.tenant_1107_settings import _spec1107 as S7
+from defender.tests.tenant_1120_piece1 import _spec1120 as H20
 
 #: The ending constant this contract coins (K4's one allowed type-level pin, slice C).
 ENDING_NAME = "ENDING_DOWN_AT_START"
@@ -232,7 +248,14 @@ VERBS = {{"health-check": None, "query": None, "alerts": None, "esql": None}}
 #: gather its three verbs), declaring a check that needs nothing. Written here, never copied from
 #: the checkout, and importing nothing from it — so loading it touches no `sys.path`.
 _PLANTED_CMDB = '''\
-"""#1256 planted: a minimal cmdb adapter whose settings check needs nothing."""
+"""#1256 planted: a minimal cmdb adapter whose settings check needs nothing. Every verb
+records its call in `planted-calls.log` at the planted tree's root."""
+from pathlib import Path
+
+
+def _called(verb):
+    with open(Path(__file__).parents[4] / "planted-calls.log", "a", encoding="utf-8") as log:
+        print(f"cmdb.{verb}", file=log)
 
 
 def check_settings(*_a, **_k):
@@ -240,14 +263,17 @@ def check_settings(*_a, **_k):
 
 
 def get_host(ctx, *, host: str) -> dict:
-    return {"host": host, "planted": True}
+    _called("get-host")
+    return {"host": host, "planted": True, "mark": "FD1256-PLANTED-CMDB-ANSWER"}
 
 
 def list_hosts(ctx, *, role=None, criticality=None, owner=None) -> dict:
+    _called("list-hosts")
     return {"hosts": [], "planted": True}
 
 
 def health_check(ctx) -> dict:
+    _called("health-check")
     return {"ok": True, "planted": True}
 
 
@@ -255,11 +281,21 @@ VERBS = {"get-host": get_host, "list-hosts": list_hosts, "health-check": health_
 '''
 
 
-def _tree_with_broken_elastic(root: Path) -> Path:
-    """A defender tree the run is pointed at: every top-level entry of the checkout symlinked
+#: Where a planted adapter's verbs record each call they run: `<root>/planted-calls.log`, beside
+#: (not inside) the tree `_planted_tree(root, ...)` builds.
+PLANTED_CALLS = "planted-calls.log"
+
+
+def _planted_calls(root: Path) -> list[str]:
+    log = root / PLANTED_CALLS
+    return log.read_text(encoding="utf-8").split() if log.is_file() else []
+
+
+def _planted_tree(root: Path, adapters: dict[str, str]) -> Path:
+    """A defender tree a run is pointed at: every top-level entry of the checkout symlinked
     except `scripts/`, whose entries are symlinked except `adapters/` — a real folder holding ONLY
-    the two adapters written here (`_PLANTED_CMDB`, `_BROKEN_ELASTIC`); no shipped adapter is
-    copied (a copy that bootstraps `sys.path` would leak the planted tree into later imports).
+    the adapters written here (`adapters`: system -> source); no shipped adapter is copied (a copy
+    that bootstraps `sys.path` would leak the planted tree into later imports).
     `<root>/repo/defender`, so `defender_dir.parent` is a repo root as the catalog expects."""
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
@@ -273,11 +309,16 @@ def _tree_with_broken_elastic(root: Path) -> Path:
         if entry.name in _NOT_MIRRORED or entry.name == "adapters":
             continue
         (scripts / entry.name).symlink_to(entry)
-    adapters = scripts / "adapters"
-    adapters.mkdir()
-    (adapters / "cmdb_adapter.py").write_text(_PLANTED_CMDB, encoding="utf-8")
-    (adapters / "elastic_adapter.py").write_text(_BROKEN_ELASTIC, encoding="utf-8")
+    folder = scripts / "adapters"
+    folder.mkdir()
+    for system, source in adapters.items():
+        (folder / f"{system.replace('-', '_')}_adapter.py").write_text(source, encoding="utf-8")
     return tree
+
+
+def _tree_with_broken_elastic(root: Path) -> Path:
+    """`_planted_tree` with the well-formed `_PLANTED_CMDB` and the unimportable elastic."""
+    return _planted_tree(root, {"cmdb": _PLANTED_CMDB, "elastic": _BROKEN_ELASTIC})
 
 
 @pytest.fixture
@@ -403,22 +444,22 @@ dispositions:
 """
 
 
-def _runs_entries(scene: _Scene) -> list[str]:
-    base = scene.tenant.runs
+def _runs_entries(tenant: S.Planted) -> list[str]:
+    base = tenant.runs
     return sorted(p.name for p in base.iterdir()) if base.is_dir() else []
 
 
-def _refusal_text(d: S.Drive, scene: _Scene) -> str:
+def _refusal_text(d: S.Drive, tenant: S.Planted) -> str:
     """The refusal `run.main` exited with, the data root spelled out of it (a host path could
     spell a system's name by accident)."""
     assert isinstance(d.refusal, str), (
         f"the run was not refused at start: rc={d.rc!r} raised={d.raised!r} "
         f"MAIN requests={d.main.requests} summary={d.summary!r}")
     assert d.refusal.strip(), "the refusal carries no text"
-    return d.refusal.replace(str(scene.tenant.root), "<DATA_ROOT>")
+    return d.refusal.replace(str(tenant.root), "<DATA_ROOT>")
 
 
-def _assert_refused_before_anything(d: S.Drive, scene: _Scene, before: list[str],
+def _assert_refused_before_anything(d: S.Drive, tenant: S.Planted, before: list[str],
                                     what: str) -> None:
     """Refused as the existing start refusals are: a non-zero exit carrying the text, before the
     run folder, the box, any model call or any adapter call."""
@@ -427,8 +468,19 @@ def _assert_refused_before_anything(d: S.Drive, scene: _Scene, before: list[str]
     assert d.router.leads() == [], f"{what}: a gather model ran: {d.router.leads()}"
     assert d.backend.rec.calls == [], f"{what}: an adapter ran: {d.backend.rec.verbs}"
     assert d.lifecycle_calls == [], f"{what}: the run's lifecycle (box, driver) was started"
-    assert _runs_entries(scene) == before, (
-        f"{what}: the refused run left something under the runs base: {_runs_entries(scene)}")
+    assert _runs_entries(tenant) == before, (
+        f"{what}: the refused run left something under the runs base: {_runs_entries(tenant)}")
+
+
+def _assert_names_each(text: str, downs: tuple[tuple[str, str], ...], what: str) -> None:
+    """The refusal names every down system (as a word of its own) and its reason's token, and
+    never the breaker's words."""
+    for system, token in downs:
+        assert _names_system(text, system), (
+            f"{what}: the refusal does not name the down system {system}: {text!r}")
+        assert token in text, f"{what}: the refusal does not name {system}'s reason ({token}): {text!r}"
+    said = [w for w in TRIPPED_WORDS if w in text.lower()]
+    assert not said, f"{what}: the refusal names the breaker's cause ({said}): {text!r}"
 
 
 def test_o8_every_granted_system_down_at_start_refuses_the_run_naming_each(
@@ -437,19 +489,14 @@ def test_o8_every_granted_system_down_at_start_refuses_the_run_naming_each(
     scene = _Scene(tmp_path, tenant_id="acme-all-down")
     _drop(scene, "cmdb", "CMDB_URL_BASE")
     _drop(scene, "elastic", "ELASTICSEARCH_URL")
-    before = _runs_entries(scene)
+    before = _runs_entries(scene.tenant)
     d = scene.run("all-down", **_down_lead())
 
-    text = _refusal_text(d, scene)
-    low = text.lower()
-    for system, key in (("cmdb", "CMDB_URL_BASE"), ("elastic", "ELASTICSEARCH_URL")):
-        assert _names_system(text, system), (
-            f"the refusal does not name the down system {system}: {text!r}")
-        assert key in text, f"the refusal does not name {system}'s reason ({key}): {text!r}"
-    assert "not configured" in low, f"the refusal does not name the cause: {text!r}"
-    said = [w for w in TRIPPED_WORDS if w in low]
-    assert not said, f"the refusal names the breaker's cause ({said}): {text!r}"
-    _assert_refused_before_anything(d, scene, before, "every granted system down")
+    text = _refusal_text(d, scene.tenant)
+    _assert_names_each(text, (("cmdb", "CMDB_URL_BASE"), ("elastic", "ELASTICSEARCH_URL")),
+                       "every granted system down")
+    assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
+    _assert_refused_before_anything(d, scene.tenant, before, "every granted system down")
 
 
 def test_o8_a_system_up_with_only_its_health_check_granted_does_not_save_the_run(
@@ -461,14 +508,14 @@ def test_o8_a_system_up_with_only_its_health_check_granted_does_not_save_the_run
 
     scene = _Scene(tmp_path, tenant_id="acme-hc-down", table=TABLE_CMDB_HEALTH_ONLY)
     _drop(scene, "elastic", "ELASTICSEARCH_URL")
-    before = _runs_entries(scene)
+    before = _runs_entries(scene.tenant)
     d = scene.run("hc-elastic-down", **_down_lead())
 
-    text = _refusal_text(d, scene)
+    text = _refusal_text(d, scene.tenant)
     assert _names_system(text, "elastic"), f"the refusal does not name the down system: {text!r}"
     assert "ELASTICSEARCH_URL" in text, f"the refusal does not name elastic's reason: {text!r}"
     assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
-    _assert_refused_before_anything(d, scene, before, "only a health check up")
+    _assert_refused_before_anything(d, scene.tenant, before, "only a health check up")
 
 
 def test_o8_one_usable_system_among_several_down_runs(tmp_path: Path) -> None:
@@ -485,9 +532,187 @@ def test_o8_one_usable_system_among_several_down_runs(tmp_path: Path) -> None:
 def test_o8_gather_granted_no_query_verb_is_still_refused(tmp_path: Path) -> None:
     """Control: the existing refusal stands — a table granting gather no query verb, every system configured, is refused at start naming the table, before anything is spent."""
     scene = _Scene(tmp_path, tenant_id="acme-blank", table=T6.TABLE_BLANK)
-    before = _runs_entries(scene)
+    before = _runs_entries(scene.tenant)
     d = scene.run("blank", backend=_backend())
 
-    text = _refusal_text(d, scene)
+    text = _refusal_text(d, scene.tenant)
     assert "verb-grants.yaml" in text, f"the refusal does not name the table: {text!r}"
-    _assert_refused_before_anything(d, scene, before, "no query verb granted")
+    _assert_refused_before_anything(d, scene.tenant, before, "no query verb granted")
+
+
+# --- O-8, discriminating arms (each: refused naming each down system; one system repaired runs) -
+
+def _drop_present(scene: _Scene, system: str, key: str) -> None:
+    """`_drop`, after checking the key is there to drop (`drop_key` is silent on an absent key)."""
+    before = S7.config_path(scene.tenant.knowledge, system).read_text(encoding="utf-8")
+    assert any(ln.split("=", 1)[0].strip() == key for ln in before.splitlines()), (
+        f"premise: {system}'s planted config.env carries no {key} to drop:\n{before}")
+    _drop(scene, system, key)
+
+
+def test_o8_all_down_through_settings_load_config_never_reads(tmp_path: Path) -> None:
+    """Every granted system down for a key no `load_config` reads — cmdb misses only its docker context (the access method `access_context` checks), elastic only its ES container (`_es_container`) — is refused at start naming each with its key: the refusal is the adapters' declared checks, not a pre-check that runs `load_config` or reads stored faults. Repairing cmdb lets the same tenant run."""
+    repaired = _Scene(tmp_path, tenant_id="acme-access-repaired")
+    _drop_present(repaired, "elastic", "ELASTIC_ES_CONTAINER")
+    ran = repaired.run("cmdb-repaired")
+    _assert_continued(ran, "control: cmdb repaired, elastic still down")
+
+    scene = _Scene(tmp_path, tenant_id="acme-access-down")
+    _drop_present(scene, "cmdb", "CMDB_DOCKER_CONTEXT")
+    _drop_present(scene, "elastic", "ELASTIC_ES_CONTAINER")
+    before = _runs_entries(scene.tenant)
+    d = scene.run("access-down", **_down_lead())
+
+    text = _refusal_text(d, scene.tenant)
+    _assert_names_each(text, (("cmdb", "CMDB_DOCKER_CONTEXT"),
+                              ("elastic", "ELASTIC_ES_CONTAINER")), "down beyond load_config")
+    assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
+    _assert_refused_before_anything(d, scene.tenant, before, "down beyond load_config")
+
+
+#: What the planted cmdb's check raises: not a ConfigFault, so cmdb is Down(AdapterBroken).
+CRASH_MARK = "FD1256-PLANTED-CHECK-CRASH"
+#: The planted elastic's check reason: a ConfigFault, so elastic is Down(NotConfigured).
+ELASTIC_PLANTED_KEY = "ELASTIC_FD1256_PLANTED_SETTING"
+
+_CRASHING_CMDB = _PLANTED_CMDB.replace(
+    "def check_settings(*_a, **_k):\n    return None",
+    f"def check_settings(*_a, **_k):\n    raise RuntimeError({CRASH_MARK!r})")
+
+#: A planted elastic whose declared check finds it not configured, with the real verbs'
+#: signatures (the correlation lead's agreement check reads the declared `alerts`).
+_NOT_CONFIGURED_ELASTIC = f'''\
+"""#1256 planted: an elastic adapter whose settings check finds it not configured."""
+from pathlib import Path
+
+from defender.scripts.adapters.faults import ConfigFault
+
+
+def _called(verb):
+    with open(Path(__file__).parents[4] / "{PLANTED_CALLS}", "a", encoding="utf-8") as log:
+        print(f"elastic.{{verb}}", file=log)
+
+
+def check_settings(*_a, **_k):
+    raise ConfigFault("{ELASTIC_PLANTED_KEY} is not set - this tenant does not configure it")
+
+
+def _search(ctx, *, native_query: str, start=None, end=None, limit: int = 20, index=None,
+            sort: str = "desc") -> dict:
+    _called("search")
+    return {{"hits": [], "planted": True}}
+
+
+def esql(ctx, *, query: str) -> dict:
+    _called("esql")
+    return {{"values": [], "planted": True}}
+
+
+def health_check(ctx) -> dict:
+    _called("health-check")
+    return {{"ok": True, "planted": True}}
+
+
+VERBS = {{"health-check": health_check, "query": _search, "alerts": _search, "esql": esql}}
+'''
+
+
+#: MAIN dispatches one lead on cmdb; its gather agent asks cmdb who web-1 is, then summarises.
+_CMDB_LEAD = ("gather", {"lead_id": "l-001", "system": "cmdb", "goal": "who is web-1",
+                         "what_to_summarize": ["web-1's owner"]})
+_CMDB_QUERY = ("query", {"system": "cmdb", "verb": "get-host", "params": {"host": "web-1"}})
+
+
+def _drive_over(tree: Path, tenant: S.Planted, where: Path) -> tuple[Any, Any, BaseException | None]:
+    """One fresh run through the REAL driver (`_replay_harness.drive`) over `tree` — the tree the
+    run reads, whose adapters' declared checks judge each granted system (K2) — as `tenant`.
+    No registry is injected: the run's verbs are `tree`'s adapters, as production's are the
+    checkout's. Returns (MAIN's fake, the gather fake, what the run raised or None)."""
+    run_dir = LZ.materialize_alert(where, LZ.alert_doc())
+    main = RH.ReplayFn([RH.Turn(tool_calls=[_CMDB_LEAD]), RH.Turn(text="Investigation complete.")])
+    gather = RH.ReplayFn([RH.Turn(tool_calls=[_CMDB_QUERY]),
+                          RH.Turn(text="Summary: asked cmdb who web-1 is.")])
+    try:
+        RH.drive(run_dir, run_id=run_dir.name, main=main, gather=gather, defender_dir=tree,
+                 tenant=tenant.accept())
+    except (Exception, SystemExit) as raised:  # noqa: BLE001 — its type is not the contract (K4)
+        return main, gather, raised
+    return main, gather, None
+
+
+@pytest.mark.usefixtures("_import_state_restored")
+def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one(tmp_path: Path) -> None:
+    """Every granted system down for two different causes — cmdb's adapter broken (its check raises something other than ConfigFault), elastic not configured — and the run does not start: the real driver, over the tree whose roster says so (K2), raises naming each system with its reason before MAIN's first request and before any gather or adapter call. A pre-check that counts only 'not configured' as down misses cmdb and lets the run start blind. With cmdb's adapter well formed (elastic still down) the same tenant's run proceeds. Where the refusal is raised, and as what type, is not pinned: the run.main arms (every-granted-system-down, the load_config one) and this driver arm together cover both entry paths."""
+    tenant = S.plant_tenant("acme-mixed-down", alert_mapping=S.DEFAULT_MAPPING,
+                            table=S.TABLE_ELASTIC)
+
+    repaired_root = tmp_path / "repaired"
+    repaired = _planted_tree(repaired_root,
+                             {"cmdb": _PLANTED_CMDB, "elastic": _NOT_CONFIGURED_ELASTIC})
+    main, gather, raised = _drive_over(repaired, tenant, tmp_path / "run-repaired")
+    assert raised is None, (
+        f"control: with cmdb's adapter well formed (elastic still down) the run raised {raised!r}")
+    assert main.seen, "control: MAIN was never asked"
+    assert "cmdb.get-host" in _planted_calls(repaired_root), (
+        "premise: the control's gather call never reached the planted cmdb adapter "
+        f"(calls: {_planted_calls(repaired_root)}; gather saw {len(gather.seen)} requests)")
+
+    mixed_root = tmp_path / "mixed"
+    mixed = _planted_tree(mixed_root, {"cmdb": _CRASHING_CMDB, "elastic": _NOT_CONFIGURED_ELASTIC})
+    main, gather, raised = _drive_over(mixed, tenant, tmp_path / "run-mixed")
+    assert raised is not None, (
+        "the run started though cmdb's adapter is broken and elastic not configured — every "
+        f"granted system down (#1256 O-8): MAIN asked {len(main.seen)} times, gather "
+        f"{len(gather.seen)}, adapter calls {_planted_calls(mixed_root)}")
+    text = str(raised).replace(str(tenant.root), "<DATA_ROOT>")
+    _assert_names_each(text, (("cmdb", CRASH_MARK), ("elastic", ELASTIC_PLANTED_KEY)),
+                       "broken + not configured")
+    assert "not configured" in text.lower(), f"the refusal does not name elastic's cause: {text!r}"
+    assert main.seen == [], f"MAIN was asked {len(main.seen)} times before the refusal"
+    assert gather.seen == [], f"a gather agent was asked {len(gather.seen)} times before the refusal"
+    assert _planted_calls(mixed_root) == [], (
+        f"an adapter verb ran before the refusal: {_planted_calls(mixed_root)}")
+
+
+# --- O-8 x D4: a run-start refusal only — setup adopts the same tenant ----------------------------
+
+def test_o8_d4_setup_adopts_an_all_down_tenant_whose_runs_are_refused(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """D4: the tenant-management commands judge a tenant's structure (folder rules, grants, lead-zero config), not whether its systems are usable — `tenant.py setup` adopts a tenant whose every granted system fails its settings check (exit 0, its row written) and `defender-policy show gather` over it answers (exit 0) — while a run of that same tenant through `run.main` is refused at start naming each system and its reason (O-8). Rejects O-8 placed in the tenant resolution those commands share with run start (the readiness function, `run_tenant_for` / `resolve_tenant`)."""
+    tenant_id = "acme-d4"
+    # The operator's folder, authored outside the data root: complete (K6) but for one key per
+    # granted system.
+    authored = S.plant_tenant(tenant_id, root=tmp_path / "authored",
+                              alert_mapping=S.DEFAULT_MAPPING, table=S.TABLE_ELASTIC)
+    S7.drop_key(authored.knowledge, "cmdb", "CMDB_URL_BASE")
+    S7.drop_key(authored.knowledge, "elastic", "ELASTICSEARCH_URL")
+    root = current_data_root()
+    H20.place_knowledge(root, tenant_id, source=authored.knowledge)
+
+    proc = H20.setup(tenant_py, root, tenant_id)
+    H20.assert_clean(proc)
+    assert H20.row_path(root, tenant_id).is_file(), (
+        f"setup exited 0 but wrote no row for {tenant_id}:\n{H20.output(proc)}")
+
+    # The operator's policy audit over the adopted tenant (`defender-policy show gather`).
+    policy_run = tmp_path / "policy-run"
+    (policy_run / "gather_raw").mkdir(parents=True)
+    capsys.readouterr()
+    try:
+        rc = policy_cli.main(["show", "gather", "--run-dir", str(policy_run),
+                              "--tenant", tenant_id])
+    except SystemExit as refused:
+        pytest.fail(f"defender-policy refused a tenant whose systems are down (D4: only a run "
+                    f"refuses): {refused.code!r}")
+    shown = capsys.readouterr().out
+    assert rc == 0, f"defender-policy show gather exited {rc!r} over an all-down tenant:\n{shown}"
+    assert shown.startswith("agent: gather"), f"defender-policy showed no gather policy:\n{shown}"
+
+    tenant = S.Planted(root=root, tenant_id=tenant_id, knowledge=H20.knowledge_dir(root, tenant_id))
+    before = _runs_entries(tenant)
+    d = S.run_alert(tmp_path / "run", alert=_alert(), tenant=tenant, **_down_lead())
+    text = _refusal_text(d, tenant)
+    _assert_names_each(text, (("cmdb", "CMDB_URL_BASE"), ("elastic", "ELASTICSEARCH_URL")),
+                       "an adopted all-down tenant")
+    assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
+    _assert_refused_before_anything(d, tenant, before, "an adopted all-down tenant")

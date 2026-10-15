@@ -1,6 +1,6 @@
 """#1256 O-9 — a branch sibling runs the same startup check over its OWN resolved settings.
 
-The design (#1256 r2, decided D2): a sibling resolves its tenant at its own start and runs the
+The design (#1256 r3, decided D2): a sibling resolves its tenant at its own start and runs the
 startup check there; a system its settings do not configure is down in that sibling even if the
 source run's capture holds answers for it — serving captured answers for a system the tenant
 cannot reach would make the world disagree with its own settings. (It arises only when settings
@@ -24,9 +24,17 @@ ledger records the call — so the channel can show a served capture. The down s
 the mark reaches no agent, the world ledger records no cmdb call, the run writes no cmdb row, the
 breaker is charged nothing, and the agent is told cmdb is not configured and why (on the dispatch
 refusal MAIN sees, or on the call refusal the gather agent sees — the design gates both).
+
+O-8 x O-9 — a sibling whose EVERY granted system is down at its own start is refused at that
+start like a fresh run (O-8), naming each system and its reason. That arm drives the sibling's
+whole entry (`run.main --episode E --world b --tenant T`, the #1107 resume path) with recording
+seams (`_spec1107.RunRecorder`): the refusal must come before the sibling's run is made and
+before its lifecycle (where the world that would answer from the capture is built), and the
+episode's recordings and run container are left as they were.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +45,20 @@ pytest.importorskip("pydantic_ai")
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.run_repository import Run  # noqa: E402
 from defender.tests import _tenants1106 as T6  # noqa: E402
+from defender.tests import _triplet_947 as T947  # noqa: E402
 from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at  # noqa: E402
 from defender.tests._data_root_1078 import current_data_root  # noqa: E402
 from defender.tests.e2e import _lead_zero_808 as LZ  # noqa: E402
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
 from defender.tests.live_oracle_1224 import _spec1224 as S  # noqa: E402
+from defender.tests.tenant_1078_pass_a import _spec1078 as H78  # noqa: E402
 from defender.tests.tenant_1107_settings import _spec1107 as S7  # noqa: E402
+from defender.tests.tenant_1107_settings.test_1107_lead_zero_replay import (  # noqa: E402
+    _identity_worlds,
+    _plant_at_data_root,
+    _resume_argv,
+    _sibling_episode,
+)
 
 pytestmark = pytest.mark.e2e
 
@@ -186,3 +202,68 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
         f"{down['state'].breaker_snapshot()!r}")
     assert down["state"].breaker_snapshot().get("total_failures", 0) == 0, (
         f"the run-wide failure count was charged: {down['state'].breaker_snapshot()!r}")
+
+
+# --- O-8 x O-9: every granted system down at the sibling's start -----------------------------------
+
+#: Every system the playground tenant's table (`TABLE_A`) grants gather, with a key its adapter's
+#: settings check requires; dropping one makes that system not configured.
+ALL_DOWN = (("cmdb", "CMDB_URL_BASE"), ("elastic", "ELASTICSEARCH_URL"))
+
+
+def _episode_census(episode: Path) -> dict[str, bytes]:
+    """What a sibling could leave in its episode: every recording (`*.jsonl`, the world ledgers
+    and the base recording) by content, and every entry of its run container."""
+    rows = {str(p.relative_to(episode)): p.read_bytes() for p in sorted(episode.rglob("*.jsonl"))}
+    runs = episode / "runs"
+    entries = {f"runs/{p.name}": b"" for p in sorted(runs.iterdir())} if runs.is_dir() else {}
+    return {**rows, **entries}
+
+
+def _resume(tmp_path: Path, label: str, source: Path, monkeypatch: Any,
+            down: tuple[tuple[str, str], ...],
+            ) -> tuple[Any, Any, Any, Path, dict[str, bytes]]:
+    """Plant the playground tenant afresh with `down`'s keys dropped, open a family over the
+    source run, and start sibling `b` through `run.main`. Returns (rc, refusal, recorder,
+    episode, the episode's census before the sibling started)."""
+    _root, folder, _tenant = _plant_at_data_root(f"o8o9{label}")
+    for system, key in down:
+        S7.drop_key(folder, system, key)
+    doc = T947.family_doc(source_run_dir=str(source), worlds=_identity_worlds())
+    episode = _sibling_episode(tmp_path, doc, root=tmp_path / f"episodes-{label}",
+                               monkeypatch=monkeypatch)
+    before = _episode_census(episode)
+    rec = S7.RunRecorder(tmp_path / f"sibling-{label}")
+    rc, refused = S7.drive_run(_resume_argv(episode / "family.yaml"), rec,
+                               visualize=rec.visualize)
+    return rc, refused, rec, episode, before
+
+
+def test_o8_o9_a_sibling_with_every_granted_system_down_at_its_start_is_refused(
+        tmp_path: Path, data_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A branch sibling whose own settings leave every granted system down is refused at its start, naming each system and its reason, before its run exists and before its world (which would answer from the source run's capture) is built. With one system configured the same sibling resumes."""
+    _base, source = H78.tenant_source(data_root, S7.PLAYGROUND_ID)
+
+    rc, refused, rec, _episode_dir, _before = _resume(
+        tmp_path, "one-up", source, monkeypatch, down=ALL_DOWN[1:])
+    assert refused is None, (
+        f"control: the sibling with cmdb configured was refused: {H78.refusal_text(refused)}")
+    assert "lifecycle" in rec.order, f"control: the sibling never ran (rc={rc}, {rec.order})"
+
+    rc, refused, rec, episode, before = _resume(
+        tmp_path, "all-down", source, monkeypatch, down=ALL_DOWN)
+    assert refused is not None, (
+        f"the sibling started though every granted system is down at its start (rc={rc}, "
+        f"seams reached: {rec.order}) — #1256 O-8 holds for a sibling's own start (O-9)")
+    text = H78.refusal_text(refused)
+    for system, key in ALL_DOWN:
+        assert re.search(rf"(?<![\w-]){system}(?![\w-])", text, re.IGNORECASE), (
+            f"the sibling's refusal does not name the down system {system}: {text!r}")
+        assert key in text, f"the sibling's refusal does not name {system}'s reason ({key}): {text!r}"
+    assert "not configured" in text.lower(), f"the refusal does not name the cause: {text!r}"
+    reached = [seam for seam in ("materialize", "lifecycle") if seam in rec.order]
+    assert reached == [], f"the refused sibling reached {reached} before refusing: {rec.order}"
+    assert rec.lifecycle_calls == [], "the refused sibling's world was built"
+    assert _episode_census(episode) == before, (
+        "the refused sibling left recordings or a run in its episode: "
+        f"{sorted(set(_episode_census(episode)) ^ set(before))}")
