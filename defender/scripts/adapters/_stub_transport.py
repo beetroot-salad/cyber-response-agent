@@ -27,7 +27,7 @@ import json
 import shlex
 import subprocess
 import urllib.parse
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender.runtime.tenant_settings import (
     DOCKER_EXEC,
@@ -46,6 +46,9 @@ from defender.scripts.adapters.faults import (
     UpstreamFault,
 )
 
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.run_tenant import RunTenant
+
 
 REQUIRED_CONFIG_KEYS_TEMPLATE = ("URL_BASE", "BASTION_HOST", "TIMEOUT_SEC")
 
@@ -53,6 +56,7 @@ __all__ = [
     "REQUIRED_CONFIG_KEYS_TEMPLATE",
     "USAGE_EXIT_CODE",
     "access_context",
+    "check_docker_curl_settings",
     "docker_context",
     "docker_exec_curl",
     "docker_exec_raw",
@@ -62,17 +66,28 @@ __all__ = [
     "http_get_obj",
     "http_post",
     "load_config",
+    "record_access_context",
+    "record_config",
+    "record_entry",
     "split_status",
     "system_entry",
 ]
 
 
 def system_entry(ctx: VerbContext, system: str) -> SystemConfig:
+    """`record_entry` over the call's run record (`ctx.tenant`)."""
+    return record_entry(ctx.tenant, system)
+
+
+def record_entry(tenant: RunTenant, system: str) -> SystemConfig:
     """`system`'s `config.env` as the RUN's record holds it (parsed once at resolve), or the
     `ConfigFault` for why there is none: a folder with no usable file keeps its own fault, and a
     system with no folder gets "this tenant's settings do not configure this system". A fresh
-    instance each call, so a stored fault is never handed a second traceback."""
-    entry = ctx.tenant.systems.get(system)
+    instance each call, so a stored fault is never handed a second traceback.
+
+    A function of the record alone, so an adapter's settings check (#1256) asks what its verbs
+    ask without a call to make."""
+    entry = tenant.systems.get(system)
     if entry is None:
         raise ConfigFault(f"config file not found: {config_pointer(system)} — {NOT_CONFIGURED}")
     if isinstance(entry, ConfigFault):
@@ -81,23 +96,29 @@ def system_entry(ctx: VerbContext, system: str) -> SystemConfig:
 
 
 def access_context(ctx: VerbContext, system: str) -> str:
+    """`record_access_context` over the call's run record (`ctx.tenant`)."""
+    return record_access_context(ctx.tenant, system)
+
+
+def record_access_context(tenant: RunTenant, system: str) -> str:
     """The docker context `system` is reached on — its `<PREFIX>_DOCKER_CONTEXT` — or
-    `ConfigFault` (that system down, the run goes on). THE ONE CHECK of how a system is reached
-    (D2): `<PREFIX>_TRANSPORT` must be `docker-exec` exactly, and the context must be named and
-    not blank. There is NO default for either: an absent or empty context would be handed to
-    docker as `--context ''`, which docker defers to its own `DOCKER_CONTEXT` or current context,
-    re-opening the very steering this record removed (MF-3).
+    `ConfigFault` (that system is not configured for this run; the run goes on). THE ONE CHECK of
+    how a system is reached (D2): `<PREFIX>_TRANSPORT` must be `docker-exec` exactly, and the
+    context must be named and not blank. There is NO default for either: an absent or empty
+    context would be handed to docker as `--context ''`, which docker defers to its own
+    `DOCKER_CONTEXT` or current context, re-opening the very steering this record removed (MF-3).
 
     Called by every docker transport entry, so a system reached through docker that is down for
-    its access method faults naming that key before any docker child runs. Not by `load_config`:
-    the two keys are this transport's own requirement, and a system its adapter reaches directly
-    declares neither.
+    its access method faults naming that key before any docker child runs — and by the settings
+    check of every adapter reached through docker, so such a system is down from run start
+    (#1256). Not by `load_config`: the two keys are this transport's own requirement, and a
+    system its adapter reaches directly declares neither.
 
     The two keys are named after the system FOLDER (`system_prefix`: `case-history` →
     `CASE_HISTORY_TRANSPORT`), whatever prefix an adapter uses for its other keys. One derivation,
     the same the resolver's warning and the connect validator use, so `load_config` and the
     transport can never judge two different keys."""
-    entry = system_entry(ctx, system)
+    entry = record_entry(tenant, system)
     prefix = system_prefix(system)
     method = entry.get(f"{prefix}_TRANSPORT")
     if method is None or is_blank(method):
@@ -132,6 +153,15 @@ def load_config(
     ctx: VerbContext, system: str, prefix: str,
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> dict[str, str]:
+    """`record_config` over the call's run record (`ctx.tenant`): the loader every verb calls,
+    under the signature the case-history ticket writer and the connect example keep."""
+    return record_config(ctx.tenant, system, prefix, required)
+
+
+def record_config(
+    tenant: RunTenant, system: str, prefix: str,
+    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
+) -> dict[str, str]:
     """`system`'s settings from the run's record: its `config.env`, prefix stripped.
 
     The record is the one resolved when the run began (`run_tenant.resolve_run_tenant`), not the
@@ -139,8 +169,9 @@ def load_config(
     change nothing a run addresses (O1, O2). The prefix namespaces the file's keys
     (CMDB_URL_BASE, IDENTITY_BASTION_HOST); caller-friendly stripped keys come back as URL_BASE /
     BASTION_HOST / TIMEOUT_SEC. A system with no usable config, or a missing, blank or malformed
-    required key is a `ConfigFault` — infra (exit 2), because a system with no config is
-    definitionally down, and only exit 2 trips the breaker.
+    required key is a `ConfigFault`: the system is not configured for this run. Its adapter's
+    settings check raises the same fault at run start, so in a run such a system is down from the
+    start and no verb of it is called (#1256).
 
     The access method is not checked here: it is the docker transport's requirement, checked by
     each docker transport entry (`access_context`), so a system its adapter reaches directly
@@ -153,7 +184,7 @@ def load_config(
     blank means down, and a caller wanting a fallback must say so in its own code rather than
     have a missing environment fact resolve silently.
     """
-    entry = system_entry(ctx, system)
+    entry = record_entry(tenant, system)
     cfg: dict[str, str] = {}
     for key in required:
         val = entry.get(f"{prefix}_{key}")
@@ -171,6 +202,19 @@ def load_config(
         raise ConfigFault(
             f"{prefix}_TIMEOUT_SEC must be a whole number of seconds above zero, got {timeout!r}")
     return cfg
+
+
+def check_docker_curl_settings(
+    tenant: RunTenant, system: str, prefix: str,
+    required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
+) -> None:
+    """The settings check of an adapter whose verbs load their config (`load_config`) and then
+    call through the docker transport (#1256 O-5): every `ConfigFault` such a verb can raise,
+    raised here over the run's record in the order a verb meets them — the required keys, then
+    the access method the transport checks on every docker call. None when the system is
+    usable."""
+    record_config(tenant, system, prefix, required)
+    record_access_context(tenant, system)
 
 
 def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state

@@ -111,6 +111,16 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
   captures the returned value by-ref under `gather_raw/`.
 - **`health-check` is required.** It returns a small status dict (e.g.
   `{"system": SYSTEM, "connected": True}`); a failed reach raises a fault.
+- **`check_settings(tenant)` is required.** A module-level function of the
+  run's tenant record (never a `VerbContext`, never a call) that raises
+  `ConfigFault` naming what is wrong, or returns None when the system is
+  usable. It must raise for EVERY settings fault any verb here can raise —
+  the keys `_config` reads and, for a docker-reached system, the access
+  method (`_stub_transport.check_docker_curl_settings`). The run calls it
+  once at start: a system whose check raises is down for the whole run, the
+  agent is told why, and no verb of it is called. A system needing no
+  settings declares one that never raises. An adapter that declares none, or
+  whose check raises anything but `ConfigFault`, is down as broken (#1256).
 
 Name verbs for what they measure (`query`, `lookup`, `get-host`), not why
 the defender asked.
@@ -124,7 +134,7 @@ write an exit code yourself:
 
 | Fault | Exit | Meaning |
 |---|---|---|
-| `ConfigFault` | 2 | `config.env` missing/incomplete — the system is down (infra). |
+| `ConfigFault` | 2 | `config.env` missing/incomplete — the system is not configured. `check_settings` raises it at run start, so a verb raising it means the check missed a key: the system is marked down then, uncharged, and the miss is logged as an adapter defect. |
 | `TransportFault` | 2 | the transport failed: unreachable, timed out, a 5xx (infra). |
 | `UpstreamFault` | 1 | the system was reached and rejected the query — a 4xx, a bad field. The agent's own to fix. |
 

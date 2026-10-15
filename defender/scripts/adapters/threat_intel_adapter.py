@@ -1,6 +1,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import urllib.parse
 
 import sys as _sys
@@ -13,6 +15,9 @@ from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.faults import UpstreamFault
 
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.run_tenant import RunTenant
+
 SYSTEM = "threat-intel"
 PREFIX = "THREAT_INTEL"
 VERDICTS = ("benign", "suspicious", "malicious", "unknown")
@@ -20,6 +25,13 @@ VERDICTS = ("benign", "suspicious", "malicious", "unknown")
 
 def _config(ctx: VerbContext) -> dict[str, str]:  # lint-dup: ok — per-module alias over the shared transport.load_config
     return transport.load_config(ctx, SYSTEM, PREFIX)
+
+
+def check_settings(tenant: RunTenant) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
+    """This system's settings check (#1256 O-5): every `ConfigFault` a verb here can raise —
+    `_config`'s keys, then the docker transport's access method — raised over the run's
+    record, or None when the system is usable."""
+    transport.check_docker_curl_settings(tenant, SYSTEM, PREFIX)
 
 
 def health_check(ctx: VerbContext) -> dict:

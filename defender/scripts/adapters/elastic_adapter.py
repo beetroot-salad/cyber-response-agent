@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import urllib.parse
+from typing import TYPE_CHECKING
 
 import sys as _sys
 from pathlib import Path as _Path
@@ -18,6 +19,9 @@ from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.confinement import confine_index, guard_outbound
 from defender.scripts.adapters.esql_text import opens_with_from, split_first_command
 from defender.scripts.adapters.faults import ConfigFault, TransportFault, UpstreamFault
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.run_tenant import RunTenant
 
 SYSTEM = "elastic"
 
@@ -64,19 +68,29 @@ class OutboundBody:
 
 
 PREFIX = "ELASTIC"
+#: The Elasticsearch container every request execs into — required.
+ES_CONTAINER_KEY = "ELASTIC_ES_CONTAINER"
+#: The Kibana container `health-check` alone reads — optional (MF-7 c).
+KIBANA_CONTAINER_KEY = "ELASTIC_KIBANA_CONTAINER"
 
 
 def load_config(ctx: VerbContext) -> dict[str, str]:
+    """`_record_config` over the call's run record (`ctx.tenant`)."""
+    return _record_config(ctx.tenant)
+
+
+def _record_config(tenant: RunTenant) -> dict[str, str]:
     """This deployment's elastic config from the run's record (#1107): the keys of
     `systems/elastic/config.env` as written, prefix included. A missing or unusable file, an
-    unimplemented access method, or a blank required key is a `ConfigFault` — Elasticsearch
-    down, the run goes on. The record's `elastic` view judges the keys platform code reads; this
-    reader judges the ones IT needs, so each reports its own view (MF-7 c).
+    unimplemented access method, or a blank required key is a `ConfigFault` — Elasticsearch is
+    not configured for this run, and the run goes on. The record's `elastic` view judges the
+    keys platform code reads; this reader judges the ones IT needs, so each reports its own view
+    (MF-7 c).
 
     Nothing is looked up in the environment, and the file is not re-read: the values are those
     of the run's start (O1, O2)."""
-    entry = transport.system_entry(ctx, SYSTEM)
-    transport.access_context(ctx, SYSTEM)
+    entry = transport.record_entry(tenant, SYSTEM)
+    transport.record_access_context(tenant, SYSTEM)
     config = dict(entry)
     missing = [k for k in REQUIRED_CONFIG_KEYS if not (config.get(k) or "").strip()]
     if missing:
@@ -85,18 +99,33 @@ def load_config(ctx: VerbContext) -> dict[str, str]:
     return config
 
 
+def check_settings(tenant: RunTenant) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
+    """Elastic's settings check (#1256 O-5): every `ConfigFault` a verb here can raise, over the
+    run's record — `load_config`'s (the file, the access method, the four keys), then the
+    Elasticsearch container every request execs into (`_http_json` → `_es_container`), which
+    `load_config` does not judge. The Kibana container is NOT judged: only `health-check` reads
+    it, asks first, and answers its absence as a result (MF-7 c), so an Elasticsearch-only
+    tenant's elastic is usable. None when the system is usable."""
+    _record_config(tenant)
+    _record_container(tenant, ES_CONTAINER_KEY)
+
+
 def _configured(ctx: VerbContext, key: str) -> str | None:
     """The container named by `key` in the tenant's file, or None when it is absent or blank."""
-    value = transport.system_entry(ctx, SYSTEM).get(key)
+    return _record_configured(ctx.tenant, key)
+
+
+def _record_configured(tenant: RunTenant, key: str) -> str | None:
+    value = transport.record_entry(tenant, SYSTEM).get(key)
     return None if value is None or not value.strip() else value
 
 
-def _container(ctx: VerbContext, key: str) -> str:
+def _record_container(tenant: RunTenant, key: str) -> str:
     """The container named by `key` (`ELASTIC_ES_CONTAINER` / `ELASTIC_KIBANA_CONTAINER`) in the
     tenant's file — `ConfigFault` naming it when absent or blank. There is no default: a built-in
     `elasticsearch` or `kibana` would address whatever container the host happens to hold of that
     name."""
-    value = _configured(ctx, key)
+    value = _record_configured(tenant, key)
     if value is None:
         raise ConfigFault(
             f"{key} is not set — name the container this system is reached through in its "
@@ -105,18 +134,18 @@ def _container(ctx: VerbContext, key: str) -> str:
 
 
 def _es_container(ctx: VerbContext) -> str:
-    return _container(ctx, "ELASTIC_ES_CONTAINER")
+    return _record_container(ctx.tenant, ES_CONTAINER_KEY)
 
 
 def _kibana_container(ctx: VerbContext) -> str:
-    return _container(ctx, "ELASTIC_KIBANA_CONTAINER")
+    return _record_container(ctx.tenant, KIBANA_CONTAINER_KEY)
 
 
 def _unreachable(ctx: VerbContext, target: str, exc: BaseException) -> TransportFault:
     context = transport.docker_context(ctx, SYSTEM)
     entry = transport.system_entry(ctx, SYSTEM)
     containers = "|".join(
-        entry[k] for k in ("ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER") if k in entry)
+        entry[k] for k in (ES_CONTAINER_KEY, KIBANA_CONTAINER_KEY) if k in entry)
     return TransportFault(
         f"{target} unreachable: {exc} — the stack is reached via "
         f"`docker --context {context} exec`; confirm it is up: "
@@ -367,7 +396,7 @@ def health_check(ctx: VerbContext) -> dict:
     # Kibana is optional to this adapter (MF-7 c: an Elasticsearch-only tenant keeps answering),
     # so a missing container is a RESULT here — asked before the call, never a ConfigFault that
     # would discard the Elasticsearch answer above and charge the breaker.
-    if _configured(ctx, "ELASTIC_KIBANA_CONTAINER") is None:
+    if _configured(ctx, KIBANA_CONTAINER_KEY) is None:
         out["kibana"] = "not configured (ELASTIC_KIBANA_CONTAINER is not set)"
         return out
     kb_url = config["KIBANA_URL"].rstrip("/") + "/api/status"
