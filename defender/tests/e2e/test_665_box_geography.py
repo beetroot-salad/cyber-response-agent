@@ -48,11 +48,13 @@ SALT = "s665geo"
 
 def _run_cycle_mounts(run_dir: Path):
     """A minimal run-cycle geography a caller composes (M2): learning_run_dir + the ro
-    defender infra tree + the ro gather_raw evidence tree."""
+    defender infra tree + the ro gather_raw evidence tree, each read-only mount declaring
+    what it holds (#1108 D7 amended): the run's data, the product code, the evidence data."""
     return (
-        Mount(source=run_dir, target=run_dir, writable=False),
-        Mount(source=DEFENDER, target=DEFENDER, writable=False),
-        Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False),
+        Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
+        Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
+        Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False,
+              kind="data"),
     )
 
 
@@ -60,7 +62,7 @@ def _populate_mount_sources(mounts, tmp_path: Path) -> None:
     """Populate only test-owned sources with an existing read-back file.
 
     D7 forbids planting during a read-only mount check. The checked-out DEFENDER already
-    has its fixed product file and is never edited by this fixture. The marker below is
+    has its committed code check file and is never edited by this fixture. The marker below is
     deliberate setup in temporary sources, available before startup begins.
     """
     for m in mounts:
@@ -72,13 +74,14 @@ def _populate_mount_sources(mounts, tmp_path: Path) -> None:
 
 
 def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=None, workdir=None,
-             spec=None):
+             spec=None, defender_dir=None):
     return BoxRequest(
         name=name,
         mounts=mounts if mounts is not None else _run_cycle_mounts(run_dir),
         workdir=workdir if workdir is not None else REPO_ROOT,
         env=env if env is not None else {},
         spec=spec,
+        defender_dir=defender_dir,
     )
 
 
@@ -121,7 +124,10 @@ def test_box_request_workdir_not_among_its_own_mounts(tmp_path):
     # `workdir / "defender"`, which this deliberately uncovered workdir lacks (#1092) — the
     # principle above is about geography, so the image is pinned out of the way.
     pinned = box_mod.BoxSpec(rootfs="python:3.11-slim")
-    start_box_request(_request(run_dir, workdir=uncovered, spec=pinned), docker=rec)
+    # The code mount's root is named explicitly (#1108 P3): the legacy `<workdir>/defender`
+    # of this deliberately uncovered workdir would lie outside the `code` mount (D7 amended).
+    start_box_request(_request(run_dir, workdir=uncovered, spec=pinned, defender_dir=DEFENDER),
+                      docker=rec)
     assert rec.flag_value("--workdir") == str(uncovered)
 
 
@@ -257,9 +263,9 @@ def test_sentinel_probes_every_mount_ro_readback_without_planting(tmp_path):
     (evidence / "result.json").write_text("{}\n", encoding="utf-8")
     # Disjoint roots give each mount its own observation: a repeated child read cannot
     # masquerade as a separate read-back of an enclosing mount.
-    mounts = (Mount(source=run_dir, target=run_dir, writable=False),
-              Mount(source=DEFENDER, target=DEFENDER, writable=False),
-              Mount(source=evidence, target=evidence, writable=False))
+    mounts = (Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
+              Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
+              Mount(source=evidence, target=evidence, writable=False, kind="data"))
     before = {m.source: frozenset(m.source.iterdir()) for m in mounts}
     rec = RecordingDocker()
     def boundary(argv, **kwargs):

@@ -267,7 +267,8 @@ def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_
 
     request = BoxRequest(
         name="defender-drain-1092", workdir=root, env={"TZ": "Europe/Oslo"},
-        mounts=(Mount(source=root, target=root), Mount(source=run_dir, target=run_dir, writable=True)),
+        mounts=(Mount(source=root, target=root, kind="code"),
+                Mount(source=run_dir, target=run_dir, writable=True)),
         spec=spec,
     )
     today_request = [

@@ -400,6 +400,8 @@ def test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable(tmp_path):
     # assertion could be satisfied by a request that mounts nothing at all.
     assert readonly_sources(request) == {paths.repo_root}, (
         f"the drain box lost its read-only worktree mount: {request.mounts}")
+    # #1108 D7 amended: the legacy drain declares its read-only worktree a `code` mount.
+    assert [m.kind for m in request.mounts if not m.writable] == ["code"], request.mounts
     for retired in RETIRED_CORPORA:
         assert B.mount_for(request, retired) is None, (
             f"{retired} is still bound into the drain box")
