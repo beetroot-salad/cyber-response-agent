@@ -224,7 +224,8 @@ def test_o6_every_start_time_settings_fault_is_down_at_start(tmp_path: Path) -> 
 
     for label, sc, tokens in (("no config.env", no_file, ()),
                               ("no ES container", container, ("ELASTIC_ES_CONTAINER",))):
-        d = sc.run(label.replace(" ", "-").replace(".", ""), **_down_lead())
+        # A run id is case-stable (lower case: `run.py --run-id`'s rule), so the label is too.
+        d = sc.run(label.replace(" ", "-").replace(".", "").lower(), **_down_lead())
         _named(d, control, f"down at start ({label})")
         _assert_names_not_configured(d, control, f"down at start ({label})", *tokens)
         _assert_never_started(d, f"down at start ({label})")

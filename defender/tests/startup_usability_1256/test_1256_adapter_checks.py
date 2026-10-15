@@ -48,6 +48,7 @@ import pytest
 from defender._io import read_jsonl_rows
 from defender.runtime.tenant_settings import NOT_CONFIGURED, SystemConfig
 from defender.scripts.adapters.faults import ConfigFault
+from defender.tests import _tenants1106 as T6
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 #: The declaration K1 names.
@@ -388,7 +389,20 @@ def test_o5_elastic_without_a_kibana_container_stays_usable(tmp_path, checkout_r
 
 
 def _no_systems(folder: Path, _system: str) -> None:
-    shutil.rmtree(S.settings_of(folder) / "systems")
+    """No system's settings at all: every `config.env` gone, and every system folder holding no
+    file the resolver requires removed whole. What resolution requires stays
+    (`_tenants1106.REQUIRED_FILES`, `systems/case-history/mapping.yaml`): without it the tenant
+    is refused before any check is asked, which is not this arm's subject."""
+    settings = S.settings_of(folder)
+    required = {settings / rel for rel in T6.REQUIRED_FILES}
+    for system_dir in sorted((settings / "systems").iterdir()):
+        kept = [p for p in system_dir.rglob("*") if p in required]
+        if not kept:
+            shutil.rmtree(system_dir)
+            continue
+        for path in sorted(system_dir.rglob("*"), reverse=True):
+            if path not in required and path.is_file():
+                path.unlink()
 
 
 def _own_folder_broken(folder: Path, system: str) -> None:
@@ -410,6 +424,10 @@ def test_o5_tacit_knowledge_needs_no_settings_and_its_check_never_raises(tmp_pat
         if mutate is not None:
             mutate(folder, "tacit-knowledge")
         record = S.resolve(root)
+        if label == "no-system-configured":
+            configured = sorted(s for s, e in record.systems.items() if isinstance(e, SystemConfig))
+            assert configured == [], (
+                f"precondition: the record configures no system at all: {configured}")
         if label == "own-folder-not-utf8":
             assert isinstance(record.systems.get("tacit-knowledge"), ConfigFault), (
                 f"precondition: the record holds tacit-knowledge's stored fault: "
