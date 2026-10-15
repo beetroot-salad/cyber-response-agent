@@ -126,3 +126,46 @@ def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
     snapshot = state.breaker_snapshot()
     assert snapshot["systems"]["elastic"]["failures"] == 2, snapshot
     assert "cmdb" not in snapshot["systems"], snapshot
+
+
+def test_a_breaker_tripped_by_config_faults_names_configuration(tmp_path):
+    """#1246: a missing or broken config (`ConfigFault`) exits 2 like a transport failure and
+    charges the same breaker — intended — so the messages it produces cannot blame
+    connectivity alone; the breaker sees exit codes, not which fault raised them. The two
+    messages that name causes read one phrase; MAIN's opening correlation sentence for a
+    tripped system claims no cause at all; the operator's escalation note names config too."""
+    from defender.runtime.case_ticket import ESCALATION_COMMENT_BODY
+    from defender.runtime.lead_zero import (
+        ENDING_TRIPPED_BREAKER,
+        CorrelationOutcome,
+        render_correlation_section,
+    )
+    from defender.scripts.adapters.faults import ConfigFault
+
+
+    state = _state(tmp_path)
+    for _ in range(cb.PER_SYSTEM_FAIL_LIMIT):
+        cb.record_outcome(state, "elastic", ConfigFault.exit_code)
+    assert cb.is_tripped(state, "elastic"), "config faults no longer charge the breaker"
+    down = cb.down_message(state, "elastic")
+    assert f"{cb.PER_SYSTEM_FAIL_LIMIT} {cb.INFRA_CAUSES}" in down, \
+        f"the down message restates the causes: {down!r}"
+    # Exit 2 is also a 5xx, a garbled reply, an adapter crash: the causes are examples, not a
+    # closed list, and the codes are the breaker's own set.
+    assert "not configured" in down, f"the down message never names a config cause: {down!r}"
+    assert "e.g." in down, f"the down message closes its list of causes: {down!r}"
+    codes = " / ".join(str(c) for c in sorted(cb.INFRA_EXIT_CODES))
+    assert f"exit {codes}" in down, f"the down message restates the infra codes: {down!r}"
+
+    aborted = str(cb.RunAborted(cb.RUN_FAIL_KILL_LIMIT, ["elastic"]))
+    assert f"{cb.RUN_FAIL_KILL_LIMIT} {cb.INFRA_CAUSES}" in aborted, \
+        f"the run-kill message restates the causes: {aborted}"
+
+    opening = render_correlation_section(
+        CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system="elastic"), grant_home="-")
+    assert "elastic" in opening, opening
+    assert "unreachable" not in opening, \
+        f"MAIN's opening message blames connectivity for a tripped breaker: {opening!r}"
+
+    assert "unconfigured" in ESCALATION_COMMENT_BODY, \
+        f"the operator's escalation note blames connectivity alone: {ESCALATION_COMMENT_BODY!r}"

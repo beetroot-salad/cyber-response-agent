@@ -2923,7 +2923,7 @@
      "-H",
      "Content-Type: application/json",
      "-d",
-     "{\"author\": \"defender-1080\", \"body\": \"Investigation ended without a verdict (exit: aborted) \\u2014 the environment appears unreachable or the investigation could not complete automatically. Escalate for manual review; this ticket is left open.\"}",
+     "{\"author\": \"defender-1080\", \"body\": \"Investigation ended without a verdict (exit: aborted) \\u2014 the environment appears unreachable or unconfigured, or the investigation could not complete automatically. Escalate for manual review; this ticket is left open.\"}",
      "-w",
      "\n%{http_code}",
      "http://case-history-t1080:8080/tickets/r1080/comments"
