@@ -160,11 +160,12 @@ def _dispatched_lead(deps: Any) -> str:
     return deps.lead_id
 
 
-def _model_visible(deps: Any, detail: str) -> str:
-    """`detail` as the model may read it: staged names and world ids removed, and the tenant
-    settings folder named rather than located. Both model-visible fault channels use this, so
-    no adapter's error wording can put a host path in front of the model."""
-    text = redact_model_visible(detail)
+def _model_visible(deps: Any, detail: str, known_ids: frozenset[str]) -> str:
+    """`detail` as the model may read it: world ids removed (`known_ids` is the serving
+    registry's `branch_identities()`, bound on the `QueryCapture`), and the tenant settings
+    folder named rather than located. Both model-visible fault channels use this, so no
+    adapter's error wording can put a host path in front of the model."""
+    text = redact_model_visible(detail, known_ids)
     tenant = getattr(deps, "tenant", None)
     if tenant is None:
         return text
@@ -175,9 +176,14 @@ def _model_visible(deps: Any, detail: str) -> str:
 
 class QueryCapture(AbstractCapability[Any]):
 
-    def __init__(self, registry: Any, role: str = "gather"):
+    def __init__(self, registry: Any, role: str = "gather", *, known_ids: frozenset[str]):
+        """`known_ids`: every branch identity this run's process knows, removed from the fault
+        text this capability shows the model or writes to the queries table. Required, with
+        no default meaning "none": the run's builder passes its registry's
+        `branch_identities()`, which is empty only for a natural run."""
         self._registry = registry
         self._role = role
+        self._known_ids = frozenset(known_ids)
 
     def _denial_logger_for(self, run_dir: Any) -> Any:
         # Per run dir, not per capability: each gather lead has its own QueryCapture over one
@@ -635,7 +641,8 @@ class QueryCapture(AbstractCapability[Any]):
                 # writers; `payload_digest` is only called for success.
                 payload_digest=(
                     payload_digest(text, "", 0) if exit_code == 0
-                    else f"exit={exit_code}; {_model_visible(deps, detail).strip()[:160]}"
+                    else f"exit={exit_code}; "
+                    f"{_model_visible(deps, detail, self._known_ids).strip()[:160]}"
                 ),
                 system_key=system_key,
                 call_id=CALL_ID.get(),
@@ -659,7 +666,7 @@ class QueryCapture(AbstractCapability[Any]):
             # The repeat note goes inside the untrusted wrap so the result stays one span.
             # Redacted here at the boundary because fault details also arrive verbatim from the
             # backend, which we do not author.
-            visible = _model_visible(deps, detail)
+            visible = _model_visible(deps, detail, self._known_ids)
             body = visible if repeat is None else f"{repeat}\n{visible}"
             return _format_bash_result(exit_code, "", wrap_fresh(body, "untrusted"), note)
         # `render` decides whether the payload fits; callers do not.

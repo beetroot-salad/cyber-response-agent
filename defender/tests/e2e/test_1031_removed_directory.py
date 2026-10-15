@@ -239,7 +239,7 @@ def test_record_charges_the_breaker_to_the_rows_own_system(tmp_path):
     # No driver started this run: start its state as the driver does at run start (#1235) —
     # `_record` allocates each row's seq from it and charges its breaker.
     state = RunState(run_dir, run_dir.name)
-    capture = QueryCapture(_real_registry(tmp_path)[1])
+    capture = QueryCapture(_real_registry(tmp_path)[1], known_ids=frozenset())
 
     row = _record(capture, state, system="elastic", exit_code=DEFAULT_FAULT_EXIT)
     assert row["system"] == "elastic"

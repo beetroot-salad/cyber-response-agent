@@ -249,7 +249,7 @@ def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path)
     deps = replace(_with_live_run_1165(bind(_tenants1106.fixture_gather_def(), real, defender_dir=DEFENDER), run=_live_run_1165(real)),
                    lead_id=LEAD, run_state=carried)
 
-    asyncio.run(QueryCapture(registry=None)._record(
+    asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={"q": "a"},
         payload=[{"a": 1}], exit_code=0, detail="", system_key=""))
 

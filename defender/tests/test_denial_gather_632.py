@@ -423,7 +423,7 @@ def test_a_lead_less_call_is_the_same_internal_error_at_every_capture_frame(tmp_
     ident = dict(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id=tmp_path.name,
                  cwd_anchor=tmp_path, policy=policy,
                  run_state=RunState(tmp_path, tmp_path.name))
-    capture = QueryCapture(_registry(VerbRecorder()))
+    capture = QueryCapture(_registry(VerbRecorder()), known_ids=frozenset())
 
     with pytest.raises(RuntimeError, match="without a dispatched lead_id"):
         capture._rejection_guard(

@@ -29,6 +29,7 @@ from typing import Any
 from defender import _yaml
 from defender._episode_paths import LAYOUT
 from defender.runtime.branch import source_alert
+from defender.runtime.branch._family import family_identities
 from defender.run_repository import Run
 from defender._io import read_jsonl_rows, read_text_utf8
 from defender._query_rules import ParamsTooDeep, _json_safe_params
@@ -352,6 +353,11 @@ class WorldRegistry(ModuleVerbRegistry):
         """How this world's call ids name its run (`record_query.bind_call_ids`): the world
         token every served-ledger row of the world carries as `world_id`."""
         return str(self.world.world_id)
+
+    def branch_identities(self) -> frozenset[str]:
+        """The whole family this world belongs to (`family_identities`), from the manifest the
+        sibling was resumed from: what the query tool removes from model-visible fault text."""
+        return family_identities(self.world.family)
 
     # -- the grant door -------------------------------------------------------------------------
 

@@ -133,7 +133,8 @@ def build_agent_core(  # noqa: PLR0913 — the single build site's config + 3 DI
         if defn.tools.query:
             from ..query_tool import QueryCapture
 
-            capabilities.append(QueryCapture(verbs, defn.role.value))
+            capabilities.append(QueryCapture(
+                verbs, defn.role.value, known_ids=verbs.branch_identities()))
     agent: Agent[Any, str] = Agent(
         built.model,
         deps_type=deps_type,

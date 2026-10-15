@@ -35,7 +35,7 @@ def test_a_capped_call_whose_view_write_is_refused_is_recorded_once(tmp_path):
     RunPaths(run_dir).executed_queries.symlink_to(outside)
 
     with pytest.raises(OSError, match="alias|link|regular|plain"):
-        asyncio.run(QueryCapture(registry=None)._record(
+        asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
             deps, system="elastic", verb="query", query_id="elastic.probe", params={},
             payload={"hits": []}, exit_code=0, detail="", system_key=""))
 
