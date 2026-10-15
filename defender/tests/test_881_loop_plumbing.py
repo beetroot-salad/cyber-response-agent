@@ -51,7 +51,7 @@ def _ids_in(line: str, label: str) -> str:
     """The contents of one `<label>=[...]` list on a held-report line.
 
     A MISSING LABEL FAILS HERE rather than answering `""`. The two assertions this feeds are
-    negative — a gate hold must appear in neither `forward_bad_terminal_ids` nor `skipped_ids` — so an
+    negative — a gate hold must appear in neither `deferred_ids` nor `skipped_ids` — so an
     absent label made them vacuously true: rename the field, drop an empty list, or move the
     line to JSON, and the whole "never merged under one label" demand passes without reading
     anything. `re.escape` for the same reason: a label carrying a regex metacharacter would
@@ -72,8 +72,8 @@ def _ids_in(line: str, label: str) -> str:
 def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_report(tmp_path):
     """#881/O3, through the real `run_batch` on the real findings channel.
 
-    BOTH ARMS OF THE GATE HOLD, and both must be named. An adversarial finding whose run has
-    no resolvable `source_refs.yaml` is held with `no_ground_truth(...)`; a `direction:
+    BOTH ARMS OF THE GATE HOLD, and both must be named. An adversarial finding — a direction
+    nothing authors since #1166 — is held with `retired_direction(...)`; a `direction:
     family` row carrying a retired name (here a pre-#1234 `judge_outcome`, #1234 I10/A4) is
     held by the family partition with `retired_name(...)`. Both are permanent — the facts they wait on have no writer
     any more — so they sit in the queue on every tick from now on, and a report that names
@@ -98,19 +98,18 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
     appended a line every tick would pass everything above while making the report
     unreadable — which is the same as not having one.
 
-    Each held id is also asserted NOT to be inside `forward_bad_terminal_ids=[...]` or
+    Each held id is also asserted NOT to be inside `deferred_ids=[...]` or
     `skipped_ids=[...]`. `DrainOutcome.held` is typed as the AUTHOR_RESULT bucket holds, so
-    folding the gate's holds into that bucket would report a row the forward check never saw
-    as a forward-check verdict, and a skip is terminal where a hold is forever. What the
+    folding the gate's holds into that bucket would report a row the curator never saw as a
+    deferral, and a skip is terminal where a hold is forever. What the
     third label IS is the implementation's to choose; that it is neither of those two is the
     demand.
     """
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
-    legacy = h.row_for("findings", "a/0")
+    legacy = h.row_for("findings", "a/0", direction="adversarial")
     family = h.row_for("findings", "f/0", direction="family", judge_outcome="not-a-word")
     authorable = h.row_for("findings", "z/0")
-    h.write_source_refs(paths, "z")
     h.seed(paths, ch, [legacy, family, authorable])
     agent = h.recording(h.committing("881-o3"))
     cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
@@ -122,7 +121,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
         "batch this test is about"
     )
     assert {r["finding_id"]: r.get("held_reason") for r in h.pending(paths, ch)} == {
-        "a/0": "no_ground_truth(direction='adversarial', disposition=None)",
+        "a/0": "retired_direction('adversarial')",
         "f/0": "retired_name(judge_outcome)",
     }, "the tick did not hold the two rows this test is about"
 
@@ -131,15 +130,15 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
         "permanent ones, and they are the ones with no written trace"
     )
     first_tick = report.read_text(encoding="utf-8")
-    for held_id, arm in (("a/0", "no_ground_truth"), ("f/0", "retired_name")):
+    for held_id, arm in (("a/0", "retired_direction"), ("f/0", "retired_name")):
         assert held_id in first_tick, (
             f"the row held on the {arm} arm is not named in the report, although the tick "
             f"committed a row alongside it: {first_tick!r}"
         )
         for line in first_tick.splitlines():
-            assert held_id not in _ids_in(line, "forward_bad_terminal_ids"), (
-                "a pre-author gate hold was reported as a forward-check verdict; the "
-                f"forward check never saw this row: {line!r}"
+            assert held_id not in _ids_in(line, "deferred_ids"), (
+                "a pre-author gate hold was reported as a deferral; the curator never saw "
+                f"this row: {line!r}"
             )
             assert held_id not in _ids_in(line, "skipped_ids"), (
                 f"a held row was reported as a skip — a hold is not terminal: {line!r}"
@@ -147,7 +146,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
 
     # A second HOLDING tick: the report is a ledger, so it grows by a line and keeps the one
     # it had. `"w"` instead of `"a"` fails here and nowhere else.
-    h.seed(paths, ch, [h.row_for("findings", "b/0")])
+    h.seed(paths, ch, [h.row_for("findings", "b/0", direction="adversarial")])
     assert drain.run_batch(cfg=cfg) == 0
     second_tick = report.read_text(encoding="utf-8")
     assert "b/0" in second_tick, "the second tick's hold is not named in the report"
@@ -161,7 +160,6 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
 
     # The paired control: a tick that holds nothing writes nothing.
     h.seed(paths, ch, [h.row_for("findings", "c/0")])
-    h.write_source_refs(paths, "c")
     assert drain.run_batch(cfg=cfg) == 0
     assert h.pending(paths, ch) == [], "the row was not authored on the tick that could author it"
     assert report.read_text(encoding="utf-8") == second_tick, (
@@ -578,7 +576,7 @@ def test_881_unreadable_lines_beside_a_real_row_do_not_take_it_with_them(tmp_pat
     which would delete every queued finding the moment one appender tore a line."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
-    keep = h.row_for("findings", "a/0")
+    keep = h.row_for("findings", "a/0", direction="adversarial")  # held, so it stays queued
     (paths.state_root / ch.queue).parent.mkdir(parents=True, exist_ok=True)
     (paths.state_root / ch.queue).write_text(json.dumps(keep) + "\n{torn\n", encoding="utf-8")
     cfg = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o2-mixed")))
@@ -617,7 +615,7 @@ def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sti
     """
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
-    held = [h.row_for("findings", f"a/{i}") for i in range(3)]
+    held = [h.row_for("findings", f"a/{i}", direction="adversarial") for i in range(3)]
     h.seed(paths, ch, held)
     full = _StateWhoseDiskIsFull.over(LearningState.open(paths), "disposition_report")
     cfg = h.cfg_for(paths, "findings", state=full,

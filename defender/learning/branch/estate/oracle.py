@@ -132,7 +132,7 @@ ORACLE_DEF = AgentDefinition(
     role=AgentRole.ORACLE, model=config.oracle_model, effort=config.oracle_effort(),
     deps_cls=OracleDeps, deny_reason=_DENY,
 )
-#: The oracle's verifier model (M11), apart from the runtime's own `VERIFIER`.
+#: The oracle's verifier model (M11).
 ORACLE_CHECK_DEF = AgentDefinition(
     role=AgentRole.ORACLE_CHECK, model=config.oracle_check_model,
     effort=config.oracle_check_effort(), deps_cls=OracleCheckDeps, deny_reason=_DENY,

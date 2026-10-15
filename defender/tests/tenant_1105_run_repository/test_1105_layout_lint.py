@@ -1,6 +1,6 @@
 """#1105 PR 1 — D7's layout lint, `scripts/lint/lint_run_layout_imports.py` (→ O1), and the
 neighbouring gates it must agree with (MF-05, MF-06, MF-07, MF-19, MF-20: the interim FENCE until
-#1082; NM-08, NM-09; the After-the-gate AUTO keying `deferred_legacy` by (module, function)).
+#1082; NM-08, NM-09).
 
 Outside the owners, production code may not take a run-folder layout name, an episode-runs name,
 `Tenant.runs` or a handle constructor except where D7's category table exempts it or the PR 1
@@ -8,11 +8,8 @@ allow-list names the use. The allow-list is the only hatch (no inline suppressio
 entry fails; PR 1's list holds exactly 18 entries: ruling 1's nine sites, `cli.py:1089`
 (`tenant.tenant.runs`), `run_common.py:90` (`tenant.runs`) and `:96` (`Run.for_tenant`),
 `visualize_run.py:633` (`Run.at`) and the five unmigrated callers' module-level `RunPaths`
-imports. The module-level `RunPaths` imports of `learning/author/lessons/run.py` (:11) and
-`learning/author/verify_forward/forward.py` (:6), which the (module, function) keying of
-`deferred_legacy` would leave outside the four exempt readers, move inside `disposition_for` and
-`load_run_context` in PR 1 (the owner's Phase F ruling on FR-1: the allow-list stays 18, so
-PR 2's empty allow-list stays reachable); no allow-list entry names either module.
+imports. (PR 1 also carried a `deferred_legacy` row exempting four per-case readers by
+(module, function); #1166 deleted the readers and the row.)
 
 #1105 PR 2 reached that end state (D7″, J15): the allow-list is empty, the `unmigrated` row is
 gone (F-09 moved its modules to the rows their remaining use fits), and F-13 deleted
@@ -46,8 +43,7 @@ THE LINT'S TEST INTERFACE (coined here; the implementer matches it, or renames i
   (a sequence, so a duplicate can be written and is a finding; entries are not normalised);
 * `CATEGORIES: Mapping[str, Sequence[str]]` — row name -> module paths under `defender/`, the
   rows `owners`, `running-investigation`, `names-only`, `run-lifecycle`, `path-taking-readers`,
-  `not-a-run`, `deferred_legacy`, `helpers-only` (PR 1's `unmigrated` row went with #1105 PR 2);
-* `DEFERRED_LEGACY: frozenset[tuple[str, str]]` — the four exempt (module, function) pairs;
+  `not-a-run`, `helpers-only` (PR 1's `unmigrated` row went with #1105 PR 2);
 * `HELPERS: frozenset[str]` — the eight ungated layout helpers;
 * the sweep skips `evals/` and `tests/` under the root, every `__pycache__` and hidden directory,
   and a venv (a directory named `venv` / `.venv`, or one holding `pyvenv.cfg`; the planted venvs
@@ -112,17 +108,9 @@ NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "ca
 
 _VE = "scripts/visualize/visualize_episode.py"
 _CLI = "learning/branch/cli.py"
-_LESSONS = "learning/author/lessons/run.py"
-_FORWARD = "learning/author/verify_forward/forward.py"
 #: The allow-list. PR 1 held 18 (module, function, name, count) entries (A4-10); #1105 PR 2
 #: migrated every site and emptied it (D7″'s end state, J15: no allow-list entries).
 EXPECTED_ALLOW_LIST: tuple[tuple[str, str, str, int], ...] = ()
-
-#: The four legacy readers `deferred_legacy` exempts, keyed by (module, function) (N-f; the
-#: After-the-gate AUTO, NF-15).
-EXPECTED_DEFERRED_LEGACY = frozenset({
-    (_LESSONS, "disposition_for"), (_LESSONS, "_has_confident_ground_truth"),
-    (_FORWARD, "load_run_context"), (_FORWARD, "expected_disposition")})
 
 _PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
                   "_held.py", "_id.py", "_errors.py")
@@ -156,7 +144,7 @@ EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
     "names-only": frozenset({
         "_report.py", "_artifact_schema.py", "runtime/compaction.py",
         "learning/branch/seams.py", "learning/judge/__init__.py",
-        "learning/author/verify_forward/checks.py", "learning/core/config.py",
+        "learning/core/config.py",
         "scripts/workspace_map.py",
         # #1191: the API stub's demo seeds a fake investigation's artifact names — names, no path.
         "api/demo.py"}),
@@ -169,7 +157,6 @@ EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
         "learning/branch/archive.py", "learning/branch/questioner/__init__.py",
         "learning/leads/lead_author/__init__.py", "learning/ops/trace_lesson.py"}),
     "not-a-run": frozenset({_VE}),
-    "deferred_legacy": frozenset({_LESSONS, _FORWARD}),
     # `learning/judge/enqueue.py` left the row in the merge of #1135, which removed its last use
     # of the layout (owner ruling: the row is dropped, 57 -> 56). #1234 took
     # `learning/judge/run.py` off it with its last `artifact_file` import.
@@ -184,7 +171,6 @@ _ROW_SAMPLE = {
     "run-lifecycle": "run_common.py",
     "path-taking-readers": "scripts/visualize/visualize_run.py",
     "not-a-run": _VE,
-    "deferred_legacy": _LESSONS,
     "helpers-only": "learning/branch/ledger.py",
     "uncategorised": "learning/planted_probe.py",
 }
@@ -742,13 +728,12 @@ def test_1105_layout_lint_flags_a_re_exports_own_import(tmp_path):
 # ==========================================================================================
 
 def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp_path):
-    """The lint's category table places each of the 50 non-owner production importers of the
+    """The lint's category table places each of the 47 non-owner production importers of the
     layout (57 at 80888efb; #1105 PR 2's F-09 moves; #1234 took `learning/judge/run.py` off
-    the helpers-only row) in exactly one row as D7's table lists
+    the helpers-only row; #1166 deleted the forward check's three) in exactly one row as D7's
+    table lists
     them, the owners in their own row, and exempts layout names exactly in the running-investigation, names-only, run-lifecycle,
-    path-taking-reader, not-a-run and deferred_legacy rows; a module in no row gets no
-    exemption. (The deferred_legacy row exempts only its four readers, keyed by (module,
-    function), per the After-the-gate AUTO.)"""
+    path-taking-reader and not-a-run rows; a module in no row gets no exemption."""
     lint_run_layout_imports = _lint()
     table = {row: frozenset(mods) for row, mods in dict(lint_run_layout_imports.CATEGORIES).items()}
     assert table == EXPECTED_CATEGORIES, (
@@ -756,7 +741,7 @@ def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp
         f"{sorted(r for r in EXPECTED_CATEGORIES if table.get(r) != EXPECTED_CATEGORIES[r])}")
     every = [m for mods in table.values() for m in mods]
     assert len(every) == len(set(every)), "a module sits in more than one row"
-    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 50  # #1235 removed two importers; #1234 removed judge/run.py from the helpers-only row
+    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 47  # #1235 removed two importers; #1234 removed judge/run.py from the helpers-only row; #1166 removed the forward check's three
     root = _planted(tmp_path)
     for module in _ROW_SAMPLE.values():
         _add(root, module, "from defender.run_repository import RunPaths  # noqa: F401\n\n\n"
@@ -770,152 +755,10 @@ def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp
         keys = set(_in(found, module))
         if row in exempt_rows:
             assert not keys, f"{row} ({module}) is exempt for layout names but was flagged: {keys}"
-        elif row == "deferred_legacy":
-            assert keys == {(module, "<module>", "RunPaths")}, (
-                f"deferred_legacy exempts disposition_for only, not the module: {keys}")
         else:
             assert keys == {(module, "<module>", "RunPaths"),
                             (module, "disposition_for", "RUN_LAYOUT")}, (
                 f"{row} ({module}) gets no layout exemption, but flagged only {keys}")
-
-
-def test_1105_the_legacy_readers_sit_in_deferred_legacy_not_on_the_allow_list(tmp_path):
-    """The deferred_legacy exemption is keyed by (module, function) for the four named readers,
-    not by module: disposition_for and _has_confident_ground_truth in
-    learning/author/lessons/run.py, load_run_context and expected_disposition in
-    learning/author/verify_forward/forward.py. A gated layout use elsewhere in either module
-    (lessons/run.py holds the live findings drain) is not exempt: it joins the allow-list or the
-    run-lifecycle category per D7's table, and a planted new use in either module outside the
-    four functions fails the lint. No allow-list entry names either module, under any function
-    or <module>: PR 1 moves their module-level RunPaths imports into disposition_for and
-    load_run_context (the owner's Phase F ruling on FR-1)."""
-    lint_run_layout_imports = _lint()
-    assert frozenset(tuple(p) for p in lint_run_layout_imports.DEFERRED_LEGACY) == (
-        EXPECTED_DEFERRED_LEGACY), "the deferred_legacy exemption is not the four (module, def)"
-    listed = {tuple(e)[:2] for e in lint_run_layout_imports.ALLOW_LIST}
-    assert not listed & EXPECTED_DEFERRED_LEGACY, "an allow-list entry names a legacy reader"
-    named = sorted(e for e in listed if e[0] in (_LESSONS, _FORWARD))
-    assert not named, (
-        f"an allow-list entry names a deferred_legacy module ({named}); FR-1 keeps the list at 18 "
-        "by moving the two module-level RunPaths imports into the exempt readers")
-    root = _planted(tmp_path)
-    for module, readers in ((_LESSONS, ("disposition_for", "_has_confident_ground_truth")),
-                            (_FORWARD, ("load_run_context", "expected_disposition"))):
-        body = "".join(f"def {fn}(*args):\n    from defender.run_repository import RunPaths\n"
-                       f"    return RunPaths\n\n\n" for fn in (*readers, "_planted_drain_use"))
-        _plant(root, module, body)
-    found = lint_run_layout_imports.scan(root, allow_list=())
-    for module in (_LESSONS, _FORWARD):
-        assert set(_in(found, module)) == {(module, "_planted_drain_use", "RunPaths")}, (
-            f"{module}: only the use outside the four readers is a finding: {_in(found, module)}")
-
-
-#: The modules a deferred_legacy reader may take a layout name from, in every spelling the
-#: two modules could use at HEAD or after the re-spell.
-_LEGACY_SOURCES = ("defender._run_paths", "defender.run_repository",
-                   "defender.run_repository._layout")
-
-
-def _resolved(node: ast.ImportFrom, package: str) -> str:
-    """The absolute module an import-from names (`package` is the importing module's)."""
-    if not node.level:
-        return node.module or ""
-    parts = package.split(".")
-    base = parts[: len(parts) - node.level + 1]
-    return ".".join([*base, *([node.module] if node.module else [])])
-
-
-def _qualnames(tree: ast.Module) -> dict[ast.AST, str]:
-    """Each node of `tree` mapped to its innermost enclosing qualified def (classes included),
-    or "<module>"."""
-    out: dict[ast.AST, str] = {}
-
-    def walk(node: ast.AST, scope: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            inner = scope
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                inner = child.name if scope == "<module>" else f"{scope}.{child.name}"
-            out[child] = inner
-            walk(child, inner)
-
-    walk(tree, "<module>")
-    return out
-
-
-def _bindings(node: ast.AST, package: str) -> list[tuple[str, str]]:
-    """(bound name, what) for each name `node` binds from `_LEGACY_SOURCES`: a non-helper name
-    imported from one (absolute, relative or aliased), or one of them imported whole."""
-    out: list[tuple[str, str]] = []
-    if isinstance(node, ast.ImportFrom):
-        source = _resolved(node, package)
-        for alias in node.names:
-            whole = f"{source}.{alias.name}"
-            if source in _LEGACY_SOURCES and alias.name not in HELPERS:
-                out.append((alias.asname or alias.name, f"imports {alias.name} from {source}"))
-            elif whole in _LEGACY_SOURCES:
-                out.append((alias.asname or alias.name, f"imports {whole} whole"))
-    elif isinstance(node, ast.Import):
-        out.extend((alias.asname or alias.name.split(".")[0], f"imports {alias.name} whole")
-                   for alias in node.names if alias.name in _LEGACY_SOURCES)
-    return out
-
-
-def _layout_uses(path: Path, rel: str) -> list[tuple[str, int, str]]:
-    """(enclosing qualified def or "<module>", line, what) for every binding `_bindings` finds
-    in the module `rel` at `path`, and every read of a name so bound."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    scope = _qualnames(tree)
-    package = ".".join(("defender", *Path(rel).parts[:-1]))
-    bound: set[str] = set()
-    uses: list[tuple[str, int, str]] = []
-    for node in ast.walk(tree):
-        for name, what in _bindings(node, package):
-            bound.add(name)
-            uses.append((scope[node], getattr(node, "lineno", 0), what))
-    uses.extend((scope[node], node.lineno, f"reads {node.id}") for node in ast.walk(tree)
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
-                and node.id in bound)
-    return uses
-
-
-def test_1105_the_legacy_modules_use_layout_names_only_inside_their_exempt_readers(tmp_path):
-    """In learning/author/lessons/run.py and learning/author/verify_forward/forward.py every
-    binding of a gated layout name (RunPaths) imported from the door, its _layout submodule or
-    the old _run_paths module, under any spelling (absolute, relative, aliased, or the module
-    imported whole), and every read of a name so bound, sits inside one of the four
-    deferred_legacy readers (disposition_for, _has_confident_ground_truth, load_run_context,
-    expected_disposition), never at module level: PR 1 moves the module-level imports at
-    lessons/run.py:11 and forward.py:6 into disposition_for and load_run_context (the owner's
-    Phase F ruling on FR-1), so the 18-entry allow-list needs no row for either module.
-    lint_run_layout_imports, run with no allow-list over a planted tree holding the two real
-    modules, reports nothing in them; positive control: the same tree with a module-level
-    RunPaths import restored in each is flagged there."""
-    for module in (_LESSONS, _FORWARD):
-        uses = _layout_uses(H.DEFENDER / module, module)
-        outside = [u for u in uses if (module, u[0]) not in EXPECTED_DEFERRED_LEGACY]
-        assert not outside, (
-            f"{module}: layout uses outside the four deferred_legacy readers (FR-1 moves them "
-            f"inside): {outside}")
-        assert uses, f"{module}: no layout use found at all, so this census reads nothing"
-    lint_run_layout_imports = _lint()
-    root = _planted(tmp_path / "moved")
-    control = _planted(tmp_path / "control")
-    for module in (_LESSONS, _FORWARD):
-        text = (H.DEFENDER / module).read_text(encoding="utf-8")
-        _plant(root, module, text)
-        _plant(control, module, "from defender.run_repository import RunPaths  # noqa: F401\n"
-                                + text)
-    found = lint_run_layout_imports.scan(root, allow_list=())
-    assert isinstance(found, list), f"scan() did not return a list of findings: {found!r}"
-    legacy = [f for f in found
-              if any(m in str(getattr(f, "display", "")) for m in (_LESSONS, _FORWARD))]
-    assert legacy == [], (
-        f"the lint flags the moved legacy modules with no allow-list: {_displays(legacy)}")
-    flagged = lint_run_layout_imports.scan(control, allow_list=())
-    for module in (_LESSONS, _FORWARD):
-        assert (module, "<module>", "RunPaths") in _keys(flagged), (
-            f"{module}: a restored module-level RunPaths import is not flagged, so the clean "
-            f"verdict above says nothing: {_in(flagged, module)}")
 
 
 def test_1105_layout_lint_sweeps_defender_minus_evals_and_tests(tmp_path):

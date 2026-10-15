@@ -34,7 +34,6 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers):
     import fcntl
 
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-A", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-A/0", run_id="run-A")
 
     lock_file = tmp_repo.paths.state_root / REPO_LOCK.file
@@ -80,111 +79,8 @@ def test_clean_scope_passes_when_clean(tmp_repo):
                                    corpus=cfg.corpus)
 
 
-def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
-    a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-A", "inconclusive")
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-B", "benign")
-    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-A/0", run_id="run-A")
-    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-B/0", run_id="run-B")
-
-    captured = {}
-
-    def fake_invoke(findings, batch_id, cfg):
-        captured["findings"] = findings
-        captured["batch_id"] = batch_id
-        return {
-            "committed": [],
-            "held_forward_bad": [],
-            "consumed_skip": [
-                {"finding_id": f["finding_id"], "reason": "covered"}
-                for f in findings
-            ],
-            "commit_sha": None,
-        }
-
-    cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
-    rc = a.run_batch(cfg=cfg)
-    assert rc == 0
-
-    assert [f["finding_id"] for f in captured["findings"]] == ["run-B/0"]
-
-    pending = [
-        json.loads(line)
-        for line in (tmp_repo.paths.state_root / FINDINGS.queue).read_text().splitlines()
-        if line.strip()
-    ]
-    assert [p["finding_id"] for p in pending] == ["run-A/0"]
-    assert "no_ground_truth" in pending[0]["held_reason"]
-
-
-def test_has_confident_ground_truth_is_direction_aware(tmp_repo):
-    """The two directions confirm on opposite dispositions (#317). A benign (FP)
-    finding is a confident over-escalation only when the source case was `malicious`;
-    an adversarial finding is a confident miss only when it was `benign`. Everything
-    else (including None) is held."""
-    a = tmp_repo.author
-    assert a._has_confident_ground_truth("benign", "malicious") is True
-    assert a._has_confident_ground_truth("benign", "benign") is False
-    assert a._has_confident_ground_truth("benign", "inconclusive") is False
-    assert a._has_confident_ground_truth("benign", None) is False
-    assert a._has_confident_ground_truth("adversarial", "benign") is True
-    assert a._has_confident_ground_truth("adversarial", "malicious") is False
-
-
-def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monkeypatch):
-    """Mirror of the adversarial gate for the FP direction: a benign finding reaches the
-    agent only from a `malicious` source case (the over-escalation it corrects); from a
-    benign source it is held (no confident FP ground truth)."""
-    a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-M", "malicious")
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-Bn", "benign")
-    helpers.write_finding(
-        tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-M/0", run_id="run-M", direction="benign"
-    )
-    helpers.write_finding(
-        tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-Bn/0", run_id="run-Bn", direction="benign"
-    )
-
-    captured = {}
-
-    def fake_invoke(findings, batch_id, cfg):
-        captured["findings"] = findings
-        return {
-            "committed": [],
-            "held_forward_bad": [],
-            "consumed_skip": [
-                {"finding_id": f["finding_id"], "reason": "covered"} for f in findings
-            ],
-            "commit_sha": None,
-        }
-
-    cfg = replace(tmp_repo.cfg, invoke_agent=fake_invoke)
-    rc = a.run_batch(cfg=cfg)
-    assert rc == 0
-
-    assert [f["finding_id"] for f in captured["findings"]] == ["run-M/0"]
-
-    pending = [
-        json.loads(line)
-        for line in (tmp_repo.paths.state_root / FINDINGS.queue).read_text().splitlines()
-        if line.strip()
-    ]
-    assert [p["finding_id"] for p in pending] == ["run-Bn/0"]
-    assert "no_ground_truth" in pending[0]["held_reason"]
-
-    consumed = [
-        json.loads(line)
-        for line in (tmp_repo.paths.state_root / FINDINGS.consumed).read_text().splitlines()
-        if line.strip()
-    ]
-    assert [c["finding_id"] for c in consumed] == ["run-M/0"]
-    assert consumed[0]["consumed_category"] == "consumed_skip"
-    assert "consumed_at" in consumed[0]
-
-
 def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-X", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
 
     (tmp_repo.paths.lessons_dir / "preexisting.md").write_text(

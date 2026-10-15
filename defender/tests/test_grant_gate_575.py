@@ -61,11 +61,9 @@ from defender.agents import (  # noqa: E402
     MAIN_DEF,
     QUESTIONER_DEF,
     SUPPORT_DEF,
-    VERIFY_DEF,
 )
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
-    CorpusRepairDeps,
     CuratorDeps,
 )
 from defender.runtime import permission, tools  # noqa: E402
@@ -156,15 +154,6 @@ def _curator(env):
     return deps.policy
 
 
-def _corpus_repair(env):
-    """#773 M4: the repair spawn's own front door, `CorpusRepairDeps.for_run` — a SEPARATE
-    deps type from the curator's, since `run_stage` resolves the effective definition off
-    `AGENTS[deps_type.role]`."""
-    corpus = env.dfn / "lessons"
-    deps = CorpusRepairDeps.for_run(env.run, env.dfn.parent, corpus, box=None)
-    return deps.policy
-
-
 def _all_policies(env) -> dict[str, permission.AgentPolicy]:
     """Every agent's compiled policy, through each role's REAL seam. The audit demands (a2/a4/
     b3/b8/g1) sweep this."""
@@ -178,14 +167,10 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
     return {
         "main": env.main,
         "gather": env.gather,
-        # Keyed by the ROLE VALUE (`verifier`, not `verify`): b3 now asserts this dict covers
-        # the registry, and it can only do that if the keys are the roster's own names.
-        "verifier": compile_policy_for(VERIFY_DEF, run_dir=env.run, defender_dir=env.dfn),
+        # Keyed by the ROLE VALUE: b3 asserts this dict covers the registry, and it can only do
+        # that if the keys are the roster's own names.
         "lead_author": _lead_author(env),
         "corpus_author": _curator(env),
-        # #773 M4's repair spawn — registered in AGENTS under its own role, so a compiled
-        # policy of its exists whether or not this dict looks at it.
-        "corpus_repair": _corpus_repair(env),
         # #796's review roles. They are here for the same reason every other role is: b3
         # sweeps THIS dict, so a role registered in AGENTS but absent here is a compiled
         # policy the audit never looks at. Their expected shape is the empty one — no bash
@@ -431,7 +416,7 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     #691). It is the one denylist-free lane, so an untabled (=ungated) program there is the worst
     place for the fail-open to hide."""
     pols = _all_policies(env)
-    # 12, and the number has moved seven times: #797 retired the review's three roles
+    # 10, and the number has moved eight times: #797 retired the review's three roles
     # (CHALLENGER, COHERENCE_CHECKER, PROJECTION) with the stages that ran under them; #796
     # added three of its own (DISCRIMINATION, SUPPORT, COMPOSER); DISCRIMINATION was then
     # retired for producing nothing the composer could route; #947 added QUESTIONER; #922
@@ -439,11 +424,12 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     # #1008 re-added JUDGE, bound to the FAMILY judge, which until then ran under the
     # questioner's definition; #773 added CORPUS_REPAIR, M4's one bounded repair spawn (a
     # fixed, separate definition rather than a per-spawn override of CORPUS_AUTHOR's own);
-    # #1224 added ORACLE and ORACLE_CHECK, a branched world's live oracle and its verifier.
+    # #1224 added ORACLE and ORACLE_CHECK, a branched world's live oracle and its verifier;
+    # #1166 retired VERIFIER and CORPUS_REPAIR with the forward check.
     # SUPPORT is claimed by two calls and QUESTIONER by four, so roles and calls have not
     # matched here since #796. This counts registered roles, so a deliberately added or
     # retired role moves it; what the test checks is the table property below.
-    assert len(AGENTS) == 12
+    assert len(AGENTS) == 10
     # ...AND `_all_policies` covers every one of them. The count alone does not say so: this
     # dict is hand-enumerated, and its own note says a role registered in AGENTS but absent
     # here is "a compiled policy the audit never looks at" — a2/a4/b3/b8/g1 all sweep THIS,

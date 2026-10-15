@@ -331,10 +331,8 @@ def _listing(hits: list[Touch], n: int = 40) -> str:
 
 #: X7's eight `lint-unguarded-tree-write: ok` waivers O1 says are gone, by (module, function).
 X7_WAIVERS = frozenset({
-    ("defender/learning/author/shared.py", "invoke_repair"),
     ("defender/learning/author/shared.py", "write_disposition_report"),
     ("defender/learning/author/drain.py", "_bump_rows"),
-    ("defender/learning/author/drain.py", "_append_gap_record"),
     ("defender/learning/author/drain.py", "_retire_unkeyable"),
     ("defender/learning/author/drain.py", "_record_stuck"),
     ("defender/learning/author/questioner/run.py", "invoke_agent"),
@@ -543,7 +541,7 @@ D1_VERBS = (
     "enqueue_curation", "has_requests", "claim", "stamp", "requeue", "done", "quarantine",
     "failed_requests",
     "record_delivery", "deliveries", "delivered", "quarantine_delivery", "failed_deliveries",
-    "append", "rows", "rows_report", "rotate", "deadletter", "deadletter_rows", "gap_record",
+    "append", "rows", "rows_report", "rotate", "deadletter", "deadletter_rows",
     "disposition_report",
     "lock", "describe", "stage_dir",
 )
@@ -750,7 +748,6 @@ RECORDS = (
     ("defender.learning.author._config", "CorpusAuthorConfig"),
     ("defender.learning.author.lessons.run", "AuthorConfig"),
     ("defender.learning.author.questioner.run", "QuestionerAuthorConfig"),
-    ("defender.learning.author.verify_forward.checks", "CheckContext"),
     ("defender.learning.leads.lead_author", "LeadAuthorDeps"),
     ("defender.learning.core.drains", "PendingDelivery"),
     ("defender.learning.core.drains", "ServedMarker"),
@@ -760,10 +757,11 @@ RECORDS = (
 GONE = (
     ("defender.learning.leads.lead_author._handoff", "queue_lock_file"),
 )
-#: The listed seams and records the graph itself binds (o5_seams_take_the_handle, all 14 names):
+#: The listed seams and records the graph itself binds (o5_seams_take_the_handle, 14 names; the
+#: forward check's `CheckContext` went with the check in #1166, so 13 are left):
 #: reshaped, never removed, so each must still resolve. A seam missing from these three tables
 #: may be removed outright (it then carries nothing); one listed here that stops resolving was
-#: renamed past this pin. By import: the function seams and the five record classes.
+#: renamed past this pin. By import: the function seams and the four record classes.
 MUST_RESOLVE = (
     ("defender.learning.core.drains", "BatchDisposition.apply"),
     ("defender.learning.core.pitfalls_disposition", "PitfallsDisposition.apply"),
@@ -773,7 +771,6 @@ MUST_RESOLVE = (
     ("defender.learning.frontend.serialize_queues", "build_view"),
     ("defender.learning.judge.enqueue", "enqueue_report"),
     ("defender.learning.author._config", "CorpusAuthorConfig"),
-    ("defender.learning.author.verify_forward.checks", "CheckContext"),
     ("defender.learning.leads.lead_author", "LeadAuthorDeps"),
     ("defender.learning.core.drains", "PendingDelivery"),
     ("defender.learning.core.drains", "ServedMarker"),

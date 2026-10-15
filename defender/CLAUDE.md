@@ -17,7 +17,7 @@
 | **the branch** / **the episode** | `learning/branch/` — forks a finished run at a chosen message and runs a family of sibling worlds from it; `cli.py` is the composition root, `estate/` is what a sibling's queries are answered from |
 | **the questioner** | `learning/branch/questioner/` — a deny-all role that authors the family manifest: sibling worlds differing by one deliberate fact. Runs no tools; its whole input is inlined by the host |
 | **the judge** | `learning/judge/` — grades an archived episode (`gradable\|discard\|corpus-contradiction`) and enqueues its findings. Holds its own deny-all role since #1008 — one such role per package, so the branch package's comparator stays under the questioner's |
-| **the curators** / **authors** | `learning/author/` — fold queued findings into lessons. TWO of them since #1007, one per queue channel and one per corpus: `author/lessons/` folds DEFENDER findings into `defender/lessons/`, gated by the **forward-check** (`author/verify_forward/`); `author/questioner/` folds WORLD findings — observations about the instrument, not the investigation — into `defender/lessons-questioner/`, with no forward check (there is no defender behaviour a world lesson could regress) and an idempotency-only gate. Both run in one drain tick, one commit, one PR |
+| **the curators** / **authors** | `learning/author/` — fold queued findings into lessons. TWO of them since #1007, one per queue channel and one per corpus: `author/lessons/` folds DEFENDER findings (`direction: family` rows only) into `defender/lessons/`; `author/questioner/` folds WORLD findings — observations about the instrument, not the investigation — into `defender/lessons-questioner/` behind an idempotency-only gate. No check re-runs a lesson before it commits (the same-case forward check was deleted in #1166; #397). Both run in one drain tick, one commit, one PR |
 | **the lead-author** | `learning/leads/` — offline curation of the gather query catalog + system skills |
 | **lessons** | `defender/lessons/` — authored by the loop, retrieved by three pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, the `append_block`/`fix_row` block keyed on the invlang frontier (`runtime/lessons_engine/lessons_frontier.py`, #919), and the same frontier block on the compaction fold's row (`runtime/lessons_push.py`, #936). Grep, no index |
 | **the agents / registry** | `defender/agents.py` — role → `AgentDefinition` (each brings its own grants + deps); `runtime/agent_definition.py` is the seam |
@@ -119,13 +119,11 @@ findings to `_pending/findings.jsonl`.
 
 That queue is the joint the cutover swung on — and since #1007 it is TWO queues, partitioned by
 what a finding is ABOUT. A finding about the defender's conduct lands on `_pending/findings.jsonl`
-and accumulates until the **lessons curator** folds it into `defender/lessons/`, each edit gated by
-the same-case **forward-check** regression (BAD = the lesson would flip a correctly-resolved case →
-revert). A finding about the WORLD — an invented field shape, a story the overlay never backed, a
+and accumulates until the **lessons curator** folds it into `defender/lessons/`; nothing re-checks a
+lesson before it commits (#1166 deleted the same-case forward check; #397). A finding about the WORLD — an invented field shape, a story the overlay never backed, a
 family that failed to discriminate — lands on `_pending/questioner_findings.jsonl` and is folded by
 the **questioner curator** into `defender/lessons-questioner/`, which the questioner reads back when
-it authors the next family. That corpus has no forward check: there is no defender behaviour a
-lesson about a world could regress. Both curators run inside one drain tick.
+it authors the next family. Both curators run inside one drain tick.
 Each worker commits from its own git worktree off `origin/main`, one PR per batch — the loop is
 the sole committer, and spawned agents run no git. Lessons feed back into the runtime three times: at
 PLAN time via `defender-lessons`, on every write that moves the investigation's open set via
@@ -152,7 +150,7 @@ until then ran on the questioner's definition. `git show e9e11a48` is the deleti
 | How the two tables are read/joined | `defender/learning/lead_repository.py` |
 | Questioner prompts + driver | `defender/learning/branch/questioner/` (`role.md`, `family.md`, `world.md` + `__init__.py`) |
 | Judge prompt + driver | `defender/learning/judge/` (`role.md` + `run.py`) |
-| Curator / forward-check prompts + drivers | `defender/learning/author/<curator>/` |
+| Curator prompts + drivers | `defender/learning/author/<curator>/` |
 | Lessons corpus | `defender/lessons/*.md` (hand-edits fine if they match the schema) |
 | Eval metrics / scenarios | `defender/evals/` |
 | Permission gate / grants | `runtime/permission/` + each agent's `bash_shapes` in `defender/agents.py`; secrets denylist in `runtime/bash_policy.json` |

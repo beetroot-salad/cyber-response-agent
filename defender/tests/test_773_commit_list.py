@@ -21,7 +21,6 @@ from defender._git import GitError
 from defender.tests import _spec773 as S
 
 LESSON = "defender/lessons/l1.md"
-LESSON2 = "defender/lessons/l2.md"
 OLD = "defender/lessons/old.md"
 
 
@@ -40,8 +39,7 @@ def test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_c
     §7 FK-1: widening the shared seam would leave all four lanes sharing a signature that
     COULD take a path list even though three never pass one — a latent coupling. A
     genuinely separate function makes "untouched" a build-time fact, not a runtime habit.
-    Driven as a seam demand AND as behaviour: the tick's commit names only the approved
-    path, which the unchanged pathspec-wide `commit_fn` could not produce."""
+    Driven as a seam demand AND as behaviour: the tick's commit names the approved path."""
     from defender import _git
 
     new = inspect.signature(S.author_shared.commit_corpus_paths)
@@ -58,12 +56,8 @@ def test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_c
 
     sc = S.build_scene(
         tmp_path,
-        rows=[S.finding_row("ok", run_id="ok"), S.finding_row("bad", run_id="bad")],
-        curator=S.FakeCurator(
-            writes={"l1.md": S.lesson("ok"), "l2.md": S.lesson("bad")},
-            committed=["ok", "bad"],
-        ),
-        verifier=S.FakeVerifier(verdicts={"l2.md": "BAD"}),
+        rows=[S.finding_row("ok", run_id="ok")],
+        curator=S.FakeCurator(writes={"l1.md": S.lesson("ok")}, committed=["ok"]),
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON]
@@ -100,12 +94,13 @@ def test_an_empty_approved_list_commits_nothing_and_invokes_no_git_773(tmp_path)
     C15 is why this is a demand and not a nicety: `git add --` with an empty pathspec stages
     nothing but `git commit -F - --` then commits the WHOLE INDEX, so an unguarded empty
     list sweeps in any unrelated staged file. The probe observed a stray `stray.txt`
-    reaching HEAD that way."""
+    reaching HEAD that way. (Since #1166 the list is empty only when the curator changed
+    nothing in the corpus.)"""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        verifier=S.FakeVerifier(default="BAD"),
+        curator=S.FakeCurator(committed=[],
+                              consumed_skip=[{"finding_id": "f1", "reason": "already taught"}]),
     )
     before = sc.head_sha()
     assert sc.run() == 0
@@ -114,16 +109,16 @@ def test_an_empty_approved_list_commits_nothing_and_invokes_no_git_773(tmp_path)
 
 
 def test_approved_list_and_deletions_list_are_both_empty_773(tmp_path):
-    """The one empty case: BOTH lists empty returns `None` without calling git. A tick whose
-    only changed file was refused, and which deleted nothing, makes no commit at all.
+    """The one empty case: BOTH lists empty returns `None` without calling git. A tick that
+    changed nothing in the corpus makes no commit at all.
 
     Positive control on the same address: one approved path and no deletions DOES commit, so
     the empty branch is the guard firing and not the commit path being broken."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        verifier=S.FakeVerifier(default="BAD"),
+        curator=S.FakeCurator(committed=[],
+                              consumed_skip=[{"finding_id": "f1", "reason": "already taught"}]),
     )
     assert sc.run() == 0
     assert sc.commit_count() == 1
@@ -140,19 +135,18 @@ def test_approved_list_and_deletions_list_are_both_empty_773(tmp_path):
 
 def test_an_empty_approved_list_still_lets_the_rest_of_the_tick_complete_773(tmp_path):
     """M5's empty-list branch is a BRANCH in the key flow, not an early exit: the tick
-    continues through recompute, ledger, deferral bump and rotation.
+    continues through recompute, deferral bump and rotation.
 
-    Observable: with nothing committed, the terminal finding still gets its gap record and
-    still rotates as `consumed_forward_bad`, and the report line is still written."""
+    Observable: with nothing committed, the skipped finding still rotates as `consumed_skip`
+    and the report line is still written."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        verifier=S.FakeVerifier(default="BAD"),
+        curator=S.FakeCurator(committed=[],
+                              consumed_skip=[{"finding_id": "f1", "reason": "already taught"}]),
     )
     assert sc.run() == 0
-    assert len(sc.gap_records()) == 1
-    assert sc.category_of("f1") == "consumed_forward_bad"
+    assert sc.category_of("f1") == "consumed_skip"
     assert sc.report_lines()
 
 
@@ -165,25 +159,22 @@ def test_the_commit_names_the_approved_files_and_the_curator_deletions_and_nothi
     tmp_path,
 ):
     """The corpus commit names exactly the approved files plus curator deletions under the
-    corpus, by explicit path list — nothing the check refused, and nothing no finding
-    vouches for.
+    corpus, by explicit path list — nothing no finding vouches for.
 
     Asked of `git show --name-only HEAD`, the operator's own instrument, not of the drain's
     record of what it meant to commit."""
     sc = S.build_scene(
         tmp_path,
-        rows=[S.finding_row("ok", run_id="ok"), S.finding_row("bad", run_id="bad")],
+        rows=[S.finding_row("ok", run_id="ok")],
         seed_corpus={"old.md": S.lesson("older")},
         curator=S.FakeCurator(
-            writes={"l1.md": S.lesson("ok"), "l2.md": S.lesson("bad")},
+            writes={"l1.md": S.lesson("ok")},
             deletes=("old.md",),
-            committed=["ok", "bad"],
+            committed=["ok"],
         ),
-        verifier=S.FakeVerifier(verdicts={"l2.md": "BAD"}),
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON, OLD]
-    assert sc.head_text(LESSON2) is None
     assert sc.head_text(OLD) is None
 
 
@@ -287,26 +278,6 @@ def test_the_commit_list_is_built_in_repo_relative_paths_773(tmp_path):
 # ---------------------------------------------------------------------------
 # O4 / O5 — the tree is the truth; AUTHOR_RESULT is a hint
 # ---------------------------------------------------------------------------
-
-
-def test_the_committed_set_is_recomputed_after_the_commit_not_before_it_773(tmp_path):
-    """The recompute runs AFTER the commit and keys on approved files that actually landed:
-    a finding is `consumed_committed` iff an approved committed file cites it.
-
-    Driven with a finding the curator reports committed whose file was refused — it is not
-    consumed as committed, whatever the report said."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("ok", run_id="ok"), S.finding_row("bad", run_id="bad")],
-        curator=S.FakeCurator(
-            writes={"l1.md": S.lesson("ok"), "l2.md": S.lesson("bad")},
-            committed=["ok", "bad"],
-        ),
-        verifier=S.FakeVerifier(verdicts={"l2.md": "BAD"}),
-    )
-    assert sc.run() == 0
-    assert sc.category_of("ok") == "consumed_committed"
-    assert sc.category_of("bad") != "consumed_committed"
 
 
 def test_a_reported_committed_finding_no_approved_file_cites_is_deferred_not_consumed_773(
@@ -450,7 +421,6 @@ def test_author_result_committed_id_is_foreign_to_this_batch_773(tmp_path):
         ),
     )
     assert sc.run() == 2
-    assert sc.verifier.call_count == 0
     assert "not-in-this-batch" not in sc.consumed_by_id()
     assert sc.head_files() == []
 
@@ -467,7 +437,6 @@ def test_git_status_reports_no_changed_corpus_files_773(tmp_path):
         curator=S.FakeCurator(writes={}, committed=["f1"]),
     )
     sc.run()
-    assert sc.verifier.call_count == 0
     assert sc.commit_count() == 1
     assert sc.category_of("f1") != "consumed_committed"
 
@@ -484,7 +453,6 @@ def test_git_status_call_itself_produces_no_output_773(tmp_path):
         curator=S.FakeCurator(writes={}, committed=[], consumed_skip=[]),
     )
     sc.run()
-    assert sc.verifier.call_count == 0
     assert sc.head_files() == []
 
 
@@ -501,7 +469,6 @@ def test_git_status_reports_an_untracked_file_under_the_corpus_773(tmp_path):
         curator=S.FakeCurator(writes={"brand-new.md": S.lesson("f1")}),
     )
     assert sc.run() == 0
-    assert sc.verifier.pairs_seen == [("brand-new.md", "f1")]
     assert sc.head_files() == ["defender/lessons/brand-new.md"]
 
 
@@ -525,7 +492,6 @@ def test_git_status_reports_a_rename_pair_or_a_mode_or_name_only_change_773(tmp_
         curator=S.FakeCurator(writes={}, also=rename_it, committed=["f1"]),
     )
     assert sc.run() == 0
-    assert sc.verifier.pairs_seen == [("new.md", "f1")]
     assert sorted(sc.head_files()) == ["defender/lessons/new.md", OLD]
     assert sc.head_text(OLD) is None
 
@@ -548,7 +514,6 @@ def test_a_mode_only_change_with_identical_bytes_is_treated_as_unchanged_773(tmp
         curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}, also=chmod_it),
     )
     assert sc.run() == 0
-    assert sc.verifier.pairs_seen == [("l1.md", "f1")]
 
 
 def test_git_status_reports_an_unexpected_two_letter_status_code_773(tmp_path):
@@ -577,7 +542,6 @@ def test_git_status_reports_an_unexpected_two_letter_status_code_773(tmp_path):
         max_attempts=1,
     )
     assert sc.run() == 2
-    assert sc.verifier.call_count == 0
     assert LESSON not in sc.head_files()
     # NAMED, not merely loud. Today this tick already fails — the conflicted file's markers
     # break its frontmatter, so it reads as unvouched — and a test asserting only "the tick
@@ -635,25 +599,3 @@ def test_a_git_read_inside_the_new_check_step_that_loses_the_index_lock_race_773
         sc.run()
     shutil.move(str(sc.repo / ".git-gone"), str(sc.repo / ".git"))
     assert sc.pending_by_id()["f1"].get("attempts") in (None, 0)
-
-
-def test_verify_agent_state_after_repair_spawn_depends_on_a_failing_git_read_773(tmp_path):
-    """The post-repair `verify_agent_state` read takes the same carve-out: its git failure
-    aborts the tick without bumping `attempts`.
-
-    §7 FK-22 applies to every git READ the new machinery adds, not only the first one — the
-    census, the post-repair state check and the recompute are all host-property failures."""
-    def hide_the_git_dir(pairs, batch_id, cfg):
-        shutil.move(str(cfg.repo_root / ".git"), str(cfg.repo_root / ".git-gone"))
-
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        verifier=S.FakeVerifier(default="BAD"),
-        repair=S.FakeRepair(also=hide_the_git_dir),
-    )
-    with pytest.raises((GitError, S.drain.GitProbeError)):
-        sc.run()
-    shutil.move(str(sc.repo / ".git-gone"), str(sc.repo / ".git"))
-    assert "attempts" not in sc.pending_by_id()["f1"]

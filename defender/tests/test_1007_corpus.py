@@ -95,15 +95,10 @@ class TwoLaneRecorder:
             return
         from defender.learning.author.lessons import run as lessons_run
 
-        # #773: the drain's own verifier-key preflight runs ahead of the first curator
-        # spawn (O10) — this class fakes only the CURATOR's model (`invoke_agent`), so the
-        # verifier's key source is faked too, or a host with no real key configured
-        # (CI) would fail here on a scenario that was never about key sourcing at all.
         cfg = dataclasses.replace(
             lessons_run.build_author_config(
                 paths, state=state, trees=author_trees(paths), box=box),
             invoke_agent=self._agent,
-            source_key=lambda model, *, label=None: None,
         )
         lessons_run.run_batch(paths=paths, cfg=cfg, hold_committed=True, box=box)
 
@@ -118,7 +113,7 @@ def world_queue_row(fid: str = "ep-1/b/0/0", **extra) -> dict:
                systems=[W.SYSTEM], provenance="model",
                subject_anchor="facts", subject_topic="answer shape",
                citations=["family.yaml#worlds/b"], source_run_dir="episodes/ep-1")
-    row.pop("judge_outcome")          # #1234 A4: a row carrying the retired name is held
+    row.pop("judge_outcome", None)          # #1234 A4: a row carrying the retired name is held
     row.update(extra)
     return row
 
@@ -130,7 +125,7 @@ def defender_queue_row(fid: str = "ep-1/b/0/1", **extra) -> dict:
                contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
                on_verdict_path=True, world_label_doubted=False,
                source_run_dir="episodes/ep-1/worlds/b")
-    row.pop("judge_outcome")          # #1234 A4: a row carrying the retired name is held
+    row.pop("judge_outcome", None)          # #1234 A4: a row carrying the retired name is held
     row.update(extra)
     return row
 
@@ -192,57 +187,6 @@ def test_the_questioner_curator_gate_is_idempotency_only(tmp_path):
         f"a world row with no defender ground truth was held: {held}")
     assert held == [], f"the gate held a world row it has no ground-truth rule for: {held}"
     assert consumed_pre == []
-
-
-def test_the_questioner_curator_registers_no_forward_check(tmp_path):
-    """The questioner curator registers NO forward check.
-
-    Observably true: the forward-check registry still holds exactly the one findings check it
-    holds today, and the questioner config declares no check of its own. #773 moved the check
-    out of the curator's own tool call entirely — it is the DRAIN's own per-channel config now
-    (`CorpusAuthorConfig.forward_check`), never a tool the model calls — so the absence is
-    observable on the config the questioner builds, not on `invoke_agent`'s source.
-
-    What failure looks like: a second check is wired for symmetry. Every questioner lesson
-    then pays a model call to be measured against a question it does not answer, and the
-    results gate a corpus on noise.
-    """
-    checks = W.mod("learning.author.verify_forward.checks")
-    curator = W.mod("learning.author.questioner.run")
-
-    registered = [name for name, value in vars(checks).items()
-                  if isinstance(value, checks.ForwardCheck)]
-    assert registered == ["FINDINGS_CHECK"], (
-        f"the forward-check registry holds {registered}; the questioner corpus added one")
-    paths = D.make_paths(tmp_path)
-    cfg = curator.build_questioner_config(
-        paths, state=W.learning_state(paths), trees=author_trees(paths))
-    assert cfg.forward_check is None, (
-        "the questioner config wires a forward check — a world lesson has no defender "
-        "verdict for one to re-run against")
-
-
-def test_the_defender_curator_still_registers_findings_check(tmp_path):
-    """The DEFENDER curator keeps its forward check — the survival half of the pair above.
-
-    Observably true: the findings check is still registered and still reachable from the
-    defender author config. Without this control, "exactly one check is registered" would also
-    hold on a change that deleted the incumbent one.
-
-    What failure looks like: the check registry is refactored to be per-corpus while adding the
-    second corpus, and the one check that exists is dropped in the move.
-    """
-    checks = W.mod("learning.author.verify_forward.checks")
-    lessons_run = W.mod("learning.author.lessons.run")
-
-    assert getattr(checks, "FINDINGS_CHECK", None) is not None, (
-        "the incumbent findings forward check is gone")
-    paths = D.make_paths(tmp_path)
-    cfg = lessons_run.build_author_config(
-        paths, state=W.learning_state(paths), trees=author_trees(paths))
-    assert cfg.forward_check is checks.FINDINGS_CHECK, (
-        "the defender curator stopped wiring its forward check — the regression gate every "
-        "lesson edit passes through")
 
 
 def test_curator_modules_names_the_questioner_curator_module(tmp_path):

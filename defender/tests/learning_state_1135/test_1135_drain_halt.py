@@ -100,7 +100,7 @@ def _defender_row(fid: str, judge_outcome: str) -> dict:
                source_run_dir="episodes/ep-1/worlds/b",
                contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
                on_verdict_path=True, world_label_doubted=False)
-    row.pop("judge_outcome")
+    row.pop("judge_outcome", None)
     return row
 
 
@@ -113,7 +113,7 @@ def _world_row(fid: str = SEEN_WORLD_ID) -> dict:
     row = dict(D.finding_row(fid, run_id="ep-1", direction="world"), subject="world",
                type="unreachable", world="b", systems=["elastic"],
                citations=["family.yaml#worlds/b"], source_run_dir="episodes/ep-1")
-    row.pop("judge_outcome")
+    row.pop("judge_outcome", None)
     return row
 
 
@@ -243,11 +243,12 @@ def test_a_non_refusal_fault_in_the_first_curator_stays_contained(tmp_path, monk
 
     The fault is a real input through real code, in place of the seed's StageAbort-from-the-gate
     (no real input makes the gate raise StageAbort): the tick's one row is admitted for authoring
-    (a fresh new-shape row), and `LEARNING_VERIFIER_MODEL` names a model no provider serves,
-    so the drain's verifier-key preflight raises `FatalConfigError` — a SYSTEMIC_FAULTS member —
-    inside _tick's body, before any model is spawned (config.source_first_party_key)."""
+    (a fresh new-shape row), and `LEARNING_AUTHOR_MODEL` names a model no provider serves, so
+    the curator spawn's key sourcing raises `FatalConfigError` — a SYSTEMIC_FAULTS member —
+    inside _tick's body, before any model is called (config.source_first_party_key). (It was
+    the verifier-key preflight's until #1166 deleted that check.)"""
     caplog.set_level(logging.INFO)
-    monkeypatch.setenv("LEARNING_VERIFIER_MODEL", "no-such-provider-model-1135")
+    monkeypatch.setenv("LEARNING_AUTHOR_MODEL", "no-such-provider-model-1135")
     repo, root, paths = _world(tmp_path, monkeypatch)
     row = _defender_row("ep-1/b/0/2", "survived")
     _seed(root, [row])
@@ -281,26 +282,25 @@ def test_a_refused_stuck_report_raises_instead_of_logging_not_written(
     link's target.
 
     Driven at the recorder itself: the folded drain body `author/drain.run_batch` over the
-    regression tier's findings config (`_drain719.cfg_for`), with the channel's forward check
-    restored and `LEARNING_VERIFIER_MODEL` naming a model no provider serves, so #31's real
-    `FatalConfigError` (a non-retiring fault) is raised inside _tick and handed to the recorder.
+    regression tier's findings config (`_drain719.cfg_for`), with a world-subject row on the
+    defender queue, so the lessons gate's real `ValueError` (a non-retiring fault) is raised
+    inside _tick and handed to the recorder. (It was the verifier-key preflight's
+    `FatalConfigError` until #1166 deleted the forward check.)
     Not through `author_drain`: `_drain_one_curator` reads the stuck report's count before the
     curator runs, so a refusal there would be met before any recorder catch is reached. The
     stuck report `_pending/findings.stuck.jsonl` is a link to a file outside the root (X5:
     today's recorder follows it and appends the record into the target)."""
     from defender.learning.author import drain as author_drain_body
-    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
 
     caplog.set_level(logging.INFO)
-    monkeypatch.setenv("LEARNING_VERIFIER_MODEL", "no-such-provider-model-1135")
     repo, root, paths = _world(tmp_path, monkeypatch)
-    row = _defender_row("ep-1/b/0/3", "survived")
+    row = dict(_defender_row("ep-1/b/0/3", "survived"), subject="world")
     _seed(root, [row])
     target = S.outside(tmp_path, "stuck.jsonl")
     report = S.plant(root / "_pending" / "findings.stuck.jsonl", "symlink", target=target)
     target_bytes = target.read_bytes()
     agent = D.recording(D.committing("never"))
-    cfg = D.cfg_for(paths, "findings", invoke_agent=agent, forward_check=FINDINGS_CHECK)
+    cfg = D.cfg_for(paths, "findings", invoke_agent=agent)
 
     escaped = S.caught(lambda: author_drain_body.run_batch(cfg=cfg, hold_committed=True))
 
@@ -313,7 +313,7 @@ def test_a_refused_stuck_report_raises_instead_of_logging_not_written(
         f"the recorder catch did not re-raise the refusal; {escaped!r} escaped run_batch"
     assert "findings.stuck.jsonl" in str(escaped), \
         f"the refusal does not name the refused stuck report: {escaped}"
-    assert agent.calls == [], "the model was spawned: the fault was not the preflight's"
+    assert agent.calls == [], "the model was spawned: the fault was not the gate's"
     assert S.entry_kind(report) == "link", "the planted stuck report was not left in place"
     assert os.readlink(report) == str(target), "the planted stuck report was re-pointed"
     assert _handle_rows(paths) == [row], "the faulted row did not stay queued"

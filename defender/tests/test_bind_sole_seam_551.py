@@ -85,7 +85,7 @@ directly. No network, no key, no fault-injection fakes (the entry points are pur
 """
 from __future__ import annotations
 
-from defender.agents import LEAD_AUTHOR_DEF, MAIN_DEF, VERIFY_DEF  # noqa: E402
+from defender.agents import LEAD_AUTHOR_DEF, MAIN_DEF  # noqa: E402
 
 import os
 import re
@@ -98,7 +98,6 @@ pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherw
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender._paths import PATHS  # noqa: E402
-from defender.learning.author.verify_forward.engine import VerifierDeps  # noqa: E402
 from defender.learning.leads.lead_author_engine import LeadAuthorDeps  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
@@ -226,18 +225,6 @@ def test_d0_bind_return_contract(tmp_path):
 
 
 
-def test_d1_verifier_via_bind(tmp_path):
-    """d1_verifier_via_bind (survival): bind(VERIFY_DEF, source_run_dir) yields deny-all."""
-    # GREEN@HEAD: same deny-all-via-empty-ToolSet path as the oracle.
-    run = tmp_path / "source-run"
-    wtd = tmp_path / "wt" / "defender"
-    vpol = bind(VERIFY_DEF, run, defender_dir=wtd).policy
-    assert isinstance(bind(VERIFY_DEF, run, defender_dir=wtd), VerifierDeps)
-    assert not permission.decide_bash(f"cat {run}/report.md", policy=vpol, run_dir=run, defender_dir=wtd).allow
-    assert not permission.decide_write(
-        run / "x.md", "c", run_dir=run, defender_dir=wtd, policy=vpol).allow
-
-
 def _lead_wtd(tmp_path):
     """A worktree tree the lead author can actually bind against.
 
@@ -292,7 +279,6 @@ def test_d1_no_factory_in_stage_modules():
     same exemption the questioner has, which is why the questioner is listed here too."""
     base = PATHS.repo_root / "defender" / "learning"
     modules = {
-        "verifier": base / "author" / "verify_forward" / "engine.py",
         "lead_author": base / "leads" / "lead_author_engine.py",
         "questioner": base / "branch" / "questioner" / "__init__.py",
         "judge": base / "judge" / "run.py",
@@ -863,16 +849,17 @@ def test_the_registered_roster_is_the_size_the_hand_maintained_censuses_claim():
     other censuses are checked against (`test_947_triplet_questioner`'s cross-check reads this
     file for the literal).
 
-    TWELVE SINCE #1224: #922 took it to eight, the actor, oracle and judge leaving `AgentRole`
+    #922 took it to eight, the actor, oracle and judge leaving `AgentRole`
     with the definitions they were the only callers of; #1008 then re-added `judge`, bound to
     the FAMILY judge — a different role that wanted the same word, and one that ran under the
     questioner's definition until the key was free — taking it to nine. #773 adds a tenth,
     `CORPUS_REPAIR`: M4's one bounded repair spawn, a fixed, separate definition rather than a
     per-spawn override of `CORPUS_AUTHOR`'s own (§7 F8), so it needs its own key. #1224 adds
     `ORACLE` and `ORACLE_CHECK` — a branched world's live oracle and its verifier, each with its
-    own model and budget, apart from the runtime's `VERIFIER` (waiver GD-04). This number moves
+    own model and budget (waiver GD-04). TEN SINCE #1166, which retires `VERIFIER` and
+    `CORPUS_REPAIR` with the forward check. This number moves
     with the roster, which is exactly why it is asserted in more than one place."""
     from defender.agents import QUESTIONER_DEF
 
     assert QUESTIONER_DEF.role is AgentRole.QUESTIONER
-    assert len({role for role in AgentRole}) == 12
+    assert len({role for role in AgentRole}) == 10

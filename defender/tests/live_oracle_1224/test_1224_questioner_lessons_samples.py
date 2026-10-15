@@ -642,7 +642,7 @@ def test_1224_questioner_finding_rows_queued_before_the_change(tmp_path, caplog)
                      subject=W.SUBJECT_WORLD, type="unreachable", world="b",
                      provenance="model", subject_anchor="world b", subject_topic="facts",
                      source_run_dir="episodes/ep-1", **shape)
-        built.pop("judge_outcome")   # `_drain719.finding_row` spells the pre-#1234 family word
+        built.pop("judge_outcome", None)   # `_drain719.finding_row` spells the pre-#1234 family word
         return built
 
     old = row("ep-1/b/0/0", pattern="logs-*", holding_system="elastic")

@@ -6,8 +6,10 @@
 `defender/learning/` as branched episode (`branch/cli.py`) → questioner
 (`branch/questioner/`) → pre-flight calibration through each world's live oracle
 (`branch/cli.py`, `branch/estate/`) → the family as `run.py --episode` processes → judge
-(`judge/`) → findings queue → lessons curator (`author/lessons/`) with a
-per-lesson forward-check (`author/verify_forward/`) → `defender/lessons/*.md`.
+(`judge/`) → findings queue → lessons curator (`author/lessons/`) →
+`defender/lessons/*.md`. **No check runs on a lesson before it commits** (#1166
+deleted the same-case forward check, which no family row reached; #397 holds the
+question of what, if anything, should replace it).
 
 **Rewritten for #922.** This doc used to describe a four-role pipeline — two
 actors, a telemetry oracle, a judge — that invented the material it learned
@@ -74,9 +76,9 @@ gradient steps. What to borrow:
   served under it.
 - *Distribution shift.* Lessons from yesterday's cases bias today's. Prefer a
   held-out set the curator has never seen (`evals/held_out.py`).
-- *Reward hacking.* The forward-check is the structural answer for promotion: a
-  lesson must keep its source case on its ground-truth disposition. The judge's
-  prompt is part of the reward function; audit it as such.
+- *Reward hacking.* Nothing structural guards promotion today: the same-case
+  forward check was deleted in #1166 and no replacement exists (#397). The
+  judge's prompt is part of the reward function; audit it as such.
 
 **Ablation studies** — the sharper analogy. A family is a control plus one-axis
 interventions, measuring the defender's *sensitivity* to each axis. One axis per
@@ -109,8 +111,7 @@ et al. (feedback-loop debt, which starts accruing once lessons feed back).
    ledger. Nothing in the loop authors telemetry.
 3. **One outcome per episode, one bucket per world.** No additive scoring.
 4. **Concrete observables only.** A lesson names a field, artifact, query, or
-   analysis-discipline failure. Abstract advice is rejected by the curator or
-   the forward-check.
+   analysis-discipline failure. Abstract advice is rejected by the curator.
 5. **Git history as the audit trail.** The loop is the sole committer; spawned
    agents run no git.
 6. **No index, no service.** Flat markdown, grep over frontmatter. Three pushes
@@ -140,9 +141,8 @@ defender/learning/branch/cli.py --tenant <T> <run_id> <branch_message_id>
         │
         ▼
 defender/learning/loop.py --author-drain   (at LEARNING_AUTHOR_THRESHOLD)
-        ├── lock + clean-scope + idempotency + ground-truth gates
+        ├── lock + clean-scope + idempotency + family-row gates
         ├── new/fold/skip lesson edits under defender/lessons/
-        ├── forward-check per candidate edit
         └── commit from a worktree + open one PR + rotate the queue
 ```
 
@@ -313,24 +313,19 @@ user, never queued as a lesson.
    findings the drain invokes `author/lessons/run.py`. Any row carrying
    `held_reason` is not counted (#881): the pre-author gate's own holds are
    permanent — the facts they wait on have no writer — so counting them woke the
-   drain every tick to hold the same rows again. The stamp is sticky and the
-   count does not distinguish, so a *forward-check* hold (step 4) is uncounted
-   too even though the next tick would retry it. `core/drains.py`
+   drain every tick to hold the same rows again. `core/drains.py`
    `_curator_queue_checks` is the one place wakeable channels are named, and
    since #922 it names **one**.
 2. **Pre-flight** — queue lock, `defender/lessons/` git-clean, findings already
-   authored filtered by `source_finding_ids`, and findings whose source carries
-   no ground truth **held** (the forward-check needs one).
+   authored filtered by `source_finding_ids`, and every row that is not a
+   well-formed `direction: family` row **held** naming why (a per-case row from
+   before #1234 is held `retired_direction(...)`).
 3. **Curator** — decides `new`, `fold`, or `skip` over flat markdown with `name`,
    `description`, `source_finding_ids`, `created_at`.
-4. **Forward-check** — re-runs the candidate lesson against its source-case
-   transcript and ground-truth disposition: would the agent, with the lesson
-   loaded at PLAN, *still* reach that disposition? `GOOD` keeps, `BAD` reverts
-   and holds the finding.
-5. **Commit + post-flight** — commits from its own worktree and opens a PR. Every
+4. **Commit + post-flight** — commits from its own worktree and opens a PR. Every
    file left CHANGED must be **attributable** — citing an id from this batch's
-   committed set (#852) — because the commit is pathspec-wide, so without it a
-   forward-check-rejected lesson rides in on a batch-mate that passed. A file
+   committed set (#852) — because the commit is pathspec-wide, so without it an
+   unrelated edit rides in on a batch-mate. A file
    whose provenance list is byte-identical to HEAD's is exempt: a supersede's
    `status: stale` flip and a reverted fold claim no new source. Then the queue
    rotates atomically, consumed rows append to `consumed.jsonl`, and held/skip
@@ -400,7 +395,6 @@ refuses the trace).
   cannot serve consistently.
 - **Draw agreement** across `JUDGE_DRAWS`. At the default of one draw this is not
   measured; raising it is how you learn whether a grade was stable.
-- **Forward-check pass rate**, with manual review of BAD holds.
 - **North star**: `evals/held_out.py`. The frozen-actor replay and judge A/B
   retired with the pipeline they measured.
 

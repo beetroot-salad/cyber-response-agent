@@ -195,9 +195,8 @@ def test_lessons_gate_refuses_direction_world_loudly(tmp_path):
     mis-routed row into an authored defender lesson. Loudly, because a silent hold would leave
     the row queued forever with nothing saying why.
 
-    What failure looks like: the gate falls through to the ground-truth branch, asks
-    `disposition_for` about an episode id, gets `None`, and holds the row as
-    `no_ground_truth` — indistinguishable from an ordinary un-authorable finding.
+    What failure looks like: the gate falls through to the direction branch and holds the row
+    as `retired_direction(...)` — indistinguishable from an ordinary un-authorable finding.
     """
     author = W.mod("learning.author.lessons.run")
     paths = W.loop_paths(tmp_path)

@@ -49,7 +49,6 @@ def _defer_again(sc, filler_id: str) -> int:
     # `finding_row`'s default `direction="adversarial"` wants `benign` on the source run —
     # `build_scene`'s own auto-seeding rule (`_spec773.py`), mirrored here since this finding
     # is seeded straight onto the channel rather than through `build_scene`.
-    S.write_source_refs(sc.paths, filler_id, "benign")
     S.seed(sc.paths, sc.channel, [*sc.pending(), filler])
     sc.curator.writes = {f"{filler_id}.md": S.lesson(filler_id)}
     sc.curator.committed = ["orphan", filler_id]
@@ -129,39 +128,6 @@ def test_the_deferral_rotation_passes_the_configured_repo_lock_wait_773(tmp_path
     # The row that would have been deferred is still queued with its counter untouched: the
     # bump never happened, so the wait was spent on the deferral's own rotation.
     assert "deferrals" not in sc.pending_by_id()["orphan"]
-
-
-def test_a_bad_verdict_does_not_bump_the_attempts_counter_773(tmp_path):
-    """A NEGATIVE demand: a BAD verdict is not a fault, so it bumps NO `attempts` on any row
-    of the batch — not the refused finding's and not its batch-mates'.
-
-    N5. The two counters are independent budgets; folding a verdict into the fault budget
-    would graveyard a batch for producing lessons the checker disagreed with. Positive
-    control on the same address: a genuine `RETIRE_SET` fault DOES bump `attempts`."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("bad", run_id="bad"), S.finding_row("ok", run_id="ok")],
-        curator=S.FakeCurator(
-            writes={"l1.md": S.lesson("bad"), "l2.md": S.lesson("ok")},
-            committed=["bad", "ok"],
-        ),
-        verifier=S.FakeVerifier(verdicts={"l1.md": "BAD"}),
-    )
-    assert sc.run() == 0
-    # The BAD must actually have fired, or "no attempts were bumped" is also green on a
-    # tick where nothing was ever refused — which is HEAD's state.
-    assert sc.category_of("bad") == "consumed_forward_bad"
-    assert LESSON not in sc.head_files()
-    assert all("attempts" not in row for row in sc.pending())
-    assert all("attempts" not in row for row in sc.consumed())
-
-    control = S.build_scene(
-        tmp_path / "control",
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(raises=S.author_error("a real fault")),
-    )
-    assert control.run() == 2
-    assert control.pending_by_id()["f1"]["attempts"] == 1
 
 
 def test_deferrals_and_attempts_counters_move_independently_across_ticks_773(tmp_path):
@@ -246,7 +212,7 @@ def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
 
 def test_drain_ticks_own_loop_continuation_is_unaffected_by_the_new_row_fields_773(tmp_path):
     """The drain tick's own reading of the pending queue — does the tick continue or stop —
-    is unchanged by M6/M7 adding `consumed_forward_bad` rows and a `deferrals` counter to
+    is unchanged by M6/M7 adding a `deferrals` counter to
     the row shape.
 
     R7 obligation g10, driven at the UNMOVED reader's own edge: `_pending_queue_counts` is
@@ -290,33 +256,6 @@ def test_max_attempts_one_retires_on_the_first_failure_773(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_a_finding_cited_by_one_approved_file_and_one_refused_file_773(tmp_path):
-    """A finding cited by two files that DISAGREE about approval this tick is DEFERRED — it
-    is added to neither the committed set nor the forward_bad set, and reports the same way
-    any other O9 deferral does.
-
-    §7 FK-2, the human's decision, taken over both offered priorities: the drain never has
-    to guess between two legitimate-but-incomplete pictures, and it never produces the
-    "committed in git, refused in the ledger" state the safer option accepted as a cost. The
-    approved FILE still commits — this is a finding-level disposition, not a file-level
-    one."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("x", run_id="x"), S.finding_row("solo", run_id="solo")],
-        curator=S.FakeCurator(
-            writes={"l1.md": S.lesson("x"), "l2.md": S.lesson("x", "solo")},
-            committed=["x", "solo"],
-        ),
-        verifier=S.FakeVerifier(verdicts={("l2.md", "solo"): "BAD"}),
-    )
-    assert sc.run() == 0
-    assert LESSON in sc.head_files()
-    assert sc.category_of("x") is None
-    assert sc.pending_by_id()["x"]["deferrals"] == 1
-    assert sc.category_of("solo") == "consumed_forward_bad"
-    assert [r["finding_id"] for r in sc.gap_records()] == ["solo"]
-
-
 def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_once_773(tmp_path):
     """The POSITIVE CONTROL for the test above: two files citing the SAME finding, every pair
     GOOD or EXEMPT, and the finding lands `consumed_committed` exactly ONCE — one row in
@@ -349,106 +288,39 @@ def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_onc
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON, LESSON2]
-    assert sorted(sc.verifier.pairs_seen) == [("l1.md", "shared"), ("l2.md", "shared")]
     assert [r["finding_id"] for r in sc.consumed()] == ["shared"]
     assert sc.category_of("shared") == "consumed_committed"
     assert sc.pending_by_id() == {}
-    assert sc.gap_records() == []
 
 
 def test_every_batch_row_reaches_exactly_one_disposition_773(tmp_path):
-    """The conservation invariant, over a tick that produces all four endings at once: every
-    batch row ends in exactly one of `consumed_committed`, `consumed_forward_bad`,
-    `consumed_skip`, or deferred-and-re-queued.
+    """The conservation invariant, over a tick that produces all three endings at once: every
+    batch row ends in exactly one of `consumed_committed`, `consumed_skip`, or
+    deferred-and-re-queued (#1166 retired the fourth, `consumed_forward_bad`).
 
-    §7 FK-2 added the fourth ending. A row in two endings, or in none, is the failure this
+    §7 FK-2 added the deferred ending. A row in two endings, or in none, is the failure this
     pins — and it is the property phase F's conservation reconciliation is written against."""
     sc = S.build_scene(
         tmp_path,
         rows=[
             S.finding_row("ok", run_id="ok"),
-            S.finding_row("bad", run_id="bad"),
             S.finding_row("skip", run_id="skip"),
             S.finding_row("orphan", run_id="orphan"),
         ],
         curator=S.FakeCurator(
-            writes={"l1.md": S.lesson("ok"), "l2.md": S.lesson("bad")},
-            committed=["ok", "bad", "orphan"],
+            writes={"l1.md": S.lesson("ok")},
+            committed=["ok", "orphan"],
             consumed_skip=[{"finding_id": "skip", "reason": "already taught"}],
         ),
-        verifier=S.FakeVerifier(verdicts={"l2.md": "BAD"}),
     )
     assert sc.run() == 0
     consumed = sc.consumed_by_id()
     queued = sc.pending_by_id()
-    assert set(consumed) | set(queued) == {"ok", "bad", "skip", "orphan"}
+    assert set(consumed) | set(queued) == {"ok", "skip", "orphan"}
     assert not (set(consumed) & set(queued))
     assert consumed["ok"]["consumed_category"] == "consumed_committed"
-    assert consumed["bad"]["consumed_category"] == "consumed_forward_bad"
     assert consumed["skip"]["consumed_category"] == "consumed_skip"
     assert queued["orphan"]["deferrals"] == 1
-
-
-def test_a_file_carrying_one_terminal_pair_and_one_approved_pair_after_pass_two_773(tmp_path):
-    """The GOOD pair's finding on a file another finding made terminal is re-queued as
-    DEFERRED with a bounded, reported count — not committed, not consumed, not lost.
-
-    O9 names this case verbatim in its own failing-by column: "a GOOD pair on a file another
-    finding made terminal". The file itself is restored whole, so there is no approved file
-    left citing the cleared finding."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("good", run_id="good"), S.finding_row("bad", run_id="bad")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("good", "bad")},
-                              committed=["good", "bad"]),
-        verifier=S.FakeVerifier(verdicts={"bad": "BAD"}),
-        repair=S.FakeRepair(writes={}),
-    )
-    assert sc.run() == 0
-    assert sc.category_of("bad") == "consumed_forward_bad"
-    assert sc.pending_by_id()["good"]["deferrals"] == 1
-    assert "deferred_ids=['good']" in sc.report_lines()[0]
-
-
-def test_a_pair_good_in_pass_one_on_a_file_that_later_goes_terminal_for_a_different_pair_773(
-    tmp_path,
-):
-    """Same O9 case reached through pass 2: the file is restored whole, finding A then has
-    no approved file citing it, and A is deferred with its counted, reported deferral.
-
-    Not lost, not consumed, not committed — the three ways a deferral can go wrong, each
-    asserted."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("a", run_id="a"), S.finding_row("b", run_id="b")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("a", "b")}, committed=["a", "b"]),
-        verifier=S.FakeVerifier(verdicts={"b": "BAD"}),
-        repair=S.FakeRepair(writes={"l1.md": S.lesson("a", "b", body="still wrong")}),
-    )
-    assert sc.run() == 0
-    assert sc.category_of("a") is None
-    assert sc.pending_by_id()["a"]["deferrals"] == 1
-    assert sc.category_of("b") == "consumed_forward_bad"
-    assert sc.head_files() == []
-
-
-def test_a_file_cited_by_one_refused_finding_and_one_cleared_finding_773(tmp_path):
-    """A cleared finding whose ONLY citing file was refused is deferred under O9's "could not
-    land through no fault of its own" — by way of M5's "a reported-committed finding no
-    approved file cites → deferred".
-
-    The two routes into deferral, M4's and M5's, converge on one disposition and one
-    counter."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("x", run_id="x"), S.finding_row("y", run_id="y")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("x", "y")}, committed=["x", "y"]),
-        verifier=S.FakeVerifier(verdicts={"x": "BAD"}),
-        repair=S.FakeRepair(writes={}),
-    )
-    assert sc.run() == 0
-    assert sc.category_of("x") == "consumed_forward_bad"
-    assert sc.pending_by_id()["y"]["deferrals"] == 1
 
 
 def test_a_batch_row_the_curator_mentions_nowhere_and_no_file_cites_773(tmp_path):
@@ -481,18 +353,17 @@ def test_rotation_runs_exactly_once_per_tick_even_when_the_commit_step_returned_
     copy of every consumed row."""
     sc = S.build_scene(
         tmp_path,
-        rows=[S.finding_row("bad", run_id="bad"), S.finding_row("skip", run_id="skip")],
+        rows=[S.finding_row("dup", run_id="dup"), S.finding_row("skip", run_id="skip")],
         curator=S.FakeCurator(
-            writes={"l1.md": S.lesson("bad")},
-            committed=["bad"],
-            consumed_skip=[{"finding_id": "skip", "reason": "dup"}],
+            committed=[],
+            consumed_skip=[{"finding_id": "dup", "reason": "dup"},
+                           {"finding_id": "skip", "reason": "dup"}],
         ),
-        verifier=S.FakeVerifier(default="BAD"),
     )
     assert sc.run() == 0
     assert sc.commit_count() == 1
     ids = [r["finding_id"] for r in sc.consumed()]
-    assert sorted(ids) == ["bad", "skip"]
+    assert sorted(ids) == ["dup", "skip"]
 
 
 def test_a_tick_that_both_defers_a_row_and_closes_its_rotation_773(tmp_path):
@@ -534,8 +405,8 @@ def test_a_finding_faulted_and_deferred_in_the_same_tick_773(tmp_path):
 def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation_773(
     tmp_path,
 ):
-    """A NEGATIVE demand: the fault path bypasses M4–M7 entirely — no gap record, no
-    deferral bump, no commit. All three are downstream of the try/undo region completing.
+    """A NEGATIVE demand: the fault path bypasses M4–M7 entirely — no deferral bump, no
+    commit. All three are downstream of the try/undo region completing.
 
     Its positive control is the same scene without the fault, where all three DO happen, so
     "none of them fired" cannot pass on a tick that never does any of them."""
@@ -547,10 +418,8 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
             committed=["bad", "orphan"],
             raises=S.author_error("faulted in the authoring region"),
         ),
-        verifier=S.FakeVerifier(default="BAD"),
     )
     assert sc.run() == 2
-    assert sc.gap_records() == []
     assert "deferrals" not in sc.pending_by_id()["orphan"]
     assert sc.head_files() == []
 
@@ -560,11 +429,10 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
         curator=S.FakeCurator(
             writes={"l1.md": S.lesson("bad")}, committed=["bad", "orphan"]
         ),
-        verifier=S.FakeVerifier(default="BAD"),
     )
     assert control.run() == 0
-    assert len(control.gap_records()) == 1
     assert control.pending_by_id()["orphan"]["deferrals"] == 1
+    assert control.head_files() == ["defender/lessons/l1.md"]
 
 
 # ---------------------------------------------------------------------------

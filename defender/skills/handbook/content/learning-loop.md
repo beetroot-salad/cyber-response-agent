@@ -89,19 +89,16 @@ nothing (#881) — the lessons curator folds the queued rows into
 python3 defender/learning/loop.py --author-drain
 ```
 
-Every edit passes the **forward-check** before it commits
-(`author/verify_forward/`): a same-case regression gate that re-runs the
-candidate lesson against its source-case transcript and that case's
-ground-truth disposition, asking whether the agent — with the lesson loaded
-at PLAN — would *still* reach that disposition. `GOOD` keeps the edit; `BAD`
-reverts it. The gate needs a ground truth, so `inconclusive` source cases are
-held rather than authored.
+An edit commits when it cites a finding from the batch; **no check re-runs a
+lesson before it lands**. (A same-case forward check used to, until #1166
+deleted it: no family finding ever reached it. Whether a replacement is needed
+is open in #397.) Only `direction: family` rows are authored; any other row is
+held naming its direction.
 
 The same drain tick runs a second curator. The **questioner curator**
 (`author/questioner/`) folds the world findings into
 `defender/lessons-questioner/`, which the questioner reads back when it authors
-the next family. That corpus has no forward check — there is no defender
-behaviour a lesson about a world could regress — only an idempotency gate.
+the next family. That corpus has only an idempotency gate.
 Both curators share one worktree, one commit and one PR per batch.
 
 At **PLAN** time the runtime agent enumerates `defender/lessons/*.md`, reads
@@ -127,15 +124,12 @@ tick serves both.
 The canonical enumeration of the queues and their thresholds is
 `defender/learning/core/config.py` and `core/drains.py`.
 
-## Why the forward-check gate is heavier than any runtime gate
+## Lessons land unchecked
 
-The runtime's gates are all cheap and local — permission, artifact schema, the
-one semantic gate on a confident close (`content/design.md`). The forward-check
-is none of those: it re-runs an entire investigation to decide whether one
-lesson may land. The asymmetry is deliberate. A bad disposition costs one case;
-a **bad lesson is durable** — it shapes every future run and nothing downstream
-re-reads it — so the offline path earns a verification step whose cost the
-online path could never pay.
+A bad disposition costs one case; a **bad lesson is durable** — it shapes every
+future run and nothing downstream re-reads it. Today nothing verifies a lesson
+before it commits beyond its citation of a batch finding; the PR the drain opens
+is the only review. That gap is deliberate for now and tracked in #397.
 
 ## Evaluating the loop itself
 

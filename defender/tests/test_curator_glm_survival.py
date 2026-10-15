@@ -96,7 +96,6 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     corpus itself on a retiring fault, so the retry the attempt bump exists to allow
     actually happens."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-P", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-P/0", run_id="run-P")
     commits_before = _commit_count(tmp_repo)
 
@@ -135,7 +134,6 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     committed=[id] + CLEAN corpus, and committed=[] + DIRTY corpus. Positive control:
     the CONSISTENT state (committed=[id] + dirty corpus) commits and rotates out."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-X", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
     pre = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
 
@@ -182,7 +180,6 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
     NOT blamed on the curator. Positive control: with only the baseline stray, the batch
     commits the lesson (pathspec-scoped — the stray does not ride into the commit)."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-S", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-S/0", run_id="run-S")
     pre = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
 
@@ -221,7 +218,6 @@ def test_survival_idempotent_redrain(tmp_repo, helpers):
     tick filters it (consumed_idempotent) and the agent is NEVER re-invoked. Positive
     control: tick 1 authored + committed the lesson exactly once."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-I", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-I/0", run_id="run-I")
     commits_before = _commit_count(tmp_repo)
 
@@ -255,7 +251,6 @@ def test_survival_agent_no_git(tmp_repo, helpers):
     commit, so ``rev-list --count`` advancing by EXACTLY 1 (not ≥2) is the observable that
     the agent committed nothing."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-G", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-G/0", run_id="run-G")
     commits_before = _commit_count(tmp_repo)
 

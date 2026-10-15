@@ -781,9 +781,7 @@ _CENSUS_SEEDS = {SEEDED: lesson_text("f0"), TOUCHED: lesson_text("f0", mark="tou
 def _census_scene(at: Path, *, undo: bool) -> Any:
     """A tick that reaches every kind of git call the curator makes, its repo under `at` and its
     flag at `at / "agent-ran"` (outside the repo, so no status lists it). The agent writes the
-    attributable `PLANTED`; rewrites `SEEDED` to cite the batch, which the verifier calls BAD on
-    both passes, so the repair spawn and a second settle run and the settle restore compares and
-    puts it back; chmods `TOUCHED` +x (a mode-only change, which the settle compares and checks
+    attributable `PLANTED`; rewrites `SEEDED` to cite the batch (committed with it); chmods `TOUCHED` +x (a mode-only change, which the settle compares and checks
     out); leaves a non-lesson `notes.txt` in the corpus (reverted through `_put_back`); then writes
     the flag. With `undo` it also leaves a stray outside the corpus and raises `AuthorError`, so
     every git call after the flag is the fault undo's (`_commit_landed`, `_restore_corpus`,
@@ -800,7 +798,7 @@ def _census_scene(at: Path, *, undo: bool) -> Any:
 
     return _scene(at, seed_corpus=dict(_CENSUS_SEEDS),
                   curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}, also=agent),
-                  verifier=S.FakeVerifier(verdicts={SEEDED: "BAD"}), git_timeout=STALL_BOUND)
+                  git_timeout=STALL_BOUND)
 
 
 #: The one `git` the census scenes share, found by the scene's own `git-shim-cfg` file in an
@@ -943,8 +941,8 @@ def _stalled_calls(stalls: dict, subcommand: str, census_log: list) -> list:
 def test_every_git_call_the_tick_makes_before_its_commit_is_bounded(
     tick_census, tick_stalls, subcommand,
 ):
-    """H1. A census tick (nothing stalled: the positive control) commits `PLANTED` after a repair
-    pass; its shim's log lists every git call it made. Every call running `subcommand` after the
+    """H1. A census tick (nothing stalled: the positive control) commits `PLANTED` and the
+    rewritten `SEEDED`; its shim's log lists every git call it made. Every call running `subcommand` after the
     tick-start clean gate (the first call, a `git status` deliberately unbounded) and before the
     commit's first `git add` (the commit is unbounded by contract) is then stalled alone, in a
     fresh scene: each is the tick's `GitProbeError` within the deadline, its message naming
@@ -956,8 +954,7 @@ def test_every_git_call_the_tick_makes_before_its_commit_is_bounded(
     read left unbounded, a settle restore or report cross-check left unbounded."""
     sc, got, shim = tick_census
     assert got == ("rc", 0), got
-    assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
-    assert sc.repair.spawned == 1
+    assert sc.head_files() == sorted([f"{LESSONS}/{PLANTED}", f"{LESSONS}/{SEEDED}"])
     census = shim.calls()
     subcommands = [_subcommand(args) for _n, _ran, args in census]
     assert subcommands[0] == "status", census[0]  # the clean gate, unbounded by design

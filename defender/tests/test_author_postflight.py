@@ -49,7 +49,6 @@ def _write_lesson(tmp_repo, name: str, finding_id: str) -> None:
 
 def test_committed_finding_consumed(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-1", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-1/0", run_id="run-1")
 
     def fake_invoke(findings, batch_id, cfg):
@@ -79,7 +78,6 @@ def test_committed_finding_consumed(tmp_repo, helpers, monkeypatch):
 
 def test_committed_finding_without_commit_message_aborts(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-1b", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-1b/0", run_id="run-1b")
     pre_pending = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
 
@@ -108,7 +106,6 @@ def test_a_stray_forward_bad_bucket_key_aborts(tmp_repo, helpers, monkeypatch):
     for the full behavior; this test is this module's own regression pin that the old bucket
     genuinely has no reader left."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-2", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-2/0", run_id="run-2")
 
     def fake_invoke(findings, batch_id, cfg):
@@ -131,7 +128,6 @@ def test_a_stray_forward_bad_bucket_key_aborts(tmp_repo, helpers, monkeypatch):
 
 def test_consumed_skip_rotates_out(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-3", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-3/0", run_id="run-3")
 
     def fake_invoke(findings, batch_id, cfg):
@@ -157,7 +153,6 @@ def test_committed_but_corpus_clean_aborts(tmp_repo, helpers, monkeypatch):
     """``committed`` non-empty but the corpus is clean (agent claimed a commit but left
     no edits) ⇒ inconsistent; refuse to rotate."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-4", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-4/0", run_id="run-4")
     pre_pending = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
 
@@ -178,7 +173,6 @@ def test_committed_but_corpus_clean_aborts(tmp_repo, helpers, monkeypatch):
 def test_no_commit_but_left_corpus_edits_aborts(tmp_repo, helpers, monkeypatch):
     """``committed`` empty but the corpus is dirty ⇒ inconsistent; refuse to rotate."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-5", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-5/0", run_id="run-5")
     pre_pending = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
 
@@ -203,7 +197,6 @@ def test_agent_result_missing_finding_stays_queued_untouched(tmp_repo, helpers, 
     counted attempt. It is simply not this tick's business; a later tick may pick it up.
     `run-6/0`, which the curator DOES place in `consumed_skip`, still rotates out normally."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-6", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-6/0", run_id="run-6")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-6/1", run_id="run-6")
 
@@ -231,7 +224,6 @@ def test_prestaged_stray_does_not_ride_into_lesson_commit(
     lesson commit. A bare index-global ``git commit`` would; this guards commit_lessons'
     ``-- defender/lessons/`` pathspec."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-8", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-8/0", run_id="run-8")
     (tmp_repo.root / "sibling_draft.md").write_text("unrelated staged work\n")
     tmp_repo.run_git("add", "sibling_draft.md")
@@ -283,7 +275,6 @@ def test_agent_result_duplicate_classification_aborts(
     tmp_repo, helpers, monkeypatch, agent_result
 ):
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-6b", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-6b/0", run_id="run-6b")
     pre_pending = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
 
@@ -302,7 +293,6 @@ def test_agent_writes_outside_lessons_aborts(tmp_repo, helpers, monkeypatch):
     """Scope gate: a working-tree change outside the corpus (the path-scoped commit
     would ignore it) fails verification rather than committing silently."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-7", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-7/0", run_id="run-7")
     pre_pending = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
 
