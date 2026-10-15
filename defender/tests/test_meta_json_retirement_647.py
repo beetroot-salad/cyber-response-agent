@@ -439,13 +439,15 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
     #1235 removed `budget` and `circuit_breaker` (in-memory state now, no file) and the
     accounting-failures sidecar's accessor, and moved the run -> case pointer out of the run dir
     into a sidecar beside it: `session_pointer` is now an upward accessor taking the runs base,
-    like `run_end_sidecar` and `ticket_write`, and no longer a property here (15 left)."""
+    like `run_end_sidecar` and `ticket_write`, and no longer a property here (15 left).
+
+    #1166 removed `source_refs` with the forward check, its last reader."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     assert accessors == {
         "alert", "report", "investigation", "executed_queries", "gather_raw", "wire_log",
         "provenance",
         # #1077 D1
-        "source_refs", "gather_summaries", "lead_author", "tool_trace", "policy_denials",
+        "gather_summaries", "lead_author", "tool_trace", "policy_denials",
         "lessons_loaded",
         "runtime_html", "box_sentinel",
         # #1222 A1: the read-only input directory, and the record beside the alert

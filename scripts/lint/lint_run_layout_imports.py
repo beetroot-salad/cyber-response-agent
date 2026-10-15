@@ -74,8 +74,6 @@ HELPERS: frozenset[str] = frozenset({
     "gather_summaries_shape", "is_case_answer_key", "GATHER_RAW_SHAPE",
 })
 
-_LESSONS = "learning/author/lessons/run.py"
-_FORWARD = "learning/author/verify_forward/forward.py"
 _CLI = "learning/branch/cli.py"
 _VE = "scripts/visualize/visualize_episode.py"
 
@@ -111,7 +109,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "_report.py", "_artifact_schema.py", "runtime/compaction.py", "learning/branch/seams.py",
         # F-09 (#1105 PR 2): learning/judge/render.py left this row (J3 took its last name).
         "learning/judge/__init__.py",
-        "learning/author/verify_forward/checks.py", "learning/core/config.py",
+        "learning/core/config.py",
         "scripts/workspace_map.py", "api/demo.py",
     ),
     "run-lifecycle": ("run.py", "run_common.py", "scripts/case_history/ticket_writer.py"),
@@ -128,8 +126,6 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "learning/ops/trace_lesson.py",
     ),
     "not-a-run": (_VE,),
-    # N-f: exempt only inside the four readers in `DEFERRED_LEGACY`; #1166 deletes them.
-    "deferred_legacy": (_LESSONS, _FORWARD),
     "helpers-only": (
         # #1234: `learning/judge/run.py` left the row with its last `artifact_file` import.
         "learning/branch/ledger.py",
@@ -141,13 +137,6 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
 #: The rows whose modules may take layout names (never the other gated names).
 _LAYOUT_EXEMPT_ROWS = ("running-investigation", "names-only", "run-lifecycle",
                        "path-taking-readers", "not-a-run")
-
-#: The four legacy readers, keyed by (module, function): layout names are exempt inside them
-#: only, so a use elsewhere in either module (lessons/run.py holds the live drain) is not.
-DEFERRED_LEGACY: frozenset[tuple[str, str]] = frozenset({
-    (_LESSONS, "disposition_for"), (_LESSONS, "_has_confident_ground_truth"),
-    (_FORWARD, "load_run_context"), (_FORWARD, "expected_disposition"),
-})
 
 #: The allow-list: (module, function, name, count). PR 1 listed every unmigrated use; PR 2
 #: replaced each site and emptied it (D7″'s end state). An entry is a hatch nobody should need.
@@ -781,8 +770,6 @@ def _exempt(rel: str, row: str | None, use: _Use, layout: frozenset[str]) -> boo
     is_layout = use.name in layout
     if row in _LAYOUT_EXEMPT_ROWS:
         return is_layout
-    if row == "deferred_legacy":
-        return is_layout and (rel, use.function) in DEFERRED_LEGACY
     return False
 
 

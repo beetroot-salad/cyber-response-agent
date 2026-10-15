@@ -98,10 +98,6 @@ class LoopPaths(DefenderPaths):
         return LoopPaths(repo_root=repo_root, state_dir=self.state_root)
 
     @property
-    def runs_dir(self) -> Path:
-        return self.state_root / "runs"
-
-    @property
     def quarantine_dir(self) -> Path:
         """Where `quarantine.preserve_tainted_tree` archives a tainted worktree. Follows
         `worktree_base`, not `state_root`: a copied state dir carries none of this host's
@@ -343,25 +339,6 @@ class StageContext:
 
 def subagent_timeout() -> int:
     return env_int("LEARNING_SUBAGENT_TIMEOUT_SECONDS", 450)
-
-
-def verifier_model() -> str:
-    return env_str("LEARNING_VERIFIER_MODEL", "glm-5.3")
-
-
-def verifier_effort() -> str:
-    return env_str("LEARNING_VERIFIER_EFFORT", "medium")
-
-
-def verifier_timeout() -> int:
-    return env_int("LEARNING_VERIFIER_TIMEOUT_SECONDS", 180)
-
-
-def verify_batch_workers() -> int:
-    n = env_int("LEARNING_VERIFY_BATCH_WORKERS", 8)
-    if n < 1:
-        raise FatalConfigError(f"LEARNING_VERIFY_BATCH_WORKERS must be >= 1; got {n}")
-    return n
 
 
 def author_model() -> str:

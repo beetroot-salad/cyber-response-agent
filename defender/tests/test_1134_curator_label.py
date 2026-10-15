@@ -288,9 +288,9 @@ def test_cfg_tree_for_maps_both_corpora_to_their_own_mounts_and_nothing_else(tmp
 
 
 def _held_queue(paths: LoopPaths) -> None:
-    """One adversarial finding with no ground truth written: the pre-author gate holds it, so a
-    tick serves it without spawning any agent."""
-    seed(paths, FINDINGS, [finding_row("f1", run_id="no-ground-truth")])
+    """One per-case finding from before #1234: the pre-author gate holds it
+    (`retired_direction`), so a tick serves it without spawning any agent."""
+    seed(paths, FINDINGS, [finding_row("f1", run_id="old-run", direction="adversarial")])
 
 
 def _trigger_args(paths: LoopPaths) -> tuple:
@@ -436,8 +436,9 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypat
 
 def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *,
                fault: BaseException | None = None, extra_mount: Path | None = None) -> LoopPaths:
-    """A `LoopPaths` (the seam's `paths`) that records, each time `runs_dir` is asked for
-    (the builders read it after the open; `author_lock_file`, which they used to read, is the
+    """A `LoopPaths` (the seam's `paths`) that records, each time `learning_dir` is asked for
+    (the builders read it for their prompt path after the open; `runs_dir`, which they read
+    until #1166, is gone; `author_lock_file`, which they used to read, is the
     state handle's now), what this process holds under the repo; with `fault`, raises it after
     recording; with `extra_mount`, the paths carry a third mount for the author label to hold
     (`extra_mount_dir`, which the caller adds to the label's tree list). A class per call."""
@@ -449,11 +450,11 @@ def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *,
             return extra_mount
 
         @property
-        def runs_dir(self) -> Path:  # type: ignore[override]
+        def learning_dir(self) -> Path:  # type: ignore[override]
             seen.append(sorted(descriptors_under(self.repo_root)))
             if fault is not None:
                 raise fault
-            return super().runs_dir
+            return super().learning_dir
 
     return Spy(repo_root=repo, state_dir=state)
 

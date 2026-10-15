@@ -110,7 +110,6 @@ def test_1135_the_drains_append_lock_wait_ends_at_the_configured_deadline(tmp_pa
     paths = S.built_paths(tmp_path, repo_root=D.make_repo(tmp_path))
     channel = D.channel_of("findings")
     rows = [D.row_for("findings", "a/0")]
-    D.write_source_refs(paths, "a")
     # The append lock by today's record name (R14); the handle exposes no append-lock role.
     append_lock = (paths.state_root / channel.queue).parent / D.APPEND_LOCK_NAMES_TODAY["findings"]
     caplog.set_level(logging.INFO)

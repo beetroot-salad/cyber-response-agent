@@ -116,15 +116,12 @@ def test_complete_finishes_a_schema_that_names_a_later_class():
 
 @pytest.mark.parametrize(("module", "name"), [
     ("defender.learning.core.drains", "BatchDisposition"),
-    ("defender.learning.author.verify_forward.checks", "CheckContext"),
 ])
 def test_every_ported_record_with_a_forward_reference_is_complete_at_import(module, name):
     """The records whose field names a class the module defines later, or another module
-    owns: `BatchDisposition.pitfalls` (now `core/pitfalls_disposition`, imported at top) and
-    `CheckContext.check` (mutually referential with `ForwardCheck`, `complete`d at module end).
-    (#1224 retired the third, the mechanical judge's family grade.) Each was left for pydantic
-    to finish on the first construction — for `CheckContext`, inside `_Judgement.mint`'s
-    worker pool, N threads at once with no lock.
+    owns: `BatchDisposition.pitfalls` (now `core/pitfalls_disposition`, imported at top).
+    (#1224 retired the mechanical judge's family grade; #1166 the forward check's
+    `CheckContext`.) Each was left for pydantic to finish on the first construction.
 
     IN A FRESH INTERPRETER, because the flag this reads flips to true on the first
     construction anyway: in this process, any earlier test in the worker that built one of
@@ -227,12 +224,11 @@ def test_agent_deps_replace_shares_the_mutable_containers():
 
 
 def test_learning_deps_subclasses_validate_like_the_base():
-    """The four learning-side deps subclasses are ported with the base: a stdlib
+    """The learning-side deps subclasses are ported with the base: a stdlib
     `@dataclass` subclass of a pydantic dataclass gets a stdlib `__init__`, so strict
     validation would have been silently OFF for exactly those roles."""
     pytest.importorskip("pydantic_ai")
-    from defender.learning.author.curator_engine import CorpusRepairDeps, CuratorDeps
-    from defender.learning.author.verify_forward.engine import VerifierDeps
+    from defender.learning.author.curator_engine import CuratorDeps
     from defender.learning.leads.lead_author_engine import LeadAuthorDeps
     from defender.runtime import permission
 
@@ -240,7 +236,7 @@ def test_learning_deps_subclasses_validate_like_the_base():
         def run_parsed(self, *a, **k):  # noqa: ARG002 — duck-typed `BoxLike`
             raise AssertionError("never run")
 
-    for cls in (CuratorDeps, CorpusRepairDeps, VerifierDeps, LeadAuthorDeps):
+    for cls in (CuratorDeps, LeadAuthorDeps):
         with pytest.raises(ValidationError):
             cls(run_dir=Path("/r"), defender_dir=Path("/d"), run_id=123,  # type: ignore[arg-type]
                 policy=permission.AgentPolicy(), cwd_anchor=Path("/r"), box=_Box())
@@ -369,22 +365,6 @@ def test_author_branch_accepts_any_structural_forge():
     assert AuthorBranch(forge=gh).forge is gh
     with pytest.raises(ValidationError):
         AuthorBranch(forge=object())  # type: ignore[arg-type]
-
-
-def test_drain_judgement_resolves_its_counter_annotation():
-    """`itertools.count` is generic to a type checker and a plain class at runtime, where
-    `itertools.count[int]` raises `TypeError: not subscriptable` — and a pydantic dataclass
-    evaluates its field annotations at DECORATION time, which `from __future__ import
-    annotations` no longer hides. The whole `author.drain` import tree (the drain, both
-    curators' runners, the queue page) failed to load until the alias split the two
-    readings, and the field must still reach pydantic as the real class."""
-    import itertools
-
-    from defender.learning.author.drain import _Judgement
-
-    counter = _Judgement.__pydantic_fields__["counter"]
-    assert counter.annotation is itertools.count
-    assert counter.default_factory is itertools.count
 
 
 # ---------------------------------------------------------------------------------------

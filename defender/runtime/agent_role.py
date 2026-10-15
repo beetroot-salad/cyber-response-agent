@@ -7,13 +7,8 @@ from enum import Enum
 class AgentRole(Enum):
     MAIN = "main"
     GATHER = "gather"
-    VERIFIER = "verifier"
     LEAD_AUTHOR = "lead_author"  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     CORPUS_AUTHOR = "corpus_author"
-    # The drain's bounded repair spawn for a BAD-verdict lesson. A separate role rather than
-    # a per-spawn override of CORPUS_AUTHOR, so its restricted toolset (write + lesson_read,
-    # no bash) is fixed at build time.
-    CORPUS_REPAIR = "corpus_repair"
     # A key here grants compiled policy and names a trace file, so every member must have a
     # definition (`set(AGENTS.keys()) == set(AgentRole)` is asserted); a retired stage retires
     # its key.
@@ -32,7 +27,7 @@ class AgentRole(Enum):
     # questioner would silently reach the judge; `agent_id` separates traces, never policies.
     JUDGE = "judge"
     # A branched world's live oracle and its verifier (#1224, M11): deny-all, their own models
-    # and budget, apart from the runtime's `VERIFIER`. Preflighted only where branching runs.
+    # and budget. Preflighted only where branching runs.
     ORACLE = "oracle"
     ORACLE_CHECK = "oracle_check"
 

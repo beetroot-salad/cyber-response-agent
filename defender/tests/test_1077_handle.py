@@ -798,7 +798,7 @@ def test_run_documents_group_write_contract_matches_the_design_tables_rewritten_
 
 
 def test_run_observability_group_stays_append_only_through_the_handle(base, run_dir):
-    """`run.observability` (wire_log, review_trace, forward_check_trace, tool_trace,
+    """`run.observability` (wire_log, review_trace, tool_trace,
     review_record, lessons_loaded, ticket_write, runtime_html, box_sentinel, session_pointer)
     is readable everywhere and append-only for the host that
     produces it — no accessor exposes an in-place rewrite of an existing entry — per §7

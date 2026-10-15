@@ -41,7 +41,6 @@ from defender.tests._frames680 import (
     _drive_learning_read,
     _expected_frame,
     assert_one_frame,
-    _findings_prompt,
     _lead_author_prompt,
     _main_bash,
     _pitfalls_prompt,
@@ -55,14 +54,6 @@ from defender.tests._frames680 import (
 
 
 
-
-
-
-
-def test_repair_gate_r1_run_findings_shape(tmp_path):
-    """The real `_run_findings` payload captured at `run_verify` orders contract, transcript, lesson, and disposition frames."""
-    observation = _findings_prompt(tmp_path)
-    assert_producer_shape(observation)
 
 
 
@@ -575,5 +566,3 @@ def test_gate_r1_tool_bash_output_shape(tmp_path):
     assert match.group("body") == _format_bash_result(
         4, "captured stdout", "captured stderr"
     )
-
-

@@ -101,7 +101,7 @@ class RunId:
     def __copy__(self) -> RunId:
         return _rebuild(self._text)
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> RunId:
+    def __deepcopy__(self, _memo: dict[int, Any]) -> RunId:
         return _rebuild(self._text)
 
     def __eq__(self, other: object) -> bool:

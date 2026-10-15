@@ -140,7 +140,7 @@ def test_bound_curator_anchoring_matches_the_for_run_anchoring(tmp_path):
 def test_bound_deps_retain_the_compiled_resolved_roots(tmp_path):
     """M6: the deps retains the ResolvedRoots the bind compiled — the record reproduces the run_dir
     and worktree tree the policy was rooted against (a bound deps is not just a policy; the roots it
-    came from ride with it, so forward_check re-reads them rather than re-deriving a second root)."""
+    came from ride with it, so a later consumer re-reads them rather than re-deriving a second root)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = bind_curator(wt, rd, "lessons")
     assert deps.roots.run_dir == rd                        # provisional M6 field
@@ -264,9 +264,9 @@ def test_bind_constructs_a_policy_correct_curator_with_no_tool_config(tmp_path):
 
 
 def test_tool_config_slot_unset_across_full_lifecycle(tmp_path):
-    """M5: with the slot unset, nothing is observable except at forward_check — write / edit / rm /
-    cat / lesson_read all work, the slot never touched (c3/g2: forward_check is the sole consumer
-    family). Drive a write and a cat with the slot unset → both succeed."""
+    """M5: with the slot unset, nothing is observable except at the slot's consumer — write / edit /
+    rm / cat / lesson_read all work, the slot never touched (c3/g2: its sole consumer family was
+    the curator's check tool, which #773 retired). Drive a write and a cat with the slot unset → both succeed."""
     from _curator_691_harness import bash_decision
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = bind_curator(wt, rd, "lessons")                  # slot unset
