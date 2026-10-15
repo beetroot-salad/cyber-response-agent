@@ -37,7 +37,7 @@ from defender.run_repository import RunId, RunRefused
 # ledger's writes. `oracle` / `verifier` (#1224): a fact world's oracle and verifier models.
 # `source` (#1105 PR 2, declared changes 6/9): the world's source run, opened by `main` by the
 # manifest's `source_run_id` through the tenant's repository — no recorded path is read.
-INVESTIGATE_PARAMS = ["self", "alert_path", "run_dir", "run_id", "defender_dir", "model_name",
+INVESTIGATE_PARAMS = ["self", "alert_path", "run", "defender_dir", "model_name",
                       "model_override", "box", "tenant", "world", "episode", "serving",
                       "source"]
 

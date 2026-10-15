@@ -16,6 +16,8 @@ asserts the first refusal is the price gate's at every rung, never the commit's.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 from dataclasses import fields
 
 from defender._artifact_schema import REPORT_FRONTMATTER_MAX, validate_artifact
@@ -370,7 +372,7 @@ def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_pat
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
     fm = frontmatter(run_dir)
     assert (fm["disposition"], fm["outcome"], fm["cause"]) == (GAP, STANDS, CEILING_EXAMINED)
-    rec = case_ticket.read_case_record(run_dir, mapping=mapping)
+    rec = case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=mapping)
     assert rec.disposition == GAP
     assert rec.cause == CEILING_EXAMINED
     comment = case_ticket.case_record_to_comment(rec, mapping=mapping)
@@ -380,7 +382,7 @@ def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_pat
     broken = close_with(deps, GAP, recording(faults={"composer": raises(RuntimeError("down"))}))
     assert broken.outcome == "forced-inconclusive"
     assert broken.failure_kind is not None
-    rec = case_ticket.read_case_record(run_dir, mapping=mapping)
+    rec = case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=mapping)
     assert rec.disposition == UNRESOLVED
     assert rec.cause == CAUSE_REVIEW_INCOMPLETE
     assert CEILING_EXAMINED not in case_ticket.case_record_to_comment(rec, mapping=mapping)["body"]

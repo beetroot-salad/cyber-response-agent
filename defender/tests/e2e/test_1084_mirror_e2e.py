@@ -43,6 +43,8 @@ have the new names yet.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import logging
 import os
 import pwd
@@ -271,7 +273,7 @@ def test_1084_mirror_page_answers_copied_with_the_page_at_the_path_under_mirror_
     run_dir = driven_run(tmp_path)
     expected = vr.mirror_root() / run_dir.name / PAGE
     assert expected == run_visualizations_dir / run_dir.name / PAGE
-    page = vr.render_page(run_dir)
+    page = vr.render_page(_run_handle_1165(run_dir))
     assert MARKER in page, "positive control: the page handed over is this run's"
     caplog.set_level(logging.DEBUG)
 
@@ -306,7 +308,7 @@ def test_1084_mirror_page_off_dev_copies_nothing_and_says_so(
         monkeypatch.delenv(_env.DEPLOYMENT_ENV)
     else:
         monkeypatch.setenv(_env.DEPLOYMENT_ENV, deployment)
-    page = vr.render_page(run_dir)
+    page = vr.render_page(_run_handle_1165(run_dir))
     caplog.set_level(logging.DEBUG)
 
     assert vr.mirror_page(page, run_dir.name) == "skipped"
@@ -375,7 +377,7 @@ def test_1084_a_failed_mirror_write_is_warned_and_the_record_kept(tmp_path, monk
     blocker.write_bytes(b"a file, not a folder\n")
     monkeypatch.setenv(ENV, str(blocker / "run-visualizations"))
     dest = blocker / "run-visualizations" / run_dir.name / PAGE
-    page = vr.render_page(run_dir)
+    page = vr.render_page(_run_handle_1165(run_dir))
 
     caplog.set_level(logging.DEBUG)
     assert vr.mirror_page(page, run_dir.name) == "failed"
@@ -415,7 +417,7 @@ def test_1084_a_mirror_write_that_fails_after_its_folder_exists_is_warned_and_th
     occupied = run_visualizations_dir / run_dir.name / PAGE
     occupied.mkdir(parents=True)
     (occupied / "keep").write_bytes(b"KEEP\n")
-    page = vr.render_page(run_dir)
+    page = vr.render_page(_run_handle_1165(run_dir))
 
     caplog.set_level(logging.DEBUG)
     assert vr.mirror_page(page, run_dir.name) == "failed"
@@ -461,7 +463,7 @@ def test_1084_a_link_at_the_page_name_is_refused_in_process_and_warned_naming_it
     outside = tmp_path / "outside.html"
     outside.write_bytes(b"OUTSIDE\n")
     os.symlink(outside, dest)
-    page = vr.render_page(run_dir)
+    page = vr.render_page(_run_handle_1165(run_dir))
 
     caplog.set_level(logging.DEBUG)
     assert vr.mirror_page(page, run_dir.name) == "failed"
@@ -519,7 +521,7 @@ def test_1084_an_override_outside_the_checkout_takes_the_copy_at_its_absolute_pa
     assert _warnings(caplog) == [], f"the outside copy was warned about: {_warnings(caplog)!r}"
 
     mirrored.unlink()
-    assert vr.mirror_page(vr.render_page(run_dir), run_dir.name) == "copied"
+    assert vr.mirror_page(vr.render_page(_run_handle_1165(run_dir)), run_dir.name) == "copied"
     assert mirrored.read_bytes() == (run_dir / PAGE).read_bytes()
     assert vr.main(_run_page_argv(tenant, run_dir)) == 0  # #1105 PR 2 (declared change 7)
 
@@ -544,7 +546,7 @@ def test_1084_a_render_under_pytest_without_the_override_is_refused_warned_and_t
     vr = _renderer()
     run_dir = driven_run(tmp_path)
     run = tenant_run(run_dir)
-    page = vr.render_page(run_dir)
+    page = vr.render_page(_run_handle_1165(run_dir))
     monkeypatch.delenv(ENV)
     with pytest.raises(vr.MirrorRootRefused) as refused:
         vr.mirror_root()

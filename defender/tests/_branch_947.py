@@ -24,6 +24,8 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import dataclasses
 import datetime as dt
 import importlib
@@ -100,7 +102,7 @@ def spec_at(store: Any, run_dir: Path, message_id: int, *,
         continuation_prompt=prompt, as_of=DRAFT_MOMENT,
     )
     moment = (  # lint-default: ok — a sentinel-defaulted override, not an optional re-coalesced in the body  # noqa: E501
-        branch.branch_point_time(store, Path(run_dir), message_id)
+        branch.branch_point_time(store, Path(run_dir), message_id, source_run=_run_handle_1165(Path(run_dir)))
         if as_of is DERIVE else as_of)
     return dataclasses.replace(draft, as_of=moment)
 
@@ -126,7 +128,7 @@ def legal_source(
     store = make_store(tmp_path, case_id=case_id)
     run_dir = runs_base(tmp_path) / name
     run_dir.mkdir(parents=True, exist_ok=True)
-    ss.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
+    ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     plant_alert(run_dir, ALERT_DOC.encode("utf-8"))
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request("investigate the alert"), *complete_pair()],

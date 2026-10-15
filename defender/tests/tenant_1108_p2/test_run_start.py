@@ -14,6 +14,7 @@ from defender import run as run_py
 from defender.runtime import box as box_mod
 from defender.runtime.box_codec import BOX_ENV_ALLOWLIST, BoxFault
 from defender.tests import _tenants1106 as T
+from defender.tests._spec1077 import fixture_run
 from defender.tests._spec1092 import STOCK_ROOTFS, make_run_dir, plant_tree
 from defender.tests.e2e import _replay_harness as R
 from defender.tests.tenant_1108_p2._support import AgentReadDocker, MountedReadDocker, start_with, tree_bytes
@@ -39,19 +40,22 @@ def scene(tmp_path):
 
 def _lifecycle(scene, docker, main, *, observed_env=None):
     tenant, run_tenant, run_dir = scene
+    run = fixture_run(run_dir)
 
     def investigate(**kw):
+        assert kw['run'] is run
+        handed_run = kw['run']
         if observed_env is not None:
             from defender.runtime.bash_exec import parse
             command = 'printenv DEFENDER_AGENT_DIR'
             result = kw['box'].run_parsed(parse(command), command=command,
-                                          cwd=kw['run_dir'], timeout=10)
+                                          cwd=handed_run.run_dir, timeout=10)
             observed_env.append(result.out.decode().strip())
-        return R.drive(kw['run_dir'], run_id=kw['run_id'], main=main,
+        return R.drive(handed_run.run_dir, run_id=str(handed_run.id), main=main,
                        tenant=tenant, box=kw['box'])
 
     return run_py._run_investigation_lifecycle(
-        run_dir=run_dir, model='test-model', model_override=None,
+        run=run, model='test-model', model_override=None,
         defender_dir=T.DEFENDER, tenant=run_tenant, investigate=investigate,
         start_box=start_with(docker), stop_box=box_mod.stop_box,
     )

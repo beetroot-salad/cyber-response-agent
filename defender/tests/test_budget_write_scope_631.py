@@ -23,6 +23,9 @@ Every assertion below pins the demanded correction, never today's behaviour.
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 import asyncio
 import json
 import math
@@ -375,7 +378,7 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
     # carry; this agent is driven outside a run, so it carries the state a started run would.
     from defender.runtime.run_state import RunState
 
-    deps = replace(bind(gather_def, run_dir, defender_dir=DEFENDER),
+    deps = replace(_with_live_run_1165(bind(gather_def, run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
                    lead_id="l-001", run_state=RunState(run_dir, "r"))
 
     async def _go():

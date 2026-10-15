@@ -91,7 +91,7 @@ def test_a_foreign_toolset_injected_at_the_entry_point_reaches_the_model_through
     can reach without a provider.
     """
     value = _payload()
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     main = PartRecorder([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
     drive(run_dir, run_id=RUN_ID, main=main, toolset=foreign_toolset(value))
 
@@ -141,7 +141,7 @@ def test_the_gate_declares_its_encoder_and_toolset_seams_at_the_composition_root
     )
     assert framed_content(substituted.dispatched.text()) == toons.dumps(value)
 
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     main = PartRecorder([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
     drive(run_dir, run_id=RUN_ID, main=main, toolset=foreign_toolset(value))
     assert framed_content(main.dispatched.text("fetch_rows")) == toons.dumps(value), (
@@ -166,7 +166,7 @@ def test_the_shipped_tool_set_is_unchanged_when_the_seam_is_not_supplied(
     the same shape, so "no foreign tool" is not green merely because nothing was installed
     anywhere.
     """
-    bare_dir = materialize(tmp_path / "bare", GOLDEN_AB3)
+    bare_dir = materialize(tmp_path / "bare", GOLDEN_AB3, run_id=RUN_ID)
     bare = ToolRoster([Turn(text="Complete.")])
     drive(bare_dir, run_id=RUN_ID, main=bare)
     bare_names = sorted(t.name for t in (bare.tool_defs or []))
@@ -174,7 +174,7 @@ def test_the_shipped_tool_set_is_unchanged_when_the_seam_is_not_supplied(
     assert "fetch_rows" not in bare_names
     assert all("fetch_rows" not in seen for seen in bare.seen)
 
-    with_dir = materialize(tmp_path / "with", GOLDEN_AB3)
+    with_dir = materialize(tmp_path / "with", GOLDEN_AB3, run_id=RUN_ID)
     supplied = ToolRoster([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
     drive(with_dir, run_id=RUN_ID, main=supplied,
           toolset=foreign_toolset(_payload()))
@@ -200,7 +200,7 @@ def test_the_seams_presence_or_absence_holds_for_every_call_across_the_whole_run
     request/response round, and all three are asserted.
     """
     value = _payload()
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     main = PartRecorder([
         Turn(tool_calls=[("fetch_rows", {})]),
         Turn(tool_calls=[("fetch_rows", {})]),
@@ -301,7 +301,7 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     from defender.run_repository import RunPaths
 
     def _run(root: Path, toolset):
-        run_dir = materialize(root, GOLDEN_AB3)
+        run_dir = materialize(root, GOLDEN_AB3, run_id=RUN_ID)
         rec = VerbRecorder()
         main = PartRecorder([
             _gather_turn(),

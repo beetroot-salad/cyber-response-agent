@@ -35,6 +35,8 @@ reaches the check the grant is validated by.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import contextlib
 import dataclasses
 import datetime as dt
@@ -1007,7 +1009,7 @@ def _timed_source(tmp_path, moments):
     store = make_store(tmp_path, case_id="case-clock")
     run_dir = runs_base(tmp_path) / "run-clock-001"
     run_dir.mkdir(parents=True, exist_ok=True)
-    ss.write_case_pointer(run_dir, case_id="case-clock", store_path=store.path)
+    ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-clock", store_path=store.path)
     session_id = store.new_session(agent_id="main")
     for i, moment in enumerate(moments):
         _stamped_turn(store, session_id, moment, text=f"t{i}")
@@ -1035,7 +1037,7 @@ def test_t0_is_the_latest_moment_the_prefix_carries(tmp_path):
         dt.datetime(2026, 5, 25, 15, 30, 30, tzinfo=dt.UTC),
     ])
 
-    derived = branch.branch_point_time(store, run_dir, path_ids[-1])
+    derived = branch.branch_point_time(store, run_dir, path_ids[-1], source_run=_run_handle_1165(run_dir))
 
     assert derived == latest.replace(microsecond=0), (
         f"T0 is {derived}, not the prefix's own latest moment truncated to seconds")
@@ -1061,8 +1063,8 @@ def test_t0_ignores_everything_the_run_did_after_the_branch(tmp_path):
         dt.datetime(2026, 5, 25, 16, 40, 0, tzinfo=dt.UTC),
     ])
 
-    early = branch.branch_point_time(store, run_dir, path_ids[1])
-    late = branch.branch_point_time(store, run_dir, path_ids[-1])
+    early = branch.branch_point_time(store, run_dir, path_ids[1], source_run=_run_handle_1165(run_dir))
+    late = branch.branch_point_time(store, run_dir, path_ids[-1], source_run=_run_handle_1165(run_dir))
 
     assert early == dt.datetime(2026, 5, 25, 15, 30, 0, tzinfo=dt.UTC)
     assert late == dt.datetime(2026, 5, 25, 16, 40, 0, tzinfo=dt.UTC)
@@ -1107,12 +1109,12 @@ def test_a_spec_whose_clock_disagrees_with_its_branch_point_is_refused(tmp_path)
         tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
     legal = spec_at(store, run_dir, path_ids[-1])
 
-    assert branch.validate(store, legal) is None, (
+    assert branch.validate(store, legal, source_run=_run_handle_1165((legal).source_run_dir)) is None, (
         "the derived spec was refused, so the refusal below pins nothing")
 
     for wrong in (dt.timedelta(seconds=1), dt.timedelta(hours=3)):
         with pytest.raises(branch.BranchError):
-            branch.validate(store, dataclasses.replace(legal, as_of=legal.as_of + wrong))
+            branch.validate(store, dataclasses.replace(legal, as_of=legal.as_of + wrong), source_run=_run_handle_1165((dataclasses.replace(legal, as_of=legal.as_of + wrong)).source_run_dir))
 
 
 @pytest.mark.parametrize("as_of", [
@@ -1135,4 +1137,4 @@ def test_a_spec_whose_clock_is_not_aware_utc_is_refused(tmp_path, as_of):
         tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
 
     with pytest.raises(branch.BranchError):
-        branch.validate(store, spec_at(store, run_dir, path_ids[-1], as_of=as_of))
+        branch.validate(store, spec_at(store, run_dir, path_ids[-1], as_of=as_of), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[-1], as_of=as_of)).source_run_dir))

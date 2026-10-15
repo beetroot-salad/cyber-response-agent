@@ -16,8 +16,6 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._io import (
     READ_LIMIT,
-    guarded_mkdir,
-    write_guarded,
 )
 from defender._model import model
 from defender._query_rules import (
@@ -26,7 +24,7 @@ from defender._query_rules import (
     _json_safe_params,
     _request_key,
 )
-from defender.run_repository import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
+from defender.run_repository import Run, LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_int, as_str, is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
 
@@ -159,7 +157,7 @@ def raw_command(system: str, verb: str, params: dict) -> str:
     return shlex.join([system, verb, *(f"{k}={v}" for k, v in params.items())])
 
 
-def persist_payload(run_dir: Path, lead_id: str, seq: int, text: str) -> str | None:
+def persist_payload(run: Run, lead_id: str, seq: int, text: str) -> str | None:
     """Write the payload sidecar at `gather_raw/{lead_id}/{seq}.json`, best-effort; returns its
     run-dir-relative path or `None`.
 
@@ -170,14 +168,12 @@ def persist_payload(run_dir: Path, lead_id: str, seq: int, text: str) -> str | N
     A payload over `READ_LIMIT` bytes is not written (#1217): every reader of a sidecar refuses
     one, and a host write is outside the box's `fsize` cap. `None` is the shape any failed write
     already takes, so the row records no sidecar and readers fall back as they do for that."""
-    owner = RunPaths(run_dir)
+    owner = RunPaths(run.run_dir)
     try:
         data = text.encode("utf-8")
         if len(data) > READ_LIMIT:
             return None
-        payload_path = owner.payload(lead_id, seq)
-        guarded_mkdir(payload_path.parent, base=run_dir)
-        write_guarded(payload_path, data)
+        run.tables.payloads(lead_id, seq).write(data)
     except (OSError, ValueError):
         return None
     return owner.payload_relpath(lead_id, seq)
@@ -229,7 +225,7 @@ def next_call_id(state: RunState) -> str:
 
 
 def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the caller must decide
-    state: RunState, *, lead_id: str, system: str, verb: str, query_id: str, params: dict,
+    state: RunState, *, run: Run, lead_id: str, system: str, verb: str, query_id: str, params: dict,
     raw_command: str, payload_text: str, exit_code: int, payload_status: str,
     payload_digest: str, system_key: str, call_id: str | None = None,
 ) -> dict:
@@ -256,12 +252,12 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     nothing. The state holds the row as its line parses (`json.loads(json.dumps(row))`), so it and
     the view agree on every line that landed."""
     # First, so too-deep params are refused before a seq is taken or a sidecar written.
-    stored_params = _json_safe_params(dict(params))
     with state.lock:
+        stored_params = _json_safe_params(dict(params))
         if call_id is None:
             call_id = next_call_id(state)
         seq = _next_seq(state, lead_id)
-        payload_rel = persist_payload(state.run_dir, lead_id, seq, payload_text)
+        payload_rel = persist_payload(run, lead_id, seq, payload_text)
         row: dict[str, Any] = {
             "lead_id": lead_id,
             "seq": seq,
@@ -292,7 +288,7 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
         # parsed line, so the state holds exactly what the file says (non-finite floats, tuples
         # and keys as written) and no reader shares the dict handed back to the caller.
         state.rows.setdefault(lead_id, []).append(json.loads(line))
-        write_guarded(RunPaths(state.run_dir).executed_queries, line + "\n", mode="append")
+        run.tables.queries.append([json.loads(line)])
     return row
 
 

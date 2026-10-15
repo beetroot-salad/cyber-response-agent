@@ -379,7 +379,7 @@ def test_replayed_message_zero_listing_matches_the_production_run_dir_file_set(
     advertising it to the model long after production stopped producing it — a suite green on
     pass/fail while pinning a prompt production can no longer emit. The listing a replayed run
     shows must name only files a production run would have."""
-    harness_dir = materialize(tmp_path / "h", GOLDEN)
+    harness_dir = materialize(tmp_path / "h", GOLDEN, run_id='replay-msg0-647')
     assert not (harness_dir / "meta.json").exists(), (
         "the replay harness still writes the metadata file into its run dir"
     )

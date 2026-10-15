@@ -152,7 +152,7 @@ def _mirror(page: bytes, dest: Path, root: Path) -> None:
             f"{proc.stderr.decode('utf-8', 'replace').strip()}")
 
 
-def render_page(run_dir: Path, *, update_ticket: bool = False) -> str:
+def render_page(run: Run, *, update_ticket: bool = False) -> str:
     """This run's page, generated and returned — nothing is written, and nothing here knows
     where the page goes: the post-run step saves it as the run's record (#1110).
     `update_ticket` is `run.py`'s own `--update-ticket` (#1107 O6), handed through to the page.
@@ -163,8 +163,8 @@ def render_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     """
     from defender.runtime import session_store as ss
 
-    ss.open_store_for_read(ss.resolve_store_path(run_dir)).connection.close()
-    return render_runtime_page(run_dir, update_ticket=update_ticket)
+    ss.open_store_for_read(ss.resolve_store_path(run)).connection.close()
+    return render_runtime_page(run.run_dir, update_ticket=update_ticket)
 
 
 def publish_page(run: Run, *, update_ticket: bool = False) -> CopyOutcome:
@@ -176,7 +176,7 @@ def publish_page(run: Run, *, update_ticket: bool = False) -> CopyOutcome:
     the cause chained: the caller's single "no record" signal. The copy never raises.
     """
     try:
-        page = render_page(run.run_dir, update_ticket=update_ticket)
+        page = render_page(run, update_ticket=update_ticket)
     except Exception as e:
         raise VisualizeFailed(f"the page for {run.run_dir} could not be rendered") from e
     record = run.observability.runtime_html

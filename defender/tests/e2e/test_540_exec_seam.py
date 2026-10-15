@@ -744,7 +744,7 @@ def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):
     seam is exercised by every existing e2e test the moment it lands — leverage and risk in
     equal measure. This drives the whole real driver loop (gather dispatch included) with the
     box injected at `drive(box=…)`, so the surviving workflow is the run, not a unit call."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     alert = RunPaths(run_dir).alert
     t = RecordingTransport(framed(0, b"3\n", b""))
 

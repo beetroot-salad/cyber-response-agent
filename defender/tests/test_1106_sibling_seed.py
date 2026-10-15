@@ -22,6 +22,8 @@ child would actually receive it. No `run.py` is launched.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
 from pathlib import Path
 from typing import Any
 
@@ -353,7 +355,7 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
         grants = record.grants
         seen: dict = {}
         run._drive_investigation(
-            alert_path=RunPaths(src).alert, run_dir=src, run_id=src.name,
+            alert_path=RunPaths(src).alert, run=_fixture_run_1165(src),
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
             tenant=record,
             world=run.resume_world(Episode.open(ep), "b", tenant=lambda r=record: r),

@@ -1,7 +1,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
@@ -18,8 +17,7 @@ from defender._clock import now_iso
 from defender._paths import PATHS
 
 
-from defender._io import write_guarded
-from defender.run_repository import RunPaths
+from defender.run_repository import Run
 from .. import box as box_mod
 from ..run_state import RunState
 from .. import permission
@@ -141,6 +139,7 @@ class AgentDeps:
     #: run (the learning stages, the review roles), whose calls the budget hooks leave alone; a
     #: live operation over it is refused (`run_state.run_state_of`). `SkipValidation`, like
     #: `tenant`: the object is shared, never rebuilt by a deps copy.
+    run: Annotated[Run | None, SkipValidation] = field(kw_only=True, default=None)
     run_state: Annotated[RunState | None, SkipValidation] = field(kw_only=True, default=None)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
@@ -245,7 +244,16 @@ def _record_lesson_load(
     if name is None:
         return
     try:
+        run: Run = run_of(deps)
         row = {"lesson_name": name, "ts": now_iso(), "kind": kind, "role": deps.role.value}
-        write_guarded(RunPaths(deps.run_dir).lessons_loaded, json.dumps(row) + "\n", mode="append")
+        run.observability.lessons_loaded.append([row])  # lint-run-records: ok — run_of requires the handed repository Run; the resolver does not trace its return type
     except Exception:  # noqa: BLE001 — best-effort observability
         pass
+
+
+def run_of(deps: Any) -> Run:
+    """The repository handle bound to a live role; durable operations require it."""
+    run = getattr(deps, "run", None)
+    if run is None:
+        raise RuntimeError("a durable run record operation requires a Run")
+    return run

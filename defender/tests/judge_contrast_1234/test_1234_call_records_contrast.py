@@ -1098,10 +1098,10 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "writes_by": "append_query_row", "via": (), "failed_write": "best-effort view",
         "call_id": "this run's", "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
     "scripts/gather_tools/record_query.py::append_query_row": {
-        "writes_by": "write_guarded", "via": (), "failed_write": "records state, then raises OSError",
+        "writes_by": "append", "via": (), "failed_write": "records state, then raises OSError",
         "call_id": "this run's", "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
     "runtime/branch/_seed.py::_inherit_evidence": {
-        "writes_by": "write_guarded", "via": (), "failed_write": "refuses the seed",
+        "writes_by": "seed", "via": (), "failed_write": "refuses the seed",
         "call_id": "none of this run's (seeded)",
         "driven_by": "test_1234_every_query_table_writer_writes_this_runs_call_id"},
     # The archive's verbatim copy of the run's finished table into `worlds/<X>/`.
@@ -1145,8 +1145,11 @@ def call_record_write_sites(trees: Iterable[tuple[str, ast.AST]]) -> set[str]:
     """`<file>::<function>` of every call that writes a world's call record: the query table's
     one append (`append_query_row`), any write primitive aimed at `executed_queries`, and a
     `record(...)` on a ledger."""
+    from defender.tests import _1165_census as records
+
     sites: set[str] = set()
     for rel, tree in trees:
+        scan = records.vocabulary._scan(rel, tree)
         for scope, node in _scoped(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -1154,11 +1157,34 @@ def call_record_write_sites(trees: Iterable[tuple[str, ast.AST]]) -> set[str]:
             table = name == "append_query_row" or (
                 name in _WRITE_PRIMITIVES and _mentions([*node.args, *node.keywords],
                                                         "executed_queries"))
+            if isinstance(node.func, ast.Attribute) and name in {"append", "seed"}:
+                receiver = node.func.value
+                table = table or (
+                    isinstance(receiver, ast.Attribute) and receiver.attr == "queries"
+                    and isinstance(receiver.value, ast.Attribute) and receiver.value.attr == "tables"
+                    and records._record_receiver(receiver, scan))
             ledger = name == "record" and isinstance(node.func, ast.Attribute) and _mentions(
                 [node.func.value], "ledger")
             if table or ledger:
                 sites.add(f"{rel}::{scope}")
     return sites
+
+
+
+def test_query_record_writer_census_recognizes_only_resolved_query_records():
+    source = """
+from defender.run_repository import Run
+def append_row(run: Run):
+    run.tables.queries.append([{}])
+def seed_rows(run: Run):
+    run.tables.queries.seed([])
+def unrelated(run: Run, mystery):
+    run.tables.payloads('l-001', 0).write(b'{}')
+    mystery.tables.queries.append([{}])
+    mystery.tables.queries.seed([])
+"""
+    assert call_record_write_sites([("runtime/planted.py", ast.parse(source))]) == {
+        "runtime/planted.py::append_row", "runtime/planted.py::seed_rows"}
 
 
 def _shipped() -> dict[str, ast.AST]:

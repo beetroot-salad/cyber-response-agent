@@ -54,7 +54,7 @@ pytestmark = pytest.mark.e2e
 
 def test_replay_golden_v2sshd(tmp_path):
     run_id = "replay-v2sshd"
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
 
     inv_text = (GOLDEN / "investigation.md").read_text()
 
@@ -99,7 +99,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
     belongs to the nested-gather replay (test_nested_gather_capture).
     """
     run_id = "replay-ab3"
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
     turns = load_turns_from_trace(
         GOLDEN_AB3 / "tool_trace.jsonl",
@@ -191,7 +191,7 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
     tell a reviewer that ran from a close that reached no reviewer at all, which is exactly
     what the replays were unable to distinguish while the seam defaulted to a live bundle."""
     run_id = "replay-gap"
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     inv_text = (GOLDEN_AB3 / "investigation.md").read_text()
 
     replay = ReplayFn([
@@ -241,7 +241,7 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
 ])
 def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn, reason_substr):
     run_id = f"deny-{label}"
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
     probe = DenyProbe(tool_name, args_fn(run_dir))
     drive(run_dir, run_id=run_id, main=probe)
@@ -264,7 +264,7 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
     (#1047), unconditional beside every run dir and on a path no tool call the model issues
     can ever name."""
     run_id = "no-write-path"
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
     assert MAIN_DEF.tools.append is True
     assert MAIN_DEF.tools.write is False, (
@@ -323,7 +323,7 @@ def _elastic_verbs() -> FakeVerbs:
 
 def test_nested_gather_capture(tmp_path):
     run_id = "nested-gather"
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
     main_replay = ReplayFn([
         Turn(tool_calls=[("gather", {

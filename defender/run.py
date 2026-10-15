@@ -21,6 +21,7 @@ takes precedence over the ambient value.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import sys
 from pathlib import Path
@@ -240,7 +241,7 @@ class _Investigate(Protocol):
     """
 
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
-        self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
+        self, *, alert_path: Path, run: Run, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
         source: Run | None = None,
@@ -257,8 +258,7 @@ def _run_the_driver(**kwargs: Any) -> dict[str, Any]:
 def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identity plus its seams
     *,
     alert_path: Path,
-    run_dir: Path,
-    run_id: str,
+    run: Run,
     defender_dir: Path,
     model_name: str,
     model_override: str | None,
@@ -322,8 +322,8 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             tenant=tenant, grant_home=tenant.table_pointer,
             # The source run's pre-branch calls, by pre-flight's own rule (M01=A): a re-ask
             # still takes its oracle turn (S1), and is served unchanged or not at all.
-            prebranch=prebranch_calls(source.run_dir, family.branch_message_id),
-            source_run_dir=source.run_dir,
+            prebranch=prebranch_calls(source, family.branch_message_id),
+            source_run=source,
         )
         resume = branch_mod.BranchSpec(
             source_run_dir=source.run_dir,
@@ -333,16 +333,16 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
         )
         try:
             return investigate(
-                alert_path=alert_path, run_dir=run_dir, run_id=run_id,
+                alert_path=alert_path, run=run,
                 defender_dir=defender_dir, model_name=model_name,
                 model_override=model_override, box=box, verbs=verbs, roster=roster,
-                resume=resume, tenant=tenant,
+                resume=resume, tenant=tenant, source_run=source,
             )
         finally:
             verbs.close()
     verbs = registry_cls(roster, tenant.grants.gather, grant_home=tenant.table_pointer)
     return investigate(
-        alert_path=alert_path, run_dir=run_dir, run_id=run_id, defender_dir=defender_dir,
+        alert_path=alert_path, run=run, defender_dir=defender_dir,
         model_name=model_name, model_override=model_override, box=box, verbs=verbs,
         roster=roster, tenant=tenant,
     )
@@ -350,7 +350,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
 
 def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs plus its four injection seams
     *,
-    run_dir: Path,
+    run: Run,
     model: str,
     #: The operator's raw `--model`, kept separate from the resolved `model` so roles with
     #: their own default still see `None` when no override was given.
@@ -370,18 +370,27 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
-    scrub: Callable[[Path], None] = box_mod.scrub,
+    scrub: Callable[..., None] = box_mod.scrub,
 ) -> dict[str, Any]:
     """Start the box, run the investigation inside it, and reap both on every exit
     (`box_mod.stop_and_scrub` owns the stop/scrub ordering and rules).
     """
-    box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id)
+    run_dir = run.run_dir
+    verdict = run.facts.scrub_verdict
+
+    def write_verdict(doc: dict) -> None:
+        verdict.write(json.dumps(doc))
+
+    def scrub_tree(tree: Path) -> None:
+        scrub(tree, write_verdict=write_verdict)
+
+    box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id,
+                    write_verdict=write_verdict)
     investigation_ok = False
     try:
         summary = investigate(
             alert_path=RunPaths(run_dir).alert,
-            run_dir=run_dir,
-            run_id=run_dir.name,
+            run=run,
             defender_dir=defender_dir,
             model_name=model,
             model_override=model_override,
@@ -395,7 +404,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
         investigation_ok = True
     finally:
         box_mod.stop_and_scrub(
-            box, run_dir, stop_box=stop_box, scrub_tree=scrub,
+            box, run_dir, stop_box=stop_box, scrub_tree=scrub_tree,
+            read_verdict=verdict.read, write_verdict=write_verdict,
             in_flight=not investigation_ok,
         )
     return summary
@@ -698,7 +708,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         with _log.run_context(run_dir.name, tenant.tenant_id, logger=_logger):
             if ns.update_ticket:
                 ticket_writer.open_case_ticket(
-                    run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
+                    run, tenant=tenant, defender_dir=DEFENDER_DIR,
                     env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent))
 
             _logger.info(f"run_dir={run_dir} model={model}")
@@ -706,7 +716,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
 
             try:
                 summary = lifecycle(
-                    run_dir=run_dir,
+                    run=run,
                     model=model,
                     model_override=ns.model,
                     defender_dir=DEFENDER_DIR,
@@ -749,7 +759,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
             if ns.update_ticket:
                 # Both inputs come from the driver's summary, not from a possibly stale sidecar.
                 ticket_writer.record_case_ticket(
-                    run_dir, tenant=tenant, defender_dir=DEFENDER_DIR,
+                    run, tenant=tenant, defender_dir=DEFENDER_DIR,
                     env=_run.run_env(DEFENDER_DIR, run_dir, tenant_agent=tenant.agent), truncated_by=summary.get("truncated_by"),
                     closed_before_cut=summary.get("closed_before_cut") is True)
 

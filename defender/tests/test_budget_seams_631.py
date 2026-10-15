@@ -14,6 +14,9 @@ precedent), `DEFENDER_BUDGET_ENFORCE` does not exist, and CI's unit-test step ha
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_fixture_run_1165
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
 import ast
 import inspect
 import json
@@ -215,7 +218,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
     import asyncio
     from dataclasses import replace
 
-    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run_state=state)
+    deps = replace(_with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_fixture_run_1165(run_dir)), run_state=state)
     with pytest.raises(BudgetKill):
         asyncio.run(runtime_tools._run_gather(
             deps, killing_factory, 40,
@@ -246,8 +249,8 @@ def _drive_gather_query(run_dir: Path, registry, state):
         make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
         verbs=registry, limits=DEFAULT_LIMITS,
     )
-    deps = replace(bind(gather_def, run_dir,
-                        defender_dir=DEFENDER), lead_id="l-001",
+    deps = replace(_with_fixture_run_1165(bind(gather_def, run_dir,
+                        defender_dir=DEFENDER), run=_fixture_run_1165(run_dir)), lead_id="l-001",
                    tenant=T1106.fixture_run_tenant(), run_state=state)
 
     async def _go():

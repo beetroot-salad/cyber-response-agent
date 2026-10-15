@@ -13,6 +13,8 @@ it could not fail; the boundary check before store setup is `test_1235_adversary
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import contextlib
 import json
 import sys
@@ -142,18 +144,18 @@ def _assert_refused_everywhere(run_dir: Path, link: dict, old: Path) -> None:
     try:
         for read in (session_store.resolve_store_path, session_store.resolve_session_id):
             with pytest.raises(session_store.LegacyRunLink) as err:
-                read(run_dir)
+                read(_run_handle_1165(run_dir))
             says_rerun(err.value)
         for open_store in (branch.open_source_store, branch.source_store_if_any):
             with pytest.raises(branch.BranchError) as err:
-                open_store(run_dir)
+                open_store(run_dir, source_run=_run_handle_1165(run_dir))
             says_rerun(err.value)
         with pytest.raises(session_store.LegacyRunLink) as err:
-            branch.session_for_run(store, run_dir)
+            branch.session_for_run(store, run_dir, source_run=_run_handle_1165(run_dir))
         says_rerun(err.value)
 
         old.unlink()
-        assert branch.source_store_if_any(run_dir) is None, "control: no old file is no session"
+        assert branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir)) is None, "control: no old file is no session"
     finally:
         store.connection.close()
 

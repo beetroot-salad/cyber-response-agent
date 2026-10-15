@@ -24,6 +24,8 @@ is proved by a PLANTED table that violates it beside a positive control that doe
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _writer_run_1165
+
 from pathlib import Path
 
 import pytest
@@ -273,7 +275,7 @@ def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
     outcome = asyncio.run(run_correlation(
         run_state=RunState(tmp_path, "r"), defender_dir=tmp_path, verbs=None, limits={},
         make_model=None, logger=None, box=None, store=None,
-        catalog=None, dispatch=withheld, tenant=None, deadline=1.0))
+        catalog=None, dispatch=withheld, tenant=None, deadline=1.0, run=_writer_run_1165(tmp_path)))
 
     assert outcome.ending == ENDING_WITHHELD, outcome
     assert outcome.summary is None, outcome

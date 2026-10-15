@@ -33,6 +33,11 @@ RED until the round-2 implementation lands: `defender.runtime.run_state` does no
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
+from defender.tests._spec1077 import fixture_run
+
 import threading
 import time
 from datetime import UTC, datetime
@@ -63,7 +68,7 @@ def _run_dir(root: Path, name: str = "run") -> Path:
 def _append(state: RunState, *, params: dict, lead: str = LEAD) -> dict:
     """One executed row through the production writer."""
     return rq.append_query_row(
-        state, lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
+        state, run=fixture_run(state.run_dir), lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
         params=params, raw_command="elastic query", payload_text=_PAYLOAD, exit_code=0,
         payload_status="ok", payload_digest=rq.payload_digest(_PAYLOAD, "", 0), system_key="")
 
@@ -241,7 +246,7 @@ def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path)
     real = _run_dir(tmp_path / "real")
     (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
     carried = RunState(tmp_path / "link" / "run", "r-carried")
-    deps = replace(bind(_tenants1106.fixture_gather_def(), real, defender_dir=DEFENDER),
+    deps = replace(_with_live_run_1165(bind(_tenants1106.fixture_gather_def(), real, defender_dir=DEFENDER), run=_live_run_1165(real)),
                    lead_id=LEAD, run_state=carried)
 
     asyncio.run(QueryCapture(registry=None)._record(

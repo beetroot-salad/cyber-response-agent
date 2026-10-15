@@ -136,7 +136,7 @@ def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_r
         assert not _under(path, checkout_knowledge), (
             f"the run's tenant {label} {path} lies under the checkout's {checkout_knowledge}")
 
-    run_dir = R.materialize(tmp_path / "replay", R.GOLDEN_AB3)
+    run_dir = R.materialize(tmp_path / "replay", R.GOLDEN_AB3, run_id='o1-1120-data-root')
     main = R.ReplayFn([_dispatch("change-mgmt"), R.Turn(text="Investigation complete.")])
     gather = R.ReplayFn([
         R.Turn(tool_calls=[("list_verbs", {"system": "change-mgmt"})]),
@@ -173,7 +173,7 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
         rec.record("get-host", ctx, {"host": host})
         return {"host": host}
 
-    run_dir = R.materialize(tmp_path / "replay", R.GOLDEN_AB3)
+    run_dir = R.materialize(tmp_path / "replay", R.GOLDEN_AB3, run_id='h2-1120-fixture')
     main = R.ReplayFn([_dispatch("cmdb"), R.Turn(text="Investigation complete.")])
     gather = R.ReplayFn([
         R.Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",

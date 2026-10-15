@@ -36,6 +36,8 @@ the handle the comparison run is driven through does not exist either.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _writer_run_1165
+
 import json
 from pathlib import Path
 
@@ -58,7 +60,7 @@ pytestmark = pytest.mark.e2e
 
 def _replay(tmp_path: Path, run_id: str = "tree-1077") -> Path:
     """One whole replayed fixture run, driven through the real driver, ended normally."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     replay = ReplayFn([
         Turn(tool_calls=[("append_block", {"text": (GOLDEN / "investigation.md").read_text()})]),
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
@@ -353,7 +355,7 @@ def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_pa
     for lead in ("l-aaa111", "l-bbb222"):
         for seq in (0, 1):
             claim("record_query", run_dir / record_query.persist_payload(
-                run_dir, lead, seq, "{}"))
+                _writer_run_1165(run_dir), lead, seq, "{}"))
         claim("Run(leads)", owner.lead_claim(lead))
     for turn in (0, 1, 2):
         claim("challenge_gate", owner.review_record(turn))

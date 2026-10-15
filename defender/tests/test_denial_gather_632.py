@@ -160,7 +160,7 @@ def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path
         ])
 
     rec = VerbRecorder()
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='d0-broken-table')
     main = _main()
     gather = BreakingReplay([q(*DENIED_PAIR), DONE], run_dir)
     summary = drive(run_dir, run_id="d0-broken-table", main=main, gather=gather,
@@ -176,7 +176,7 @@ def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path
     assert [row["query_id"] for row in summary["run_state"].lead_rows(LEAD)] == \
         [DENIED_QUERY_ID], "the denied call is not on the run's state: its view write failed"
 
-    control_dir = materialize(tmp_path / "unbroken", GOLDEN_AB3)
+    control_dir = materialize(tmp_path / "unbroken", GOLDEN_AB3, run_id='d0-unbroken-table')
     control = drive(control_dir, run_id="d0-unbroken-table", main=_main(),
                     gather=ReplayFn([q(*DENIED_PAIR), DONE]), verbs=_registry(VerbRecorder()))
     assert [row["query_id"] for row in control["run_state"].lead_rows(LEAD)] == \

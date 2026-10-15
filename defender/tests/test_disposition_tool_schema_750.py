@@ -26,6 +26,9 @@ entry point's own injection seams (`register_close_tool(stages=…, bounds=…)`
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_fixture_run_1165
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
 from pathlib import Path
 
 import pytest
@@ -72,7 +75,7 @@ def _deps(tmp_path: Path):
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
+    return _with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_fixture_run_1165(run_dir)), run_dir
 
 
 def _stages():

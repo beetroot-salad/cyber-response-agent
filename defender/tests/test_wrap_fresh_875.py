@@ -47,6 +47,9 @@ re-read are all production code.
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 import ast
 import asyncio
 import dataclasses
@@ -125,7 +128,7 @@ def _main_deps(tmp_path: Path):
 
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    return run_dir, replace(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER),
+    return run_dir, replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_live_run_1165(run_dir)),
                             run_state=RunState(run_dir, "r-875"))
 
 

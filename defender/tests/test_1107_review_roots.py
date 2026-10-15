@@ -13,6 +13,8 @@ Each test fails on 755177b6 (the PR head these fixes land on).
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
 import json
 import os
 from pathlib import Path
@@ -200,7 +202,7 @@ def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_pat
     (run_dir / "ticket_write.json" / "x").write_text(json.dumps(
         {"key": "SOC-FORGED", "status": "commented", "url": None, "ok": True, "reason": None}),
         encoding="utf-8")
-    ticket_writer._write_receipt(run_dir, None, "SOC-1", ticket_writer.RECEIPT_ERROR, "REASON-1")
+    ticket_writer._write_receipt(_fixture_run_1165(run_dir), None, "SOC-1", ticket_writer.RECEIPT_ERROR, "REASON-1")
     assert S.receipt(run_dir) == {"key": "SOC-1", "status": ticket_writer.RECEIPT_ERROR,
                                   "url": None, "ok": False, "reason": "REASON-1"}
     line = visualize_run.render_ticket_line(run_dir)

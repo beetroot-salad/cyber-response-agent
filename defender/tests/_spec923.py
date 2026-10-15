@@ -311,9 +311,11 @@ def _with_run_state(deps: Any) -> Any:
     hooks raise on deps that carry none (#1235 round 3)."""
     from dataclasses import replace
 
+    from defender.run_repository import Run
     from defender.runtime.run_state import RunState
 
-    return replace(deps, run_state=RunState(deps.run_dir, "r-923"))
+    return replace(deps, run=Run.under(deps.run_dir.parent, deps.run_dir.name),
+                   run_state=RunState(deps.run_dir, "r-923"))
 
 
 def main_deps(tmp_path: Path, companion: str | None = None) -> tuple[Any, Path]:

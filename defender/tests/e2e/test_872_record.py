@@ -62,7 +62,7 @@ def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = N
     """One driven run in which a foreign result IS substituted — the shared setup for every
     demand in this module, and the positive control each of the negatives needs. `summaries`
     receives what `drive()` returned, whose `run_state` is the run's own state (#1235)."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     calls = [Turn(tool_calls=[("fetch_rows", {})]) for _ in range(turns)]
     if gather:
         calls.insert(0, Turn(tool_calls=[("gather", {
@@ -519,7 +519,7 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
         "the gated run did not substitute, so the two runs are the same run"
     )
 
-    idle_dir = materialize(tmp_path / "idle", GOLDEN_AB3)
+    idle_dir = materialize(tmp_path / "idle", GOLDEN_AB3, run_id=RUN_ID)
     rec = VerbRecorder()
     idle_main = PartRecorder([
         Turn(tool_calls=[("gather", {
@@ -587,7 +587,7 @@ def test_the_rendered_runtime_page_shows_the_original_json_of_a_substituted_call
         "the rendered page shows the TOON view and not the original JSON the gate replaced"
     )
 
-    plain_dir = materialize(tmp_path / "plain", GOLDEN_AB3)
+    plain_dir = materialize(tmp_path / "plain", GOLDEN_AB3, run_id=RUN_ID)
     rec = VerbRecorder()
     drive(plain_dir, run_id=RUN_ID,
           main=PartRecorder([Turn(tool_calls=[("gather", {

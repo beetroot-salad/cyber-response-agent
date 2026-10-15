@@ -50,6 +50,8 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import contextlib
 import hashlib
 import io
@@ -608,13 +610,13 @@ class RunRecorder:
         _plant_with_record(run_dir, Path(alert).read_bytes(), mapping={
             "signature": "rule.id", "event_time": "timestamp", "summary": "rule.description"})
         seed_session_store(run_dir)
-        return mod("run_repository._handle").Run.at(run_dir)
+        return _run_handle_1165(run_dir)
 
     def lifecycle(self, **kw: Any) -> dict[str, Any]:
         self.order.append("lifecycle")
         self.lifecycle_calls.append(kw)
         if self.before_lifecycle is not None:
-            self.before_lifecycle(kw["run_dir"])
+            self.before_lifecycle(kw["run"].run_dir)
         return dict(self.summary)
 
     def visualize(self, *args: Any, **kw: Any) -> None:
@@ -639,7 +641,7 @@ def seed_session_store(run_dir: Path) -> None:
     ss = mod("runtime.session_store")
     store = ss.open_store(case_id=f"c1107-{uuid.uuid4().hex[:12]}", sessions=SessionPaths(Path(run_dir).parent))
     try:
-        ss.write_case_pointer(Path(run_dir), case_id=store.case_id, store_path=store.path)
+        ss.write_case_pointer(_run_handle_1165(Path(run_dir)), case_id=store.case_id, store_path=store.path)
     finally:
         store.close()
 
@@ -666,14 +668,14 @@ def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
     """`record_case_ticket` as run.py calls it after #1107: the record, the defender dir and the
     run env handed in (coined keywords `tenant=`, `defender_dir=`, `env=`; F6, human)."""
     return ticket_writer().record_case_ticket(
-        Path(run_dir), tenant=record, defender_dir=defender_dir, env=dict(env), **kw)
+        _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=defender_dir, env=dict(env), **kw)
 
 
 def open_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
               defender_dir: Path = DEFENDER, **kw: Any) -> Any:
     """`open_case_ticket`, same coined keywords as `record_step`."""
     return ticket_writer().open_case_ticket(
-        Path(run_dir), tenant=record, defender_dir=defender_dir, env=dict(env), **kw)
+        _run_handle_1165(Path(run_dir)), tenant=record, defender_dir=defender_dir, env=dict(env), **kw)
 
 
 def receipt_path(run_dir: Path) -> Path:
@@ -705,7 +707,7 @@ def render_page(run_dir: Path, *, update_ticket: bool) -> str:
     """Render the page the way run.py does after teardown — `run_common.visualize`, the default
     `visualize` seam — handing it run.py's own `--update-ticket` flag as an ARGUMENT (PG-2a,
     coined keyword `update_ticket=`), and return the page's HTML."""
-    mod("run_common").visualize(mod("run_repository._handle").Run.at(Path(run_dir)), update_ticket=update_ticket)
+    mod("run_common").visualize(_run_handle_1165(Path(run_dir)), update_ticket=update_ticket)
     return page_html(run_dir)
 
 

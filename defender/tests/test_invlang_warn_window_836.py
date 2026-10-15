@@ -150,6 +150,8 @@ def test_agentdeps_gains_no_window_field(tmp_path):
         # #1235 round 2: the run's one live state (budget and its clock origin — the retired
         # `budget_started_monotonic` — breaker, queries) — not a window either.
         "run_state",
+        # #1165: repository handle, not stored window state.
+        "run",
     }
 
 

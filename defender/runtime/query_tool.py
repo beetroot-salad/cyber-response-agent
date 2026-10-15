@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -20,6 +19,7 @@ from pydantic_ai.exceptions import (
     ToolRetryError,
 )
 
+from defender.runtime.tools._deps import run_of
 from defender._knowledge import CHECKOUT_KNOWLEDGE
 from defender.hooks.budget_enforcer import BudgetKill
 from defender._text import as_str
@@ -411,7 +411,7 @@ class QueryCapture(AbstractCapability[Any]):
             refusal = decision.refusal or f"denied: {system}.{verb}"
             # Audit record first, above the door: a stopped lead does not get a quieter audit
             # trail, and a failed row write below has already left it behind.
-            self._denial_logger_for(deps.run_dir).log_policy_denial(
+            self._denial_logger_for(run_of(deps)).log_policy_denial(
                 role=self._role, system=system, verb=verb,
                 call_id=f"{system}.{verb}", params=params,
             )
@@ -619,6 +619,7 @@ class QueryCapture(AbstractCapability[Any]):
         try:
             row = append_query_row(
                 state,
+                run=run_of(deps),
                 lead_id=lead_id,
                 system=system,
                 verb=verb,
@@ -666,7 +667,6 @@ class QueryCapture(AbstractCapability[Any]):
         if repeat is not None:
             view = f"{repeat}\n{view}"
         return _format_bash_result(0, wrap_fresh(view, "untrusted"), "", note)
-
 
 
 #: What a param renders as when its annotation could not be resolved. `_resolved_hints` then
@@ -955,7 +955,6 @@ def register_query_tool(agent, registry) -> None:
             raise
         finally:
             CALL_DELIVERY.reset(token)
-
 
 
 def _raw_args(args: Any) -> dict:

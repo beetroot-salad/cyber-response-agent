@@ -271,7 +271,7 @@ def _run(
     starts — rows no host recorded for this run, which since #1235 round 2 no run reads into
     its state. Rows a run DOES start with are a branch sibling's inherited prefix
     (`_run_inherited`)."""
-    run_dir = materialize(root, GOLDEN_AB3)
+    run_dir = materialize(root, GOLDEN_AB3, run_id=run_id)
     if planted:
         _seed(run_dir, planted)
     main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
@@ -328,7 +328,7 @@ def _run_two_leads(
     """Two leads dispatched SERIALLY (one gather tool call per main turn), so one shared
     gather replay script serves them in order: the first lead consumes turns until it stops,
     the second picks up at the next turn."""
-    run_dir = materialize(root, GOLDEN_AB3)
+    run_dir = materialize(root, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[_dispatch(*first)]),
         Turn(tool_calls=[_dispatch(*second)]),

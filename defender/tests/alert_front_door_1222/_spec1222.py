@@ -1567,11 +1567,11 @@ class NoTicket:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Path]] = []
 
-    def open_case_ticket(self, run_dir: Path, **_kw: Any) -> None:
-        self.calls.append(("open", Path(run_dir)))
+    def open_case_ticket(self, run: Any, **_kw: Any) -> None:
+        self.calls.append(("open", run.run_dir))
 
-    def record_case_ticket(self, run_dir: Path, **_kw: Any) -> None:
-        self.calls.append(("record", Path(run_dir)))
+    def record_case_ticket(self, run: Any, **_kw: Any) -> None:
+        self.calls.append(("record", run.run_dir))
 
 
 # =================================================================================================
@@ -1707,7 +1707,8 @@ class _ReplayLifecycle:
         self.defender_dir = defender_dir
         self.orient_shim = orient_shim
 
-    def __call__(self, *, run_dir: Path, tenant: Any, **kw: Any) -> dict:
+    def __call__(self, *, run: Any, tenant: Any, **kw: Any) -> dict:
+        run_dir = run.run_dir
         self.d.run_dir = Path(run_dir)
         self.d.lifecycle_calls.append({"run_dir": Path(run_dir), "tenant": tenant, **kw})
         summary = drive_run(
@@ -1812,8 +1813,8 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
 
         def lifecycle_with_before(**kw: Any) -> dict:
             # The folder is the run's from here on, even if `before` raises (an interrupted run).
-            d.run_dir = Path(kw["run_dir"])
-            before(Path(kw["run_dir"]))
+            d.run_dir = Path(kw["run"].run_dir)
+            before(Path(kw["run"].run_dir))
             d.run_state = getattr(before, "run_state", None)
             return inner(**kw)
 

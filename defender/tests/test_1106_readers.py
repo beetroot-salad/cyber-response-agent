@@ -20,6 +20,8 @@ from is not where its settings are, which is the whole of D2.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 from pathlib import Path
 
 import pytest
@@ -151,7 +153,7 @@ def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
         return "201", "{}"
 
     writer.open_case_ticket(
-        run_dir, deps=writer.TicketWriterDeps(request=request), tenant=_record(injected),
+        _run_handle_1165(run_dir), deps=writer.TicketWriterDeps(request=request), tenant=_record(injected),
         defender_dir=T.DEFENDER, env={})
     assert len(sent) == 1, sent
     config, method, path, body, ctx = sent[0]

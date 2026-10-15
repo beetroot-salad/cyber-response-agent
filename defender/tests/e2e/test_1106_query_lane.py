@@ -54,7 +54,7 @@ def _tenant(tmp_path: Path, table: str, marker: str):
 
 def _run(tmp_path: Path, *, tenant, verbs, system: str, gather_turns: list[Turn],
          run_id: str) -> tuple[Path, ReplayFn]:
-    run_dir = materialize(tmp_path / run_id, GOLDEN_AB3)
+    run_dir = materialize(tmp_path / run_id, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": system, "goal": f"measure the {system} lead",

@@ -26,10 +26,12 @@ import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import field
-from defender._model import model
 from typing import Any
 
 from defender._env import env_int
+from defender._model import model
+from defender.run_repository import Run
+from defender.runtime.tools._deps import run_of
 from defender._untrusted import wrap_fresh
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION
 from defender.skills.invlang.schema import CompanionBody
@@ -123,16 +125,11 @@ class ReviewState:
         return box["state"]
 
 
-# The review record: beside the run, temp-plus-rename, keyed by turn. The path is owned by
-# `RunPaths.review_record`.
+# The review record is replaced atomically through its owned record, keyed by turn.
 
 
-def write_review_record(run_dir, turn: int, record: dict) -> None:
-    from defender._io import write_guarded
-    from defender.run_repository import RunPaths
-
-    write_guarded(
-        RunPaths(run_dir).review_record(turn), json.dumps(record, indent=2), mode="replace")
+def write_review_record(run: Run, turn: int, record: dict) -> None:
+    run.observability.review_record(turn).write(json.dumps(record, indent=2))
 
 
 # Stage invocation: real wall-clock bound, distinguishable timeout/error.
@@ -192,16 +189,13 @@ def _is_row_shaped(raw_reply: str) -> bool:
 
 
 def _write_trace_row(
-    run_dir, role: str, round_no: int, row: dict, *, raw_reply: str | None = None,
+    run: Run, role: str, round_no: int, row: dict, *, raw_reply: str | None = None,
 ) -> None:
     """Append one trace row, optionally followed by the stage's raw wrapped reply.
 
     The reply goes out as literal lines, so its framing is checkable in the bytes on disk
     (inside a JSON string the newlines would be escaped), unless it could be parsed as a row,
     in which case it goes inside the row's JSON instead."""
-    from pathlib import Path
-
-    from defender._io import guarded_mkdir, write_guarded
 
     payload = {"round": round_no, **row}
     inline = raw_reply is not None and _is_row_shaped(raw_reply)
@@ -210,13 +204,8 @@ def _write_trace_row(
     line = json.dumps(payload) + "\n"
     if raw_reply is not None and not inline:
         line += raw_reply if raw_reply.endswith("\n") else raw_reply + "\n"
-    # One guarded append so the row and its reply land together. The directory is created
-    # here (the `RunPaths` resolver stays pure), guarded from the run dir: the box's rw bind.
-    from defender.run_repository import RunPaths
-
-    path = RunPaths(Path(run_dir)).review_trace(role)
-    guarded_mkdir(path.parent, base=Path(run_dir))
-    write_guarded(path, line, mode="append")
+    # One guarded append keeps the row and its reply together.
+    run.observability.review_trace(role).append_text(line)
 
 
 def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
@@ -227,7 +216,7 @@ def _mark_traces_incomplete(deps: Any, round_no: int, reason: str) -> None:
     `finding`/`target`, a provider error message)."""
     for role in REVIEW_ROLES:
         _write_trace_row(
-            deps.run_dir, role, round_no,
+            run_of(deps), role, round_no,
             {"incomplete": True, "reason": wrap_fresh(reason, "untrusted")},
         )
 
@@ -415,7 +404,7 @@ async def challenge_gate(
     else:
         # No `ok` key: readers take `ok` as "this stage answered", and it was never dispatched.
         _write_trace_row(
-            deps.run_dir, "ablation", round_no,
+            run_of(deps), "ablation", round_no,
             {"skipped": "no strong belief movement cites an edge to withhold"},
         )
     outcomes = await asyncio.gather(*(
@@ -425,7 +414,7 @@ async def challenge_gate(
     # Record every lens's reply before judging any, so a fault doesn't drop the others'.
     for lens, outcome in zip(lenses, outcomes, strict=True):
         _write_trace_row(
-            deps.run_dir, lens, round_no, {"ok": outcome.ok},
+            run_of(deps), lens, round_no, {"ok": outcome.ok},
             raw_reply=wrap_fresh(outcome.text or outcome.detail or "", "untrusted"),
         )
 
@@ -448,7 +437,7 @@ async def challenge_gate(
         bounds,
     )
     _write_trace_row(
-        deps.run_dir, "composer", round_no, {"ok": composer.ok},
+        run_of(deps), "composer", round_no, {"ok": composer.ok},
         raw_reply=wrap_fresh(composer.text or composer.detail or "", "untrusted"),
     )
     if not composer.ok:

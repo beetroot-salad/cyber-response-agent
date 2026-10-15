@@ -31,6 +31,8 @@ Round 1 made these green; round 2 keeps every claim and moves only how the state
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 import shutil
 from pathlib import Path
@@ -266,7 +268,7 @@ def _finished_run(root: Path, run_id: str) -> Path:
     """A real, finished run with its own case store: one text turn through the real driver and
     the default store factory. Each root is its own container (`<root>/run`), and every root
     under the test's `tmp_path` shares one sessions directory beside them."""
-    run_dir = materialize(root, GOLDEN)
+    run_dir = materialize(root, GOLDEN, run_id=run_id)
     drive(run_dir, run_id=run_id, main=ReplayFn([Turn(text="Investigation complete.")]))
     return run_dir
 
@@ -313,21 +315,21 @@ def test_a_pointer_planted_inside_the_folder_is_not_the_case_link(tmp_path):
     (run_a / OLD_POINTER_NAME).write_text(json.dumps(b_link), encoding="utf-8")
 
     for open_store in (branch.open_source_store, branch.source_store_if_any):
-        handle = open_store(run_a)
+        handle = open_store(run_a, source_run=_run_handle_1165(run_a))
         try:
             assert Path(handle.path).resolve() == Path(a_link["store_path"]).resolve(), \
                 f"{open_store.__name__} followed a pointer planted inside the run folder"
         finally:
             handle.connection.close()
-    assert session_store.resolve_store_path(run_a) == Path(a_link["store_path"])
-    assert session_store.resolve_session_id(run_a) == a_link.get("session_id")
+    assert session_store.resolve_store_path(_run_handle_1165(run_a)) == Path(a_link["store_path"])
+    assert session_store.resolve_session_id(_run_handle_1165(run_a)) == a_link.get("session_id")
 
-    control = branch.open_source_store(run_b)
+    control = branch.open_source_store(run_b, source_run=_run_handle_1165(run_b))
     try:
         assert Path(control.path).resolve() == Path(b_link["store_path"]).resolve()
     finally:
         control.connection.close()
-    assert session_store.resolve_store_path(run_b) == Path(b_link["store_path"])
+    assert session_store.resolve_store_path(_run_handle_1165(run_b)) == Path(b_link["store_path"])
 
 
 def test_a_hand_copied_run_folder_carries_no_case_link(tmp_path):
@@ -342,13 +344,13 @@ def test_a_hand_copied_run_folder_carries_no_case_link(tmp_path):
     copy = tmp_path / "elsewhere" / "run"
     shutil.copytree(run_dir, copy)
 
-    assert branch.source_store_if_any(copy) is None, \
+    assert branch.source_store_if_any(copy, source_run=_run_handle_1165(copy)) is None, \
         "a hand-copied folder opened a store through a link carried inside it"
 
     (copy / OLD_POINTER_NAME).write_text(json.dumps(_pointer(run_dir)), encoding="utf-8")
     with pytest.raises(branch.BranchError):
-        branch.source_store_if_any(copy)
+        branch.source_store_if_any(copy, source_run=_run_handle_1165(copy))
 
-    handle = branch.source_store_if_any(run_dir)
+    handle = branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir))
     assert handle is not None, "the original run's sidecar opened no store"
     handle.connection.close()

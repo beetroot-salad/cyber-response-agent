@@ -222,7 +222,25 @@ MEMBER_VERB: dict[str, str | None] = {
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
     "session_db": "open",
 }
-VERBS = ("write", "append", "update", "open")
+# #1165 keeps MEMBER_VERB as compatibility metadata. These are the operations a record
+# actually supports; encoded telemetry uses append_text without JSON re-encoding.
+MEMBER_CAPABILITIES: dict[str, frozenset[str]] = {
+    name: frozenset({verb}) if verb is not None else frozenset()
+    for name, verb in MEMBER_VERB.items()
+}
+MEMBER_CAPABILITIES.update({
+    "payloads": frozenset({"write", "ensure_parent"}),
+    "gather_summaries": frozenset({"write", "ensure_parent"}),
+    "alert_record": frozenset({"write", "replace"}),
+    "queries": frozenset({"append", "seed"}),
+    "policy_denials": frozenset({"append_text", "start_stream"}),
+    "investigation": frozenset({"write", "seed"}),
+    "wire_log": frozenset({"append_text", "start_stream"}),
+    "review_trace": frozenset({"append_text"}),
+    "ticket_write": frozenset({"write", "delete"}),
+})
+VERBS = ("write", "append", "update", "open", "append_text", "start_stream", "create", "seed", "delete", "replace", "ensure_parent")
+READ_OPERATIONS = ("read", "read_result", "read_bytes", "read_rows")
 
 #: The `observability` members that are LOCKED JSON STATES rather than logs: their writer
 #: method reaches `_io.locked_for_rewrite` (a read-modify-write under `flock`), never a blind
@@ -453,6 +471,12 @@ def member_args(name: str, *, runs_base: Path | None = None) -> tuple[Any, ...]:
         "forward_check_trace": (PREFIX, STEM, CHECK_INDEX), "session_db": (LINEAGE_ID,),
     }
     return table.get(name, ())
+
+
+def fixture_run(directory: Path) -> Any:
+    """A fixture's real Run, including its sidecar root, built without reading the tree."""
+    directory = Path(directory)
+    return Run().under(directory.parent, directory.name)
 
 
 def make_runs_base(tmp_path: Path, name: str = "runs") -> Path:

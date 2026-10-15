@@ -766,7 +766,7 @@ class Recorder:
 
     def __call__(self, **kw: Any) -> dict[str, Any]:
         self.calls.append(kw)
-        (kw["run_dir"] / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
+        (kw["run"].run_dir / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
 

@@ -187,7 +187,7 @@ def run_gather(
     `turns` (the query calls under test) against the INJECTED verb registry. Everything
     between the two fakes — dispatch, the query tool, its validator, the capture capability,
     the circuit breaker, the two tables — is production code."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": system, "goal": "measure this lead",
@@ -313,7 +313,7 @@ def test_query_return_wrap_positive_control(tmp_path):
         turns.append(Turn(tool_calls=[("bash", {"command": "PLACEHOLDER"})]))
     turns.append(DONE)
 
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='q611-ctl')
     payload_abs = run_dir / "gather_raw" / LEAD / "0.json"
     if sql_turn_idx is not None:
         turns[sql_turn_idx] = Turn(tool_calls=[("bash", {
@@ -809,7 +809,7 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
     method otherwise fires for EVERY tool (the tools=[…] filter exists only on the Hooks
     decorator API)."""
     rec = VerbRecorder()
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='q611-other')
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": "elastic", "goal": "g", "what_to_summarize": ["e"]})]),
@@ -1364,7 +1364,7 @@ def test_gather_bash_runs_a_declared_defender_sql_over_the_esql_payload_it_captu
         rec.record("esql", ctx, {"native_query": native_query})
         return esql_payload(native_query, _ESQL_RAW)
 
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='q1138')
     payload_abs = run_dir / "gather_raw" / LEAD / "0.json"
     command = (f"cat {payload_abs} | defender-sql --rows values --names columns "
                "'SELECT count(*) AS n, sum(failed) AS s FROM data'")

@@ -45,8 +45,8 @@ from defender.tests._spec767 import (
 
 #: Run ids in the shapes the product mints: a live run's `{UTC stamp}-{alert slug}`, and the
 #: longest one, a branch run's `{source run}-n{N}-{label}` (runtime/branch/_family.py).
-RUN_ID = "20261008T091500Z-5710-sshd-invalid-user"
-BRANCH_RUN_ID = "20261008T091500Z-5710-sshd-invalid-user-n12-world-b-no-cmdb-owner"
+RUN_ID = "20261008t091500z-5710-sshd-invalid-user"
+BRANCH_RUN_ID = "20261008t091500z-5710-sshd-invalid-user-n12-world-b-no-cmdb-owner"
 
 NARRATIVE = "The account is a decommissioned service identity; no egress followed."
 

@@ -68,4 +68,9 @@ def _main_deps(tmp_path: Path):
     run.mkdir()
     dfn = tmp_path / "defender"
     dfn.mkdir()
-    return bind(MAIN_DEF, run, defender_dir=dfn), run, dfn
+    from dataclasses import replace
+
+    from defender.run_repository import Run
+
+    return replace(bind(MAIN_DEF, run, defender_dir=dfn),
+                   run=Run.under(run.parent, run.name)), run, dfn

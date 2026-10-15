@@ -185,7 +185,7 @@ def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
     every correct implementation, so equality is asserted nowhere here; the join and the
     two recorded digests are the contract."""
     ss = store_mod()
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='join')
     opened: list = []
     replay = ReplayFn([
         Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),

@@ -21,7 +21,7 @@ from pydantic_ai.messages import (
 from defender._clock import now_iso
 from defender._env import env_int
 from defender._io import JSON_NESTING_LIMIT, guarded_mkdir, json_safe, open_guarded, write_guarded
-from defender.run_repository import RUN_LAYOUT, RunPaths
+from defender.run_repository import Run, RUN_LAYOUT, RunPaths
 from defender.runtime._wire import wire_digest
 
 from defender._pricing import billed_usage as _usage_dict, usage_cost
@@ -96,11 +96,34 @@ class RequestLogger:
             _EVER_LOGGER_PATHS.add(key)
         self._key = key
         self._fh = fh
+        self._record = None
+        self._closed = False
         self._cap = _max_chars()
         self.messages: list[dict] = []
         self._seq: dict[str, int] = {}
         self.n_requests = 0
         self._denial_seq = 0
+
+    @classmethod
+    def from_record(cls, record: Any) -> RequestLogger:
+        path = record.path
+        key = str(Path(path).resolve())
+        if key in _ACTIVE_PATHS:
+            raise FileExistsError(f"a RequestLogger has already opened {path}")
+        if key in _EVER_LOGGER_PATHS:
+            record.append_text("")
+        else:
+            record.start_stream("")
+        logger = cls.__new__(cls)
+        logger.path, logger._key = path, key
+        logger._record, logger._fh, logger._closed = record, None, False
+        logger._cap = _max_chars()
+        logger.messages = []
+        logger._seq = {}
+        logger.n_requests = logger._denial_seq = 0
+        _ACTIVE_PATHS.add(key)
+        _EVER_LOGGER_PATHS.add(key)
+        return logger
 
     def _emit(
         self, agent_id: str, kind: str, message: dict, cap: int, *, cut: bool = False,
@@ -131,8 +154,14 @@ class RequestLogger:
         `encode_wire_record` uses ensure_ascii=True because a lone UTF-16 surrogate (reachable
         from a provider response via a `\\u` escape) would otherwise raise UnicodeEncodeError
         on write and halt the run."""
-        self._fh.write(encode_wire_record(rec) + "\n")
-        self._fh.flush()
+        if self._closed:
+            raise ValueError("RequestLogger is closed")
+        text = encode_wire_record(rec) + "\n"
+        if self._record is not None:
+            self._record.append_text(text)
+        else:
+            self._fh.write(text)
+            self._fh.flush()
 
     def log(
         self, *, request_messages: list[Any], response: Any, run_step: int = 0,
@@ -193,6 +222,7 @@ class RequestLogger:
             self._write_record(rec)
 
     def close(self) -> None:
+        self._closed = True
         if self._key is not None:
             _ACTIVE_PATHS.discard(self._key)
         with contextlib.suppress(Exception):
@@ -205,7 +235,7 @@ class RequestLogger:
 _DENIAL_LOGGERS: dict[str, RequestLogger] = {}
 
 
-def _denial_logger_or_null(path: Path) -> RequestLogger:
+def _denial_logger_or_null(record: Any) -> RequestLogger:
     """Open the denial stream, degrading to a null sink if the open is refused.
 
     It opens lazily, mid-run, after the box could have planted a symlink at the name; letting
@@ -213,22 +243,23 @@ def _denial_logger_or_null(path: Path) -> RequestLogger:
     itself still takes effect; only the record is lost (logged), and the reap scan reports the
     plant."""
     try:
-        return RequestLogger(path)
+        return RequestLogger.from_record(record)
     except OSError as e:
         _logger.error(
-            f"the policy-denial log at {path} could not be opened ({e!r}); denials "
+            f"the policy-denial log at {record.path} could not be opened ({e!r}); denials "
             f"for this run will be REFUSED AS NORMAL but not recorded",
         )
         return RequestLogger(Path(os.devnull))
 
 
-def denial_logger(run_dir: Path) -> RequestLogger:
-    path = RunPaths(run_dir).policy_denials
+def denial_logger(run: Run) -> RequestLogger:
+    record = run.tables.policy_denials
+    path = record.path
     key = str(path.resolve())
     logger = _DENIAL_LOGGERS.get(key)
     if logger is None:
         # Cache the null fallback too, so a plant doesn't cause per-call re-probing and logging.
-        logger = _denial_logger_or_null(path)
+        logger = _denial_logger_or_null(record)
         _DENIAL_LOGGERS[key] = logger
     return logger
 
@@ -362,3 +393,10 @@ def write_trace(run_dir: Path, *, store: Any, session_id: str, wall_ms: float) -
         "usage": totals,
     })
     write_guarded(RunPaths(run_dir).tool_trace, "".join(json.dumps(e) + "\n" for e in events))
+
+
+# Public path-mode helpers remain available to learning and tooling callers.
+__all__ = [
+    "RequestLogger", "encode_wire_record", "denial_logger", "wire_log_path",
+    "stage_trace_path", "writer_id", "write_trace",
+]

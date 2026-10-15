@@ -92,15 +92,15 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
     # N-a: the running investigation does not migrate; its record writes are #1165.
     "running-investigation": (
         "hooks/record_lead.py",
-        "runtime/challenge_gate.py", "runtime/close_tool.py",
+        "runtime/close_tool.py",
         "runtime/driver/__init__.py", "runtime/driver/_build.py",
         "runtime/lead_zero/__init__.py", "runtime/lead_zero/_capture.py", "runtime/observe.py",
         "runtime/permission/files.py", "runtime/permission/policies/_common.py",
         "runtime/run_end.py", "runtime/scrub.py", "runtime/session_store.py",
-        "runtime/tools/_deps.py", "runtime/tools/_document.py", "runtime/tools/_files.py",
-        "runtime/tools_gather.py", "runtime/toon_gate.py", "runtime/box/_lifecycle.py",
+        "runtime/tools/_document.py", "runtime/tools/_files.py",
+        "runtime/toon_gate.py", "runtime/box/_lifecycle.py",
         "runtime/branch/__init__.py", "runtime/branch/_frontier.py", "runtime/branch/_seed.py",
-        "runtime/branch/_spec.py", "runtime/case_ticket.py",
+        "runtime/branch/_spec.py",
         "scripts/gather_tools/record_query.py", "skills/invlang/corpus.py",
         # #1105 PR 2 (row 26): `infra_env` takes `DEFENDER_RUNS_BASE` from the run folder's
         # own hand-out (`RunPaths.runs_base_export`).

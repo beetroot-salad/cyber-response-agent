@@ -32,6 +32,8 @@ decision and the write half is the one that was already true.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import ast
 import json
 
@@ -484,7 +486,7 @@ def test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_
     assert marker not in str(record["reviewed_disposition"])
 
     payload = case_ticket.case_record_to_comment(
-        case_ticket.read_case_record(run_dir, mapping=fixture_run_tenant().ticket_mapping),
+        case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=fixture_run_tenant().ticket_mapping),
         mapping=fixture_run_tenant().ticket_mapping)
     assert payload["body"].split(" — ", 1)[0] in DISPOSITION_ENUM, (
         "the outbound comment's disposition head is not a member of the closed enum"

@@ -40,9 +40,9 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 #: The later run — the one gathering — and so the key of its own case.
-SELF = "20261008T120000Z-1221-later-run"
+SELF = "20261008t120000z-1221-later-run"
 #: The earlier run whose recorded investigation is on an open case.
-PRIOR = "20261001T090000Z-1221-prior-run"
+PRIOR = "20261001t090000z-1221-prior-run"
 LEAD = "l-001"
 ENRICHMENT = "OWN-CASE-ENRICHMENT-1221: the host is a CI runner owned by build-infra"
 PRIOR_NOTES = "PRIOR-RUN-NOTES-1221: the binary is the fleet's packaged metrics shipper"
@@ -68,8 +68,8 @@ def _q(system: str, verb: str, params: dict) -> Turn:
 
 def _drive(tmp_path: Path, *, verbs: FakeVerbs, turns: list[Turn], system: str) -> tuple[
         Path, ReplayFn, _Reading]:
-    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
-    assert run_dir.name != SELF, "the fixture must distinguish the run id from the dir name"
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id=SELF)
+    assert run_dir.name == SELF, "the fixture must use the Run-derived identity"
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": system, "goal": "correlate ticket context",

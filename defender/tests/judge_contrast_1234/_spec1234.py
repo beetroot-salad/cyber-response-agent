@@ -82,6 +82,8 @@ payload demands assert on what the fake saw, never on its canned reply.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import ast
 import contextlib
 import importlib
@@ -1929,7 +1931,7 @@ class InProcessSiblings:
         label = script.label
 
         def lifecycle(**kw: Any) -> Any:
-            run_dir = Path(kw["run_dir"])
+            run_dir = Path(kw["run"].run_dir)
             self.run_dirs[label] = run_dir
             fam = kw["world"].family
             src = Path(kw["source"].run_dir)
@@ -1947,7 +1949,7 @@ class InProcessSiblings:
             self.gathers[label] = gather
             reg = S24.world_registry(Path(kw["episode"].dir), label, self.est, oracle=oracle,
                                      verifier=self.verifier, world=kw.get("world"),
-                                     prebranch=prebranch_calls(src, fam.branch_message_id))
+                                     prebranch=prebranch_calls(_run_handle_1165(src), fam.branch_message_id))
             out = harness.drive(run_dir, run_id=run_dir.name, main=main, gather=gather,
                                 verbs=reg, tenant=self.est.place(), resume=spec)
             if script.disposition is not None:

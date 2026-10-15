@@ -1694,6 +1694,16 @@ def rooted_write(
                   stage_name=stage_name, open_unnamed=open_unnamed)
 
 
+def rooted_unlink(root: Path, name: str | PurePath, *, os_: Any = os) -> None:
+    """Unlink a leaf, including a leaf symlink, without following its holding folders."""
+    _spelling, parts = _parse_name(name)
+    try:
+        with _rooted(os_, root, parts[:-1]) as dir_fd:
+            os_.unlink(parts[-1], dir_fd=dir_fd)
+    except FileNotFoundError:
+        pass
+
+
 def _check_write(text: object, mode: str, durable: bool) -> None:
     """A write's arguments, judged before any I/O: `text` is `str` or `bytes` (an iterable
     would be spent by the create lane's first attempt), `mode` one of `_ROOTED_MODES`, and

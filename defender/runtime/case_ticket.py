@@ -10,7 +10,7 @@ from defender import _alert_input
 from defender._alert_input import AlertFacts
 from defender._model import model
 from defender._report import ReportUnreadable, require_report
-from defender.run_repository import RunPaths
+from defender.run_repository import Run
 from defender.runtime.tenant_settings import pointer_to, read_regular_bytes
 
 
@@ -244,23 +244,23 @@ def alert_event_time(facts: AlertFacts) -> str | None:
     return facts.event_time
 
 
-def read_case_record(run_dir: Path, *, mapping: CaseMapping | CaseTicketError) -> CaseRecord:
+def read_case_record(run: Run, *, mapping: CaseMapping | CaseTicketError) -> CaseRecord:
     # The bridge writes to a real ticket system off this record, so an unreadable headline must
     # take the unreadable branch (`ReportNotParsable`) rather than the ordinary one. Re-raised
     # from the shared accessor's own refusal, so this classification is a CONSUMER of
     # `_report.read_report`'s verdict rather than a second, bespoke emptiness check (§7 R10).
     try:
-        report = require_report(RunPaths(run_dir).report)
+        report = require_report(run.documents.report)
     except ReportUnreadable as e:
         raise ReportNotParsable(str(e)) from e
     fm, body, disposition = report.frontmatter, report.body, report.disposition
-    case_id = run_dir.name
+    case_id = str(run.id)
     cause = str(fm.get("cause") or "")
 
     _thawed(mapping)
     # The signature is the run's recorded one (A1): never read off the alert again. A folder
     # with no usable record has none, and the existing fallback label stands.
-    record = _alert_input.read_record(RunPaths(run_dir).alert_record)
+    record = _alert_input.parse_alert_record(run.facts.alert_record.read() or "")
     signature_id = (record.signature if record is not None else None) or _SIGNATURE_FALLBACK
 
     return CaseRecord(

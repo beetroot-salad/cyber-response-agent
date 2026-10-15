@@ -31,6 +31,8 @@ WHAT §7 DECIDED THAT EVERY ASSERTION HERE RESTS ON:
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import inspect
 import json
 import re
@@ -80,7 +82,7 @@ def _case_record(**kw):
     report body), never the retired single `reason`."""
     cls = require(case_ticket, "CaseRecord", "D3 splits CaseRecord.reason into cause + narrative")
     fields = {
-        "case_id": "20260917T000000Z-sshd",
+        "case_id": "20260917t000000z-sshd",
         "signature_id": "5710",
         "disposition": "benign",
         "cause": HOST_CAUSE,
@@ -136,7 +138,7 @@ def test_767_record_case_ticket_returns_and_receipts(tmp_path, monkeypatch):
     )
     assert good["url"].endswith(f"{TICKETS_PATH}/{run_dir.name}")
 
-    failed_dir = make_run(tmp_path, name="20260917T000001Z-sshd")
+    failed_dir = make_run(tmp_path, name="20260917t000001z-sshd")
     record(failed_dir, FakeStore(transport_fault_on=COMMENTS_SUFFIX))
     bad = receipt(failed_dir)
     assert bad["ok"] is False, "the failure branch wrote no `ok: false` receipt"
@@ -227,7 +229,7 @@ def test_767_writer_comments_on_a_closed_case(tmp_path, monkeypatch, capsys):
     use_mapping(monkeypatch, tmp_path / "dfn")
 
     for n, status in enumerate((CLOSED_STATUS, "in_progress", OPEN_STATUS)):
-        run_dir = make_run(tmp_path, name=f"20260917T00000{n}Z-sshd")
+        run_dir = make_run(tmp_path, name=f"20260917t00000{n}z-sshd")
         store = FakeStore(ticket=ticket("any", status=status, labels=["sig:5710"]))
         assert record(run_dir, store) is None, f"{status}: the post-step returned a value"
         assert [(c.method, c.path) for c in store.calls] == [
@@ -329,7 +331,7 @@ def test_767_the_loader_still_refuses_a_non_literal_open_status(
     assert "open.status" in str(refusal.value), (
         f"{why}: the refusal does not name `open.status`: {refusal.value}"
     )
-    run_dir = make_run(tmp_path, name="20260917T000001Z-refused")
+    run_dir = make_run(tmp_path, name="20260917t000001z-refused")
     store = FakeStore()
     assert record(run_dir, store) is None, f"{why}: the refusal escaped into the run"
     assert store.calls == [], f"{why}: the writer reached the store off a refused mapping"
@@ -340,7 +342,7 @@ def test_767_the_loader_still_refuses_a_non_literal_open_status(
 
     use_mapping(monkeypatch, root, mapping_doc())
     control = FakeStore()
-    record(make_run(tmp_path, name="20260917T000002Z-control"), control)
+    record(make_run(tmp_path, name="20260917t000002z-control"), control)
     assert control.comment_payloads, "the control failed: a literal open.status posted nothing"
 
 
@@ -494,7 +496,7 @@ def test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write(
     assert store.comment_payloads, "the shipped mapping did not produce a comment"
 
     use_mapping(monkeypatch, root, mapping_doc(open_status="{summary}"))
-    refused_dir = make_run(tmp_path, name="20260917T000002Z-sshd")
+    refused_dir = make_run(tmp_path, name="20260917t000002z-sshd")
     refused_store = FakeStore()
     assert record(refused_dir, refused_store) is None, "a refused mapping aborted the run"
     assert refused_store.calls == [], "a refused mapping still reached the estate"
@@ -1186,7 +1188,7 @@ def test_767_record_case_ticket_is_the_writer_seam(tmp_path, monkeypatch):
         "contest D2 exists to end"
     )
     params = inspect.signature(fn).parameters
-    assert list(params)[0] == "run_dir"
+    assert list(params)[0] == "run"
     assert params["deps"].default is ticket_writer.DEFAULT_DEPS
 
     key_param = next((n for n in params if "key" in n), None)
@@ -1251,7 +1253,7 @@ def test_767_case_record_splits_cause_from_narrative(tmp_path, monkeypatch):
     use_mapping(monkeypatch, root, mapping_doc(comment_body="{cause}//{narrative}"))
     run_dir = make_run(tmp_path, cause=HOST_CAUSE, body="the model's own notes")
 
-    rec = case_ticket.read_case_record(run_dir, mapping=current_mapping())
+    rec = case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=current_mapping())
     assert rec.cause == HOST_CAUSE
     assert rec.narrative == "the model's own notes"
     assert not hasattr(rec, "reason"), (
