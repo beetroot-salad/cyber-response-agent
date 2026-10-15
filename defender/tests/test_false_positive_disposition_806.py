@@ -10,6 +10,9 @@ the host it was paged for. A gate that only demanded "some committed lead" would
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 import pytest
 
 from defender._vocab import DISPOSITION_ENUM
@@ -258,7 +261,7 @@ def _close(tmp_path, companion: str, disposition: str):
     (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    deps = bind(MAIN_DEF, run_dir, defender_dir=dfn)
+    deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
     return asyncio.run(_close_investigation_async(
         deps, disposition, stages=_bundle(composer=_composer(finding="holds")),
         bounds=challenge_gate.default_bounds(),
@@ -423,7 +426,7 @@ def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, sh
         (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    deps = bind(MAIN_DEF, run_dir, defender_dir=dfn)
+    deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
 
     with pytest.raises(ModelRetry) as e:
         asyncio.run(_close_investigation_async(
@@ -495,7 +498,7 @@ def test_a_companion_that_cannot_be_read_never_commits_the_models_verdict(tmp_pa
         (run_dir / "investigation.md").mkdir()          # the fault: a directory, not a file
         dfn = tmp_path / disposition / "defender"
         dfn.mkdir(exist_ok=True)
-        deps = bind(MAIN_DEF, run_dir, defender_dir=dfn)
+        deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
         result = asyncio.run(_close_investigation_async(
             deps, disposition, stages=_bundle(composer=_composer(finding="holds")),
             bounds=challenge_gate.default_bounds(),
@@ -530,7 +533,7 @@ def test_an_absent_companion_is_not_a_fault(tmp_path):
     from defender.tests._review_bundle import bundle as _bundle
     from defender.tests._review_bundle import composer_reply as _composer
 
-    deps = bind(MAIN_DEF, run_dir, defender_dir=dfn)
+    deps = _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir))
     with pytest.raises(ModelRetry) as e:
         asyncio.run(_close_investigation_async(
             deps, "false-positive", stages=_bundle(composer=_composer(finding="holds")),

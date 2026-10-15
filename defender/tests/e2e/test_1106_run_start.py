@@ -123,7 +123,7 @@ def _lifecycle(start_box: StartBoxRecorder, *, investigate: Any = None) -> Any:
             raise AssertionError("the investigation ran on a refused tenant")
     return functools.partial(
         run._run_investigation_lifecycle, investigate=investigate, start_box=start_box,
-        stop_box=lambda *a, **k: None, scrub=lambda tree: None)
+        stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
 
 
 def _names(text: str, path: Path) -> bool:

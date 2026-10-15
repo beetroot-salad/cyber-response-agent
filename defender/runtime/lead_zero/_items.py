@@ -113,7 +113,7 @@ class LeadEnd:
 
 
 async def run_correlation_lead(  # noqa: PLR0913 — the dispatch composition: registry, session, terminator wiring, one pre-claimed seam call
-    *, run_state: RunState, defender_dir: Path,
+    *, run: Any, run_state: RunState, defender_dir: Path,
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any = None,
     catalog: str | None,
@@ -178,7 +178,7 @@ async def run_correlation_lead(  # noqa: PLR0913 — the dispatch composition: r
     # overstate the remaining wall-clock budget. `harness_lead`: this lead's failures mark its
     # system but never count toward the run-level failure kill (A2).
     gdeps = replace(
-        gbase, run_id=run_state.run_id, lead_id=L3, run_state=run_state,
+        gbase, run=run, run_id=run_state.run_id, lead_id=L3, run_state=run_state,
         tenant=tenant, harness_lead=True,
     )
 

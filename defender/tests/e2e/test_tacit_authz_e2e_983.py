@@ -87,7 +87,7 @@ def _run(tmp_path: Path, doc: str, disposition: str, *, run_id: str):
     `append_block` rather than a seeded file: the write gate — invlang validation included —
     is half of what these scenarios are about, and a document staged around it would let a
     refusal the gate WOULD have made read as a close that succeeded."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     replay = ReplayFn([
         Turn(tool_calls=[("append_block", {"text": doc})]),
         Turn(tool_calls=[("close_investigation", {"disposition": disposition})]),
@@ -134,7 +134,7 @@ def _run_with_lookup(
     and close the document then meets."""
     root = tmp_path / "estate"
     scene.write_registry(root, *entries)
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     rec = VerbRecorder()
 
     main = ReplayFn([

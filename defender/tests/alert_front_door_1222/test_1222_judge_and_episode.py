@@ -35,6 +35,8 @@ per-test table is in `.spec-flow/frontiers/82-writer-judge_and_episode.md`.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 from defender.run_repository import Run
 
 import json
@@ -100,6 +102,8 @@ def _episode(tmp_path: Path, name: str, *, raw: bytes | None = None,
     carrying `signature` (default `SIG-<name>`; None = no signature recorded). `copy=False`
     plants nothing: the episode a pre-change launcher left."""
     ep = J.accepted_episode(tmp_path, root=tmp_path / f"episodes-{name}", **world_kw)
+    # Distinct scenarios share a queue, so their episode identities must differ (#1241).
+    ep = ep.rename(ep.with_name(f"{ep.name}-{name}"))
     alert = _alert(name) if raw is None else raw
     if copy:
         sig = f"SIG-{name}" if signature == "" else signature
@@ -297,7 +301,7 @@ class _Lifecycle:
         self.run_dir: Path | None = None
 
     def __call__(self, **kw: Any) -> dict[str, Any]:
-        self.run_dir = Path(kw["run_dir"])
+        self.run_dir = Path(kw["run"].run_dir)
         (self.run_dir / "report.md").write_text(T.report_text("benign"), encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
@@ -957,7 +961,7 @@ def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
 
     store = S.TicketStore()
     S.ticket_writer(store).record_case_ticket(
-        sib, tenant=planted.run_tenant(dispatches_lead_zero=False), defender_dir=S.DEFENDER,
+        _run_handle_1165(sib), tenant=planted.run_tenant(dispatches_lead_zero=False), defender_dir=S.DEFENDER,
         env={})
     bodies = [str(c.get("body")) for c in store.comments()]
     assert len(bodies) == 1, f"the record leg posted {len(bodies)} comments: {store.calls}"

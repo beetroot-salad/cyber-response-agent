@@ -42,6 +42,8 @@ for the wrong reason. The real-runtime acceptance legs are deferred to a non-Doo
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import ast
 import dataclasses
 import json
@@ -380,7 +382,7 @@ def _drive_lifecycle(tmp_path, rec, *, fault=None, run_dir=None, **kw):
     seams = {"start_box": rec.start_box, "stop_box": rec.stop_box, "scrub": rec.scrub}
     seams.update(kw)   # a test may swap one seam for a faulting or real one
     return _run_investigation_lifecycle(
-        run_dir=run, model="m-741", model_override=None, defender_dir=DEFENDER,
+        run=fixture_run(run), model="m-741", model_override=None, defender_dir=DEFENDER,
         tenant=_tenants1106.fixture_run_tenant(),
         investigate=_recording_investigate(rec.events, fault=fault), **seams,
     )
@@ -1530,14 +1532,14 @@ def test_a_box_write_cannot_overwrite_a_claimed_lead_sidecar(tmp_path):
     forged = '{"goal": "written by the box"}\n'
     (raw / "l-002.lead.json").write_text(forged, encoding="utf-8")
 
-    assert claim_lead(dispatch) == ALREADY_CLAIMED, \
+    assert claim_lead(dispatch, run=fixture_run(run)) == ALREADY_CLAIMED, \
         "the claim overwrote a name it did not create"
     assert (raw / "l-002.lead.json").read_text(encoding="utf-8") == forged
 
     dispatch2 = dict(dispatch, lead_id="l-003")
-    assert claim_lead(dispatch2) == CLAIMED
+    assert claim_lead(dispatch2, run=fixture_run(run)) == CLAIMED
     first = (raw / "l-003.lead.json").read_text(encoding="utf-8")
-    assert claim_lead(dict(dispatch2, goal="a different goal")) == ALREADY_CLAIMED
+    assert claim_lead(dict(dispatch2, goal="a different goal"), run=fixture_run(run)) == ALREADY_CLAIMED
     assert (raw / "l-003.lead.json").read_text(encoding="utf-8") == first
 
 
@@ -1562,7 +1564,7 @@ def test_gather_only_workflow_completes_via_its_substitute(tmp_path):
         rec.record("query", ctx, {"native_query": native_query, "limit": limit})
         return [{"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana"}]
 
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='g540')
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": "l-001", "system": "elastic", "goal": "measure this lead",

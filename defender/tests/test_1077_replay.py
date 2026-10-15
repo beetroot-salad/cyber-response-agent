@@ -19,6 +19,8 @@ orphan. Importing `defender.tests.e2e._replay_harness` from here is established 
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import json
 import os
 import sqlite3
@@ -268,8 +270,8 @@ def test_a_second_claim_on_one_lead_still_loses_the_exclusive_create(tmp_path: P
     dispatch = {"run_dir": str(run_dir), "lead_id": S.LEAD_ID, "goal": "first claim",
                 "what_to_summarize": ["a"]}
 
-    first = record_lead.claim_lead(dispatch)
-    second = record_lead.claim_lead({**dispatch, "goal": "second claim"})
+    first = record_lead.claim_lead(dispatch, run=fixture_run(run_dir))
+    second = record_lead.claim_lead({**dispatch, "goal": "second claim"}, run=fixture_run(run_dir))
 
     assert first == record_lead.CLAIMED
     assert second == record_lead.ALREADY_CLAIMED, (
@@ -280,7 +282,7 @@ def test_a_second_claim_on_one_lead_still_loses_the_exclusive_create(tmp_path: P
     assert "first claim" in sidecar.read_text(encoding="utf-8"), (
         "the loser overwrote the winner's row")
     # A DIFFERENT lead id still wins its own claim — the refusal is per key, not a blanket one.
-    assert record_lead.claim_lead({**dispatch, "lead_id": "l-other1"}) == record_lead.CLAIMED
+    assert record_lead.claim_lead({**dispatch, "lead_id": "l-other1"}, run=fixture_run(run_dir)) == record_lead.CLAIMED
 
 
 def test_a_reader_process_resolving_names_in_a_live_run(tmp_path: Path):
@@ -480,8 +482,7 @@ def test_runs_written_records_are_all_slots_bound_and_role_disjoint(tmp_path: Pa
     S.member(handle, "tables", "payloads", S.LEAD_ID, S.SEQ).write('{"rows": []}')
     S.member(handle, "observability", "review_record", S.TURN).write(
         json.dumps({"turn": S.TURN}))
-    S.member(handle, "observability", "wire_log").append(
-        [{"event_type": "message", "agent_id": "main", "seq": 0}])
+    S.member(handle, 'observability', 'wire_log').append_text("".join(json.dumps(row) + "\n" for row in [{'event_type': 'message', 'agent_id': 'main', 'seq': 0}]))
 
     # ALL SLOTS BOUND: no resolved name carries an unsubstituted placeholder.
     written = [p for p in run_dir.rglob("*") if p.is_file()]
@@ -518,7 +519,7 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     item 6). `visualize_messages.load_messages` is driven here over the real replayed log;
     `compaction_dryrun._load_main_records` is driven at its own grain by `g12`'s test.
     """
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='writerid-1077')
     drive(run_dir, run_id="writerid-1077", main=ReplayFn(_closing_turns()))
 
     from defender.runtime.observe import POLICY_DENIAL_EVENT_TYPE
@@ -568,8 +569,7 @@ def test_wire_log_writers_stay_distinguishable_under_concurrent_main_and_subagen
     writers = ("MAIN", "gather-l-aaa111", "gather-l-bbb222")
     for i in range(30):
         who = writers[i % len(writers)]
-        wire.append([{"event_type": "message", "writer_id": who, "seq": i,
-                      "message": "x" * 512}])
+        wire.append_text("".join(json.dumps(row) + "\n" for row in [{'event_type': 'message', 'writer_id': who, 'seq': i, 'message': 'x' * 512}]))
 
     text = S.RunPaths(run_dir).wire_log.read_text(encoding="utf-8")
     lines = [line for line in text.splitlines() if line.strip()]

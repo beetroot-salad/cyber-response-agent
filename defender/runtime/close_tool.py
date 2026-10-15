@@ -49,6 +49,7 @@ from . import tools as tools_mod
 from .tools import CompanionRead
 from .agent_role import AgentRole
 from .tools import AgentDeps
+from defender.runtime.tools._deps import run_of
 
 _logger = logging.getLogger(__name__)
 
@@ -300,7 +301,7 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     record_error: BaseException | None = None
     try:
         record_path = RunPaths(deps.run_dir).review_record(turn_for_record)
-        challenge_gate.write_review_record(deps.run_dir, turn_for_record, record)
+        challenge_gate.write_review_record(run_of(deps), turn_for_record, record)
     except OSError as e:
         record_error = e
 
@@ -315,12 +316,8 @@ def _commit(  # noqa: PLR0913 — the commit's full inputs; the scalars are alre
     if schema_reason is not None:
         report_error = ModelRetry(schema_reason)
     else:
-        report_path = RunPaths(deps.run_dir).report
         try:
-            from defender._io import guarded_mkdir, write_guarded
-
-            guarded_mkdir(report_path.parent, base=Path(deps.run_dir))
-            write_guarded(report_path, body, mode="replace")
+            run_of(deps).documents.report.write(body)
         except OSError as e:
             report_error = e
 
@@ -442,7 +439,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     if verdict.outcome == CHALLENGED:
         turn = state.turns  # already incremented inside challenge_gate for this attempt
         record_path = RunPaths(deps.run_dir).review_record(turn)
-        challenge_gate.write_review_record(deps.run_dir, turn, record)
+        challenge_gate.write_review_record(run_of(deps), turn, record)
         return CloseResult(
             outcome=CHALLENGED, message=_render_challenged_message(material, deps),
             material=material, record_path=record_path, cause=verdict.cause,

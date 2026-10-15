@@ -41,6 +41,8 @@ and — for the asks O7 names — the words the demand itself uses (window, anch
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import functools
 import json
 import re
@@ -534,7 +536,7 @@ class _Views:
     # --- the run page ------------------------------------------------------------------------
     @functools.cached_property
     def run_page(self) -> str:
-        return S.sym("scripts.visualize.visualize_run", "render_page")(self.run_dir)
+        return S.sym("scripts.visualize.visualize_run", "render_page")(_run_handle_1165(self.run_dir))
 
     @functools.cached_property
     def run_page_parsed(self) -> _Page:

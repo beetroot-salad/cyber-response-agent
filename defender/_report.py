@@ -16,7 +16,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from defender.run_repository import RecordHandle
 
 from defender.run_repository import RUN_LAYOUT
 from defender._frontmatter import FrontmatterError, parse_frontmatter
@@ -130,10 +133,19 @@ def repeats_disposition(text: str) -> bool:
     return "disposition" in duplicate_key_paths(split_frontmatter(text)[1])
 
 
-def require_report(path: Path) -> Report:
+def require_report(path: Path | RecordHandle) -> Report:
     """`read_report` for a caller that cannot proceed without a headline; raises
     `ReportUnreadable`."""
-    read = read_report(path)
+    if isinstance(path, Path):
+        read = read_report(path)
+    else:
+        result = path.read_result()
+        if result.absent:
+            read = _no_headline(f"{RUN_LAYOUT.report.name} not found: {path.path}")
+        elif result.text is None:
+            read = _no_headline(f"{RUN_LAYOUT.report.name} is unreadable: {result.reason}")
+        else:
+            read = parse_report_text(result.text)
     report = read.report
     if report is None:
         raise ReportUnreadable(read.reason)

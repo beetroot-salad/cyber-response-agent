@@ -1,15 +1,12 @@
 
 from __future__ import annotations
 
-import contextlib
 import errno
 import json
-import os
 import sys
-from pathlib import Path
 
-from defender._io import guarded_mkdir
-from defender.run_repository import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: this module is the claim gate's import surface
+from defender._io import NotPlainEntry
+from defender.run_repository import LEAD_ID_RE, Run, RunPaths  # noqa: F401 — re-export: this module is the claim gate's import surface
 
 #: `claim_lead`'s answers. Success must be distinguishable from "nothing was written": the
 #: sidecar's `O_EXCL` create is the only id-reuse gate, so dispatching without a row would let
@@ -30,79 +27,31 @@ def _say_already_dispatched(lead_id: object) -> None:
     )
 
 
-def _claim_path(run_dir: Path, lead_id: str) -> Path | int:
-    """The claim sidecar's path under a `gather_raw/` this call could create — or the code the
-    hook answers with when it could not."""
-    paths = RunPaths(run_dir)
-    try:
-        guarded_mkdir(paths.gather_raw, base=run_dir)
-    except (OSError, ValueError):
-        # `guarded_mkdir` raises ValueError for a target outside the anchor; never raise here.
-        return NOT_CLAIMED
-    try:
-        return paths.lead_claim(lead_id)
-    except ValueError:
-        # Not a plain single segment: nobody holds the name, so not the taken-id answer.
-        return NOT_CLAIMED
-    except OSError:
-        # An entry planted at the claim's name resolves outside the run dir. Something holds
-        # the name, as EEXIST would say, so answer the same way (alias refusals are exempt from
-        # failure circuits).
-        _say_already_dispatched(lead_id)
-        return ALREADY_CLAIMED
-
-
-def claim_lead(dispatch: dict) -> int:
-    """Write this lead's leads-table row and claim its id, atomically. `CLAIMED` only when this
-    call created the sidecar; `ALREADY_CLAIMED` when the id was taken; `NOT_CLAIMED` for a
-    refused dispatch or any filesystem fault. Never raises."""
-    run_dir = dispatch.get("run_dir")
+def claim_lead(dispatch: dict, *, run: Run) -> int:
+    """Exclusively claim the dispatch through the run's leads table."""
     lead_id = dispatch.get("lead_id")
     goal = dispatch.get("goal")
     wtc = dispatch.get("what_to_summarize") or []
-
-    # The stripped goal is recorded, so a whitespace-only goal is as empty as a missing one.
-    if not run_dir or not lead_id or not goal or not str(goal).strip():
-        return NOT_CLAIMED
-    if not isinstance(wtc, list):
+    if (not dispatch.get("run_dir") or not lead_id or not goal
+            or not str(goal).strip() or not isinstance(wtc, list)):
         return NOT_CLAIMED
     if not LEAD_ID_RE.match(str(lead_id)):
         return NOT_CLAIMED
-
-    sidecar_path = _claim_path(Path(run_dir), lead_id)
-    if isinstance(sidecar_path, int):
-        return sidecar_path
-    body: dict = {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}
+    body = {"goal": str(goal).strip(), "what_to_summarize": list(wtc)}
     provenance = dispatch.get("provenance")
     if provenance:
-        # Absent means model-authored; the harness names one for its reserved-id claims.
         body["provenance"] = str(provenance)
-    payload = json.dumps(body, indent=2) + "\n"
-
     try:
-        fd = os.open(sidecar_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-    except OSError as e:
-        if e.errno == errno.EEXIST:
+        run.tables.leads(lead_id).write(json.dumps(body, indent=2) + "\n")
+    except ValueError:
+        return NOT_CLAIMED
+    except OSError as error:
+        leaf_alias = (getattr(error, "write_guarded_alias", False)
+                      and not getattr(error, "record_parent_refused", False))
+        occupied_leaf = (isinstance(error, NotPlainEntry)
+                         and not getattr(error, "record_parent_refused", False))
+        if isinstance(error, FileExistsError) or error.errno == errno.EEXIST or leaf_alias or occupied_leaf:
             _say_already_dispatched(lead_id)
             return ALREADY_CLAIMED
-        return NOT_CLAIMED
-    try:
-        fh = os.fdopen(fd, "w", encoding="utf-8")
-    except OSError:
-        # The only branch where this hook still owns `fd`; `fdopen` takes it on success.
-        with contextlib.suppress(OSError):
-            os.close(fd)
-        with contextlib.suppress(OSError):
-            os.unlink(sidecar_path)
-        return NOT_CLAIMED
-    try:
-        with fh:
-            fh.write(payload)
-    except OSError:
-        # No `os.close(fd)`: the `with` already closed it, even when the failure is the flush
-        # in `close()` (ENOSPC/EDQUOT/EIO). A second close could hit a descriptor another
-        # thread has since been handed the same number for (adapter subprocess pipes).
-        with contextlib.suppress(OSError):
-            os.unlink(sidecar_path)
         return NOT_CLAIMED
     return CLAIMED

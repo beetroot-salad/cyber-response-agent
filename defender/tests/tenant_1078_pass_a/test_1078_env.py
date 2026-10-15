@@ -380,7 +380,7 @@ def test_d9_replay_harness_survives(tmp_path, monkeypatch):
 
     assert H.entries(H.resolve_data_root()) == [], "a tenant was configured before the harness"
     monkeypatch.delenv("DEFENDER_RUNS_BASE", raising=False)
-    run_dir = R.materialize(tmp_path, R.GOLDEN_AB3)
+    run_dir = R.materialize(tmp_path, R.GOLDEN_AB3, run_id='d9-no-tenant')
     replay = R.ReplayFn([
         R.Turn(tool_calls=[("append_block", {"text": "+ spec1078 probe\n"})]),
         R.Turn(text="done"),

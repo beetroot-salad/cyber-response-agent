@@ -32,7 +32,7 @@ def test_a_hard_link_read_is_a_retry_and_the_run_reads_and_appends_on(tmp_path):
     """The model asks for `notes.txt`, a hard link to a host file: the host bytes never reach
     any later model turn. Then a plain read (the alert) comes back, and an append lands — the
     refusal did not wedge the loop, and the plain lanes still work through the move."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='rooted-1136')
     host = tmp_path / "outside" / "secret.txt"
     host.parent.mkdir()
     host.write_text(f"{HOST_MARK} do not disclose\n", encoding="utf-8")

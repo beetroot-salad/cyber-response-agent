@@ -45,6 +45,8 @@ RED until the round-2 implementation lands: `defender.runtime.run_state` does no
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import gc
 import json
 import weakref
@@ -145,7 +147,7 @@ def _rows(run_dir: Path, lead: str = LEAD) -> list[dict]:
 
 def _real_rows(root: Path, gather_turns: list[Turn]) -> tuple[list[dict], dict[str, bytes]]:
     """`l-001`'s rows and payload files as a fresh real run writes them for `gather_turns`."""
-    run_dir = materialize(root, GOLDEN_AB3)
+    run_dir = materialize(root, GOLDEN_AB3, run_id='r1235-v2-source-rows')
     drive(run_dir, run_id="r1235-v2-source-rows", main=_main(LEAD),
           gather=ReplayFn([*gather_turns, DONE]), verbs=Asked("source").registry())
     rows = _rows(run_dir)
@@ -256,7 +258,7 @@ def test_a_siblings_next_row_takes_the_seq_after_its_inherited_rows(tmp_path):
             f"the sibling's own call overwrote the inherited payload {rel}")
     assert b'"run": "sibling"' in (branched.sibling / own[0]["payload_path"]).read_bytes()
 
-    fresh_dir = materialize(tmp_path / "fresh", GOLDEN_AB3)
+    fresh_dir = materialize(tmp_path / "fresh", GOLDEN_AB3, run_id='r1235-v2-fresh-seq')
     drive(fresh_dir, run_id="r1235-v2-fresh-seq", main=_main(LEAD),
           gather=ReplayFn([q("elastic", "query", _OTHER), DONE]), verbs=Asked("fresh").registry())
     assert [r["seq"] for r in _rows(fresh_dir)] == [0], "the control's first row is not seq 0"
@@ -365,7 +367,7 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
     real.mkdir()
     link = tmp_path / "link"
     link.symlink_to(real, target_is_directory=True)
-    run_dir = materialize(link, GOLDEN_AB3)
+    run_dir = materialize(link, GOLDEN_AB3, run_id="r1235-v2-link")
     probe = Probe()
 
     state = _pool_script(run_dir, run_id="r1235-v2-link", probe=probe)["run_state"]
@@ -375,10 +377,10 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
     assert all(s is state for s in probe.states), (
         "the gather lead's verb context carried a state other than the run's")
     assert state.run_id == "r1235-v2-link"
-    assert state.run_dir.resolve() == (real / "run").resolve()
+    assert state.run_dir.resolve() == (real / "r1235-v2-link").resolve()
     snapshot = state.budget_snapshot()
     assert (snapshot["tool_calls"], snapshot["subagent_spawns"]) == (5, 2), snapshot
-    assert list(state.lead_rows(LEAD)) == _rows(real / "run"), (
+    assert list(state.lead_rows(LEAD)) == _rows(real / "r1235-v2-link"), (
         "the state's rows and the table read through the real spelling disagree")
     assert len(state.lead_rows(LEAD)) == 2
 
@@ -494,34 +496,34 @@ def test_a_run_recorded_before_1235_refuses_at_every_reader_of_its_case_link(tmp
         assert issubclass(session_store.LegacyRunLink, session_store.StoreError)
         for read in (session_store.resolve_store_path, session_store.resolve_session_id):
             with pytest.raises(session_store.LegacyRunLink) as err:
-                read(run_dir)
+                read(_run_handle_1165(run_dir))
             _says_rerun(err.value, run_dir)
         for open_store in (branch.open_source_store, branch.source_store_if_any):
             with pytest.raises(branch.BranchError) as err:
-                open_store(run_dir)
+                open_store(run_dir, source_run=_run_handle_1165(run_dir))
             _says_rerun(err.value, run_dir)
         with pytest.raises(session_store.LegacyRunLink) as err:
-            branch.session_for_run(store, run_dir)
+            branch.session_for_run(store, run_dir, source_run=_run_handle_1165(run_dir))
         _says_rerun(err.value, run_dir)
 
         # Control: no old file and no sidecar is a folder with no link — "no session".
         (run_dir / OLD_POINTER_NAME).unlink()
         with pytest.raises(FileNotFoundError):
-            session_store.resolve_store_path(run_dir)
+            session_store.resolve_store_path(_run_handle_1165(run_dir))
         with pytest.raises(FileNotFoundError):
-            session_store.resolve_session_id(run_dir)
-        assert branch.source_store_if_any(run_dir) is None
-        assert branch.session_for_run(store, run_dir) == branch.main_session(store)
+            session_store.resolve_session_id(_run_handle_1165(run_dir))
+        assert branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir)) is None
+        assert branch.session_for_run(store, run_dir, source_run=_run_handle_1165(run_dir)) == branch.main_session(store)
     finally:
         store.connection.close()
 
     # Control: the sidecar beside an old file wins.
     (run_dir / OLD_POINTER_NAME).write_text(json.dumps({"case_id": "elsewhere"}), encoding="utf-8")
-    session_store.write_case_pointer(run_dir, case_id=link["case_id"],
+    session_store.write_case_pointer(_run_handle_1165(run_dir), case_id=link["case_id"],
                                      store_path=Path(link["store_path"]),
                                      session_id=link.get("session_id"))
-    assert session_store.resolve_store_path(run_dir) == Path(link["store_path"])
-    handle = branch.source_store_if_any(run_dir)
+    assert session_store.resolve_store_path(_run_handle_1165(run_dir)) == Path(link["store_path"])
+    handle = branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir))
     assert handle is not None
     try:
         assert Path(handle.path).resolve() == Path(link["store_path"]).resolve()

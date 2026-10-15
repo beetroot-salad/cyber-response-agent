@@ -52,6 +52,7 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+
 import importlib
 import json
 import os
@@ -658,6 +659,7 @@ def seed_source_session(base: Path, src: Path) -> None:
     Idempotent: `runs_base` is called more than once in some scenarios, and a second session
     under one case id would make "the run's own main session" ambiguous.
     """
+    from defender.tests._spec1077 import fixture_run as _run_handle_1165
     from defender.run_repository import RunPaths, SessionPaths
 
     ss = mod("runtime.session_store")
@@ -669,7 +671,7 @@ def seed_source_session(base: Path, src: Path) -> None:
     # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
     store = ss.open_store(case_id=SOURCE_CASE_ID, sessions=SessionPaths(base))
     try:
-        ss.write_case_pointer(src, case_id=SOURCE_CASE_ID, store_path=store.path)
+        ss.write_case_pointer(_run_handle_1165(src), case_id=SOURCE_CASE_ID, store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [S.user_request("investigate the alert")], agent_id="main")
         while BRANCH_MESSAGE_ID not in ss.path_row_ids(store, session_id):

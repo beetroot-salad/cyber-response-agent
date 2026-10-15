@@ -17,6 +17,13 @@ Round 2 (#1235, comment 6117481676) moved the state from three folder-keyed tabl
 `RunState` per run; each test reaches the state through that object and keeps its claim."""
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
+from defender.tests._spec1077 import fixture_run
+
 import json
 import shutil
 from pathlib import Path
@@ -50,22 +57,22 @@ def test_1235_a_hand_copied_folder_has_no_link_at_any_reader(tmp_path):
     copy = tmp_path / "elsewhere" / "run"
     shutil.copytree(run_dir, copy)
     with pytest.raises(FileNotFoundError):
-        session_store.resolve_store_path(copy)
+        session_store.resolve_store_path(_run_handle_1165(copy))
     with pytest.raises(FileNotFoundError):
-        session_store.resolve_session_id(copy)
+        session_store.resolve_session_id(_run_handle_1165(copy))
     with pytest.raises(branch.BranchError):
-        branch.open_source_store(copy)
-    assert branch.source_store_if_any(copy) is None
+        branch.open_source_store(copy, source_run=_run_handle_1165(copy))
+    assert branch.source_store_if_any(copy, source_run=_run_handle_1165(copy)) is None
 
     (copy / OLD_POINTER_NAME).write_text(json.dumps(_pointer(run_dir)), encoding="utf-8")
     for read in (session_store.resolve_store_path, session_store.resolve_session_id):
         with pytest.raises(session_store.LegacyRunLink):
-            read(copy)
+            read(_run_handle_1165(copy))
     for open_store in (branch.open_source_store, branch.source_store_if_any):
         with pytest.raises(branch.BranchError):
-            open_store(copy)
+            open_store(copy, source_run=_run_handle_1165(copy))
     # control: the original resolves
-    assert session_store.resolve_store_path(run_dir) == Path(_pointer(run_dir)["store_path"])
+    assert session_store.resolve_store_path(_run_handle_1165(run_dir)) == Path(_pointer(run_dir)["store_path"])
 
 
 # X3 — the query tool never makes a state of its own: deps that carry no run state are refused
@@ -82,7 +89,7 @@ def test_1235_the_query_tool_never_makes_a_state_of_its_own(tmp_path):
 
     run_dir = tmp_path / "run"
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
-    deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
+    deps = replace(_with_live_run_1165(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
                    lead_id="l-001")
     assert deps.run_state is None
 
@@ -125,7 +132,7 @@ def test_1235_rows_planted_between_leads_move_no_guard(tmp_path):
                           at=1, plant=lambda: _copies_for(holder[0], "l-002", 2))
     gather = ReplayFn([q("elastic", "query", _SAME), DONE, q("elastic", "query", _SAME), DONE])
     rec = VerbRecorder()
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='k-x4')
     holder.append(run_dir)
     drive(run_dir, run_id="k-x4", main=main, gather=gather, verbs=elastic_ok(rec))
     assert main.planted
@@ -150,7 +157,7 @@ def test_1235_rows_planted_before_the_first_query_move_no_guard(tmp_path):
     main = PlantingReplay([_gather("l-001"), Turn(text="done")], at=0, plant=plant)
     gather = ReplayFn([q("elastic", "query", _SAME), DONE])
     rec = VerbRecorder()
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='k-x3b')
     holder.append(run_dir)
     drive(run_dir, run_id="k-x3b", main=main, gather=gather, verbs=elastic_ok(rec))
     assert main.planted
@@ -166,7 +173,7 @@ def test_1235_payload_attribution_reads_the_runs_state(tmp_path):
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "k-x5")
     row = rq.append_query_row(
-        state, lead_id="l-001", system="elastic", verb="query", query_id="elastic.q",
+        state, run=fixture_run(state.run_dir), lead_id="l-001", system="elastic", verb="query", query_id="elastic.q",
         params={"q": "a"}, raw_command="elastic query", payload_text="{}", exit_code=0,
         payload_status="ok", payload_digest="d", system_key="")
     RunPaths(run_dir).executed_queries.write_text(
@@ -188,7 +195,7 @@ def test_1235_a_planted_spawn_count_refuses_no_gather(tmp_path, monkeypatch):
     main = PlantingReplay([Turn(tool_calls=[("gather", {
         "lead_id": "l-001", "system": "cmdb", "goal": "g", "what_to_summarize": ["x"]})]),
         Turn(text="done")], at=0, plant=spend)
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='k-x6')
     holder.append(run_dir)
     drive(run_dir, run_id="k-x6", main=main, gather=ReplayFn([_cmdb(1), DONE]),
           verbs=_registry(rec, cmdb_fails=False),
@@ -210,7 +217,7 @@ def test_1235_a_planted_breaker_file_refuses_no_dispatch(tmp_path):
     main = PlantingReplay([Turn(tool_calls=[("gather", {
         "lead_id": "l-001", "system": "cmdb", "goal": "g", "what_to_summarize": ["x"]})]),
         Turn(text="done")], at=0, plant=trip)
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='k-x8')
     holder.append(run_dir)
     drive(run_dir, run_id="k-x8", main=main, gather=ReplayFn([_cmdb(1), DONE]),
           verbs=_registry(rec, cmdb_fails=False))

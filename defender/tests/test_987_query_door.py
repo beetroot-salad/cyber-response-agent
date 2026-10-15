@@ -19,6 +19,9 @@ No `monkeypatch.setattr`: every fake enters through `gather_factory`.
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 import asyncio
 import re
 from pathlib import Path
@@ -147,7 +150,7 @@ def dispatch(root: Path, agent, *, ceiling: int = 40, stamps: list | None = None
     run_dir = materialize(root, GOLDEN_AB3)
     # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
     # the dispatch's breaker screen reads it.
-    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
+    deps = replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
                    run_state=RunState(run_dir, "r-987"))
 
     def factory(agent_id: str, system: str, request_limit: int):
@@ -215,7 +218,7 @@ def test_a_bound_gather_deps_carries_no_stop_record(tmp_path):
     such deps unwinds as the exception it always was. `_run_gather` is the one place that
     makes one. The ceiling is not a deps field at all — it is the run's `UsageLimits`."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
-    deps = bind(T1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER)
+    deps = _with_live_run_1165(bind(T1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir))
     assert deps.stop is None
     assert not hasattr(deps, "request_limit")
 

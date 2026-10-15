@@ -31,6 +31,8 @@ so an escaped regex cannot pass for it verbatim), and the two never contain each
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import html
 import json
 import os
@@ -264,6 +266,8 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR091
     every prompt it was shown) and the rows the pass appended to the findings queue."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             alert=worlds_alert)
+    # Separate episode roots still share finding identity on the queue (#1241).
+    ep = ep.rename(ep.with_name(f"{ep.name}-{tmp_path.name}"))
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     S.plant_episode_copy(ep, alert=alert, record=record, facts=facts)
     if alter is not None:
@@ -967,7 +971,7 @@ def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
         f"the receipt reads as a success for a ticket the store refused: {receipt}")
     assert reason in text, (
         f"the receipt does not quote the store's reason {reason!r}: {receipt}")
-    page = html.unescape(render_page(_run_dir(d), update_ticket=True))
+    page = html.unescape(render_page(_run_handle_1165(_run_dir(d)), update_ticket=True))
     assert reason in page, "the run page does not quote the store's refusal of the ticket"
 
 
@@ -993,7 +997,7 @@ def test_p085_mapped_value_carries_control_characters_into_ope(tmp_path: Path) -
     for piece in ("FAKE-LOG", "## Forged section", "\x1b"):
         assert piece not in harness, f"MAIN's opening message carries {piece!r} as harness prose"
     assert any("FAKE-LOG" in body for body in S.framed_bodies(d.opening_message))
-    page = S.sym("scripts.visualize.visualize_run", "render_page")(_run_dir(d))
+    page = S.sym("scripts.visualize.visualize_run", "render_page")(_run_handle_1165(_run_dir(d)))
     assert "<b>bold</b>" not in page, "the run page renders alert markup unescaped"
     assert d.recorded("signature") is None
     _ep, judge, _rows = _graded(tmp_path / "judge", alert=d.stored_alert,

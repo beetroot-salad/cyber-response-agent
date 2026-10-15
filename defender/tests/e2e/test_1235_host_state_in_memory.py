@@ -128,7 +128,7 @@ _CAP_TWO = {**DEFAULT_LIMITS, "max_tool_calls": 2, "wall_clock_timeout": 3600, "
 
 def _drive_main(root: Path, main: ReplayFn, *, run_id: str, limits: dict) -> dict:
     """Drive MAIN's script; returns the run's budget snapshot, read off the run's state."""
-    run_dir = materialize(root, GOLDEN)
+    run_dir = materialize(root, GOLDEN, run_id=run_id)
     return drive(run_dir, run_id=run_id, main=main, limits=limits)["run_state"].budget_snapshot()
 
 
@@ -173,7 +173,7 @@ def test_a_reset_budget_file_does_not_reopen_the_cap(tmp_path, enforced, plant):
             target.unlink(missing_ok=True)
 
     main = PlantingReplay(list(_FOUR_BASH), at=2, plant=reset)
-    run_dir = materialize(tmp_path / plant, GOLDEN)
+    run_dir = materialize(tmp_path / plant, GOLDEN, run_id='b1235-reset')
     run_dir_holder.append(run_dir)
     state = drive(run_dir, run_id="b1235-reset", main=main, limits=_CAP_TWO)["run_state"]
 
@@ -202,7 +202,7 @@ def test_a_planted_spent_budget_does_not_refuse_a_call_under_the_cap(tmp_path, e
             "created_at": now, "started_at": now}))
 
     main = PlantingReplay(list(_FOUR_BASH), at=0, plant=spend)
-    run_dir = materialize(tmp_path / "spent", GOLDEN)
+    run_dir = materialize(tmp_path / "spent", GOLDEN, run_id='b1235-spent')
     holder.append(run_dir)
     summary = drive(run_dir, run_id="b1235-spent", main=main, limits=_CAP_TWO)
 
@@ -232,7 +232,7 @@ def test_a_planted_clock_origin_does_not_trip_the_wall_clock(tmp_path, enforced)
             "started_at": "2000-01-01T00:00:00+00:00"}))
 
     main = PlantingReplay(list(_FOUR_BASH), at=0, plant=ancient)
-    run_dir = materialize(tmp_path / "ancient", GOLDEN)
+    run_dir = materialize(tmp_path / "ancient", GOLDEN, run_id='b1235-clock')
     holder.append(run_dir)
     summary = drive(run_dir, run_id="b1235-clock", main=main, limits=roomy)
 
@@ -272,7 +272,7 @@ def _cmdb(n: int) -> Turn:
 
 def _drive_gather(root: Path, gather: ReplayFn, *, verbs, run_id: str) -> dict:
     """Drive one cmdb lead; returns the run's breaker snapshot, read off the run's state."""
-    run_dir = materialize(root, GOLDEN_AB3)
+    run_dir = materialize(root, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": "cmdb", "goal": "measure this lead",
@@ -323,7 +323,7 @@ def test_a_reset_breaker_file_does_not_untrip_a_system(tmp_path, plant):
 
     rec = VerbRecorder()
     gather = PlantingReplay([_cmdb(1), _cmdb(2), _cmdb(3), DONE], at=2, plant=reset)
-    run_dir = materialize(tmp_path / plant, GOLDEN_AB3)
+    run_dir = materialize(tmp_path / plant, GOLDEN_AB3, run_id='k1235-reset')
     holder.append(run_dir)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -365,7 +365,7 @@ def test_a_planted_breaker_file_does_not_trip_a_healthy_system(tmp_path, plant):
 
     rec = VerbRecorder()
     gather = PlantingReplay([_cmdb(1), DONE], at=0, plant=trip)
-    run_dir = materialize(tmp_path / plant, GOLDEN_AB3)
+    run_dir = materialize(tmp_path / plant, GOLDEN_AB3, run_id='k1235-plant')
     holder.append(run_dir)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -410,7 +410,7 @@ def test_a_run_leaves_none_of_the_retired_state_files(tmp_path, monkeypatch, pos
     else:
         monkeypatch.delenv(FLAG, raising=False)
     rec = VerbRecorder()
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='o2-1235')
     main = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo ran-one"})]),
         Turn(tool_calls=[("gather", {

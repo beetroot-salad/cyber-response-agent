@@ -28,6 +28,8 @@ guard by `test_record_lead.py`.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 
 from defender.tests._by_path import DEFENDER, load_module
 
@@ -223,7 +225,7 @@ def test_repeat_note_is_silent_on_a_run_with_no_rows(tmp_path):
 
 
 def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='rq-seq')
     (run_dir / "gather_raw" / LEAD / "0.json").mkdir(parents=True)
 
     rec = VerbRecorder()
@@ -298,7 +300,7 @@ def _bare_run(tmp_path, name: str = "run"):
 def _append(rq, state, *, params, payload=_PAYLOAD, lead=LEAD):
     """One executed row through the production writer, its digest derived from `payload`."""
     return rq.append_query_row(
-        state, lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
+        state, run=fixture_run(state.run_dir), lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
         params=params, raw_command="elastic query", payload_text=payload, exit_code=0,
         payload_status="ok", payload_digest=rq.payload_digest(payload, "", 0), system_key="",
     )

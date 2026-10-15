@@ -42,6 +42,7 @@ from defender._model import model  # noqa: E402
 from defender.learning.core.state import (  # noqa: E402
     FINDINGS,
     QUESTIONER_FINDINGS,
+    Channel,
     LearningState,
     StateRefused,
 )
@@ -571,8 +572,8 @@ class _Pass:
         self.rows: dict[str, dict[str, Any]] = {}
         #: The manifest's planted labels, in order: the order every write lists the rows in.
         self.order: list[str] = []
-        #: The finding ids the questioner queue held when this pass first looked (`_place`).
-        self.questioner_ids: frozenset[str] | None = None
+        #: The finding ids each queue held when this pass first looked (`_place`).
+        self.queued_ids: dict[str, frozenset[str]] = {}
         self.family: dict[str, Any] | None = prior.family if prior is not None else None
         self.ledger: list[dict[str, Any]] = []
         self.user = _empty_user()
@@ -766,8 +767,8 @@ class _Pass:
                user: dict[str, list[dict[str, Any]]]) -> tuple[str, str | None]:
         """Turn one finding's lane into its queue row or its entry on `user` (the world's
         pending user-record lists); return the lane it ends in. A row its channel's rule
-        refuses is `unqueueable`, naming why; so is a design row whose id the questioner queue
-        already holds (A25, below)."""
+        refuses is `unqueueable`, naming why; so is a row whose id its queue already holds
+        (A25, below)."""
         a = item.assessment
         finding = item.finding
         if lane in (route_mod.LANE_DEFENDER, route_mod.LANE_QUESTIONER):
@@ -782,18 +783,18 @@ class _Pass:
             try:
                 if defender:
                     enqueue_mod._validate_row(row, episode_dir=self.episode.dir)
-                    defender_rows.append(row)
                 else:
                     enqueue_mod._validate_world_row(row, episode_dir=self.episode.dir)
-                    if fid in self._questioner_ids():
-                        # A25 (R7): the questioner channel drops a row whose id it holds, and
-                        # this pass's ids are fresh, so the holder is a row a pre-change pass
-                        # queued before it stopped. Named here rather than lost to the dedup.
-                        return route_mod.LANE_UNQUEUEABLE, (
-                            f"the questioner queue already holds a row with id {fid!r} — one a "
-                            "pass before this record queued — so its dedup on finding_id would "
-                            "drop this finding silently; it is recorded here instead")
-                    world_rows.append(row)
+                channel = FINDINGS if defender else QUESTIONER_FINDINGS
+                if fid in self._queued_ids(channel):
+                    # A25: a pre-change pass may have queued this id before it stopped.
+                    # Name the new finding rather than silently losing it to queue dedup.
+                    name = "defender" if defender else "questioner"
+                    return route_mod.LANE_UNQUEUEABLE, (
+                        f"the {name} queue already holds a row with id {fid!r} — one a "
+                        "pass before this record queued — so its dedup on finding_id would "
+                        "drop this finding silently; it is recorded here instead")
+                (defender_rows if defender else world_rows).append(row)
             except JudgeRefused as refused:
                 return route_mod.LANE_UNQUEUEABLE, str(refused)
             return lane, why
@@ -812,20 +813,19 @@ class _Pass:
                 user[SERVING_FINDINGS].append(entry)
         return lane, why
 
-    def _questioner_ids(self) -> frozenset[str]:
-        """The finding ids on the questioner queue, read once per pass: every id this pass
-        mints is its own, so only a row an earlier pass queued can hold one."""
-        if self.questioner_ids is None:
+    def _queued_ids(self, channel: Channel) -> frozenset[str]:
+        """The finding ids on a queue, read once per pass: every id this pass mints is its
+        own, so only a row an earlier pass queued can hold one."""
+        if channel.name not in self.queued_ids:
             try:
-                rows = self.state.rows(QUESTIONER_FINDINGS)
+                rows = self.state.rows(channel)
             except (StateRefused, OSError):
-                # The queue cannot be read, so nothing here can be dropped by its dedup either:
-                # the append that follows meets the same refusal and stops the pass loudly,
-                # with this world's row left `queueing` (A6).
+                # The append meets the same read refusal and stops the pass loudly with
+                # this world's row left `queueing` (A6); no row is silently deduplicated.
                 return frozenset()
-            self.questioner_ids = frozenset(
+            self.queued_ids[channel.name] = frozenset(
                 r["finding_id"] for r in rows if isinstance(r.get("finding_id"), str))
-        return self.questioner_ids
+        return self.queued_ids[channel.name]
 
     def _commit(self, row: dict[str, Any], defender_rows: list[dict[str, Any]],
                 world_rows: list[dict[str, Any]], *,

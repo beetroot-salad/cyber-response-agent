@@ -3,14 +3,13 @@ the declaring `:L findings` row the harness lead must own before it may write an
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
-from defender.run_repository import RunPaths
+from defender.run_repository import Run
 
 _logger = logging.getLogger(__name__)
 
 
-def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> bool:
+def _declare_l_finding(run: Run, lead_id: str, name: str, system: str) -> bool:
     """Write the harness lead's declaring `:L findings` row into `investigation.md` before
     MAIN's first turn; without it, a citation of the reserved id is refused as an undeclared
     lead. True when the row is on disk; False when it could not be written, which the caller
@@ -21,9 +20,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> b
     validation is not written. Never raises."""
     from defender._artifact_schema import validate_artifact
     from defender.run_repository import RUN_LAYOUT
-    from defender._io import read_text_utf8, write_guarded
 
-    path = RunPaths(run_dir).investigation
     block = (
         f"## lead-0 ({lead_id}) — harness-authored, declared before the investigation begins\n\n"
         "```invlang\n"
@@ -33,7 +30,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> b
     )
     try:
         # `None`, not `""`, for an absent file, matching `permission.decide_write`'s baseline.
-        existing = read_text_utf8(path) if path.is_file() else None
+        existing = run.documents.investigation.read()
         proposed = block if existing is None else existing + block
         reason = validate_artifact(RUN_LAYOUT.investigation.name, proposed, existing)
         if reason is not None:
@@ -43,7 +40,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> b
                 f"undeclared: {reason}"
             )
             return False
-        write_guarded(path, proposed)
+        run.documents.investigation.write(proposed)
     except (OSError, ValueError) as e:  # noqa: BLE001 — never breaks the run
         _logger.warning(f"could not declare {lead_id} in investigation.md: {e!r}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
         return False

@@ -315,8 +315,8 @@ class SiblingRecorder:
 
     @property
     def run_dir(self) -> Path | None:
-        rd = self.lifecycle_kwargs.get("run_dir")
-        return Path(rd) if rd is not None else None
+        run = self.lifecycle_kwargs.get("run")
+        return run.run_dir if run is not None else None
 
 
 def drive_run_py(argv: list[str], rec: SiblingRecorder, **override: Any) -> tuple[

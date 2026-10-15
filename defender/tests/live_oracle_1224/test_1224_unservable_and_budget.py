@@ -235,7 +235,7 @@ def _drive(root: Path, est: S.Estate, verbs: Any, turns: list[Any], *,
     `turns`, with `verbs` injected as the run's verb registry. `OracleUnservable` escaping the
     run is kept on `.raised`; any other exception propagates."""
     H = S.replay_harness()
-    run_dir = H.materialize(root / RUN_ID, H.GOLDEN_AB3)
+    run_dir = H.materialize(root / RUN_ID, H.GOLDEN_AB3, run_id=RUN_ID)
     run = _Run(run_dir, _main_fn(system), H.ReplayFn(list(turns)))
     run.carried = S.tap_run_states(verbs)
     try:
@@ -298,7 +298,7 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
     sib = _Sibling(ep)
 
     def lifecycle(**kw: Any) -> Any:
-        run_dir = Path(kw["run_dir"])
+        run_dir = Path(kw["run"].run_dir)
         sib.run = _Run(run_dir, _main_fn(), H.ReplayFn(list(turns)))
         reg = S.world_registry(ep, label, est, oracle=oracle, verifier=verifier,
                                world=kw.get("world"), **knobs)

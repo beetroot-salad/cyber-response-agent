@@ -6,6 +6,9 @@ second failure row.
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_fixture_run_1165
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
 import asyncio
 from dataclasses import replace
 
@@ -25,7 +28,7 @@ def test_a_capped_call_whose_view_write_is_refused_is_recorded_once(tmp_path):
     run_dir = tmp_path / "run"
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "adv3-capped")
-    deps = replace(bind(fixture_gather_def(), run_dir, defender_dir=DEFENDER),
+    deps = replace(_with_fixture_run_1165(bind(fixture_gather_def(), run_dir, defender_dir=DEFENDER), run=_fixture_run_1165(run_dir)),
                    run_state=state, lead_id="l-00c", harness_lead=True)
     outside = tmp_path / "outside.jsonl"
     outside.write_bytes(b"")

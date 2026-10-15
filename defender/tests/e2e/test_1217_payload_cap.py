@@ -10,6 +10,8 @@ stdout never reaches a sidecar and has no test here.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _writer_run_1165
+
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -31,7 +33,7 @@ def test_persist_payload_refuses_a_payload_one_byte_over_the_read_limit(tmp_path
     text = WIDE * (READ_LIMIT // 2) + "x"
     assert len(text) <= READ_LIMIT < len(text.encode("utf-8"))
 
-    rel = record_query.persist_payload(tmp_path, LEAD, 0, text)
+    rel = record_query.persist_payload(_writer_run_1165(tmp_path), LEAD, 0, text)
 
     assert rel is None
     assert not (tmp_path / "gather_raw" / LEAD / "0.json").exists()
@@ -42,7 +44,7 @@ def test_persist_payload_writes_a_payload_of_exactly_the_read_limit_and_it_reads
     text = WIDE * (READ_LIMIT // 2)
     assert len(text.encode("utf-8")) == READ_LIMIT
 
-    rel = record_query.persist_payload(tmp_path, LEAD, 0, text)
+    rel = record_query.persist_payload(_writer_run_1165(tmp_path), LEAD, 0, text)
 
     assert rel is not None
     assert read_bytes_capped(tmp_path / rel) == text.encode("utf-8")

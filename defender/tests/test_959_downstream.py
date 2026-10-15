@@ -14,6 +14,11 @@ attribute.
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
+from defender.tests._spec1077 import fixture_run
+
 import copy
 import dataclasses
 import io
@@ -94,7 +99,7 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
 
     box = Box(result)
     deps = dataclasses.replace(
-        bind(T1106.fixture_gather_def(), run, defender_dir=dfn, box=box), lead_id=lead_id,
+        _with_live_run_1165(bind(T1106.fixture_gather_def(), run, defender_dir=dfn, box=box), run=_live_run_1165(run)), lead_id=lead_id,
         run_state=RunState(run, "r959-downstream"),
     )
     return deps, box, payload
@@ -174,7 +179,7 @@ def test_the_audit_rows_system_attribution_derives_from_the_authorised_operand_s
     deps, _box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"boom"))
     run = deps.run_dir
     record_query.append_query_row(
-        deps.run_state, lead_id="l-1", system="elastic", verb="query", query_id="elastic.q", params={},
+        deps.run_state, run=fixture_run(deps.run_state.run_dir), lead_id="l-1", system="elastic", verb="query", query_id="elastic.q", params={},
         raw_command="seed", payload_text="{}", exit_code=0, payload_status="ok",
         payload_digest="d", system_key="",
     )

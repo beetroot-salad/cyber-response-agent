@@ -40,6 +40,8 @@ No `monkeypatch.setattr` anywhere; `setenv`/`delenv` only.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import contextlib
 import functools
 import json
@@ -450,7 +452,8 @@ def _box_write_run(tmp_path: Path, *, start_box: Callable[..., Any]) -> tuple[_B
     alert = S.alert_bytes(S.generic_alert(message=MARK))
     seen = _BoxSeen()
 
-    def investigate(*, run_dir: Path, box: Any, **_kw: Any) -> dict:
+    def investigate(*, run: Any, box: Any, **_kw: Any) -> dict:
+        run_dir = run.run_dir
         _write_probes(box, Path(run_dir), seen)
         return {}
 
@@ -698,7 +701,7 @@ def test_p148_host_reader_still_addresses_the_former_place(tmp_path):
     real = d.input_bytes
     # The box's leftover: a file named like the alert at its former place, written after setup.
     _former_place(run_dir).write_bytes(DECOY_BYTES)
-    page = S.mod("scripts.visualize.visualize_run").render_page(run_dir)
+    page = S.mod("scripts.visualize.visualize_run").render_page(_run_handle_1165(run_dir))
     assert DECOY not in page, "the run page took the box's file at the former place for the alert"
     assert MARK in page, "the run page no longer shows the run's alert (N8: display unchanged)"
     record = S.mod("run_repository").Run.at(run_dir).record
@@ -777,10 +780,10 @@ def _finished_run(tmp_path: Path) -> S.Drive:
 def _case_run_page(tmp_path: Path) -> None:
     render = S.mod("scripts.visualize.visualize_run").render_page
     d = _finished_run(tmp_path)
-    assert MARK in render(d.run_dir), "the run page does not show the untouched alert"
+    assert MARK in render(_run_handle_1165(d.run_dir)), "the run page does not show the untouched alert"
     _replace_alert(d.folder)
     try:
-        page = render(d.run_dir)
+        page = render(_run_handle_1165(d.run_dir))
     except Exception as e:  # noqa: BLE001 — a refusal is the expected outcome; its text is asserted
         _assert_names_the_run_and_carries_no_byte(_refusal_text(e, None), d.folder, "the run page")
         return
@@ -1059,8 +1062,8 @@ def _start_over(tmp_path: Path, shape: Callable[[Path], None]) -> tuple[Any, Any
     seen: dict[str, Path] = {}
 
     def around(prod: Callable[..., dict], kw: dict) -> dict:
-        seen["run_dir"] = Path(kw["run_dir"])
-        shape(Path(kw["run_dir"]))
+        seen["run_dir"] = Path(kw["run"].run_dir)
+        shape(Path(kw["run"].run_dir))
         return prod(**kw)
 
     try:
@@ -1099,7 +1102,8 @@ def test_p153_box_created_while_the_directory_is_missing_or_no(tmp_path, monkeyp
 
 def _capture_inputs(store: dict[str, Any]) -> Callable[..., dict]:
     """`investigate`: what the input directory holds once the box is up."""
-    def investigate(*, run_dir: Path, **_kw: Any) -> dict:
+    def investigate(*, run: Any, **_kw: Any) -> dict:
+        run_dir = run.run_dir
         store["run_dir"] = Path(run_dir)
         store["alert"] = S.alert_file(run_dir).read_bytes()
         with contextlib.suppress(AssertionError, OSError):
@@ -1179,7 +1183,8 @@ def _gated_run(tmp_path: Path, daemon: Any, caplog: pytest.LogCaptureFixture) ->
     """One production run through the curation enqueue (the learning gate's consumer)."""
     out: dict[str, Any] = {"enqueued": []}
 
-    def investigate(*, run_dir: Path, box: Any, **_kw: Any) -> dict:
+    def investigate(*, run: Any, box: Any, **_kw: Any) -> dict:
+        run_dir = run.run_dir
         out["run_dir"], out["sandboxed"] = Path(run_dir), bool(box.sandboxed)
         return {}
 
@@ -1255,7 +1260,7 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     planted = _tenant()
     src = _branchable_source(tmp_path, planted)
     assert src.run_dir is not None
-    store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir)
+    store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
     ss = SS.store_mod()
     spec = spec_at(store, src.run_dir, ss.path_row_ids(store, ss.main_session_id(store))[2],
                    prompt="Continue this investigation from where it stands.")
@@ -1302,7 +1307,8 @@ def test_p152_host_replaces_a_file_inside_the_directory_mid_ru(tmp_path, monkeyp
             pytest.skip("the 'runc' runtime is not registered with this daemon")
         seen: dict[str, Any] = {}
 
-        def investigate(*, run_dir: Path, box: Any, **_kw: Any) -> dict:
+        def investigate(*, run: Any, box: Any, **_kw: Any) -> dict:
+            run_dir = run.run_dir
             alert = S.alert_file(run_dir)
             _replace_alert(Path(run_dir), replaced)
             seen["box_sees"] = _exec(box, Path(run_dir), "cat", str(alert)).stdout

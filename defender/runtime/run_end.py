@@ -27,8 +27,7 @@ from defender._model import model
 from pathlib import Path
 from typing import Any
 
-from defender._io import write_guarded
-from defender.run_repository import RunPaths
+from defender.run_repository import Run, RunPaths
 
 TRUNCATED_BY_REQUEST_LIMIT = "request-limit"
 TRUNCATED_BY_RETRY_EXHAUSTED = "retry-exhausted"
@@ -63,8 +62,8 @@ class CallRecordWriteFailed(Exception):  # noqa: N818 — named for what it repo
 
     `record` is the record whose write failed — `TRUNCATED_BY_SERVED_LEDGER` or
     `TRUNCATED_BY_EXECUTED_QUERIES` — and is the exit class the driver stamps. Raised by the
-    record's own writer (`Ledger.record`, `record_query.append_query_row`), never swallowed on
-    the way up: a call whose record is missing would read as never made, or as unserved."""
+    served-ledger writer (`Ledger.record`), never swallowed on the way up. Query-row writers
+    retain their OSError after recording the call in memory (#1235); they do not stamp a cut."""
 
     def __init__(self, record: str, detail: str) -> None:
         if record not in CALL_RECORDS:
@@ -106,12 +105,12 @@ def sidecar_path(run_dir: Path) -> Path:
     return RunPaths(run_dir).run_end_sidecar()
 
 
-def write_sidecar(run_dir: Path, record: RunEnd) -> None:
+def write_sidecar(run: Run, record: RunEnd) -> None:
     """Write the sidecar beside `run_dir`. Written for every run reaching the agent loop,
     clean ones included, so "not cut short" differs from "the host never said". Atomically
     replaces a stale sidecar.
     """
-    write_guarded(sidecar_path(run_dir), json.dumps(record.doc()))
+    run.facts.run_end.write(json.dumps(record.doc()))
 
 
 def parse_record(doc: object) -> RunEnd | None:

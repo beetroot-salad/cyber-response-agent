@@ -16,6 +16,9 @@ and the retirement itself is recorded in the graph rather than dropped from it.
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
 import ast
 import json
 from pathlib import Path
@@ -86,7 +89,7 @@ def _main_deps(tmp_path: Path):
     (run_dir / "alert.json").write_bytes((GOLDEN / "alert.json").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
+    return _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir)), run_dir
 
 
 def test_797_no_review_role_survives_the_retirement():

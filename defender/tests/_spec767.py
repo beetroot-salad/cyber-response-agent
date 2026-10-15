@@ -36,6 +36,8 @@ classifies nothing and decides no policy.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -312,7 +314,7 @@ def write_report(
     return path
 
 
-def make_run(tmp_path: Path, name: str = "20260917T000000Z-sshd", *, alert: Any = None,
+def make_run(tmp_path: Path, name: str = "20260917t000000z-sshd", *, alert: Any = None,
              **report_kw: Any) -> Path:
     """A run dir carrying the two files the writer reads: `report.md` and `alert.json`."""
     run_dir = tmp_path / name
@@ -515,7 +517,7 @@ def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | o
         "D2 renames `close_case_ticket` to `record_case_ticket`: one POST "
         "/tickets/{key}/comments, no transition",
     )
-    return fn(run_dir, writer_deps(store), **_handed(run_dir, config), **kw)
+    return fn(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config), **kw)
 
 
 def open_ticket(
@@ -523,7 +525,7 @@ def open_ticket(
 ) -> Any:
     from defender.scripts.case_history import ticket_writer
 
-    return ticket_writer.open_case_ticket(run_dir, writer_deps(store), **_handed(run_dir, config))
+    return ticket_writer.open_case_ticket(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config))
 
 
 def receipt_path(run_dir: Path) -> Path:
@@ -577,7 +579,7 @@ def listing(*tickets: dict[str, Any], source: str = "ticket-store") -> dict[str,
     return {"total": len(tickets), "tickets": list(tickets), "source": source}
 
 
-SELF_KEY = "20260917T000000Z-the-current-case"
+SELF_KEY = "20260917t000000z-the-current-case"
 OTHER_KEY = "20260101T000000Z-a-prior-case"
 
 

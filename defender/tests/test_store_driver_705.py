@@ -26,6 +26,8 @@ the run loop (G14/F7) and `truncated_by` is written only inside `except BudgetKi
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 from pathlib import Path
 
@@ -124,7 +126,7 @@ def test_run_investigation_takes_a_store_factory_seam(tmp_path):
     store is missing", one third of O19's stated domain, while reading as covered. The
     fake records what it received, so the outbound channel is pinned and not merely the
     return value (rules.md R1)."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='seam')
     opened: list = []
     factory = store_factory(tmp_path, sink=opened)
     handles: list = []
@@ -165,7 +167,7 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
     case link, which is host state beside the folder — the copiers it cited are gone or never
     open a store.)"""
     ss = store_mod()
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='pointer')
     result = drive(run_dir, run_id="pointer",
                    main=ReplayFn([Turn(text="done")]),
                    store_factory=store_factory(tmp_path))
@@ -179,7 +181,7 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
     assert not (run_dir / "session_store_pointer.json").exists(), (
         "the case pointer is still written inside the box-writable run dir")
 
-    resolved = ss.resolve_store_path(run_dir)
+    resolved = ss.resolve_store_path(_run_handle_1165(run_dir))
     assert Path(resolved) == Path(body["store_path"]) == Path(result["store_path"])
 
 
@@ -194,7 +196,7 @@ def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
     The enumeration is how the subjects are picked, not what is asserted: each agent is
     DRIVEN and the store's rows are the observed effect (C11: one build site,
     `capabilities = [hooks, *extra_capabilities]`)."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='seam-attach')
     opened: list = []
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -232,7 +234,7 @@ def test_node_iteration_and_node_hooks_are_untouched(tmp_path):
     assert "async for node in run" in source, (
         "the bare node iteration is the shape the store's seam is chosen to survive")
 
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='no-hooks')
     opened: list = []
     drive(run_dir, run_id="no-hooks",
           main=ReplayFn([Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})]),
@@ -257,9 +259,9 @@ def test_capability_is_unconditional_with_DEFENDER_COMPACTION_unset(tmp_path, mo
     else:
         monkeypatch.setenv("DEFENDER_COMPACTION", flag)
 
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id=f"flag-{str(flag).lower()}")
     opened: list = []
-    drive(run_dir, run_id=f"flag-{flag}",
+    drive(run_dir, run_id=f"flag-{str(flag).lower()}",
           main=ReplayFn(_read_alert_turns(run_dir, 3) + [Turn(text="done")]),
           store_factory=store_factory(tmp_path, sink=opened))
 
@@ -304,7 +306,7 @@ def test_main_history_is_store_rendered(tmp_path):
     not the list the framework accumulated: the messages the model is handed on turn N are
     exactly what the reader returns for `(session, role="send")` at that point."""
     ss = store_mod()
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='store-render')
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 2) + [Turn(text="done")])
     drive(run_dir, run_id="store-render", main=replay,
@@ -336,7 +338,7 @@ def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tm
     "fold off" and "render off" are two parameters, and gather takes both off, so the
     sentence cannot be re-collapsed at implementation time. O21 is a pinned non-obligation
     and wins over the convenience reading of "the same capability"."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='gather-render')
     opened: list = []
     main = ReplayFn([
         Turn(text=MAIN_ONLY_MARKER,
@@ -409,7 +411,7 @@ def test_store_append_is_fail_closed(tmp_path, mode):
     phase-C consensus premise (`test_disk_fills_partway_through_a_fail_closed_append`)
     that had no demand, no promotion and no drop, over a domain that silently never
     included it; `rp-c1` (EXECUTED) is the claim its fault content rests on."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id=f"fail-{mode}")
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
     factory = store_factory(tmp_path, fault=StoreFault(on="append", after=2, mode=mode),
@@ -438,7 +440,7 @@ def test_store_append_failure_stops_the_run_through_a_handled_exit(tmp_path):
     therefore exists today only as an uncaught crash: deleting the catch-all (M5) is not
     sufficient — the driver needs a new except arm, or the store must raise a type already
     caught, for fail-closed to be OBSERVED BEHAVIOUR rather than an accident."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='handled')
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
 
@@ -464,7 +466,7 @@ def test_a_swallowed_store_error_never_sends_an_unrecorded_list(tmp_path):
     Positive control: `test_store_append_is_fail_closed`. This is
     `_make_compaction_processor`'s catch-all (`driver.py:311-317`, C12: `except Exception:
     print('compaction skipped'); return messages`) pinned as ABSENT."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='no-swallow')
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 8) + [Turn(text="done")])
     drive(run_dir, run_id="no-swallow", main=replay,
@@ -497,7 +499,7 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
     is text-only and ENDS the agent loop" — so a text-only first response would end the
     run after one call regardless of whether the log-side fault stopped anything,
     collapsing the very distinction this test exists to make."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='log-guard')
     opened: list = []
 
     class SurrogateModel:
@@ -545,7 +547,7 @@ def request_limit_run(tmp_path_factory):
     `e2e/test_replay_error_paths.py::test_request_limit_writes_partial_trace`'s to drive. The
     model's call count shows the injected ceiling, not the shipped one, is what ended it."""
     base = tmp_path_factory.mktemp("request-limit")
-    rd = materialize(base, GOLDEN_AB3)
+    rd = materialize(base, GOLDEN_AB3, run_id='flush-limit')
     opened: list = []
     bounds = challenge_gate.Bounds(base_request_limit=_SHORT_BASE_REQUEST_LIMIT)
     model = NeverEndsModel(rd)
@@ -579,7 +581,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
     exits["UsageLimitExceeded"] = (request_limit_run[1], "request-limit")
 
     # (2) BudgetKill — a real cap trip
-    rd = materialize(tmp_path / "budget", GOLDEN)
+    rd = materialize(tmp_path / "budget", GOLDEN, run_id="flush-budget")
     opened = []
     monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", "1")
     drive(rd, run_id="flush-budget",
@@ -589,7 +591,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
     exits["BudgetKill"] = (opened[0], "budget")
 
     # (3) RunAborted — the run-wide circuit breaker, raised deep inside a nested gather
-    rd = materialize(tmp_path / "abort", GOLDEN_AB3)
+    rd = materialize(tmp_path / "abort", GOLDEN_AB3, run_id="flush-abort")
     opened = []
     systems = ("elastic", "identity", "cmdb", "ticket", "host-state")
     assert len(systems) == circuit_breaker.RUN_FAIL_KILL_LIMIT
@@ -605,7 +607,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
     exits["RunAborted"] = (opened[0], "aborted")
 
     # (4) an uncaught type — the case a per-except-arm flush loses entirely
-    rd = materialize(tmp_path / "uncaught", GOLDEN)
+    rd = materialize(tmp_path / "uncaught", GOLDEN, run_id="flush-uncaught")
     opened = []
 
     def _exploding_gather(messages, info) -> ModelResponse:
@@ -692,7 +694,7 @@ def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
     the boundary advances every round, so every round would mint a fresh frontier and
     orphan the turns before it."""
     monkeypatch.setenv("DEFENDER_COMPACTION", "1")
-    rd = materialize(tmp_path, GOLDEN)
+    rd = materialize(tmp_path, GOLDEN, run_id='minted')
     (rd / "investigation.md").write_text(CLOSED_LOOP_INVLANG, encoding="utf-8")
     opened: list = []
     drive(rd, run_id="minted",
@@ -721,7 +723,7 @@ def test_the_wire_log_is_still_written_and_still_human_readable(tmp_path):
     Positive control for `test_projections_are_built_from_the_store_not_from_logger_messages`
     — O27 keeps the log for a human debugging a run, and `DEFENDER_LLM_LOG_MAX_CHARS`
     trimming stays legal once nothing forks from it."""
-    rd = materialize(tmp_path, GOLDEN)
+    rd = materialize(tmp_path, GOLDEN, run_id='log-alive')
     replay = ReplayFn(_read_alert_turns(rd, 2) + [Turn(text="done")])
     drive(rd, run_id="log-alive", main=replay,
           store_factory=store_factory(tmp_path))

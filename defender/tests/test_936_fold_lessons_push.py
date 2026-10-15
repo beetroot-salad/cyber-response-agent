@@ -135,7 +135,7 @@ def _fold_run(tmp_path: Path, monkeypatch, *, tree: Path,
     """One driven run under compaction on a document that folds on its first render.
     `turns` is called with the materialized run dir so a script can name its own alert."""
     monkeypatch.setenv("DEFENDER_COMPACTION", "1")
-    rd = materialize(tmp_path, GOLDEN)
+    rd = materialize(tmp_path, GOLDEN, run_id='fold-936')
     (rd / "investigation.md").write_text(doc, encoding="utf-8")
     opened: list = []
     replay = ReplayFn(turns(rd))

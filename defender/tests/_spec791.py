@@ -343,9 +343,10 @@ class SpecTail:
         self.ticket_tenants: list[Any] = []
 
     # the seam's three dependencies
-    def lifecycle(self, *, run_dir: Path, **_kw: Any) -> dict:
+    def lifecycle(self, *, run: Any, **_kw: Any) -> dict:
         from defender.runtime import scrub as scrub_mod
 
+        run_dir = run.run_dir
         self.run_dirs.append(run_dir)
         populate_run_dir(run_dir, disposition=self._disposition, leads=self._leads)
         if self._certify:
@@ -361,12 +362,12 @@ class SpecTail:
         self.visualized.append(run)
         self._note("visualize", run.run_dir)
 
-    def open_case_ticket(self, run_dir: Path, *, tenant: Any, defender_dir: Path,
+    def open_case_ticket(self, run: Any, *, tenant: Any, defender_dir: Path,
                          env: Any) -> None:
         self.ticket_tenants.append(tenant)
-        self._note("open_case_ticket", run_dir)
+        self._note("open_case_ticket", run.run_dir)
 
-    def record_case_ticket(self, run_dir: Path, *, tenant: Any, defender_dir: Path, env: Any,
+    def record_case_ticket(self, run: Any, *, tenant: Any, defender_dir: Path, env: Any,
                            **kw: Any) -> None:
         self.ticket_tenants.append(tenant)
         # `**kw` absorbs #1047's `truncated_by=`/`closed_before_cut=` kwargs — this fake
@@ -376,7 +377,7 @@ class SpecTail:
         # it — but it DOES record what it was called with, in `record_calls`, because whether
         # the tail passes these through at all is a question only this seam can answer.
         self.record_calls.append(kw)
-        self._note("record_case_ticket", run_dir)
+        self._note("record_case_ticket", run.run_dir)
 
     # what the steps saw
     def _note(self, name: str, run_dir: Path) -> None:

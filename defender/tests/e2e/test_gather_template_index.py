@@ -81,7 +81,7 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
     from defender.tests.e2e._replay_harness import FakeVerbs
 
     run_id = "tmpl-index"
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     report_md = ("---\ncase_id: tmpl-index\ndisposition: benign\n"
                  "confidence: low\n---\nSynthetic template-index test.\n")
 
@@ -157,7 +157,7 @@ def test_835_the_composition_root_keys_each_gather_lane_on_its_dispatched_system
     lead on a different one. The negative half is what makes it a test of the key rather than of
     any constant — a `cache_key` that stopped varying with the system would pass the first
     assertion and fail the second; one that kept varying with the LEAD fails the first."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='cache-lane')
     report_md = ("---\ncase_id: cache-lane\ndisposition: benign\n"
                  "confidence: low\n---\nSynthetic cache-lane test.\n")
 

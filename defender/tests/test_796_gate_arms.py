@@ -7,6 +7,11 @@ which a review role is shown — so these are the arms that live entirely on the
 
 from __future__ import annotations
 
+from dataclasses import replace as _with_live_run_1165
+from defender.tests._spec1077 import fixture_run as _live_run_1165
+
+from defender.tests._spec1077 import fixture_run
+
 import asyncio
 import json
 from pathlib import Path
@@ -50,7 +55,7 @@ def _deps(tmp_path: Path):
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
-    return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
+    return _with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_live_run_1165(run_dir)), run_dir
 
 
 def _run(deps, bundle, *, disposition="malicious", bounds=None):
@@ -381,7 +386,7 @@ def test_no_stage_reply_stands_as_a_trace_row_whatever_shape_it_arrives_in(tmp_p
     either way. A reader that loosened its rule alone would fail this from its own side."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    challenge_gate._write_trace_row(run_dir, "composer", 0, {"ok": True}, raw_reply=reply)
+    challenge_gate._write_trace_row(fixture_run(run_dir), "composer", 0, {"ok": True}, raw_reply=reply)
 
     path = RunPaths(run_dir).review_trace("composer")
     rows = read_jsonl_rows(path)
@@ -413,7 +418,7 @@ def test_the_writer_and_the_reader_agree_about_a_nested_reply_from_any_stack_dep
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     from_a_deep_stack(
-        lambda: challenge_gate._write_trace_row(run_dir, "composer", 0, {"ok": True},
+        lambda: challenge_gate._write_trace_row(fixture_run(run_dir), "composer", 0, {"ok": True},
                                                 raw_reply=reply))
     rows = read_jsonl_rows(RunPaths(run_dir).review_trace("composer"))
     assert len(rows) == 1, f"a stage's reply was counted as a trace row of its own: {len(rows)}"

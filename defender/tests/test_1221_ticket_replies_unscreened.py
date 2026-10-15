@@ -48,7 +48,7 @@ from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
 #: The run's own id — and so the key of the case it is investigating (the lab's case key is
 #: the run id).
-OWN = "20261008T120000Z-1221-own-case"
+OWN = "20261008t120000z-1221-own-case"
 OPEN_KEY = "SOC-OPEN-1221"
 #: Comment text distinctive enough that its presence in the model's view is unambiguous.
 OWN_NOTE = "OWN-CASE-ENRICHMENT-1221: the customer's own note on the alerted host"
@@ -145,7 +145,7 @@ def test_1221_get_ticket_on_the_runs_own_key_is_served(tmp_path, key, note):
         rec.record("get-ticket", ctx, {"key": key})
         return copy.deepcopy(case)
 
-    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id=OWN)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "ticket",
                                      "goal": "read the case's own ticket",

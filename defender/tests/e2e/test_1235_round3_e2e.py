@@ -97,7 +97,7 @@ def test_a_failing_query_whose_view_write_is_refused_ends_the_run_holding_its_ro
     Observed failing by: round 2's ordering (the row recorded and the breaker charged only after
     the line was written), under which this run ends holding one row and no charge — the failed
     call invisible to every live decision."""
-    run_dir = materialize(tmp_path / "planted", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "planted", GOLDEN_AB3, run_id='r3-view-refused')
     outside = tmp_path / "outside.jsonl"
     outside.write_bytes(b"")
     cmdb = _Cmdb(run_dir, outside)
@@ -114,7 +114,7 @@ def test_a_failing_query_whose_view_write_is_refused_ends_the_run_holding_its_ro
         "the failed call whose view write was refused was not charged to its system"
     assert outside.read_bytes() == b"", "the append followed the box's planted link"
 
-    clean_dir = materialize(tmp_path / "clean", GOLDEN_AB3)
+    clean_dir = materialize(tmp_path / "clean", GOLDEN_AB3, run_id='r3-view-clean')
     clean = _Cmdb(clean_dir, outside)
     summary = drive(clean_dir, run_id="r3-view-clean", main=_main(),
                     gather=_lead("up", "steady", "after"), verbs=clean.verbs())
@@ -138,7 +138,7 @@ def test_the_production_summary_carries_no_run_state_on_either_exit(tmp_path):
 
     Positive control: the injected state is the one the run used — it holds the lead's row and
     the run's counted calls."""
-    run_dir = materialize(tmp_path / "done", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "done", GOLDEN_AB3, run_id='r3-summary')
     cmdb = _Cmdb(run_dir, tmp_path / "unused")
     mine = RunState(run_dir, "r3-summary")
     summary = driver_summary(run_dir, run_id="r3-summary", main=_main(), gather=_lead("up"),
@@ -149,7 +149,7 @@ def test_the_production_summary_carries_no_run_state_on_either_exit(tmp_path):
         "the injected state is not the one the run recorded into"
     assert mine.budget_snapshot()["tool_calls"] >= 2, "the run did not count on the injected state"
 
-    store_dir = materialize(tmp_path / "store", GOLDEN_AB3)
+    store_dir = materialize(tmp_path / "store", GOLDEN_AB3, run_id='r3-store')
     cut = driver_summary(store_dir, run_id="r3-store", main=ReplayFn([Turn(text="done")]),
                          store_factory=_store_down, run_state=RunState(store_dir, "r3-store"))
     assert cut["truncated_by"] == session_store.TRUNCATED_BY_STORE, cut
@@ -164,7 +164,7 @@ def test_a_run_handed_no_state_resolves_its_own_at_the_boundary(tmp_path):
 
     Positive control: the resolved state is the run's live one — it holds the lead's row and the
     run's counted calls."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='r3-own-state')
     carried: list = []
 
     def probe(ctx, *, native_query: str = "FROM hosts") -> list[dict]:
@@ -195,7 +195,7 @@ def test_an_injected_state_for_another_run_is_refused_before_the_run_starts(tmp_
 
     Positive control: the same run handed its own state completes (the summary test above), and
     here the drive with a matching state on a fresh folder does too."""
-    run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
+    run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='r3-mismatch')
     elsewhere = tmp_path / "elsewhere" / run_dir.name
     elsewhere.mkdir(parents=True)
     stranger = (RunState(elsewhere, "r3-mismatch") if other == "folder"
@@ -207,7 +207,7 @@ def test_an_injected_state_for_another_run_is_refused_before_the_run_starts(tmp_
     assert stranger.budget_snapshot()["tool_calls"] == 0, "the stranger's state was counted on"
     assert stranger.breaker_snapshot() == {"systems": {}, "total_failures": 0}
 
-    ok_dir = materialize(tmp_path / "ok", GOLDEN_AB3)
+    ok_dir = materialize(tmp_path / "ok", GOLDEN_AB3, run_id='r3-own')
     own = RunState(ok_dir, "r3-own")
     ok = driver_summary(ok_dir, run_id="r3-own", main=ReplayFn([Turn(text="done")]),
                         run_state=own)

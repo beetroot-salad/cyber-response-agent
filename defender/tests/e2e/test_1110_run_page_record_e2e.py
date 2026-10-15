@@ -57,6 +57,8 @@ does not have them yet.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import dataclasses
 import errno
 import json
@@ -324,7 +326,7 @@ def test_1110_o1_the_post_run_step_saves_the_page_through_the_runs_tenant_bound_
     assert record == RunPaths(run_dir).runtime_html, "precondition: the record's address"
 
     listing = sorted(p.name for p in run_dir.iterdir())
-    page = vr.render_page(run_dir)
+    page = vr.render_page(_run_handle_1165(run_dir))
     assert MARKER in page, "render_page did not generate this run's page"
     assert sorted(p.name for p in run_dir.iterdir()) == listing, (
         "render_page wrote into the run dir — generation must write nothing (M1)")
@@ -355,7 +357,8 @@ class _ReplayLifecycle:
         self.after = after
         self.run_dirs: list[Path] = []
 
-    def __call__(self, *, run_dir: Path, **_kw: Any) -> dict:
+    def __call__(self, *, run: Any, **_kw: Any) -> dict:
+        run_dir = run.run_dir
         self.run_dirs.append(run_dir)
         drive(run_dir, run_id=run_dir.name, main=golden_replay(run_dir))
         if self.crash_row is not None:
@@ -428,7 +431,7 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
     assert write.mode == "replace"
     page = _text(write.text)
     assert MARKER in page, "the record written is not this run's page"
-    assert page == _renderer().render_page(run.run_dir)
+    assert page == _renderer().render_page(_run_handle_1165(run.run_dir))
     assert record.read_text(encoding="utf-8") == page
 
 
@@ -442,7 +445,7 @@ def _records_of(run) -> Callable[[Path], bool]:
     its session store — the store's transient `-wal`/`-shm` included."""
     from defender.runtime import session_store
 
-    store = session_store.resolve_store_path(run.run_dir)
+    store = session_store.resolve_store_path(_run_handle_1165(run.run_dir))
     # #1235: the accounting-failures sidecar retired (no `run.facts.accounting` member), and
     # the case pointer is a runs-base sidecar now, not a file in the run dir.
     exact = {run.facts.run_end.path, run.facts.scrub_verdict.path,
@@ -704,7 +707,7 @@ def test_1110_m2_the_dev_copy_is_the_in_memory_page_not_the_record_read_back(
     other = "<!doctype html><title>ANOTHER DRIVER'S PAGE</title>\n"
     io = _RecordReplacedAfterWriteIo(record, other)
     run = tenant_run(run_dir, io=io)
-    page = vr.render_page(run_dir)
+    page = vr.render_page(_run_handle_1165(run_dir))
 
     run_common.visualize(run)
 
@@ -962,7 +965,7 @@ def test_1110_o2_s1_a_production_re_render_writes_nothing_to_the_temp_dir_or_hom
     assert report["code"] == 0, f"the re-render did not exit 0: {report!r} {child.stderr[-800:]!r}"
     page = record.read_text(encoding="utf-8")
     assert MARKER in page
-    assert page == _renderer().render_page(run_dir)
+    assert page == _renderer().render_page(_run_handle_1165(run_dir))
     assert sorted(temp.rglob("*")) == [], "a production render wrote into the system temp dir"
     assert sorted(home.rglob("*")) == [], "a production render wrote into the home directory"
     assert sorted(run_visualizations_dir.iterdir()) == [], "a production re-render made a copy"
@@ -1125,7 +1128,7 @@ def test_1110_publish_page_saves_the_record_and_answers_what_the_copy_did(
 
     answer = vr.publish_page(run)
 
-    page = vr.render_page(run_dir)
+    page = vr.render_page(_run_handle_1165(run_dir))
     (write,) = io.writes_to(record)
     assert write.mode == "replace", f"not a whole-document replace: {write.bound()!r}"
     assert _text(write.text) == page, "the handle was handed something other than the page"
@@ -1293,7 +1296,7 @@ def test_1110_a_dev_re_render_whose_copy_failed_exits_1_with_the_record_written(
 
     assert child.returncode == 1, (
         f"a dev re-render whose copy failed exited {child.returncode}: {child.stderr[-800:]!r}")
-    assert record.read_text(encoding="utf-8") == _renderer().render_page(run_dir)
+    assert record.read_text(encoding="utf-8") == _renderer().render_page(_run_handle_1165(run_dir))
     warnings = [line for line in _json_lines(child.stderr) if line.get("severity") == "WARNING"]
     assert len(warnings) == 1, f"expected one WARNING line for the failed copy: {child.stderr!r}"
     (warning,) = warnings

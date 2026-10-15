@@ -30,6 +30,8 @@ The readers split three ways, and the split is what each case asserts:
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import re
 from pathlib import Path
 
@@ -176,7 +178,7 @@ def _ticket_lane_reads_the_committed_verdict(tmp_path: Path) -> None:
     from defender.runtime import case_ticket
 
     run_dir = finished_run(tmp_path, disposition=MEMBER)
-    assert case_ticket.read_case_record(run_dir, mapping=fixture_run_tenant().ticket_mapping).disposition == MEMBER
+    assert case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=fixture_run_tenant().ticket_mapping).disposition == MEMBER
 
 
 def _episode_verdicts_reads_the_archived_headline(tmp_path: Path) -> None:
@@ -231,7 +233,7 @@ def _the_review_record_has_no_consumer_outside_the_runtime_view(tmp_path: Path) 
     assert read_report(run_dir / "report.md").disposition == MEMBER
     assert normalize_disposition(run_dir / "report.md") == MEMBER
     assert predicted_disposition(run_dir) == MEMBER
-    assert case_ticket.read_case_record(run_dir, mapping=fixture_run_tenant().ticket_mapping).disposition == MEMBER
+    assert case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=fixture_run_tenant().ticket_mapping).disposition == MEMBER
 
 
 # --- the three surfaces newly pulled into scope ----------------------------------------------
@@ -403,7 +405,7 @@ def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
         "report_reader": call(lambda: read_report(report).disposition),
         "learning_validate": call(lambda: normalize_disposition(report)),
         "held_out": call(lambda: predicted_disposition(run_dir)),
-        "ticket_lane": call(lambda: case_ticket.read_case_record(run_dir, mapping=fixture_run_tenant().ticket_mapping).disposition),
+        "ticket_lane": call(lambda: case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=fixture_run_tenant().ticket_mapping).disposition),
         "trace_lesson": call(lambda: _report_disposition(run_dir)),
     }
 

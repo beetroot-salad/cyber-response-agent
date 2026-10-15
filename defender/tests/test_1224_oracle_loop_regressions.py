@@ -34,6 +34,10 @@ id collides only with a real identifier.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import ast
 import os
 import re
@@ -1647,13 +1651,13 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
     post = S.post_branch_call()
     _base, src = S.source_run(tmp_path, est, calls=[*S.default_calls(), post])
     expected = {request_key(c.system, c.verb, c.params) for c in S.default_calls()}
-    assert prebranch_calls(src, S.BRANCH_MESSAGE_ID) == expected
+    assert prebranch_calls(_run_handle_1165(src), S.BRANCH_MESSAGE_ID) == expected
 
     ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)))
     seen: dict = {}
     from defender._episode_handle import Episode
     run._drive_investigation(
-        alert_path=src / "alert.json", run_dir=tmp_path / "sib", run_id="sib",
+        alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / 'sib'),
         defender_dir=est.defender_dir, model_name="m", model_override=None, box=None,
         tenant=est.run_tenant(), world=S.load_world(ep, "b"), episode=Episode.open(ep),
         serving=S.serving(), source=S.T.open_source(src),

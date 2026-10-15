@@ -32,6 +32,10 @@ silently skipped artifact is a sibling running without the evidence its prefix n
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
+from defender.tests._spec1077 import fixture_run
+
 import json
 import shutil
 from pathlib import Path
@@ -183,7 +187,7 @@ def resume(store, run_dir, message_id, target: Path):
 
     branch = branch_mod()
     return branch.open_main_session(store, spec_at(store, run_dir, message_id),
-                                    RunState(target, target.name))
+                                    RunState(target, target.name), run=fixture_run(target), source_run=fixture_run(run_dir))
 
 
 # 1. which leads existed at the branch point
@@ -203,7 +207,7 @@ def test_a_lead_counts_from_the_turn_its_dispatch_returned(tmp_path, landed, exp
     landed is not in the history the sibling is handed."""
     store, run_dir, session_id, returns = gathering_source(tmp_path)
 
-    assert branch_mod().leads_at(store, session_id, returns[landed], run_dir) == expected
+    assert branch_mod().leads_at(store, session_id, returns[landed], run_dir, source_run=_run_handle_1165(run_dir)) == expected
 
 
 def test_a_dispatch_still_in_flight_at_the_branch_claims_nothing(tmp_path):
@@ -218,7 +222,7 @@ def test_a_dispatch_still_in_flight_at_the_branch_claims_nothing(tmp_path):
     path = ss.path_row_ids(store, session_id)
     call_row = path[path.index(returns[1]) - 1]
 
-    assert branch_mod().leads_at(store, session_id, call_row, run_dir) == {
+    assert branch_mod().leads_at(store, session_id, call_row, run_dir, source_run=_run_handle_1165(run_dir)) == {
         UNDISPATCHED, "l-001"}
 
 
@@ -245,9 +249,9 @@ def test_a_lead_dispatched_but_never_answered_is_never_inherited(tmp_path):
     evidence(run_dir, [(UNDISPATCHED, 0), ("l-001", 0), ("l-002", 0), ("l-003", 0)])
     leads_at = branch_mod().leads_at
 
-    assert leads_at(store, session_id, first, run_dir) == {UNDISPATCHED, "l-001"}
-    assert leads_at(store, session_id, second, run_dir) == {UNDISPATCHED, "l-001", "l-002"}
-    assert leads_at(store, session_id, unanswered, run_dir) == {UNDISPATCHED, "l-001", "l-002"}, (
+    assert leads_at(store, session_id, first, run_dir, source_run=_run_handle_1165(run_dir)) == {UNDISPATCHED, "l-001"}
+    assert leads_at(store, session_id, second, run_dir, source_run=_run_handle_1165(run_dir)) == {UNDISPATCHED, "l-001", "l-002"}
+    assert leads_at(store, session_id, unanswered, run_dir, source_run=_run_handle_1165(run_dir)) == {UNDISPATCHED, "l-001", "l-002"}, (
         "the never-answered lead was inherited — its dispatch left no trace in the subtrahend, "
         "so it read as evidence lead-0 had written before the model's first turn")
 
@@ -266,7 +270,7 @@ def test_a_lead_no_dispatch_accounts_for_survives_every_branch_point(tmp_path):
     every arm written with them and silently drops the next one lead-0 mints."""
     store, run_dir, session_id, returns = gathering_source(tmp_path)
 
-    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir) for at in returns]
+    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir, source_run=_run_handle_1165(run_dir)) for at in returns]
 
     assert all(UNDISPATCHED in leads for leads in everywhere), (
         f"the undispatched lead was dropped at some branch point: {everywhere}")
@@ -292,7 +296,7 @@ def test_a_lead_named_only_by_a_table_row_still_crosses(tmp_path):
     store, run_dir, session_id, returns = gathering_source(tmp_path)
     target = sibling_dir(tmp_path)
 
-    assert tabled not in branch_mod().leads_at(store, session_id, returns[0], run_dir), (
+    assert tabled not in branch_mod().leads_at(store, session_id, returns[0], run_dir, source_run=_run_handle_1165(run_dir)), (
         "the fixture's lead is already known through an artifact, so this arm would pass "
         "against a census that never reads the queries table")
     with RunPaths(run_dir).executed_queries.open("a", encoding="utf-8") as fh:
@@ -302,7 +306,7 @@ def test_a_lead_named_only_by_a_table_row_still_crosses(tmp_path):
             "payload_path": None, "exit_code": 0, "payload_status": "ok",
         }) + "\n")
 
-    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir) for at in returns]
+    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir, source_run=_run_handle_1165(run_dir)) for at in returns]
     assert all(tabled in leads for leads in everywhere), (
         f"a lead named only by its table row is invisible to the lead census ({everywhere}) — "
         "the sibling's inherited table loses a call its own prefix made")
@@ -332,7 +336,7 @@ def test_a_lead_claimed_without_a_captured_row_still_crosses(tmp_path):
         json.dumps({"lead_id": claimed}), encoding="utf-8")
     target = sibling_dir(tmp_path)
 
-    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir) for at in returns]
+    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir, source_run=_run_handle_1165(run_dir)) for at in returns]
     assert all(claimed in leads for leads in everywhere), (
         f"a lead with a claim and no captured row is invisible to the lead universe ({everywhere})"
         " — the sibling inherits no claim for it and may re-dispatch an id its own prefix spent")
@@ -368,12 +372,12 @@ def test_a_lead_known_only_by_its_summary_still_crosses(tmp_path):
     summary = run_dir / "gather_summaries" / f"{summarized}.md"
     target = sibling_dir(tmp_path)
 
-    assert summarized not in branch_mod().leads_at(store, session_id, returns[0], run_dir), (
+    assert summarized not in branch_mod().leads_at(store, session_id, returns[0], run_dir, source_run=_run_handle_1165(run_dir)), (
         "the fixture's lead is already known through the table or `gather_raw/`, so this arm "
         "would pass against a census that never reads the summaries")
     summary.write_text(f"# {summarized}\nwhat this lead measured\n", encoding="utf-8")
 
-    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir) for at in returns]
+    everywhere = [branch_mod().leads_at(store, session_id, at, run_dir, source_run=_run_handle_1165(run_dir)) for at in returns]
     assert all(summarized in leads for leads in everywhere), (
         f"a lead named only by its summary is invisible to the lead census ({everywhere}) — its "
         "summary is left behind, and with no claim sidecar nothing stops the sibling re-using "
@@ -407,7 +411,7 @@ def test_a_refusal_clears_the_claim_before_any_later_return_can_pop_it(tmp_path)
     # and must be inherited.
     evidence(run_dir, [(UNDISPATCHED, 0)])
 
-    assert branch_mod().leads_at(store, session_id, orphan, run_dir) == {UNDISPATCHED}, (
+    assert branch_mod().leads_at(store, session_id, orphan, run_dir, source_run=_run_handle_1165(run_dir)) == {UNDISPATCHED}, (
         "a return under a REFUSED call id landed the refused lead — the sibling inherits "
         "evidence on the strength of a dispatch that never ran")
 
@@ -426,7 +430,7 @@ def test_a_refused_retry_does_not_remove_an_inherited_undispatched_lead(tmp_path
     refused = refused_dispatch(store, session_id, inherited, call_id="already-claimed")
     evidence(run_dir, [(UNDISPATCHED, 0), (inherited, 0)])
 
-    assert branch_mod().leads_at(store, session_id, refused, run_dir) == {
+    assert branch_mod().leads_at(store, session_id, refused, run_dir, source_run=_run_handle_1165(run_dir)) == {
         UNDISPATCHED, inherited,
     }, "the retry-refused gather erased a pre-existing inherited lead from the census"
 
@@ -452,9 +456,9 @@ def test_a_refused_dispatch_does_not_land_for_whoever_reuses_its_call_id(tmp_pat
     evidence(run_dir, [(UNDISPATCHED, 0), ("l-004", 0), ("l-005", 0)])
     leads_at = branch_mod().leads_at
 
-    assert leads_at(store, session_id, refused, run_dir) == {UNDISPATCHED, "l-004"}, (
+    assert leads_at(store, session_id, refused, run_dir, source_run=_run_handle_1165(run_dir)) == {UNDISPATCHED, "l-004"}, (
         "the refused call removed a pre-existing undispatched lead from inherited evidence")
-    assert leads_at(store, session_id, landed, run_dir) == {
+    assert leads_at(store, session_id, landed, run_dir, source_run=_run_handle_1165(run_dir)) == {
         UNDISPATCHED, "l-004", "l-005",
     }, (
         "the return under the reused id credited the REFUSED lead — so the sibling inherits "
@@ -473,7 +477,7 @@ def test_a_dispatch_counts_however_the_provider_spelled_its_arguments(tmp_path, 
     included, and nothing anywhere is red."""
     store, run_dir, session_id, returns = gathering_source(tmp_path, spelling=spelling)
 
-    assert branch_mod().leads_at(store, session_id, returns[0], run_dir) == {
+    assert branch_mod().leads_at(store, session_id, returns[0], run_dir, source_run=_run_handle_1165(run_dir)) == {
         UNDISPATCHED, "l-001"}
 
 

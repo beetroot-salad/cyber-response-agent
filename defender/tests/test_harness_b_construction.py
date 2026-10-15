@@ -41,6 +41,9 @@ that parameter seam and env vars (`monkeypatch.setenv`), never `monkeypatch.seta
 """
 from __future__ import annotations
 
+from dataclasses import replace as _with_fixture_run_1165
+from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+
 from pathlib import Path
 
 import pytest
@@ -288,7 +291,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
     (run_dir / "gather_raw").mkdir(parents=True)
     # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
     # the dispatch's breaker screen reads it.
-    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER),
+    deps = replace(_with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_fixture_run_1165(run_dir)),
                    run_state=RunState(run_dir, "r-harness-b"))
     asyncio.run(tools_gather._run_gather(
         deps, _factory, 40,

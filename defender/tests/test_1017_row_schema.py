@@ -31,6 +31,8 @@ What is pinned here, at the unit level (the driven-run half lives in
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _writer_run_1165
+
 import dataclasses
 import json
 import os
@@ -124,7 +126,7 @@ def _inherited_state(source: Path):  # noqa: ANN202 — a `RunState` (#1235: not
     sibling = source / "sibling"
     sibling.mkdir()
     state = RunState(sibling, "r1017-sibling")
-    _inherit_evidence(source, state, {LEAD})
+    _inherit_evidence(_writer_run_1165(source), state, {LEAD}, run=_writer_run_1165(state.run_dir))
     return state
 
 

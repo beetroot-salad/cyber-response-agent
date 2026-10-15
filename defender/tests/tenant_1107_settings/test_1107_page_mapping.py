@@ -24,6 +24,8 @@ shim first on this process's PATH before run.py builds its env.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _view_run_1165
+
 import copy
 import json
 import logging
@@ -50,7 +52,6 @@ from defender.tests.e2e._replay_harness import (
     materialize,
 )
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
-from defender.run_repository import Run as _Run
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 #: The ticket system's gather grant — the table the screen tests' tenant carries, so the replayed
@@ -109,12 +110,12 @@ class _ReceiptWriter:
         self.receipt = receipt
         self.calls: list[str] = []
 
-    def open_case_ticket(self, run_dir: Path, *_a: Any, **_kw: Any) -> None:
+    def open_case_ticket(self, run: Any, *_a: Any, **_kw: Any) -> None:
         self.calls.append("open")
 
-    def record_case_ticket(self, run_dir: Path, *_a: Any, **_kw: Any) -> None:
+    def record_case_ticket(self, run: Any, *_a: Any, **_kw: Any) -> None:
         self.calls.append("record")
-        _write_receipt(Path(run_dir), self.receipt)
+        _write_receipt(run.run_dir, self.receipt)
 
 
 def _run_world(tmp_path: Path, monkeypatch: Any, name: str) -> tuple[Path, Path, S.DockerShim]:
@@ -143,7 +144,7 @@ def _screen_leg(tmp_path: Path, root: Path, name: str, tickets: list[dict[str, A
             while_serving()
         return M.listing(*copy.deepcopy(tickets))
 
-    run_dir = materialize(tmp_path / name, GOLDEN_AB3)
+    run_dir = materialize(tmp_path / name, GOLDEN_AB3, run_id=f"r-{name}")
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "ticket",
                                      "goal": "measure the ticket lead",
@@ -202,7 +203,7 @@ def test_o6_run_page_renders_receipt(tmp_path):
 
     run_dir = _seeded_run(tmp_path, "r-o6")
     # The page with no receipt and no flag — the standalone renderer, handed nothing.
-    visualize_run.publish_page(_Run.at(run_dir))
+    visualize_run.publish_page(_view_run_1165(run_dir))
     bare = S.page_html(run_dir)
     assert _header(run_dir) in bare, "the standalone page did not render"
     assert "commented" not in bare, "the bare page already says 'commented'; pick another probe"
@@ -331,10 +332,10 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
     assert S.receipt(run_dir) is not None, "the flagged run left no receipt"
     flagged = S.page_html(run_dir)
     # The standalone render of the SAME dir, receipt still present: handed no flag.
-    visualize_run.publish_page(_Run.at(run_dir))
+    visualize_run.publish_page(_view_run_1165(run_dir))
     standalone = S.page_html(run_dir)
     S.receipt_path(run_dir).unlink()
-    visualize_run.publish_page(_Run.at(run_dir))
+    visualize_run.publish_page(_view_run_1165(run_dir))
     no_receipt = S.page_html(run_dir)
     assert _header(run_dir) in no_receipt, "the receipt-less page did not render"
     assert "SOC-FLAG-PG-1107" in flagged, "with --update-ticket the receipt's key is not shown"
@@ -368,7 +369,7 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
         for needle in needles:
             assert needle not in page, f"{label}: without --update-ticket {needle!r} rendered"
         at_name.unlink()
-        visualize_run.publish_page(_Run.at(run_dir))
+        visualize_run.publish_page(_view_run_1165(run_dir))
         assert page == S.page_html(run_dir), (
             f"{label}: without --update-ticket the page is not the receipt-less page")
 
@@ -412,12 +413,12 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
 
     # The same dir without the receipt, standalone: the page run.py rendered is exactly that.
     S.receipt_path(run_dir).unlink()
-    visualize_run.publish_page(_Run.at(run_dir))
+    visualize_run.publish_page(_view_run_1165(run_dir))
     assert page == S.page_html(run_dir), "the page run.py rendered carries a ticket line"
 
     # Positive control, same planted run dir: handed run.py's flag as true, the line renders.
     _write_receipt(run_dir, forged)
-    run_common.visualize(_Run.at(run_dir), update_ticket=True)
+    run_common.visualize(_view_run_1165(run_dir), update_ticket=True)
     flagged = S.page_html(run_dir)
     assert "SOC-FORGED-BOX-1107" in flagged, (
         "handed the flag, the renderer still shows no ticket line — the absence above proves "
@@ -452,7 +453,7 @@ def test_d_case_ticket_takes_mapping(tmp_path):
     assert "sig:sig-name-1107" in payload["labels"], payload
 
     run_dir = M.make_run(tmp_path / "runs", "case-rec-1107", alert=alert)
-    rec = S.with_mapping(case_ticket.read_case_record, run_dir, mapping=mapping)
+    rec = S.with_mapping(case_ticket.read_case_record, _view_run_1165(run_dir), mapping=mapping)
     assert rec.signature_id == "sig-name-1107", rec
     comment = S.with_mapping(case_ticket.case_record_to_comment, rec, mapping=mapping)
     assert comment["author"] == "author-1107", comment
@@ -491,7 +492,7 @@ def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
     assert again == kept, "an edit to one payload reached the next built from the same mapping"
 
     run_dir = M.make_run(tmp_path / "runs", "case-mf11", alert=first)
-    rec = S.with_mapping(case_ticket.read_case_record, run_dir, mapping=mapping)
+    rec = S.with_mapping(case_ticket.read_case_record, _view_run_1165(run_dir), mapping=mapping)
     comment = S.with_mapping(case_ticket.case_record_to_comment, rec, mapping=mapping)
     comment["author"] = "planted-1107"
     escalation = S.with_mapping(case_ticket.escalation_comment_payload, "aborted", mapping=mapping)
@@ -635,9 +636,9 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
 
         def lifecycle(**kw: Any) -> dict[str, Any]:
             handed.update(kw)
-            rd = kw["run_dir"]
+            rd = kw["run"].run_dir
             return run._drive_investigation(
-                alert_path=RunPaths(rd).alert, run_dir=rd, run_id=rd.name,
+                alert_path=RunPaths(rd).alert, run=kw["run"],
                 defender_dir=kw["defender_dir"], model_name=kw["model"],
                 model_override=kw["model_override"], box=None, tenant=kw["tenant"],
                 world=kw["world"], episode=kw["episode"], serving=kw["serving"],

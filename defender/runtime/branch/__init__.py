@@ -37,7 +37,7 @@ from defender._io import (
     read_text_soft,
     write_guarded,
 )
-from defender.run_repository import RunPaths, artifact_dir, artifact_file
+from defender.run_repository import Run, RunPaths, RUN_LAYOUT, artifact_dir, artifact_file
 from defender._query_rules import is_reserved_query_id
 
 from .. import session_store
@@ -82,7 +82,7 @@ from ._seed import (
 )
 
 
-def validate(store: Any, spec: BranchSpec, *, require_capture: bool = True) -> None:
+def validate(store: Any, spec: BranchSpec, *, source_run: Run, require_capture: bool = True) -> None:
     """Refuse a branch point that cannot carry a sibling world.
 
     Beyond the branch point being a complete message on MAIN's path with a matching clock, a
@@ -106,7 +106,7 @@ def validate(store: Any, spec: BranchSpec, *, require_capture: bool = True) -> N
 
     # On MAIN's path, not merely a number: an id past the tip or from a gather session would
     # miscount fences, and `fork` would inherit a sub-agent's transcript.
-    session = source_session(store, spec)
+    session = source_session(store, spec, source_run=source_run)
     path = session_store.path_row_ids(store, session)
     if spec.branch_message_id not in path:
         raise BranchError(
@@ -141,17 +141,20 @@ def validate(store: Any, spec: BranchSpec, *, require_capture: bool = True) -> N
             "uncompacted run, or fork before the fold")
 
     # Sentinel rows (`∅.`-prefixed ids) never reached a system, so they are not evidence.
-    rows = [
-        row for row in read_jsonl_rows(RunPaths(run_dir).executed_queries)
-        if not is_reserved_query_id(str(row.get("query_id", "")))
-    ]
+    captured, _malformed, observation = source_run.tables.queries.read_rows()
+    if observation.reason is not None:
+        raise BranchError(
+            f"{RUN_LAYOUT.executed_queries} could not be read from {source_run.run_dir}: "
+            f"{observation.reason}")
+    rows = [row for row in captured
+            if not is_reserved_query_id(str(row.get("query_id", "")))]
     if not rows and require_capture:
         raise BranchError(
             f"{run_dir} captured no query that reached a system — a sibling world would be "
             "consistent with an empty prefix by construction, which is the generated-world "
             "design, not a branch")
 
-    frontier = frontier_at_branch(store, spec)
+    frontier = frontier_at_branch(store, spec, source_run=source_run)
     # Snapped first: a clamped answer is the terminal frontier, which would otherwise be misreported
     # as "nothing open".
     if frontier.snapped:
@@ -196,7 +199,7 @@ def stamp_dead_fork(store: Any, session_id: str | None) -> None:
 
 
 def attach_case_pointer(
-    store: Any, spec: BranchSpec | None, run_dir: Path, *, case_id: str, session_id: str,
+    store: Any, spec: BranchSpec | None, run: Run, *, case_id: str, session_id: str,
 ) -> str:
     """Write the run's case pointer, and stamp the fork if that write is what fails.
 
@@ -211,7 +214,7 @@ def attach_case_pointer(
     recorded = getattr(store, "case_id", None) or case_id
     try:
         session_store.write_case_pointer(
-            run_dir, case_id=recorded, store_path=store.path, session_id=session_id)
+            run, case_id=recorded, store_path=store.path, session_id=session_id)
     except BaseException:
         if spec is not None:
             stamp_dead_fork(store, session_id)
@@ -220,7 +223,7 @@ def attach_case_pointer(
 
 
 def open_main_session(
-    store: Any, spec: BranchSpec | None, run_state: RunState,
+    store: Any, spec: BranchSpec | None, run_state: RunState, *, run: Run, source_run: Run | None = None,
 ) -> tuple[str, list | None]:
     """MAIN's session for this run, the history it starts from, and the document that history
     refers to.
@@ -240,9 +243,11 @@ def open_main_session(
     try:
         # Every refusal before the fork: `store.fork` commits, and each retried refusal after
         # it would leave another orphan session in the source database.
-        validate(store, spec)
+        if source_run is None:
+            raise BranchError("a resumed run requires its source Run")
+        validate(store, spec, source_run=source_run)
         refuse_seeded_run_dir(run_state.run_dir)
-        session = source_session(store, spec)
+        session = source_session(store, spec, source_run=source_run)
         session_id = store.fork(session, at_message_id=spec.branch_message_id)
         try:
             prefix = session_store.hydrate(store, session_id, role="send")
@@ -251,7 +256,7 @@ def open_main_session(
                 # Re-seed to the framework's count, which `ingest` compares against. Inside the
                 # guard so a failure here still stamps the orphan.
                 store.set_last_render_len(session_id, len(visible))
-            seed_investigation(store, spec, run_state)
+            seed_investigation(store, spec, run_state, run=run, source_run=source_run)
         except BaseException:
             # The fork cannot be rolled back; stamp it so it reads as ended, not mid-flight.
             stamp_dead_fork(store, session_id)

@@ -1002,7 +1002,7 @@
    "assert vr.mirror_page(page, run_dir.name) == 'failed'",
    "assert vr.mirror_page(page, run_dir.name) == 'failed'",
    "assert vr.mirror_page(page, run_dir.name) == 'skipped'",
-   "assert vr.mirror_page(vr.render_page(run_dir), run_dir.name) == 'copied'"
+   "assert vr.mirror_page(vr.render_page(_run_handle_1165(run_dir)), run_dir.name) == 'copied'"
   ],
   "defender/tests/test_1096_entrypoint_closure.py": [
    "assert 'hunter2' not in done.stdout.decode('utf-8', 'replace')",

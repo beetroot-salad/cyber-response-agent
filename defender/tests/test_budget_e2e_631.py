@@ -133,7 +133,7 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
     caps those two tests use, and asserts a refusal was delivered — proving enforcement
     fired here, which is exactly the difference the controlled tests observe the
     absence of."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='trip')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
         Turn(tool_calls=[("bash", {"command": "echo again"})]),
@@ -158,7 +158,7 @@ def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
     """A run ended by the budget kill carries truncated_by: "budget", so the post-run
     pipeline can see that enforcement stopped the run rather than the defender
     concluding, and does not score a truncated investigation as a complete one."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='trunc')
     summary = drive(run_dir, run_id="trunc",
                     main=ReplayFn(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
@@ -166,7 +166,7 @@ def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
     assert summary["truncated_by"] == "budget"
     assert summary["output"] is None, "the kill ended the run before an End node"
 
-    clean_dir = materialize(tmp_path / "clean", GOLDEN)
+    clean_dir = materialize(tmp_path / "clean", GOLDEN, run_id='clean')
     clean = drive(clean_dir, run_id="clean",
                   main=ReplayFn([Turn(text="Investigation complete.")]),
                   limits=caps())
@@ -188,7 +188,7 @@ def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
     test_a_budget_killed_run_carries_truncated_by_budget."""
     from defender.tests.e2e._replay_harness import NeverEndsModel
 
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='reqlimit')
     summary = drive(run_dir, run_id="reqlimit",
                     main=NeverEndsModel(run_dir), limits=caps())
     assert summary["truncated_by"] == "request-limit", (
@@ -214,7 +214,7 @@ def test_budget_kill_writes_partial_trace(tmp_path, enforced):
     the driver's plain `except BudgetKill` would MISS the group and `drive()` would
     raise the group past its caller — this test would then fail LOUDLY at that raise,
     which is exactly the guard P6 bought."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='kill')
     burst = [Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})] * 15)]
     summary = drive(run_dir, run_id="kill", main=ReplayFn(burst),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
@@ -241,7 +241,7 @@ def test_kill_exception_reaches_uncaught_driver_handling(tmp_path, enforced, cap
     the negative is falsifiable: an implementation that raised the kill from inside the
     guard would emit it. The positive control is test_budget_kill_writes_partial_trace,
     where the kill DOES reach the driver's catch and DOES write the trace."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='guard')
     summary = drive(run_dir, run_id="guard",
                     main=ReplayFn(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
@@ -263,7 +263,7 @@ def test_only_one_shutdown_path_writes_the_run_dir_artifacts(tmp_path, enforced)
     trace. The observable is the artifact, not the code path: `tool_trace.jsonl` ends
     with exactly one `type: result` event and the request log has no duplicated
     request ids."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='shutdown')
     summary = drive(run_dir, run_id="shutdown",
                     main=ReplayFn(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
@@ -294,7 +294,7 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
     one elastic failure on the run's own state (#1235 round 2: the driver starts that state, so
     nothing seeded before `drive` can reach it). The budget then trips on the tail reads, and
     the breaker's record at the end is exactly that one charge."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='both')
     dead = FakeVerbs({"elastic": {"esql": _dead_verb()}})
     charge = ReplayFn([Turn(tool_calls=[("query", {
         "system": "elastic", "verb": "esql", "params": {"index": "logs"},
@@ -316,7 +316,7 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
         "or the charge never landed"
     )
 
-    other = materialize(tmp_path / "brk", GOLDEN)
+    other = materialize(tmp_path / "brk", GOLDEN, run_id='brk')
     verbs = FakeVerbs({"elastic": {"esql": _dead_verb()}})
     gather = ReplayFn([Turn(tool_calls=[("query", {
         "system": "elastic", "verb": "esql", "params": {"index": "logs"},
@@ -358,7 +358,7 @@ def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
     retry crash the mechanism exists to avoid), and a before_tool_execute backstop for
     stale calls (X2 — with nothing withdrawn there are no stale calls, and that hook
     never fires for a tool the framework has already rejected)."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='refuse')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
         Turn(tool_calls=[("bash", {"command": "echo again"})]),
@@ -390,7 +390,7 @@ def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):
     re-issues below, because at ten or fewer it proves nothing."""
     from pydantic_ai.exceptions import UnexpectedModelBehavior
 
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='reissue')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
         *[Turn(tool_calls=[("bash", {"command": "echo again"})]) for _ in range(25)],
@@ -430,7 +430,7 @@ def test_refusal_message_content(tmp_path, enforced):
     nothing; and (2) the DELIVERY requirement — every refusal, not merely the first —
     is asserted by counting the message's guarded literal stem in the captured inbound
     history, which the system prompt does NOT contain."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='msg')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
         *[Turn(tool_calls=[("bash", {"command": f"echo {i}"})]) for i in range(6)],
@@ -470,7 +470,7 @@ def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
     is PURE — no memory, no per-run "already warned" state — so against a frozen
     at-cap counter it re-emits BYTE-IDENTICAL text on every single refusal, five for
     five, burying the real signal under its own repetition."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='silent')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
         *[Turn(tool_calls=[("bash", {"command": f"echo {i}"})]) for i in range(20)],
@@ -500,7 +500,7 @@ def test_a_refused_call_writes_an_explicit_refusal_record(tmp_path, enforced):
     ORDER is unchanged (M11's no-phantom-row intent survives); what is added is the
     record. ACCEPTED RESIDUAL, recorded not fixed: the circuit breaker still does not
     observe refusals."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='record')
     drive(run_dir, run_id="record",
           main=ReplayFn([
               Turn(tool_calls=[("bash", {"command": "echo hi"})]),
@@ -531,7 +531,7 @@ def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
     require the refusal to be OBSERVED, not merely for the run to finish."""
     # #774/R1: report.md left MAIN's write allow-list entirely (the close tool is now its
     # only writer), so the tail-tier artifact this scenario funds is investigation.md.
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='e2e')
     inv = run_dir / "investigation.md"
     inv_text = (GOLDEN / "investigation.md").read_text()
     replay = ReplayFn([
@@ -569,7 +569,7 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
     def one_limb(name: str, limits: dict, script: list[Turn]) -> tuple[str, Path]:
         # #774/R1: report.md left MAIN's write allow-list — the tail-tier artifact this
         # scenario funds is investigation.md, whichever limb trips.
-        rd = materialize(tmp_path / name, GOLDEN)
+        rd = materialize(tmp_path / name, GOLDEN, run_id=name)
         rep = rd / "investigation.md"
         replay = ReplayFn([*script,
                            Turn(tool_calls=[("append_block", {"text": inv_text})]),
@@ -618,7 +618,7 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
     splice, and a splice is no longer expressible — the document is append-only and its verb
     has no anchor. Two appends, and the contract is the same one: whatever completed before
     the kill is still on disk."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='between')
     inv = run_dir / "investigation.md"
     inv_text = (GOLDEN / "investigation.md").read_text()
     addendum_block = "\n## ADDENDUM\n\nnoted.\n"
@@ -653,7 +653,7 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
         return {"rows": []}
 
     verbs = FakeVerbs({"elastic": {"esql": esql}})
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='pool')
     gather = ReplayFn([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                     "params": {"index": "logs"},
@@ -700,7 +700,7 @@ def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
             monkeypatch.setenv(FLAG, "true")
         else:
             monkeypatch.delenv(FLAG, raising=False)
-        rd = materialize(tmp_path / posture, GOLDEN)
+        rd = materialize(tmp_path / posture, GOLDEN, run_id=posture)
         states[posture] = budget(drive(rd, run_id=posture, main=script(),
                                        limits=caps(max_tool_calls=4)))
         warned[posture] = "Budget warning" in capsys.readouterr().err
@@ -719,7 +719,7 @@ def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
     SAME two-bash-then-text script under the SAME injected caps with the flag ON
     delivers a refusal, which this run does not — the complementary condition on the
     same address (blind reader R3 required aligning the two)."""
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='off')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
         Turn(tool_calls=[("bash", {"command": "echo again"})]),
@@ -746,7 +746,7 @@ def test_refused_gather_and_the_spawn_counter(tmp_path, enforced):
     consensus was 3/3-by-inference, so it is cited as such rather than dressed up as
     doc-direct."""
     verbs = FakeVerbs({"elastic": {"esql": lambda ctx, *, index: {"rows": []}}})
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='spawn')
     gather = ReplayFn([Turn(text="summary")])
     replay = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -794,7 +794,7 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
         return {"rows": [1]}
 
     verbs = FakeVerbs({"elastic": {"esql": esql}})
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='stopped')
     limits = caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600)
 
     gather = ReplayFn([
@@ -857,7 +857,7 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
         return {"rows": [1]}
 
     verbs = FakeVerbs({"elastic": {"esql": esql}})
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='phantom')
     gather = ReplayFn([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                     "params": {"index": "logs"},
@@ -899,7 +899,7 @@ def test_executed_query_writes_a_row(tmp_path, unenforced):
         return {"rows": [1]}
 
     verbs = FakeVerbs({"elastic": {"esql": esql}})
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='row')
     drive(run_dir, run_id="row",
           main=ReplayFn([
               Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -951,7 +951,7 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
         for i in range(200)
     ]
 
-    run_dir = materialize(tmp_path / "limit", GOLDEN)
+    run_dir = materialize(tmp_path / "limit", GOLDEN, run_id='limit')
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
                                      "goal": "g", "what_to_summarize": ["w"]})]),
@@ -962,7 +962,7 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
     assert "reached its request limit" in "\n".join(main.seen)
     assert "Treat this lead as incomplete" in "\n".join(main.seen)
 
-    other = materialize(tmp_path / "refused", GOLDEN)
+    other = materialize(tmp_path / "refused", GOLDEN, run_id='gref')
     main_b = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
                                      "goal": "g", "what_to_summarize": ["w"]})]),
@@ -1002,7 +1002,7 @@ def test_gather_has_no_per_call_timeout(tmp_path, unenforced):
         return {"rows": [1]}
 
     verbs = FakeVerbs({"elastic": {"esql": slow}})
-    run_dir = materialize(tmp_path, GOLDEN)
+    run_dir = materialize(tmp_path, GOLDEN, run_id='slow')
     main = ReplayFn([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
                                      "goal": "g", "what_to_summarize": ["w"]})]),

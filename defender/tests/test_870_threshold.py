@@ -14,6 +14,8 @@ alone, while N silent failures are N records and did.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 import json
 from pathlib import Path
 
@@ -377,13 +379,13 @@ def test_the_learning_side_join_still_splits_the_sentinel_row(tmp_path):
 
     state = RunState(tmp_path, "r870-threshold")
     append_query_row(
-        state, lead_id="l-001", system="elastic", verb="query", query_id="elastic.esql",
+        state, run=fixture_run(state.run_dir), lead_id="l-001", system="elastic", verb="query", query_id="elastic.esql",
         params={"native_query": "FROM logs"}, raw_command="elastic query",
         payload_text="[]", exit_code=0, payload_status="ok", payload_digest="2 bytes",
         system_key="",
     )
     append_query_row(
-        state, lead_id="l-001", system="", verb="bash", query_id=BASH_SHIM_QUERY_ID,
+        state, run=fixture_run(state.run_dir), lead_id="l-001", system="", verb="bash", query_id=BASH_SHIM_QUERY_ID,
         params={"command": "cat 0.json | defender-sql 'SELECT unnest(data)'"},
         raw_command="defender-sql", payload_text="", exit_code=1, payload_status="error",
         payload_digest=BINDER,

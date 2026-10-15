@@ -43,6 +43,8 @@ new symbol), because today's dump carries the sentinel's params to the prompt. S
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run
+
 from pathlib import Path
 import re
 
@@ -174,7 +176,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     state = RunState(tmp_path, "r1032-questioner")
     state.inherit_rows(read_jsonl_rows(RunPaths(tmp_path).executed_queries))
     append_query_row(
-        state, lead_id=LEAD, system="", verb="bash", system_key="",
+        state, run=fixture_run(state.run_dir), lead_id=LEAD, system="", verb="bash", system_key="",
         query_id=BASH_SHIM_QUERY_ID, params={"command": shell}, raw_command=shell,
         payload_text="", exit_code=1, payload_status="error",
         payload_digest="exit=1; SHIM_STDERR_MARKER",

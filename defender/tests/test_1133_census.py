@@ -952,6 +952,8 @@ _ALERT = "the investigation's alert input, a run file read before any episode ex
 #: Rev 3 (R1) removes `episode._answers(path)`'s row: `_answers` takes the rows `delta_o` read
 #: through its one `bind`, not a path.
 PARAM_ALLOWLIST = frozenset({
+    ("run", "_run_investigation_lifecycle.scrub_tree", "tree",
+     "scrub callback takes the lifecycle tree; verdict reads/writes use its bound Run"),
     ("learning.branch.ledger", "Ledger._absorb", "path", _CARVE_READ),
     ("learning.judge.family", "leads_by_id", "world_dir", _CARVE_READ),
     # (#1234 removed `run._resolves(world_dir, …)` and `run._draw_document(world_dir, …)`: the

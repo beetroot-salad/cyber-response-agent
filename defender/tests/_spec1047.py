@@ -80,6 +80,8 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 import re
 from dataclasses import dataclass, field
@@ -426,7 +428,7 @@ def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
     here reads a store, a pointer file or anything else inside the run dir to get them."""
     fake = ticket or FakeTicketSystem()
     mod("scripts.case_history.ticket_writer").record_case_ticket(
-        Path(run_dir), fake.deps(), **_handed(run_dir, fake), **kw)
+        _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake), **kw)
     return fake
 
 
@@ -435,7 +437,7 @@ def open_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None) -> Fak
     with no `report.md` anywhere on disk (round-2 probe #30, EXECUTED)."""
     fake = ticket or FakeTicketSystem()
     mod("scripts.case_history.ticket_writer").open_case_ticket(
-        Path(run_dir), fake.deps(), **_handed(run_dir, fake))
+        _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake))
     return fake
 
 
@@ -475,7 +477,7 @@ def receipt(run_dir: Path) -> dict | None:
 
 
 def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bool = True,
-                   name: str = "2026-09-16T12-00-00Z_case-1047-lotl-web1") -> Path:
+                   name: str = "2026-09-16t12-00-00z_case-1047-lotl-web1") -> Path:
     """A finished run dir as `run.py`'s tail meets it: an alert, and a committed `report.md`
     unless `report=False`.
 

@@ -415,15 +415,20 @@ def verified_input(alert_path: Path, record_path: Path, *, run_name: str) -> tup
     bytes' digest compared with the record's. Raises `AlertReplaced` (a fixed reason naming
     `run_name`, carrying no byte of either file) when the record is missing or malformed, the
     alert is unreadable, or the digest differs."""
+    text, _reason = _io.read_guarded(record_path)
+    raw, _reason = _io.read_bytes_guarded(alert_path)
+    return verify_input_bytes(raw, text, run_name=run_name)
+
+
+def verify_input_bytes(raw: bytes | None, text: str | None, *, run_name: str) -> tuple[bytes, str]:
+    """Verify already-read original bytes against the recorded digest."""
     refusal = AlertReplaced(
         f"the alert stored for run {run_name} does not match the digest its record carries "
         "(or one of the two is missing) — the run's input was replaced or damaged, and nothing "
         "is read from it")
-    text, _reason = _io.read_guarded(record_path)
     record = None if text is None else parse_alert_record(text)
     if text is None or record is None:
         raise refusal
-    raw, _reason = _io.read_bytes_guarded(alert_path)
     if not _matches_record(raw, record):
         raise refusal
     assert raw is not None

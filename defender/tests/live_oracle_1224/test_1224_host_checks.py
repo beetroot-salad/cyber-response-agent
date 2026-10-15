@@ -48,6 +48,8 @@ submissions are scripted content the design itself names as the failure (O3, O8)
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -123,14 +125,13 @@ class _Scene:
         if self.source_run_dir is None:
             return S.world_registry(self.ep, label, self.est, oracle=o, verifier=verifier,
                                     box=box, **knobs)
-        # #1105 PR 2 (declared change 9): the registry is handed the source run's folder
-        # (`WorldRegistry(source_run_dir=)`, off the sibling's opened source `Run`); the
+        # The registry receives the opened source Run; the
         # manifest's recorded `source_run_dir` is never read. Otherwise `world_registry`'s.
         rt = self.est.run_tenant()
         world, ledger = S.load_world(self.ep, label), S.world_ledger(self.ep, label)
         return S.sym(S.REGISTRY, "WorldRegistry")(
             self.est.roster(), rt.grants.gather, world=world, ledger=ledger, as_of=S.AS_OF_DT,
-            tenant=rt, grant_home=rt.table_pointer, source_run_dir=self.source_run_dir,
+            tenant=rt, grant_home=rt.table_pointer, source_run=_run_handle_1165(self.source_run_dir),
             **S.registry_seams(world, ledger, oracle=o.model, verifier=verifier.model, box=box,
                                oracle_dir=S.oracle_dir(self.ep, label), **knobs))
 

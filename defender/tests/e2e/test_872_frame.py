@@ -351,7 +351,7 @@ def test_a_substituted_view_and_a_gather_summary_in_one_run_are_each_independent
     """
     assert frame_overhead() > 0
     value = toon_rows(corpus()["fx-33"])
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     rec = VerbRecorder()
     main = PartRecorder([
         Turn(tool_calls=[("gather", {

@@ -322,7 +322,7 @@ def seed_executed_query(
     the time. Seeding through that function rather than by hand is what keeps this fixture a
     real historical row instead of the test's own idea of one."""
     from defender._io import read_jsonl_rows
-    from defender.run_repository import RunPaths
+    from defender.run_repository import Run, RunPaths
     from defender.runtime.run_state import RunState
     from defender.scripts.gather_tools.record_query import append_query_row
 
@@ -338,7 +338,8 @@ def seed_executed_query(
     state = RunState(run_dir, "r869-historical")
     state.inherit_rows(read_jsonl_rows(RunPaths(run_dir).executed_queries))
     return append_query_row(
-        state, lead_id=lead_id, system=system, verb=verb, query_id=query_id,
+        state, run=Run.under(run_dir.parent, run_dir.name),
+        lead_id=lead_id, system=system, verb=verb, query_id=query_id,
         params={"query": "FROM logs"}, raw_command=f"{system} {verb}",
         payload_text="[]", exit_code=0, payload_status="ok", payload_digest="2 bytes",
         # `system` is the dispatched name on every row this fixture writes, so the row keys as

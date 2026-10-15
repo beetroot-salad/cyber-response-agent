@@ -48,6 +48,8 @@ in the summary · O5 leads below the budget untouched.
 """
 from __future__ import annotations
 
+from defender.tests._spec1077 import fixture_run as _run_handle_1165
+
 import pytest
 
 pytest.importorskip("pydantic_ai")
@@ -139,7 +141,7 @@ def _terminator(r: _Res) -> str | None:
     The read goes through `_session_store_705.sql` — "the observation channel that does not go
     through the reader under test" — the same helper `test_808_correlation_lead` and
     `test_826_gather_deferred` ask this column with, so the four readers move together."""
-    store = session_store.open_store_for_read(session_store.resolve_store_path(r.run_dir))
+    store = session_store.open_store_for_read(session_store.resolve_store_path(_run_handle_1165(r.run_dir)))
     try:
         rows = sql(
             store, "SELECT truncated_by FROM session WHERE agent_id = ?",

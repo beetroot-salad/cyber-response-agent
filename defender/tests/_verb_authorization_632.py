@@ -558,7 +558,7 @@ def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elast
 
     `watch` snapshots the evidence surface at every gather model request, which is what the
     conservation half of the denial demand reads."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": system, "goal": "measure this lead",
