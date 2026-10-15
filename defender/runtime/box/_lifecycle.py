@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 from pathlib import Path
 
-from defender._io import read_bytes_capped, READ_LIMIT, sweep_staged, write_guarded
+from defender._io import read_text_utf8, READ_LIMIT, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
 from defender._tenants import TENANT_ID_FILE
@@ -227,9 +227,9 @@ def _check_mount_sentinel(
 ) -> None:
     """Check one mount through the started box. A writable source gets a planted sentinel. A
     read-only source is never written: an existing file, chosen by the mount's kind, is read
-    back through the box and compared, exactly, with the host's own read of its bytes (no
-    newline translation, so a whitespace-only difference refuses). `code_dir` is the
-    request's code root, which a `code` mount must contain."""
+    back through the box and compared with the host's own read of it, line endings
+    normalized on both sides and exact otherwise. `code_dir` is the request's code root,
+    which a `code` mount must contain."""
     if not mount.writable:
         source = Path(mount.source)
         relative = _readonly_probe_file(mount, code_dir)
@@ -238,11 +238,16 @@ def _check_mount_sentinel(
         try:
             if not stat.S_ISREG((source / relative).lstat().st_mode):
                 raise BoxFault(f"mount readback probe is not a regular file: {source / relative}")
-            expected = read_bytes_capped(source / relative).decode("utf-8")
+            expected = read_text_utf8(source / relative)
             proc = _call(docker, ["docker", "exec", name, "cat", str(Path(mount.target) / relative)])
         except (OSError, UnicodeError) as e:
             raise BoxFault(f"could not read mount probe at {source / relative}: {e}") from e
-        if proc.returncode != 0 or proc.stdout != expected:
+        # Known limit: the box answers over Docker's text channel, which translates line
+        # endings, so both sides are compared with universal newlines (the host read applies
+        # them; the answer is put through the same translation) and a CR-only difference is
+        # invisible. Every other difference, a trailing newline or whitespace included,
+        # refuses; catching a wrong mapping does not depend on line endings.
+        if proc.returncode != 0 or _universal_newlines(proc.stdout) != expected:
             raise BoxFault(f"could not read back the startup sentinel at {source / relative} — "
                            "the mount probe does not match the host")
         return
@@ -250,6 +255,12 @@ def _check_mount_sentinel(
         Path(mount.source), Path(mount.target), docker, name,
         f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
     )
+
+
+def _universal_newlines(text: object) -> str | None:
+    """`text` with CRLF and lone CR read as LF, as a text-mode subprocess reads its output;
+    `None` for anything that is not text, which then matches no host read."""
+    return text.replace("\r\n", "\n").replace("\r", "\n") if isinstance(text, str) else None
 
 
 def _refuse_a_second_code_mount(request: BoxRequest) -> None:
