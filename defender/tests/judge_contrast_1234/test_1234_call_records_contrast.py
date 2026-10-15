@@ -49,6 +49,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests._after_start_1256 import Relink
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
 # --------------------------------------------------------------------------------------
@@ -458,9 +459,17 @@ def test_1234_retried_call_first_fault_then_answered(tmp_path: Path) -> None:
 
     render reads the served_ledger into the JudgeContext's refusal-and-fault list;
     read_world_ledger feeds the user_record's found gaps. The siem-x adapter cannot load on
-    b's first `siem-x lookup` (p32's shape: an import of a module that does not exist; the
-    source here makes no siem-x call, so no earlier load is cached) and is repaired before the
-    identical retry. No J3 sentinel here, so the fault is b's only blocked call."""
+    b's first `siem-x lookup` (p32's shape: an import of a module that does not exist) and is
+    repaired before the identical retry. No J3 sentinel here, so the fault is b's only blocked
+    call.
+
+    #1256 (and the system index before it): b's run imports every granted adapter at its
+    start, so siem-x is loaded before its first call and bytes written over the file then change
+    nothing that call loads; an adapter that cannot load at start is down for the whole run
+    (O-5a) and no call of it reaches the registry. The fault is therefore the adapter changing
+    AFTER b's start: replaced by a link to the module that cannot import (`Relink`) when the
+    gather model asks for the first call — the load it makes is of that module, and fails — and
+    put back, byte for byte, before the retry, which loads what b's start loaded."""
     calls = [S.S24.Call("idp", "query", S.Q1, S.BASE_ANSWER),
              S.S24.Call("edr", "query", S.Q2, S.BASE_ANSWER), S.POST]
     est = estate(tmp_path)
@@ -470,13 +479,17 @@ def test_1234_retried_call_first_fault_then_answered(tmp_path: Path) -> None:
     broken = good.replace("from __future__ import annotations\n",
                           "from __future__ import annotations\nimport _no_such_dependency_1234\n",
                           1)
-    turns_b = [_Between(q("siem-x", "lookup", S.L3),
-                        before=lambda: adapter.write_text(broken, encoding="utf-8")),
-               _Between(q("siem-x", "lookup", S.L3),
-                        before=lambda: adapter.write_text(good, encoding="utf-8")),
+    assert broken != good, "fixture: the broken module differs from the adapter"
+    relink = Relink(adapter, broken)
+    turns_b = [_Between(q("siem-x", "lookup", S.L3), before=relink.break_),
+               _Between(q("siem-x", "lookup", S.L3), before=relink.restore),
                S.done_turn()]
-    built = launch(tmp_path, est, calls=calls, after_source=None,
-                   b=S.RealWorld("b", turns=turns_b))
+    try:
+        built = launch(tmp_path, est, calls=calls, after_source=None,
+                       b=S.RealWorld("b", turns=turns_b))
+    finally:
+        relink.restore()
+    assert relink.broken == 1, "fixture: the adapter was never broken during b's run"
     faulted, answered = lines(built.table_rows("b"), S.L3)
     assert [r["source"] for r in built.ledger_rows("b")] == ["fault", "passthrough"], (
         "fixture: the fault and the answered retry are both on the ledger")

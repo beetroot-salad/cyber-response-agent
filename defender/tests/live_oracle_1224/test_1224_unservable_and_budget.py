@@ -42,6 +42,7 @@ import pytest
 
 from defender._env import FatalConfigError
 from defender.tests import _triplet_947 as T
+from defender.tests._after_start_1256 import AfterStart, Relink
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
 # --------------------------------------------------------------------------------------
@@ -763,19 +764,36 @@ def test_1224_exhausted_oracle_budget_makes_the_sibling_unservable(tmp_path):
 def test_served_system_adapter_cannot_be_loaded_at_call_time(tmp_path):
     """s_p046 — a served system whose adapter cannot be loaded at call time fails the original query as on a real run; it is no oracle failure and the world stays servable.
 
-    The adapter file is removed after both registries are built (a real input through the real
-    loader); F-02=A keeps `fault` for exactly this row in the world ledger."""
+    The adapter breaks after both registries are built (a real input through the real
+    loader); F-02=A keeps `fault` for exactly this row in the world ledger.
+
+    #1256: an adapter that cannot be loaded when the run STARTS is down for the whole run
+    (O-5a) and no call reaches it, branched or not. "At call time" is therefore an adapter that
+    changes after the run's start check: each run starts over the importable file, which is
+    replaced by a link to a module that cannot be imported when the gather model asks for the
+    edr call (`Relink`), and put back after the run."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path)
     o = S.oracle(S.submit(ALICE_ROWS))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier())
     plain_reg = S.plain_registry(est)
-    (est.adapters / "edr_adapter.py").unlink()
-    turns = [_q("host:db-1", "edr"), _q("user:alice"), S.done_turn()]
+    relink = Relink(est.adapters / "edr_adapter.py",
+                    'raise ImportError("#1224 s_p046: the edr adapter cannot be loaded")\n')
 
-    branched = _drive(tmp_path / "w", est, reg, turns)
-    plain = _drive(tmp_path / "p", est, plain_reg, turns)
+    def turns() -> list[Any]:
+        return [AfterStart(_q("host:db-1", "edr"), relink.break_), _q("user:alice"),
+                S.done_turn()]
+
+    try:
+        branched = _drive(tmp_path / "w", est, reg, turns())
+    finally:
+        relink.restore()
+    try:
+        plain = _drive(tmp_path / "p", est, plain_reg, turns())
+    finally:
+        relink.restore()
+    assert relink.broken == 2, "premise: the adapter did not break after each run's start"
 
     (b_row,) = branched.rows_for("edr", "host:db-1")
     (p_row,) = plain.rows_for("edr", "host:db-1")

@@ -22,8 +22,11 @@ sibling (cmdb configured) is answered from it — the mark reaches the gather ag
 ledger records the call — so the channel can show a served capture. The down sibling (cmdb's
 `config.env` loses `CMDB_URL_BASE` after the source run, before the sibling starts) must not be:
 the mark reaches no agent, the world ledger records no cmdb call, the run writes no cmdb row, the
-breaker is charged nothing, and the agent is told cmdb is not configured and why (on the dispatch
-refusal MAIN sees, or on the call refusal the gather agent sees — the design gates both).
+breaker is charged nothing, and the agent is told cmdb is not configured and why. The lead is
+dispatched on elastic (configured in both siblings), so the gather agent runs in the down sibling
+too and the resumed run's surfaces can be read: its system index and its `list_verbs(cmdb)`
+answer carry cmdb's down status (the design's resume non-obligation), and its cmdb call is
+refused.
 
 O-8 x O-9 — a sibling whose EVERY granted system is down at its own start is refused at that
 start like a fresh run (O-8), naming each system and its reason. That arm drives the sibling's
@@ -97,7 +100,9 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
              ) -> dict[str, Any]:
     """Start one sibling of world `a` at the branch point: resolve its tenant NOW (its own
     start), build its world registry as `run.main` does, and drive the real driver resumed. MAIN
-    dispatches one lead on cmdb; the lead asks `cmdb.get-host {host: web-1}`, then summarises."""
+    dispatches one lead on elastic (configured in both siblings, so the lead runs and its first
+    prompt carries the system index the resumed run rebuilds); the lead asks `list_verbs(cmdb)`,
+    then `cmdb.get-host {host: web-1}`, then summarises."""
     run_py = S.mod("run")
     ep = _episode(tmp_path / f"ep-{label}", spec, source_dir)
     world = S.load_world(ep, "a")
@@ -106,12 +111,13 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
     source = Run.under(source_dir.parent, source_dir.name)
     sibling_dir = LZ.materialize_alert(tmp_path / f"sibling-{label}", LZ.alert_doc())
     main = H.ReplayFn([
-        H.Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "cmdb",
+        H.Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "elastic",
                                        "goal": "who owns web-1",
                                        "what_to_summarize": ["web-1's owner"]})]),
         H.Turn(text="Resumed and stopping."),
     ])
     gather = H.ReplayFn([
+        H.Turn(tool_calls=[("list_verbs", {"system": "cmdb"})]),
         H.Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
                                       "params": {"host": HOST}})]),
         H.Turn(text="Summary: asked cmdb who owns web-1."),
@@ -153,13 +159,29 @@ def _served_cmdb(sib: dict[str, Any]) -> list[dict]:
             and (r.get("source") in SERVED or CAPTURE_MARK in str(r.get("payload_text")))]
 
 
+def _answer(seen: list[str], request: int) -> str:
+    """The lines the gather model's request `request` carries that its previous one did not —
+    the host's answer to the previous turn's call."""
+    shown = set(seen[request - 1].splitlines())
+    return "\n".join(ln for ln in seen[request].splitlines() if ln not in shown)
+
+
+def _down_lines(text: str) -> list[str]:
+    """The lines of `text` naming cmdb (as a word) as not configured with the dropped key."""
+    return [ln for ln in text.splitlines()
+            if re.search(r"(?<![\w-])cmdb(?![\w-])", ln) and "not configured" in ln.lower()
+            and DROPPED in ln]
+
+
 def _cmdb_query_rows(sib: dict[str, Any]) -> list[dict]:
     return [r for r in S.read_jsonl(Path(RunPaths(sib["dir"]).executed_queries))
             if r.get("system") == "cmdb"]
 
 
 def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -> None:
-    """A system configured when the source ran but not at the sibling's start is down in that sibling: its call is refused without being answered from the source run's capture, the agent is told 'not configured' and why, and nothing is charged. The same sibling with the system configured is answered from the capture."""
+    """A system configured when the source ran but not at the sibling's start is down in that sibling: its call is refused without being answered from the source run's capture, the agent is told 'not configured' and why, and nothing is charged. The same sibling with the system configured is answered from the capture.
+
+    The resumed sibling's surfaces carry the status (the design's resume non-obligation: "the rebuilt gather index, `list_verbs`, and dispatch refusals carry the down status"; adversary A3): the lead's first prompt — the system index the resumed run builds — and its `list_verbs(cmdb)` answer each name cmdb not configured with the dropped key. In the configured sibling neither does, and `list_verbs(cmdb)` lists cmdb's verbs."""
     knowledge, accepted = _plant_tenant()
     store, source_dir, _session, path_ids = legal_source(
         tmp_path / "source", investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
@@ -174,12 +196,32 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
         f"(the gather agent saw {len(configured['gather'].seen)} requests)")
     assert _served_cmdb(configured), (
         "premise: the configured sibling's world ledger records no served cmdb call")
+    seen = configured["gather"].seen
+    assert len(seen) >= 3, f"premise: the configured sibling's lead ran its script: {len(seen)}"
+    assert _down_lines(seen[0]) == [], (
+        "control: the configured sibling's system index shows cmdb as not configured")
+    assert _down_lines(_answer(seen, 1)) == [], (
+        "control: the configured sibling's list_verbs(cmdb) shows cmdb as not configured")
+    assert "get-host" in _answer(seen, 1), (
+        f"control: list_verbs(cmdb) in the configured sibling lists its verbs: "
+        f"{_answer(seen, 1)!r}")
 
     # The operator edits the tenant's settings after the source run, before the branch.
     S7.drop_key(knowledge, "cmdb", DROPPED)
     down = _sibling(tmp_path, "down", accepted=accepted, spec=spec, source_dir=source_dir)
     assert DROPPED not in down["tenant"].systems.get("cmdb", {}), (
         "premise: the sibling's own start did not resolve the edited settings")
+
+    seen = down["gather"].seen
+    assert len(seen) >= 2, (
+        f"premise: the down sibling's lead on elastic ran (its gather model was asked "
+        f"{len(seen)} times)")
+    assert _down_lines(seen[0]), (
+        "the resumed sibling's rebuilt system index (the lead's first prompt) does not name "
+        f"cmdb as not configured with {DROPPED} on any line (resume non-obligation, O-3)")
+    assert _down_lines(_answer(seen, 1)), (
+        f"list_verbs(cmdb) in the resumed sibling does not name cmdb not configured with "
+        f"{DROPPED}: {_answer(seen, 1)!r}")
 
     main_saw = "\n".join(down["main"].seen)
     gather_saw = "\n".join(down["gather"].seen)
