@@ -18,6 +18,19 @@ its real entry point.
 
 RED before the fixes, each for its stated reason; every negative is paired with a positive
 control in the same test.
+
+#1187 (design rev 2, R1): no container holds or is judged by a `_tenant.json`, so the faults
+that spoiled one are retired; a link or an absent folder is the container fault left. The
+tests that changed say so in their docstrings ("#1187 declared change N").
+`test_a_a_container_spoiled_after_the_siblings_ran_is_recorded_and_judged` is retired: its
+fault was the record, and the judge door's record check goes with it (VERIFY's per-world
+refusal stays pinned by `test_a_verify_opens_every_finished_arm_or_hands_back_its_refusal`;
+the door's recordless open by
+`ids_1187/test_1187_roster_consumers.py::test_the_judge_door_opens_an_episode_whose_arm_container_has_no_record`).
+Its launcher-level half — the container goes bad after the siblings ran, VERIFY records each
+world `not archived`, the launch returns a status and the judge step is reached — is kept by
+`test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged`, with the fault #1187
+leaves: `<ep>/runs` swapped for a link (review round 2, F24).
 """
 from __future__ import annotations
 
@@ -25,6 +38,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -33,20 +47,13 @@ from typing import Any
 import pytest
 
 from defender import _tenant
-from defender.tests import _judge_921 as J
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.tenant_1105_run_repository import _spec1105_pr2 as P
-
-EP = "20260728t161845z-src-n59"
 
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     P.roots(tmp_path, monkeypatch)
-
-
-def _episodes() -> Path:
-    return Path(os.environ[P.EPISODES_BASE_ENV])
 
 
 def _rid(text: str):
@@ -57,7 +64,7 @@ def _rid(text: str):
 
 def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
     """A tenant under the configured data root, its natural runs folder as run setup leaves it
-    (`_tenant.json` naming it) and a real run folder per id."""
+    (#1187 R1: no `_tenant.json`) and a real run folder per id."""
     t = H.tenant(P.data_root(), tenant_id)
     H.runs_folder(t)
     for rid in run_ids:
@@ -65,19 +72,27 @@ def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
     return t
 
 
-def _episode(*, container: str | None, arms: tuple[str, ...] = (),
-             episode_id: str = EP) -> Path:
-    """`<episodes>/<episode_id>/` with a manifest-shaped file and, when `container` names a
-    tenant, its `runs/` with that tenant's record (the real writer) and a real folder per arm."""
-    ep = _episodes() / episode_id
-    ep.mkdir(parents=True)
-    (ep / "family.yaml").write_text("episode_id: x\n", encoding="utf-8")
-    if container is not None:
-        (ep / "runs").mkdir()
-        _tenant.ensure_runs_base_record(ep / "runs", container)
-    for label in arms:
-        H.make_run(ep / "runs", f"{episode_id}-{label}", alert=f'{{"arm": "{label}"}}\n')
-    return ep
+def _uuid_tenant(*run_ids: str, tenant_id: str = H.T_ID):
+    """#1187's natural container (declared changes 1 and 6): a tenant under the configured data
+    root, its `<T>/runs` a real folder with NO `_tenant.json`, and a run folder per (UUID) id."""
+    t = H.tenant(P.data_root(), tenant_id)
+    Path(t.runs).mkdir(parents=True, exist_ok=True)
+    for rid in run_ids:
+        H.make_run(t.runs, rid)
+    return t
+
+
+def _post_runs_episode(tenant_id: str, labels: tuple[str, ...]) -> tuple[Path, str, dict]:
+    """#1187's episode after RUNS: `<T>/episodes/<uuid>/` with its arm roster naming `labels`
+    and a real arm folder at each roster id (no record anywhere). Returns
+    `(folder, episode id, roster)`."""
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    episode_id = S.new_id()
+    roster = {label: S.new_id() for label in labels}
+    ep = S.make_episode(P.data_root(), tenant_id, episode_id, labels=labels, roster=roster,
+                        arms=True)
+    return ep, episode_id, roster
 
 
 # ==========================================================================================
@@ -85,76 +100,69 @@ def _episode(*, container: str | None, arms: tuple[str, ...] = (),
 # ==========================================================================================
 
 def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(tmp_path):
-    """`runs.open` over a container that cannot be trusted or read — a corrupt `_tenant.json`,
-    none, another tenant's, a link at `<T>/runs` — refuses with `RunUnreachable`, a
-    `RunRefused`, raised from the container's `TenantRefused` (whose text it carries). An
-    absent container is `RunAbsent`: the run is gone with it. `resolve` answers the same
-    family; an address naming another tenant stays `TenantRefused` (a caller's bug). Positive
-    control: the same open over the good container hands out the run. RED before the fix: the
-    container faults are a bare `TenantRefused`, which an `except RunRefused` misses."""
-    from defender.run_repository import RunAbsent, RunAddress, RunRefused, RunUnreachable
+    """`runs.open` over a container that cannot be read — a link at `<T>/runs` — refuses with
+    `RunUnreachable`, a `RunRefused`, raised from the container's `TenantRefused`. An absent
+    container is `RunAbsent`: the run is gone with it. `resolve` answers the same family; an
+    address naming another tenant stays `TenantRefused` (a caller's bug). Positive control: the
+    same open over the good container hands out the run. RED before the fix: the container
+    faults are a bare `TenantRefused`, which an `except RunRefused` misses.
 
-    t = _good(tmp_path, "r1")
+    #1187 declared changes 1 and 6 (R1): the record faults (a corrupt `_tenant.json`, none,
+    another tenant's) are retired — no record is judged, and a container holding none is the
+    good one. Ids are UUIDs. Declared change 8 (S-iso): the link is refused by the walk from
+    `<T>`; the open still answers the one `RunRefused` family naming the level, but whether as
+    `RunUnreachable` raised from a `TenantRefused` or as a `RunRefused` of the walk's own is not
+    pinned (the design allows either at a link below `<T>`). (Name kept.)"""
+    import uuid
+
+    from defender.run_repository import RunAbsent, RunAddress, RunRefused
+
+    r1 = str(uuid.uuid4())
+    t = _uuid_tenant(r1)
     runs = t.runs_repository()
-    record = Path(t.runs) / "_tenant.json"
-    good = record.read_bytes()
-    assert Path(runs.open(_rid("r1")).run_dir) == Path(t.runs) / "r1", "positive control"
-
-    faults = {
-        "a corrupt record": lambda: record.write_text("{not json", encoding="utf-8"),
-        "no record": record.unlink,
-        "another tenant's record": lambda: record.write_bytes(
-            H.tenant_record_text(H.U_ID).encode("utf-8")),
-    }
-    for what, plant in faults.items():
-        plant()
-        for door, call in (("open", lambda: runs.open(_rid("r1"))),
-                           ("resolve", lambda: runs.resolve(RunAddress(H.T_ID, "r1")))):
-            err = H.raised(call)
-            assert isinstance(err, RunUnreachable), f"{door} over {what} raised {err!r}"
-            assert isinstance(err, RunRefused), what
-            assert not isinstance(err, RunAbsent), what
-            assert isinstance(err.__cause__, _tenant.TenantRefused), (
-                f"{door} over {what}: not raised from the container's refusal: {err!r}")
-            assert "_tenant.json" in str(err), f"{door} over {what} lost the reason: {err}"
-        record.write_bytes(good)
-        assert Path(runs.open(_rid("r1")).run_dir) == Path(t.runs) / "r1", f"after {what}"
+    assert not (Path(t.runs) / "_tenant.json").exists()
+    assert Path(runs.open(_rid(r1)).run_dir) == Path(t.runs) / r1, "positive control"
+    assert Path(runs.resolve(RunAddress(H.T_ID, r1)).run_dir) == Path(t.runs) / r1
 
     moved = tmp_path / "runs-elsewhere"
     Path(t.runs).rename(moved)
     os.symlink(moved, t.runs)
-    err = H.raised(runs.open, _rid("r1"))
-    assert isinstance(err, RunUnreachable), f"open under a linked runs folder raised {err!r}"
+    for door, call in (("open", lambda: runs.open(_rid(r1))),
+                       ("resolve", lambda: runs.resolve(RunAddress(H.T_ID, r1)))):
+        err = H.raised(call)
+        assert isinstance(err, RunRefused), f"{door} under a linked runs folder raised {err!r}"
+        assert not isinstance(err, RunAbsent), door
+        assert str(t.runs) in H.message(err), f"{door}: the refusal names the level: {err!r}"
     os.unlink(t.runs)
-    err = H.raised(runs.open, _rid("r1"))
+    err = H.raised(runs.open, _rid(r1))
     assert isinstance(err, RunAbsent), f"open over an absent container raised {err!r}"
     moved.rename(t.runs)
-    assert Path(runs.open(_rid("r1")).run_dir) == Path(t.runs) / "r1", "the folder put back"
+    assert Path(runs.open(_rid(r1)).run_dir) == Path(t.runs) / r1, "the folder put back"
 
-    foreign = H.raised(runs.resolve, RunAddress(H.U_ID, "r1"))
+    foreign = H.raised(runs.resolve, RunAddress(H.U_ID, r1))
     assert isinstance(foreign, _tenant.TenantRefused), (
         f"resolve of another tenant's address must stay the caller's TenantRefused: {foreign!r}")
 
 
 def test_a_an_arm_whose_container_goes_bad_after_the_view_opened_is_run_refused(tmp_path):
-    """An episode view's `open` answers the same family: a container whose `_tenant.json` is
-    removed or corrupted after the view opened is `RunUnreachable`; a container removed
-    outright is `RunAbsent`. Positive control: the arm opens before the fault. RED before the
-    fix: `TenantRefused`."""
-    from defender.run_repository import RunAbsent, RunUnreachable
+    """An episode view's `open` answers the same family: a container removed outright after
+    the view opened is `RunAbsent`. Positive control: the arm opens before the fault.
 
-    t = _good(tmp_path)
-    ep = _episode(container=H.T_ID, arms=("a",))
-    view = t.runs_repository().episode(EP)
+    #1187 declared changes 2, 6 and 15 (R1, R2): the record halves (a `_tenant.json` removed or
+    corrupted after the view opened) are retired — no arm container holds a record. The episode
+    is `<T>/episodes/<uuid>/` and the arm is at its roster id. (A link at the arm container is
+    pinned by
+    `ids_1187/test_1187_layout_isolation.py::test_a_link_at_an_arm_container_is_refused_and_the_real_folder_opens`.)
+    (Name kept.)"""
+    from defender.run_repository import RunAbsent
+
+    t = _uuid_tenant()
+    ep, episode_id, roster = _post_runs_episode(H.T_ID, ("a", "b"))
+    view = t.runs_repository().episode(episode_id)
     arm = view.arm_id("a")
-    assert Path(view.open(arm).run_dir) == ep / "runs" / f"{EP}-a", "positive control"
+    assert str(arm) == roster["a"]
+    assert Path(view.open(arm).run_dir) == ep / "runs" / roster["a"], "positive control"
 
-    (ep / "runs" / "_tenant.json").unlink()
-    err = H.raised(view.open, arm)
-    assert isinstance(err, RunUnreachable), f"a removed record raised {err!r}"
-    (ep / "runs" / "_tenant.json").write_text("{torn", encoding="utf-8")
-    err = H.raised(view.open, arm)
-    assert isinstance(err, RunUnreachable), f"a corrupt record raised {err!r}"
     (ep / "runs").rename(tmp_path / "container-gone")
     err = H.raised(view.open, arm)
     assert isinstance(err, RunAbsent), f"a removed container raised {err!r}"
@@ -163,40 +171,56 @@ def test_a_an_arm_whose_container_goes_bad_after_the_view_opened_is_run_refused(
 
 def test_a_verify_opens_every_finished_arm_or_hands_back_its_refusal(tmp_path):
     """The launcher's VERIFY step opens each finished arm through `_finished_arms`, which keeps
-    a `RunRefused` as that world's own fault. With the container's record removed after the
-    siblings ran, every arm comes back as a `RunRefused` (none raises). Positive control: with
-    the record in place every arm is a `Run`. RED before the fix: the container's
-    `TenantRefused` escapes `_finished_arms`."""
+    a `RunRefused` as that world's own fault. With the container gone after the siblings ran,
+    every arm comes back as a `RunRefused` (none raises). Positive control: with the container
+    in place every arm is a `Run`. RED before the fix: the container's `TenantRefused` escapes
+    `_finished_arms`.
+
+    #1187 declared changes 6 and 15 (R1, R2): the fault is no longer a removed `_tenant.json`
+    (no record is judged); it is the arm container itself moved away. The arms are opened by
+    the ids the episode's roster holds. (Name kept.)"""
     from defender.learning.branch import cli
     from defender.run_repository import Run, RunRefused
 
-    t = _good(tmp_path)
+    t = _uuid_tenant()
     labels = ("a", "b", "c")
-    ep = _episode(container=H.T_ID, arms=labels)
-    with t.runs_repository().episode(EP) as view:
+    ep, episode_id, roster = _post_runs_episode(H.T_ID, labels)
+    with t.runs_repository().episode(episode_id) as view:
         arms = cli._finished_arms(view, labels)
         assert all(isinstance(arms[label], Run) for label in labels), f"control: {arms}"
-        (ep / "runs" / "_tenant.json").unlink()
+        assert {label: Path(arms[label].run_dir).name for label in labels} == roster
+        (ep / "runs").rename(tmp_path / "container-gone")
         arms = cli._finished_arms(view, labels)
     assert sorted(arms) == sorted(labels)
     assert all(isinstance(arms[label], RunRefused) for label in labels), arms
 
 
-class _ContainerSpoilingSibling:
-    """`J.FakeSibling`, then the siblings' container record overwritten with garbage after
-    each sibling ran — a container fault that appears between RUNS and VERIFY."""
+class _ContainerLinkingSibling(P.J.FakeSibling):
+    """`J.FakeSibling`, then — once EVERY started sibling has returned — the episode's arm
+    container `<ep>/runs` moved outside the episode and a link left at its name: a container
+    fault that appears between RUNS and VERIFY (#1187: the record it used to be is retired; a
+    link is the fault left, S-iso). Counted under a lock, so the move happens after the last
+    sibling finished writing, never under one still running."""
 
-    def __init__(self, episode_dir: Path) -> None:
-        self.inner = J.FakeSibling(episode_dir)
-        self.record = Path(episode_dir) / "runs" / "_tenant.json"
+    def __init__(self, *, outside: Path, siblings: int) -> None:
+        super().__init__()
+        self.outside = outside
+        self.siblings = siblings
+        self._done = 0
+        self._lock = threading.Lock()
+        self.linked: Path | None = None
 
-    def __call__(self, argv: list[str], **kw: Any) -> int:
-        rc = self.inner(argv, **kw)
-        self.record.write_text("{spoiled", encoding="utf-8")
+    def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **kw: Any) -> int:
+        rc = super().__call__(argv, env=env, **kw)
+        with self._lock:
+            self._done += 1
+            ep = self.episode_of(list(argv))
+            if self._done == self.siblings and ep is not None and self.linked is None:
+                moved = self.outside / "runs-moved"
+                (ep / "runs").rename(moved)
+                os.symlink(moved, ep / "runs")
+                self.linked = ep / "runs"
         return rc
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.inner, name)
 
 
 def _world_reasons(episode_dir: Path) -> dict[str, str]:
@@ -209,32 +233,50 @@ def _world_reasons(episode_dir: Path) -> dict[str, str]:
             for p in sorted(records.glob("*.yaml"))}
 
 
-def test_a_a_container_spoiled_after_the_siblings_ran_is_recorded_and_judged(
-        tmp_path, monkeypatch, caplog):
+def _steps(episode_dir: Path) -> list[str]:
+    """The launcher's stage timing record's steps (`learning.branch.timing`, #1025 O7): a step
+    is on it once its boundary was crossed, the judge's included when the grade failed."""
+    from defender import _io
+    from defender.learning.branch import timing
+
+    with _io.bind(episode_dir) as bound:
+        return [row["step"] for row in timing.read_stage_timings(bound) or []]
+
+
+def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
+        tmp_path, monkeypatch):
     """Driven through the launcher (`learning/branch/cli.main`): the siblings ran, then their
-    container's `_tenant.json` was spoiled. VERIFY records each finished world as `not
-    archived` (its run folder refused), the launch returns a status rather than raising, and
-    the judge step is still reached — and, since PR #1236's second review round, its door
-    judges the container's record as the episode view does, so it refuses the spoiled record
-    (logged by the launcher, non-fatal) and writes no `judge.yaml`. The page then refuses the
-    spoiled container on its own, non-fatal to the launch, so it is not asserted. Positive
-    control: a clean launch under fresh roots archives the worlds, records none `not
-    archived` and grades. RED before the fix: the container's `TenantRefused` escapes VERIFY,
-    the launch raises, and neither the records nor the judge step are reached."""
+    container `<ep>/runs` was swapped for a link to a real folder holding every finished arm.
+    VERIFY opens each arm through the episode view, which never follows the link: every world
+    is recorded `not archived` (its arm refused — `RunRefused`, or the container's
+    `TenantRefused`, which VERIFY must hold too), the launch returns a status rather than
+    raising, and the judge step is still reached (its row is on the stage timing record).
+    Nothing is archived from the link's target. Positive control: a clean launch under fresh
+    roots archives the worlds, records none `not archived` and grades.
+
+    Review round 2, F24: the launcher-level half of the retired
+    `test_a_a_container_spoiled_after_the_siblings_ran_is_recorded_and_judged`, whose fault (a
+    spoiled `_tenant.json`) #1187 R1 retires; S-iso lets the open raise either class here, and
+    `_finished_arms` catching only `RunRefused` would crash the launch on the other."""
     est, src = P.launch_source(tmp_path)
-    ep = _episodes() / P.EPISODE_ID
-    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src),
-                         spawn=_ContainerSpoilingSibling(ep))
+    outside = tmp_path / "outside-the-episode"
+    outside.mkdir()
+    spawn = _ContainerLinkingSibling(outside=outside, siblings=len(P.T.WORLDS))
+    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src), spawn=spawn)
     assert got.questioner.calls > 0, f"the launch never ran: {got.message!r}"
+    assert spawn.faults == [], spawn.faults
+    unplanted = "the double never linked the container: the fault this test is about was not planted"
+    assert spawn.linked is not None, unplanted
+    assert spawn.linked.is_symlink(), unplanted
     assert got.raised is None, f"a container fault escaped the launch: {got.raised!r}"
     assert isinstance(got.rc, int)
+    (ep,) = P.launched_episodes()
     reasons = _world_reasons(ep)
+    assert sorted(reasons) == sorted(P.T.WORLDS), reasons
     assert set(reasons.values()) == {"not archived"}, reasons
-    assert sorted(reasons) == ["a", "b", "c"], reasons
-    judged = [r.getMessage() for r in caplog.records if "the judge pass failed" in r.getMessage()]
-    assert judged, "the judge step was not reached after VERIFY"
-    assert "_tenant.json" in judged[0], f"the judge refused something else: {judged}"
-    assert not (ep / "judge.yaml").exists(), "the judge graded a spoiled container"
+    assert "judge" in _steps(ep), f"the judge step was not reached after VERIFY: {_steps(ep)}"
+    archived = [q for q in (ep / "worlds").rglob("report.md")] if (ep / "worlds").is_dir() else []
+    assert archived == [], f"a world was archived through the linked container: {archived}"
 
     control_root = tmp_path / "control"
     control_root.mkdir()
@@ -244,7 +286,7 @@ def test_a_a_container_spoiled_after_the_siblings_ran_is_recorded_and_judged(
     clean = P.drive_launch(est2, P.launch_argv(P.LAUNCH_TENANT, src2))
     assert clean.raised is None, f"the control did not launch: {clean!r}"
     assert clean.rc == 0, f"the control did not launch: {clean!r}"
-    ep2 = _episodes() / P.EPISODE_ID
+    (ep2,) = P.launched_episodes()
     assert "not archived" not in _world_reasons(ep2).values()
     assert (ep2 / "worlds" / "b" / "report.md").is_file()
     assert (ep2 / "judge.yaml").is_file()
@@ -267,26 +309,36 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     re-queued with `attempts: 1` — not dead-lettered, not served — and at
     `LEAD_AUTHOR_MAX_RETRIES` quarantined `transient-exhausted`. Positive control in the same
     ticks: a row whose run folder is GONE is `artifact-missing` at once, and a good row is
-    served. RED before the fix: every such row is `artifact-missing` on the first tick."""
+    served. RED before the fix: every such row is `artifact-missing` on the first tick.
+
+    #1187 declared changes 1 and 6 (R1): the container that cannot be trusted is no longer one
+    whose `_tenant.json` was removed (no record is judged; such a container serves) — it is one
+    whose `<U>/runs` is a link. Run ids are UUIDs, and neither container holds a record.
+    (Name kept.)"""
+    import uuid
+
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "2")
-    t = _good(tmp_path, "r1")
-    u = _good(tmp_path, "r1", tenant_id=H.U_ID)
-    os.symlink(Path(t.runs) / "r1", Path(t.runs) / "linked")
+    r1, linked, nope = (str(uuid.uuid4()) for _ in range(3))
+    t = _uuid_tenant(r1)
+    u = _uuid_tenant(r1, tenant_id=H.U_ID)
+    os.symlink(Path(t.runs) / r1, Path(t.runs) / linked)
     paths = P.loop_paths(tmp_path)
     transient = {
-        "ghost": {"case_id": "ghost", "tenant_id": "ghost", "run_id": "r1"},
-        "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": "linked"},
-        "unreachable": {"case_id": "unreachable", "tenant_id": H.U_ID, "run_id": "r1"},
+        "ghost": {"case_id": "ghost", "tenant_id": "ghost", "run_id": r1},
+        "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": linked},
+        "unreachable": {"case_id": "unreachable", "tenant_id": H.U_ID, "run_id": r1},
     }
     for case_id, body in transient.items():
         P.queue_row(paths, case_id, body)
-    P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": H.T_ID, "run_id": "nope"})
-    P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.T_ID, "run_id": "r1"})
-    (Path(u.runs) / "_tenant.json").unlink()
+    P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": H.T_ID, "run_id": nope})
+    P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.T_ID, "run_id": r1})
+    moved = tmp_path / "u-runs-elsewhere"
+    Path(u.runs).rename(moved)
+    os.symlink(moved, u.runs)
 
     lane = P.Lane()
     P.drain(paths, lane)
-    assert lane.run_dirs == [Path(t.runs) / "r1"], f"served {lane.run_dirs}"
+    assert lane.run_dirs == [Path(t.runs) / r1], f"served {lane.run_dirs}"
     gone = P.dead_letter(paths, "gone")
     assert gone is not None
     assert gone.get("failed") == "artifact-missing", gone
@@ -467,25 +519,31 @@ def test_d_the_shared_opener_opens_a_natural_run_and_an_arm_or_returns_the_refus
         tmp_path, d9_tenant):
     """`open_requested_run(data_root, tenant, run_id, episode_id=None)`: the natural run, or
     with an episode id the arm, opened through the tenant's repository — or the refusal as one
-    line of text naming the request. RED before the fix: no such function."""
-    from defender.run_repository import Run, open_requested_run
-    from defender.tests._state1135 import curation_run_dir
+    line of text naming the request. RED before the fix: no such function.
 
-    run_dir = curation_run_dir("r-real", tenant_id=d9_tenant)
-    ep = _episode(container=d9_tenant, arms=("a",))
+    #1187 declared changes 1, 2, 5 and 15: the arm is opened under `<T>/episodes/<uuid>/` by
+    the id its roster holds (never `<episode>-<label>`), and every id is a UUID — the absent
+    run and the absent episode are UUIDs that name nothing. (Name kept.)"""
+    import uuid
+
+    from defender.run_repository import Run, open_requested_run
+
+    real = str(uuid.uuid4())
+    run_dir = H.make_run(P.data_root() / d9_tenant / "runs", real)
+    ep, episode_id, roster = _post_runs_episode(d9_tenant, ("a",))
     root = _tenant.resolve_data_root()
 
-    run = open_requested_run(root, d9_tenant, "r-real")
+    run = open_requested_run(root, d9_tenant, real)
     assert isinstance(run, Run), run
     assert Path(run.run_dir) == run_dir
-    arm = open_requested_run(root, d9_tenant, f"{EP}-a", episode_id=EP)
+    arm = open_requested_run(root, d9_tenant, roster["a"], episode_id=episode_id)
     assert isinstance(arm, Run), arm
-    assert Path(arm.run_dir) == ep / "runs" / f"{EP}-a"
+    assert Path(arm.run_dir) == ep / "runs" / roster["a"]
 
-    for raw_tenant, raw_run, episode_id in ((d9_tenant, "nope-run", None),
-                                           ("no-such-tenant", "r-real", None),
-                                           (d9_tenant, "r-real", "no-such-episode"),
-                                           (d9_tenant, "../r-real", None)):
+    for raw_tenant, raw_run, episode_id in ((d9_tenant, str(uuid.uuid4()), None),
+                                           ("no-such-tenant", real, None),
+                                           (d9_tenant, real, str(uuid.uuid4())),
+                                           (d9_tenant, f"../{real}", None)):
         refused = open_requested_run(root, raw_tenant, raw_run, episode_id=episode_id)
         assert isinstance(refused, str), f"{raw_tenant}/{raw_run}/{episode_id}: {refused!r}"
         assert "cannot be opened" in refused, refused
@@ -497,15 +555,17 @@ def test_d_the_shared_opener_opens_a_natural_run_and_an_arm_or_returns_the_refus
 # ==========================================================================================
 
 def test_e_the_tenants_runs_come_from_one_hold_of_the_runs_folder(tmp_path):
-    """`RunsRepository.all_runs()` holds the runs folder ONCE (its `_tenant.json` judged once)
-    and hands out a `Run` for every listed run, in id order, each reading its own records;
+    """`RunsRepository.all_runs()` holds the runs folder ONCE and hands out a `Run` for every listed run, in id order, each reading its own records;
     `trace_lesson.tenant_runs` answers the same runs. An absent runs folder holds none.
     Positive control on the cost: opening the same runs one by one holds the folder once per
     run. RED before the fix: no `all_runs`, and the tracer lists then opens each run."""
     from defender.learning.ops import trace_lesson
     from defender.run_repository import Run, RunsRepository
 
-    ids = ["r1", "r2", "r3"]
+    # #1187 declared change 1: uuid run ids (sorted: the listing hands them out in id order).
+    from defender.tests._fixture_uuid import fixture_uuid
+
+    ids = sorted(fixture_uuid(f"rf-e-r{i}") for i in (1, 2, 3))
     t = _good(tmp_path, *ids)
     rec = H.RecordingIO()
     got = RunsRepository(t, io=rec).all_runs()

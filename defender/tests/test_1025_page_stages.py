@@ -451,14 +451,22 @@ def test_1025_a_sibling_tool_trace_jsonls_final_row_is_not_a_result_event(tmp_pa
 def test_1025_render_against_a_still_running_sibling_with_no_result_event_yet(tmp_path):
     """A sibling still running — a run dir with events and no result event yet — is
     indistinguishable from a crashed one by design: the section renders, the cost row reads
-    "no result event", the link is rendered; no live-process inspection.
+    "no result event", the link (to the arm id the roster holds) is rendered; no live-process
+    inspection. The roster and the arm folders at its ids are planted over the older fixture
+    (`roster_for_arms`); the graded world's arm, at its roster id, has events and no result.
+    #1187 declared change 15
     """
+    from defender.tests.ids_1187._spec1187 import roster_for_arms
+
     ep = E.sample_episode(tmp_path)
-    E.run_dir(ep.dir, E.GRADED_WORLD, result=False)
+    roster = roster_for_arms(ep.dir, {label: ep.run(label) for label in E.WORLDS})
+    E.write_tool_trace(ep.dir / "runs" / roster[E.GRADED_WORLD], [
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}}])
     page = render(ep)
     assert f"world-{E.GRADED_WORLD}" in page.by_id
+    expected = f"runs/{roster[E.GRADED_WORLD]}/runtime.html"
+    assert expected in page.anchors_in(f"world-{E.GRADED_WORLD}")
     assert "no result event" in page.text_of("stage-runs")
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" in page.anchors_in(f"world-{E.GRADED_WORLD}")
 
 
 def test_1025_a_very_long_unbroken_token(tmp_path):

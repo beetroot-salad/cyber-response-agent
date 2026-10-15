@@ -151,7 +151,7 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
     assert summary["requests"] >= 2
     assert (run_dir / "tool_trace.jsonl").is_file()
     assert RunPaths(run_dir).wire_log.is_file()
-    assert budget(summary).get("run_id") == "trip", "the run opened no budget of its own"
+    assert budget(summary).get("run_id") == run_dir.name, "the run opened no budget of its own"
 
 
 def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):

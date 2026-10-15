@@ -27,6 +27,11 @@ NOT PINNED: the launcher's SUCCESS as a process (F7) — a launch spends the que
 oracle and the judge, which a process cannot be handed fakes for; its process refusal is pinned,
 and its in-process launch is pinned by the declared-change and guard tests.
 
+#1187 (design rev 2) flips F2 (no container record: the refused request is another tenant's,
+which finds nothing under its own `<T>/episodes`), F5 (the record halves retired; the linked
+`<T>/runs` halves kept) and F7/F9's runs (UUID ids, no `_tenant.json`); each says so in its
+docstring.
+
 The F2 audit hook is installed once per test process (an audit hook cannot be removed). It
 checks a module-level flag first, records only `open` events while a test arms it, and never
 raises.
@@ -50,6 +55,7 @@ from types import ModuleType
 import pytest
 
 from defender.tests import _episode_1025 as E
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.tenant_1105_run_repository import _spec1105_pr2 as P
 
@@ -57,10 +63,6 @@ from defender.tests.tenant_1105_run_repository import _spec1105_pr2 as P
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     P.roots(tmp_path, monkeypatch)
-
-
-def _episodes() -> Path:
-    return Path(os.environ[P.EPISODES_BASE_ENV])
 
 
 def _launched(got: P.Launched) -> bool:
@@ -244,28 +246,37 @@ def _episode_records(episode_dir: Path) -> set[str]:
 
 
 def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
-    """F2 / G19 / S-c1 amended: a sibling over an episode whose container record names another
-    real tenant is refused by the view's one read of `runs/_tenant.json`, "before it reads B's
-    manifest or any other episode record; that one read is the refusal". Observed through the
-    process's `open` audit events: no top-level episode record (`family.yaml`, `served`) is
-    opened before the refusal. POSITIVE CONTROL: with the record naming T the sibling runs, and
-    the same hook sees `family.yaml` opened (the hook reaches the read primitive). RED at base:
-    `--resume` reads the manifest first, then refuses on the record."""
-    src, ep = P.sibling_scene(tmp_path, container="beta")
+    """F2 / G19 / S-c1 amended: a sibling refused for its tenant reads no episode record
+    first. Observed through the process's `open` audit events: no top-level episode record
+    (`family.yaml`, `served`, …) is opened before the refusal. POSITIVE CONTROL: the owning
+    tenant's sibling runs, and the same hook sees `family.yaml` opened (the hook reaches the
+    read primitive). RED at base: `--resume` reads the manifest first, then refuses on the
+    record.
+
+    #1187 declared changes 6, 8 and 10 (R1, O8, O4b): no container record is judged — the
+    episode belongs to the tenant it lives under. Tenant `beta` asking for T's episode looks
+    under `<beta>/episodes` only and is refused having opened NOTHING of T's episode, the arm
+    roster included. The episode has reached RUNS (its roster names `b`; no `_tenant.json`), so
+    T's own sibling runs. (Name kept.)"""
+    from defender import _yaml
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    src, ep = P.sibling_scene(tmp_path, roster=False)
+    doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
+    (ep / "runs").mkdir(exist_ok=True)
+    S.write_roster(ep, {w["world_id"]: S.new_id() for w in doc["worlds"]})
     P.second_tenant(P.data_root(), "beta")
     records = _episode_records(ep)
-    assert "family.yaml" in records
+    assert {"family.yaml", S.ROSTER_NAME} <= records
 
     rec = P.SiblingRecorder()
     with _opens() as opened:
-        rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
-    assert refused is not None or rc not in (0, None), f"a foreign container was run: {err}"
+        rc, refused, err = P.drive_run_py(P.sibling_argv("beta", ep, "b"), rec)
+    assert refused is not None or rc not in (0, None), f"another tenant's episode was run: {err}"
     assert "lifecycle" not in rec.order
     read = sorted(set(opened) & records)
-    assert read == [], f"the refused sibling read {read} before the container record refused"
+    assert read == [], f"the refused sibling read {read} of another tenant's episode"
 
-    (ep / "runs" / "_tenant.json").unlink()
-    P.plant_record(ep / "runs", P.SIBLING_TENANT)
     ok = P.SiblingRecorder()
     with _opens() as opened:
         rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), ok)
@@ -274,29 +285,35 @@ def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
 
 
 def test_f2_a_refused_page_reads_no_episode_record(tmp_path, d9_tenant):
-    """F2 / G20: the page judges `runs/_tenant.json` "before `_load_episode` … reads the
-    manifest, outcome, samples, archive or judge records". With the record naming another real
-    tenant the page is refused and no top-level episode record (`family.yaml`, `judge.yaml`,
-    `outcome.yaml`, `samples.yaml`, `worlds`, …) is opened. POSITIVE CONTROL: with the record
-    naming T the page renders and the hook sees `family.yaml` opened. RED at base: the page
-    checks no record and renders another tenant's episode."""
-    ep = E.sample_episode(tmp_path, root=_episodes())
+    """F2 / G20: a page refused for its tenant opens no episode record before the refusal —
+    not the manifest, outcome, samples, archive or judge records. POSITIVE CONTROL: the owning
+    tenant's page renders and the hook sees `family.yaml` opened. RED at base: the page checks
+    no record and renders another tenant's episode.
+
+    #1187 declared changes 5, 6 and 8 (R1, O8): no container record is judged. The episode is
+    T's own `<T>/episodes/<uuid>/` (its manifest naming the uuid, its arm roster, its outcome
+    record); asked for by `beta`, the page finds nothing under `<beta>/episodes`, refuses, and
+    opens no record of it, `arms.json` included. (Name kept.)"""
+    from defender.tests import _triplet_947 as T
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    episode_id = S.new_id()
+    ep = S.make_episode(P.data_root(), d9_tenant, episode_id, labels=T.WORLDS, roster=True)
+    T.write_family(ep, T.family_doc(episode_id=episode_id, source_run_id=S.new_id()))
+    E.write_outcome(ep, "accepted", reason="F2 outcome", family_stamp=False)
     P.second_tenant(P.data_root(), "beta")
-    P.plant_record(ep.dir / "runs", "beta")
-    records = _episode_records(ep.dir)
-    assert {"family.yaml", "judge.yaml", "worlds"} <= records
+    records = _episode_records(ep)
+    assert {"family.yaml", S.ROSTER_NAME, "outcome.yaml"} <= records
 
     with _opens() as opened:
-        got = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+        got = P.drive_cli(P.page_main(), P.new_page_argv("beta", episode_id))
     assert _refused(got), "another tenant's episode was rendered"
-    assert not ep.page.exists()
+    assert not (ep / E.PAGE_NAME).exists()
     read = sorted(set(opened) & records)
-    assert read == [], f"the refused page read {read} before the container record refused"
+    assert read == [], f"the refused page read {read} of another tenant's episode"
 
-    (ep.dir / "runs" / "_tenant.json").unlink()
-    P.plant_record(ep.dir / "runs", d9_tenant)
     with _opens() as opened:
-        ok = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+        ok = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))
     assert ok.rc == 0, ok.said
     assert "family.yaml" in opened, "the hook did not see the manifest read"
 
@@ -316,7 +333,7 @@ def _judge_prompts(root: Path, monkeypatch, *, prior: bool) -> dict[str, str]:
     monkeypatch.setenv(P.DATA_ROOT_ENV, str(root / "data-root"))
     est, src = P.launch_source(root)
     if prior:
-        other = src.parent / "20260101t000000z-prior-trial"
+        other = src.parent / fixture_uuid("f3-prior-trial")  # #1187 dc1: a uuid run id
         other.mkdir()
         (other / "alert.json").write_text(json.dumps({"alert_id": P.J.ALERT_ID}),
                                           encoding="utf-8")
@@ -369,10 +386,11 @@ def test_f4_an_old_source_run_dir_never_stands_in_for_an_absent_source(tmp_path)
     with `source_run_id` naming T's source resumes, its arm's alert the source's. RED at base:
     the sibling reads its source from `source_run_dir` and resumes from T's decoy."""
     base, src = P.T.runs_base(tmp_path, source_run_id=P.SOURCE_RUN_ID)
-    own_decoy = base / "20260101t000000z-decoy"
+    # #1187 declared change 1: every run and episode id here is a uuid.
+    own_decoy = base / fixture_uuid("f4-decoy")
     beta = P.second_tenant(P.data_root(), "beta")
     H.runs_folder(beta)
-    beta_decoy = Path(beta.runs) / "20260101t000000z-betas-run"
+    beta_decoy = Path(beta.runs) / fixture_uuid("f4-betas-run")
     for decoy in (own_decoy, beta_decoy):
         shutil.copytree(src, decoy)
         (decoy / "alert.json").write_text('{"rule": {"id": "DECOY-ONLY-ALERT"}}\n',
@@ -381,16 +399,15 @@ def test_f4_an_old_source_run_dir_never_stands_in_for_an_absent_source(tmp_path)
     def sibling(i: int, decoy: Path, source_run_id: str) -> tuple[P.SiblingRecorder, tuple]:
         sub = tmp_path / f"scene{i}"
         sub.mkdir()
-        episode_id = f"{P.EPISODE_ID}-r{i + 2}"
+        episode_id = fixture_uuid(f"f4-scene-{i}")
         doc = P.family_doc(src, source_run_dir=str(decoy), episode_id=episode_id)
         doc["source_run_id"] = source_run_id
-        _s, ep = P.sibling_scene(sub, container=P.SIBLING_TENANT, episode_id=episode_id,
-                                 doc=doc)
+        _s, ep = P.sibling_scene(sub, episode_id=episode_id, doc=doc)
         rec = P.SiblingRecorder()
         return rec, P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
 
     for i, decoy in enumerate((own_decoy, beta_decoy)):
-        rec, (rc, refused, err) = sibling(i, decoy, "20260101t000000z-gone")
+        rec, (rc, refused, err) = sibling(i, decoy, fixture_uuid("f4-gone"))
         steered = rec.run_dir is not None and b"DECOY-ONLY-ALERT" in (
             rec.run_dir / "alert_input" / "alert.json").read_bytes()
         assert not steered, f"the old field stood in for the absent source: {decoy}"
@@ -404,24 +421,9 @@ def test_f4_an_old_source_run_dir_never_stands_in_for_an_absent_source(tmp_path)
 
 
 # ==========================================================================================
-# F5 — the run page and `workspace_map` open through the repository: the record is judged and
-# a linked `<T>/runs` is never followed (declared change 7, O3, O1).
+# F5 — the run page and `workspace_map` open through the repository: a linked `<T>/runs` is
+# never followed (declared change 7, O3, O1). (#1187 R1: no record is judged any more.)
 # ==========================================================================================
-
-def _swap_record(runs: Path, tenant_id: str) -> bytes:
-    """Re-plant `<runs>/_tenant.json` naming `tenant_id`; returns the record it replaced."""
-    record = runs / "_tenant.json"
-    own = record.read_bytes()
-    record.unlink()
-    P.plant_record(runs, tenant_id)
-    return own
-
-
-def _restore_record(runs: Path, own: bytes) -> None:
-    record = runs / "_tenant.json"
-    record.unlink()
-    record.write_bytes(own)
-
 
 def _link_runs(runs: Path, elsewhere: Path) -> Path:
     runs.rename(elsewhere)
@@ -431,25 +433,21 @@ def _link_runs(runs: Path, elsewhere: Path) -> Path:
 
 def test_f5_the_run_page_refuses_a_foreign_record_and_a_linked_runs(tmp_path):
     """F5 / declared change 7 / O3: `visualize_run.py --tenant T <run_id>` opens through
-    `runs.open`. POSITIVE CONTROL first: T's run renders. Then T's runs folder's `_tenant.json`
-    names another real tenant: refused, no page written. Then (record restored) `<T>/runs` is a
-    link to a real folder holding the same run: refused, nothing written into the link's target.
-    A run page composing `<data root>/<T>/runs/<id>` by hand fails both. RED at base: the CLI
-    takes a folder path ("usage")."""
-    src, _ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
+    `runs.open`. POSITIVE CONTROL first: T's run renders. Then `<T>/runs` is a link to a real
+    folder holding the same run: refused, nothing written into the link's target. A run page
+    composing `<data root>/<T>/runs/<id>` by hand fails it. RED at base: the CLI takes a folder
+    path ("usage").
+
+    #1187 declared change 6 (R1): the half where T's `_tenant.json` named another tenant is
+    retired — no record is judged; isolation is the no-follow walk from `<T>` (a link at
+    `<T>/runs`, kept here). (Name kept.)"""
+    src, _ep = P.sibling_scene(tmp_path)
     runs = src.parent
     argv = P.new_run_page_argv(P.SIBLING_TENANT, src.name)
     ok = P.drive_cli(P.run_page_main(), argv)
     assert ok.rc == 0, f"--tenant T <run id> did not render: {ok.said}"
     assert (src / "runtime.html").is_file()
     (src / "runtime.html").unlink()
-
-    P.second_tenant(P.data_root(), "beta")
-    own = _swap_record(runs, "beta")
-    foreign = P.drive_cli(P.run_page_main(), argv)
-    assert _refused(foreign), "the run page rendered under a record naming another tenant"
-    assert not (src / "runtime.html").exists()
-    _restore_record(runs, own)
 
     moved = _link_runs(runs, tmp_path / "runs-elsewhere")
     linked = P.drive_cli(P.run_page_main(), argv)
@@ -459,29 +457,27 @@ def test_f5_the_run_page_refuses_a_foreign_record_and_a_linked_runs(tmp_path):
 
 def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d9_tenant):
     """F5 / declared change 10 / O3: `workspace_map.py --tenant T <run_id>` opens through the
-    repository. POSITIVE CONTROL first: it prints the library's map of T's run. Then T's
-    `_tenant.json` names another real tenant: refused, nothing printed. Then (record restored)
-    `<T>/runs` is a link to a real folder: refused. RED at base: the CLI takes a folder path."""
+    repository. POSITIVE CONTROL first: it prints the library's map of T's run. Then
+    `<T>/runs` is a link to a real folder: refused, nothing printed. RED at base: the CLI takes
+    a folder path.
+
+    #1187 declared changes 1 and 6 (R1): the "record naming another tenant" half is retired —
+    no record is judged — and T's run is UUID-named in a container holding no `_tenant.json`.
+    (Name kept.)"""
+    import uuid
+
     from defender._paths import adapters_under
     from defender.runtime.verbs import read_roster
     from defender.scripts import workspace_map as wm
 
     runs = P.data_root() / d9_tenant / "runs"
-    P.plant_record(runs, d9_tenant)
-    run = H.make_run(runs, "20260605t000000z-case-a")
+    run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(
         run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
     argv = ["workspace_map.py", "--tenant", d9_tenant, run.name]
     ok = P.drive_cli(wm.main, argv)
     assert ok.rc == 0, ok.said
     assert ok.out == expected
-
-    P.second_tenant(P.data_root(), "beta")
-    own = _swap_record(runs, "beta")
-    foreign = P.drive_cli(wm.main, argv)
-    assert _refused(foreign), "workspace_map mapped a run under another tenant's record"
-    assert foreign.out == ""
-    _restore_record(runs, own)
 
     _link_runs(runs, tmp_path / "runs-elsewhere")
     linked = P.drive_cli(wm.main, argv)
@@ -494,16 +490,21 @@ def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d
 # drain goes on.
 # ==========================================================================================
 
+#: #1187 declared change 1: a run id is canonical lowercase uuid4 text, so the well-formed
+#: rows name uuid runs and the off-grammar member is that uuid upper-cased.
+_F6_R1, _F6_R2 = fixture_uuid("f6-r1"), fixture_uuid("f6-r2")
+
+
 @pytest.mark.parametrize(("case_id", "body"), [
     ("no-run", {"tenant_id": H.T_ID}),
     ("run-null", {"tenant_id": H.T_ID, "run_id": None}),
     ("run-int", {"tenant_id": H.T_ID, "run_id": 7}),
-    ("run-list", {"tenant_id": H.T_ID, "run_id": ["r1"]}),
-    ("run-upper", {"tenant_id": H.T_ID, "run_id": "R1"}),
+    ("run-list", {"tenant_id": H.T_ID, "run_id": [_F6_R1]}),
+    ("run-upper", {"tenant_id": H.T_ID, "run_id": _F6_R1.upper()}),
     ("run-empty", {"tenant_id": H.T_ID, "run_id": ""}),
-    ("tenant-null", {"tenant_id": None, "run_id": "r1"}),
-    ("tenant-int", {"tenant_id": 7, "run_id": "r1"}),
-    ("tenant-dict", {"tenant_id": {"id": H.T_ID}, "run_id": "r1"}),
+    ("tenant-null", {"tenant_id": None, "run_id": _F6_R1}),
+    ("tenant-int", {"tenant_id": 7, "run_id": _F6_R1}),
+    ("tenant-dict", {"tenant_id": {"id": H.T_ID}, "run_id": _F6_R1}),
 ])
 def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_id, body):
     """F6(a) / D-stored: "a row whose `tenant_id` or `run_id` is missing, not a string, or off
@@ -515,15 +516,15 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
     root = P.data_root()
     t = H.tenant(root, H.T_ID)
     H.runs_folder(t)
-    for run_id in ("r1", "r2"):
+    for run_id in (_F6_R1, _F6_R2):
         H.make_run(t.runs, run_id)
     paths = P.loop_paths(tmp_path)
     P.queue_row(paths, case_id, {"case_id": case_id, **body})
-    P.queue_row(paths, "good", {"case_id": "good", "tenant_id": H.T_ID, "run_id": "r1"})
+    P.queue_row(paths, "good", {"case_id": "good", "tenant_id": H.T_ID, "run_id": _F6_R1})
 
     lane = P.Lane()
     assert H.raised(P.drain, paths, lane) is None, "the malformed row raised out of the drain"
-    assert lane.run_dirs == [Path(t.runs) / "r1"], f"served {lane.run_dirs}"
+    assert lane.run_dirs == [Path(t.runs) / _F6_R1], f"served {lane.run_dirs}"
     letter = P.dead_letter(paths, case_id)
     assert letter is not None, f"{case_id} was not quarantined"
     assert str(letter.get("failed", "")).startswith("unreadable"), letter
@@ -531,17 +532,18 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
 
     # The next tick: it raises nothing and serves the next row. (This lane double never
     # consumes what it is handed, so the tick may hand it `good` again; that is the harness's.)
-    P.queue_row(paths, "next", {"case_id": "next", "tenant_id": H.T_ID, "run_id": "r2"})
+    P.queue_row(paths, "next", {"case_id": "next", "tenant_id": H.T_ID, "run_id": _F6_R2})
     again = P.Lane()
     assert H.raised(P.drain, paths, again) is None, "the next tick raised: the drain is wedged"
-    assert Path(t.runs) / "r2" in again.run_dirs, f"the next tick served {again.run_dirs}"
+    assert Path(t.runs) / _F6_R2 in again.run_dirs, f"the next tick served {again.run_dirs}"
 
 
 # ==========================================================================================
 # F7 — the migrated CLIs as the operator runs them: real processes, their `__main__` lines lit.
 # ==========================================================================================
 
-_ABSENT = "20990101t000000z-pr2-absent"
+#: #1187 declared change 1: a uuid no run holds — refused as absent, never by the id rule.
+_ABSENT = fixture_uuid("pr2-absent")
 
 
 def _process(*command: str) -> subprocess.CompletedProcess:
@@ -583,14 +585,18 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     """F7 / declared change 10: `python defender/scripts/workspace_map.py --tenant T <run_id>`
     exits 0 printing the library's map of T's run; for an absent run id it exits non-zero naming
     the id, with no argument error. A `__main__` that hands `main` the wrong slice of argv fails
-    both. RED at base: the script takes a folder path ("usage")."""
+    both. RED at base: the script takes a folder path ("usage").
+
+    #1187 declared changes 1 and 6: T's run is UUID-named (an old id is refused by every
+    `--tenant T <id>` command line) and its container holds no `_tenant.json`. (Name kept.)"""
+    import uuid
+
     from defender._paths import adapters_under
     from defender.runtime.verbs import read_roster
     from defender.scripts import workspace_map as wm
 
     runs = P.data_root() / d9_tenant / "runs"
-    P.plant_record(runs, d9_tenant)
-    run = H.make_run(runs, "20260605t000000z-case-a")
+    run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(
         run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
     script = _script("scripts", "workspace_map.py")
@@ -614,12 +620,14 @@ def test_f7_the_launcher_as_a_process(tmp_path):
 
 def _done_run(tenant_id: str) -> Path:
     """A run of `tenant_id` the lead author has already served (its `done` sentinel written
-    through the real writer), so serving it again is the clean no-op exit 0."""
+    through the real writer), so serving it again is the clean no-op exit 0. #1187 declared
+    changes 1 and 6: UUID-named, in a container holding no `_tenant.json`."""
+    import uuid
+
     from defender.learning.leads import lead_author
 
     runs = P.data_root() / tenant_id / "runs"
-    P.plant_record(runs, tenant_id)
-    run = H.make_run(runs, "20260605t000000z-case-a")
+    run = H.make_run(runs, str(uuid.uuid4()))
     lead_author.write_done_sentinel(run, "0" * 40)
     return run
 
@@ -640,14 +648,20 @@ def test_f7_the_tracer_as_a_process(tmp_path, d9_tenant):
     """F7 / declared change 10: `python defender/learning/ops/trace_lesson.py --tenant T --all
     --lessons-dir D` walks T's runs and prints lesson L's row (one run loaded it); with a stray
     file in `<T>/runs` it exits non-zero naming the stray, with no argument error. RED at base:
-    the tracer does not know `--tenant` ("usage")."""
+    the tracer does not know `--tenant` ("usage").
+
+    #1187 declared changes 1, 6 and 7: the run is UUID-named in a container holding no
+    `_tenant.json` (either an old run or the record would stop the tracer, naming the one-time
+    command). (Name kept.)"""
+    import uuid
+
     lessons = tmp_path / "lessons"
     lessons.mkdir()
     (lessons / "L.md").write_text(
         "---\nname: L\ndescription: d\ncreated_at: 2026-06-04\n---\nbody\n", encoding="utf-8")
     runs = P.data_root() / d9_tenant / "runs"
-    P.plant_record(runs, d9_tenant)
-    run = runs / "20260605t000000z-case-a"
+    runs.mkdir(parents=True, exist_ok=True)
+    run = runs / str(uuid.uuid4())
     run.mkdir()
     from defender.tests._alert_plant import plant_alert
     plant_alert(run)
@@ -676,7 +690,10 @@ def test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path(tmp_pa
     SAME run named by its folder path is refused — a path is not a run id — and so is the id
     under another real tenant and an absent id. A lead author that requires `--tenant` but keeps
     the positional a path fails the first assertion. RED at base: the lead author does not know
-    `--tenant`."""
+    `--tenant`.
+
+    #1187 declared changes 1 and 6: the served run (`_done_run`) is UUID-named in a container
+    holding no `_tenant.json`. (Name kept.)"""
     from defender.learning.leads import lead_author
 
     run = _done_run(d9_tenant)

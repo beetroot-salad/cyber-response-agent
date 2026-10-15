@@ -31,7 +31,6 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender import _tenant, _tenants
 from defender._episode_handle import Episode
 from defender import run as run_py
@@ -188,7 +187,9 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
 
     # The sibling: the same accepted Tenant, and no turn-0 dispatch.
     src = _source_under(data_root, H.TID)
-    manifest = P.family_for(src, tmp_path / "episodes" / T.EPISODE_ID)
+    # #1187 (Layout A): the episode is `<root>/<T>/episodes/<uuid>`, as RUNS leaves it. (The
+    # retired variable, set below to that same folder, is read by nothing after #1187, O9.)
+    manifest = P.family_for(src)
     monkeypatch.setenv(EPISODES_BASE_ENV, str(manifest.parent.parent))
     with Episode.open(manifest.parent) as episode:
         T.episode_view(episode, tenant=expected)  # the container, as its launcher makes it
@@ -491,7 +492,9 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
 
     # The child re-accepts: its tenant lost a required settings file since the launch.
     src = _source_under(data_root, H.TID)
-    manifest = P.family_for(src, tmp_path / "episodes" / T.EPISODE_ID)
+    # #1187 (Layout A): the episode is `<root>/<T>/episodes/<uuid>`, as RUNS leaves it. (The
+    # retired variable, set below to that same folder, is read by nothing after #1187, O9.)
+    manifest = P.family_for(src)
     (H.settings_dir(data_root) / "verb-grants.yaml").unlink()
     expected = _owner(data_root)
     assert "verb-grants.yaml" in expected, expected
@@ -571,38 +574,6 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
     other_root = other / "defender" / "data"
     H.adopted(other_root)
     assert H.accept(_tenant, other_root, H.TID).dir == other_root / H.TID
-
-
-# ======================================================================================
-# J44 — the launcher's episodes-base refusal survives until D12.
-# ======================================================================================
-
-# rejected: deleting J44's refusal in piece 1 — D12 removes it (scope constraint).
-def test_1120_the_launcher_still_refuses_an_episodes_base_inside_the_data_root(
-        data_root: Path, tmp_path: Path, monkeypatch) -> None:
-    """Given a Tenant (from accept_tenant), the branch launcher's episodes_root still refuses
-    DEFENDER_EPISODES_BASE in each of these cases: equal to the tenant's episodes folder,
-    inside the data root, inside the checkout, or containing the data root. It raises
-    the episode owner's refusal naming the base (#1105 PR 2: `_episode_handle.episodes_root`,
-    `EpisodeRefused`, which the launcher re-raises as `LauncherRefused`), and it takes the
-    data root from the Tenant. J44 is unchanged until D12. The positive control: a base outside
-    both is accepted and returned resolved."""
-    H.adopted(data_root)
-    tenant = H.accept(_tenant, data_root, H.TID)
-    bases = {
-        "tenant-episodes": H.tenant_folder(data_root) / "episodes",
-        "inside-data-root-other": data_root / "elsewhere-episodes",
-        "inside-checkout": H.REPO_ROOT / f".spec1120-episodes-{uuid.uuid4().hex}",
-        "containing-data-root": data_root.parent,
-    }
-    for cell, base in bases.items():
-        monkeypatch.setenv(EPISODES_BASE_ENV, str(base))
-        with pytest.raises(EH.EpisodeRefused) as refused:
-            EH.episodes_root(tenant.data_root)
-        assert str(base) in H.exit_text(refused.value), f"{cell}: {refused.value}"
-    outside = tmp_path / "episodes-outside"
-    monkeypatch.setenv(EPISODES_BASE_ENV, str(outside))
-    assert EH.episodes_root(tenant.data_root) == outside.resolve()
 
 
 # ======================================================================================

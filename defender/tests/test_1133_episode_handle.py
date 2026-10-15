@@ -11,7 +11,7 @@ The handle this suite builds against (every name is gathered in `_spec1133`'s do
   record answers `read` — a record is read through `episode.view()`): `family`,
   `family_stamp`, `review`, `samples`, `judge`, `timing`, `learning_html`,
   `served_base`, `priming_lock` (properties); `served_world(token)`, `wire_log(name)`
-  (methods); `world(label).draw(n)`, `world(label).run_dir_pointer`;
+  (methods); `world(label).draw(n)` (#1187 R8 retired `world(label).run_dir_pointer`);
 * folders (`.path`, `.ensure()`): `served`, `runs`, `worlds`, `world(label).dir`,
   `world(label).draws`;
 * `RECORD_VERBS` / `FOLDERS`, exactly the spec's tables; `LAYOUT.wire_log(name)`.
@@ -122,7 +122,10 @@ def test_d2_the_shipped_tables_are_the_designs_row_for_row():
     """Rev 2 kept rev 1's records and folders; rev 3 (R1) makes records write-only (`family`
     and `review` lose `read`): the shipped `RECORD_VERBS` equals the spec's copy key for key and
     verb set for verb set, and `FOLDERS` names exactly the spec's five folders. A record added
-    or dropped is a change to this spec."""
+    or dropped is a change to this spec: #1187 R8 drops `world.run_dir_pointer` (nothing reads
+    the archive pointer, so it goes with its write).
+    #1187 declared change 12
+    """
     mod = S.handle()
     shipped = {k: set(v) for k, v in mod.RECORD_VERBS.items()}
     assert shipped == {k: set(v) for k, v in S.RECORD_VERBS.items()}, shipped
@@ -189,7 +192,10 @@ def test_d2_the_episode_and_its_worlds_expose_only_the_designs_surface(opened):
     records and folders by name — its episode-root ones but `runs`, which is private since
     #1105 PR 2 (its one hand-out is `box_mounted_container`), and `world(label)`, which answers
     the `world.*` ones. Nothing else is public: no accessor for the held root, no other
-    constructor, no write outside the records."""
+    constructor, no write outside the records — and, since #1187 R8, no `run_dir_pointer` on a
+    world.
+    #1187 declared change 12
+    """
     top = {k for k in (*S.RECORD_VERBS, *S.FOLDERS)
            if not k.startswith("world.") and k not in S.PRIVATE_FOLDERS}
     in_world = {k.removeprefix("world.") for k in (*S.RECORD_VERBS, *S.FOLDERS)
@@ -691,7 +697,6 @@ def test_d1_a_records_write_verb_takes_str_or_bytes_only(tree, opened, key, verb
 
 _BAD_NAMES = [
     pytest.param(lambda ep: ep.world("B").draw(0).write("x"), id="label-not-case-stable-draw"),
-    pytest.param(lambda ep: ep.world("B").run_dir_pointer.write("x"), id="label-pointer"),
     pytest.param(lambda ep: ep.world("B").dir.ensure(), id="label-dir-ensure"),
     pytest.param(lambda ep: ep.world("B").draws.ensure(), id="label-draws-ensure"),
     pytest.param(lambda ep: ep.world("a/b").draw(0).write("x"), id="label-two-components"),

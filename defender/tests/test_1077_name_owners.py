@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
 
-import inspect
 import json
 from pathlib import Path
 
@@ -60,6 +59,7 @@ def _concrete(template: str, acc: S.Accessor) -> str:
         "<label>": S.LABEL, "<prefix>": S.PREFIX, "<stem>": S.STEM,
         "<n>": str(S.CHECK_INDEX) if acc.kind == "forward_check_trace" else "1",
         "<stage>": S.STAGE, "<token>": S.WORLD_TOKEN, "<episode_id>": S.EPISODE_ID,
+        "<uuid>": S.ARM_ID,
     }
     out = template.split(",")[0].strip()
     for k, v in subs.items():
@@ -99,11 +99,17 @@ def test_run_paths_resolves_every_name_d1_enumerates(base, run_dir):
 
 
 def test_episode_paths_resolves_every_name_d1_enumerates(episode_dir):
-    """`EpisodePaths` resolves every episode-level name the design enumerates, including the
-    run-dir pointer."""
+    """`EpisodePaths` resolves every episode-level name the design enumerates, and — #1187 (R2,
+    Sequencing §4) — the arm roster `arms.json` the owner's `LAYOUT` names, and an arm's folder
+    `runs/<uuid>/`: the container the owner names joined with the arm's id, which the kinds
+    table spells with no episode id or label. #1187 R8 retires the archive's run-dir pointer
+    (`worlds/<label>/run_dir`) with its write: the owner no longer names it.
+    #1187 declared change 2
+    #1187 declared change 12
+    """
     missing = []
     for acc in S.ACCESSOR_FOR_KIND:
-        if acc.owner != "episode":
+        if acc.owner not in ("episode", "episode_arm"):
             continue
         try:
             got = S.resolve(acc, run_dir=episode_dir, episode_dir=episode_dir)
@@ -115,9 +121,8 @@ def test_episode_paths_resolves_every_name_d1_enumerates(episode_dir):
     assert missing == [], f"these episode names have no accessor on the owner: {missing}"
 
     owner = S.EpisodePaths(episode_dir)
-    assert owner.run_dir_pointer(S.LABEL) == episode_dir / "worlds" / S.LABEL / "run_dir", (
-        "the run-dir pointer (archive.py:82) was missed by the handoff and is D1's, not a "
-        "constant left behind in archive.py")
+    assert not hasattr(owner, "run_dir_pointer"), (
+        "#1187 R8: the archive's run-dir pointer is retired with its write, so its name goes too")
     assert owner.served_world(S.WORLD_TOKEN) == (
         episode_dir / "served" / f"{S.WORLD_TOKEN}.jsonl")
     assert owner.served == episode_dir / "served"
@@ -199,11 +204,14 @@ def test_no_episode_layout_constant_survives_outside_the_owner(episode_dir):
     rehomed = {
         "learning/branch/archive.py", "learning/branch/ledger.py", "learning/branch/timing.py",
         "learning/branch/outcome.py", "runtime/branch/_family.py",
-        "scripts/visualize/visualize_episode.py", "learning/branch/cli.py"}
+        "scripts/visualize/visualize_episode.py", "learning/branch/cli.py",
+        "run_repository/_lookup.py", "run.py"}
     # #1224: the episode outcome moved from `review.yaml` to `outcome.yaml` (written by
     # `learning/branch/outcome.py`); `staged.yaml` and its writer retired with cluster staging.
+    # #1187 (R2): the arm roster's name is the owner's too (`_episode_paths.ARM_ROSTER_NAME`,
+    # `LAYOUT.arm_roster`), never re-spelled by the repository's view or the page.
     names = ("family.yaml", "outcome.yaml", "samples.yaml", "judge.yaml", "timing.json",
-             "base.jsonl", "learning.html", ".priming")
+             "base.jsonl", "learning.html", ".priming", "arms.json")
     offenders = []
     for rel in sorted(rehomed):
         text = (DEFENDER / rel).read_text(encoding="utf-8")
@@ -215,24 +223,11 @@ def test_no_episode_layout_constant_survives_outside_the_owner(episode_dir):
         f"{offenders}")
     owner = S.EpisodePaths(episode_dir)
     assert owner.family.name == "family.yaml", "positive control: the name resolves on the owner"
-
-
-def test_the_episodes_root_resolver_is_not_moved_into_the_owner(episode_dir):
-    """The episodes root is still resolved by the launcher's own `episodes_root`, and the owner
-    does not define one.
-
-    NEGATIVE. Positive control inline: the launcher's resolver is still there and still refuses
-    an unset `$DEFENDER_EPISODES_BASE` (claim S4).
-    """
-    owner_mod = S.episode_paths()
-    for forbidden in ("episodes_root", "EPISODES_BASE_ENV", "episodes_base"):
-        assert not hasattr(owner_mod, forbidden), (
-            f"{forbidden} moved onto the episode-layout owner; D1 re-homes the LAYOUT constants "
-            "and leaves the root's resolution in learning/branch/cli.py")
-    cli = S.branch_cli()
-    assert callable(cli.episodes_root), "positive control: the launcher still owns the resolver"
-    assert "EPISODES_BASE" in inspect.getsource(cli.episodes_root), (
-        "the resolver still reads the configured location, with no default derivation")
+    layout = S.episode_paths()
+    assert getattr(layout, "ARM_ROSTER_NAME", None) == "arms.json", (
+        "#1187 (R2): the roster's name is owned by `_episode_paths` beside `FAMILY_NAME`")
+    assert str(layout.LAYOUT.arm_roster) == "arms.json", (
+        "#1187: `LAYOUT.arm_roster` is the roster's path relative to the episode folder")
 
 
 # ---------------------------------------------------------------------------------------
@@ -573,25 +568,25 @@ def test_the_owner_carries_a_refusal_rule_that_lives_outside_the_box_closure(bas
 # ---------------------------------------------------------------------------------------
 
 def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_dir):
-    """The LABEL carrying the composition's own delimiter is refused at mint time, for
-    `<episode_id>-<label>` and `<episode token>.<label>` alike.
+    """The LABEL carrying a composition's own delimiter is refused at mint time: `.` for the
+    world token `<episode token>.<label>`, and `-` by the label's own rule (N8: "The view-name
+    rule still refuses `-` in a world label").
 
-    The label is the component held delimiter-free, and that alone makes both compositions
-    recoverable: every real episode id carries `-` (`cli.episode_id_for` derives
-    `<source run>-n<turn>`) and every real episode token carries `.` (`_family.
-    episode_token_for` folds each `-` onto one), so refusing the delimiter in the LEFT half
-    would refuse every production id — the positive control below is itself a dashed episode
-    id. With the label delimiter-free, `ep-a-b` is `(ep-a, b)` and never `(ep, a-b)`.
+    #1187 declared change 2 (O3): the `<episode_id>-<label>` arm id is gone — an arm's id is the
+    uuid the episode's roster holds, so `EpisodePaths.sibling_run_dir` and its refusal go with
+    it; the `-` refusal stays the label rule's own (`_world_label.world_label_fault`, the one
+    statement of the shape rule every manifest reader asks). The world token still composes,
+    so its `.` refusal stays where it is asked, `_family.world_token_for`.
     """
-    owner = S.EpisodePaths(episode_dir)
-    assert owner.sibling_run_dir(S.EPISODE_ID, "plain").name == f"{S.EPISODE_ID}-plain", (
-        "positive control: a delimiter-free label composes, byte for byte as today (O3)")
+    from defender._world_label import world_label_fault
+
+    assert world_label_fault("plain") is None, "positive control: a delimiter-free label passes"
     for label in ("has-dash", "a-b"):
-        with pytest.raises(Exception) as excinfo:  # noqa: PT011
-            owner.sibling_run_dir(S.EPISODE_ID, label)
-        assert "-" in str(excinfo.value), (
-            "the refusal names the delimiter the component carries; two distinct pairs "
-            "composing to one sibling run id is what decision 12 closes")
+        fault = world_label_fault(label)
+        assert fault is not None, (
+            f"the label rule admitted {label!r}: N8 keeps the view-name rule's `-` refusal")
+        assert "-" in fault, f"the label rule's refusal does not name the delimiter: {fault!r}"
+    owner = S.EpisodePaths(episode_dir)
     # The world token is minted by `_family.world_token_for`; the owner's `served_world` takes
     # the minted token, so the `.` refusal is asked of the label THERE.
     from defender.runtime.branch import _family
@@ -605,9 +600,14 @@ def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_di
 
 def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stability_refusal(
         base, run_dir, episode_dir):
-    """The composed sibling run id, the composed world token and the session-database path each
+    """The composed world token, the archived world's folder and the session-database path each
     carry the same case-stability refusal the handle's own bare run-id admission carries — one
-    rule reached by reference at four sites, not an old accident beside three new rules."""
+    rule reached by reference, not an old accident beside new rules.
+
+    #1187 declared change 2 (O3): the composed sibling run id `<episode_id>-<label>` is gone
+    (an arm's id is a roster uuid, which `RunId` itself holds to canonical lowercase), so its
+    half of this check goes with `EpisodePaths.sibling_run_dir`.
+    """
     from defender._run_id import is_case_stable_id
     owner = S.EpisodePaths(episode_dir)
     by_reference = "the rule is today's `_run_id.is_case_stable_id`, reached by reference"
@@ -617,13 +617,14 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
     # on the episode id alone (claim RC-3), so "the refusal a directly-offered run id already
     # clears" was false of this repo. These two demands are siblings, not one demand twice.
 
+    assert owner.world_dir("overlay").name == "overlay", "positive control: a folded label"
     for label in ("Overlay", "OVERLAY", "oVerlay"):
         with pytest.raises(Exception):  # noqa: B017,PT011
-            owner.sibling_run_dir(S.EPISODE_ID, label)
-        with pytest.raises(Exception):  # noqa: B017,PT011
             owner.world_dir(label)
+    assert owner.served_world(f"{S.WORLD_TOKEN}").name == f"{S.WORLD_TOKEN}.jsonl", (
+        "positive control: a folded world token resolves")
     with pytest.raises(Exception):  # noqa: B017,PT011
-        owner.served_world(f"{S.EPISODE_ID}.Overlay")
+        owner.served_world(f"{S.WORLD_TOKEN[:-len(S.LABEL)]}Overlay")
     # The session-database path gains the check BESIDE its existing CASE_ID_RE format check.
     from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId
     mixed = "Case-0011223344556677"

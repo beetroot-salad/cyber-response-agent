@@ -621,13 +621,12 @@ def test_create_tenant_refuses_as_it_did(tmp_path, shape):
 # O1: no path seam reached from the tenant module, except by the stamp until #1187.
 # ======================================================================================
 
-#: The functions of `defender/_tenant.py` that may still reach a path seam, and why. Both are
-#: the runs-folder stamp's, which #1187 retires (#1105 PR 2 kept the stamp, E-10); the list is
-#: empty once it lands.
-STAMP_SEAM_CALLERS: dict[str, str] = {
-    "read_tenant": "retired by #1187",
-    "ensure_runs_base_record": "retired by #1187",
-}
+#: The functions of `defender/_tenant.py` that may still reach a path seam, and why. Until
+#: #1187 it held the runs-folder stamp's two (`read_tenant`, `ensure_runs_base_record`; #1105
+#: PR 2 kept the stamp, E-10). #1187 declared change 6 (R1) retires the stamp, so the list is
+#: EMPTY: the tenant module reaches no path seam at all (RED at base, where both still do; the
+#: parametrized staleness check below then has no entry to check).
+STAMP_SEAM_CALLERS: dict[str, str] = {}
 
 _TENANT_MODULE = "_tenant.py"
 

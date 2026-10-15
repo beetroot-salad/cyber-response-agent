@@ -42,7 +42,6 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender import _yaml
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
 from defender.scripts.adapters import faults
@@ -264,6 +263,9 @@ def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.Script
     spawn = S.FakeSpawn()
     cli = S.mod(S.CLI)
     message = ""
+    # #1187 (O9): the episode is the ONE new folder under the tenant's own `<T>/episodes/`.
+    root = S.tenant_episodes(src.parent.parent.name)
+    already = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:
         # #1105 PR 2 (declared change 1): the tenant and the source run by id.
         rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
@@ -273,7 +275,7 @@ def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.Script
                       oracle=oracle.model, verifier=verifier.model)
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
-    ep = EH.episode_dir(T.current_tenant().data_root, S.EPISODE_ID)
+    ep = S.new_episode(root, already)
     return S.Launch(rc=rc, message=message, spawn=spawn, ep=ep)
 
 

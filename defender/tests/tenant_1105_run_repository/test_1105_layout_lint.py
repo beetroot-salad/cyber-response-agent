@@ -502,8 +502,7 @@ from defender._episode_paths import LAYOUT, RUNS_DIRNAME, EpisodePaths
 
 
 def reads(ep: Path, episode: Episode):
-    return (EpisodePaths(ep).runs, EpisodePaths(ep).sibling_run_dir("e", "a"), LAYOUT.runs,
-            LAYOUT.run("r"), LAYOUT.run_page("r"), LAYOUT.sibling_run_dir("e", "a"),
+    return (EpisodePaths(ep).runs, LAYOUT.runs, LAYOUT.run("r"), LAYOUT.run_page("r"),
             episode.runs, RUNS_DIRNAME)
 
 
@@ -512,14 +511,16 @@ def writes(episode: Episode):
     del episode.runs
 """
 
-_EPISODE_RUNS_NAMES = {"EpisodePaths.runs", "EpisodePaths.sibling_run_dir", "EpisodeLayout.runs",
-                       "EpisodeLayout.run", "EpisodeLayout.run_page",
-                       "EpisodeLayout.sibling_run_dir", "Episode.runs", "RUNS_DIRNAME"}
+#: #1187 (design rev 2, "Production readers of the composed name"): `sibling_run_dir`, the
+#: composed `runs/<ep>-<label>` path, is deleted with its lint entry — an arm's folder is
+#: `runs/<arm uuid>` — so neither spelling is sampled here any more.
+_EPISODE_RUNS_NAMES = {"EpisodePaths.runs", "EpisodeLayout.runs", "EpisodeLayout.run",
+                       "EpisodeLayout.run_page", "Episode.runs", "RUNS_DIRNAME"}
 
 
 def test_1105_layout_lint_flags_each_episode_runs_name_outside_the_owners(tmp_path):
-    """A read, write or delete of each episode-runs name (EpisodePaths(x).runs, .sibling_run_dir,
-    LAYOUT.runs/.run/.run_page/.sibling_run_dir, Episode.runs, and an import of RUNS_DIRNAME) is
+    """A read, write or delete of each episode-runs name (EpisodePaths(x).runs,
+    LAYOUT.runs/.run/.run_page, Episode.runs, and an import of RUNS_DIRNAME) is
     flagged in every category but the owners, the running investigation and names-only users
     included; the same code in an owner module passes."""
     lint_run_layout_imports = _lint()
@@ -578,7 +579,7 @@ from defender.run_repository import ArchivedWorld, Run
 
 def build(run_dir, tenant_id, run_id, runs_base):
     return (Run(run_dir, runs_base=None), Run.at(run_dir),
-            Run.for_tenant(tenant_id, run_id, runs_base=runs_base), Run.under(runs_base, run_id),
+            Run.under(runs_base, run_id, tenant_id=tenant_id),
             ArchivedWorld.at(run_dir), Run.at)
 """
 
@@ -586,7 +587,10 @@ def build(run_dir, tenant_id, run_id, runs_base):
 def test_1105_layout_lint_flags_every_handle_constructor_outside_the_owners_but_not_a_type_import_of_run(tmp_path):
     """A call Run(...) and any reference to Run.at, Run.for_tenant, Run.under or ArchivedWorld.at
     is flagged outside the owners, the running investigation included; importing Run only to
-    annotate a parameter is not flagged."""
+    annotate a parameter is not flagged.
+
+    #1187 (R1): `Run.for_tenant` is retired (`Run.under(container, id, tenant_id=)` replaces
+    it), so the sample no longer spells it."""
     lint_run_layout_imports = _lint()
     root = _planted(tmp_path)
     for module in ("learning/ctor_probe.py", "runtime/observe.py", "run_repository/_lookup.py"):
@@ -596,7 +600,7 @@ def test_1105_layout_lint_flags_every_handle_constructor_outside_the_owners_but_
            "    return None\n")
     found = lint_run_layout_imports.scan(root, allow_list=())
     expected = collections.Counter(
-        {"Run": 1, "Run.at": 2, "Run.for_tenant": 1, "Run.under": 1, "ArchivedWorld.at": 1})
+        {"Run": 1, "Run.at": 2, "Run.under": 1, "ArchivedWorld.at": 1})
     for module in ("learning/ctor_probe.py", "runtime/observe.py"):
         names = collections.Counter(k[2] for k in _in(found, module))
         assert names == expected, f"{module}: constructors flagged {dict(names)}"

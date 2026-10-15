@@ -22,7 +22,6 @@ RED against b8a63e66: none of the seams below exists, the launcher runs siblings
 """
 from __future__ import annotations
 
-from defender.run_repository import Run
 
 import json
 import re
@@ -30,11 +29,11 @@ from pathlib import Path
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 from defender._io import bind
 from defender.run_repository import RunPaths
 from defender.tests import _triplet_947 as T
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
 
@@ -608,7 +607,7 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         "git-failed": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED},
     }
     for name, stamp in waivable.items():
-        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
+        ep = T.episode(tmp_path, episode_id=fixture_uuid(f"947-launcher-{name}"))
 
         def dirs(ep, w, stamp=stamp):
             return T.arm_run_dir(ep, w, **(stamp if w == "b" else {}))
@@ -617,7 +616,7 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         assert report["comparable"] is False, name
         assert "b" in report["reason"], (name, report["reason"])
         assert not (ep / "provenance.json").exists(), name
-        ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}-ok")
+        ok = T.episode(tmp_path, episode_id=fixture_uuid(f"947-launcher-{name}-ok"))
         waived = _verify_family(ok, dirs, source=T.provenance_record(), allow_dirty=True)
         assert waived["comparable"] is True, name
         assert (ok / "provenance.json").is_file(), name
@@ -627,9 +626,9 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         return T.arm_run_dir(ep, w, **(silent if w == "b" else {}))
 
     for allow_dirty in (False, True):
-        # A case-folded id: an episode id is a run id (`refuse_bad_episode_id`).
+        # #1187 declared change 1: an episode id is a canonical lowercase uuid4 text.
         ep = T.episode(tmp_path,
-                       episode_id=f"{T.EPISODE_ID}-silent-{str(allow_dirty).lower()}")
+                       episode_id=fixture_uuid(f"947-launcher-silent-{str(allow_dirty).lower()}"))
         report = _verify_family(ep, silent_dirs, source=T.provenance_record(),
                                 allow_dirty=allow_dirty)
         assert report["comparable"] is False, f"allow_dirty={allow_dirty}"
@@ -668,11 +667,11 @@ def test_947_launcher_no_longer_hoists_one_capture_above_the_family(tmp_path):
 
     from defender.tests import _judge_921 as J
 
-    ep = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     launcher_moment = T.source_capture(dirty=True, model=None)
     # The judge seam is `_launch`'s scripted default: an ACCEPTED family is graded at the tail
-    # of the launch, and its production value is a real model call.
-    rc, spawn, ep, _message = _launch(tmp_path, spawn=J.FakeSibling(ep),
+    # of the launch, and its production value is a real model call. #1187: the spawn double
+    # finds the episode the launch minted from each child's argv (`--tenant`, `--episode`).
+    rc, spawn, ep, _message = _launch(tmp_path, spawn=J.FakeSibling(),
                                       live_tree=launcher_moment, argv_extra=("--allow-dirty",))
     assert rc == 0
     assert launcher_moment.calls == 1, "the live tree was captured other than once per launch"
@@ -734,21 +733,31 @@ def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability
 
 def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     """The episode directory's creation is an exclusive create, not a check-then-act: two
-    launchers racing on one source and branch point each claim their OWN episode directory
-    (N17: a launch never reuses one — the loser moves on to `<id>-r2`), never two captures
-    stacked into a single base recording that both callers read as clean."""
+    launchers racing on one source and branch point each claim their OWN episode directory,
+    never one directory both callers read as theirs.
+
+    #1187 declared change 3: the claim is `runs.create_episode()`, which mints a fresh UUID per
+    call under `<T>/episodes/` — there is no derived `<id>` to race on and no `<id>-r2` for the
+    loser to move on to. Two concurrent claims are two distinct canonical-UUID folders, both
+    real directories, neither a retry name. (The priming half moves with `prepare_episode`'s
+    new signature, which the design leaves to the implementer; `-r<n>` is pinned gone by
+    `ids_1187/test_1187_layout_isolation.py::test_two_episodes_get_two_fresh_uuid_folders_and_never_a_retry_suffix`.)
+    """
+    import os
     import threading
 
-    base, src = T.runs_base(tmp_path)
-    cli = _cli()
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    T.runs_base(tmp_path)
+    tenant = _tenant_paths()
     results: list = []
     barrier = threading.Barrier(2)
 
     def attempt():
         barrier.wait()
         try:
-            with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=_tenant_paths().data_root) as episode:
-                results.append(episode)
+            with tenant.runs_repository().create_episode() as view:
+                results.append(view.episode_id)
         except Exception as e:  # noqa: BLE001 — the refusal is the observation
             results.append(e)
 
@@ -758,11 +767,13 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     for t in threads:
         t.join()
     assert not any(isinstance(r, Exception) for r in results), results
-    first = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
-    assert sorted(r.dir for r in results) == [first, first.parent / f"{T.EPISODE_ID}-r2"]
-    for episode in results:
-        lines = (episode.dir / "served" / "base.jsonl").read_text(encoding="utf-8").splitlines()
-        assert len(lines) == len(set(lines)) == 1, (episode.dir, lines)
+    assert len(set(results)) == 2, f"two launchers claimed one episode: {results}"
+    episodes = S.episodes_dir(tenant.data_root, str(tenant.id))
+    assert sorted(os.listdir(episodes)) == sorted(results), sorted(os.listdir(episodes))
+    for episode_id in results:
+        assert S.is_canonical_uuid(episode_id), f"{episode_id!r} is not a canonical uuid"
+        assert (episodes / episode_id).is_dir(), episode_id
+        assert not (episodes / episode_id).is_symlink(), episode_id
 
 
 # ---------------------------------------------------------------------------------------
@@ -814,7 +825,8 @@ def test_947_concurrent_siblings_take_distinct_container_names(tmp_path):
     """Concurrent siblings take distinct container names: each name is derived from that
     sibling's own run id, so no two children of one family can contend for one container."""
     docker = T.mod("runtime.box._docker")
-    names = {docker.container_name(f"{T.EPISODE_ID}-{w}") for w in T.WORLDS}
+    # #1187: a sibling's run id is its roster arm id, a uuid4 (never `<episode>-<label>`).
+    names = {docker.container_name(fixture_uuid(f"947-container-arm-{w}")) for w in T.WORLDS}
     assert len(names) == len(T.WORLDS)
     assert all(name.startswith("defender-run-") for name in names)
 

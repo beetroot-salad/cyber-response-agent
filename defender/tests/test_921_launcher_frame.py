@@ -15,11 +15,9 @@ pre-flight's `outcome.yaml`).
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import _state1135
@@ -62,14 +60,9 @@ _EMPTY: dict = {"rows": []}
 
 class _LazySibling(J.FakeSibling):
     """`J.FakeSibling`, its episode directory resolved when the launcher first starts a child
-    (the launcher names the directory; the test does not)."""
-
-    def __init__(self) -> None:
-        super().__init__(Path("/nonexistent-until-launch"))
-
-    def __call__(self, argv, *, env=None, **kw):
-        self.episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
-        return super().__call__(argv, env=env, **kw)
+    (the launcher names the directory; the test does not). #1187: `J.FakeSibling` itself now
+    finds the episode from each child's `--tenant` and `--episode` (the launcher mints the id),
+    so this is the plain double, kept under its name for the scenarios that construct it."""
 
 
 def _launch_judge() -> J.FakeJudge:
@@ -267,6 +260,15 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
     with pytest.raises(J.refusals()):
         J.grade_at(
             ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
+    assert outside.read_text(encoding="utf-8") == "untouched\n"
+
+    # POSITIVE CONTROL, same episode, same channel: with neither link the same grade lands both
+    # sinks as plain files — so each refusal above was the link's, not the episode failing to
+    # open at all (which a bare `pytest.raises(J.refusals())` would also accept; #1187 sweep).
+    (draw_dir / "0.yaml").unlink()
+    J.grade_at(ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
+    assert (ep / "judge.yaml").is_file(), "control: the unlinked grade wrote no judge.yaml"
+    assert not (ep / "judge.yaml").is_symlink(), "control: judge.yaml is not a plain file"
     assert outside.read_text(encoding="utf-8") == "untouched\n"
 
 

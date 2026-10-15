@@ -44,7 +44,6 @@ gap (82-writer red flag).
 from __future__ import annotations
 
 import json
-import os
 import re
 import shlex
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -55,6 +54,7 @@ from typing import Any
 import pytest
 
 from defender import _tenant, _yaml
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests.alert_front_door_1222 import _spec1222 as S
@@ -665,9 +665,10 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
     runs.mkdir(parents=True, exist_ok=True)
     _tenant.ensure_runs_base_record(runs, "acme")
     alert = S.generic_alert(rule_id="R-R7-TRACE")
-    S.plant_run(runs, "r7-traced", alert=alert, record=False,
+    traced_run = fixture_uuid("1222-r7-traced")  # #1187 declared change 1: a run id is a uuid
+    S.plant_run(runs, traced_run, alert=alert, record=False,
                 files={"lessons_loaded.jsonl": _loaded_row(name)})
-    recorded = _with_record(runs, "r7-traced", alert=alert, facts={"signature": "R-R7-TRACE"})
+    recorded = _with_record(runs, traced_run, alert=alert, facts={"signature": "R-R7-TRACE"})
     main = S.sym("learning.ops.trace_lesson", "main")
     traced: dict[str, list[str]] = {}
     for spelling, corpus in corpora.items():
@@ -734,93 +735,68 @@ def test_r8_each_shipped_lesson_is_found_by_exact_lookup_of_its_declared_signatu
         assert set(in_box) == want, f"MAIN's lookup of {sig!r}: {sorted(in_box)} != {sorted(want)}"
 
 
-def _held_out_fixture(fixtures: Path, slug: str, *, disposition: str = "benign") -> None:
-    """One labelled held-out fixture (`ground_truth.yaml`, `alert.json`), the alert written
-    where the fixture reader looks (`RunPaths(<fixture>).alert`) and at the folder's own
-    `alert.json`."""
-    folder = fixtures / slug
-    folder.mkdir(parents=True)
-    (folder / "ground_truth.yaml").write_text(
-        f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8")
-    raw = S.alert_bytes(S.generic_alert(rule_id="R-HELD"))
-    for target in {folder / "alert.json", S.alert_file(folder)}:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(raw)
-
-
 def _report(disposition: str) -> str:
     return f"---\ndisposition: {disposition}\n---\n\nbody\n"
 
 
-def _age(runs: Path, order: Sequence[str]) -> None:
-    """Give the folders strictly increasing mtimes in `order` (the last is the newest)."""
-    for i, name in enumerate(order):
-        stamp = 1_800_000_000 + 60 * i
-        os.utime(runs / name, (stamp, stamp))
-
-
 def test_r7_the_eval_index_and_the_lesson_tracer_skip_a_recordless_run_folder_by_name(tmp_path, capsys):
     """Over a runs base holding a run with a readable record and folders with none (a pre-change
-    run, a crashed setup), the held-out eval index and the lesson tracer each skip a recordless
-    folder by name and count it, as the corpus and the sibling union do, and still index and
-    trace the recorded run; neither raises on a recordless folder, and neither picks it as the
-    newest run of a slug. Positive control: with its record present the folder is indexed and
-    traced.
+    run, a crashed setup), the lesson tracer skips a recordless folder by name and counts it, as
+    the corpus and the sibling union do, and still traces the recorded run; it does not raise on
+    a recordless folder. Positive control: with its record present the folder is traced.
 
-    Observed: `evals/held_out.main` and `learning/ops/trace_lesson.main --all` over one runs
-    base, first with only recordless folders (the newest of them a pre-change run whose report
-    says malicious), then with records planted.
+    Observed: `learning/ops/trace_lesson.main --all` over one runs base, first with only
+    recordless folders, then with records planted.
+
+    #1187 declared change 14: the held-out half is retired. `held_out.py` no longer walks run
+    folders and matches them to fixture slugs by name (`index_runs` / `_claimed_slug` go); it
+    scores only the runs its index names, and an indexed run with no alert record scores WRONG
+    ("launched, no run record") — pinned by
+    `ids_1187/test_1187_held_out.py::test_a_row_naming_an_absent_or_recordless_run_scores_wrong_not_not_run`
+    and `::test_a_slug_with_no_row_is_not_run_whatever_folders_are_named_after_it`. (Name kept.)
     """
     slug, lesson = "fd-slug", "fd-traced"
-    fixtures, runs, corpus = tmp_path / "fixtures", S.plant_tenant().accept().runs, tmp_path / "lessons"
+    runs, corpus = S.plant_tenant().accept().runs, tmp_path / "lessons"
     runs.mkdir(parents=True, exist_ok=True)
     _tenant.ensure_runs_base_record(runs, "acme")
-    _held_out_fixture(fixtures, slug)
     corpus.mkdir()
     (corpus / f"{lesson}.md").write_text(S.lesson_text(lesson), encoding="utf-8")
     alert = S.generic_alert(rule_id="R-HELD")
-    pre, crashed, recorded_run = f"{slug}-pre", f"{slug}-crashed", slug
+    # #1187 declared change 1: every run folder is a uuid — an old-shaped name is a legacy folder
+    # the listing refuses outright (naming the one-time command), which would fail this test for
+    # a reason it is not about. The slug stays the test's label for the three.
+    pre, crashed, recorded_run = (fixture_uuid(f"1222-{slug}-pre"),
+                                  fixture_uuid(f"1222-{slug}-crashed"), fixture_uuid(f"1222-{slug}"))
     S.plant_run(runs, pre, alert=alert, record=False,
                 files={"report.md": _report("malicious"), "lessons_loaded.jsonl": _loaded_row(lesson)})
     S.plant_run(runs, crashed, alert=alert, record=False)
-    _age(runs, [pre, crashed])
 
-    held_out = S.sym("evals.held_out", "main")
     trace = S.sym("learning.ops.trace_lesson", "main")
 
-    def both() -> tuple[str, str]:
+    def traced_out() -> str:
         capsys.readouterr()
-        held_out([str(runs), "--fixtures-dir", str(fixtures)])
-        scored = capsys.readouterr()
         assert trace(["--all", "--lessons-dir", str(corpus), "--tenant", "acme"]) == 0
         traced = capsys.readouterr()
-        return scored.out + scored.err, traced.out + traced.err
+        return traced.out + traced.err
 
-    scored, traced = both()
-    assert "predicted=" not in scored, (
-        f"the held-out index scored {slug!r} off a recordless folder:\n{scored}")
+    traced = traced_out()
     row = [ln for ln in traced.splitlines() if ln.startswith(f"{lesson}\t")]
     assert len(row) == 1, f"the lesson tracer did not index {lesson!r} once:\n{traced}"
     assert row[0].split("\t")[2] == "0", (
         f"the lesson tracer counted a recordless folder's case:\n{traced}")
-    for out, walker in ((scored, "held-out index"), (traced, "lesson tracer")):
-        for name in (pre, crashed):
-            assert name in out, f"the {walker} did not name the recordless folder {name!r}:\n{out}"
-        assert any(re.search(r"\b2\b", ln) and "record" in ln.lower() for ln in out.splitlines()), (
-            f"the {walker} does not count the two recordless folders:\n{out}")
+    for name in (pre, crashed):
+        assert name in traced, f"the lesson tracer did not name the recordless folder {name!r}:\n{traced}"
+    assert any(re.search(r"\b2\b", ln) and "record" in ln.lower() for ln in traced.splitlines()), (
+        f"the lesson tracer does not count the two recordless folders:\n{traced}")
 
     S.plant_run(runs, recorded_run, alert=alert, record=False,
                 files={"report.md": _report("benign"), "lessons_loaded.jsonl": _loaded_row(lesson)})
     planted = [_with_record(runs, name, alert=alert, facts={"signature": "R-HELD"})
                for name in (recorded_run, pre)]
-    _age(runs, [recorded_run, pre, crashed])
-    scored, traced = both()
-    assert "predicted='malicious'" in scored, (
-        f"with its record present the newest run {pre!r} is not the one scored:\n{scored}")
+    traced = traced_out()
     row = [ln for ln in traced.splitlines() if ln.startswith(f"{lesson}\t")]
     assert len(row) == 1, f"the lesson tracer did not index {lesson!r} once:\n{traced}"
     assert row[0].split("\t")[2] == "2", f"with records present both runs are traced:\n{traced}"
-    assert crashed in scored, "the held-out index does not name the still-recordless folder"
     assert crashed in traced, "the lesson tracer does not name the still-recordless folder"
     assert all(planted), "the records could not be planted (S.COINED accessors)"
 

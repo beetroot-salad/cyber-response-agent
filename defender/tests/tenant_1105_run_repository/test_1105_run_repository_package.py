@@ -35,6 +35,7 @@ from typing import Any
 import pytest
 
 from defender.tests._by_path import import_lint_lib, load_lint_gate
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._import_blocker import run_blocked
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 
@@ -73,8 +74,9 @@ HANDLE_NAMES = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "
                           "case_ref_of_digest"})
 #: The door's 15 non-layout public names (D1.3).
 NON_LAYOUT_PUBLIC = HANDLE_NAMES | {
-    "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress", "RunAbsent",
-    "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
+    "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress", "RunAbsent", "RunRefused",
+    # #1187 R6 (D-del, declared change 13): PR 1's `_episodes` record API — record_episode_runs,
+    # episode_runs, sibling_run_ids, episode_sibling_ids — is deleted, and leaves the door.
     # Owner rulings (the high and xhigh reviews): the repository answers "may this text name a
     # run?" and holds a runs folder for its outside callers (run setup, the family gate), so
     # neither re-derives the sidecar clause or the hold's refusals.
@@ -390,7 +392,11 @@ def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the own
     lists none of the layout's 10 imported names nor _check_component, _check_index, _confine,
     and serves none of them as an attribute but annotations, which the door's own
     `from __future__ import annotations` binds; every name today's code imports from the two
-    moved modules, private helpers aside, is in it."""
+    moved modules, private helpers aside, is in it.
+
+    #1187 declared change 13 (R6, D-del): the `_episodes` record's four functions
+    (record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids) are deleted, so
+    the door serves 70 names, not 74. (Name kept.)"""
     from defender import run_repository as door
     from defender.run_repository import _layout
 
@@ -399,7 +405,7 @@ def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the own
         f"__all__ differs from D1.3's 68 plus the two ruled names: missing "
         f"{sorted((LAYOUT_NAMES | NON_LAYOUT_PUBLIC) - served)}, extra "
         f"{sorted(served - LAYOUT_NAMES - NON_LAYOUT_PUBLIC)}")
-    assert len(served) == 74, f"{len(served)} public names, not 74"
+    assert len(served) == 70, f"{len(served)} public names, not 70"
     layout_public = {n for n in _module_defs(ast.parse(Path(_layout.__file__).read_text(
         "utf-8"))) if not n.startswith("_")}
     assert served - NON_LAYOUT_PUBLIC == layout_public, (
@@ -473,15 +479,18 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
     assert seen["alert"] == str(RUN_LAYOUT.alert) == "alert_input/alert.json", (
         f"the child's RUN_LAYOUT is not the door's: {seen}")
     assert seen["paths"] == RunPaths.__name__ == "RunPaths", f"the child's RunPaths: {seen}"
+    # #1187 declared change 1: `RunId` admits only canonical lowercase uuid4 text.
+    rid = fixture_uuid("package-pydantic-free")
     proc = _child("from defender.run_repository import RunId, RunRefused\n"
-                  "print(RunId.parse('r1'), RunRefused.__name__)\n", block=("pydantic*",))
+                  f"print(RunId.parse({rid!r}), RunRefused.__name__)\n", block=("pydantic*",))
     assert proc.returncode == 0, f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
-    assert _out(proc).split()[:2] == ["r1", "RunRefused"], f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
+    assert _out(proc).split()[:2] == [rid, "RunRefused"], f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
     proc = _child("import defender.run_repository as rr\n"
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    assert _out(proc).split()[0] == "74", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    # F18(b): the door's count as the flipped `__all__` test above pins it (#1187 R6).
+    assert _out(proc).split()[0] == "70", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 
@@ -861,8 +870,9 @@ def test_1105_the_spec_flow_profile_names_the_moved_symbols_at_their_new_paths()
     old = [r for r in rows if r.split("::")[0] in ("defender/_run_paths.py",
                                                     "defender/_run_handle.py")]
     assert old == [], f"profile rows still name the moved files: {old}"
+    # #1187 (R1): `Run.for_tenant` goes with the record it read (replaced by `Run.under`), so
+    # its profile row is not pinned here; the two other moved rows are.
     expected = {"defender/run_repository/_layout.py::contained_payload",
-                "defender/run_repository/_handle.py::Run.for_tenant",
                 "defender/run_repository/_handle.py::Run._exit_class"}
     assert expected <= set(rows), f"the moved rows are missing: {sorted(expected - set(rows))}"
     for row in (r for r in rows if r.startswith("defender/run_repository/")):
@@ -876,7 +886,6 @@ def test_1105_the_spec_flow_profile_names_the_moved_symbols_at_their_new_paths()
             names = {getattr(n, "name", None) for n in getattr(node, "body", [])}
             assert member in names, f"{row}: {head} defines no {member}"
     for row, obj in (("defender/run_repository/_layout.py::contained_payload", contained_payload),
-                     ("defender/run_repository/_handle.py::Run.for_tenant", Run.for_tenant),
                      ("defender/run_repository/_handle.py::Run._exit_class", Run._exit_class)):
         rel, symbol = row.split("::")
         assert _defined_in(obj) == (H.WORKTREE / rel).resolve(), (
@@ -1024,19 +1033,24 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
     binds no source at or above tenant.runs read-write, so neither _episodes/ nor _tenant.json is
     under a writable bind. Positive control: the run's own run_dir is bound read-write. (A BoxSpec
     with an explicit rootfs keeps _create_argv off the filesystem: resolve_rootfs returns it
-    verbatim, _docker.py:65-70; GR-A1, executed, is the design's own discharge.)"""
+    verbatim, _docker.py:65-70; GR-A1, executed, is the design's own discharge.)
+
+    #1187 (R1, R6): `_tenant.json` and `_episodes/` are retired — nothing writes either — so
+    the guard is the container itself and a neighbouring run: neither is under a writable
+    bind. The run id is a uuid (declared change 1). (Name kept.)"""
     from defender.run_repository import RunId
     from defender.runtime.box import BoxSpec
     from defender.runtime.box._lifecycle import _create_argv
 
     t = H.tenant(tmp_path / "data", H.T_ID)
     runs = H.runs_folder(t)
-    H.make_run(runs, "r1")
+    rid, neighbour = fixture_uuid("box-bind-run"), fixture_uuid("box-bind-neighbour")
+    H.make_run(runs, rid)
+    H.make_run(runs, neighbour)
     from defender.tests._alert_plant import plant_alert
-    plant_alert(runs / "r1")
-    H.plant_record(runs, "r1-n1", t.id, "r1", {"a": "r1-n1-a"})
-    run = t.runs_repository().open(RunId.parse("r1"))
-    assert getattr(run, "run_dir", None) == runs / "r1", f"runs.open handed out {run!r}"
+    plant_alert(runs / rid)
+    run = t.runs_repository().open(RunId.parse(rid))
+    assert getattr(run, "run_dir", None) == runs / rid, f"runs.open handed out {run!r}"
     create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER,
                           BoxSpec(runtime="runc", rootfs="busybox"), tenant_agent=t.agent)
     argv = create.argv
@@ -1046,10 +1060,9 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
         fields = dict(f.split("=", 1) for f in spec.split(",") if "=" in f)
         binds.append((Path(fields["source"]), "readonly" in spec.split(",")))
     writable = [src for src, ro in binds if not ro]
-    assert writable == [runs / "r1"], (
+    assert writable == [runs / rid], (
         f"the box's writable binds are {writable}, not exactly the run's own folder")
-    for protected in (runs, runs / "_tenant.json", runs / "_episodes",
-                      runs / "_episodes" / "r1-n1.json"):
+    for protected in (runs, runs / neighbour):
         under = [src for src in writable if protected == src or src in protected.parents]
         assert under == [], f"{protected} sits under a writable box bind: {under}"
     assert "--read-only" in argv, "the box's own root is read-only"
@@ -1062,11 +1075,12 @@ def test_1105_a_handles_address_is_frozen_after_init(tmp_path):
     stay its own mutable state."""
     from defender.run_repository import Run
 
+    # #1187: a uuid run id (declared change 1) in a container with no record (R1); the
+    # record-reading `Run.for_tenant` goes (R1), `Run.under` is its replacement.
     runs = tmp_path / H.T_ID / "runs"
-    H.plant_tenant_record(runs, H.T_ID)
-    run_dir = H.make_run(runs, "r1")
-    for run in (Run.under(runs, "r1", tenant_id=H.T_ID),
-                Run.for_tenant(H.T_ID, "r1", runs_base=runs),
+    rid = fixture_uuid("package-frozen")
+    run_dir = H.make_run(runs, rid)
+    for run in (Run.under(runs, rid, tenant_id=H.T_ID),
                 Run(run_dir, runs_base=runs, tenant_id=H.T_ID)):
         for attr, value in (("run_dir", tmp_path / "elsewhere"), ("runs_base", tmp_path),
                             ("tenant_id", H.U_ID)):

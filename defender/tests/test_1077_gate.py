@@ -612,17 +612,27 @@ def test_one_package_migrated_while_another_still_spells_the_name(tmp_path: Path
 # ---------------------------------------------------------------------------------------
 
 def test_kinds_tsv_carries_the_tenant_row_and_a_subcollection_for_circuit_breaker():
-    """`run-records-kinds.tsv` carries a `tenant` row filed under table 2, and every kind's
-    `subcollection` cell is filled. (Its `circuit_breaker` clause retired with #1235: the
-    breaker is the run process's memory, not a run record, so the table has no row for it.)"""
+    """`run-records-kinds.tsv` carries no `tenant` or `episode_runs_record` row, carries the arm
+    roster's row and the arm folder's `runs/<uuid>/` path, and every kind's `subcollection` cell
+    is filled. (Its `circuit_breaker` clause retired with #1235: the breaker is the run
+    process's memory, not a run record, so the table has no row for it.)
+
+    #1187 declared change 6 (R1, R6, Sequencing §4): `_tenant.json` and PR 1's `_episodes`
+    record are retired, so D2's `tenant` row and #1105 D3's `episode_runs_record` row leave the
+    table; the host-written arm roster gains a row (its name owned by `_episode_paths.LAYOUT`,
+    `test_1077_name_owners`), and an arm's folder is `runs/<uuid>/`, never
+    `runs/<episode_id>-<label>/` (declared change 2). The name stays (the spec graph's).
+    """
     rows = {r["kind"]: r for r in S.kinds_rows()}
-    assert "tenant" in rows, (
-        "D2 mints a new kind; a kind with no row is a kind with no accessor, and O2's count "
-        "would silently fall one short")
-    assert rows["tenant"]["table"] == "2", (
-        "table 2 holds the records that live BESIDE the run dir under the runs base — the "
-        "heading D2's placement fits")
-    assert rows["tenant"]["path"] == S.TENANT_RECORD_NAME
+    for retired in ("tenant", "episode_runs_record"):
+        assert retired not in rows, f"the retired `{retired}` row is still in the kinds table"
+    assert "tenant_row" in rows, "positive control: the tenant ROW (`<tenant>/tenant.json`) stays"
+    assert "arm_roster" in rows, "#1187 R2: the arm roster has no row in the kinds table"
+    assert rows["arm_roster"]["table"] == "4", (
+        "table 4 holds the episode folder's records — the roster is one, beside the manifest")
+    assert rows["arm_roster"]["path"] == "arms.json"
+    assert rows["episode_runs"]["path"].rstrip("/") == "runs/<uuid>", (
+        f"an arm folder is named by its roster uuid: {rows['episode_runs']['path']!r}")
     assert "circuit_breaker" not in rows, (
         "#1235: the breaker is the run process's memory; a row would name a record no one writes")
     appendix = S.appendix_only()
@@ -646,7 +656,7 @@ def test_the_sites_table_is_gone_and_the_kinds_table_still_renders():
     assert S.KINDS_TSV.is_file(), "the kinds table stays (N6)"
     rendered = S.gate().render(S.kinds_rows())
     assert rendered.strip(), "the kinds table no longer renders"
-    for kind in ("alert", "provenance", "session_db", "tenant"):
+    for kind in ("alert", "provenance", "session_db", "tenant_row"):
         assert kind in rendered, f"{kind} is missing from the rendered page"
     page = S.PAGE.read_text(encoding="utf-8")
     for retired in ("Table 1", "Table 2", "Table 3", "Table 4"):
@@ -761,11 +771,16 @@ def test_the_tenant_writer_is_hard_gated_by_the_unguarded_write_lint(tmp_path: P
     from defender.tests.e2e import _spec771
     lint = load_lint_gate("lint_unguarded_tree_write")
 
+    # #1187 (R1): the runs-base record `_tenant.json` and its writer are retired, so the census
+    # row this keys on is `_tenant.py`'s surviving writer, the tenant ROW's (`create_tenant`).
     tenant_rows = [w for w in _spec771.CENSUS
-                   if S.TENANT_RECORD_NAME in str(getattr(w, "artifact", ""))]
+                   if str(getattr(w, "artifact", "")).endswith("/tenant.json")]
     assert tenant_rows, (
         "decision 16, reading 1: a census row for the tenant WRITER joins the #771 census — "
         f"the census names {sorted({str(getattr(w, 'artifact', '')) for w in _spec771.CENSUS})}")
+    assert not [w for w in _spec771.CENSUS
+                if S.TENANT_RECORD_NAME in str(getattr(w, "artifact", ""))], (
+        "#1187 R1: the census still drives the retired `_tenant.json` writer")
     modules = {w.module for w in tenant_rows}
     assert modules <= set(_spec771.LINT_HARD_GATED_MODULES), (
         f"the writer's containing module {modules} is not hard-gated")

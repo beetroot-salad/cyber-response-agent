@@ -604,7 +604,8 @@ class _Views:
     @functools.cached_property
     def episode_page(self) -> str:
         assert self.judge_prompts, "the episode was never graded"
-        with J.episodes_base(self.episode.parent), J.judge_runs().episode(self.episode.name) as view:
+        # #1187 (O8/O9): by id, through the repository of the tenant holding the episode.
+        with J.episode_runs_for(self.episode).episode(self.episode.name) as view:
             return S.sym("scripts.visualize.visualize_episode", "build_page")(view)
 
     @functools.cached_property

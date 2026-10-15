@@ -189,7 +189,7 @@ def test_1235_a_planted_spawn_count_refuses_no_gather(tmp_path, monkeypatch):
 
     def spend() -> None:
         (holder[0] / "budget.json").write_text(json.dumps({
-            "run_id": "k-x6", "tool_calls": 0, "subagent_spawns": 10_000}), encoding="utf-8")
+            "run_id": holder[0].name, "tool_calls": 0, "subagent_spawns": 10_000}), encoding="utf-8")
 
     rec = VerbRecorder()
     main = PlantingReplay([Turn(tool_calls=[("gather", {

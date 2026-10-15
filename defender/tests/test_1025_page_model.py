@@ -342,7 +342,7 @@ def test_1025_a_nan_or_infinite_duration_is_that_slots_own_absence(tmp_path):
     `json.loads` admits both — cost the world's wall and that call's wall, never the render:
     the page is written, the world's cost still reads, and the lower bound is still a number."""
     ep = E.sample_episode(tmp_path)
-    rd = ep.dir / "runs" / f"{E.EPISODE_ID}-{E.GRADED_WORLD}"
+    rd = ep.run(E.GRADED_WORLD)  # #1187: the arm folder the roster names
     E.plant_raw(rd / "tool_trace.jsonl", json.dumps(E.result_event()).replace(
         "180000", "NaN") + "\n")
     agent_id = f"judge:{E.GRADED_WORLD}:1"

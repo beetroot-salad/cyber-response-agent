@@ -36,15 +36,16 @@ stamp, `verify_family` takes no `source=`, and the family stamp has no `source` 
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 from defender.tests import _judge_921 as J
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
@@ -93,7 +94,9 @@ class Launch:
     are all readable after `run()` has raised."""
 
     src: Path
-    episode_dir: Path
+    #: Every episode under any tenant of the data root before the launch (#1187: the launcher
+    #: mints the episode's id, so `episode_dir` is the one new folder after it).
+    episodes_before: frozenset
     spawn: Any
     questioner: Any
     live_tree: Any
@@ -124,6 +127,14 @@ class Launch:
         return self.rc
 
     @property
+    def episode_dir(self) -> Path:
+        """The episode this launch made: the one new folder under `<data root>/<T>/episodes/`
+        (#1187 Layout A). A launch that made none answers a path that does not exist."""
+        made = sorted(_episodes_now() - self.episodes_before)
+        assert len(made) <= 1, f"one launch made {made}"
+        return made[0] if made else Path(os.environ["DEFENDER_DATA_ROOT"]) / "<no episode made>"
+
+    @property
     def family_stamp(self) -> dict:
         return json.loads((self.episode_dir / "provenance.json").read_text(encoding="utf-8"))
 
@@ -143,12 +154,16 @@ def _prepare(tmp_path, *, live_tree=None, siblings_at: str | None = "deadbee",
     """
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=[S.Call("idp", "query", QUERY, BASE)])
-    episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     return Launch(
-        src=src, episode_dir=episode_dir, estate=est,
-        spawn=J.FakeSibling(episode_dir, commit=siblings_at) if spawn is None else spawn,
+        src=src, episodes_before=frozenset(_episodes_now()), estate=est,
+        spawn=J.FakeSibling(commit=siblings_at) if spawn is None else spawn,
         questioner=S.questioner_for(),
         live_tree=T.source_capture() if live_tree is None else live_tree)
+
+
+def _episodes_now() -> set[Path]:
+    """Every episode under any tenant of this test's data root (`<root>/<T>/episodes/*`)."""
+    return set(Path(os.environ["DEFENDER_DATA_ROOT"]).glob("*/episodes/*"))
 
 
 def _restamp(src: Path, **overrides: Any) -> Path:
@@ -418,7 +433,7 @@ def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete
     def dirs(ep, w):
         return T.arm_run_dir(ep, w, commit="cafe1")
 
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-drifted")
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-drifted"))
     report = _verify(ep, dirs, source=T.provenance_record(commit="deadbee"))
     assert report["comparable"] is False
     assert "source" in report["reason"], report["reason"]
@@ -433,13 +448,13 @@ def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete
         def near(ep, w, extended=extended):
             return T.arm_run_dir(ep, w, commit=extended)
 
-        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{extended}")
+        ep = T.episode(tmp_path, episode_id=fixture_uuid(f"976-{extended}"))
         report = _verify(ep, near, source=T.provenance_record(commit="cafe1"))
         assert report["comparable"] is False, extended
         assert "commit" in report["reason"], report["reason"]
         assert not (ep / "provenance.json").exists()
 
-    ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-anchored")
+    ok = T.episode(tmp_path, episode_id=fixture_uuid("976-anchored"))
     report = _verify(ok, dirs, source=T.provenance_record(commit="cafe1"))
     assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
@@ -457,7 +472,7 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
     # WITH AND WITHOUT THE OVERRIDE (adversary H3): a scope mismatch is not dirt, so
     # `--allow-dirty` does not reach it at this tier any more than at preflight.
     for allow_dirty in (False, True):
-        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-scoped-{str(allow_dirty).lower()}")
+        ep = T.episode(tmp_path, episode_id=fixture_uuid(f"976-scoped-{str(allow_dirty).lower()}"))
         report = _verify(ep, source=T.provenance_record(scope="defender"),
                          allow_dirty=allow_dirty)
         assert report["comparable"] is False, allow_dirty
@@ -467,7 +482,7 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
         assert "''" not in report["reason"], report["reason"]
         assert not (ep / "provenance.json").exists()
 
-    ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-unscoped")
+    ok = T.episode(tmp_path, episode_id=fixture_uuid("976-unscoped"))
     report = _verify(ok, source=T.provenance_record(scope=None))
     assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
@@ -484,14 +499,14 @@ def test_976_a_dirty_source_under_the_override_is_still_held_to_its_commit(tmp_p
     def elsewhere(ep, w):
         return T.arm_run_dir(ep, w, commit="cafe1")
 
-    ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-anchored")
+    ok = T.episode(tmp_path, episode_id=fixture_uuid("976-dirty-anchored"))
     report = _verify(ok, source=T.provenance_record(dirty=True), allow_dirty=True)
     assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["source"]["dirty"] is True
     assert stamp["allow_dirty"] is True
 
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-drifted")
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-dirty-drifted"))
     report = _verify(ep, elsewhere, source=T.provenance_record(dirty=True), allow_dirty=True)
     assert report["comparable"] is False
     assert "commit" in report["reason"], report["reason"]
@@ -592,14 +607,14 @@ def test_976_the_authority_judges_the_sources_own_dirt_not_only_the_siblings(tmp
     the exact record O5 says must never exist."""
     T.runs_base(tmp_path)
 
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-source-unwaived")
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-dirty-source-unwaived"))
     report = _verify(ep, source=T.provenance_record(dirty=True))
     assert report["comparable"] is False
     assert "source" in report["reason"], report["reason"]
     assert "dirty=True" in report["reason"], report["reason"]
     assert not (ep / "provenance.json").exists()
 
-    ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-source-waived")
+    ok = T.episode(tmp_path, episode_id=fixture_uuid("976-dirty-source-waived"))
     report = _verify(ok, source=T.provenance_record(dirty=True), allow_dirty=True)
     assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
@@ -647,7 +662,7 @@ def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_
         "drifted": lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1"),
     }
     for name, dirs in never.items():
-        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
+        ep = T.episode(tmp_path, episode_id=fixture_uuid(f"976-{name}"))
         report = _verify(ep, dirs, source=T.provenance_record())
         assert report["comparable"] is False, name
         reason = report["reason"]
@@ -656,7 +671,7 @@ def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_
     def only_dirt(ep, w):
         return T.arm_run_dir(ep, w, dirty=(w == "b"))
 
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-only-dirt")
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-only-dirt"))
     report = _verify(ep, only_dirt, source=T.provenance_record())
     assert report["comparable"] is False
     assert "allow-dirty" in report["reason"]
@@ -674,7 +689,7 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
     def two_commits(ep, w):
         return T.arm_run_dir(ep, w, commit=f"c-{w}")
 
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-commits")
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-two-commits"))
     report = _verify(ep, two_commits, source=T.provenance_record(commit="s"))
     assert report["comparable"] is False
     reason = report["reason"]
@@ -691,7 +706,7 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
             T.source_stamp(arm, scope="defender")
         return arm
 
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-scopes")
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-two-scopes"))
     report = _verify(ep, two_scopes, source=T.provenance_record(scope=None))
     assert report["comparable"] is False
     assert "siblings disagree on scope" in report["reason"], report["reason"]
@@ -701,7 +716,7 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
     def two_models(ep, w):
         return T.arm_run_dir(ep, w, model=("m-2" if w == "b" else "m-1"))
 
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-models")
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-two-models"))
     report = _verify(ep, two_models, source=T.provenance_record())
     assert report["comparable"] is False
     assert report["reason"].count("siblings disagree on model") == 1, report["reason"]
@@ -712,7 +727,7 @@ def test_976_a_family_of_no_siblings_is_incomplete_not_a_crash(tmp_path):
     reason — not comparable with an agreed record of nobody, and not a `StopIteration` out of
     the family-stamp writer after the archive directory was made. The launcher never gets here
     (a manifest always has a base world), so this is the public entry's own answer."""
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-nobody")
+    ep = T.episode(tmp_path, episode_id=fixture_uuid("976-nobody"))
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, {}, source=T.provenance_record())
     assert report["comparable"] is False
@@ -733,7 +748,9 @@ def test_976_the_accepted_family_stamp_carries_the_sources_whole_record(tmp_path
     not the launcher-moment capture (which here carries no model, as a real `capture_tree`
     never does) and not the siblings' agreement. Paired with the clean reading: `source.dirty`
     is False and `allow_dirty` is False. Without this a reader of the archive could not tell
-    which code the family was anchored to, or would read the launcher's own capture as it."""
+    which code the family was anchored to, or would read the launcher's own capture as it.
+
+    #1187 declared change 11: the accepted stamp no longer carries `base_world_id`."""
     launch = _prepare(tmp_path, live_tree=T.source_capture(model=None))
     stamp = _accepted(launch)
     expected = T.provenance_record()
@@ -743,16 +760,11 @@ def test_976_the_accepted_family_stamp_carries_the_sources_whole_record(tmp_path
     assert stamp["source"]["model"] == "m-1", "the source's model, not the capture's None"
     assert stamp["source"]["dirty"] is False
     assert stamp["allow_dirty"] is False
-    # #1106 M2: the launcher now SEEDS each sibling's runs base with the episode's tenant record
-    # before any child starts (real siblings always minted one), so the family's base world is
-    # read from it — and it is exactly the seeded record's.
     # #1204: `waived` names the fault kinds the override waived — none, for a clean family.
-    assert set(stamp) == {"agreed", "allow_dirty", "source", "base_world_id", "waived"}
+    # #1187 declared change 11 (R1b): the family stamp drops `base_world_id` — `_tenant.json`,
+    # its only home, is retired, and no reader of the value existed.
+    assert set(stamp) == {"agreed", "allow_dirty", "source", "waived"}
     assert stamp["waived"] == []
-    from defender import _tenant
-
-    assert stamp["base_world_id"] == _tenant.read_tenant(
-        launch.episode_dir / "runs").base_world_id
 
 
 # ---------------------------------------------------------------------------------------

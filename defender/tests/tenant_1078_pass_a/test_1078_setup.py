@@ -431,24 +431,28 @@ def test_d1_1077_gate_registration(tmp_path, monkeypatch):
     and one the tenant row (so both writers are in the census by what they write, not by a row
     label); then each is driven again with an alias planted at its artifact and must refuse
     with the outside target untouched — the create_tenant row's refusal being the write's, not
-    O10's (§7 J60)."""
+    O10's (§7 J60).
+
+    #1187 declared change 6 (R1): the runs-base record is retired, so the kinds table has no
+    `tenant` row (`<runs_base>/_tenant.json`) any more and no `_tenant.py` census row lands
+    the record — `ensure_runs_base_record` is gone; the tenant row (`create_tenant`) is the
+    one `_tenant.py` writer left, driven and alias-planted as before. (Name kept.)"""
     rows = {r["kind"]: r for r in S.kinds_rows()}
     assert "tenant_row" in rows, "docs/run-records-kinds.tsv has no kind tenant_row"
     assert rows["tenant_row"]["path"].split("/")[-1] == H.ROW_NAME
-    assert rows["tenant"]["path"] == H.RECORD_NAME, "kind tenant moved off _tenant.json"
+    assert "tenant" not in rows, (
+        f"docs/run-records-kinds.tsv still registers the retired runs-base record: {rows.get('tenant')}")
     by_kind = {a.kind: a for a in S.ACCESSOR_FOR_KIND}
     assert "tenant_row" in by_kind, "_spec1077.ACCESSOR_FOR_KIND has no tenant_row accessor"
     root, base = tmp_path / "data", tmp_path / "data" / TID / "runs"
     got = S.resolve(by_kind["tenant_row"], run_dir=base / "r1", runs_base=base,
                     data_root=root, tenant_id=TID)
     assert Path(got) == root / TID / H.ROW_NAME == H.TenantPaths(root, TID).row
-    assert S.resolve(by_kind["tenant"], run_dir=base / "r1", runs_base=base) == \
-        base / H.RECORD_NAME
 
     census, tenant_rows = _tenant_census_rows()
-    assert len(tenant_rows) >= 2, (
-        f"the #771 census has {len(tenant_rows)} _tenant.py writer row(s); D1 renames the "
-        "ensure_tenant row and adds a create_tenant row")
+    assert len(tenant_rows) >= 1, (
+        f"the #771 census has {len(tenant_rows)} _tenant.py writer row(s); create_tenant's row "
+        "must stay (the ensure_runs_base_record row went with the record, #1187 R1)")
     monkeypatch.setenv(H.DATA_ROOT_ENV, str(tmp_path / "census-root"))
     landed_names: list[str] = []
     for i, writer in enumerate(tenant_rows):
@@ -460,7 +464,7 @@ def test_d1_1077_gate_registration(tmp_path, monkeypatch):
             f"census row {writer.id} failed on a clean tree: {outcome!r}")
         new = _landed(clean, before)
         landed_names += [n.split("/")[-1] for n in new]
-    assert H.RECORD_NAME in landed_names, "no census row lands the runs-base record"
+    assert H.RECORD_NAME not in landed_names, "a census row still lands the retired runs-base record"
     assert H.ROW_NAME in landed_names, "no census row lands the tenant row (create_tenant)"
 
     for i, writer in enumerate(tenant_rows):

@@ -54,6 +54,7 @@ from defender import _yaml
 from defender.learning.core.state import FINDINGS
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._state1135 import env_state
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 
@@ -97,13 +98,20 @@ def _alert(tag: str, **over: Any) -> bytes:
 def _episode(tmp_path: Path, name: str, *, raw: bytes | None = None,
              signature: str | None = "", copy: bool = True,
              record: bool | dict[str, Any] = True, **world_kw: Any) -> tuple[Path, bytes]:
-    """An accepted, archived episode (`J.accepted_episode`, world copies = the decoys) under its
-    own episodes root, with the launch's copies of `raw` (default `_alert(name)`) and a record
-    carrying `signature` (default `SIG-<name>`; None = no signature recorded). `copy=False`
-    plants nothing: the episode a pre-change launcher left."""
-    ep = J.accepted_episode(tmp_path, root=tmp_path / f"episodes-{name}", **world_kw)
-    # Distinct scenarios share a queue, so their episode identities must differ (#1241).
-    ep = ep.rename(ep.with_name(f"{ep.name}-{name}"))
+    """An accepted, archived episode (`J.accepted_episode`, world copies = the decoys) at
+    `<data root>/<T>/episodes/<uuid>` (#1187 Layout A: the only place a door reaches it by id),
+    with the launch's copies of `raw` (default `_alert(name)`) and a record carrying `signature`
+    (default `SIG-<name>`; None = no signature recorded). `copy=False` plants nothing: the
+    episode a pre-change launcher left."""
+    ep = J.accepted_episode(tmp_path, **world_kw)
+    # Distinct scenarios share a queue, so their episode identities must differ (#1241): each
+    # its own uuid (#1187 dc3), and the manifest names that id (R5: every manifest reader
+    # refuses a manifest whose `episode_id` is not its folder's name — a mismatch here would be
+    # refused for THAT, and a test about the record would pass on the wrong refusal).
+    episode_id = fixture_uuid(f"1222-episode-{name}")
+    ep = ep.rename(ep.with_name(episode_id))
+    doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
+    T.write_family(ep, {**doc, "episode_id": episode_id})
     alert = _alert(name) if raw is None else raw
     if copy:
         sig = f"SIG-{name}" if signature == "" else signature
@@ -231,6 +239,9 @@ def _judge_refusal(ep: Path, base: Path) -> str:
 
 def _assert_names_record(text: str, what: str) -> None:
     assert "record" in text.lower(), f"{what} does not name the missing record: {text!r}"
+    # #1187 (R5): a manifest naming another episode is refused too, and its text may say
+    # "record"; a refusal of the record is never that one.
+    assert "episode_id" not in text, f"{what} is the manifest's id refusal, not the record's: {text!r}"
 
 
 # --- a pass that predates the change ---------------------------------------------------------
@@ -272,11 +283,13 @@ def _source(tmp_path: Path, raw: bytes, *, record: bool = True, digest: str | No
 
 
 def _launch(planted: S.Planted, src: Path, episode_id: str = T.EPISODE_ID) -> Path:
-    """`prepare_episode` over `src` (the real primer), the episode handle released."""
+    """`prepare_episode` over `src` (the real primer), then the launcher's RUNS step for the
+    manifest's worlds (#1187 R2: `view.start_runs` makes `runs/` and writes the arm roster — it
+    replaces `create_container`), the episode handle released."""
     cli = S.mod(CLI)
     with cli.prepare_episode(episode_id, Run.at(src), data_root=planted.accept().data_root) as episode:
         with planted.accept().runs_repository().episode(episode.dir.name, held=episode) as view:
-            view.create_container()
+            view.start_runs(list(T.WORLDS))
         return Path(episode.dir)
 
 
@@ -291,6 +304,18 @@ def _files_under(root: Path) -> dict[str, bytes]:
         return {}
     return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*"))
             if p.is_file() and not p.is_symlink()}
+
+
+def _episode_files() -> dict[str, bytes]:
+    """Every file in every episode of every tenant: `<data root>/*/episodes/` (#1187 Layout A,
+    where a launch puts its episode and its copies; O9: no configured root). The census a
+    refused launch leaves without the source's bytes — and `test_a1`'s accepted launch does not
+    (its positive control)."""
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    found: dict[str, bytes] = {}
+    for episodes in sorted(root.glob("*/episodes")):
+        found.update({f"{episodes.parent.name}/{k}": v for k, v in _files_under(episodes).items()})
+    return found
 
 
 class _Lifecycle:
@@ -309,8 +334,8 @@ class _Lifecycle:
 def _resume_sibling(ep: Path, label: str = "b") -> Path:
     """World `label`'s sibling through the REAL `run.main --resume`; returns its run folder."""
     life = _Lifecycle()
-    with J.episodes_base(ep.parent):
-        return _resume_sibling_at(ep, label, life)
+    # #1187 (O9): the episode is found under `--tenant`'s own `<T>/episodes/`; no variable.
+    return _resume_sibling_at(ep, label, life)
 
 
 def _resume_sibling_at(ep: Path, label: str, life: _Lifecycle) -> Path:
@@ -403,6 +428,8 @@ def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
     record_bytes = S.record_file(src).read_bytes()
 
     ep = _launch(planted, src)
+    assert raw in _episode_files().values(), (
+        "the census p156/p157 take never saw the accepted launch's copy (#1187: <T>/episodes)")
     assert S.episode_alert_file(ep).is_file(), "the launch put no copy of the alert in the episode"
     assert S.episode_record_file(ep).is_file(), "the launch put no copy of the record in the episode"
     assert S.episode_alert_file(ep).read_bytes() == raw, "the episode's alert is not the source's"
@@ -853,8 +880,8 @@ def test_p159_episode_launched_before_the_change_is_judged_aft(tmp_path):
 def _page_rule(ep: Path) -> str:
     """The episode page's rule header, off the page `render_episode` writes."""
     visualize_episode = S.mod(VISUALIZE)
-    with J.episodes_base(ep.parent):
-        page = Path(visualize_episode.render_episode(J.judge_runs(), ep.name))
+    # #1187 (O8/O9): by id, through the repository of the tenant whose `<T>/episodes/` holds it.
+    page = Path(visualize_episode.render_episode(J.episode_runs_for(ep), ep.name))
     html = page.read_text(encoding="utf-8")
     found = re.findall(r'<span class="hd-alert">([^<]*)</span>', html)
     assert len(found) == 1, f"the episode page's header carries {len(found)} alert spans"
@@ -889,8 +916,7 @@ def test_p156_launch_from_a_source_run_without_a_record(tmp_path):
     before = _files_under(src)
     _assert_names_record(_refused_launch(planted, src), "the launcher's refusal")
     assert _files_under(src) == before, "the launch wrote into the source run (derived a record)"
-    episodes = Path(os.environ[T.EPISODES_BASE_ENV])
-    assert raw not in _files_under(episodes).values(), "the launch copied the alert anyway"
+    assert raw not in _episode_files().values(), "the launch copied the alert anyway"
 
 
 def test_p157_source_digest_and_alert_bytes_disagree_at_launch(tmp_path):
@@ -903,7 +929,7 @@ def test_p157_source_digest_and_alert_bytes_disagree_at_launch(tmp_path):
     message = _refused_launch(planted, src)
     assert any(w in message.lower() for w in ("digest", "mismatch", "differ", "disagree")), (
         f"the refusal does not name the mismatch: {message!r}")
-    copied = _files_under(Path(os.environ[T.EPISODES_BASE_ENV])).values()
+    copied = _episode_files().values()
     assert raw not in copied, "the launch copied the source's alert"
     assert record_bytes not in copied, "the launch copied the source's record"
 

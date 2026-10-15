@@ -413,7 +413,9 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
     def materialize(alert: Path, run_id: str | None, **kw: Any) -> Run:
         real = run_common.materialize_run(alert, run_id, **kw)
         assert real.runs_base == entrypoint_env, "the builder bound another runs base"
-        run = Run.for_tenant(real.tenant_id, real.run_dir.name, runs_base=real.runs_base, io=io)
+        # #1187 (R1): `Run.for_tenant` is retired with the runs base's record it read;
+        # `Run.under(container, id, tenant_id=)` is its replacement.
+        run = Run.under(real.runs_base, real.run_dir.name, tenant_id=real.tenant_id, io=io)
         handles.append(run)
         return run
 

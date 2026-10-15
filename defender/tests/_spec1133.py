@@ -143,7 +143,8 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "priming_lock": ("create", "delete"),
     "wire_log": ("write",),
     "world.draw": ("write", "delete"),
-    "world.run_dir_pointer": ("write",),
+    # #1187 R8 (declared change 12): the archive pointer `world.run_dir_pointer` is retired with
+    # its write — nothing reads it, and the arm roster supersedes it — so the row is gone.
     # #1224: the episode outcome and each world's own record, both created once.
     "world_record": ("create",),
     "outcome": ("create",),
@@ -234,7 +235,6 @@ def expected_record_rel(key: str) -> PurePosixPath:
         "priming_lock": lambda: LAYOUT.priming_lock,
         "wire_log": lambda: LAYOUT.wire_log(WIRE_NAME),
         "world.draw": lambda: world.draw(DRAW_N),
-        "world.run_dir_pointer": lambda: world.run_dir_pointer,
         "world_record": lambda: LAYOUT.world_record(LABEL),
         "outcome": lambda: LAYOUT.outcome,
         "not_comparable": lambda: LAYOUT.not_comparable,

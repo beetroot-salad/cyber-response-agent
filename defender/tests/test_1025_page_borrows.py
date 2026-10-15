@@ -271,7 +271,6 @@ def test_1025_the_fixture_ledger_is_the_passes_own(tmp_path):
     family = J.as_reply_text(J.draw_doc(ep.dir, E.FAMILY, 0))
     for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD, E.FAMILY):
         shutil.rmtree(ep.world(label) / "judge")
-    E.plant_container_record(ep.dir)
     judge = J.FakeJudge(replies=replies, family_default=family)
     J.grade_at(ep.dir, judge=judge, draws=1, state=_state1135.state_over(tmp_path / "queue"))
     assert judge.agent_ids == [f"judge:{E.PASSTHROUGH_WORLD}:0", f"judge:{E.GRADED_WORLD}:0",

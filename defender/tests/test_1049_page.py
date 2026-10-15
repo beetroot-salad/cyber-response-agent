@@ -24,6 +24,7 @@ import ast
 import os
 import re
 import shutil
+import uuid
 from pathlib import Path
 
 import pytest
@@ -122,8 +123,10 @@ def _write_grade_over(copy: E.Episode) -> None:
 def _every_arm(tmp_path: Path) -> tuple[E.Episode, E.Episode, E.Episode]:
     built = E.sample_episode(tmp_path, root=tmp_path / "build")
     _plant_shared_arms(built)
-    one = E.copy_episode(built, tmp_path / "root-one" / "copy-one")
-    two = E.copy_episode(built, tmp_path / "root-two" / "nested" / "renamed-two")
+    # #1187 declared change 10 (R5): a copy keeps the episode's folder name (its manifest's
+    # episode id); the two copies differ only in where they sit.
+    one = E.copy_episode(built, tmp_path / "root-one" / built.dir.name)
+    two = E.copy_episode(built, tmp_path / "root-two" / "nested" / built.dir.name)
     for copy in (one, two):
         _plant_per_copy_arms(copy)
         _write_grade_over(copy)
@@ -186,15 +189,22 @@ def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identic
     refuse byte-identically; enumeration order is stable) — with no scrub anywhere in the
     module (d-24). Rejected: the leads loader's bare `except Exception` is kept; facts_error's
     root-freedom is pinned HERE, not by an enumeration of what it can catch.
+
+    #1187 declared change 10 (R5): every manifest reader checks the manifest's `episode_id`
+    against the folder it was read from, so the two copies keep the episode's folder name (its
+    id) and differ only in where they sit; a copy RENAMED to another folder name (a fresh
+    UUID, so the id itself is well-formed) is refused — the refusal names both ids — and no
+    page is written for it. (Name kept.)
     """
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H5
+
     built, one, two = _every_arm(tmp_path)
     E.render(one)
     E.render(two)
     for copy in (one, two):
         text = copy.page.read_text(encoding="utf-8")
         for absent in (str(copy.dir), os.path.realpath(copy.dir), str(copy.dir.parent),
-                       str(built.dir), str(tmp_path), "root-one", "copy-one", "renamed-two",
-                       "nested", "build"):
+                       str(built.dir), str(tmp_path), "root-one", "root-two", "nested", "build"):
             assert absent not in text, f"{absent!r} leaked into {copy.dir.name}'s page"
     assert one.page.read_bytes() == two.page.read_bytes(), "the two copies rendered differently"
     # the record the page rendered reasons from carries each planted world's refusal (the control is real)
@@ -203,6 +213,16 @@ def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identic
     assert rows[E.PASSTHROUGH_WORLD].get("malformed") is True, rows[E.PASSTHROUGH_WORLD]
     assert "gather_summaries" in rows[E.PASSTHROUGH_WORLD]["ungradable_reason"], (
         rows[E.PASSTHROUGH_WORLD])
+    # R5: a renamed copy is refused, naming the folder's id and the manifest's, and writes no
+    # page (the two copies above are the positive control on the same door).
+    renamed_id = str(uuid.uuid4())
+    renamed = E.copy_episode(built, tmp_path / "root-three" / renamed_id)
+    err = H5.raised(E.render_episode, renamed.dir)
+    assert err is not None, "a renamed copy rendered (R5)"
+    said = H5.message(err)
+    assert renamed_id in said, f"the R5 refusal does not name the folder's id: {said!r}"
+    assert E.EPISODE_ID in said, f"the R5 refusal does not name the manifest's id: {said!r}"
+    assert not renamed.page.exists(), "a page was written for a renamed copy"
 
 
 # ---------------------------------------------------------------------------------------

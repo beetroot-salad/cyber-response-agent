@@ -33,6 +33,7 @@ import pytest
 from defender._episode_handle import Episode
 from defender.tests import _session_store_705 as SS
 from defender.tests import _spec1077 as S
+from defender.tests._fixture_uuid import fixture_uuid
 
 pytest.importorskip("pydantic_ai")
 
@@ -56,15 +57,6 @@ def _closing_turns() -> list[Turn]:
     ]
 
 
-def _with_record(base: Path) -> Path:
-    """`base` holding its tenant record naming `DEFAULT_TENANT_ID`. #1105 NH-3: `Run.for_tenant`
-    refuses a runs base with no `_tenant.json`, so the record is planted first — as run setup
-    writes it before building the handle."""
-    if not (base / "_tenant.json").exists():
-        S.plant_tenant_record(base)
-    return base
-
-
 def _read_rows(path: Path) -> list[dict]:
     if not path.is_file():
         return []
@@ -82,7 +74,7 @@ def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_han
     second process while the run is still going."""
     run_dir = materialize(tmp_path, GOLDEN)
     base = run_dir.parent
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     queries = S.member(handle, "tables", "queries")
     leads = S.member(handle, "tables", "leads", S.LEAD_ID)
 
@@ -124,8 +116,8 @@ def test_the_session_store_still_forks_at_turn_n_through_the_handle(tmp_path: Pa
     """A session opened through the handle still forks at turn N and the sibling reads the
     prefix rows."""
     base = SS.runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-fork"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-fork")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     session = S.member(handle, "session", "session_db", "case-alpha")
 
     with session.open() as store:
@@ -172,8 +164,8 @@ def test_the_handles_session_access_reaches_todays_store_seam_with_no_new_guaran
             ceiling on what a resumed or forked sibling's connection can see.
     """
     base = SS.runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-seam"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-seam")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     session = S.member(handle, "session", "session_db", "case-alpha")
     store_mod = SS.store_mod()
 
@@ -233,8 +225,8 @@ def test_resume_joins_a_session_store_with_an_incomplete_last_append(tmp_path: P
     torn state unobservable rather than merely unlikely.
     """
     base = SS.runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-resume"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-resume")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
 
     with S.member(handle, "session", "session_db", "case-alpha").open() as store:
         session_id, _ = SS.mid_pair_session(store)
@@ -290,8 +282,8 @@ def test_a_reader_process_resolving_names_in_a_live_run(tmp_path: Path):
     supported situation: O5 requires leads and queries readable mid-run and the session store
     forkable at turn N."""
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-live"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-live")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     S.member(handle, "tables", "queries").append([{"seq": 0}])
     before = S.mutation_census(run_dir)
 
@@ -321,8 +313,8 @@ def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
     the doc requires no regression on this axis at any step."""
     from defender._io import append_jsonl
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-mixed"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-mixed")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     queries = S.member(handle, "tables", "queries")
 
     queries.append([{"seq": 0, "route": "handle"}])
@@ -342,7 +334,7 @@ def test_a_writer_that_runs_outside_the_driver_process(tmp_path: Path):
     outside the driver process today, and D5's 'writer methods wrap today's seams unchanged'
     keeps that true after the migration."""
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-outside"))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-outside")))
 
     # (1) THE HOOK's arm retired with #1235: the accounting-failures sidecar it wrote is gone
     # (the budget is counted in the run process's memory, and nothing writes the sidecar).
@@ -408,11 +400,12 @@ def test_a_fork_or_archive_of_a_still_running_source_is_supported(tmp_path: Path
         running_sidecar.unlink()
     assert not running_sidecar.exists(), "the fixture source has already ended"
 
-    episode_dir = T.episode(tmp_path, episode_id=f"{S.EPISODE_ID}-running")
+    running = fixture_uuid("1077-replay-running")
+    episode_dir = T.episode(tmp_path, episode_id=running)
     family = S.EpisodePaths(episode_dir).family
     with Episode.open(episode_dir) as episode:
         S.mod("runtime.branch._family").write_family(episode, {
-            "episode_id": f"{S.EPISODE_ID}-running", "source_run_dir": str(source),
+            "episode_id": running, "source_run_dir": str(source),
             "source_run_id": source.name, "branch_message_id": 3, "fences_at": 3})
     assert family.is_file(), (
         "declaring a fork from a still-running source must not be a refusal — what the archive "
@@ -429,8 +422,8 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     """A failed wire-log, review-trace, sidecar or tool-trace write is recorded as a partial
     failure and does not fail the run."""
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-besteffort"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-besteffort")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
 
     # A REAL obstruction through the REAL primitive: the record's own path is occupied by a
     # directory, so today's append seam raises on disk. No exception is injected.
@@ -447,21 +440,21 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
 
     # POSITIVE CONTROL: with the obstruction gone the same append lands and records nothing.
     trace.path.rmdir()
-    clean = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    clean = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     S.member(clean, "observability", "tool_trace").append([{"row": 2}])
     assert _read_rows(trace.path) == [{"row": 2}]
     assert clean.partial_failures == ()
 
-    # THE CONTRAST, in one test: the SAME obstruction on an IDENTITY-BEARING write fails loudly
-    # rather than being recorded and shrugged off. (The record planted for the handle, #1105
-    # NH-3, gives its name up to the obstruction.)
-    (base / S.TENANT_RECORD_NAME).unlink()
-    (base / S.TENANT_RECORD_NAME).mkdir()
-    # #1078: `ensure_tenant` is renamed `ensure_runs_base_record(runs_base, tenant_id)` — the
-    # obstruction still fails loudly, as the one tenant refusal (demand #0) rather than a
-    # bare OSError.
-    with pytest.raises(S.tenant().TenantRefused):
-        S.tenant().ensure_runs_base_record(base, "census-tenant")
+    # THE CONTRAST, in one test: the SAME obstruction on a decision-bearing write fails loudly
+    # rather than being recorded and shrugged off. #1187 (R1): the runs-base record this used
+    # to obstruct is retired (and `Run.under` reads none), so the obstructed write is the
+    # run's own report — a record the run's verdict is read from, never best-effort.
+    report = S.member(clean, "documents", "report")
+    report.path.mkdir(parents=True)
+    with pytest.raises(OSError, match="non-plain or aliased"):
+        report.write(S.report_text("# the contrast\n"))
+    assert clean.partial_failures == (), (
+        "a failed report write was recorded as a partial failure and shrugged off")
 
 
 # ---------------------------------------------------------------------------------------
@@ -473,8 +466,8 @@ def test_runs_written_records_are_all_slots_bound_and_role_disjoint(tmp_path: Pa
     review records, wire-log lines) has every declared slot bound (no unsubstituted part) and
     no two sub-collections share one source for what they each claim as their own part."""
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-payload"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-payload")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
 
     S.member(handle, "tables", "queries").append([{"seq": 0, "lead_id": S.LEAD_ID}])
     S.member(handle, "tables", "leads", S.LEAD_ID).write(
@@ -562,8 +555,8 @@ def test_wire_log_writers_stay_distinguishable_under_concurrent_main_and_subagen
     no torn line, and MAIN's and each subagent's lines stay distinguishable from one another by
     the writer id §7 decision 18 adds to every record."""
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-concurrent"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-concurrent")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     wire = S.member(handle, "observability", "wire_log")
 
     writers = ("MAIN", "gather-l-aaa111", "gather-l-bbb222")

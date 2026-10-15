@@ -80,8 +80,6 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -94,6 +92,7 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabula
     EPISODE_TOKEN,
     EPISODES_BASE_ENV,
     EVENTS_PATTERN,
+    ROSTER_NAME,
     RUNS_BASE_ENV,
     SOURCE_RUN_ID,
     Fault,
@@ -219,7 +218,7 @@ staged_row = oracle_row
 
 
 def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
-                 episode_token: str = EPISODE_TOKEN, raw: str | None = None) -> Path:
+                 episode_token: str | None = None, raw: str | None = None) -> Path:
     """Land `served/<world_token>.jsonl` for one world and return its path.
 
     `raw=` writes the file's bytes verbatim, for the two states J3's reader posture is about: a
@@ -230,10 +229,23 @@ def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
     ledger row without one of its run. A row that names no `call_id` key is written with
     `<token>/<i>`, `i` its line index (a copy: the caller's dict is not touched); a row that
     spells the key — `None` included — is written as given, for the scenarios about the id.
+
+    #1187: with no `episode_token=`, the token is the EPISODE'S — its folder's uuid with every
+    `-` as `.` (R2-03) — so a test's second scene (`T.episode` gives it its own id) gets its own
+    ledgers; a row built for the default episode (`ledger_row`'s `world_id`, the default token)
+    is re-pointed at this episode's token for its world.
     """
+    from defender.tests._fixture_uuid import is_fixture_uuid_shape
+
     served = Path(episode_dir) / "served"
     served.mkdir(parents=True, exist_ok=True)
+    if episode_token is None:
+        name = Path(episode_dir).name
+        episode_token = name.replace("-", ".") if is_fixture_uuid_shape(name) else EPISODE_TOKEN
     token = world_token(world_label, episode_token=episode_token)
+    if episode_token != EPISODE_TOKEN:
+        default = world_token(world_label)
+        rows = [{**r, "world_id": token} if r.get("world_id") == default else r for r in rows]
     path = served / f"{token}.jsonl"
     stamped = [r if CALL_ID in r else {**r, CALL_ID: f"{token}/{i}"}
                for i, r in enumerate(rows)]
@@ -459,43 +471,59 @@ def scripted_judge(**kw: Any) -> FakeJudge:
     return FakeJudge(**kw)
 
 
-@contextmanager
-def episodes_base(base: Path) -> Iterator[Path]:
-    """`DEFENDER_EPISODES_BASE` pointed at `base` for the block, and restored (or unset) after —
-    the configured root the judge's door (`runs.episode_files`) opens an episode id under."""
-    before = os.environ.get(EPISODES_BASE_ENV)
-    os.environ[EPISODES_BASE_ENV] = str(base)
-    try:
-        yield Path(base)
-    finally:
-        if before is None:
-            os.environ.pop(EPISODES_BASE_ENV, None)
-        else:
-            os.environ[EPISODES_BASE_ENV] = before
-
-
-def judge_runs(tenant_id: str | None = None) -> Any:
+def judge_runs(tenant_id: str | None = None, *, data_root: Path | None = None) -> Any:
     """The runs repository the judge is handed (#1105 PR 2: `grade_episode(runs, episode_id)`):
-    an accepted tenant under this test's `DEFENDER_DATA_ROOT` — `tenant_id`, or the root's one
-    tenant (`_triplet_947.current_tenant`). The judge reads only the episode, never the
-    tenant's runs (J3), so which tenant it is changes nothing it grades."""
+    an accepted tenant — `tenant_id` under `data_root` (default: this test's
+    `DEFENDER_DATA_ROOT`), or that root's one tenant (`_triplet_947.current_tenant`). The judge
+    reads only the episode, never the tenant's runs (J3); #1187 (O8/O9) opens that episode at
+    `<data root>/<T>/episodes/<id>`, under the tenant the repository holds."""
     if tenant_id is None:
         return current_tenant().runs_repository()
     from defender.tests._data_root_1078 import set_up_tenant
 
-    return set_up_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), tenant_id).runs_repository()
+    root = Path(data_root) if data_root is not None else Path(os.environ["DEFENDER_DATA_ROOT"])
+    return set_up_tenant(root, tenant_id).runs_repository()
+
+
+def episode_location(episode_dir: Path) -> tuple[Path, str]:
+    """`(data root, tenant id)` of the tenant whose `<data root>/<T>/episodes/` holds
+    `episode_dir` (#1187 Layout A: an episode is reached by id only under its tenant, so where it
+    sits names its tenant). The data root is the folder above the tenant's — this test's
+    `DEFENDER_DATA_ROOT`, or a data root a scene set up of its own (several same-id episodes in
+    one test each need one). A folder anywhere else, or under a folder holding no tenant row, is
+    a fixture bug (no door can reach it by id), raised here rather than met as a confusing
+    "absent" refusal further in."""
+    episode_dir = Path(episode_dir).absolute()
+    container = episode_dir.parent
+    tenant_dir = container.parent
+    if container.name != "episodes" or not (tenant_dir / "tenant.json").is_file():
+        raise AssertionError(
+            f"fixture bug: {episode_dir} is not at <data root>/<T>/episodes/<id> under a set-up "
+            "tenant — build it with `_triplet_947.episode` (default root), or under "
+            "`_spec1234.tenant_episodes(<a data root of its own>)`, to reach it by id")
+    return tenant_dir.parent, tenant_dir.name
+
+
+def episode_tenant_of(episode_dir: Path) -> str:
+    """The tenant whose `<T>/episodes/` holds `episode_dir` (`episode_location`)."""
+    return episode_location(episode_dir)[1]
+
+
+def episode_runs_for(episode_dir: Path) -> Any:
+    """The runs repository of the tenant holding `episode_dir` (`episode_location`)."""
+    data_root, tenant_id = episode_location(episode_dir)
+    return judge_runs(tenant_id, data_root=data_root)
 
 
 def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
     """`learning.judge.grade_episode(runs, episode_dir.name, **kw)` — the judge's one entry
-    point, by id: `runs` (default `judge_runs()`) and the episode `episode_dir` names, opened
-    under the episodes base `episode_dir.parent` (pointed at for the call). Every keyword passes
-    through unchanged; nothing is defaulted."""
+    point, by id: `runs` (default: the repository of the tenant whose `<T>/episodes/` holds
+    `episode_dir`, `episode_runs_for`) and the episode `episode_dir` names. Every keyword passes
+    through unchanged; nothing is defaulted, and no environment is set (#1187 O9)."""
     episode_dir = Path(episode_dir)
-    repository = judge_runs() if runs is None else runs
+    repository = episode_runs_for(episode_dir) if runs is None else runs
     kw.pop("runs_base", None)  # The same-alert union retired in #1105 PR 2 (J3).
-    with episodes_base(episode_dir.parent):
-        return mod("learning.judge").grade_episode(repository, episode_dir.name, **kw)
+    return mod("learning.judge").grade_episode(repository, episode_dir.name, **kw)
 
 
 def grade(episode_dir: Path, *, judge: Any = None, state: Any = None, **kw: Any) -> Any:
@@ -799,21 +827,29 @@ class FakeSibling:
 
     `_triplet_947.FakeSpawn` records argv and runs no code, which is right for every #947
     scenario about how children are started. #921 grades what a child LEFT BEHIND, so this fake
-    does the one thing a real `run.py --resume` child does that the judge can see: it
-    materialises the sibling's run dir under `{episode_dir}/runs/` with the artifacts the
-    archive copies — including D7's three new inputs — and, where a scenario asks, the world's
-    own ledger rows.
+    does the one thing a real `run.py --tenant T --episode <ep> --world <label>` child does that
+    the judge can see: it materialises the sibling's arm with the artifacts the archive copies —
+    including D7's three new inputs — and, where a scenario asks, the world's own ledger rows.
+
+    #1187: the arm is where a real sibling makes it — `<data root>/<T>/episodes/<ep>/runs/<arm
+    id>`, the arm id the episode's ROSTER (`arms.json`) holds for `<label>`, read as the sibling
+    reads it before anything else (O4b). The episode comes from the argv (the launcher mints its
+    id; nothing here knows it in advance); the data root is `data_root`, else the process's
+    `DEFENDER_DATA_ROOT` at the call. A child started with no roster, or whose roster does not
+    name its label, does nothing and exits 97, the fault recorded in `faults` — the double never
+    writes a roster entry itself, so "the roster is written before the first sibling" stays
+    observable. `episode_dir` is the episode the last started child ran in.
 
     It injects no fault of its own: `exits` scripts a child's return code, which is data the
     real seam already returns, and nothing here decides what a non-zero exit MEANS.
     """
 
-    def __init__(self, episode_dir: Path, *, exits: dict[str, int] | None = None,
+    def __init__(self, *, data_root: Path | None = None, exits: dict[str, int] | None = None,
                  ledgers: dict[str, list[dict]] | None = None,
                  dispositions: dict[str, str] | None = None,
                  scrub_ran: bool = True, commit: str | None = "deadbee",
                  knowledge: Any = _STAMP_DEFAULT) -> None:
-        self.episode_dir = Path(episode_dir)
+        self.data_root = None if data_root is None else Path(data_root)
         self.exits = dict(exits or {})
         self.ledgers = dict(ledgers or {})
         self.dispositions = dict(dispositions or {})
@@ -824,6 +860,18 @@ class FakeSibling:
         self.stamp_fields: dict[str, Any] = (
             {} if knowledge is _STAMP_DEFAULT else {"knowledge": knowledge})
         self.launches: list[dict[str, Any]] = []
+        self.faults: list[str] = []
+        self.episode_dir: Path | None = None
+
+    def episode_of(self, argv: list[str]) -> Path | None:
+        """The episode folder a child started with `argv` runs in: `<data root>/<T>/episodes/
+        <ep>` from its `--tenant` and `--episode` (None when either is missing)."""
+        tenant, episode = _flag(argv, "--tenant"), _flag(argv, "--episode")
+        if tenant is None or episode is None:
+            return None
+        root = (self.data_root if self.data_root is not None
+                else Path(os.environ["DEFENDER_DATA_ROOT"]))
+        return root / tenant / "episodes" / episode
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None,
                  **kw: Any) -> int:
@@ -831,10 +879,22 @@ class FakeSibling:
         label = _world_arg(argv)
         if label is None:
             return 0
-        runs = self.episode_dir / "runs"
-        runs.mkdir(parents=True, exist_ok=True)
-        run_dir = sibling_run_dir(runs, label, scrub_ran=self.scrub_ran, commit=self.commit,
-                                  **self.stamp_fields)
+        ep = self.episode_of(list(argv))
+        if ep is None:
+            self.faults.append(f"sibling {label}: started without --tenant/--episode: {argv}")
+            return 97
+        roster_path = ep / ROSTER_NAME
+        if not roster_path.is_file():
+            self.faults.append(f"sibling {label}: no roster at {roster_path}")
+            return 97
+        arm_id = json.loads(roster_path.read_text(encoding="utf-8")).get(label)
+        if arm_id is None:
+            self.faults.append(f"sibling {label}: the roster at {roster_path} does not name it")
+            return 97
+        self.episode_dir = ep
+        runs = ep / "runs"
+        run_dir = sibling_run_dir(runs, label, arm_id=arm_id, scrub_ran=self.scrub_ran,
+                                  commit=self.commit, **self.stamp_fields)
         (run_dir / "report.md").write_text(
             report_text(self.dispositions.get(label, "malicious")), encoding="utf-8")
         (run_dir / "investigation.md").write_text(
@@ -853,12 +913,19 @@ class FakeSibling:
         # a scenario that wants THAT state names it by constructing its own `FakeSibling` with
         # `ledgers={label: None}` is not representable — every launch this fake drives leaves a
         # served ledger, empty or not, the same as a real completed sibling does.
-        write_ledger(self.episode_dir, label, self.ledgers.get(label) or [])
+        write_ledger(ep, label, self.ledgers.get(label) or [])
         return self.exits.get(label, 0)
 
     @property
     def worlds(self) -> list[str]:
         return [w for w in (_world_arg(la["argv"]) for la in self.launches) if w]
+
+
+def _flag(argv: list[str], name: str) -> str | None:
+    for i, token in enumerate(argv):
+        if token == name and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
 
 
 def _world_arg(argv: list[str]) -> str | None:
@@ -921,7 +988,7 @@ __all__ = [
     "HOLDING_SYSTEM", "MODEL_KNOB", "PER_WORLD_FACTS", "ROW_KEYS", "RUNS_BASE_ENV",
     "SOURCE_RUN_ID",
     "FakeGitShow", "FakeJudge", "FakeSibling", "Fault",
-    "accepted_episode", "archived_judge_world", "episodes_base", "grade", "grade_at",
+    "accepted_episode", "archived_judge_world", "episode_runs_for", "episode_tenant_of", "grade", "grade_at",
     "judge_runs", "scripted_judge", "archived_world", "as_reply_text",
     "assert_wrapped_untrusted", "base_capture", "capture_call", "captured_row", "draw_doc",
     "draw_files", "enqueued_rows", "episode", "family_doc", "family_reply", "finding_doc",

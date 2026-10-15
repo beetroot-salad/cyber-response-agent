@@ -17,15 +17,13 @@ tests whose change IS the edge's arguments call the declared shape (`new_*_argv`
 | test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally   | J3     | VIEW 4 / TRIAL SPREAD name the same-alert prior run    |
 | test_dc3_a_world_label_equal_to_a_natural_run_id_grades        | 3, J3  | the label probe over `<T>/runs` refuses (G17)          |
 | test_dc4_the_episode_page_takes_a_tenant_and_an_episode_id    | 4, J8  | the page CLI takes a folder path                       |
-| test_dc4_a_container_with_no_record_refuses_the_page          | 4      | the page reads `runs/` whatever its record             |
-| test_dc4_the_page_judges_the_container_record_first           | 4, G20 | the page checks no tenant; the manifest is read first  |
+| test_dc4_the_page_judges_the_container_record_first           | 4, G20 | #1187 O8: another tenant's episode id is absent        |
 | test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray   | 4, J3  | every `runs/` dir gets a section (`stray_run_dir`)     |
 | test_dc5_an_arm_entry_that_is_a_link_is_never_archived        | 5      | verify joins `runs/<ep>-<label>` by hand and follows it|
 | test_dc6_the_launcher_starts_siblings_by_tenant_episode_label | 6      | the argv is `--resume <family.yaml>`                   |
 | test_dc6_run_py_refuses_resume_and_takes_the_episode_id       | 6, G18 | `--resume` is the sibling's edge; `--episode` unknown  |
-| test_dc6_a_sibling_over_an_absent_container_is_refused        | 6, G5  | run setup creates the container for whoever asks       |
-| test_dc6_the_sibling_judges_the_container_before_the_manifest | 6, G19 | the manifest is read first                             |
-| test_dc6_a_sibling_needs_the_episodes_base                    | 6      | `--resume` opens a path; the setting is never read     |
+| test_dc6_a_sibling_over_an_absent_container_is_refused        | 6, G5  | #1187 O4b: the roster, not a record, proves RUNS       |
+| test_dc6_the_sibling_judges_the_container_before_the_manifest | 6, G19 | #1187 O4b: the roster is judged before the manifest    |
 | test_dc7_the_run_page_takes_a_tenant_and_a_run_id             | 7, J8  | the run page CLI takes a folder path                   |
 | test_dc7_the_run_page_refuses_a_linked_run_folder             | 7, 11  | `Run.at` follows the link and renders into its target  |
 | test_dc8_a_natural_run_enqueues_its_address_not_its_folder    | 8      | the row is `{case_id, run_dir}`                        |
@@ -39,6 +37,14 @@ tests whose change IS the edge's arguments call the declared shape (`new_*_argv`
 | test_dc10_j8_every_migrated_cli_requires_the_tenant[*]        | J8     | none of the six CLIs knows `--tenant`                  |
 | test_dc10_the_tracer_walks_the_tenants_runs_and_refuses_a_stray | 10, J3, J8 | `--runs-dir`/the dead state-root walk; strays skipped |
 | test_dc10_workspace_map_takes_a_tenant_and_a_run_id           | 10, J8 | the CLI takes a folder path                            |
+
+#1187 (design rev 2) retired two rows: `test_dc4_a_container_with_no_record_refuses_the_page`
+(R1: no container record is written or judged; a recordless arm container is every episode's —
+the page over one is pinned by `ids_1187/test_1187_roster_consumers.py::test_page_links_each_arm_by_its_roster_id_never_a_composed_name`)
+and `test_dc6_a_sibling_needs_the_episodes_base` (declared change 5 / O9: nothing reads
+`DEFENDER_EPISODES_BASE`; pinned by
+`ids_1187/test_1187_roster_sibling.py::test_the_sibling_needs_no_episodes_variable_and_ignores_a_decoy`).
+Each flipped test names its #1187 declared change in its own docstring.
 
 SETTLED (the spine's ruling on #1105, its newest comment): under J3 the judge's world-label
 collision probe (`family._check_world_labels`' `runs_base` arm — G17) is REMOVED: it guarded
@@ -104,11 +110,12 @@ commit edits none of them). Declared change 12's signature families adapt on top
       ::test_o5_disagreeing_tenant_refused, ::test_o5_resume_without_tenant_refused,
       ::test_resume_flag_combined_with_run_id_and_tenant,
       ::test_launch_whose_source_row_disappears_before_the_siblings_start,
-      ::test_s7_j42_resume_manifest_resolved_at_entry, ::test_data_root_moves_after_runs_exist;
+      ::test_data_root_moves_after_runs_exist; (its resume-manifest test was retired by #1187
+      declared change 5 — now ids_1187/test_1187_roster_sibling.py::test_the_sibling_needs_no_episodes_variable_and_ignores_a_decoy);
       test_947_triplet_sibling.py::test_a_sibling_resumes_through_its_requested_tenant and
       ::test_947_run_py_screens_the_source_alert_before_reading_it (absent container, `--resume`);
-      tenant_1078_pass_a/test_1078_materialize.py::test_d2_sibling_runs_base (expects the absent
-      container created); test_1133_o4.py::test_the_sibling_door_refuses_a_resume_manifest_not_named_family_yaml
+      tenant_1078_pass_a/test_1078_materialize.py's sibling-runs-base test (expected the absent
+      container created; retired by #1187 R2 — now ids_1187/test_1187_roster_sibling.py::test_an_arm_is_created_only_at_an_id_the_roster_holds); test_1133_o4.py::test_the_sibling_door_refuses_a_resume_manifest_not_named_family_yaml
       (G18, moot); the other `"--resume"` files (11).
   7   e2e/test_1110_run_page_record_e2e.py::test_1110_the_standalone_re_render_logs_under_the_tenant_the_runs_stamp_names
       (the log names the request's tenant) and every other test there that runs the standalone
@@ -138,6 +145,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests import _episode_1025 as E
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.tenant_1105_run_repository import _spec1105_pr2 as P
 
@@ -147,13 +155,19 @@ def _roots(tmp_path, monkeypatch):
     P.roots(tmp_path, monkeypatch)
 
 
-def _episodes() -> Path:
-    return Path(os.environ[P.EPISODES_BASE_ENV])
-
-
 def _episode_names() -> set[str]:
-    root = _episodes()
-    return {p.name for p in root.iterdir()} if root.is_dir() else set()
+    """Every entry under any tenant's `<data root>/<T>/episodes/` — #1187 Layout A, where every
+    launch claims its episode (O9: no configured episodes root)."""
+    root = P.data_root()
+    return {str(p.relative_to(root)) for p in root.glob("*/episodes/*")}
+
+
+def _the_launched_episode() -> Path:
+    """The one episode the launch made under `<data root>/<LAUNCH_TENANT>/episodes/` (#1187: the
+    launcher mints its id, so a test finds it rather than composing it)."""
+    made = P.launched_episodes()
+    assert len(made) == 1, f"expected the launch's one episode under <T>/episodes: {made}"
+    return made[0]
 
 
 def _launched(got: P.Launched) -> bool:
@@ -165,18 +179,63 @@ def _refused_unspent(got: P.Launched) -> bool:
     return (got.raised is not None or got.rc not in (0, None)) and got.questioner.calls == 0
 
 
-def _sample(tmp_path: Path, tenant_id: str | None) -> E.Episode:
-    """`_episode_1025`'s sample episode under the configured episodes base, its container
-    record naming `tenant_id` (`None`: the fixture as it is, with no record — an episode
-    launched before #1078)."""
-    ep = E.sample_episode(tmp_path, root=_episodes())
-    if tenant_id is not None:
-        P.plant_record(ep.dir / "runs", tenant_id)
-    return ep
+def _sample(tmp_path: Path, tenant_id: str) -> E.Episode:
+    """`_episode_1025`'s sample episode at `<data root>/<tenant_id>/episodes/<uuid>/` (#1187
+    Layout A), as RUNS leaves it: the arm roster naming every world, each arm at its roster id.
+    No container record (R1)."""
+    return E.sample_episode(tmp_path, root=P.episodes(tenant_id))
 
 
 def _corrupt_manifest(ep: Path) -> None:
     (ep / "family.yaml").write_text("episode_id: [this is not a manifest\n", encoding="utf-8")
+
+
+def _tenant_episode(tenant_id: str) -> tuple[Path, str]:
+    """#1187's layout (decision 1, declared change 5): `<data root>/<tenant_id>/episodes/<uuid>/`
+    holding a manifest the family model loads (`_triplet_947.family_doc`, worlds a, b, c) that
+    names that uuid (R5), and the arm roster `arms.json` naming every manifest world — no
+    container record anywhere. Returns `(folder, episode id)`."""
+    from defender.tests import _triplet_947 as T
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    episode_id = S.new_id()
+    ep = S.make_episode(P.data_root(), tenant_id, episode_id, labels=T.WORLDS, roster=True)
+    T.write_family(ep, T.family_doc(episode_id=episode_id, source_run_id=S.new_id()))
+    return ep, episode_id
+
+
+def _tenant_episode_names(tenant_id: str) -> set[str]:
+    """The entries of `<data root>/<tenant_id>/episodes/` (#1187: the only place an episode is
+    created, declared changes 3 and 5)."""
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    root = S.episodes_dir(P.data_root(), tenant_id)
+    return {p.name for p in root.iterdir()} if root.is_dir() else set()
+
+
+def _roster_by_hand(ep: Path) -> dict[str, str]:
+    """What #1187's `start_runs` leaves (R2): the arm roster `arms.json` naming every manifest
+    world with a fresh UUID, and each arm the fixture already holds at `runs/<episode>-<label>/`
+    (with its sidecar) moved to `runs/<roster id>/`. Returns the roster. An episode the shared
+    fixture already built as RUNS leaves it (its roster written, its arms at their ids) is
+    returned as it is."""
+    from defender import _yaml
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    if (ep / P.T.ROSTER_NAME).is_file():
+        return S.read_roster(ep)
+    doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
+    roster = {w["world_id"]: S.new_id() for w in doc["worlds"]}
+    runs = ep / "runs"
+    runs.mkdir(exist_ok=True)
+    for label, arm_id in roster.items():
+        composed = runs / f"{P.EPISODE_ID}-{label}"
+        if composed.is_dir():
+            composed.rename(runs / arm_id)
+        for sidecar in runs.glob(f"{P.EPISODE_ID}-{label}.*"):
+            sidecar.rename(runs / f"{arm_id}{sidecar.name[len(composed.name):]}")
+    S.write_roster(ep, roster)
+    return roster
 
 
 # ==========================================================================================
@@ -211,21 +270,32 @@ def test_dc1_the_launcher_takes_a_tenant_and_a_source_run_id_only(tmp_path):
     (the episode is made and its siblings start). The tenant comes from the request (S2): the
     same id under another real tenant that has no such run is refused before the questioner.
     And the edge takes ids only (O1(d)): the source's PATH where its id belongs is refused before
-    the questioner, with no episode. RED at base: the launcher does not know `--tenant`."""
+    the questioner, with no episode. RED at base: the launcher does not know `--tenant`.
+
+    #1187 declared changes 3 and 5 (O9): the episode the launch makes is one fresh
+    canonical-UUID folder under `<T>/episodes/` — not `<source id>-n<message>` under
+    `DEFENDER_EPISODES_BASE` — and neither refusal makes one there (nor anywhere). (Name kept.)"""
+    from defender.tests.ids_1187 import _spec1187 as S
+
     est, src = P.launch_source(tmp_path)
     P.second_tenant(P.data_root(), "beta")
 
     ok = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name))
     assert _launched(ok), f"--tenant T <run id> did not launch: rc={ok.rc} {ok.message!r}"
-    assert (_episodes() / P.EPISODE_ID / "family.yaml").is_file()
+    made = sorted(_tenant_episode_names(P.LAUNCH_TENANT))
+    assert len(made) == 1, f"the launch made {made} under <T>/episodes"
+    assert S.is_canonical_uuid(made[0]), f"the episode is named {made[0]!r}, not a uuid"
+    assert (S.episodes_dir(P.data_root(), P.LAUNCH_TENANT) / made[0] / "family.yaml").is_file()
     assert ok.spawn.worlds, "no sibling was started"
 
-    before = _episode_names()
+    before = (_episode_names(), _tenant_episode_names(P.LAUNCH_TENANT),
+              _tenant_episode_names("beta"))
     other = P.drive_launch(est, P.new_launch_argv("beta", src.name))
     assert _refused_unspent(other), "another tenant's request reached T's run"
     as_path = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, str(src)))
     assert _refused_unspent(as_path), "the launcher took a path where it takes a run id"
-    assert _episode_names() == before
+    assert (_episode_names(), _tenant_episode_names(P.LAUNCH_TENANT),
+            _tenant_episode_names("beta")) == before
 
 
 def test_dc1_a_source_under_a_linked_runs_folder_is_refused(tmp_path):
@@ -318,7 +388,7 @@ def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog):
     assert got.judge.prompts, (
         f"the judge was never asked — a world label equal to a natural run id under <T>/runs "
         f"refused the grade: {judge_failures}")
-    ep = _episodes() / P.EPISODE_ID
+    ep = _the_launched_episode()
     graded = J.world_rows(J.judge_record(ep))
     assert {"b", "c"} <= set(graded), f"the episode's worlds were not graded: {sorted(graded)}"
     assert natural.is_dir()
@@ -346,83 +416,89 @@ def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog):
 
 def test_dc4_the_episode_page_takes_a_tenant_and_an_episode_id(tmp_path, d9_tenant, monkeypatch):
     """Declared change 4 / J8: `visualize_episode.py --tenant T <episode_id>` renders the
-    episode under the configured episodes base (positive). Through the episode owner, it needs
-    `DEFENDER_EPISODES_BASE` (refused without it, naming it), and an episode outside the
-    configured base can no longer be rendered (G15, wider). RED at base: the CLI takes one
-    folder path ("usage")."""
-    ep = _sample(tmp_path, d9_tenant)
-    ok = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, ep.dir.name))
+    episode (positive). RED at base: the CLI takes one folder path ("usage").
+
+    #1187 declared change 5 (O9): the episode is `<T>/episodes/<uuid>/` and the page reads no
+    `DEFENDER_EPISODES_BASE`. With the variable set (the suite's roots), unset, or naming
+    another folder that holds a decoy copy at the same id, the page renders the tenant's own
+    episode, and never writes into the decoy. An episode that exists only under the variable's
+    folder is not the tenant's: refused, nothing written there. (Name kept.)"""
+    import shutil
+
+    from defender.tests import _triplet_947 as T
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    ep, episode_id = _tenant_episode(d9_tenant)
+    page = ep / E.PAGE_NAME
+    # The variable set, to a folder that is not the tenant's (the suite's roots set none, O9).
+    monkeypatch.setenv(P.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    ok = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))
     assert ok.rc == 0, f"--tenant T <episode id> did not render: {ok.said}"
-    assert ep.page.is_file()
+    assert page.is_file()
 
-    ep.page.unlink()
-    monkeypatch.delenv(P.EPISODES_BASE_ENV)
-    unset = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, ep.dir.name))
-    assert unset.rc not in (0, None) or unset.raised is not None
-    assert P.EPISODES_BASE_ENV in unset.said
-    assert not ep.page.exists()
+    page.unlink()
+    monkeypatch.delenv(P.EPISODES_BASE_ENV, raising=False)
+    unset = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))
+    assert unset.rc == 0, f"the page needed the retired variable: {unset.said}"
+    assert page.is_file()
 
-    monkeypatch.setenv(P.EPISODES_BASE_ENV, str(tmp_path / "another-root"))
-    elsewhere = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, ep.dir.name))
-    assert elsewhere.rc not in (0, None) or elsewhere.raised is not None
-    assert not ep.page.exists(), "an episode outside the configured base was rendered"
+    page.unlink()
+    elsewhere = tmp_path / "another-root"
+    shutil.copytree(ep, elsewhere / episode_id)
+    monkeypatch.setenv(P.EPISODES_BASE_ENV, str(elsewhere))
+    decoyed = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))
+    assert decoyed.rc == 0, decoyed.said
+    assert page.is_file(), "the tenant's own episode was not the one rendered"
+    assert not (elsewhere / episode_id / E.PAGE_NAME).exists(), "the page wrote into the decoy"
 
-
-def test_dc4_a_container_with_no_record_refuses_the_page(tmp_path, d9_tenant):
-    """Declared change 4 / N-c″ (owner ruling, old episodes not supported): a present `runs/`
-    with no `_tenant.json` — an episode launched before #1078 (R51-22) — refuses the page: a
-    non-zero exit and no `learning.html`. The positive control is the same episode once its
-    container record names T: the page renders. RED at base: the page reads `runs/` whatever
-    its record and renders."""
-    ep = _sample(tmp_path, None)
-    assert not (ep.dir / "runs" / "_tenant.json").exists()
-
-    refused = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
-    assert refused.rc not in (0, None) or refused.raised is not None, (
-        "an episode whose container holds no record was rendered")
-    assert not ep.page.exists()
-
-    P.plant_record(ep.dir / "runs", d9_tenant)
-    ok = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
-    assert ok.rc == 0, ok.said
-    assert ep.page.is_file(), ok.said
+    only_there = S.new_id()
+    shutil.copytree(ep, elsewhere / only_there)
+    T.write_family(elsewhere / only_there,
+                   T.family_doc(episode_id=only_there, source_run_id=S.new_id()))
+    stray = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, only_there))
+    assert stray.rc not in (0, None) or stray.raised is not None, (
+        "an episode outside <T>/episodes was rendered")
+    assert not (elsewhere / only_there / E.PAGE_NAME).exists()
 
 
 def test_dc4_the_page_judges_the_container_record_first(tmp_path, d9_tenant):
-    """Declared change 4 / G20 / S1: the page opens `runs.episode(ep)` before `_load_episode`
-    reads anything. With the container record naming ANOTHER real tenant the page is refused,
-    no `learning.html` written; and with the manifest also corrupt, the refusal is the record's
-    (it names `_tenant.json` or the other tenant), not the manifest's. Positive controls on the
-    same episode: the record naming T with the corrupt manifest refuses for the manifest (no
-    `_tenant.json` in the refusal), and with the manifest restored the page renders. RED at
-    base: the page checks no tenant, and reads the manifest first."""
-    ep = _sample(tmp_path, d9_tenant)
-    P.second_tenant(P.data_root(), "beta")
-    record = ep.dir / "runs" / "_tenant.json"
-    own = record.read_bytes()
-    record.unlink()
-    P.plant_record(ep.dir / "runs", "beta")
-    good_manifest = (ep.dir / "family.yaml").read_bytes()
+    """Declared change 4 / G20 / S1: the page opens the episode view before `_load_episode`
+    reads anything. RED at base: the page checks no tenant, and reads the manifest first.
 
-    foreign = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+    #1187 declared changes 6 and 8 (R1, O8): no container record is judged — the episode's
+    tenant is where it lives. Tenant `beta`'s episode, asked for by T's id, is refused: T's
+    repository finds nothing under `<T>/episodes`, no `learning.html` is written, and nothing of
+    beta's episode changes — even with beta's manifest corrupt, the refusal is not the
+    manifest's (it never names `family.yaml`: nothing of beta's was read). Positive controls on
+    the same episode through the same channel: beta's own request over the corrupt manifest
+    refuses FOR the manifest (naming `family.yaml`), and with the manifest restored beta's page
+    renders. (Name kept.)"""
+    P.second_tenant(P.data_root(), "beta")
+    ep, episode_id = _tenant_episode("beta")
+    page = ep / E.PAGE_NAME
+    good_manifest = (ep / "family.yaml").read_bytes()
+    before = P.tree(ep)
+
+    foreign = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))
     assert foreign.rc not in (0, None) or foreign.raised is not None, (
         "another tenant's episode was rendered")
-    assert not ep.page.exists()
+    assert not page.exists()
+    assert P.tree(ep) == before, "T's request changed beta's episode"
 
-    _corrupt_manifest(ep.dir)
-    first = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+    _corrupt_manifest(ep)
+    first = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))
     assert first.rc not in (0, None) or first.raised is not None
-    assert "_tenant.json" in first.said or "beta" in first.said, (
-        f"the manifest was judged before the container record: {first.said!r}")
+    assert "family.yaml" not in first.said, (
+        f"T's request read beta's manifest before refusing: {first.said!r}")
 
-    record.write_bytes(own)
-    manifest_first = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
-    assert manifest_first.rc not in (0, None) or manifest_first.raised is not None
-    assert "_tenant.json" not in manifest_first.said
-    (ep.dir / "family.yaml").write_bytes(good_manifest)
-    ok = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+    own_corrupt = P.drive_cli(P.page_main(), P.new_page_argv("beta", episode_id))
+    assert own_corrupt.rc not in (0, None) or own_corrupt.raised is not None
+    assert "family.yaml" in own_corrupt.said, (
+        f"control: beta's own request did not reach its manifest: {own_corrupt.said!r}")
+    (ep / "family.yaml").write_bytes(good_manifest)
+    ok = P.drive_cli(P.page_main(), P.new_page_argv("beta", episode_id))
     assert ok.rc == 0, ok.said
-    assert ep.page.is_file(), ok.said
+    assert page.is_file(), ok.said
 
 
 def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_tenant):
@@ -437,9 +513,26 @@ def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_ten
     runnable manifest label has its world section and its arm's run-page link. Neither stray
     has a section, a link or its name on the page, no line reads "not declared in the
     manifest", and both are left on disk. RED at base: `_build_roster` sections every `runs/`
-    directory — `world-stray_run_dir` ("not declared in the manifest") and `world-orphan`."""
+    directory — `world-stray_run_dir` ("not declared in the manifest") and `world-orphan`.
+
+    #1187 declared change 15: each arm's link is to the id the episode's arm roster
+    (`arms.json`) holds for its label, never the composed `runs/<episode>-<label>/`; a third
+    stray, a UUID-named folder no roster entry names, is not shown either. The test plants
+    what `start_runs` leaves (`_roster_by_hand`: the roster, each arm moved to its roster id),
+    then a DECOY complete arm at each composed `runs/<episode>-<label>/`, so a page that
+    composes links the decoy and fails. The episode is the shared fixture's, at
+    `<T>/episodes/<uuid>/` with no container record (`_sample`)."""
+    from defender.tests.ids_1187 import _spec1187 as S
+
     ep = _sample(tmp_path, d9_tenant)
-    strays = ("stray_run_dir", f"{P.EPISODE_ID}-orphan")
+    roster = _roster_by_hand(ep.dir)
+    for label in E.WORLDS:
+        E.run_dir(ep.dir, label)
+        decoy = ep.dir / "runs" / f"{P.EPISODE_ID}-{label}"
+        (decoy / "gather_raw").mkdir(parents=True, exist_ok=True)
+        (decoy / "runtime.html").write_text("<!doctype html><title>decoy</title>",
+                                            encoding="utf-8")
+    strays = ("stray_run_dir", f"{P.EPISODE_ID}-orphan", S.new_id())
     for name in strays:
         (ep.dir / "runs" / name / "gather_raw").mkdir(parents=True)
 
@@ -448,8 +541,10 @@ def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_ten
     page = E.read_page(ep)
     for label in E.WORLDS:
         assert f"world-{label}" in page.by_id, f"the manifest arm {label} has no section"
-        assert f"runs/{P.EPISODE_ID}-{label}/runtime.html" in page.hrefs, (
-            f"the manifest arm {label} has no run-page link: {page.hrefs}")
+        assert f"runs/{roster[label]}/runtime.html" in page.hrefs, (
+            f"the manifest arm {label} has no run-page link at its roster id: {page.hrefs}")
+        assert not any(f"runs/{P.EPISODE_ID}-{label}/" in href for href in page.hrefs), (
+            f"the manifest arm {label} is linked at its composed decoy: {page.hrefs}")
     shown = sorted(i for i in page.ids_with("world-")
                    if i not in {f"world-{label}" for label in E.WORLDS})
     assert shown == [], f"a stray runs/ entry was sectioned: {shown}"
@@ -466,15 +561,21 @@ def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_ten
 
 class _LinkingSibling(P.J.FakeSibling):
     """`FakeSibling` whose arm `b` is materialised OUTSIDE the container, with a link left at
-    its name: the one arm-entry shape a host (never a box: seccomp, B-03) can leave."""
+    its name: the one arm-entry shape a host (never a box: seccomp, B-03) can leave. #1187: the
+    arm's name is the id the episode's roster holds for `b`."""
 
-    def __init__(self, episode_dir: Path, *, outside: Path) -> None:
-        super().__init__(episode_dir)
+    def __init__(self, *, outside: Path) -> None:
+        super().__init__()
         self.outside = outside
 
     def __call__(self, argv, *, env=None, **kw):
         rc = super().__call__(argv, env=env, **kw)
-        arm = self.episode_dir / "runs" / f"{P.EPISODE_ID}-b"
+        if self.episode_dir is None:
+            return rc
+        arm_id = P.T.read_roster(self.episode_dir).get("b")
+        if arm_id is None:
+            return rc
+        arm = self.episode_dir / "runs" / arm_id
         if arm.is_dir() and not arm.is_symlink():
             target = self.outside / arm.name
             shutil.move(str(arm), str(target))
@@ -497,10 +598,13 @@ def test_dc5_an_arm_entry_that_is_a_link_is_never_archived(tmp_path, monkeypatch
     est, src = P.launch_source(tmp_path)
     outside = tmp_path / "outside-arms"
     outside.mkdir()
-    ep = _episodes() / P.EPISODE_ID
-    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src),
-                         spawn=_LinkingSibling(ep, outside=outside))
+    linking = _LinkingSibling(outside=outside)
+    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src), spawn=linking)
     assert got.questioner.calls > 0, f"the launch never ran: {got.message!r}"
+    ep = _the_launched_episode()
+    assert linking.faults == [], linking.faults
+    assert any(p.is_symlink() for p in (ep / "runs").iterdir()), (
+        "the double left no link at arm b's name: the scene this test is about was not built")
     archived = [p for p in (ep / "worlds").rglob("*") if p.is_file()] if (
         ep / "worlds").is_dir() else []
     leaked = [p for p in archived if b"OUTSIDE-THE-CONTAINER" in p.read_bytes()]
@@ -513,7 +617,7 @@ def test_dc5_an_arm_entry_that_is_a_link_is_never_archived(tmp_path, monkeypatch
     est2, src2 = P.launch_source(control_root)
     clean = P.drive_launch(est2, P.launch_argv(P.LAUNCH_TENANT, src2))
     assert _launched(clean), f"the control did not launch: {clean.message!r}"
-    assert (_episodes() / P.EPISODE_ID / "worlds" / "b" / "report.md").is_file()
+    assert (_the_launched_episode() / "worlds" / "b" / "report.md").is_file()
 
 
 # ==========================================================================================
@@ -525,10 +629,18 @@ def test_dc6_the_launcher_starts_siblings_by_tenant_episode_label(tmp_path):
     --world L` — the address's tenant and episode plus the label — with no `--resume` and no
     path anywhere after `run.py` (O1(c)). Asserted on the spawn seam's captured argv: one start
     per world label. RED at base: the argv is `--resume <episode>/family.yaml --world L
-    --tenant T`."""
+    --tenant T`.
+
+    #1187 declared changes 3 and 5: the `--episode` every sibling is handed is the episode the
+    launch claimed — one fresh canonical UUID, the name of the one folder the launch made under
+    `<T>/episodes/` — never the derived `<source id>-n<message>`. (Name kept.)"""
+    from defender.tests.ids_1187 import _spec1187 as S
+
     est, src = P.launch_source(tmp_path)
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
     assert _launched(got), f"the launch did not run: {got.message!r}"
+    made = sorted(_tenant_episode_names(P.LAUNCH_TENANT))
+    assert len(made) == 1, f"the launch made {made} under <T>/episodes"
     seen = []
     for launch in got.spawn.launches:
         argv = launch["argv"]
@@ -537,7 +649,8 @@ def test_dc6_the_launcher_starts_siblings_by_tenant_episode_label(tmp_path):
         assert not any("/" in tok for tok in tail), f"a sibling's argv carries a path: {tail}"
         flags = dict(zip(tail[::2], tail[1::2], strict=False))
         assert flags.get("--tenant") == P.LAUNCH_TENANT, tail
-        assert flags.get("--episode") == P.EPISODE_ID, tail
+        assert S.is_canonical_uuid(flags.get("--episode")), f"--episode is no uuid: {tail}"
+        assert flags.get("--episode") == made[0], f"--episode is not the claimed folder: {tail}"
         seen.append(flags.get("--world"))
     assert sorted(seen) == ["a", "b", "c"]
 
@@ -547,8 +660,13 @@ def test_dc6_run_py_refuses_resume_and_takes_the_episode_id(tmp_path):
     a usage error with nothing spent; `--episode` passes the owner's id grammar before anything
     opens (a separator, `..`: refused, nothing spent). The positive control is the declared
     argv for the same episode: the sibling runs its arm. RED at base: `--resume` is the
-    sibling's edge, and `--episode` is unknown."""
-    src, ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
+    sibling's edge, and `--episode` is unknown.
+
+    #1187 declared changes 2, 10 and 15 (R1, R2, O4b): the episode reached RUNS when its arm
+    roster names the label — no container record — and the arm is made at the roster's id for
+    `b`, never at `runs/<episode>-b`. (Name kept.)"""
+    src, ep = P.sibling_scene(tmp_path, roster=False)
+    roster = _start_runs_by_hand(ep)
     resume = ["--resume", str(ep / "family.yaml"), "--world", "b", "--tenant", P.SIBLING_TENANT]
     rec = P.SiblingRecorder()
     rc, refused, _err = P.drive_run_py(resume, rec)
@@ -566,80 +684,84 @@ def test_dc6_run_py_refuses_resume_and_takes_the_episode_id(tmp_path):
     rc, refused, err = P.drive_run_py(P.new_sibling_argv(P.SIBLING_TENANT, ep.name, "b"), ok)
     assert refused is None, f"the declared argv was refused: {P.refusal_text(refused)} {err}"
     assert rc == 0, f"the declared argv was refused: {P.refusal_text(refused)} {err}"
-    assert ok.run_dir == ep / "runs" / f"{P.EPISODE_ID}-b"
+    assert ok.run_dir == ep / "runs" / roster["b"], f"the arm is at {ok.run_dir}"
+
+
+def _start_runs_by_hand(ep: Path) -> dict[str, str]:
+    """What the launcher's `start_runs` leaves at the start of RUNS (#1187 R2): `runs/`, then
+    the arm roster naming every manifest world with a fresh UUID. Returns the roster."""
+    from defender import _yaml
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
+    roster = {w["world_id"]: S.new_id() for w in doc["worlds"]}
+    (ep / "runs").mkdir(exist_ok=True)
+    S.write_roster(ep, roster)
+    return roster
 
 
 def test_dc6_a_sibling_over_an_absent_container_is_refused(tmp_path):
-    """Declared change 6 / G5 / R51-02: an episode with no container yet (pre-RUNS) has no
-    record binding it to any tenant, so a sibling over it is refused — before the preflight
-    and the lifecycle — and NO container is made (today run setup would mint the requesting
-    tenant's record over it, whoever's episode it is). The positive control is the same
-    episode once the launcher's container (naming T) exists: the sibling runs, its arm inside.
-    RED at base: run setup creates the container for whoever asks."""
-    src, ep = P.sibling_scene(tmp_path, container=None)
+    """Declared change 6 / G5 / R51-02: an episode that never reached RUNS binds no arm, so a
+    sibling over it is refused — before the preflight and the lifecycle — and NO container is
+    made. RED at base: run setup creates the container for whoever asks.
+
+    #1187 declared change 10 (O4b): the proof that the episode reached RUNS is the host-written
+    arm roster, not a container record. The positive control is the same episode once RUNS has
+    started — `runs/` and a roster naming `b`, no `_tenant.json` anywhere: the sibling runs,
+    its arm at the roster's id inside the container."""
+    src, ep = P.sibling_scene(tmp_path, roster=False)
     assert not (ep / "runs").exists()
     rec = P.SiblingRecorder()
     rc, refused, _err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
-    assert refused is not None, "a sibling ran over an episode with no container"
+    assert refused is not None, "a sibling ran over an episode that never reached RUNS"
     assert rec.order == [], f"the sibling spent before refusing: {rec.order}"
     assert not (ep / "runs").exists(), "the refused sibling made the container"
 
-    P.plant_record(ep / "runs", P.SIBLING_TENANT)
+    roster = _start_runs_by_hand(ep)
     ok = P.SiblingRecorder()
     rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), ok)
     assert refused is None, f"the control was refused: {P.refusal_text(refused)} {err}"
     assert rc == 0, f"the control was refused: {P.refusal_text(refused)} {err}"
+    assert ok.run_dir == ep / "runs" / roster["b"], f"the arm is at {ok.run_dir}"
 
 
 def test_dc6_the_sibling_judges_the_container_before_the_manifest(tmp_path):
-    """Declared change 6 / G19 / S-c1 amended: the sibling's view judges the container record
-    right after acceptance, BEFORE the manifest. With the record naming another real tenant
-    and the manifest corrupt, the refusal is the record's (it names `_tenant.json` or the other
-    tenant). Positive controls on the same episode: the record naming T with the corrupt
-    manifest refuses for the manifest (no `_tenant.json` in it); the manifest restored, the
-    sibling runs. RED at base: the manifest is read (and refused) first."""
-    src, ep = P.sibling_scene(tmp_path, container="beta")
-    P.second_tenant(P.data_root(), "beta")
+    """Declared change 6 / G19 / S-c1 amended: the sibling's view is judged right after
+    acceptance, BEFORE the manifest. RED at base: the manifest is read (and refused) first.
+
+    #1187 declared change 10 (O4b): what is judged is the arm roster, not a container record.
+    The manifest carries a field the family loader refuses BY NAME, so the name reaches the
+    refusal if and only if the manifest was read. With no roster naming `b` (the roster names
+    only the other worlds), the refusal does not carry it. Positive controls on the same
+    episode: the roster naming `b`, the poisoned manifest refuses for that field; the manifest
+    restored, the sibling runs."""
+    from defender import _yaml
+    from defender.tests.ids_1187 import _spec1187 as S
+
+    poison = "zz_dc6_never_read_before_the_roster"
+    src, ep = P.sibling_scene(tmp_path, roster=False)
     good = (ep / "family.yaml").read_bytes()
-    _corrupt_manifest(ep)
+    roster = _start_runs_by_hand(ep)
+    S.write_roster(ep, {k: v for k, v in roster.items() if k != "b"})
+    doc = _yaml.safe_load(good.decode("utf-8"))
+    (ep / "family.yaml").write_text(_yaml.safe_dump({**doc, poison: "read"}), encoding="utf-8")
 
     rec = P.SiblingRecorder()
     _rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
     said = f"{P.refusal_text(refused)}\n{err}"
     assert refused is not None
     assert rec.order == []
-    assert "_tenant.json" in said or "beta" in said, (
-        f"the manifest was read before the container record: {said!r}")
+    assert poison not in said, f"the manifest was read before the roster: {said!r}"
 
-    shutil.rmtree(ep / "runs")
-    P.plant_record(ep / "runs", P.SIBLING_TENANT)
+    S.write_roster(ep, roster)
     mrec = P.SiblingRecorder()
     _rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), mrec)
     assert refused is not None
-    assert "_tenant.json" not in f"{P.refusal_text(refused)}\n{err}"
+    assert poison in f"{P.refusal_text(refused)}\n{err}", (
+        "past the roster, the manifest's refusal should name the poisoned field")
+    assert mrec.order == []
 
     (ep / "family.yaml").write_bytes(good)
-    ok = P.SiblingRecorder()
-    rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), ok)
-    assert refused is None, f"the control was refused: {P.refusal_text(refused)} {err}"
-    assert rc == 0, f"the control was refused: {P.refusal_text(refused)} {err}"
-
-
-def test_dc6_a_sibling_needs_the_episodes_base(tmp_path, monkeypatch):
-    """Declared change 6: the sibling opens its episode through the episode owner, so it needs
-    `DEFENDER_EPISODES_BASE`; a hand resume without it is refused naming the setting, with
-    nothing spent. (The launcher's spawn passes its own environment, C-18.) The positive
-    control sets it: the sibling runs. RED at base: `--resume` opens the manifest's path and
-    never reads the setting."""
-    src, ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
-    monkeypatch.delenv(P.EPISODES_BASE_ENV)
-    rec = P.SiblingRecorder()
-    _rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
-    assert refused is not None, "a sibling ran with no episodes base"
-    assert rec.order == [], "a sibling ran with no episodes base"
-    assert P.EPISODES_BASE_ENV in f"{P.refusal_text(refused)}\n{err}"
-
-    monkeypatch.setenv(P.EPISODES_BASE_ENV, str(ep.parent))
     ok = P.SiblingRecorder()
     rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), ok)
     assert refused is None, f"the control was refused: {P.refusal_text(refused)} {err}"
@@ -663,9 +785,10 @@ def _run_page_child(argv: list[str]) -> subprocess.CompletedProcess:
 def test_dc7_the_run_page_takes_a_tenant_and_a_run_id(tmp_path):
     """Declared change 7 / J8: `visualize_run.py --tenant T <run_id>` renders T's run, and
     every log line names the REQUEST's tenant — not the one the run's box-writable stamp names
-    (here rewritten to another tenant). With `--episode ep`, the arm `<ep>-<label>` renders
-    from its episode's container. RED at base: the CLI takes a folder path ("usage")."""
-    src, ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
+    (here rewritten to another tenant). With `--episode ep`, the arm renders from its episode's
+    container (#1187: the arm is named by the id the episode's roster holds for its label, not
+    `<ep>-<label>`). RED at base: the CLI takes a folder path ("usage")."""
+    src, ep = P.sibling_scene(tmp_path)
     stamp = src / "provenance.json"
     doc = json.loads(stamp.read_text(encoding="utf-8"))
     stamp.write_text(json.dumps({**doc, "tenant_id": "beta"}), encoding="utf-8")
@@ -699,8 +822,10 @@ def test_dc7_the_run_page_refuses_a_linked_run_folder(tmp_path):
     folder elsewhere. The run page opens through `runs.open`, which never follows it: a
     non-zero exit and nothing written into the target. The positive control renders the real
     folder. RED at base: `Run.at` follows the link and writes `runtime.html` into its target."""
-    src, _ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
-    target = tmp_path / "elsewhere" / "20260101t000000z-linked"
+    src, _ep = P.sibling_scene(tmp_path)
+    # #1187 declared change 1: the link's name is a uuid, so the id rule admits it and the
+    # refusal is the link's (O8), never the id grammar's.
+    target = tmp_path / "elsewhere" / fixture_uuid("dc7-linked")
     shutil.copytree(src, target)
     link = src.parent / target.name
     os.symlink(target, link)
@@ -879,7 +1004,7 @@ def test_dc9_the_launchers_manifest_names_its_source_by_id_only(tmp_path):
     assert _launched(got), f"the launch did not run: {got.message!r}"
     from defender import _yaml
 
-    doc = _yaml.safe_load((_episodes() / P.EPISODE_ID / "family.yaml").read_text(encoding="utf-8"))
+    doc = _yaml.safe_load((_the_launched_episode() / "family.yaml").read_text(encoding="utf-8"))
     assert doc.get("source_run_id") == src.name
     assert "source_run_dir" not in doc, f"the manifest still names a path: {doc.get('source_run_dir')!r}"
     assert str(src) not in json.dumps(doc, default=str)
@@ -891,7 +1016,7 @@ def test_dc9_a_manifest_without_source_run_dir_resumes(tmp_path):
     RED at base: the manifest is refused ("source_run_dir must be a non-empty string")."""
     doc = P.T.family_doc(source_run_id=P.SOURCE_RUN_ID)
     doc.pop("source_run_dir")
-    src, ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT, doc=doc)
+    src, ep = P.sibling_scene(tmp_path, doc=doc)
     rec = P.SiblingRecorder()
     rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
     assert refused is None, f"refused: {P.refusal_text(refused)} {err}"
@@ -907,15 +1032,15 @@ def test_dc9_an_old_manifests_source_run_dir_is_never_read(tmp_path):
     the `source_run_id` run's. RED at base: the sibling reads its source alert from
     `source_run_dir` (the decoy's alert; then refused for the missing path)."""
     base, src = P.T.runs_base(tmp_path, source_run_id=P.SOURCE_RUN_ID)
-    decoy = base / "20260101t000000z-decoy"
+    decoy = base / fixture_uuid("dc9-decoy")  # #1187 dc1: a run id is a uuid
     shutil.copytree(src, decoy)
     (decoy / "alert.json").write_text('{"rule": {"id": "the-decoy-alert"}}\n', encoding="utf-8")
 
     for i, named in enumerate((str(decoy), str(tmp_path / "no-such-run"))):
         sub = tmp_path / f"scene{i}"
         sub.mkdir()
-        episode_id = f"{P.EPISODE_ID}-r{i + 2}"
-        _s, ep = P.sibling_scene(sub, container=P.SIBLING_TENANT, episode_id=episode_id,
+        episode_id = fixture_uuid(f"dc9-scene-{i}")  # #1187 dc3: an episode id is a uuid
+        _s, ep = P.sibling_scene(sub, episode_id=episode_id,
                                  doc=P.family_doc(src, source_run_dir=named,
                                                   episode_id=episode_id))
         rec = P.SiblingRecorder()
@@ -954,7 +1079,8 @@ def _workspace_map_main():
     return workspace_map.main
 
 
-ABSENT_ID = "20990101t000000z-pr2-absent"
+#: #1187 declared change 1: a uuid no run holds, so only `--tenant`'s absence is refused.
+ABSENT_ID = fixture_uuid("pr2-absent")
 
 #: Each migrated CLI with an otherwise-complete id-taking argv, minus `--tenant`.
 _J8_CASES = {
@@ -994,14 +1120,20 @@ def test_dc10_the_tracer_walks_the_tenants_runs_and_refuses_a_stray(tmp_path, d9
     folder (`<T>/runs`, no longer the dead `<state root>/runs` default): a run there that
     loaded lesson L counts. `--runs-dir` is gone (a usage error). The tracer applies the
     repository's listing rule (rev 4.1 H4): a stray file in `<T>/runs` fails it loudly, naming
-    the stray. RED at base: the tracer does not know `--tenant`."""
+    the stray. RED at base: the tracer does not know `--tenant`.
+
+    #1187 declared changes 1, 6 and 7: the run the tracer counts is UUID-named in a container
+    holding no `_tenant.json` (an old run folder, or the record, would itself stop the tracer,
+    naming the one-time command). (Name kept.)"""
+    import uuid
+
     from defender.learning.ops import trace_lesson
 
     lessons = tmp_path / "lessons"
     _lesson(lessons, "L")
     runs = P.data_root() / d9_tenant / "runs"
-    P.plant_record(runs, d9_tenant)
-    run = runs / "20260605t000000z-case-a"
+    runs.mkdir(parents=True, exist_ok=True)
+    run = runs / str(uuid.uuid4())
     run.mkdir()
     from defender.tests._alert_plant import plant_alert
     plant_alert(run)
@@ -1035,14 +1167,18 @@ def test_dc10_workspace_map_takes_a_tenant_and_a_run_id(tmp_path, d9_tenant):
     """Declared change 10 / J8: `workspace_map.py --tenant T <run_id>` prints the map of T's run
     — the same text the library call (`workspace_map(run.run_dir, …)`, which the running
     investigation keeps, N-a) gives for that folder — and refuses a path where the id belongs.
-    RED at base: the CLI takes a folder path ("usage")."""
+    RED at base: the CLI takes a folder path ("usage").
+
+    #1187 declared changes 1 and 6: the run id is a UUID (an old id is refused by every
+    `--tenant T <id>` command line) and T's container holds no `_tenant.json`. (Name kept.)"""
+    import uuid
+
     from defender._paths import adapters_under
     from defender.runtime.verbs import read_roster
     from defender.scripts import workspace_map as wm
 
     runs = P.data_root() / d9_tenant / "runs"
-    P.plant_record(runs, d9_tenant)
-    run = H.make_run(runs, "20260605t000000z-case-a")
+    run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
 
     ok = P.drive_cli(wm.main, ["workspace_map.py", "--tenant", d9_tenant, run.name])

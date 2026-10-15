@@ -26,11 +26,19 @@ _FORGED = "x\nFORGED LINE: all good"
 
 
 def test_the_repository_reads_and_writes_episode_records_without_the_model_stack(tmp_path):
-    """With `pydantic_ai` unimportable, the record writer and every record reader answer over a
-    runs folder holding a record (the review: they raised ModuleNotFoundError on first read)."""
+    """With `pydantic_ai` unimportable, the repository answers over a tenant's runs folder (the
+    review: its readers raised ModuleNotFoundError on first read).
+
+    #1187 declared change 13 (R6, D-del): PR 1's `_episodes` record and its writer and readers
+    (`record_episode_runs`, `episode_runs`, `sibling_run_ids`) are deleted — there is no record
+    to write or read. The guard kept is the import weight: the repository lists a container
+    holding one UUID run and no `_tenant.json` (declared change 6) in a process without the
+    model stack. (Name kept.)"""
+    import uuid
+
     t = H.tenant(tmp_path / "data")
-    H.runs_folder(t)
-    H.make_run(t.runs, "r0")
+    run_id = str(uuid.uuid4())
+    H.make_run(t.runs, run_id)
     probe = textwrap.dedent(f'''
         import sys
         class _Block:
@@ -42,10 +50,8 @@ def test_the_repository_reads_and_writes_episode_records_without_the_model_stack
         from defender import run_repository as R
         t = _tenant.accept_tenant({str(tmp_path / "data")!r}, {t.id!r},
                                   defender_dir={str(H.DEFENDER)!r})
-        R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {{"a": R.RunId.parse("ep-a")}})
-        assert R.episode_runs(t, "ep") == {{"a": R.RunId.parse("ep-a")}}
-        assert R.sibling_run_ids(t) == {{R.RunId.parse("ep-a")}}
-        assert [str(i) for i in t.runs_repository().list()] == ["r0"]
+        assert str(R.RunId.parse({run_id!r})) == {run_id!r}
+        assert [str(i) for i in t.runs_repository().list()] == [{run_id!r}]
         assert "pydantic_ai" not in sys.modules and "defender.runtime.branch" not in sys.modules
         print("ok")
     ''')
@@ -125,81 +131,24 @@ def test_a_huge_read_bound_allocates_nothing_up_front(tmp_path):
         assert bound.read("f.json", max_bytes=10 ** 15).text == "{}"
 
 
-def test_a_record_over_the_cap_cut_mid_character_is_refused_as_over(tmp_path):
-    """The cap is judged on the file's size, not on what a prefix decodes to: a record one byte
-    over the cap whose last character is multibyte says it is over, not that it is unreadable."""
-    t = H.tenant(tmp_path / "data")
-    runs = H.runs_folder(t)
-    body = H.record_text("ep", t.id, "r0", {"a": "ep-a"})
-    pad = H.RECORD_CAP - 1 - len(body.encode("utf-8"))
-    raw = (body + " " * pad + "é").encode("utf-8")  # the cap's last byte starts the "é"
-    assert len(raw) == H.RECORD_CAP + 1
-    H.plant_record(runs, "ep", t.id, "r0", {}, raw=raw)
-    with pytest.raises(R.RunRefused) as refused:
-        R.episode_runs(t, "ep")
-    assert f"over {H.RECORD_CAP} bytes" in str(refused.value), str(refused.value)
-
-
-def test_another_tenants_record_is_a_record_mismatch_everywhere(tmp_path):
-    """`_tenant.json` naming another tenant is `TenantRecordMismatch` — what `Run.for_tenant`
-    raises — from the lookups and the listings alike, not a bare `TenantRefused`. An open
-    answers it as `RunUnreachable` raised from that `TenantRecordMismatch` (#1105 PR 2 review:
-    an open answers one refusal family)."""
-    from defender._tenant import TenantRecordMismatch
-    t = H.tenant(tmp_path / "data")
-    runs = H.runs_folder(t)
-    H.make_run(runs, "r0")
-    H.plant_tenant_record(runs, H.U_ID)
-    for call in (lambda: t.runs_repository().list(),
-                 lambda: R.sibling_run_ids(t)):
-        with pytest.raises(TenantRecordMismatch):
-            call()
-    with pytest.raises(R.RunUnreachable) as opened:
-        t.runs_repository().open(R.RunId.parse("r0"))
-    assert isinstance(opened.value.__cause__, TenantRecordMismatch), repr(opened.value.__cause__)
-
-
 def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
-    """The absent folder's refusal is raised outside the hold's `except`, so it carries no
-    `FileNotFoundError` as its context (a traceback that blamed the wrong error) — the
-    container's `TenantRefused` (here from `base_world_id`), and an open's `RunAbsent` (#1105
-    PR 2 review: an open answers an absent container as the run gone) alike."""
-    from defender._tenant import TenantRefused
+    """An open's `RunAbsent` over an absent runs folder (#1105 PR 2 review: an open answers an
+    absent container as the run gone) is raised outside the hold's `except`, so it carries no
+    `FileNotFoundError` as its context (a traceback that blamed the wrong error). Positive
+    control: once the folder and the run exist, the same open hands the run out.
+
+    #1187 declared changes 1 and 11 (R1b): the container half's vehicle, `runs.base_world_id()`,
+    is deleted with `base_world_id`, so the open is the absent folder's refusal left to pin; the
+    id is a UUID and the folder holds no `_tenant.json`. (Name kept.)"""
+    import uuid
+
     t = H.tenant(tmp_path / "data")
-    with pytest.raises(TenantRefused) as refused:
-        t.runs_repository().base_world_id()
-    assert refused.value.__context__ is None, repr(refused.value.__context__)
+    run_id = str(uuid.uuid4())
     with pytest.raises(R.RunAbsent) as absent:
-        t.runs_repository().open(R.RunId.parse("r0"))
+        t.runs_repository().open(R.RunId.parse(run_id))
     assert absent.value.__context__ is None, repr(absent.value.__context__)
-
-
-@pytest.mark.parametrize(("label", "reason"), [
-    ("base", "reserved name"), ("family_3", "family_<n>"), ("Upper", "upper case"),
-    ("a-b", "carries '-'"), ("a b", "cannot hold")])
-def test_a_refused_label_says_which_rule_it_broke(tmp_path, label, reason):
-    t = H.tenant(tmp_path / "data")
-    runs = H.runs_folder(t)
-    H.make_run(runs, "r0")
-    with pytest.raises(R.RunRefused) as refused:
-        R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {label: R.RunId.parse("ep-a")})
-    assert reason in str(refused.value), str(refused.value)
-
-
-def test_the_writer_names_a_record_that_vanished_or_cannot_be_read():
-    """The writer lost the create race and then judges the record that won: gone again, or
-    unreadable, each refuses saying so (not as 'different content')."""
-    from pathlib import Path
-
-    from defender.run_repository import _record
-    path = Path("/runs/_episodes/ep.json")
-    gone = _io.RecordRead(name="ep.json", text=None, absent=True, reason=None)
-    with pytest.raises(R.RunRefused, match="gone again"):
-        _record._judge_existing(gone, "{}", path=path, episode_id="ep")
-    bad = _io.RecordRead(name="ep.json", text=None, absent=False, reason="not utf-8",
-                         refused_by=_io.REFUSED_UNDECODABLE)
-    with pytest.raises(R.RunRefused, match="cannot be read"):
-        _record._judge_existing(bad, "{}", path=path, episode_id="ep")
+    H.make_run(t.runs, run_id)
+    assert t.runs_repository().open(R.RunId.parse(run_id)).run_dir == t.runs / run_id
 
 
 # -- the third review's findings ----------------------------------------------------------------
@@ -224,47 +173,6 @@ def _family_doc(episode_id: str, label: str) -> dict:
             "branch_message_id": 1, "fences_at": 1, "as_of": "2026-07-28T16:18:45Z",
             "continuation_prompt": "go", "base_story": "b", "served_systems": ["elastic"],
             "discriminator": {"predicate": "p"}, "worlds": [world]}
-
-
-def test_a_sibling_id_over_the_bound_is_refused_before_anything_is_staged():
-    """The family gate judges `<episode_id>-<label>` by the whole run-id rule, its 206-byte
-    bound included, so an over-long sibling is refused with the manifest, not by each child
-    after authoring. The episode id itself must leave room for a sibling."""
-    from defender.runtime.branch import _family
-    episode = "e" * 190
-    with pytest.raises(_family.FamilyError, match="206-byte bound"):
-        _family.check_identities(_family.parse_family(_family_doc(episode, "a" * 20)))
-    _family.check_identities(_family.parse_family(_family_doc(episode, "a" * 15)))
-    with pytest.raises(_family.FamilyError, match="no room"):
-        _family.refuse_bad_episode_id("e" * 205)
-
-
-class _HoldCount:
-    def __init__(self):
-        self.holds = 0
-
-    def __call__(self, frame, event, _arg):
-        if event == "call" and frame.f_code.co_name == "hold" and (
-                frame.f_globals.get("__name__") == "defender._io"):
-            self.holds += 1
-
-
-def test_run_setup_holds_the_runs_folder_once(tmp_path):
-    """The folder-state check and the claimed-id read share one no-follow hold."""
-    from defender import run_common
-    t = H.tenant(tmp_path / "data")
-    H.runs_folder(t)
-    alert = tmp_path / "a" / "alert.json"
-    alert.parent.mkdir()
-    alert.write_text('{"alert": 1}', encoding="utf-8")
-    seen = _HoldCount()
-    previous = sys.getprofile()
-    sys.setprofile(seen)
-    try:
-        run_common.materialize_run(alert, "pinned-1", tenant=t)
-    finally:
-        sys.setprofile(previous)
-    assert seen.holds == 1, f"run setup held the runs folder {seen.holds} times"
 
 
 def test_a_runs_folder_that_cannot_be_opened_is_not_called_a_link(tmp_path):
@@ -299,11 +207,22 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
 
 def test_the_run_name_rule_is_one_answer_for_every_caller():
     """`run_name_fault` is the run-id rule plus the sidecar clause, and the sidecar clause is
-    no `RunPaths` method (the records lint needs no carve-out)."""
-    assert R.run_name_fault("r1") is None
-    assert "sidecar" in R.run_name_fault("r1.run-end.json")
-    assert "sidecar" in R.run_name_fault("r1.run-end.json.staged-0a")
-    assert "206-byte" in R.run_name_fault("r" * 207)
+    no `RunPaths` method (the records lint needs no carve-out).
+
+    #1187 declared change 1: the run-id rule is canonical lowercase UUID text, so a UUID is a
+    run name and an old id (`r1`) is not; a UUID plus a sidecar suffix, staged or not, is still
+    no run name (which clause speaks is not pinned: it fails both). The 206-byte bound is gone,
+    so an over-long id is refused for its shape, never for a byte count."""
+    import uuid
+
+    run_id = str(uuid.uuid4())
+    assert R.run_name_fault(run_id) is None
+    assert R.run_name_fault("r1"), "an old run id is still a run name"
+    assert R.run_name_fault(f"{run_id}.run-end.json")
+    assert R.run_name_fault(f"{run_id}.run-end.json.staged-0a")
+    too_long = R.run_name_fault("r" * 207)
+    assert too_long, "a 207-byte name is a run name"
+    assert "206" not in too_long, f"the run-id rule still counts bytes: {too_long!r}"
     assert not hasattr(R.RunPaths, "sidecar_owner")
 
 
@@ -315,18 +234,6 @@ def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
     with pytest.raises(_family.FamilyError, match="world-token alphabet"):
         _family.check_identities(_family.parse_family(
             _family_doc("ep", "x.accounting_failures.json")))  # lint-stale-ref: ok — the reserved sidecar suffix, not the removed `RunPaths.accounting_failures()`
-
-
-def test_the_writer_refuses_an_arm_id_its_sidecar_files_hold(tmp_path):
-    """An id that owns sidecar files but has no run folder is taken: the writer refuses it as
-    an arm. (`runs.exists`, PR 1's `run_exists`, which agreed, is deleted — no production
-    caller, #1105 PR 2 review.)"""
-    t = H.tenant(tmp_path / "data")
-    runs = H.runs_folder(t)
-    H.make_run(runs, "r0")
-    (runs / "ep-a.run-end.json").write_text("{}", encoding="utf-8")
-    with pytest.raises(R.RunRefused, match="taken"):
-        R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a": R.RunId.parse("ep-a")})
 
 
 def test_a_long_printable_path_keeps_its_file_name_when_cut():
@@ -345,24 +252,29 @@ def test_a_long_printable_path_keeps_its_file_name_when_cut():
 
 
 def test_a_tenant_refusal_escapes_its_own_message(tmp_path):
-    """`TenantRefused` escapes what it is built with, so the run handle's tenant check, which
-    raises it directly, stays one line under a runs folder whose path carries a newline."""
+    """`TenantRefused` escapes what it is built with, so a repository refusal that quotes a path
+    stays one line under a data root whose path carries a newline. Positive control: the
+    refusal still shows the path's characters, escaped.
+
+    #1187 declared changes 6 and 8 (R1, S-iso): `Run.for_tenant`, the run handle's tenant
+    check that raised it directly over a pre-#1187 id, goes with the tenant record; the
+    refusal pinned is the repository's at a link at `tenant.runs` (`TenantRefused` or
+    `RunRefused`, naming the level), for `runs.list` and `runs.open` of a UUID. (Name kept.)"""
+    import uuid
+
     from defender._tenant import TenantRefused
     assert "\n" not in str(TenantRefused("a\nb\x1b[2J"))
-    runs = tmp_path / _FORGED / "runs"
-    runs.mkdir(parents=True)
-    with pytest.raises(TenantRefused) as refused:
-        R.Run.for_tenant(H.T_ID, R.RunId.parse("r1"), runs_base=runs)
-    assert "\n" not in str(refused.value), str(refused.value)
-
-
-def test_a_huge_label_is_refused_in_a_bounded_message(tmp_path):
-    t = H.tenant(tmp_path / "data")
-    runs = H.runs_folder(t)
-    H.make_run(runs, "r0")
-    with pytest.raises(R.RunRefused) as refused:
-        R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a b" * 20000: R.RunId.parse("ep-a")})
-    assert len(str(refused.value)) < 2000, len(str(refused.value))
+    root = tmp_path / _FORGED / "data"
+    root.mkdir(parents=True)
+    t = H.tenant(root)
+    os.symlink(tmp_path, t.runs)
+    run_id = R.RunId.parse(str(uuid.uuid4()))
+    for what, call in (("runs.list", lambda: t.runs_repository().list()),
+                       ("runs.open", lambda: t.runs_repository().open(run_id))):
+        with pytest.raises((TenantRefused, R.RunRefused)) as refused:
+            call()
+        assert "\n" not in str(refused.value), f"{what}: {refused.value}"
+        assert "FORGED LINE" in str(refused.value), f"{what} does not show the path: {refused.value}"
 
 
 def test_a_runs_folder_fault_above_the_folder_is_not_blamed_on_the_folder(tmp_path):

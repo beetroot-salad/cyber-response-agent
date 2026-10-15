@@ -743,13 +743,25 @@ class Built:
 
 
 def episodes_root(tmp_path: Path | None = None) -> Path:
-    """The configured episodes root (this suite's conftest points it under `tmp_path`)."""
-    configured = os.environ.get(EPISODES_BASE_ENV)
-    if configured:
-        return Path(configured)
-    if tmp_path is None:
-        raise AssertionError("no configured episodes root and no tmp_path")
-    return Path(tmp_path) / "episodes-root"
+    """The episodes folder of this data root's tenant, `<data root>/<T>/episodes/` (#1187 O9:
+    an episode lives under its tenant; no episodes root is configured). `tmp_path` is unused,
+    kept so every caller's spelling stands."""
+    del tmp_path
+    return T.current_tenant().episodes
+
+
+def tenant_episodes(data_root: Path) -> Path:
+    """`_triplet_947.tenant_episodes`: a scene's own data root's `<T>/episodes/`."""
+    return T.tenant_episodes(data_root)
+
+
+def _scene_root(root: Path) -> Path:
+    """`family(root=...)`: a tenant's own `episodes/` folder as given; any other folder is the
+    data root of a scene of its own (`tenant_episodes`)."""
+    root = Path(root)
+    if root.name == "episodes" and (root.parent / "tenant.json").is_file():
+        return root
+    return tenant_episodes(root)
 
 
 def manifest_doc(worlds: Sequence[World], *, served_systems: Iterable[str] = SYSTEMS,
@@ -937,12 +949,15 @@ def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PL
     pre-flight record; `family_stamp=False` leaves the family not comparable; `outcome_reason`
     is pre-flight's `reason` text. `served/base.jsonl` (the family capture ledger) is written
     EMPTY unless `base_rows=` names its rows — a pointer at `base.jsonl#0` otherwise fails to
-    resolve for the wrong reason (no such row)."""
+    resolve for the wrong reason (no such row).
+
+    `root=` (#1187): a tenant's `episodes/` folder, or a folder that becomes the data root of a
+    scene of its own (`tenant_episodes`) — several same-id families in one test each get one."""
     worlds = list(worlds if worlds is not None else triad())
     systems = list(served_systems)
     doc = manifest_doc(worlds, served_systems=systems, predicate=predicate,
                        base_story=base_story, episode_id=episode_id, **dict(manifest_over or {}))
-    ep = T.episode(tmp_path, doc=doc, root=Path(root) if root is not None else
+    ep = T.episode(tmp_path, doc=doc, root=_scene_root(root) if root is not None else
                    episodes_root(tmp_path), episode_id=episode_id)
     if base_rows is not None:
         T.base_capture(ep, base_rows)
@@ -1445,7 +1460,7 @@ def page(where: Any) -> str:
     """The episode page's HTML through `open_episode_view(runs, id)` + `build_page(view)`."""
     ep = _ep(where)
     ve = mod(VISUALIZE)
-    with J.episodes_base(ep.parent), ve.open_episode_view(J.judge_runs(), ep.name) as view:
+    with ve.open_episode_view(J.episode_runs_for(ep), ep.name) as view:
         return ve.build_page(view)
 
 
@@ -2073,7 +2088,10 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
                                spawn=spawn, **seams)
         except SystemExit as stop:
             rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
-    fresh = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in before)
+    # #1187: the tenant's `episodes/` is made by the launch itself, so a launch refused before
+    # it made one leaves none — said below with the launch's own refusal, not as a listing error.
+    fresh = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in before) \
+        if root.is_dir() else []
     if len(fresh) != 1:
         raise AssertionError(f"real_family: the launch made {len(fresh)} episodes "
                              f"(rc={rc}, {message!r})")

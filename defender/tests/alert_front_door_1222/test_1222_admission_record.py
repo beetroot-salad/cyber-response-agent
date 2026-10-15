@@ -196,8 +196,9 @@ def _assert_refused_before_any_folder(d: S.Drive, what: str) -> None:
     assert d.lifecycle_calls == [], f"{what}: the run's lifecycle (its box) started for a refused alert"
     assert d.main.requests == 0, f"{what}: MAIN was asked for a turn on a refused alert"
     assert d.router.leads() == [], f"{what}: leads were dispatched for a refused alert: {d.router.leads()}"
-    record_name = S.sym("_tenant", "TENANT_RECORD_NAME")
-    left = [e for e in d.runs_base_entries() if e != record_name]
+    # #1187 (R1): run setup writes no `_tenant.json`, so a refused alert leaves the runs base
+    # with no entry at all — nothing is excluded from the census.
+    left = d.runs_base_entries()
     assert left == [], f"{what}: a refused alert left {left} under the runs base"
 
 
@@ -263,7 +264,9 @@ def _union_shown(tmp_path: Path, source_alert: bytes, runs_base: Path, tag: str)
     """Grade an accepted episode whose launch copy holds `source_alert` (and its record) over
     `runs_base`, and return everything the judge was SHOWN — the sibling-trials section names
     each run of the union by its run id."""
-    ep = J.accepted_episode(tmp_path, root=Path(tmp_path) / f"episodes-{tag}",
+    # #1187 (Layout A): the episode sits under the planted tenant's `<T>/episodes/`, where the
+    # judge reaches it by id; `tmp_path / tag` tells this scene from another (`T.episode`).
+    ep = J.accepted_episode(Path(tmp_path) / f"episodes-{tag}",
                             ledgers={"b": [J.oracle_row("b")], "c": []})
     S.plant_episode_copy(ep, alert=source_alert)
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))

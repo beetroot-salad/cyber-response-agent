@@ -165,7 +165,8 @@ def tenant(root: Path, tenant_id: str = T_ID) -> Any:
 
 
 def tenant_record_text(tenant_id: str) -> str:
-    """`_tenant.json` naming `tenant_id`, in `ensure_runs_base_record`'s own shape."""
+    """`_tenant.json` naming `tenant_id`, in the retired `ensure_runs_base_record`'s own shape —
+    a pre-#1187 container record (R1: a fault now, an old entry the listing refuses)."""
     return json.dumps({"tenant_id": tenant_id, "base_world_id": "0" * 32,
                        "created_at": "2026-10-04T00:00:00+00:00"},
                       indent=2, sort_keys=True) + "\n"
@@ -185,8 +186,10 @@ def plant_tenant_record(runs: Path, tenant_id: str, *, raw: str | bytes | None =
 
 
 def runs_folder(t: Any) -> Path:
-    """`t.runs` as run setup leaves it: a real folder holding `_tenant.json` naming `t.id`."""
-    plant_tenant_record(t.runs, t.id)
+    """`t.runs` as run setup leaves it: a real folder. #1187 (R1): it holds run folders and their
+    sidecars only — no `_tenant.json` (a test planting one plants the OLD entry it now is,
+    `plant_tenant_record`)."""
+    Path(t.runs).mkdir(parents=True, exist_ok=True)
     return Path(t.runs)
 
 

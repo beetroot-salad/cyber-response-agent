@@ -376,11 +376,11 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
     assert probe.states, "the lead's verb was never called"
     assert all(s is state for s in probe.states), (
         "the gather lead's verb context carried a state other than the run's")
-    assert state.run_id == "r1235-v2-link"
-    assert state.run_dir.resolve() == (real / "r1235-v2-link").resolve()
+    assert state.run_id == run_dir.name
+    assert state.run_dir.resolve() == (real / run_dir.name).resolve()
     snapshot = state.budget_snapshot()
     assert (snapshot["tool_calls"], snapshot["subagent_spawns"]) == (5, 2), snapshot
-    assert list(state.lead_rows(LEAD)) == _rows(real / "r1235-v2-link"), (
+    assert list(state.lead_rows(LEAD)) == _rows(real / run_dir.name), (
         "the state's rows and the table read through the real spelling disagree")
     assert len(state.lead_rows(LEAD)) == 2
 

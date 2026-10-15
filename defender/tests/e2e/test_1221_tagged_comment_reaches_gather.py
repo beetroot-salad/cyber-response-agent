@@ -26,6 +26,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.runtime import case_ticket  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests._spec767 import FakeStore, make_run, record, require  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
@@ -39,8 +40,9 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-#: The later run — the one gathering — and so the key of its own case.
-SELF = "20261008t120000z-1221-later-run"
+#: The later run — the one gathering — and so the key of its own case: a run id, so a UUID
+#: (#1187 declared change 1; the replay harness names the run's folder by it).
+SELF = fixture_uuid("1221-later-run")
 #: The earlier run whose recorded investigation is on an open case.
 PRIOR = "20261001t090000z-1221-prior-run"
 LEAD = "l-001"

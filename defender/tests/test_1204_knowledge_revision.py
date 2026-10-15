@@ -815,13 +815,15 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
     tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
     data_root = tmp_path / "data"
     _base, src = H.tenant_source(data_root, TENANT_ID, row=False)
-    episode_dir = tmp_path / "episodes" / T.EPISODE_ID
-    manifest = H.family_for(src, episode_dir)
+    # #1187 (Layout A): the episode is `<data root>/<T>/episodes/<uuid>`, as RUNS leaves it
+    # (its arm roster written); `family_for` builds it there.
+    manifest = H.family_for(src)
+    episode_dir = manifest.parent
     with Episode.open(manifest.parent) as episode:
         world = H.run_py().resume_world(
             episode, "b", tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))
         # #1105 PR 2: the arm is made through the sibling's episode view, over the container
-        # the launcher made for the tenant (`family_for` plants it).
+        # RUNS made for the tenant (`family_for` plants it and the roster, #1187).
         view = tenant.runs_repository().episode(episode.dir.name, held=episode,
                                                 container_required=True)
         run_dir = run_common.materialize_run(

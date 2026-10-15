@@ -28,6 +28,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     DONE,
     LEAD,
@@ -47,8 +48,8 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
 #: The run's own id — and so the key of the case it is investigating (the lab's case key is
-#: the run id).
-OWN = "20261008t120000z-1221-own-case"
+#: the run id): a UUID, as every run id after #1187 (declared change 1).
+OWN = fixture_uuid("1221-own-case")
 OPEN_KEY = "SOC-OPEN-1221"
 #: Comment text distinctive enough that its presence in the model's view is unambiguous.
 OWN_NOTE = "OWN-CASE-ENRICHMENT-1221: the customer's own note on the alerted host"

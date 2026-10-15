@@ -1205,7 +1205,10 @@ demands:
   - A019
 - id: d2_tenant_record_parsing_follows_read_tenant
   kind: parity
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged, and its tenant guard is replaced by the no-follow walk from the accepted tenant''s folder (S-iso), which removes the lookups'' judgement of the record by `read_tenant`; `test_1105_the_lookups_refuse_a_tenant_record_exactly_when_read_tenant_does`, which discharged this demand, was deleted with it. The replacement guards are pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
   binds:
   - read_tenant
   - tenant_runs_record.access[read_tenant]
@@ -1213,7 +1216,6 @@ demands:
   - tenant_runs_record.domain.distinguished[deep-nesting]
   - interacts(open_run->tenant_runs_record)
   - TenantRefused
-  discharged_by: test_1105_the_lookups_refuse_a_tenant_record_exactly_when_read_tenant_does
   home: defender/tests/tenant_1105_run_repository/test_1105_run_lookup.py
   seed_docstring: 'The lookups judge _tenant.json by read_tenant served through the held view: a record read_tenant admits with an extra key is
     served, a record read_tenant refuses (a UTF-8 BOM) refuses with TenantRefused, and a record whose read raises anything else (200,000-deep
@@ -1231,13 +1233,15 @@ demands:
   - I048
 - id: d2_other_tenant_refusal_text
   kind: negative
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged, and its tenant guard is replaced by the no-follow walk from the accepted tenant''s folder (S-iso), which removes the other-tenant refusal text; `test_1105_an_other_tenant_refusal_names_the_file_and_the_id_and_no_run_of_that_tenant`, which discharged this demand, was deleted with it. The replacement guards are pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
   binds:
   - tenant_runs_record.domain.distinguished[other-tenant]
   - open_run
   - list_run_ids
   - TenantRefused
-  discharged_by: test_1105_an_other_tenant_refusal_names_the_file_and_the_id_and_no_run_of_that_tenant
   home: defender/tests/tenant_1105_run_repository/test_1105_run_lookup.py
   seed_docstring: 'When _tenant.json names another tenant, the TenantRefused message names the record file and the tenant id found and carries none
     of the run ids present in that folder. Positive control: the message does carry the found id. A _tenant.json whose tenant id holds a newline and
@@ -1330,13 +1334,15 @@ demands:
       iff RunId.parse admits them (was: _episodes.bak skipped)'
 - id: nh3_for_tenant_refuses_absent_record
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged, and its tenant guard is replaced by the no-follow walk from the accepted tenant''s folder (S-iso), which removes `Run.for_tenant` (replaced by `Run.under`); `test_1105_run_for_tenant_refuses_a_runs_folder_with_no_tenant_record`, which discharged this demand, was deleted with it. The replacement guards are pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
   binds:
   - Run.for_tenant
   - tenant_runs_record.domain.distinguished[absent]
   - TenantRefused
   - interacts(Run.for_tenant->tenant_runs_record)
-  discharged_by: test_1105_run_for_tenant_refuses_a_runs_folder_with_no_tenant_record
   home: defender/tests/tenant_1105_run_repository/test_1105_run_lookup.py
   seed_docstring: Run.for_tenant(tenant_id, run_id, runs_base=...) raises TenantRefused when runs_base has no _tenant.json (today it returns a
     handle); with a record naming tenant_id it returns the handle, and with a record naming another tenant it raises today's TenantRecordMismatch.
@@ -1493,14 +1499,16 @@ demands:
   - D087
 - id: d2_list_run_ids_contract
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13) removes this demand''s subtraction of record-claimed ids, and R1 (declared change 6) the record-only container; `test_1105_list_run_ids_returns_sorted_run_ids_minus_record_claimed_ids`, which discharged this demand, was deleted with them. The surviving half, the listing as the sorted RunIds of the run folders of a container holding no record, is pinned in this suite by `test_1105_both_listings_accept_only_runs_the_record_episodes_and_known_sidecar_files` and by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_container_with_no_record_opens_lists_and_hands_out_every_run`.'
   binds:
   - list_run_ids
   - RunId
   - interacts(list_run_ids->episode_runs_record)
   - interacts(caller->list_run_ids).response
   - runs_base.domain.distinguished[real-dir]
-  discharged_by: test_1105_list_run_ids_returns_sorted_run_ids_minus_record_claimed_ids
   home: defender/tests/tenant_1105_run_repository/test_1105_run_lookup.py
   seed_docstring: list_run_ids(tenant) returns a list of RunId, sorted by text, of the runs in tenant.runs, minus every id a good episode record
     claims (the record written in the test through record_episode_runs); a folder holding only its good _tenant.json lists [].
@@ -1814,7 +1822,10 @@ demands:
   - L006
 - id: p2_tenant_record_other_tenant_refuses
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged, and its tenant guard is replaced by the no-follow walk from the accepted tenant''s folder (S-iso), which removes the other-tenant record refusal; `test_1105_a_tenant_record_naming_another_tenant_refuses_every_function`, which discharged this demand, was deleted with it. The replacement guards are pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
   binds:
   - open_run
   - list_run_ids
@@ -1833,7 +1844,6 @@ demands:
   - interacts(episode_runs->tenant_runs_record)
   - interacts(sibling_run_ids->tenant_runs_record)
   - TenantRefused
-  discharged_by: test_1105_a_tenant_record_naming_another_tenant_refuses_every_function
   home: defender/tests/tenant_1105_run_repository/test_1105_run_lookup.py
   seed_docstring: 'With tenant.runs/_tenant.json naming another tenant, each lookup and tenant-keyed record function raises TenantRefused naming
     the record, writes nothing and returns no run of that folder (O3''s ''refused for any other tenant''); two accepted tenants with their records
@@ -1992,14 +2002,16 @@ demands:
       staged shape makes the listings refuse (was: listed iff RunId.parse admits it, skipped over 206 bytes)'
 - id: d3_record_contract
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the four-field record and its writer; `test_1105_record_episode_runs_writes_exactly_the_four_field_record_beside_the_tenant_record`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - record_episode_runs
   - episode_runs_record
   - interacts(record_episode_runs->episode_runs_record).payload
   - _episodes
   - Tenant.runs
-  discharged_by: test_1105_record_episode_runs_writes_exactly_the_four_field_record_beside_the_tenant_record
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'record_episode_runs(tenant, ''src-n1'', RunId.parse(''src''), {''a'': RunId.parse(''src-n1-a'')}) returns None and writes tenant.runs/_episodes/src-n1.json,
     a regular file beside _tenant.json (creating _episodes/ when it is absent), which episode_runs and sibling_run_ids then read back; a second
@@ -2018,7 +2030,10 @@ demands:
     value_now: the second record lands beside the first; the FIFO-at-_episodes cell is a per-condition P2 state, not pinned (w_p2_per_condition_states)
 - id: d3_writer_folder_refusals
   kind: domain-outcome
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s folder refusals; `test_1105_the_writer_refuses_an_unchecked_runs_folder_and_creates_only_episodes_inside_a_checked_one`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - interacts(record_episode_runs->runs_base)
   - interacts(record_episode_runs->tenant_runs_record)
@@ -2026,7 +2041,6 @@ demands:
   - tenant_runs_record.domain.distinguished[other-tenant]
   - _episodes.domain.distinguished[absent]
   - ensure_runs_base_record
-  discharged_by: test_1105_the_writer_refuses_an_unchecked_runs_folder_and_creates_only_episodes_inside_a_checked_one
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'record_episode_runs raises TenantRefused and creates nothing when tenant.runs is absent and when its _tenant.json names another
     tenant; it never creates the runs folder or _tenant.json (ensure_runs_base_record stays that record''s one writer). Positive control: over
@@ -2055,7 +2069,10 @@ demands:
   - L035
 - id: d3_bad_episode_id_refused_first
   kind: domain-outcome
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s episode-id refusal; `test_1105_a_bad_episode_id_is_refused_as_run_refused_before_any_name_is_built`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - refuse_bad_episode_id
   - record_episode_runs
@@ -2068,7 +2085,6 @@ demands:
   - episode_id.domain.distinguished[non-str]
   - RunRefused
   - episode_id.domain.distinguished[over-long-record-name]
-  discharged_by: test_1105_a_bad_episode_id_is_refused_as_run_refused_before_any_name_is_built
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: record_episode_runs and episode_runs raise RunRefused, not FamilyError, for an episode id refuse_bad_episode_id refuses ('../x',
     'a/b', '', '_x', 'Ep1', 5), write nothing, and do so even over an absent runs folder (the id is judged before any name is built or folder
@@ -2093,7 +2109,10 @@ demands:
   - I105
 - id: d3_writer_input_refusals
   kind: domain-outcome
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s input refusals; `test_1105_the_writer_refuses_every_input_that_would_hide_a_run_or_claim_an_id_twice`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`. Of those rules, two are RE-HOMED rather than removed: two labels on one id is refused by the arm roster''s reader, and a label keeps its own grammar (N8); both are pinned by `defender/tests/ids_1187/test_1187_roster_sibling.py::test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused` and `defender/tests/ids_1187/test_1187_ids.py::test_1187_o3_a_label_is_still_held_to_its_own_rule`.'
   binds:
   - record_episode_runs
   - runs.domain.distinguished[empty]
@@ -2112,7 +2131,6 @@ demands:
   - run_exists
   - RunRefused
   - episode_runs_record.domain.distinguished[at-cap-65536]
-  discharged_by: test_1105_the_writer_refuses_every_input_that_would_hide_a_run_or_claim_an_id_twice
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'record_episode_runs raises RunRefused and writes nothing for: an empty or non-mapping runs; a label the family model refuses
     (base, family, family_1, an unnameable label, labels equal under case folding); an arm id ending in a sidecar suffix or other than
@@ -2219,13 +2237,15 @@ demands:
   - FR-12 (owner, Phase F round 2)
 - id: d3_writer_refuses_non_plain_str
   kind: negative
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s type refusals; `test_1105_the_writer_refuses_a_label_or_episode_id_that_is_not_exactly_str_before_any_write`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - record_episode_runs
   - label.domain.distinguished[non-str]
   - episode_id.domain.distinguished[non-str]
   - RunRefused
-  discharged_by: test_1105_the_writer_refuses_a_label_or_episode_id_that_is_not_exactly_str_before_any_write
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'record_episode_runs refuses, with RunRefused and before any write, a label or an episode id whose type is not exactly str (FR-12,
     owner: subclasses are refused, as RunId refuses subclassing): a plain subclass label, a label that formats unlike its text (x shown as a, arm
@@ -2239,14 +2259,16 @@ demands:
   - RG-F3-b
 - id: d3_reader_content_rules
   kind: negative
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record reader''s content rules; `test_1105_the_reader_refuses_each_content_rule_breaker_naming_the_file`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - sibling_run_ids
   - episode_runs
   - interacts(sibling_run_ids->episode_runs_record)
   - interacts(episode_runs->episode_runs_record)
   - RunRefused
-  discharged_by: test_1105_the_reader_refuses_each_content_rule_breaker_naming_the_file
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'D3.4''s content rules, one breaker each, planted by hand at _episodes/ep.json: bytes that are not strict UTF-8, a UTF-8 BOM before
     the JSON and text after it (neither is strict UTF-8 JSON), a duplicate key, an extra field, a missing field (no source_run_id), a JSON array at
@@ -2260,13 +2282,15 @@ demands:
   - 'phase F round 2 (owner routing: reader field rules the design states)'
 - id: d3_record_written_once
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the write-once rule; `test_1105_an_episode_record_is_written_once_an_identical_retry_is_a_no_op_and_a_different_one_refused`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - interacts(record_episode_runs->episode_runs_record)
   - write_guarded
   - episode_runs_record.domain.distinguished[exists-identical]
   - episode_runs_record.domain.distinguished[exists-different]
-  discharged_by: test_1105_an_episode_record_is_written_once_an_identical_retry_is_a_no_op_and_a_different_one_refused
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: A second record_episode_runs call with byte-identical content returns without error and leaves the record unchanged (today's
     create lane raises FileExistsError there); a call for the same episode with different content raises RunRefused and leaves the first record
@@ -2292,12 +2316,14 @@ demands:
       is compared and refused, never removed; the per-form occupants are not pinned per condition
 - id: d3_writer_never_writes_through_a_link
   kind: negative
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s link refusal at `_episodes`; `test_1105_the_writer_never_writes_through_a_link_at_episodes`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - interacts(record_episode_runs->episode_runs_record)
   - _episodes.domain.distinguished[symlink]
   - RunRefused
-  discharged_by: test_1105_the_writer_never_writes_through_a_link_at_episodes
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'With _episodes a link to an outside folder, record_episode_runs raises RunRefused naming _episodes, never a raw OSError, and
     the outside folder is byte-unchanged (no record lands there). Positive control: with _episodes absent the record lands inside tenant.runs.'
@@ -2326,12 +2352,14 @@ demands:
   - I085
 - id: d3_writer_never_removes_what_it_did_not_create
   kind: negative
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s cleanup rule; `test_1105_the_writer_never_removes_a_file_it_did_not_create`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - interacts(record_episode_runs->episode_runs_record)
   - episode_runs_record.domain.distinguished[exists-different]
   - Held.write
-  discharged_by: test_1105_the_writer_never_removes_a_file_it_did_not_create
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'When a regular file already stands at the record name with different bytes (another key order included), record_episode_runs
     compares it, raises RunRefused naming the file, and leaves it byte-identical: the writer removes only what its own create made. Positive control:
@@ -2366,13 +2394,15 @@ demands:
       is compared and refused, never removed; the per-form occupants are not pinned per condition
 - id: d3_record_cap
   kind: domain-outcome
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record''s 64 KiB cap; `test_1105_a_record_over_64_kib_is_corrupt_and_read_no_further_than_the_cap_plus_one`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - interacts(sibling_run_ids->episode_runs_record)
   - episode_runs_record.domain.distinguished[at-cap-65536]
   - episode_runs_record.domain.distinguished[over-cap-65537]
   - Bound.read
-  discharged_by: test_1105_a_record_over_64_kib_is_corrupt_and_read_no_further_than_the_cap_plus_one
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: A good record of exactly 65536 bytes claims its ids; one of 65537 bytes, and a sparse file claiming 1 GiB, make sibling_run_ids
     raise RunRefused naming the file, having read it through Bound.read(max_bytes=65537), so no more than the cap plus one byte is read and the
@@ -2403,12 +2433,14 @@ demands:
       not pinned
 - id: d3_overlapping_claims_union
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the union of overlapping claims; `test_1105_overlapping_claims_across_good_records_are_a_union`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - sibling_run_ids
   - list_run_ids
   - episode_runs_record
-  discharged_by: test_1105_overlapping_claims_across_good_records_are_a_union
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'Two good records claiming the same run id are not an error: sibling_run_ids returns the union, and list_run_ids drops that
     id once.'
@@ -2417,13 +2449,15 @@ demands:
   - D056
 - id: d3_episode_runs_contract
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes `episode_runs`; `test_1105_episode_runs_answers_from_that_episodes_own_record_only`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - episode_runs
   - episode_runs_record
   - interacts(caller->episode_runs).response
   - episode_runs_record.domain.distinguished[absent]
-  discharged_by: test_1105_episode_runs_answers_from_that_episodes_own_record_only
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'episode_runs(tenant, ep) returns that record''s {label: RunId}; it returns {} when ep has no record (DV-7), answers unchanged
     when another episode''s record is corrupt (it reads only ep''s record), and raises RunRefused when ep''s own record is corrupt.'
@@ -2438,13 +2472,15 @@ demands:
   - U058
 - id: d3_sibling_run_ids_contract
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes `sibling_run_ids`; `test_1105_sibling_run_ids_is_the_union_of_every_record_and_fails_closed`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - sibling_run_ids
   - episode_runs_record
   - _episodes
   - episode_runs_record.domain.distinguished[good]
-  discharged_by: test_1105_sibling_run_ids_is_the_union_of_every_record_and_fails_closed
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: sibling_run_ids(tenant) returns the set of every RunId any good record claims (arms only, not the source), the empty set with
     no _episodes/, and raises RunRefused when any one record is corrupt.
@@ -2453,13 +2489,15 @@ demands:
   - D006
 - id: d3_listing_exclusion_is_sibling_run_ids
   kind: coherence
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the listings'' subtraction of claimed ids (an arm is out of the natural listing by location, O10); `test_1105_both_listings_drop_exactly_the_ids_sibling_run_ids_claims`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - interacts(list_run_ids->episode_runs_record)
   - interacts(bound_runs->episode_runs_record)
   - interacts(sibling_run_ids->episode_runs_record)
   - interacts(episode_runs->episode_runs_record)
-  discharged_by: test_1105_both_listings_drop_exactly_the_ids_sibling_run_ids_claims
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'With real run folders for a source and two arms and a record written by record_episode_runs, list_run_ids and bound_runs both drop
     exactly sibling_run_ids(tenant) and keep the source; a record in tenant.runs/_episodes naming another tenant makes both listings raise
@@ -2486,32 +2524,39 @@ demands:
       with no folder (was: returns a Run for each)'
 - id: d3_record_never_collides_with_run
   kind: uniqueness
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record folder whose name had to stay off the run-id grammar; `test_1105_the_record_folder_can_never_be_a_run_id`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - episode_runs_record
   - _episodes
   - RunId.parse
   - run_id.domain.distinguished[_episodes]
-  discharged_by: test_1105_the_record_folder_can_never_be_a_run_id
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: RunId.parse refuses '_episodes' and every name with a leading '_', so no run folder can share the record folder's name, and
     a populated _episodes/ is never a list_run_ids entry.
   source: 20-demands
 - id: d3_kinds_registry_row
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record''s kinds-registry row (the design removes the row from run-records-kinds.tsv); `test_1105_the_episode_record_has_its_own_kinds_registry_row`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - run_records_kinds
   - episode_runs_record
   - lint_run_records
-  discharged_by: test_1105_the_episode_record_has_its_own_kinds_registry_row
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: defender/docs/run-records-kinds.tsv carries a row for the episode-to-runs record whose kind name is not 'episode_runs' (that
     kind stays the sibling run directories).
   source: 20-demands
 - id: d3_episode_sibling_ids_contract
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes `episode_sibling_ids`; `test_1105_episode_sibling_ids_takes_only_a_bound_and_applies_the_file_rules_without_a_tenant_compare`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - episode_sibling_ids
   - Bound
@@ -2520,7 +2565,6 @@ demands:
   - runs_base.domain.distinguished[absent]
   - TypeError
   - RunRefused
-  discharged_by: test_1105_episode_sibling_ids_takes_only_a_bound_and_applies_the_file_rules_without_a_tenant_compare
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'episode_sibling_ids(runs) takes a Bound and raises TypeError before any read for a Path, a str, a Held, a Tenant or None; over a
     Bound it reads runs.under(''_episodes'') with D3.4''s file rules and no tenant compare (a record naming another tenant still claims its ids, and
@@ -2565,11 +2609,13 @@ demands:
     value_now: episode_sibling_ids is handed a Bound and never reads _tenant.json; a corrupt record raises RunRefused naming the file
 - id: d3_episode_sibling_ids_parity
   kind: parity
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the parity of the two record readers; `test_1105_the_path_only_reader_and_sibling_run_ids_agree_on_every_good_and_corrupt_record`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - episode_runs_record.access[sibling_run_ids]
   - episode_runs_record.access[episode_sibling_ids]
-  discharged_by: test_1105_the_path_only_reader_and_sibling_run_ids_agree_on_every_good_and_corrupt_record
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: Over the same records, episode_sibling_ids(<the held view of tenant.runs>) equals sibling_run_ids(tenant) for good records;
     both refuse a truncated record with RunRefused; and a record naming another tenant still claims its ids in episode_sibling_ids, which makes
@@ -2586,11 +2632,13 @@ demands:
     value_now: episode_sibling_ids takes the held view (a Bound), not runs_base; otherwise as settled
 - id: d3_record_payload_shape
   kind: shape
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record''s serialisation; `test_1105_the_record_is_exactly_four_fields_in_one_canonical_sorted_key_serialisation`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - interacts(record_episode_runs->episode_runs_record).payload
   - episode_runs_record
-  discharged_by: test_1105_the_record_is_exactly_four_fields_in_one_canonical_sorted_key_serialisation
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'The stored record is exactly {episode_id, tenant_id, source_run_id, runs: {label: run_id}} with tenant_id == tenant.id and
     every run id stored as its RunId text, in one canonical serialisation with sorted keys: two calls with equal mappings given in different key
@@ -2609,7 +2657,10 @@ demands:
   - I088
 - id: d3_record_stem_rule
   kind: domain-outcome
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record''s file-name rule; `test_1105_a_records_episode_id_must_equal_its_file_name_minus_the_final_json`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - episode_runs_record.domain.distinguished[dotted-stem]
   - episode_runs_record.domain.distinguished[stem-mismatch]
@@ -2617,7 +2668,6 @@ demands:
   - sibling_run_ids
   - episode_id.domain.distinguished[dotted]
   - episode_runs
-  discharged_by: test_1105_a_records_episode_id_must_equal_its_file_name_minus_the_final_json
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'A record''s stem is its file name minus the final ''.json'': _episodes/ep.json holding episode_id ''ep'' is good, and so is
     _episodes/ep.1.json holding ''ep.1'' (refuse_bad_episode_id admits it); a record whose episode_id differs from its stem in any way (ep-2, EP-1,
@@ -2632,12 +2682,14 @@ demands:
   - I101
 - id: d3_record_closed_list
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the reader''s closed rule list; `test_1105_the_reader_applies_only_its_closed_list_so_a_writer_rule_breaker_claims`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - episode_runs_record.domain.distinguished[writer-rule-only-breaker]
   - sibling_run_ids
   - list_run_ids
-  discharged_by: test_1105_the_reader_applies_only_its_closed_list_so_a_writer_rule_breaker_claims
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'The reader''s rule is D3.4''s closed list: a host-written record that breaks only writer rules (two labels on one id, an arm
     equal to the source, an arm not shaped f''{episode_id}-{label}'', an arm another record claims) is good on read, so sibling_run_ids claims
@@ -2656,7 +2708,10 @@ demands:
   - I096
 - id: p2_episode_record_truncated_refuses
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes a truncated record''s refusal; `test_1105_a_truncated_episode_record_refuses_naming_the_file`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - sibling_run_ids
   - list_run_ids
@@ -2670,7 +2725,6 @@ demands:
   - interacts(episode_runs->episode_runs_record)
   - interacts(episode_sibling_ids->episode_runs_record)
   - RunRefused
-  discharged_by: test_1105_a_truncated_episode_record_refuses_naming_the_file
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'With _episodes/ep-1.json truncated (a good record cut short), sibling_run_ids, list_run_ids, bound_runs, episode_runs(tenant,
     ''ep-1'') and episode_sibling_ids raise RunRefused naming that file, and it fails closed until an operator removes it; episode_runs for another
@@ -2693,7 +2747,10 @@ demands:
   - U025
 - id: p2_episodes_stray_name_refuses
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes a stray name inside `_episodes`; `test_1105_a_stray_name_in_episodes_refuses_naming_it`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - sibling_run_ids
   - list_run_ids
@@ -2703,7 +2760,6 @@ demands:
   - interacts(sibling_run_ids->_episodes)
   - interacts(episode_sibling_ids->_episodes)
   - RunRefused
-  discharged_by: test_1105_a_stray_name_in_episodes_refuses_naming_it
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'With a file named ''README'' beside a good record in _episodes, sibling_run_ids, list_run_ids, bound_runs and episode_sibling_ids
     raise RunRefused naming tenant.runs/_episodes/README. Positive control: with it removed the good record''s claims stand.'
@@ -2741,7 +2797,10 @@ demands:
       entries claim nothing)'
 - id: es_episodes_absent_no_claims
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the absent-`_episodes` state; `test_1105_an_absent_episodes_claims_nothing_and_the_writer_creates_it`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - sibling_run_ids
   - episode_runs
@@ -2749,7 +2808,6 @@ demands:
   - episode_sibling_ids
   - materialize_run
   - _episodes.domain.distinguished[absent]
-  discharged_by: test_1105_an_absent_episodes_claims_nothing_and_the_writer_creates_it
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: With no _episodes in a good runs folder, sibling_run_ids is the empty set, episode_runs returns {}, the listings exclude nothing,
     episode_sibling_ids returns the empty set, and a first-ever pinned run setup proceeds and creates no _episodes; the first record_episode_runs
@@ -2764,13 +2822,15 @@ demands:
   - L030
 - id: d3_run_setup_refuses_claimed_pinned_id
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): run setup reads no `_episodes` record, so the claimed-id refusal is gone; `test_1105_run_setup_refuses_a_pinned_id_a_record_claims_and_creates_no_run_folder`, which discharged this demand, was deleted with it. The replacement (a pinned UUID is never refused for an episodes claim, and the listing refuses the stray record) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
   binds:
   - interacts(materialize_run->episode_runs_record)
   - materialize_run
   - episode_sibling_ids
   - run.main
-  discharged_by: test_1105_run_setup_refuses_a_pinned_id_a_record_claims_and_creates_no_run_folder
   home: defender/tests/tenant_1105_run_repository/test_1105_run_setup.py
   seed_docstring: 'Run setup for a pinned run id that a record in tenant.runs/_episodes claims (written by record_episode_runs in the test) exits
     with a str refusal, leaves the runs folder and _tenant.json in place, and creates no run folder. Positive control: an unclaimed pinned id
@@ -2789,12 +2849,14 @@ demands:
   - L051
 - id: d3_run_setup_corrupt_record_scope
   kind: domain-outcome
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): run setup reads no `_episodes` record, so a corrupt record''s scope over pinned ids is gone; `test_1105_a_corrupt_episode_record_refuses_every_pinned_id_and_never_a_minted_one`, which discharged this demand, was deleted with it. The replacement (a pinned UUID is never refused for an episodes claim, and the listing refuses the stray record) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
   binds:
   - interacts(materialize_run->episode_runs_record)
   - episode_runs_record.domain.distinguished[truncated]
   - materialize_run
-  discharged_by: test_1105_a_corrupt_episode_record_refuses_every_pinned_id_and_never_a_minted_one
   home: defender/tests/tenant_1105_run_repository/test_1105_run_setup.py
   seed_docstring: With a truncated record in tenant.runs/_episodes, run setup refuses every pinned id, an unclaimed one included, with one stderr
     line naming that record (sys.exit(str), no traceback); a minted id (no pinned id given) still runs, because minted ids are not checked.
@@ -2817,11 +2879,13 @@ demands:
       entries claim nothing)'
 - id: d3_run_setup_foreign_record_still_claims
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): run setup reads no `_episodes` record, so a foreign record''s claim is gone; `test_1105_run_setup_refuses_a_pinned_id_a_record_naming_another_tenant_claims`, which discharged this demand, was deleted with it. The replacement (a pinned UUID is never refused for an episodes claim, and the listing refuses the stray record) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
   binds:
   - interacts(materialize_run->episode_runs_record)
   - episode_runs_record.domain.distinguished[other-tenant]
-  discharged_by: test_1105_run_setup_refuses_a_pinned_id_a_record_naming_another_tenant_claims
   home: defender/tests/tenant_1105_run_repository/test_1105_run_setup.py
   seed_docstring: 'A record planted in T''s _episodes/ that names another tenant still claims its ids at run setup: a pinned id it claims is refused
     (the fail-safe direction).'
@@ -2991,13 +3055,15 @@ demands:
       not pinned per condition
 - id: o5_run_setup_deep_tenant_record_refuses
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R1 (declared change 6): run setup neither writes nor reads the runs container''s `_tenant.json`, so a deeply nested record has no reader to refuse it; `test_1105_run_setup_over_a_deeply_nested_tenant_record_refuses_as_tenant_refused`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run` and `...::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - materialize_run
   - ensure_runs_base_record
   - tenant_runs_record.domain.distinguished[deep-nesting]
   - interacts(ensure_runs_base_record->tenant_runs_record)
-  discharged_by: test_1105_run_setup_over_a_deeply_nested_tenant_record_refuses_as_tenant_refused
   home: defender/tests/tenant_1105_run_repository/test_1105_run_setup.py
   seed_docstring: 'Run setup over a tenant runs folder whose _tenant.json nests 200,000 levels deep exits ''[run.py] ...'' with TenantRefused,
     not a raw RecursionError (today''s value, RG-20-a), and creates no run folder: ensure_runs_base_record''s read-back uses the nesting-checked
@@ -3777,11 +3843,13 @@ demands:
   - RG-11-a
 - id: d3_record_key_is_tenant_and_episode
   kind: uniqueness
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record''s key; `test_1105_the_record_key_is_tenant_and_episode_so_no_record_is_read_by_another_episode_or_tenant`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - episode_runs_record.identity
   - interacts(record_episode_runs->episode_runs_record)
-  discharged_by: test_1105_the_record_key_is_tenant_and_episode_so_no_record_is_read_by_another_episode_or_tenant
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'the same episode_id recorded under tenants T and U (U hand-planted, F36) lands in two files; T''s episode_runs, sibling_run_ids
     and list_run_ids see only T''s record and U''s only U''s; two episodes of one tenant, and ''ep'' beside the dotted ''ep.1'', never read each
@@ -3796,13 +3864,15 @@ demands:
   - R41-26
 - id: d3_record_labels_are_untrusted_text
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record''s labels (an arm''s label is now read from the host-written roster); `test_1105_record_labels_are_returned_verbatim_as_untrusted_text_and_a_refusal_quoting_one_escapes_it`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
   binds:
   - interacts(episode_runs->episode_runs_record)
   - episode_runs_record.domain.distinguished[writer-rule-only-breaker]
   - interacts(sibling_run_ids->episode_runs_record)
   - RunRefused
-  discharged_by: test_1105_record_labels_are_returned_verbatim_as_untrusted_text_and_a_refusal_quoting_one_escapes_it
   home: defender/tests/tenant_1105_run_repository/test_1105_episode_record.py
   seed_docstring: 'a host-written record whose labels carry a newline, an escaped NUL, a 4,000-character string and non-ASCII text is good on read:
     episode_runs returns each label byte-for-byte as the key and its RunId as the value, sibling_run_ids and list_run_ids are unaffected, and a
@@ -3845,12 +3915,14 @@ demands:
   - R41-13
 - id: d2_for_tenant_deep_record_refuses
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged, and its tenant guard is replaced by the no-follow walk from the accepted tenant''s folder (S-iso), which removes `Run.for_tenant`''s deep-record refusal; `test_1105_run_for_tenant_over_a_deeply_nested_tenant_record_refuses_as_tenant_refused`, which discharged this demand, was deleted with it. The replacement guards are pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
   binds:
   - interacts(Run.for_tenant->tenant_runs_record)
   - tenant_runs_record.domain.distinguished[deep-nesting]
   - Run.for_tenant
-  discharged_by: test_1105_run_for_tenant_over_a_deeply_nested_tenant_record_refuses_as_tenant_refused
   home: defender/tests/tenant_1105_run_repository/test_1105_run_lookup.py
   seed_docstring: 'Run.for_tenant over a runs folder whose _tenant.json nests 200,000 levels deep raises TenantRefused (TenantRecordCorrupt is
     one) naming the record, never RecursionError; positive control: the same call over a good record returns the handle. The implementer chooses
@@ -5425,6 +5497,14 @@ structure:
     provenance: code
     multiplicity: serial
 claims:
+# ---- #1187 (2026-10-15): the design claim the #1187 retirements below cite ----
+- id: C1187
+  kind: referential
+  claim: '#1187 design rev 2, adopted by the owner on 2026-10-15, removes PR 1''s `_episodes` record with its writer and its readers (R6, D-del), the runs container''s `_tenant.json` with the tenant-record judgement and `Run.for_tenant` (R1), `base_world_id` (R1b), and `DEFENDER_EPISODES_BASE` with `episodes_root` and its refusals (decision 3, O9).'
+  probe: 'read the #1187 design rev 2 (issue comments 6192137519 and 6192137980): Decisions 3, Recommendations R1, R1b and R6, the repository API section, and the list ''Declared behaviour changes vs main'' items 5, 6, 11 and 13'
+  probe_kind: read
+  observed: 'R1, R1b and R6 are marked adopted by the owner on 2026-10-15; the API section deletes `ensure_runs_base_record`, `runs.base_world_id()` and the claimed-id check, and names `Run.under` in place of `Run.for_tenant`; declared changes 5, 6, 11 and 13 state the removals'
+  verdict: holds
 - id: R4-1
   kind: census
   claim: 'defender._run_handle is imported by 3 production files (run.py:50, run_common.py:21, scripts/visualize/visualize_run.py:73,621), by
@@ -9004,6 +9084,310 @@ gate:
     cites:
     - RG-20-a
     - R4-17
+  - rule: R3
+    element: 'tenant_runs_record.access[read_tenant]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R3 fires on `tenant_runs_record.access[read_tenant]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R1).'
+    resolution: 'No obligation: removed by #1187 design item R1 (declared change 6), adopted by the owner on 2026-10-15. The runs container''s `_tenant.json` is neither written nor judged and `Run.for_tenant` is replaced by `Run.under`; the tenant guard becomes the no-follow walk from the accepted tenant''s folder (S-iso). The replacement guards are pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `...::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `...::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
+    resolved_by: design (#1187 rev 2, R1; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R3
+    element: 'tenant_runs_record.access[held-view]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R3 fires on `tenant_runs_record.access[held-view]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R1).'
+    resolution: 'No obligation: removed by #1187 design item R1 (declared change 6), adopted by the owner on 2026-10-15. The runs container''s `_tenant.json` is neither written nor judged and `Run.for_tenant` is replaced by `Run.under`; the tenant guard becomes the no-follow walk from the accepted tenant''s folder (S-iso). The replacement guards are pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `...::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `...::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
+    resolved_by: design (#1187 rev 2, R1; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R3
+    element: 'episode_runs_record.access[sibling_run_ids]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R3 fires on `episode_runs_record.access[sibling_run_ids]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R3
+    element: 'episode_runs_record.access[episode_sibling_ids]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R3 fires on `episode_runs_record.access[episode_sibling_ids]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'tenant_runs_record.domain.distinguished[other-tenant]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `tenant_runs_record.domain.distinguished[other-tenant]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R1).'
+    resolution: 'No obligation: removed by #1187 design item R1 (declared change 6), adopted by the owner on 2026-10-15. The runs container''s `_tenant.json` is neither written nor judged and `Run.for_tenant` is replaced by `Run.under`; the tenant guard becomes the no-follow walk from the accepted tenant''s folder (S-iso). The replacement guards are pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `...::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `...::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
+    resolved_by: design (#1187 rev 2, R1; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[good]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[good]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[at-cap-65536]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[at-cap-65536]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[over-cap-65537]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[over-cap-65537]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[dotted-stem]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[dotted-stem]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[stem-mismatch]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[stem-mismatch]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[writer-rule-only-breaker]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[writer-rule-only-breaker]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[other-tenant]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[other-tenant]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[exists-identical]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[exists-identical]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[exists-different]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[exists-different]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_runs_record.domain.distinguished[absent]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_runs_record.domain.distinguished[absent]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: '_episodes.domain.distinguished[absent]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `_episodes.domain.distinguished[absent]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: '_episodes.domain.distinguished[symlink]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `_episodes.domain.distinguished[symlink]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'label.domain.distinguished[reserved]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `label.domain.distinguished[reserved]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation here: the writer this member was exercised through is removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. The label rule itself is RE-HOMED, not removed: a label keeps its own grammar (N8), applied at the family gate and by the arm roster''s reader (design R2), pinned outside this suite by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o3_a_label_is_still_held_to_its_own_rule` and `defender/tests/ids_1187/test_1187_roster_sibling.py::test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'label.domain.distinguished[unnameable]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `label.domain.distinguished[unnameable]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation here: the writer this member was exercised through is removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. The label rule itself is RE-HOMED, not removed: a label keeps its own grammar (N8), applied at the family gate and by the arm roster''s reader (design R2), pinned outside this suite by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o3_a_label_is_still_held_to_its_own_rule` and `defender/tests/ids_1187/test_1187_roster_sibling.py::test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'label.domain.distinguished[case-fold-duplicate]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `label.domain.distinguished[case-fold-duplicate]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation here: the writer this member was exercised through is removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. The label rule itself is RE-HOMED, not removed: a label keeps its own grammar (N8), applied at the family gate and by the arm roster''s reader (design R2), pinned outside this suite by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o3_a_label_is_still_held_to_its_own_rule` and `defender/tests/ids_1187/test_1187_roster_sibling.py::test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_id.domain.distinguished[../x]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_id.domain.distinguished[../x]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`. The episode id itself is now held to the canonical UUID rule, pinned by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_id.domain.distinguished[a/b]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_id.domain.distinguished[a/b]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`. The episode id itself is now held to the canonical UUID rule, pinned by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_id.domain.distinguished[empty]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_id.domain.distinguished[empty]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`. The episode id itself is now held to the canonical UUID rule, pinned by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_id.domain.distinguished[_x]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_id.domain.distinguished[_x]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`. The episode id itself is now held to the canonical UUID rule, pinned by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_id.domain.distinguished[not-case-stable]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_id.domain.distinguished[not-case-stable]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`. The episode id itself is now held to the canonical UUID rule, pinned by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_id.domain.distinguished[non-str]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_id.domain.distinguished[non-str]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`. The episode id itself is now held to the canonical UUID rule, pinned by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_id.domain.distinguished[over-long-record-name]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_id.domain.distinguished[over-long-record-name]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`. The episode id itself is now held to the canonical UUID rule, pinned by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'episode_id.domain.distinguished[dotted]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `episode_id.domain.distinguished[dotted]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`. The episode id itself is now held to the canonical UUID rule, pinned by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'runs.domain.distinguished[empty]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `runs.domain.distinguished[empty]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'runs.domain.distinguished[non-mapping]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `runs.domain.distinguished[non-mapping]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'runs.domain.distinguished[sidecar-suffixed-arm]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `runs.domain.distinguished[sidecar-suffixed-arm]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'runs.domain.distinguished[arm-not-episode-label]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `runs.domain.distinguished[arm-not-episode-label]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'runs.domain.distinguished[two-labels-one-id]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `runs.domain.distinguished[two-labels-one-id]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation here: the writer this member was exercised through is removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. The rule itself is RE-HOMED, not removed: the arm roster''s reader refuses two labels on one id (design R2, recheck S1), pinned outside this suite by `defender/tests/ids_1187/test_1187_roster_sibling.py::test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused` (its duplicate-ids case).'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'runs.domain.distinguished[arm-equals-source]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `runs.domain.distinguished[arm-equals-source]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'runs.domain.distinguished[claimed-by-another-record]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `runs.domain.distinguished[claimed-by-another-record]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'runs.domain.distinguished[arm-entry-exists]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `runs.domain.distinguished[arm-entry-exists]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R6).'
+    resolution: 'No obligation: removed by #1187 design item R6 (D-del, declared change 13), adopted by the owner on 2026-10-15. PR 1''s `_episodes` record, its writer `record_episode_runs` and its readers (`episode_runs`, `sibling_run_ids`, `episode_sibling_ids`, the listings'' subtraction and run setup''s claimed-id check) are deleted, so this element has no surviving writer or reader to test. The replacement guard is pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder` and `...::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`.'
+    resolved_by: design (#1187 rev 2, R6; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R7
+    element: 'interacts(Run.for_tenant->tenant_runs_record)'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R7 fires on `interacts(Run.for_tenant->tenant_runs_record)`; the executable demands that answered it were retired with the tests #1187 deletes (design item R1).'
+    resolution: 'No obligation: removed by #1187 design item R1 (declared change 6), adopted by the owner on 2026-10-15. The runs container''s `_tenant.json` is neither written nor judged and `Run.for_tenant` is replaced by `Run.under`; the tenant guard becomes the no-follow walk from the accepted tenant''s folder (S-iso). The replacement guards are pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `...::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `...::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
+    resolved_by: design (#1187 rev 2, R1; owner-adopted 2026-10-15)
+    cites:
+    - C1187
+  - rule: R4
+    element: 'tenant_runs_record.domain.distinguished[deep-nesting]'
+    route: removed by #1187 (element retired with its subject)
+    witness: 'R4 fires on `tenant_runs_record.domain.distinguished[deep-nesting]`; the executable demands that answered it were retired with the tests #1187 deletes (design item R1).'
+    resolution: 'No obligation: removed by #1187 design item R1 (declared change 6), adopted by the owner on 2026-10-15. The runs container''s `_tenant.json` is neither written nor judged and `Run.for_tenant` is replaced by `Run.under`; the tenant guard becomes the no-follow walk from the accepted tenant''s folder (S-iso). The replacement guards are pinned outside this suite by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`, `...::test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens` and `...::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
+    resolved_by: design (#1187 rev 2, R1; owner-adopted 2026-10-15)
+    cites:
+    - C1187
   pre_discharged:
   - rule: R3
     element: runs_base.access[unsandboxed-fallback]

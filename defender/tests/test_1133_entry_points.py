@@ -66,7 +66,6 @@ from typing import Any
 import pytest
 import yaml
 
-from defender import _episode_handle as EH
 from defender._episode_paths import LAYOUT
 from defender.run_repository import WIRE_LOG_NAMES
 from defender.tests import _judge_921 as J
@@ -200,12 +199,13 @@ def branch_cli() -> Any:
 
 def start_family(episode: Any, spawn: Any) -> dict[str, int]:
     """The launcher's RUNS step for tenant `acme` (#1105 PR 2): the siblings' container made
-    through the episode's view (`EpisodeRuns.create_container`, the `runs/` ensure
-    `start_family` no longer does), then the siblings started."""
+    through the episode's view (the `runs/` ensure `start_family` no longer does; #1187 R2:
+    `view.start_runs(<every manifest world>)` replaces `create_container` — `runs/`, then the
+    arm roster), then the siblings started."""
     from defender.tests._data_root_1078 import set_up_tenant
 
     acme = set_up_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), "acme")
-    acme.runs_repository().episode(episode.dir.name, held=episode).create_container()
+    acme.runs_repository().episode(episode.dir.name, held=episode).start_runs(list(T.WORLDS))
     return branch_cli().start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme")
 
 
@@ -261,7 +261,10 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
     assert exits == {"b": 0, "c": 0}
     assert len(spawn.argvs) == 2
     assert_real_folder(ep / "runs")
-    assert T.mod("_tenant").read_tenant(ep / "runs").tenant_id == "acme"
+    # #1187 declared change 6 (R1): the arm container holds no `_tenant.json`; an arm's tenant
+    # is the one whose folder holds the episode.
+    assert not (ep / "runs" / "_tenant.json").exists(), (
+        "start_family wrote the retired tenant record into the arm container")
 
 
 @pytest.mark.parametrize("reach", REACH)
@@ -382,39 +385,6 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
     assert archived == {"b": world}
     assert_real_folder(world)
     assert (world / "report.md").is_file()
-
-
-@pytest.mark.parametrize("reach", REACH)
-@pytest.mark.parametrize("kind", LEAF_LINKS)
-def test_h1_the_archive_refuses_a_link_at_the_run_dir_pointer(tmp_path, host, kind, reach):
-    """The pointer is written last, with `episode.world(label).run_dir_pointer.write(...)`: a
-    link at `worlds/<label>/run_dir` (which the copy lane's destination screen does not judge)
-    is the core's marked ELOOP, the file it reaches keeps its bytes (a dangling link's target is
-    not created) and the link is left.
-
-    A reverted `open(pointer, "w")` writes the run dir's path through the link.
-
-    Control on the same address: the pointer is a plain file naming the run dir."""
-    archive = T.mod("learning.branch.archive")
-    ep = T.episode(tmp_path)
-    run_dir = T.sibling_run_dir(ep / "runs", "b")
-    planted = link_file(ep / "worlds" / "b" / "run_dir", kind, reach=reach, ep=ep, host=host)
-    before, host_before = planted.state(), S.census(host)
-
-    with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: archive.archive_episode(episode, {"b": run_dir}))
-
-    S.assert_refusal(refusal_in(raised), kind, where="the archive's run_dir pointer over a link")
-    assert planted.state() == before, "the run_dir pointer was written through the link"
-    assert S.census(host) == host_before
-    planted.assert_left()
-
-    planted.remove()
-    with S.open_episode(ep) as episode:
-        archive.archive_episode(episode, {"b": run_dir})
-    pointer = ep / "worlds" / "b" / "run_dir"
-    assert_plain_file(pointer)
-    assert pointer.read_text(encoding="utf-8") == f"{run_dir}\n"
 
 
 # =======================================================================================
@@ -724,7 +694,9 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     _base, src = T.runs_base(tmp_path)
-    ep = EH.episode_dir(T.current_tenant().data_root, T.EPISODE_ID)
+    # #1187 (O9): an episode is the tenant's own `<T>/episodes/<id>`; the configured
+    # `episode_dir` resolver is retired, so the address is the tenant's folder.
+    ep = T.current_tenant().episodes / T.EPISODE_ID
     claim = ep / "served" / ".priming"
     priming, second_done = threading.Event(), threading.Event()
     first: dict[str, Any] = {}

@@ -23,7 +23,6 @@ import re
 import pytest
 import yaml
 
-from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 
 from defender.tests import _triplet_947 as T
@@ -138,14 +137,15 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     again inside each sibling process — the family-level pass is an early exit, never a
     substitute for the sibling's own.
 
-    Both CONFIGURED roots point inside `tmp_path`: the episodes root is read from configuration
-    and the launcher refuses to invent one, so a scenario that drives `main` has to name it or
-    it observes that refusal instead of the thing it is about."""
+    #1187 (O9, declared change 5): the episode is the tenant's own `<T>/episodes/<uuid>`, its id
+    minted by the launcher — so the episode read below is the one folder the launch made there,
+    never a configured root or a composed id."""
     cli = T.mod("learning.branch.cli")
     seen: list[str] = []
     base, src = T.runs_base(tmp_path)
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(base))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    data_root = T.current_tenant().data_root
+    before = set(data_root.glob("*/episodes/*"))
     spawn = T.FakeSpawn()
     # The launch runs the question-writer and then pre-flight, which refuses the family (no
     # world declares a fact, so nothing calibrates) before any oracle turn or sibling: every
@@ -161,8 +161,9 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     assert rc == 1
     assert questioner.calls == 3
     assert spawn.launches == []
-    with Episode.open(
-            EH.episode_dir(T.current_tenant().data_root, T.EPISODE_ID)) as episode:
+    made = sorted(set(data_root.glob("*/episodes/*")) - before)
+    assert len(made) == 1, f"expected the launch's one episode under <T>/episodes: {made}"
+    with Episode.open(made[0]) as episode:
         outcome = T.sym("learning.branch.outcome", "read_outcome")(episode.view())
     assert outcome["outcome"] == "refused", outcome
     assert "carries a fact" in outcome["reason"], outcome

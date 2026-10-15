@@ -25,7 +25,6 @@ from typing import Any
 import pytest
 
 from defender.tests import _spec791
-from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender._episode_handle import Episode  # noqa: E402
 from defender.run_repository import RunId, RunRefused
@@ -78,13 +77,15 @@ def _accepted(argv: list[str], rec: H.Recorder) -> dict[str, Any]:
     return rec.materialize_calls[0]
 
 
-def _sibling(tmp_path: Path, root: Path, tenant_id: str = H.VALID_ID, *, monkeypatch: Any,
-             record: str | None = "same", row: bool = True) -> tuple[Path, Path]:
-    """A source run at T's tenant location plus an episode manifest naming it (outside the data
-    root), its container made with T's record as the launcher leaves it, and the episodes base
-    pointed at it (#1105 PR 2). Returns (source run dir, manifest)."""
-    _base, src = H.tenant_source(root, tenant_id, record=record, row=row)
-    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID, monkeypatch=monkeypatch)
+def _sibling(tmp_path: Path, root: Path, tenant_id: str = H.VALID_ID, *, monkeypatch: Any = None,
+             row: bool = True) -> tuple[Path, Path]:
+    """A source run at T's tenant location plus an episode manifest naming it, at
+    `<root>/<T>/episodes/<uuid>` as RUNS leaves it (#1187 Layout A, R2: `runs/` and the arm
+    roster; no container record, R1). Returns (source run dir, manifest). `tmp_path` and
+    `monkeypatch` are unused: no episodes base is configured (O9)."""
+    del tmp_path, monkeypatch
+    _base, src = H.tenant_source(root, tenant_id, row=row)
+    manifest = H.family_for(src)
     return src, manifest
 
 
@@ -214,9 +215,8 @@ def test_d3_materialize_seam_tenant(tmp_path, data_root, monkeypatch):
     assert fresh["tenant"].id == H.VALID_ID, fresh
 
     base = H.runs_dir(data_root, H.VALID_ID)
-    H.plant_record(base, H.VALID_ID)
-    src = H.source_run(base)
-    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID, monkeypatch=monkeypatch)
+    src = H.source_run(base)  # #1187 (R1): no runs-base record; the run's tenant is its place
+    manifest = H.family_for(src)
     sibling = _accepted(H.sibling_argv(manifest, "b", "--tenant", H.VALID_ID),
                         H.Recorder(tmp_path / "sib"))
     assert isinstance(sibling.get("tenant"), H.tenant().Tenant), sibling
@@ -328,32 +328,6 @@ def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, 
     assert manifest.is_file(), "the prepared episode dir is not the sibling's to remove"
 
 
-def test_s7_j42_resume_manifest_resolved_at_entry(tmp_path, data_root, monkeypatch):
-    """run.py --episode under a relative or symlinked episodes base (#1105 PR 2: the sibling
-    takes the episode's id, and its location is the configured `DEFENDER_EPISODES_BASE`)
-    resolves it at entry, before deriving episode_dir, so the sibling's runs base is the same
-    absolute EpisodePaths(ep).runs whatever the invoking cwd.
-
-    Observed on what the materialize seam is handed: the world's `episode_dir`, the root
-    `materialize_run`'s sibling arm derives `EpisodePaths(world.episode_dir).runs` from."""
-    _src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
-    episode = manifest.parent.resolve()
-    expected_runs = H.S.EpisodePaths(episode).runs
-    link = tmp_path / "episodes-link"
-    link.symlink_to(manifest.parent.parent, target_is_directory=True)
-    monkeypatch.chdir(tmp_path)
-    for n, base in enumerate((Path("episodes"), link)):
-        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(base))
-        spelling = base / T.EPISODE_ID / "family.yaml"
-        got = _accepted(H.sibling_argv(spelling, "b", "--tenant", "acme"),
-                        H.Recorder(tmp_path / "sib" / str(n)))
-        world = got["world"]
-        assert Path(world.episode_dir).is_absolute(), f"{spelling}: {world.episode_dir}"
-        assert Path(world.episode_dir) == episode, (
-            f"{spelling}: the manifest was not resolved at entry ({world.episode_dir})")
-        assert H.S.EpisodePaths(world.episode_dir).runs == expected_runs
-
-
 # ======================================================================================
 # The data root seen from the request (settled s003/s004/s008/s009/s040/s042)
 # ======================================================================================
@@ -455,31 +429,6 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     assert H.census(old) == old_census, "the old data root was touched"
 
 
-@pytest.mark.parametrize("body", ["{torn", '{"tenant_id": "../x", "base_world_id": "w", "created_at": "t"}'])
-def test_a_corrupt_runs_base_record_is_a_run_py_refusal_not_a_traceback(tmp_path, data_root,
-                                                                         body):
-    """A runs-base record that does not parse, or names an off-grammar tenant, reaches the
-    operator as ONE `[run.py] ...` line naming the record — the owner's `TenantRecordCorrupt`
-    is a `TenantRefused`, which the entry's run-dir builder catches — never a traceback. The
-    control: the same call over a sound record builds the run dir."""
-    H.make_tenant(data_root, H.VALID_ID)
-    base = H.runs_dir(data_root, H.VALID_ID)
-    base.mkdir(parents=True)
-    (base / H.RECORD_NAME).write_text(body, encoding="utf-8")
-    alert = H.plant_alert(tmp_path / "in")
-    with pytest.raises(SystemExit) as refused:
-        H.run_py()._materialize_run(alert, None, tenant=H.accept(data_root, H.VALID_ID),
-                                     model=None)
-    said = H.refusal_text(refused.value)
-    assert said.startswith("[run.py] "), said
-    assert str(base / H.RECORD_NAME) in said, said
-
-    (base / H.RECORD_NAME).unlink()
-    run_dir = H.run_py()._materialize_run(alert, None, tenant=H.accept(data_root, H.VALID_ID),
-                                     model=None).run_dir
-    assert Path(run_dir).is_dir()
-
-
 def test_unknown_tenant_with_a_pinned_run_id(tmp_path, data_root):
     """`--run-id X --tenant acme` with no row, but a hand-made <root>/acme/runs/X/: refused by
     O2 before materialize; nothing under acme/ is read, written or changed."""
@@ -550,7 +499,11 @@ def test_o3_grammar_refusal_parity(tmp_path, data_root, bad):
 
     The record reads are real bytes on disk: a row and a runs-base record whose `tenant_id`
     field carries the refused id (at ed5386bc a runs-base record's `tenant_id` of `../../x`
-    reads back unchallenged, C23)."""
+    reads back unchallenged, C23).
+
+    #1187 declared change 6 (R1): the runs-base record is retired — nothing reads it, so its
+    half (the repository's listing and `ensure_runs_base_record` refusing a record naming the
+    refused id) is gone; the row read keeps the grammar. (Name kept.)"""
     fresh = tmp_path / "fresh-root"
     proc = H.run_setup(fresh, bad)
     H.assert_setup_ran(proc)
@@ -569,17 +522,9 @@ def test_o3_grammar_refusal_parity(tmp_path, data_root, bad):
 
     rows = tmp_path / "rows"
     H.plant_row(rows, H.VALID_ID, row_tenant_id=bad)
-    H.owner_refusal(H.require_tenant, rows, H.VALID_ID)
-    base = H.runs_dir(data_root, H.VALID_ID)
-    H.plant_record(base, bad)
-    (base / "r1").mkdir()
     reads = H.census(tmp_path)
-    # #1105 PR 2: the runs-base record is read through the tenant's repository
-    # (`tenant_of_run_dir` is gone, F-13) — its listing, which refuses the record as
-    # `TenantRefused` (an open answers `RunUnreachable` from it, #1105 PR 2 review).
-    H.owner_refusal(lambda: H.accept(data_root, H.VALID_ID).runs_repository().list())
-    H.owner_refusal(H.ensure_runs_base_record, base, H.VALID_ID)
-    assert H.census(tmp_path) == reads, "a refused record read wrote something"
+    H.owner_refusal(H.require_tenant, rows, H.VALID_ID)
+    assert H.census(tmp_path) == reads, "a refused row read wrote something"
 
 
 def _confined(text: str, value: str, *, surface: str) -> None:
@@ -605,9 +550,11 @@ def test_g_r6_refusal_confinement(tmp_path, data_root, value):
     output.
 
     Four surfaces (§7 R-g_r6): create_tenant's refusal, `run.py main --tenant`'s exit,
-    `tenant.py setup`'s output, and the branch launcher's refusal of a source whose runs-base
-    record carries the value (the launcher takes no --tenant; its tenant comes off the
-    record)."""
+    `tenant.py setup`'s output, and the branch launcher's refusal.
+
+    #1187 declared change 6 (R1): the runs-base record is retired, so the launcher's surface is
+    its refusal of the value as the REQUEST's `--tenant` (#1105 PR 2 made the launcher take
+    one) — never a record carrying it, which nothing reads any more. (Name kept.)"""
     _confined(str(H.owner_refusal(H.create_tenant, tmp_path / "c", value)), value,
               surface="create_tenant")
     said = _refused([str(H.plant_alert(tmp_path / "in")), "--tenant", value],
@@ -620,8 +567,7 @@ def test_g_r6_refusal_confinement(tmp_path, data_root, value):
 
     H.make_tenant(data_root, H.VALID_ID)
     base = H.runs_dir(data_root, H.VALID_ID)
-    H.plant_record(base, value)
     src = H.source_run(base)
-    launched = H.drive_launch(src)
+    launched = H.drive_launch(src, tenant_id=value)
     assert isinstance(launched, H.branch_cli().LauncherRefused), launched
     _confined(H.refusal_text(launched), value, surface="the branch launcher")

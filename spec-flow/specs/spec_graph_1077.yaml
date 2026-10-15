@@ -436,13 +436,15 @@ demands:
     note: "claim R11: `materialize_run_dir` is the single host materialisation site, and it already constructs `RunPaths`."
   - id: tenant_record_created_once
     kind: behavior
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design items R1 and R1b (declared changes 6 and 11): run setup writes no `_tenant.json` and mints no `base_world_id`; `test_the_tenant_record_is_created_once_under_the_runs_base`, which discharged this demand, was deleted with them. The replacement (no record is written for a minted or a pinned run) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record`.'
     source: "20-demands.md d18"
     binds:
       - "tenant_record"
       - "tenant_record.identity"
       - "interacts(materialize_run_dir->tenant_record)"
-    discharged_by: test_the_tenant_record_is_created_once_under_the_runs_base
     seed_docstring: >-
       The first materialisation creates `<runs_base>/_tenant.json` naming the request's tenant,
       a fresh `base_world_id` and a `created_at`, and a second materialisation reuses it
@@ -461,13 +463,15 @@ demands:
       (demand h38). `tenant_record`'s identity stays keyed on `runs_base_path`.
   - id: tenant_record_write_seam
     kind: seam
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes the tenant record''s write and read seam; `test_the_tenant_record_is_written_through_write_guarded_and_read_through_read_guarded`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "20-demands.md d19"
     binds:
       - "interacts(_tenant->tenant_record)"
       - "_io.access[write_guarded]"
       - "_io.access[read_guarded]"
-    discharged_by: test_the_tenant_record_is_written_through_write_guarded_and_read_through_read_guarded
     seed_docstring: >-
       The tenant record is created through `_io.write_guarded` and read through `read_guarded`,
       never through a raw `os.open`.
@@ -477,10 +481,12 @@ demands:
       about NEW seams, so F11 is unaffected — and must not be quietly converted by the move.
   - id: unparseable_tenant_refuses_run
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes an unparseable tenant record''s refusal; `test_an_unparseable_tenant_record_refuses_the_run`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "20-demands.md d20"
     binds: ["tenant_record.domain.distinguished[unparseable]", "materialize_run_dir"]
-    discharged_by: test_an_unparseable_tenant_record_refuses_the_run
     seed_docstring: "A tenant record that fails to parse refuses the run rather than degrading to a default."
   - id: tenant_record_not_at_runs_base_parent
     kind: negative
@@ -769,10 +775,12 @@ demands:
     note: "POSITIVE CONTROL: `episode_paths_owns_enumerated_names` (d39) — every name still resolves, on the owner."
   - id: episodes_root_stays_in_cli
     kind: negative
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — decision 3 and declared change 5 (O9): `DEFENDER_EPISODES_BASE` is read by nothing, `episodes_root` and its refusals are retired, and episodes are created only at the tenant''s own episodes folder, which removes the launcher''s episodes-root resolver this demand kept out of the owner; `test_the_episodes_root_resolver_is_not_moved_into_the_owner`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_episode_claims_a_uuid_folder_under_the_tenant_and_reads_no_environment` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_episodes_variable_changes_nothing_and_no_episodes_root_refusal_fires`.'
     source: "20-demands.md d41"
     binds: ["EpisodePaths", "episodes_root"]
-    discharged_by: test_the_episodes_root_resolver_is_not_moved_into_the_owner
     seed_docstring: >-
       The episodes root is still resolved by the launcher's own `episodes_root`, and the owner
       does not define one.
@@ -932,10 +940,12 @@ demands:
       for ordinary components.
   - id: tenant_record_unreachable_from_box
     kind: negative
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor read, so there is no tenant record beside the run directory for a box mount to reach; `test_the_tenant_record_sits_outside_every_box_mount`, which discharged this demand, was deleted with it. The replacement (what sits beside an arm''s folder — the roster, the manifest, a sibling arm — is outside its box) is pinned by `defender/tests/ids_1187/test_1187_arm_box.py::test_1187_an_arm_box_cannot_see_the_roster_the_manifest_or_a_sibling_arm`.'
     source: "20-demands.md d49"
     binds: ["tenant_record.identity", "box_spec", "runs_base"]
-    discharged_by: test_the_tenant_record_sits_outside_every_box_mount
     seed_docstring: "The tenant record's directory is mounted into no box, while the run dir still is."
     note: >-
       `rejected` (20-demands.md): N9 — a hostile local user on a shared `/tmp` is outside the
@@ -1027,20 +1037,24 @@ demands:
   # ---- The tenant record (settled arms) ----------------------------------------------------
   - id: s06_tenant_record_malformed_json
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes a malformed tenant record''s refusal; `test_tenant_record_malformed_json`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "45-dispositions.md settled (non-escalated)"
     binds: ["tenant_record.domain.distinguished[malformed_json]", "materialize_run_dir"]
-    discharged_by: test_tenant_record_malformed_json
     seed_docstring: >-
       A tenant record whose bytes are not parseable JSON refuses the run — the caller observes
       the run refused, not degraded, unlike the provenance stamp which degrades on old or
       partial data.
   - id: s07_tenant_record_removed_between_two_runs
     kind: behavior
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design items R1 and R1b (declared changes 6 and 11): no tenant record exists to be removed or re-minted, and no base world is stamped; `test_the_tenant_record_is_removed_between_two_runs_of_one_tenant`, which discharged this demand, was deleted with them. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run` and `defender/tests/ids_1187/test_1187_display_facts.py::test_a_natural_run_is_stamped_with_no_world_id`.'
     source: "45-dispositions.md settled (non-escalated)"
     binds: ["tenant_record.identity", "interacts(_tenant->tenant_record)"]
-    discharged_by: test_the_tenant_record_is_removed_between_two_runs_of_one_tenant
     seed_docstring: >-
       'Created once when absent' is the only stated rule, so a materialisation after the record
       was deleted recreates it with a freshly-minted `base_world_id`, silently re-minting the
@@ -1048,19 +1062,23 @@ demands:
     note: "Judge's note: settled on D2's own words; the identity discontinuity it produces is cluster G's."
   - id: s08_tenant_record_empty_file
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes an empty tenant record''s refusal; `test_tenant_record_empty_file`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "45-dispositions.md settled (non-escalated)"
     binds: ["tenant_record.domain.distinguished[empty_file]"]
-    discharged_by: test_tenant_record_empty_file
     seed_docstring: >-
       An empty tenant-record file fails `json.loads` unambiguously, so D2's 'fails to parse ->
       refuses the run' applies directly.
   - id: s09_tenant_created_at_has_no_reader
     kind: negative
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes the record''s `created_at` field; `test_the_tenant_records_created_at_is_read_by_nobody`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "45-dispositions.md settled (non-escalated); red flag 4"
     binds: ["interacts(_tenant->tenant_record).payload", "tenant_record"]
-    discharged_by: test_the_tenant_records_created_at_is_read_by_nobody
     seed_docstring: >-
       D2 writes `created_at` at creation and no design section reads it: as written it is a
       write-only field, and nothing in this change consumes it.
@@ -1268,13 +1286,15 @@ demands:
       name: the doc requires no regression on this axis at any step.
   - id: s26_tenant_record_and_first_run_born_in_one_call
     kind: behavior
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design items R1 and R1b (declared changes 6 and 11): run setup creates no tenant record, so there is no record-then-stamp ordering; `test_tenant_record_and_first_run_are_born_in_the_same_materialize_call`, which discharged this demand, was deleted with them. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`.'
     source: "45-dispositions.md settled (non-escalated)"
     binds:
       - "interacts(materialize_run_dir->tenant_record)"
       - "interacts(materialize_run_dir->RunProvenance)"
       - "drives(materialize_run_dir->_tenant)"
-    discharged_by: test_tenant_record_and_first_run_are_born_in_the_same_materialize_call
     seed_docstring: >-
       The tenant record and its `base_world_id` exist before the same call's provenance stamp is
       written: create-then-stamp is the only ordering consistent with D2's 'created once when
@@ -1292,10 +1312,12 @@ demands:
     note: "THIS IS THE C16 REFUTATION AS A TEST. A demand or test asserting the opposite is refused by the Resolution."
   - id: s28_world_token_for_the_first_run_of_a_new_tenant
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1b (declared change 11): a natural run stamps no world id, so the first run of a new tenant mints no base world; `test_world_token_requested_for_the_first_ever_run_of_a_brand_new_tenant`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_display_facts.py::test_a_natural_run_is_stamped_with_no_world_id` and, in this suite, by the flipped `test_materialize_stamps_the_tenant_and_world_from_the_record`.'
     source: "45-dispositions.md settled (non-escalated)"
     binds: ["RunProvenance.domain.distinguished[unforked]", "tenant_record.identity"]
-    discharged_by: test_world_token_requested_for_the_first_ever_run_of_a_brand_new_tenant
     seed_docstring: >-
       The very first run mints the tenant record and its base world inside its own materialize
       call, and is stamped with that freshly-minted `base_world_id` before the box exists.
@@ -1303,10 +1325,12 @@ demands:
   # ---- ESCALATED AND CONVERGED (11). Eight carry only the hedge — see the block warning. ----
   - id: s29_a_second_runs_base_live_in_one_process
     kind: behavior
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes a per-runs-base record (an arm container holds no record either); `test_a_second_runs_base_is_live_in_the_same_process`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "45-dispositions.md settled (escalated, 2/2 converged)"
     binds: ["tenant_record.identity", "runs_base.identity"]
-    discharged_by: test_a_second_runs_base_is_live_in_the_same_process
     seed_docstring: >-
       Two runs bases live at once — a sibling's `<episode>/runs` alongside the tenant's own
       `<data root>/<tenant>/runs` — and each independently creates and reads its OWN
@@ -1325,10 +1349,12 @@ demands:
       seed_docstring); the 1:1-with-its-runs-base structural claim survives unchanged.
   - id: s30_tenant_record_path_occupied_by_a_non_regular_file
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes the record path''s occupancy check; `test_the_tenant_records_path_is_occupied_by_something_that_is_not_a_regular_file`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "45-dispositions.md settled (escalated, 2/2 converged)"
     binds: ["tenant_record.domain.distinguished[non_regular_file]", "_io.access[write_guarded]"]
-    discharged_by: test_the_tenant_records_path_is_occupied_by_something_that_is_not_a_regular_file
     seed_docstring: >-
       With something that is not a regular file at `<runs_base>/_tenant.json`, the alias-refusing
       staged create fails, and because the tenant record is an identity-bearing write the run
@@ -1340,10 +1366,12 @@ demands:
       retried (demand h24).
   - id: s31_tenant_id_that_is_not_the_built_in_default
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes the record as the authority for the stamped tenant (the stamped tenant is the request''s, pinned in this suite by the flipped `test_materialize_stamps_the_tenant_and_world_from_the_record`); `test_a_tenant_record_whose_tenant_id_is_not_the_built_in_default`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "45-dispositions.md settled (escalated, 2/2 converged)"
     binds: ["tenant_record.domain.distinguished[non_default_tenant_id]"]
-    discharged_by: test_a_tenant_record_whose_tenant_id_is_not_the_built_in_default
     seed_docstring: >-
       A tenant record is read and stamped exactly as it names its tenant: the record is the
       sole authority for the stamped tenant, and the handle neither refuses nor rewrites it.
@@ -1553,12 +1581,14 @@ demands:
     note: R1 obligation on interacts(Run->run_dir).payload — see gate.obligations.
   - id: g02_tenant_record_payload_shape
     kind: shape
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes the record''s three-slot payload; `test_tenant_records_payload_has_all_three_slots_bound`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: gate leaf, phase D step 6 (spec-graph gate --residue, obligation minted from the rule's own
       obligation clause)
     binds:
     - interacts(_tenant->tenant_record).payload
-    discharged_by: test_tenant_records_payload_has_all_three_slots_bound
     seed_docstring: 'The tenant record `_tenant` writes has `tenant_id`, `base_world_id` and `created_at`
       all bound on every write, matching structure''s declared `invariants: [all-slots-bound]` for the `tenant_record.payload`
       facet.'
@@ -2032,12 +2062,14 @@ demands:
       on purpose while cluster E was open.
   - id: h19_tenant_record_corruption_refuses_the_run
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes a corrupt record''s refusal; `test_a_tenant_record_missing_a_field_or_carrying_a_wrong_type_refuses_the_run`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "§7 rework 2026-09-21; 70-resolutions.md decision 4"
     binds:
       - "tenant_record.domain.distinguished[missing_required_field]"
       - "tenant_record.domain.distinguished[wrong_type_field]"
-    discharged_by: test_a_tenant_record_missing_a_field_or_carrying_a_wrong_type_refuses_the_run
     seed_docstring: >-
       The tenant record is the sole exception to the read-as-`None` policy: one missing a required
       field, or carrying a field of the wrong type, refuses the whole run.
@@ -2120,13 +2152,15 @@ demands:
   # ---- Decision 7 — failure policy (cluster F) ---------------------------------------------
   - id: h24_identity_bearing_writes_fail_loudly
     kind: behavior
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes the record''s one-attempt create (the deleted test drove only the record write, never the stamp); `test_a_failed_tenant_or_stamp_write_fails_the_run_loudly_and_is_never_retried`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "§7 rework 2026-09-21; 70-resolutions.md decision 7"
     binds:
       - "interacts(_tenant->tenant_record)"
       - "interacts(materialize_run_dir->RunProvenance)"
       - "materialize_run_dir"
-    discharged_by: test_a_failed_tenant_or_stamp_write_fails_the_run_loudly_and_is_never_retried
     seed_docstring: >-
       A failed write of the tenant record or of the provenance stamp fails the run loudly and is
       never silently retried.
@@ -2350,13 +2384,15 @@ demands:
   # ---- Decision 13 (PARTIALLY DISSOLVED) — tenant record scope (cluster G) -----------------
   - id: h37_the_tenant_record_create_race_loser_rereads
     kind: uniqueness
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes the record''s create race; `test_the_loser_of_a_tenant_record_create_race_discards_its_value_and_rereads`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "§7 rework 2026-09-21; 70-resolutions.md decision 13"
     binds:
       - "tenant_record.identity"
       - "interacts(_tenant->tenant_record)"
       - "interacts(_tenant->runs_base)"
-    discharged_by: test_the_loser_of_a_tenant_record_create_race_discards_its_value_and_rereads
     seed_docstring: >-
       The loser of a tenant-record create race discards the value it was about to write and reads
       the winner's record instead, with no retry and no error surfaced. (
@@ -2387,12 +2423,14 @@ demands:
       CONTROL: d18 — an ordinary run dir IS created beside the record.
   - id: h39_a_stamp_disagreeing_with_its_bases_record_is_not_reconciled
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor judged (a run''s tenant follows from its location under the accepted tenant''s folder), which removes a record a stamp could disagree with; `test_a_stamp_disagreeing_with_the_record_at_its_current_base_is_left_alone`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_run_setup_writes_no_tenant_record_for_a_minted_or_a_pinned_run`, `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_makes_the_runs_folder_and_writes_no_tenant_record` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
     source: "§7 rework 2026-09-21; 70-resolutions.md decision 13"
     binds:
       - "RunProvenance.domain.distinguished[tenant_disagrees]"
       - "tenant_record.domain.distinguished[non_default_tenant_id]"
-    discharged_by: test_a_stamp_disagreeing_with_the_record_at_its_current_base_is_left_alone
     seed_docstring: >-
       A run whose stamp carries a tenant the record at its current base does not name is read back
       unchanged: no reconciliation, no migration, no divergence check.
@@ -2535,12 +2573,14 @@ demands:
       unstamped sibling cannot silently shrink the comparison.
   - id: h48_the_familys_base_world_lives_in_the_family_record
     kind: shape
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1b (declared change 11): `base_world_id` lived only in `_tenant.json` and is retired, so the family stamp carries no base world; `test_the_family_record_carries_the_familys_base_world`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_display_facts.py::test_the_launchers_family_stamp_has_no_base_world_id`.'
     source: "§7 rework 2026-09-21; 70-resolutions.md decision 15"
     binds:
       - "interacts(_write_family_stamp->episode_dir).payload"
       - "episode_dir.identity"
-    discharged_by: test_the_family_record_carries_the_familys_base_world
     seed_docstring: >-
       The family record carries the family's base world, so a family whose every member is a
       forked sibling still has one carrier for the base world lessons attribution keys on.
@@ -2712,13 +2752,15 @@ demands:
   # ---- Decision 22 — `Run.for_tenant`'s tenant-argument mismatch (finding 5) ---------------
   - id: h55_for_tenant_refuses_a_tenant_the_record_disagrees_with
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1187 — design item R1 (declared change 6): the runs container''s `_tenant.json` is neither written nor read, and `Run.for_tenant`, which judged its tenant argument against that record, is replaced by `Run.under(container, run_id, tenant_id=)` (a run''s tenant is the one whose folder holds it), so there is no record for an argument to disagree with; `test_for_tenant_refuses_a_tenant_id_the_record_at_the_resolved_base_disagrees_with`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_container_with_no_record_opens_lists_and_hands_out_every_run` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_another_tenants_episode_is_absent_to_this_tenants_repository`.'
     source: "§7 final resolutions 2026-09-21; 70-resolutions.md decision 22"
     binds:
       - "Run.access[for_tenant]"
       - "tenant_record.domain.distinguished[non_default_tenant_id]"
       - "interacts(Run->tenant_record)"
-    discharged_by: test_for_tenant_refuses_a_tenant_id_the_record_at_the_resolved_base_disagrees_with
     seed_docstring: >-
       `Run.for_tenant(tenant_id, run_id)` refuses when the `tenant_id` argument disagrees with
       the tenant record actually stored at the resolved runs base, and the refusal names both.

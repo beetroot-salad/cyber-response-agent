@@ -325,44 +325,19 @@ def write_tool_trace(run_dir: Path, rows: list[dict[str, Any]]) -> Path:
 def page_tenant() -> Any:
     """The tenant a page is rendered for (#1105 PR 2, declared change 4: `render_episode(runs,
     episode_id)` renders an episode of `runs`' tenant): this test data root's one tenant
-    (`_triplet_947.current_tenant`), set up from the committed fixture when absent."""
+    (`_triplet_947.current_tenant`), set up from the committed fixture when absent — the tenant
+    whose `<T>/episodes/` the fixture episode sits under (#1187)."""
     return T.current_tenant()
-
-
-def plant_container_record(episode_dir: Path) -> None:
-    """`<episode>/runs/_tenant.json` naming the page's tenant, through the real writer — what
-    the launcher leaves when it makes the siblings' container (`EpisodeRuns.create_container`;
-    the page's view refuses a container without one, #1105 PR 2 declared change 4) — when
-    `runs/` is a real directory holding no record entry. Anything else is left as planted: no
-    `runs/` (an episode stopped before RUNS), a link or a file there, a container the scenario
-    made unlistable or unsearchable (nothing inside it is touched: the page reads such a
-    container as absent, rev 5.1 S1), or a record of any kind already present (a scenario's
-    own). The page helpers below call it before each render; `sample_episode` itself leaves the
-    container as the pre-#1078 shape it always was (`test_dc4_a_container_with_no_record_…`
-    builds on that)."""
-    from defender import _tenant
-
-    runs = Path(episode_dir) / "runs"
-    if runs.is_symlink() or not runs.is_dir():
-        return
-    if not os.access(runs, os.R_OK | os.X_OK):
-        return
-    record = runs / _tenant.TENANT_RECORD_NAME
-    if record.is_symlink() or record.exists():
-        return
-    _tenant.ensure_runs_base_record(runs, page_tenant().id)
 
 
 def render_episode(episode_dir: Path, *, module: Any = None) -> Path:
     """The page's in-process door, by id (#1105 PR 2): `render_episode(runs, episode_id)` for
-    the episode at `episode_dir`, with `runs` the page tenant's repository and the configured
-    episodes base pointed at `episode_dir.parent` for the call (the container's record ensured
-    first, `plant_container_record`). Returns what it returns."""
+    the episode at `episode_dir`, with `runs` the repository of the tenant whose `<T>/episodes/`
+    holds it (#1187: no container record, no configured episodes base). Returns what it
+    returns."""
     d = Path(episode_dir).absolute()
     target = module if module is not None else page_module()
-    plant_container_record(d)
-    with J.episodes_base(d.parent):
-        return target.render_episode(page_tenant().runs_repository(), d.name)
+    return target.render_episode(J.episode_runs_for(d), d.name)
 
 
 def load_episode(episode_dir: Path, *, module: Any = None) -> Any:
@@ -370,9 +345,7 @@ def load_episode(episode_dir: Path, *, module: Any = None) -> Any:
     opened by id the way `render_episode` opens it (#1105 PR 2)."""
     d = Path(episode_dir).absolute()
     target = module if module is not None else page_module()
-    plant_container_record(d)
-    with J.episodes_base(d.parent), \
-            target.open_episode_view(page_tenant().runs_repository(), d.name) as view:
+    with target.open_episode_view(J.episode_runs_for(d), d.name) as view:
         return target.load_episode(view)
 
 
@@ -381,32 +354,29 @@ def build_page(episode_dir: Path, *, module: Any = None) -> str:
     id the way `render_episode` opens it (#1105 PR 2); nothing is written."""
     d = Path(episode_dir).absolute()
     target = module if module is not None else page_module()
-    plant_container_record(d)
-    with J.episodes_base(d.parent), \
-            target.open_episode_view(page_tenant().runs_repository(), d.name) as view:
+    with target.open_episode_view(J.episode_runs_for(d), d.name) as view:
         return target.build_page(view)
 
 
 def cli_on(episode_dir: Path, capsys, *, module: Any = None) -> tuple[int, str, str]:
-    """`cli` for the episode at `episode_dir`, by id: `--tenant T <episode_id>` under the
-    episodes base that holds it (#1105 PR 2, declared change 4)."""
-    d = Path(episode_dir)
-    plant_container_record(d)
-    return cli(cli_argv(d), capsys, module=module, episodes_base=d.parent)
+    """`cli` for the episode at `episode_dir`, by id: `--tenant T <episode_id>`, T the tenant
+    whose `<T>/episodes/` holds it (#1105 PR 2, declared change 4; #1187 Layout A)."""
+    return cli(cli_argv(Path(episode_dir)), capsys, module=module)
 
 
 def cli_argv(episode_dir: Path) -> list[str]:
     """The page CLI's arguments for the episode at `episode_dir` (#1105 PR 2, declared change 4
-    and J8): `--tenant T <episode_id>`; the caller points the episodes base at its parent."""
-    return ["--tenant", str(page_tenant().id), Path(episode_dir).name]
+    and J8): `--tenant T <episode_id>`, T the tenant whose `<T>/episodes/` holds it."""
+    return ["--tenant", J.episode_tenant_of(Path(episode_dir)), Path(episode_dir).name]
 
 
 def run_dir(episode_dir: Path, label: str, *, cost: float | Any = 0.25,
             duration_ms: int | Any = 180_000, result: bool = True, runtime_html: bool = True,
             events: list[dict[str, Any]] | None = None) -> Path:
-    """`runs/<episode_id>-<label>/` — the sibling's run dir plus its scrub sidecar
-    (`_triplet_947.sibling_run_dir`), with `tool_trace.jsonl` ending in a result event and the
-    `runtime.html` the run's own visualizer leaves (x11)."""
+    """`runs/<arm id>/` — the sibling's run dir at the id the episode's arm roster holds for
+    `label` (#1187), plus its scrub sidecar (`_triplet_947.sibling_run_dir`), with
+    `tool_trace.jsonl` ending in a result event and the `runtime.html` the run's own visualizer
+    leaves (x11)."""
     runs = Path(episode_dir) / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     rd = T.sibling_run_dir(runs, label)
@@ -743,7 +713,8 @@ class Episode:
         return self.dir / "worlds" / label
 
     def run(self, label: str) -> Path:
-        return self.dir / "runs" / f"{EPISODE_ID}-{label}"
+        """The arm folder of `label`: `runs/<the id the arm roster holds for it>` (#1187)."""
+        return self.dir / "runs" / T.read_roster(self.dir)[label]
 
     def record(self, name: str) -> Path:
         return self.dir / name
@@ -770,6 +741,10 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
                                            attempts=1)]})
     # the manifest the sample carries: base story, a real axis per sibling, the control's null
     T.write_family(ep, manifest)
+    # #1187 (R2): an archived, judged episode reached RUNS, so its arm roster names every
+    # manifest world (written whether or not the arm folders are kept, `runs=`).
+    for label in WORLDS:
+        T.roster_arm_id(ep, label)
     # The family stamp is `stamp`'s alone (`write_stamp` below), so `stamp=False` means absent.
     write_outcome(ep, family_stamp=False)
     # the episode's copy of the source alert names the rule the header shows
@@ -837,11 +812,18 @@ def _leads(world_dir: Path, label: str) -> None:
 
 
 def copy_episode(ep: Episode, dest: Path) -> Episode:
-    """A whole-tree copy under another root AND another directory name — the O6 fixture
-    (correction 4: the page takes the episode id from the manifest, never the directory)."""
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(ep.dir, dest, symlinks=True)
-    return Episode(dest, ep.tmp_path)
+    """A whole-tree copy of `ep` named `dest.name` — the O6 fixture.
+
+    #1187 (Layout A, O9): an episode is reached by id only under its tenant's `<T>/episodes/`,
+    so `dest.parent` is taken as the DATA ROOT of a scene of its own (`T.tenant_episodes`) and
+    the copy lands at `<dest.parent>/<T>/episodes/<dest.name>` — another root, as O6 wants. Its
+    name stays `dest.name`: a caller keeping the id (`.../<ep.dir.name>`) gets a copy the page
+    reaches; one naming another folder gets the renamed copy R5 refuses (a manifest names its
+    own folder — correction 4's "the id from the manifest, never the directory" is the half
+    #1187 turns into a refusal)."""
+    target = T.tenant_episodes(dest.parent) / dest.name
+    shutil.copytree(ep.dir, target, symlinks=True)
+    return Episode(target, ep.tmp_path)
 
 
 # --------------------------------------------------------------------------------------
@@ -873,14 +855,11 @@ def read_page(ep: Episode | Path) -> Page:
     return Page.parse(page.read_text(encoding="utf-8"))
 
 
-def cli(argv: list[str], capsys, *, module: Any = None,
-        episodes_base: Path | None = None) -> tuple[int, str, str]:
-    """`visualize_episode.main(argv)` with its stdout / stderr captured — under the episodes
-    base `episodes_base` when given (an id-taking argv names an episode under it)."""
+def cli(argv: list[str], capsys, *, module: Any = None) -> tuple[int, str, str]:
+    """`visualize_episode.main(argv)` with its stdout / stderr captured. An id-taking argv names
+    an episode under its tenant's `<T>/episodes/` (#1187: no episodes base is configured)."""
     target = module if module is not None else page_module()
-    with (J.episodes_base(episodes_base) if episodes_base is not None
-          else contextlib.nullcontext()):
-        rc = target.main(argv)
+    rc = target.main(argv)
     out = capsys.readouterr()
     return rc, out.out, out.err
 

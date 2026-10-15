@@ -144,6 +144,7 @@ import contextlib
 import hashlib
 import importlib
 import json
+import logging
 import os
 import threading
 import time
@@ -297,6 +298,9 @@ def judge_refused_cls() -> type[BaseException]:
 EPISODE_ID = T.EPISODE_ID
 EPISODE_TOKEN = T.EPISODE_TOKEN
 SOURCE_RUN_ID = T.SOURCE_RUN_ID
+#: The run id a direct (unbranched) investigation fixture runs under (#1187: a uuid4 — `RunId`
+#: admits canonical lowercase UUID text only).
+RUN_ID = "9c2e4b1a-7d3f-4e5a-8b6c-1d2e3f4a5b6c"
 AS_OF = T.AS_OF
 AS_OF_DT = datetime(2026, 7, 28, 16, 18, 45, tzinfo=UTC)
 WORLDS = ("a", "b", "c")
@@ -1245,11 +1249,22 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
 
 
 def load_world(ep: Path, label: str) -> Any:
-    """The sibling's `ResumeWorld` for `label`, through the REAL loader."""
+    """The sibling's `ResumeWorld` for `label`, through the REAL loader, as the sibling builds it
+    after its roster check (#1187): the manifest loaded with the episode's own folder name as the
+    expected id (R5, `expected_episode_id=`), and the world handed the episode's ARM ROSTER
+    (`arm_ids=`, `{label: RunId}`) — its own run id and the redaction set's arm ids come from
+    the roster, never composed (O4, S-red). A hand-built episode with no roster yet gets one
+    here, as RUNS would have written it (`_triplet_947.roster_arm_id`)."""
+    from defender.run_repository import RunId
+
     fam = mod(FAMILY)
-    with mod("_episode_handle").Episode.create(Path(ep)) as handle:
-        family = fam.load_family(handle.view())
-    return fam.resume_world_from(family, label, Path(ep))
+    ep = Path(ep)
+    if not (ep / T.ROSTER_NAME).is_file():
+        T.roster_arm_id(ep, label)
+    arm_ids = {name: RunId.parse(arm) for name, arm in T.read_roster(ep).items()}
+    with mod("_episode_handle").Episode.create(ep) as handle:
+        family = fam.load_family(handle.view(), expected_episode_id=ep.name)
+    return fam.resume_world_from(family, label, ep, arm_ids=arm_ids)
 
 
 def world_ledger(ep: Path, label: str) -> Any:
@@ -1342,7 +1357,7 @@ def plain_registry(est: Estate) -> Any:
                                             grant_home=rt.table_pointer)
 
 
-def run_state(run_dir: Path, run_id: str = "run-1224") -> Any:
+def run_state(run_dir: Path, run_id: str = RUN_ID) -> Any:
     """A fresh run's `RunState` (#1235 round 2) — what a direct registry call's context carries
     when the scenario needs the investigator's clock to pause and resume (a context with no run
     state pauses none). Imported lazily: the module is new in round 2."""
@@ -1408,7 +1423,7 @@ def lead_rows(run_dir: Path) -> list[dict]:
 
 
 def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
-                 run_id: str = "run-1224", limits: Any = None, tenant: Any = None,
+                 run_id: str = RUN_ID, limits: Any = None, tenant: Any = None,
                  **kw: Any) -> tuple[Path, Any]:
     """A whole investigation through the replay harness (the `test_1106_query_lane` shape):
     the main loop dispatches ONE gather lead on `system`, whose scripted turns are
@@ -1421,7 +1436,7 @@ def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system:
 
 
 def drive_gather_run(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
-                     run_id: str = "run-1224", limits: Any = None, tenant: Any = None,
+                     run_id: str = RUN_ID, limits: Any = None, tenant: Any = None,
                      **kw: Any) -> tuple[Path, Any, Any]:
     """`drive_gather`, also handing back the run's one `RunState` (#1235: `drive()` injects it
     and returns it as `["run_state"]`) — where a scenario reads the run's budget or breaker,
@@ -1589,7 +1604,7 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
 
     from defender.run_repository import SessionPaths
 
-    store = ss.open_store(case_id=T.SOURCE_CASE_ID, sessions=SessionPaths(base))
+    store = ss.open_store(case_id=T.source_case_id(src), sessions=SessionPaths(base))
     try:
         session_id = session_for_run(store, src, source_run=_run_handle_1165(src))
         call_id = f"gather-{lead}-after-branch"
@@ -1634,31 +1649,67 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
         seams["verifier"] = verifier.model
     cli = mod(CLI)
     message = ""
-    root = Path(os.environ.get(T.EPISODES_BASE_ENV, "")) if os.environ.get(
-        T.EPISODES_BASE_ENV) else None
-    before = {p.name for p in root.iterdir()} if root is not None and root.is_dir() else set()
+    # #1187 (O9): the episode lands under the launching tenant's own `<T>/episodes/`, no
+    # configured root; the launcher mints its id, so it is found as the ONE new folder there.
+    tenant_id = src.parent.parent.name
+    root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
+    before = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:
         # #1105 PR 2 (declared change 1): the tenant and the source run by id — the source sits
         # at `<data root>/<tenant>/runs/<run id>`.
-        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(BRANCH_MESSAGE_ID),
+        rc = cli.main(["--tenant", tenant_id, src.name, str(BRANCH_MESSAGE_ID),
                        "--continuation-prompt", "go", *argv_extra], spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code
         else:
             rc, message = 2, str(stop.code)
-    # The episode this launch created: the ONE new directory under the configured episodes root
-    # (N17: a launch never reuses a directory, so an implementation may mint a fresh id per
-    # launch); the derived id's directory when nothing new appeared (a refusal before minting).
+    # The episode this launch created: the ONE new folder under the tenant's episodes folder
+    # (N17: a launch never reuses one). A launch refused before it claimed an episode leaves
+    # none, and `ep` is then a name under that folder that nothing made (its records read as
+    # absent).
     fresh = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in before) \
-        if root is not None and root.is_dir() else []
-    if len(fresh) == 1:
-        ep = fresh[0]
-    else:
-        from defender._episode_handle import episode_dir
-
-        ep = episode_dir(T.current_tenant().data_root, EPISODE_ID)
+        if root.is_dir() else []
+    ep = fresh[0] if len(fresh) == 1 else root / NO_EPISODE
+    log_refusal(rc, message)
     return Launch(rc=rc, message=message, spawn=spawn, ep=ep)
+
+
+def log_refusal(rc: Any, message: str) -> None:
+    """Log a launch's refusal (a WARNING on this module's logger), so a test that fails
+    downstream of a refused launch — no episode, no outcome — still carries WHY in its captured
+    log: the refusal text is otherwise held only in the returned `Launch`."""
+    if rc not in (0, None) and message:
+        logging.getLogger(__name__).warning("the launch was refused (rc=%s): %s", rc, message)
+
+
+#: The name `launch()` reports for a launch that made no episode (refused before claiming one):
+#: not a UUID, so no launch can ever make a folder by it.
+NO_EPISODE = "no-episode-was-made"
+
+
+def tenant_episodes(tenant_id: str = FIXTURE_TENANT) -> Path:
+    """`<data root>/<tenant_id>/episodes` — where #1187 (Layout A, O9) puts every episode a
+    launch over that tenant makes."""
+    return Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
+
+
+def new_episode(root: Path, before: set[str]) -> Path:
+    """The ONE folder under `root` whose name is not in `before` (a launch's own episode — the
+    launcher mints its id, N17: it never reuses one), else `root / NO_EPISODE`."""
+    fresh = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in before) \
+        if root.is_dir() else []
+    return fresh[0] if len(fresh) == 1 else root / NO_EPISODE
+
+
+def episode_of(argv: list[str]) -> Path | None:
+    """The episode folder a sibling started with `argv` runs in: `<data root>/<T>/episodes/<ep>`
+    from its own `--tenant` and `--episode` (#1187), or None when either is missing."""
+    flags = {argv[i]: argv[i + 1] for i in range(len(argv) - 1)
+             if argv[i] in ("--tenant", "--episode")}
+    if "--tenant" not in flags or "--episode" not in flags:
+        return None
+    return tenant_episodes(flags["--tenant"]) / flags["--episode"]
 
 
 @dataclass(frozen=True)

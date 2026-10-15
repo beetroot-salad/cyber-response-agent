@@ -55,7 +55,6 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender import _provenance
 from defender._episode_handle import Episode
 from defender._provenance import RunProvenance
@@ -379,8 +378,7 @@ def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incompl
     the pin that the knowledge comparison runs on the siblings' per-process stamps, not only on
     the launcher's capture."""
     T.runs_base(tmp_path)
-    episode_dir = EH.episode_dir(T.current_tenant().data_root, T.EPISODE_ID)
-    launch = A._prepare(tmp_path, spawn=J.FakeSibling(episode_dir, knowledge={"commit": K2}))
+    launch = A._prepare(tmp_path, spawn=J.FakeSibling(knowledge={"commit": K2}))
     assert launch.run(*argv) == 0, "the exit is about the launch; the outcome is the family's"
     assert launch.questioner.calls > 0, "the launch was refused at preflight instead"
     assert sorted(launch.spawn.worlds) == list(T.WORLDS)
@@ -575,15 +573,18 @@ def test_1204_the_default_live_capture_reads_the_episode_tenants_knowledge_clone
 # O3 / D4 — every stamp field is classified, and the classification drives the comparison
 # ---------------------------------------------------------------------------------------
 
-#: D4's classification, as the design states it.
+#: D4's classification, as the design states it. #1187 declared change 11 adds the two display
+#: facts to every natural run's stamp; N5 says no decision compares them, so each is in a class
+#: the check does not compare (`started_at` differs between siblings by construction; the
+#: alert's label is recorded for the page). The class within those two is the contract's pick.
 D4 = {
     "commit": "anchored", "scope": "anchored", "knowledge": "anchored",
     "model": "constant",
     "dirty": "dedicated", "tenant_id": "dedicated",
     "dirty_paths": "informational", "dirty_path_count": "informational",
-    "unavailable": "informational",
+    "unavailable": "informational", "alert_label": "informational",
     "world_id": "expected_to_differ", "parent_run_id": "expected_to_differ",
-    "fork_turn": "expected_to_differ",
+    "fork_turn": "expected_to_differ", "started_at": "expected_to_differ",
 }
 CLASSES = {"anchored", "constant", "dedicated", "informational", "expected_to_differ"}
 
@@ -602,7 +603,9 @@ def test_1204_every_stamp_field_is_in_exactly_one_class_of_the_table():
     """O3 census: the fork check's table classifies EVERY `RunProvenance` field — its keys are
     exactly the dataclass's fields, so a field added to the stamp without a class fails here
     rather than being silently skipped by the comparison (the gap #1204 found: `knowledge`
-    would have been) — each into one of the five classes, as D4 states them."""
+    would have been) — each into one of the five classes, as D4 states them.
+    #1187 declared change 11 (the stamp gains `started_at` and `alert_label`, never compared)
+    """
     table = _table()
     declared = {f.name for f in dataclasses.fields(RunProvenance)}
     assert set(table) == declared, f"unclassified or stale: {declared ^ set(table)}"
@@ -671,9 +674,10 @@ def _verify_with(cli: Any, tmp_path: Path, name: str, docs: dict[str, dict]) -> 
     (by label), against the default source — planted in the container of an episode of its own
     (`name`) and handed over as arms opened through its view (#1105 PR 2)."""
     ep = T.episode(tmp_path, root=tmp_path / "episodes" / name)
-    dirs = [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]
-    for d in dirs:
-        (d / "provenance.json").write_text(json.dumps(docs[d.name[-1]]), encoding="utf-8")
+    # #1187: an arm's folder is its roster uuid, so the label is the world it was made for.
+    for w in T.WORLDS:
+        d = T.sibling_run_dir(ep / "runs", w)
+        (d / "provenance.json").write_text(json.dumps(docs[w]), encoding="utf-8")
     with Episode.open(ep) as episode:
         return cli.verify_family(episode, T.family_arms(episode, T.WORLDS),
                                  source=T.provenance_record())
@@ -717,9 +721,10 @@ def test_1204_fields_expected_to_differ_or_informational_are_not_compared(tmp_pa
     under `--allow-dirty`, which waives the dirt and nothing else. Without this a table-driven
     loop that compared every field would refuse every real family."""
     ep = T.episode(tmp_path, root=tmp_path / "episodes" / "lineage")
-    dirs = [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]
-    for turn, d in enumerate(dirs, start=1):
-        doc = {**T.provenance_record(), "world_id": f"{T.EPISODE_ID}.{d.name[-1]}",
+    # #1187: an arm's folder is its roster uuid; its world id is the world token of its label.
+    for turn, w in enumerate(T.WORLDS, start=1):
+        d = T.sibling_run_dir(ep / "runs", w)
+        doc = {**T.provenance_record(), "world_id": T.world_token(w),
                "parent_run_id": f"source-{turn}", "fork_turn": turn}
         (d / "provenance.json").write_text(json.dumps(doc), encoding="utf-8")
     with Episode.open(ep) as episode:

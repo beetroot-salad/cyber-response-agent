@@ -734,46 +734,62 @@ def test_1234_control_pushed_to_an_unusable_close_by_the_alert(tmp_path):
 # The door precedes everything; O5 and the control check keep their order (I-3, g16).
 # ======================================================================================
 
-def _container_record(ep: Path, tenant_id: str) -> None:
-    (ep / "runs").mkdir(exist_ok=True)
-    S.mod("_tenant").ensure_runs_base_record(ep / "runs", tenant_id)
+def _stray_record(ep: Path, tenant_id: str) -> None:
+    """A `_tenant.json` naming `tenant_id` planted by hand in the episode's `runs/` — the record
+    #1187 retires (R1), so a stray one is a file the judge's door reads nothing of."""
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H5
+
+    H5.plant_tenant_record(ep / "runs", tenant_id)
 
 
 def test_1234_door_refusal_precedes_the_control_check_and_writes_nothing(tmp_path):
-    """An episode whose runs/ container lacks _tenant.json (the pre-#1078 shape), or names
-    another tenant, is refused at the door (JudgeRefused) before A3's control read. Nothing is
-    written: no judge.yaml, no stamp, no found-gap census, no model call and no queue row, for
-    the grade pass and the page alike. An archive the door admits (a valid record, a runs link,
-    or no runs/) whose control ledger lacks call ids is stamped not graded instead (I-3).
+    """An episode the judge's door refuses is refused there, before A3's control read. Nothing
+    is written: no judge.yaml, no stamp, no found-gap census, no model call and no queue row,
+    for the grade pass and the page alike. An archive the door admits whose control ledger
+    lacks call ids is stamped not graded instead (I-3).
 
     Every case carries THE SAME damaged control, a ledger without call ids, as a pre-change
-    archive would. So the only thing that decides refuse-or-stamp is the container, which pins
-    the door's place before the control check. The id-less row is ledger-only: an id-less
-    table row the siblings lack would be a failed read of the table of its own (R3 (a))."""
-    judge_refused = S.sym(S.JUDGE, "JudgeRefused")
+    archive would. So the only thing that decides refuse-or-stamp is the door, which pins the
+    door's place before the control check. The id-less row is ledger-only: an id-less
+    table row the siblings lack would be a failed read of the table of its own (R3 (a)).
+
+    #1187 declared changes 6 and 8 (R1, S-iso): the door judges no container record, so an
+    episode whose `runs/` holds no `_tenant.json`, or a stray one naming this tenant or another,
+    is admitted and stamped like one with no `runs/` at all. The door's refusal kept here is
+    a link at the episode's own folder, which the door's walk never follows: the link points at
+    a real episode carrying the same damaged control, so following it would stamp that episode;
+    the refusal names the episode and writes nothing there. (A link at `<ep>/runs` is no
+    longer pinned here: the design leaves open whether the walk refuses it or records the
+    container unreadable, and the judge reads nothing in `runs/`.) (Name kept.)"""
+    from defender._tenant import TenantRefused
+    from defender.run_repository import RunRefused
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H5
+
+    door_refusals = (*S.refusals(), RunRefused, TenantRefused)
     pre_change = {"a": {"calls": [S.CallRow(call_id=None, table=False)]}}
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    refused = {"recordless-container": lambda ep: (ep / "runs").mkdir(),
-               "another-tenants-container": lambda ep: _container_record(ep, "othertenant")}
-    admitted = {"own-tenants-container": lambda ep: _container_record(
-                    ep, T.current_tenant().id),
-                "runs-link": lambda ep: S.plant_symlink(ep / "runs", elsewhere),
+
+    linked = _build(tmp_path, "linked-episode", _triad_ctl(**pre_change))
+    real_ep = tmp_path / "elsewhere" / linked.ep.name
+    real_ep.parent.mkdir()
+    linked.ep.rename(real_ep)
+    S.plant_symlink(linked.ep, real_ep)
+    before = H5.tree_state(real_ep)
+    judge = S.judge()
+    err = H5.raised(S.grade, linked, judge)
+    assert isinstance(err, door_refusals), f"the door over a linked episode gave {err!r}"
+    assert linked.ep.name in H5.message(err), (
+        f"the refusal does not name the episode: {H5.message(err)!r}")
+    assert H5.tree_state(real_ep) == before, "the door wrote through the linked episode"
+    assert not (real_ep / "judge.yaml").exists(), "the door wrote judge.yaml"
+    assert judge.calls == 0, f"the door let the pass call {judge.agent_ids}"
+    assert _queues_empty(), "the door let the pass queue rows"
+    page_err = H5.raised(S.page, linked)
+    assert isinstance(page_err, door_refusals), f"the page over a linked episode gave {page_err!r}"
+
+    admitted = {"recordless-container": lambda ep: (ep / "runs").mkdir(exist_ok=True),
+                "own-tenants-stray-record": lambda ep: _stray_record(ep, T.current_tenant().id),
+                "another-tenants-stray-record": lambda ep: _stray_record(ep, "othertenant"),
                 "no-container": lambda ep: None}
-
-    for name, plant in refused.items():
-        built = _build(tmp_path, name, _triad_ctl(**pre_change))
-        plant(built.ep)
-        judge = S.judge()
-        err = S.grade_refused(built, judge)
-        assert isinstance(err, judge_refused), f"{name}: refused as {err!r}"
-        assert "_tenant.json" in str(err), f"{name}: the refusal names no container: {err}"
-        assert not (built.ep / "judge.yaml").exists(), f"{name}: the door wrote judge.yaml"
-        assert judge.calls == 0, f"{name}: the door let the pass call {judge.agent_ids}"
-        assert _queues_empty(), f"{name}: the door let the pass queue rows"
-        with pytest.raises(judge_refused):
-            S.page(built)
-
     for name, plant in admitted.items():
         built = _build(tmp_path, name, _triad_ctl(**pre_change))
         plant(built.ep)
@@ -1225,7 +1241,18 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
     archived served file. Ids are read off the real rows, and only the unmapped row mints b's
     spelling. Each foreign row carries a refused call no run made (`FOREIGN`), so a reader that
     kept it would list it as a gap. The paired positive control is the unedited archive plus the
-    undeclared label's file: b grades, and its own refused call IS a found gap."""
+    undeclared label's file: b grades, and its own refused call IS a found gap.
+
+    #1187 declared change 10 (R5): every manifest reader, the judge's included, checks the
+    manifest's `episode_id` against the folder it was read from. Each variant is a copy under
+    another root that keeps the episode's folder name (its id), so each still grades; a copy
+    RENAMED to another folder name (a fresh UUID, so the id itself is well-formed) is refused,
+    naming both ids, before any model call, writing nothing. (Name kept.)"""
+    import shutil
+    import uuid
+
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H5
+
     real = S.real_family(tmp_path)
     token = real.token
     refused_b = next(r for r in real.ledger_rows("b") if r.get("source") == "refused")
@@ -1283,6 +1310,21 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
         f"control: b's own refused call is not a found gap: {S.found_gaps(clean)}")
     assert not any(_carries(e, GHOST_PARAMS) or _names_run(e, GHOST)
                    for e in S.found_gaps(clean)), "the undeclared label's file was read"
+
+    # R5: the same archive under a renamed folder is refused (the variants above, copies that
+    # keep the folder name, are the positive control on the same door).
+    renamed_id = str(uuid.uuid4())
+    renamed = tmp_path / "variant-renamed" / renamed_id
+    shutil.copytree(real.ep, renamed, symlinks=True)
+    before = H5.tree_state(renamed)
+    judge = S.judge()
+    err = H5.raised(S.grade, renamed, judge)
+    assert err is not None, "a renamed copy was graded (R5)"
+    said = H5.message(err)
+    assert renamed_id in said, f"the R5 refusal does not name the folder's id: {said!r}"
+    assert real.ep.name in said, f"the R5 refusal does not name the manifest's id: {said!r}"
+    assert judge.calls == 0, f"a renamed copy reached the model: {judge.agent_ids}"
+    assert H5.tree_state(renamed) == before, "the refused pass wrote into the renamed copy"
 
 
 # ======================================================================================

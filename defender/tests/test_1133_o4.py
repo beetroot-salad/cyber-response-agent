@@ -710,20 +710,27 @@ def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreat
     the episodes root `ep.parent`): a missing dir (or a missing episodes root, or a file at the
     name) is `JudgeRefused`, and nothing is created — rev 1 wrote a not-graded stamp and so
     recreated the dir (C14). Control: an existing episode that is not `accepted` is graded
-    not-graded, its stamp written inside it."""
+    not-graded, its stamp written inside it. #1187 (Layout A, O9): the episodes root is the
+    tenant's own `<T>/episodes/` — absent (`missing-parent`), present without the episode
+    (`missing`), or holding a file at the id — and nothing is configured."""
+    from defender.tests._fixture_uuid import fixture_uuid
+
     judge_mod = J.mod("learning.judge")
-    ep = tmp_path / "episodes" / EPISODE_ID
+    tenant = T.current_tenant()
+    ep = Path(tenant.episodes) / EPISODE_ID
     if kind != "missing-parent":
         ep.parent.mkdir()
     if kind == "file":
         ep.write_bytes(S.HOST_BYTES)
-    before = S.census(tmp_path)
+    before = S.census(Path(tenant.dir))
 
     with pytest.raises(judge_mod.JudgeRefused):
-        J.grade_at(ep, judge=ScriptedJudge({}, default="never called"), state=env_state())
-    assert S.census(tmp_path) == before, f"grading a {kind} episode dir created something"
+        J.grade_at(ep, runs=tenant.runs_repository(),
+                   judge=ScriptedJudge({}, default="never called"), state=env_state())
+    assert S.census(Path(tenant.dir)) == before, f"grading a {kind} episode dir created something"
 
-    control = T.episode(tmp_path / "control")
+    control = T.episode(tmp_path / "control", episode_id=fixture_uuid("o4-8-2-grade-control"),
+                        doc=T.family_doc(episode_id=fixture_uuid("o4-8-2-grade-control")))
     grade = J.grade_at(control, judge=ScriptedJudge({}, default="never called"), state=env_state())
     assert grade.not_graded is not None
     assert (control / "judge.yaml").is_file()
@@ -736,20 +743,25 @@ def test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recrea
     (its door, `runs.episode`, converts the open's `FileNotFoundError`), and creates nothing —
     neither the episode nor a missing episodes base. Control: an existing episode's page is
     written inside it. (#1105 PR 2, declared change 4: the door takes the tenant's repository
-    and an id under the configured episodes base, no longer a folder.)"""
+    and an id under the configured episodes base, no longer a folder.) #1187 (Layout A, O9):
+    the episodes base is the tenant's own `<T>/episodes/` — absent (`missing-parent`) or
+    present without the episode (`missing`) — and nothing is configured."""
+    from defender.tests._fixture_uuid import fixture_uuid
+
     page = T.mod("scripts.visualize.visualize_episode")
-    runs = T.current_tenant().runs_repository()
-    ep = tmp_path / "episodes" / EPISODE_ID
+    tenant = T.current_tenant()
+    runs = tenant.runs_repository()
+    ep = Path(tenant.episodes) / EPISODE_ID
     if kind == "missing":
         ep.parent.mkdir()
-    before = S.census(tmp_path)
-    with J.episodes_base(ep.parent), pytest.raises(page.JudgeRefused):
+    before = S.census(Path(tenant.dir))
+    with pytest.raises(page.JudgeRefused):
         page.render_episode(runs, EPISODE_ID)
-    assert S.census(tmp_path) == before
+    assert S.census(Path(tenant.dir)) == before
 
-    control = T.episode(tmp_path / "control")
-    with J.episodes_base(control.parent):
-        written = page.render_episode(runs, control.name)
+    control = T.episode(tmp_path / "control", episode_id=fixture_uuid("o4-8-2-control"),
+                        doc=T.family_doc(episode_id=fixture_uuid("o4-8-2-control")))
+    written = page.render_episode(runs, control.name)
     assert Path(written) == control / "learning.html"
     assert (control / "learning.html").is_file()
 

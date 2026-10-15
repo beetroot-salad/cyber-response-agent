@@ -452,7 +452,11 @@ def test_d0_return_contract(tmp_path, monkeypatch):
     setup returns 0 when every kind of its pass adopted, was already in place, or had nothing
     to adopt, and 1 when any kind was refused or a racing entry was re-listed; a selector tool
     given no --tenant exits non-zero before touching any state. Every entry passes the owner's
-    refusal message through verbatim, never rephrased."""
+    refusal message through verbatim, never rephrased.
+
+    #1187 declared change 6 (R1): `ensure_runs_base_record` is retired with the runs-base
+    record, so it is no longer one of the owner functions whose refusal is checked here.
+    (Name kept.)"""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     _d0_return_values(root)
@@ -489,17 +493,12 @@ def _d0_owner_refusals(tmp_path: Path, root: Path, monkeypatch) -> dict:
     old_base = tmp_path / "old-runs"
     H.plant_record(old_base, "playground")
     (old_base / "r0").mkdir()
-    other_base = tmp_path / "other-base"
-    H.plant_record(other_base, "someone-else")
     refusals = {
         "TenantId": (H.owner_refusal(H.tenant().TenantId, "../x"),
                                  "../x"),
         "TenantPaths": (H.owner_refusal(H.TenantPaths, root, "Acme-Corp"), "Acme-Corp"),
         "create_tenant": (H.owner_refusal(H.create_tenant, tmp_path / "x", "a/b"), "a/b"),
         "require_tenant": (H.owner_refusal(H.require_tenant, root, "acme"), "acme"),
-        "ensure_runs_base_record": (
-            H.owner_refusal(H.ensure_runs_base_record, other_base, "playground"),
-            "someone-else"),
     }
     monkeypatch.delenv(H.DATA_ROOT_ENV)
     refusals["resolve_data_root"] = (H.owner_refusal(H.resolve_data_root), H.DATA_ROOT_ENV)

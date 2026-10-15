@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender.tests import _episode_1025 as E
 from defender.tests._alert_plant import plant_source_copy
 from defender.tests import _judge_921 as J
@@ -238,15 +237,31 @@ def test_1025_world_chips_carry_the_judge_models_systems_and_every_draws_answer_
 
 def test_1025_each_world_links_to_runs_episode_world_runtime_html_relatively_and_the_run_dir_pointer_is_never_the_source(
         tmp_path):
-    """Every world section's link is exactly `runs/<episode>-<world>/runtime.html` (the episode
-    id the manifest's, correction 4); the absolute path in `worlds/<X>/run_dir` appears nowhere
-    on the page, and a copied episode whose `run_dir` pointer names a nonexistent path renders
-    the same link.
+    """Every world section's link is exactly `runs/<arm id>/runtime.html`, the arm id the one
+    the episode's arm roster (`arms.json`) holds for that world — never composed from the
+    episode id and the label; the absolute path in `worlds/<X>/run_dir` appears nowhere on the
+    page, and a copied episode whose `run_dir` pointer names a nonexistent path renders the
+    same link. The roster and the arm folders at its ids are planted here over the older
+    fixture (`roster_for_arms`), so the link this asserts is the roster's, and no href composes
+    `<episode>-<label>`. Since #1187 R8 nothing writes `worlds/<X>/run_dir` (declared change
+    12); the file is a hand-planted DECOY at the retired name, and this test's point — the page
+    never takes an arm's location from it — still holds against it.
+    #1187 declared change 15
     """
+    from defender.tests.ids_1187._spec1187 import roster_for_arms
+
     ep = E.sample_episode(tmp_path)
-    page = render(ep)
+    roster = roster_for_arms(ep.dir, {label: ep.run(label) for label in E.WORLDS})
+    # #1187 (R8): nothing writes `worlds/<X>/run_dir` any more. A file at that retired name is
+    # planted here as a DECOY naming each arm's real folder: the page must never take an arm's
+    # location (or any text) from it — the link is the roster's.
     for label in E.WORLDS:
-        expected = f"runs/{E.EPISODE_ID}-{label}/runtime.html"
+        (ep.world(label) / "run_dir").write_text(f"{ep.run(label)}\n", encoding="utf-8")
+    page = render(ep)
+    composed = [h for h in page.hrefs if f"{ep.dir.name}-" in h]
+    assert composed == [], f"the page linked a composed <episode>-<label> folder: {composed}"
+    for label in E.WORLDS:
+        expected = f"runs/{roster[label]}/runtime.html"
         assert expected in page.anchors_in(f"world-{label}"), page.anchors_in(f"world-{label}")
         pointer = (ep.world(label) / "run_dir").read_text(encoding="utf-8").strip()
         assert pointer not in page.raw, pointer
@@ -672,27 +687,43 @@ def test_1025_a_declared_world_with_no_run_directory(tmp_path):
 def test_1025_render_when_a_graded_world_has_no_matching_runs_dir(tmp_path):
     """A graded world whose run dir is gone keeps its section: the record-derived parts
     (verdict, bucket, verdict line, card, findings group) render and the run-dir-derived parts read
-    "run directory absent" — no link, no cost row, no result-event wall (J8).
+    "run directory absent" — no link (to the arm id its roster holds), no cost row, no
+    result-event wall (J8). The roster names the world's arm id, and no folder sits there;
+    the arm's folder sits instead at the COMPOSED name `runs/<episode>-<world>/` — a decoy a
+    reader that composes the name would link and cost.
+    #1187 declared change 15
     """
+    from defender.tests.ids_1187._spec1187 import roster_for_arms
+
     ep = E.sample_episode(tmp_path)
-    shutil.rmtree(ep.run(E.GRADED_WORLD))
+    roster = roster_for_arms(ep.dir, {label: ep.run(label) for label in E.WORLDS})
+    (ep.dir / "runs" / roster[E.GRADED_WORLD]).rename(
+        ep.dir / "runs" / f"{ep.dir.name}-{E.GRADED_WORLD}")
     page = render(ep)
     world = _world(page, E.GRADED_WORLD)
     assert "run directory absent" in world, world
     assert "decision-discipline" in world, world
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" not in page.hrefs
+    assert f"runs/{roster[E.GRADED_WORLD]}/runtime.html" not in page.hrefs
+    composed = [h for h in page.hrefs if f"{ep.dir.name}-" in h]
+    assert composed == [], f"the page linked the composed decoy: {composed}"
     assert any(E.GRADED_WORLD in c.text() for c in page.elements(cls="vd-cause"))
     assert f"f-{E.GRADED_WORLD}-0-0" in page.ids
 
 
 def test_1025_a_run_dir_with_a_result_event_and_no_runtime_html(tmp_path):
     """The `runtime.html` link renders unconditionally — it is where the page would be — so a
-    run dir with a result event and no `runtime.html` links exactly like one with it (J8).
+    run dir with a result event and no `runtime.html` links exactly like one with it (J8), at
+    the arm id its roster holds (roster and arm folders planted over the older fixture).
+    #1187 declared change 15
     """
+    from defender.tests.ids_1187._spec1187 import roster_for_arms
+
     ep = E.sample_episode(tmp_path)
-    (ep.run(E.GRADED_WORLD) / "runtime.html").unlink()
+    roster = roster_for_arms(ep.dir, {label: ep.run(label) for label in E.WORLDS})
+    (ep.dir / "runs" / roster[E.GRADED_WORLD] / "runtime.html").unlink()
     page = render(ep)
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" in page.anchors_in(f"world-{E.GRADED_WORLD}")
+    expected = f"runs/{roster[E.GRADED_WORLD]}/runtime.html"
+    assert expected in page.anchors_in(f"world-{E.GRADED_WORLD}")
     assert "no result event" not in _world(page, E.GRADED_WORLD)
 
 
@@ -801,7 +832,10 @@ def test_1025_the_control_is_identified_how(tmp_path):
     manifest["worlds"][0]["world_id"] = "zeta"
     T.write_family(ep.dir, manifest)
     shutil.move(ep.world(E.CONTROL), ep.world("zeta"))
-    shutil.move(ep.run(E.CONTROL), ep.dir / "runs" / f"{E.EPISODE_ID}-zeta")
+    # #1187 (R2): the arm folder keeps its uuid; the roster's key is what relabels it.
+    roster = T.read_roster(ep.dir)
+    roster["zeta"] = roster.pop(E.CONTROL)
+    T.write_roster(ep.dir, roster)
     page = render(ep)
     worlds = page.text_of("sec-worlds")
     assert _ordered(worlds, "zeta", CONTROL_GUIDE), worlds
@@ -816,13 +850,19 @@ def test_1025_a_world_that_ran_but_was_never_archived(tmp_path):
     """The run dir gives it a section (O5) with its `runtime.html` link and its result-event
     cost and wall; every archive-derived block (leads, report, scrub verdict)
     reads "not archived" / the reader's refusal; the judge part follows the record — here an
-    ungradable row's reason.
+    ungradable row's reason. The link is to the arm id the roster holds (roster and arm folders
+    planted over the older fixture).
+    #1187 declared change 15
     """
+    from defender.tests.ids_1187._spec1187 import roster_for_arms
+
     ep = _ungradable_episode(tmp_path)
+    roster = roster_for_arms(ep.dir, {label: ep.run(label) for label in E.WORLDS})
     shutil.rmtree(ep.world(E.PASSTHROUGH_WORLD))
     page = render(ep)
     world = _world(page, E.PASSTHROUGH_WORLD)
-    assert f"runs/{E.EPISODE_ID}-{E.PASSTHROUGH_WORLD}/runtime.html" in page.anchors_in(f"world-{E.PASSTHROUGH_WORLD}")
+    expected = f"runs/{roster[E.PASSTHROUGH_WORLD]}/runtime.html"
+    assert expected in page.anchors_in(f"world-{E.PASSTHROUGH_WORLD}")
     assert "$0.2500" in world, world
     assert "3m00s" in world, world
     assert "not archived" in world, world
@@ -851,12 +891,17 @@ def test_1025_render_against_a_world_archive_mid_copy(tmp_path):
 
 
 def test_1025_a_run_directory_symlink_or_dir_pointer_naming_a_symlinked_final_component(tmp_path):
-    """The `run_dir` pointer is never read as a link source nor followed: the link is composed
-    from the manifest id and the label, and a pointer whose final component is a symlink to an
+    """The `run_dir` pointer is never read as a link source nor followed: the link is to the
+    arm id the episode's roster holds, and a pointer whose final component is a symlink to an
     outside tree changes nothing on the page — the outside tree's content appears nowhere.
-    Positive control: the composed link is present.
+    Positive control: the roster arm's link is present (roster and arm folders planted over the
+    older fixture).
+    #1187 declared change 15
     """
+    from defender.tests.ids_1187._spec1187 import roster_for_arms
+
     ep = E.sample_episode(tmp_path)
+    roster = roster_for_arms(ep.dir, {label: ep.run(label) for label in E.WORLDS})
     outside = tmp_path / "outside-run"
     (outside / "gather_raw").mkdir(parents=True)
     (outside / "report.md").write_text(T.report_text("benign", body="OUTSIDE-RUN-REPORT"), encoding="utf-8")
@@ -864,7 +909,8 @@ def test_1025_a_run_directory_symlink_or_dir_pointer_naming_a_symlinked_final_co
     link.symlink_to(outside, target_is_directory=True)
     (ep.world(E.GRADED_WORLD) / "run_dir").write_text(f"{link}\n", encoding="utf-8")
     page = render(ep)
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" in page.anchors_in(f"world-{E.GRADED_WORLD}")
+    expected = f"runs/{roster[E.GRADED_WORLD]}/runtime.html"
+    assert expected in page.anchors_in(f"world-{E.GRADED_WORLD}")
     assert "OUTSIDE-RUN-REPORT" not in page.raw
     assert str(link) not in page.raw
 
@@ -1015,20 +1061,27 @@ def test_1025_a_sibling_process_exited_non_zero(tmp_path):
     its cost row reads "no result event" / "no cost recorded"; its archive-derived blocks render
     from the archive; and the failure it does state is the world's own record
     (`world_records/b.yaml`, the launcher's `did not finish`) — its reason and detail verbatim.
-    Positive control: the section, its link and its rows exist.
+    Positive control: the section, its link (to the arm id the roster the LAUNCHER wrote holds)
+    and its rows exist; no href composes `<episode>-<label>`.
+    #1187 declared change 15
     """
-    launch = ST._launch(tmp_path, spawn=J.FakeSibling(
-        EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID), exits={"b": 1}))
+    from defender.tests.ids_1187._spec1187 import read_roster
+
+    launch = ST._launch(tmp_path, spawn=J.FakeSibling(exits={"b": 1}))
     assert launch.rc == 1, "the control failed: no sibling exited non-zero"
     record = T.mod("_yaml").safe_load(
         (launch.episode_dir / "world_records" / "b.yaml").read_text(encoding="utf-8"))
     assert record["reason"] == "did not finish", record
     page = hook_page(launch.episode_dir)
+    composed = [h for h in page.hrefs if f"{launch.episode_dir.name}-" in h]
+    assert composed == [], f"the page linked a composed <episode>-<label> folder: {composed}"
     world = _world(page, "b")
     assert "no result event" in world or "no cost recorded" in world, world
     assert f"{record['reason']} — {record['detail']}" in world, world
     assert world.lower().count("exit") == record["detail"].lower().count("exit"), world
-    assert f"runs/{E.EPISODE_ID}-b/runtime.html" in page.anchors_in("world-b")
+    assert (launch.episode_dir / "arms.json").is_file(), "the launcher wrote no arm roster"
+    expected = f"runs/{read_roster(launch.episode_dir)['b']}/runtime.html"
+    assert expected in page.anchors_in("world-b")
 
 
 def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
@@ -1040,7 +1093,7 @@ def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
     tile 3 counts none — the page is written in every case.
     """
     base = E.sample_episode(tmp_path)
-    no_served = E.copy_episode(base, tmp_path / "no-served")
+    no_served = E.copy_episode(base, tmp_path / "no-served" / base.dir.name)
     shutil.rmtree(no_served.dir / "served")
     page = render(no_served)
     for label in E.WORLDS:
@@ -1049,14 +1102,14 @@ def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
         assert "not archived" not in _world(page, label), _world(page, label)
     assert f"f-{E.GRADED_WORLD}-0-0" in page.ids
 
-    no_wire = E.copy_episode(base, tmp_path / "no-wire")
+    no_wire = E.copy_episode(base, tmp_path / "no-wire" / base.dir.name)
     shutil.rmtree(no_wire.dir / "wire_logs")
     page = render(no_wire)
     assert page.ids_with("tx-") == [], page.ids_with("tx-")
     assert "no cost recorded" in page.text_of("stage-questioner"), page.text_of("stage-questioner")
     assert "no cost recorded" in page.text_of("stage-judge"), page.text_of("stage-judge")
 
-    no_worlds = E.copy_episode(base, tmp_path / "no-worlds")
+    no_worlds = E.copy_episode(base, tmp_path / "no-worlds" / base.dir.name)
     shutil.rmtree(no_worlds.dir / "worlds")
     page = render(no_worlds)
     for label in E.WORLDS:

@@ -6,6 +6,14 @@
 * `lint_run_layout_imports` reports a module too deeply nested to parse as a finding naming it,
   the same as one that does not decode, instead of dying in `ast.parse` with a bare
   `RecursionError` and no file name.
+
+#1187 (design rev 2, R1, R6 D-del): the runs container's `_tenant.json` and PR 1's `_episodes`
+record are retired, so the hostile-folder tenant plants no record, run ids are uuids, and
+`test_a_record_refusal_under_a_folder_with_a_newline_stays_one_line` — which drove the
+`_episodes` record's refusal through the listing and `episode_sibling_ids` — was deleted with
+the record. The listing's refusal of an `_episodes` entry is pinned by
+`ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`;
+a refusal under a hostile folder staying one line is still held below, by the lookup.
 """
 from __future__ import annotations
 
@@ -16,8 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from defender import _io
 from defender import run_repository as R
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 
 _FORGED = "x\nFORGED LINE: all good"
@@ -27,7 +35,6 @@ def _tenant_under_a_hostile_folder(tmp_path: Path):
     t = H.tenant(tmp_path / _FORGED)
     runs = Path(t.runs)
     runs.mkdir(parents=True)
-    H.plant_tenant_record(runs, t.id)
     return t, runs
 
 
@@ -38,18 +45,6 @@ def _one_line(exc: BaseException) -> str:
     return text
 
 
-def test_a_record_refusal_under_a_folder_with_a_newline_stays_one_line(tmp_path):
-    t, runs = _tenant_under_a_hostile_folder(tmp_path)
-    (runs / "_episodes").mkdir()
-    (runs / "_episodes" / "junk.txt").write_text("x", encoding="utf-8")
-    with pytest.raises(R.RunRefused) as listed:
-        t.runs_repository().list()
-    assert "junk.txt" in _one_line(listed.value)
-    with _io.hold(runs, follow=False) as held, pytest.raises(R.RunRefused) as path_only:
-        R.episode_sibling_ids(held.view())
-    assert "junk.txt" in _one_line(path_only.value)
-
-
 def test_a_lookup_refusal_under_a_folder_with_a_newline_stays_one_line(tmp_path):
     t, runs = _tenant_under_a_hostile_folder(tmp_path)
     (runs / "stray").write_text("x", encoding="utf-8")
@@ -58,7 +53,7 @@ def test_a_lookup_refusal_under_a_folder_with_a_newline_stays_one_line(tmp_path)
     _one_line(stray.value)
     (runs / "stray").unlink()
     with pytest.raises(R.RunRefused) as absent:
-        t.runs_repository().open(R.RunId.mint("a"))
+        t.runs_repository().open(R.RunId.parse(fixture_uuid("claims-followups-absent")))
     _one_line(absent.value)
 
 

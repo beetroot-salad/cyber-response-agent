@@ -274,13 +274,15 @@ def test_d8_retired_runs_knob_text():
     assigns the knob a path, says to set/point/export it, or uses `$DEFENDER_RUNS_BASE` in a
     file that never says the value is the derived `<root>/<T>/runs` (`run_dir.parent`). The
     launcher's entry on the list is `episodes_root`, read alone — since #1105 PR 2 the episode
-    owner's (`_episodes_root.episodes_root`; the launcher's `cli.episodes_root` is gone)."""
+    owner's (`_episodes_root.episodes_root`; the launcher's `cli.episodes_root` is gone).
+
+    #1187 (design rev 2, "the episode owner"; O9): `episodes_root` and `DEFENDER_EPISODES_BASE`
+    are retired — an episode lives at `<T>/episodes/<uuid>`, derived from the data root — so the
+    list's launcher entry leaves with the function it named."""
     found = []
     for path in RETIRED_KNOB_FILES:
         assert path.is_file(), f"D8's retired-knob file {path} moved"
         found += _knob_instructions(path)
-    found += _knob_instructions(DEFENDER / "_episodes_root.py",
-                                only_function="episodes_root")
     assert found == [], "retired DEFENDER_RUNS_BASE knob text survives:\n  " + "\n  ".join(found)
 
     lifecycle = ast.parse((DEFENDER / "runtime" / "box" / "_lifecycle.py").read_text(

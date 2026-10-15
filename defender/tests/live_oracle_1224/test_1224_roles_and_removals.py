@@ -16,6 +16,11 @@ census really scans. The role-count pins and test_797's fence are waivers W-01/W
 tests; nothing here re-pins a count.
 
 Preflight failures are logged (`defender.run`'s logger), so they are read off `caplog`.
+
+#1187 (design rev 2, R6 D-del): the run-record label check's writer (`record_episode_runs`) is
+deleted, so `test_1224_run_record_label_check_still_refuses_a_reserved_label` (d19c) was deleted
+with it (the graph says so); a label reaches the roster only as a manifest world, which the
+manifest reader still holds to the reserved-label rule.
 """
 from __future__ import annotations
 
@@ -420,27 +425,6 @@ def test_1224_staging_stagers_applier_lookups_and_review_are_gone():
         encoding="utf-8")
     assert "EXCLUDED_PREFIXES" in lint_src, "the lint moved"
     assert "estate/stagers" not in lint_src
-
-
-def test_1224_run_record_label_check_still_refuses_a_reserved_label(tmp_path):
-    """d19c_reserved_label_rule_survives — the runs repository's episode-record writer still refuses a reserved world label, naming the rule, and records a well-formed one.
-
-    M12 takes `_world_label.world_view_fault`'s view arm; this writer imports the label rule
-    from that module. Positive control: a well-formed label is recorded and read back.
-    """
-    from defender import run_repository as R
-
-    H = importlib.import_module("defender.tests.tenant_1105_run_repository._spec1105")
-    t = H.tenant(tmp_path / "data")
-    runs = H.runs_folder(t)
-    H.make_run(runs, "r0")
-    for label, why in (("base", "reserved"), ("BASE", "reserved"), ("family", "reserved"),
-                       ("family_3", "family_")):
-        with pytest.raises(R.RunRefused) as refused:
-            R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {label: R.RunId.parse("ep-a")})
-        assert why in str(refused.value), (label, str(refused.value))
-    R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a": R.RunId.parse("ep-a")})
-    assert R.episode_runs(t, "ep") == {"a": R.RunId.parse("ep-a")}
 
 
 def test_1224_redaction_filter_still_masks_what_it_masked_without_the_staged_name_rule():

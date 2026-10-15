@@ -256,13 +256,12 @@ def write_served(episode_dir: Path, world: str, rows: list[dict]) -> Path:
 
 def contrast_family(tmp_path: Path, monkeypatch, worlds: Any = None, **kw: Any) -> Any:
     """`_spec1234.family(tmp_path, worlds, **kw)` (control `a`, planted `b` and `c` by
-    default), with the episodes root and the learning state root pointed inside `tmp_path` —
-    what #1234's own conftest does for its suite, done here per scenario."""
+    default), with the learning state root pointed inside `tmp_path` — what #1234's own
+    conftest does for its suite, done here per scenario. (#1187 O9: the episode lands under the
+    data root's tenant, `<T>/episodes/`; no episodes root is configured.)"""
     from defender.tests.judge_contrast_1234 import _spec1234 as S
 
-    root = tmp_path / "episodes-root"
-    root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv(S.EPISODES_BASE_ENV, str(root))
+    Path(tmp_path).mkdir(parents=True, exist_ok=True)  # a scenario's own subfolder (`tmp_path / "clean"`)
     S.isolate_learning_state(tmp_path, monkeypatch)
     return S.family(tmp_path, worlds, **kw)
 

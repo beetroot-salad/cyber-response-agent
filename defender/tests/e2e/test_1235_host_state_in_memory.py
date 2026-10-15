@@ -168,7 +168,7 @@ def test_a_reset_budget_file_does_not_reopen_the_cap(tmp_path, enforced, plant):
     def reset() -> None:
         target = run_dir_holder[0] / BUDGET_FILE
         if plant == "overwrite":
-            _write(target, _zeroed_budget("b1235-reset"))
+            _write(target, _zeroed_budget(run_dir_holder[0].name))
         else:
             target.unlink(missing_ok=True)
 
@@ -198,7 +198,7 @@ def test_a_planted_spent_budget_does_not_refuse_a_call_under_the_cap(tmp_path, e
     def spend() -> None:
         now = _now_iso()
         _write(holder[0] / BUDGET_FILE, json.dumps({
-            "run_id": "b1235-spent", "tool_calls": 10_000, "subagent_spawns": 10_000,
+            "run_id": holder[0].name, "tool_calls": 10_000, "subagent_spawns": 10_000,
             "created_at": now, "started_at": now}))
 
     main = PlantingReplay(list(_FOUR_BASH), at=0, plant=spend)
@@ -227,7 +227,7 @@ def test_a_planted_clock_origin_does_not_trip_the_wall_clock(tmp_path, enforced)
 
     def ancient() -> None:
         _write(holder[0] / BUDGET_FILE, json.dumps({
-            "run_id": "b1235-clock", "tool_calls": 0, "subagent_spawns": 0,
+            "run_id": holder[0].name, "tool_calls": 0, "subagent_spawns": 0,
             "created_at": "2000-01-01T00:00:00+00:00",
             "started_at": "2000-01-01T00:00:00+00:00"}))
 

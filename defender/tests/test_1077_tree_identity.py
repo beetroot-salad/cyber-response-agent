@@ -203,12 +203,15 @@ def test_the_records_beside_the_run_directory_get_their_own_separate_assertion(t
     """The sidecars and the tenant record, which live beside the run directory rather than
     inside it, are asserted by their own separate check. #1235: the run -> case pointer is one
     of them now (`RunPaths.session_pointer(runs_base)`), and a run that opened a store writes it
-    there, beside the folder, with the case and store it names."""
+    there, beside the folder, with the case and store it names.
+
+    #1187 declared change 6 (R1): the tenant record `_tenant.json` is retired — nothing writes it
+    beside the run directory any more, so it leaves the beside set and the check asserts its
+    absence instead."""
     run_dir = _replay(tmp_path)
     base = run_dir.parent
     owner = S.RunPaths(run_dir)
     beside = {name: getattr(owner, name)(base) for name in S.SIDECAR_ACCESSORS}
-    beside["tenant"] = S.tenant().record_path(base)
 
     for name, path in beside.items():
         assert path.parent == base, f"{name} is not beside the run directory"
@@ -225,7 +228,8 @@ def test_the_records_beside_the_run_directory_get_their_own_separate_assertion(t
     assert {"case_id", "store_path"} <= set(json.loads(pointer.read_text(encoding="utf-8")))
     assert not (run_dir / "session_store_pointer.json").exists(), \
         "the case pointer is still written inside the run directory"
-    assert S.tenant().record_path(base).name == S.TENANT_RECORD_NAME
+    assert not (base / S.TENANT_RECORD_NAME).exists(), (
+        "#1187 R1: the replayed run's container holds the retired tenant record")
 
 
 def test_the_tree_snapshot_is_taken_after_the_run_ends_so_probe_files_are_never_in_scope(

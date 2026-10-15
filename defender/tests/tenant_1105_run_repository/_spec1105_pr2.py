@@ -31,6 +31,7 @@ Underscore-prefixed so pytest does not collect it.
 """
 from __future__ import annotations
 
+import logging
 import io
 import json
 import os
@@ -53,14 +54,13 @@ RUNS_BASE_ENV = T.RUNS_BASE_ENV
 
 #: The launch fixture's tenant (`_spec1224.FIXTURE_TENANT`).
 LAUNCH_TENANT = S.FIXTURE_TENANT
-#: The source run's id. NOT `_triplet_947.SOURCE_RUN_ID` (`20260728T161845Z-fresh-case`): that
-#: spelling is not case-stable, so `RunId.parse` refuses it, and once the launcher and the
-#: sibling take ids (declared changes 1 and 6) a source under it can no longer be named at all.
-#: A minted run id is case-folded; this is that id, folded. The derived episode id is unchanged
-#: (`episode_id_for` folds it either way).
-SOURCE_RUN_ID = T.SOURCE_RUN_ID.casefold()
+#: The source run's id: `_triplet_947.SOURCE_RUN_ID`, a uuid4 (#1187: `RunId` admits canonical
+#: lowercase UUID text only).
+SOURCE_RUN_ID = T.SOURCE_RUN_ID
 BRANCH_MESSAGE_ID = T.BRANCH_MESSAGE_ID
-#: The episode id the launcher derives for that source and branch point.
+#: The fixture episode id a hand-built sibling scene carries (`_triplet_947.EPISODE_ID`, a uuid4).
+#: A LAUNCH mints its own (`runs.create_episode()`, #1187): a launcher test finds the episode it
+#: made under `<data root>/<T>/episodes/` (`launched_episodes`), never by this id.
 EPISODE_ID = T.EPISODE_ID
 #: The sibling fixture's tenant (`_triplet_947.SOURCE_TENANT`).
 SIBLING_TENANT = T.SOURCE_TENANT
@@ -125,19 +125,29 @@ def new_run_page_argv(tenant_id: str, run_id: str, *, episode_id: str | None = N
 # Roots and scenes.
 # ==========================================================================================
 
-def roots(tmp_path: Path, monkeypatch: Any) -> Path:
+def roots(tmp_path: Path, monkeypatch: Any) -> None:
     """Every configured root inside `tmp_path`, as `test_1025_stage_timing`'s launches set them:
-    the episodes base (outside the data root and the checkout), the operator runs base pre-flight
-    exports, and the learning state root. Returns the episodes base."""
-    episodes = Path(tmp_path) / "episodes-root"
+    the operator runs base pre-flight exports and the learning state root. #1187 (O9): no
+    episodes base — an episode lives under its tenant (`episodes(tenant_id)`)."""
     monkeypatch.setenv(RUNS_BASE_ENV, str(Path(tmp_path) / "defender-runs"))
-    monkeypatch.setenv(EPISODES_BASE_ENV, str(episodes))
     _state1135.set_state_dir(monkeypatch, Path(tmp_path) / "learning-state")
-    return episodes
 
 
 def data_root() -> Path:
     return Path(os.environ[DATA_ROOT_ENV])
+
+
+def episodes(tenant_id: str = LAUNCH_TENANT) -> Path:
+    """`<data root>/<tenant_id>/episodes` — where #1187 puts every episode of that tenant."""
+    return data_root() / tenant_id / "episodes"
+
+
+def launched_episodes(tenant_id: str = LAUNCH_TENANT) -> list[Path]:
+    """Every episode folder under `episodes(tenant_id)`, sorted — the census a launcher test takes
+    to find the episode a launch made (it mints the id) or to show it made none. Entries that
+    are not real folders are listed too, so a squatting file is not hidden."""
+    folder = episodes(tenant_id)
+    return sorted(folder.iterdir()) if folder.is_dir() else []
 
 
 #: The one answer every captured call recorded and the live estate gives
@@ -209,10 +219,9 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     its verifier passing it (so the family is accepted), the judge recording its prompts."""
     from defender.learning.branch import cli
 
-    # The episode the fake sibling materialises arms in (never reached when the launch refuses
-    # first — the episodes base may be unset on purpose).
-    episode_dir = Path(os.environ.get(EPISODES_BASE_ENV, "/nonexistent-episodes")) / EPISODE_ID
-    spawn = spawn if spawn is not None else J.FakeSibling(episode_dir)  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
+    # The fake sibling materialises each arm at the id the launched episode's roster holds
+    # (#1187), the episode named by the child's own argv.
+    spawn = spawn if spawn is not None else J.FakeSibling()  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
     judge = judge if judge is not None else quiet_judge()  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
     questioner = seams.pop("questioner", None) or CountingQuestioner()
     seams.setdefault("preflight", S.no_preflight)
@@ -234,6 +243,9 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     except Exception as failed:  # noqa: BLE001 — handed back; the test asserts
         raised = failed
         message = str(failed)
+    if rc not in (0, None) and message:
+        # Logged so a test failing downstream of a refused launch carries why in its log.
+        logging.getLogger(__name__).warning("the launch was refused (rc=%s): %s", rc, message)
     return Launched(rc, message, raised, spawn, judge, questioner)
 
 
@@ -242,8 +254,9 @@ def grade(episode_dir: Path, tenant_id: str) -> Any:
     (`learning.judge.grade_episode`). Re-pointed by PR 2 to the declared shape (J3 as settled:
     the judge reads only the episode it is handed, and the world-label collision probe over
     `<T>/runs` is removed): `grade_episode(runs, episode_id)`, `runs` the tenant's repository
-    under the configured data root, the episode opened by id under the configured episodes
-    base. A final `judge.yaml` short-circuits a second pass, so it is removed first."""
+    under the configured data root, the episode opened by id under that tenant's
+    `<T>/episodes/` (#1187). A final `judge.yaml` short-circuits a second pass, so it is removed
+    first."""
     from defender import _tenant
     from defender.tests._state1135 import env_state
     from defender.tests.tenant_1105_run_repository import _spec1105 as H1
@@ -256,25 +269,35 @@ def grade(episode_dir: Path, tenant_id: str) -> Any:
         runs, Path(episode_dir).name, judge=J.scripted_judge(), state=env_state())
 
 
-def sibling_scene(tmp_path: Path, *, container: str | None = None,
+def sibling_scene(tmp_path: Path, *, roster: bool = True,
                   doc: dict | None = None, episode_id: str = EPISODE_ID) -> tuple[Path, Path]:
     """`(source run dir, episode dir)` for a sibling: the fixture tenant `SIBLING_TENANT` with a
     branchable source run at its natural runs folder (`_triplet_947.runs_base`), and an episode
-    under the configured episodes base holding the launcher's manifest (`T.family_doc`, whose
-    `source_run_dir` today names that source).
+    at `<data root>/<SIBLING_TENANT>/episodes/<episode_id>` (#1187 Layout A) holding the
+    launcher's manifest (`T.family_doc`, naming that source) and a primed `served/base.jsonl`,
+    built by the shared `_spec1187.make_episode`.
 
-    `container`: `None` leaves `<episode>/runs` absent (a pre-RUNS episode); a tenant id makes
-    it with a `_tenant.json` naming that tenant, through the real writer
-    (`ensure_runs_base_record`), as the launcher's `start_family` does before the first arm."""
-    from defender import _tenant
+    `roster`: `True` is the episode as RUNS leaves it — `runs/` made, then the arm roster
+    (`arms.json`) naming every manifest world at a fresh uuid4 (R2); `False` is a pre-RUNS
+    episode (pre-flight refused or aborted, or the launcher crashed first): no roster and no
+    `runs/` — the state a sibling must refuse before anything is spent (O4b)."""
+    from defender import _yaml
+    from defender.tests.ids_1187 import _spec1187 as R
 
     _base, src = T.runs_base(tmp_path, source_run_id=SOURCE_RUN_ID)
-    episodes = Path(os.environ[EPISODES_BASE_ENV])
-    ep = T.episode(tmp_path, doc=doc if doc is not None else family_doc(src), root=episodes,
-                   episode_id=episode_id)
-    if container is not None:
+    doc = doc if doc is not None else family_doc(src)  # lint-default: ok — a test builder's fresh per-call manifest
+    labels = [w["world_id"] for w in doc.get("worlds", [])]
+    ep = R.make_episode(data_root(), SIBLING_TENANT, episode_id, manifest=_yaml.safe_dump(doc),
+                        labels=labels, roster=False)
+    (ep / "served").mkdir(exist_ok=True)
+    (ep / "served" / "base.jsonl").write_text("", encoding="utf-8")
+    if T.PLANT_RECORDS:
+        # The launch's copies of the source alert and its record (#1222 A1), as `T.episode`
+        # plants them for the suites that run with the front door's records on.
+        T._plant_source_input(ep, str(src), SOURCE_RUN_ID)
+    if roster:
         (ep / "runs").mkdir(exist_ok=True)
-        _tenant.ensure_runs_base_record(ep / "runs", container)
+        R.write_roster(ep, {label: R.new_id() for label in labels})
     return src, ep
 
 
@@ -382,12 +405,12 @@ def run_page_main() -> Any:
 
 
 def plant_record(runs: Path, tenant_id: str) -> Path:
-    """`<runs>/_tenant.json` naming `tenant_id`, through the real writer."""
-    from defender import _tenant
+    """`<runs>/_tenant.json` naming `tenant_id`, in the retired writer's own shape — a
+    pre-#1187 container record, planted as the OLD ENTRY it now is (R1: nothing writes or
+    accepts one; a listing that meets it refuses, naming the one-time command)."""
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H
 
-    Path(runs).mkdir(parents=True, exist_ok=True)
-    _tenant.ensure_runs_base_record(Path(runs), tenant_id)
-    return Path(runs) / "_tenant.json"
+    return H.plant_tenant_record(Path(runs), tenant_id)
 
 
 def second_tenant(root: Path, tenant_id: str) -> Any:

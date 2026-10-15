@@ -811,15 +811,22 @@ def _case_launcher(tmp_path: Path) -> None:
     d = _finished_run(tmp_path / "ok")
     assert d.tenant is not None
     accepted = d.tenant.accept()
-    prepare("s08-ok", Run.at(d.run_dir), data_root=accepted.data_root).close()
+    # #1187: an episode id is a uuid (declared change 3).
+    from defender.tests._fixture_uuid import fixture_uuid
+
+    prepare(fixture_uuid("s08-ok"), Run.at(d.run_dir), data_root=accepted.data_root).close()
     bad = _finished_run(tmp_path / "bad")
     _replace_alert(bad.folder)
     with pytest.raises(Exception) as refused:  # noqa: PT011 — the refusal's class is the implementer's; its text is asserted
-        prepare("s08-bad", Run.at(bad.run_dir), data_root=accepted.data_root).close()
+        prepare(fixture_uuid("s08-bad"), Run.at(bad.run_dir), data_root=accepted.data_root).close()
     _assert_names_the_run_and_carries_no_byte(
         _refusal_text(refused.value, None), bad.folder, "the launcher")
-    episodes = Path(os.environ[T.EPISODES_BASE_ENV])
-    copied = [p for p in episodes.rglob("*") if p.is_file() and DECOY.encode() in p.read_bytes()]
+    # #1187 (Layout A, O9): every episode is under its tenant's `<data root>/<T>/episodes/`; the
+    # census covers every tenant. Positive control: the accepted prepare above made one there.
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    assert list(root.glob("*/episodes/*")), "the census never saw the accepted launch's episode"
+    copied = [p for p in root.glob("*/episodes/**/*")
+              if p.is_file() and DECOY.encode() in p.read_bytes()]
     assert not copied, f"the launcher copied the replaced alert into an episode: {copied}"
 
 

@@ -10,9 +10,13 @@ through its real entry point with a positive control.
   by every command line and by the drain's rehydration; the three `--tenant T <run_id>`
   command lines resolve the root and open the run through one shared opener.
 * 3 — the launcher's VERIFY and the episode page hold an episode's container once for all its
-  arms, its `_tenant.json` judged once, however many arms there are.
+  arms, its `_tenant.json` judged once, however many arms there are. (#1187 R1: no record is
+  judged; VERIFY's per-arm handout stays pinned below, the page's count test is retired — the
+  page's arms by roster id are pinned by
+  `ids_1187/test_1187_roster_consumers.py::test_page_links_each_arm_by_its_roster_id_never_a_composed_name`.)
 * 4 — the failed-requests view shows a quarantined row's address (`tenant_id`, `run_id`).
 * 6 — the judge's door judges the episode container's `_tenant.json`, as `runs.episode` does.
+  (#1187 R1, O8: no record; another tenant's episode is not under the asking tenant at all.)
 * 7 — the judge prompt's views are numbered without a gap.
 """
 from __future__ import annotations
@@ -21,6 +25,7 @@ import ast
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +35,6 @@ from defender import _tenant
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.tests.tenant_1105_run_repository import test_1105_pr2_review_fixes as R1
-
-EP = R1.EP
 
 
 @pytest.fixture(autouse=True)
@@ -258,73 +261,32 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
 # 3 — one hold of an episode's container for all its arms.
 # ==========================================================================================
 
-def _count_record_reads(monkeypatch: Any, container: Path) -> list[Path]:
-    """Every judgement of `container`'s `_tenant.json` (`read_tenant` as the held folder calls
-    it), recorded."""
-    from defender.run_repository import _held
+def test_3_verify_judges_the_container_once_for_every_arm(tmp_path):
+    """VERIFY's `_finished_arms` hands each arm back by its own entry: a real folder is a
+    `Run`, nothing at the id is `RunAbsent`, a link at the id a refused entry (`RunRefused`,
+    never followed) — one arm's entry never spoils another's.
 
-    seen: list[Path] = []
-    real = _held.read_tenant
-
-    def counting(folder: Path, *args: Any, **kwargs: Any) -> Any:
-        if Path(folder) == Path(container):
-            seen.append(Path(folder))
-        return real(folder, *args, **kwargs)
-
-    monkeypatch.setattr(_held, "read_tenant", counting)  # lint-monkeypatch: ok — a pure spy (delegates unchanged); the held record read goes through `Bound.read`, which the `io=` seam does not see
-    return seen
-
-
-def test_3_verify_judges_the_container_once_for_every_arm(tmp_path, monkeypatch):
-    """VERIFY's `_finished_arms` over three arms judges the container's `_tenant.json` ONCE
-    and hands each arm back by its own entry: a real folder is a `Run`, nothing at the id is
-    `RunAbsent`, a link at the id a refused entry (`RunRefused`, never followed) — one arm's
-    entry never spoils another's. Positive control: the same arms opened one by one judge the
-    record once per arm. RED before the fix: VERIFY opens each arm on its own hold (three
-    judgements)."""
+    #1187 declared changes 6 and 15 (R1, R2): the container's `_tenant.json` is judged by
+    nobody, so the "judged once" count (and its per-arm control) is retired; the arms are the
+    ones the episode's roster names, each at its roster id under `<T>/episodes/<uuid>/runs/`:
+    `a` and `b` real, `c`'s id with nothing at it, `l`'s id a link to `a`'s folder. (Name kept.)"""
     from defender.learning.branch import cli
     from defender.run_repository import Run, RunAbsent, RunRefused
 
-    t = R1._good(tmp_path)
-    ep = R1._episode(container=H.T_ID, arms=("a", "b"))
-    os.symlink(ep / "runs" / f"{EP}-a", ep / "runs" / f"{EP}-l")
-    with t.runs_repository().episode(EP) as view:
-        seen = _count_record_reads(monkeypatch, ep / "runs")
+    t = R1._uuid_tenant()
+    ep, episode_id, roster = R1._post_runs_episode(H.T_ID, ("a", "b", "c", "l"))
+    runs_dir = ep / "runs"
+    shutil.rmtree(runs_dir / roster["c"])
+    shutil.rmtree(runs_dir / roster["l"])
+    os.symlink(runs_dir / roster["a"], runs_dir / roster["l"])
+    with t.runs_repository().episode(episode_id) as view:
         arms = cli._finished_arms(view, ("a", "b", "c", "l"))
-        assert len(seen) == 1, f"the container's record was judged {len(seen)} times"
-        for label in ("a", "b"):
-            assert isinstance(arms[label], Run), arms[label]
-            assert Path(arms[label].run_dir) == ep / "runs" / f"{EP}-{label}"
-        assert isinstance(arms["c"], RunAbsent), arms["c"]
-        assert isinstance(arms["l"], RunRefused), arms["l"]
-        assert not isinstance(arms["l"], RunAbsent), arms["l"]
-
-        seen.clear()
-        for label in ("a", "b"):
-            view.open(view.arm_id(label))
-        assert len(seen) == 2, "control: a per-arm open judges the record each time"
-
-
-def test_3_the_page_judges_the_container_once_more_for_all_its_arms(tmp_path, monkeypatch):
-    """The episode page over a launched three-world episode judges its container's
-    `_tenant.json` twice in all — once when its view opens (G20: before anything else of the
-    episode is read) and once for every arm together — and still shows every arm (its run
-    folder's name). RED before the fix: once at the view's opening plus once per arm (4)."""
-    from defender.scripts.visualize import visualize_episode
-
-    est, src = P.launch_source(tmp_path)
-    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
-    assert got.raised is None, f"the launch did not run: {got!r}"
-    assert got.rc == 0, f"the launch did not run: {got!r}"
-    ep = R1._episodes() / P.EPISODE_ID
-    runs = _tenant.accept_tenant(P.data_root(), P.LAUNCH_TENANT,
-                                 defender_dir=H.DEFENDER).runs_repository()
-    seen = _count_record_reads(monkeypatch, ep / "runs")
-    with visualize_episode.open_episode_view(runs, P.EPISODE_ID) as view:
-        model = visualize_episode.load_episode(view)
-    assert len(seen) == 2, f"the page judged the container's record {len(seen)} times"
-    shown = {label: w.run_dir_name for label, w in model.entries.items()}
-    assert shown == {label: f"{P.EPISODE_ID}-{label}" for label in ("a", "b", "c")}, shown
+    for label in ("a", "b"):
+        assert isinstance(arms[label], Run), arms[label]
+        assert Path(arms[label].run_dir) == runs_dir / roster[label]
+    assert isinstance(arms["c"], RunAbsent), arms["c"]
+    assert isinstance(arms["l"], RunRefused), arms["l"]
+    assert not isinstance(arms["l"], RunAbsent), arms["l"]
 
 
 # ==========================================================================================
@@ -360,52 +322,56 @@ def test_4_a_quarantined_curation_row_shows_its_address(tmp_path):
 # ==========================================================================================
 
 def test_6_grading_another_tenants_episode_is_refused(tmp_path):
-    """The judge (`grade_episode`) handed tenant U's repository and tenant T's episode (its
-    container's `_tenant.json` names T) refuses (`JudgeRefused`, naming the record) before
-    anything is graded: the judge is never asked, no `judge.yaml` is written, the learning
-    state is untouched. So does T's own repository once the record is removed (a present
-    container with no record). An ABSENT container is not the door's to refuse: the episode
-    opens. Positive control: T's own repository grades the episode. RED before the fix:
-    `episode_files` reads nothing in `runs/`, so U grades T's episode."""
+    """The judge (`grade_episode`) handed tenant U's repository and tenant T's episode id
+    refuses before anything is graded: no `judge.yaml` is written and the learning state is
+    untouched. An ABSENT container is not the door's to refuse: the episode opens. Positive
+    control: T's own repository grades the episode. RED before the fix: `episode_files` reads
+    nothing in `runs/`, so U grades T's episode.
+
+    #1187 declared changes 3, 5, 6 and 8 (R1, O8): no container record is judged. T's episode
+    is the one fresh `<T>/episodes/<uuid>/` the launch made; U's repository looks under
+    `<U>/episodes` only, finds nothing, and refuses (the door's absent refusal, or the judge's).
+    The "recordless container refuses" half flips: a container holding no `_tenant.json` is
+    every episode's, and T grades it. (Name kept.)"""
     from defender.learning.judge import JudgeRefused, grade_episode
+    from defender.run_repository import RunRefused
     from defender.tests import _judge_921 as J
     from defender.tests._state1135 import env_state
+    from defender.tests.ids_1187 import _spec1187 as S
 
     est, src = P.launch_source(tmp_path)
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
     assert got.raised is None, f"the launch did not run: {got!r}"
     assert got.rc == 0, f"the launch did not run: {got!r}"
-    ep = R1._episodes() / P.EPISODE_ID
+    episodes = S.episodes_dir(P.data_root(), P.LAUNCH_TENANT)
+    made = sorted(p.name for p in episodes.iterdir()) if episodes.is_dir() else []
+    assert len(made) == 1, f"the launch made {made} under <T>/episodes"
+    episode_id = made[0]
+    ep = episodes / episode_id
     (ep / "judge.yaml").unlink(missing_ok=True)
     other = P.second_tenant(P.data_root(), H.U_ID)
     state_dir = tmp_path / "learning-state"
     before = P.tree(state_dir)
 
     judge = J.scripted_judge()
-    err = H.raised(grade_episode, other.runs_repository(), P.EPISODE_ID, judge=judge,
+    err = H.raised(grade_episode, other.runs_repository(), episode_id, judge=judge,
                    state=env_state())
-    assert isinstance(err, JudgeRefused), f"another tenant graded the episode: {err!r}"
-    assert "_tenant.json" in str(err), err
+    assert isinstance(err, (JudgeRefused, RunRefused, _tenant.TenantRefused,
+                            FileNotFoundError)), f"another tenant graded the episode: {err!r}"
     assert not (ep / "judge.yaml").exists(), "a grade was written for another tenant"
     assert P.tree(state_dir) == before, "the refused grade touched the learning state"
+    assert not os.path.lexists(S.episodes_dir(P.data_root(), H.U_ID) / episode_id)
 
     own = _tenant.accept_tenant(P.data_root(), P.LAUNCH_TENANT,
                                 defender_dir=H.DEFENDER).runs_repository()
-    record = ep / "runs" / "_tenant.json"
-    kept = record.read_bytes()
-    record.unlink()
-    err = H.raised(grade_episode, own, P.EPISODE_ID, judge=J.scripted_judge(),
-                   state=env_state())
-    assert isinstance(err, JudgeRefused), f"a recordless container was graded: {err!r}"
-    record.write_bytes(kept)
-
+    assert not (ep / "runs" / "_tenant.json").exists(), "the launch wrote a container record"
     moved = tmp_path / "container-away"
     (ep / "runs").rename(moved)
-    handle = own.episode_files(P.EPISODE_ID)
+    handle = own.episode_files(episode_id)
     handle.close()
     moved.rename(ep / "runs")
 
-    graded = P.grade(ep, P.LAUNCH_TENANT)
+    graded = grade_episode(own, episode_id, judge=J.scripted_judge(), state=env_state())
     assert graded is not None
     assert (ep / "judge.yaml").is_file(), "control: the own tenant did not grade"
 

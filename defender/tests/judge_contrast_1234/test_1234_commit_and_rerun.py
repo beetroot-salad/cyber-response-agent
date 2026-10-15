@@ -46,6 +46,7 @@ from typing import Any
 import pytest
 
 from defender import _yaml
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
 # --------------------------------------------------------------------------------------
@@ -56,9 +57,10 @@ from defender.tests.judge_contrast_1234 import _spec1234 as S
 CONTROL, B, C, D = "alpha", "bravo", "charlie", "delta"
 FAMILY = S.FAMILY
 
-#: More episodes beside `S.EPISODE_ID`, for scenarios that need two or more.
-EP2 = "20260728t161845z-fresh-case-n60"
-EP3 = "20260728t161845z-fresh-case-n61"
+#: More episodes beside `S.EPISODE_ID`, for scenarios that need two or more: UUIDs, as every
+#: episode id after #1187 (declared change 1).
+EP2 = fixture_uuid("fresh-case-n60")
+EP3 = fixture_uuid("fresh-case-n61")
 
 COMPLETED = S.RULED["row.completed_draws"]
 BUCKET = S.RULED["reply.bucket"]
@@ -1162,7 +1164,7 @@ _G05_PROCESSES, _G05_EPISODES_EACH = 4, 3
 
 
 def _g05_episode_id(k: int) -> str:
-    return f"20260728t161845z-fresh-case-n{70 + k}"
+    return fixture_uuid(f"fresh-case-n{70 + k}")  # a UUID, as every episode id after #1187
 
 
 def _g05_judge(k: int) -> S.RoutedJudge:

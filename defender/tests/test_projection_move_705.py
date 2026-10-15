@@ -34,6 +34,7 @@ import sys
 from pathlib import Path
 
 from defender.tests._by_path import WORKTREE, load_module
+from defender.tests._fixture_uuid import fixture_uuid
 
 import pytest
 
@@ -383,10 +384,22 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     the same call over an intact run dir returns normally and writes the page."""
     from defender import run_common
 
-    run_dir, store, _replay = _driven_run(tmp_path, run_id=f"failclosed-{breakage}")
+    # #1187 declared change 1: the run id is a uuid, so the re-render's `--tenant T <run_id>`
+    # cannot be refused for the id's shape — that refusal is non-zero too, and would pass the
+    # negative below for the wrong reason (#1187 sweep: pass-by-accident).
+    run_dir, store, _replay = _driven_run(tmp_path, run_id=fixture_uuid(f"failclosed-{breakage}"))
     tenant, run_dir = _into_tenant_runs(run_dir)
+    script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
-    # positive control — intact, the post-run step renders the page and does not raise
+    # positive control — intact, the standalone re-render exits 0 on the same argv, and the
+    # post-run step renders the page and does not raise
+    healthy = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
+        [sys.executable, str(script), "--tenant", tenant, run_dir.name],
+        capture_output=True, text=True, encoding="utf-8", check=False)
+    assert healthy.returncode == 0, (
+        f"control: the re-render of the intact run exited {healthy.returncode}: "
+        f"{healthy.stderr!r}")
+    (run_dir / "runtime.html").unlink(missing_ok=True)
     run_common.visualize(_view_run_1165(run_dir))
     for name in ("runtime.html",):
         assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"
@@ -404,7 +417,6 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
 
     # the standalone re-render really exits non-zero — the real script, the real argv
     # (`--tenant T <run_id>`, #1105 PR 2 declared change 7), the real broken input
-    script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
     child = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
         [sys.executable, str(script), "--tenant", tenant, run_dir.name],
         capture_output=True, text=True, encoding="utf-8", check=False)

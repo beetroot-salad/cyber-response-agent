@@ -766,10 +766,15 @@ def test_1224_forbidden_world_label_is_refused_by_the_launcher_and_the_sibling_l
         assert [w["world_id"] for w in _judge_read(ep)["worlds"]] == ["a", "siem_x", "c"]
         load_page(ep)
         # #1105 PR 2 (F-13): nothing decodes a label from an arm folder's name any more
-        # (`cli._world_label_of` is gone); the one composition left is the episode view's
-        # `arm_id(label)`, which admits the label into the arm's run id.
+        # (`cli._world_label_of` is gone). #1187 declared change 2 (R2): nothing composes one
+        # either — the episode view's `arm_id(label)` is the id the arm roster holds for the
+        # label (written at RUNS, `episode_view`), a uuid carrying neither the label nor the
+        # episode id; the admitted label is a roster key.
         with _episode_cls().open(Path(ep)) as handle:
-            assert str(S.T.episode_view(handle).arm_id("siem_x")) == f"{S.EPISODE_ID}-siem_x"
+            arm_id = str(S.T.episode_view(handle).arm_id("siem_x"))
+        assert arm_id == S.T.read_roster(ep)["siem_x"], arm_id
+        assert "siem_x" not in arm_id, arm_id
+        assert Path(ep).name not in arm_id, arm_id
         return
     assert _names(_refused(lambda: _parse(doc), FamilyError), label)
     assert _names(_refused(lambda: _resume(ep, label), FamilyError), label)

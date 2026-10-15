@@ -46,6 +46,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
 #: The words A2/M2 require on the aligned lead view and the fact surfaces (`S.COINED`).
@@ -64,7 +65,7 @@ SECTIONS = ("header", "contrast", "surfaces", "aligned", "references", "focus", 
 #: A pre-flight drift entry (the noise context is pre-flight's record alone, drift overlay).
 DRIFT_MARK = "MARK-preflight-drift"
 #: The episode id of a second, separately graded family in one test (finding ids carry it).
-SECOND_EPISODE_ID = "20260728t161845z-fresh-case-n60"
+SECOND_EPISODE_ID = fixture_uuid("fresh-case-n60")  # a UUID, as every episode id after #1187
 
 
 def _title(section: str) -> str:

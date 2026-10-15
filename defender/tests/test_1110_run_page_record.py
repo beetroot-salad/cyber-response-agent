@@ -183,8 +183,10 @@ def test_1110_o1_main_hands_the_render_step_the_tenant_bound_handle_it_materiali
     assert tail.run_dirs == [run.run_dir], (
         "the render step was handed a handle over a different run dir than the lifecycle's")
     assert run.runs_base == runs_base, "the handle is not bound to the configured runs base"
-    assert run.tenant_id == _tenant.read_tenant(runs_base).tenant_id, (
-        "the handle does not carry the tenant the runs base's tenant record names")
+    # #1187 (R1, P-loc): no runs-base record names a tenant any more; the run's tenant is the
+    # one whose `<data root>/<T>/runs` holds it.
+    assert run.tenant_id == runs_base.parent.name, (
+        "the handle does not carry the tenant whose runs folder holds the run")
     assert run.observability.runtime_html.path == run.run_dir / "runtime.html"
 
 

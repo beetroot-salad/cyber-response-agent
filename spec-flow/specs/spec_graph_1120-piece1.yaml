@@ -297,12 +297,12 @@ demands:
              "defender_dir.domain.distinguished[contains-data-root]", knowledge_dir],
      discharged_by: test_1120_a_data_root_inside_the_checkouts_defender_tree_is_still_refused}
   # Grown binds: the four refusals its own seed names (EPISODES_BASE_ENV re-coined).
-  - {id: d1_j44_episodes_refusal_survives, kind: survival, form: test,
+  - {id: d1_j44_episodes_refusal_survives, kind: survival, form: clause, status: retired,
      binds: [episodes_root, Tenant, "DEFENDER_EPISODES_BASE.domain.distinguished[tenant-episodes]",
              "DEFENDER_EPISODES_BASE.domain.distinguished[inside-data-root-other]",
              "DEFENDER_EPISODES_BASE.domain.distinguished[inside-checkout]",
              "DEFENDER_EPISODES_BASE.domain.distinguished[containing-data-root]"],
-     discharged_by: test_1120_the_launcher_still_refuses_an_episodes_base_inside_the_data_root}
+     outcome: {nl: 'RETIRED by #1187 — decision 3 and declared change 5 (O9): `DEFENDER_EPISODES_BASE` is read by nothing, `episodes_root` and its refusals are retired, and episodes are created only at the tenant''s own episodes folder, which removes the launcher''s refusal of an episodes base inside the data root; `test_1120_the_launcher_still_refuses_an_episodes_base_inside_the_data_root`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_create_episode_claims_a_uuid_folder_under_the_tenant_and_reads_no_environment` and `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_episodes_variable_changes_nothing_and_no_episodes_root_refusal_fires`.'}}
   - {id: d1_tenant_of_run_dir_takes_root, kind: survival, form: clause, status: retired,
      binds: [tenant_of_run_dir, data_root],
      outcome: {nl: 'RETIRED by #1105 PR 2 — F-13: `tenant_of_run_dir` lost its last production caller when the launcher took a tenant and a source run id (declared change 1) and was deleted; `test_1120_tenant_of_run_dir_takes_the_data_root_and_still_refuses_a_run_outside_its_tenant`, which discharged this demand, was deleted with it.'}}

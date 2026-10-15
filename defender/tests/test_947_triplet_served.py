@@ -192,17 +192,26 @@ def test_947_the_queries_table_digest_carries_no_world_token(tmp_path):
 #: An episode forked from an operator-pinned source run id: nothing here is stamp-shaped, so
 #: only the identities the serving registry declares can be removed.
 PINNED_EPISODE = "live-lever-up-20260930-sudo-n5"
+#: #1187: the family's arm ids as its host-written roster (`<ep>/arms.json`) holds them — random
+#: UUIDs, never `<episode_id>-<label>` (declared change 15).
+ROSTER = {"a": "0b5c7e2a-4d1f-4a8e-9c3b-2f6d8e1a7c40",
+          "b": "7e3a9c1f-5b2d-4e8a-a6c4-3d1f9b7e5a20",
+          "c": "c4d2e6f8-1a3b-4c5d-9e7f-8a0b2c4d6e81"}
 PINNED_FAULT = ("Elasticsearch query failed (HTTP 404): ledger "
                 "live.lever.up.20260930.sudo.n5.a.jsonl missing; run "
-                "live-lever-up-20260930-sudo-n5-c refused")
+                f"{ROSTER['c']} refused")
 
 
 def _branched_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
     """`_faulting_backend`, as a registry serving one world of a pinned-source family: it
-    declares the family's identities through the seam a `WorldRegistry` answers."""
+    declares the family's identities — over the roster's arm ids (#1187) — through the seam a
+    `WorldRegistry` answers."""
+    from defender.run_repository import RunId
+
     family = T.sym("runtime.branch._family", "parse_family")(
         T.family_doc(episode_id=PINNED_EPISODE, source_run_id="live-lever-up-20260930-sudo"))
-    known = T.sym("runtime.branch._family", "family_identities")(family)
+    arm_ids = {label: RunId.parse(text) for label, text in ROSTER.items()}
+    known = T.sym("runtime.branch._family", "family_identities")(family, arm_ids)
     plain = _faulting_backend(rec, detail)
 
     class _World(FakeVerbs):
@@ -214,7 +223,10 @@ def _branched_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
 
 def test_947_a_driven_pinned_source_fault_reaches_neither_surface_with_a_known_id(tmp_path):
     """Driven end to end: the registry declares the family, and neither the model's turn nor the
-    queries table's digest names any of it, while the actionable half survives on both."""
+    queries table's digest names any of it — a sibling's arm id included, as the roster holds
+    it — while the actionable half survives on both.
+    #1187 declared change 15
+    """
     rec = VerbRecorder()
     gather, run_dir = _drive_one_query(tmp_path, _branched_backend(rec, PINNED_FAULT))
     assert rec.calls, "the query never reached the verb, so no fault was raised"
@@ -222,6 +234,6 @@ def test_947_a_driven_pinned_source_fault_reaches_neither_surface_with_a_known_i
     digests = "\n".join(str(r.get("payload_digest", "")) for r in _own_failure_rows(run_dir))
     assert ACTIONABLE in seen
     assert ACTIONABLE in digests
-    for leak in ("live.lever.up.20260930.sudo.n5", PINNED_EPISODE):
+    for leak in ("live.lever.up.20260930.sudo.n5", PINNED_EPISODE, ROSTER["c"]):
         assert leak not in seen, f"{leak!r} reached the model on the fault channel"
         assert leak not in digests, f"{leak!r} was persisted into the queries table"

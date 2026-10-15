@@ -8,6 +8,12 @@ coined names (`run_repository._handle`, `RecordHandle`, `RunRecord`) and every f
 bare run id's case fold, which claim RC-3 showed no rule covered) and `h55` (decision 22 — a
 `for_tenant` tenant argument the record at the resolved base disagrees with).
 
+#1187 (design rev 2, R1): the runs container's `_tenant.json` is retired, and `Run.for_tenant`
+— which judged its tenant argument against that record — with it; `Run.under(container, run_id,
+tenant_id=)` is the constructor every test here builds through, over a container holding no
+record, and every run id is a uuid (declared change 1). h55 is retired with the record (its test
+deleted; the graph says so); h06 keeps its name and now pins `Run.under`.
+
 RED AGAINST BASE db1af01a by construction: `defender/run_repository/_handle.py` does not exist, and every
 test reaches it through `S.handle()` per call, so the failure is the missing module once per
 test rather than a collection error hiding the rest.
@@ -25,6 +31,7 @@ import pytest
 
 from defender.tests import _spec1077 as S
 from defender.tests._alert_plant import plant_alert
+from defender.tests._fixture_uuid import fixture_uuid
 
 
 @pytest.fixture
@@ -38,17 +45,15 @@ def run_dir(base: Path) -> Path:
 
 
 def _with_record(base: Path) -> Path:
-    """`base` holding its tenant record naming `DEFAULT_TENANT_ID`, unless a test planted its
-    own. #1105 NH-3: `Run.for_tenant` refuses a runs base with no `_tenant.json`, so a handle is
-    built only once the record exists — as run setup writes it before building the handle."""
-    if not (base / "_tenant.json").exists():
-        S.plant_tenant_record(base)
+    """`base` as run setup leaves it. #1187 (R1): no `_tenant.json` is planted — the record is
+    retired and `Run.under` reads none (the name is kept so the call sites read as before)."""
     return base
 
 
-def _tenanted(base: Path, run_id: str = "run-1077"):
-    """A handle built the way real application code builds one (decision 1d)."""
-    return S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_id, runs_base=_with_record(base))
+def _tenanted(base: Path, run_id: str = S.RUN_ID):
+    """A handle built the way real application code builds one (decision 1d; #1187: through
+    `Run.under`, `Run.for_tenant` being retired with the record it read)."""
+    return S.Run().under(base, run_id, tenant_id=S.DEFAULT_TENANT_ID)
 
 
 # ---------------------------------------------------------------------------------------
@@ -151,7 +156,7 @@ def test_the_wrappers_read_reaches_todays_reader_unchanged(base, run_dir):
     """A wrapper's read method reaches today's reader for that record's shape, with the same
     guard and the same result the call site got before."""
     recorder = S.RecordingIo()
-    run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base),
+    run = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID,
                              io=recorder)
     # The constructor's own record read (#1105 NH-3) is not the wrapper's: start the record here.
     recorder.calls.clear()
@@ -197,9 +202,12 @@ def test_the_wrapper_adds_no_parsing_or_validation_of_its_own(base, run_dir):
 
 def test_application_code_constructs_a_run_through_for_tenant(base, run_dir):
     """`Run.for_tenant(tenant_id, run_id)` is what the host process that creates and operates on
-    a run constructs through, and it resolves the run against that tenant's runs base."""
-    S.plant_tenant_record(base, tenant_id="acme", base_world_id="feedfacefeedfacefeedfacefeedface")
-    run = S.Run().for_tenant("acme", run_dir.name, runs_base=base)
+    a run constructs through, and it resolves the run against that tenant's runs base.
+
+    #1187 (R1): `Run.for_tenant` is retired with the container record it read; its replacement
+    `Run.under(container, run_id, tenant_id=)` is the constructor, over a container holding no
+    record. (The name is kept: it is the spec graph's h06 discharge.)"""
+    run = S.Run().under(base, run_dir.name, tenant_id="acme")
     assert run.run_dir == run_dir, "for_tenant did not resolve the run against the tenant's base"
     assert run.tenant_id == "acme"
     assert run.runs_base == base, (
@@ -231,6 +239,10 @@ def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it
 
     NEGATIVE. Positive control inline: `Run.for_tenant` IS reached and resolves the same
     directory `under` would have.
+
+    #1187 (R1): `Run.for_tenant` is retired; the repository package (`_lookup`) calls
+    `Run.under(container, id, tenant_id=)` in its place, which is still inside the owner, so the
+    negative holds unchanged and the positive control builds through `Run.under` itself.
     """
     import ast
     from defender.tests._by_path import DEFENDER, cached_parse, import_lint_lib
@@ -257,7 +269,7 @@ def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it
                 break
     assert hits == [], f"Run.under is reached outside the owner module: {hits}"
     assert _tenanted(base).run_dir == run_dir, (
-        "positive control: for_tenant, which under is the helper of, resolves the same directory")
+        "positive control: the constructor resolves the run directory inside the container")
 
 
 def test_run_at_refuses_a_nonexistent_path_and_a_file(base, tmp_path: Path):
@@ -295,7 +307,7 @@ def test_run_id_admission_is_todays_validator_by_reference_not_a_second_one(base
     for run_id in bad:
         assert not is_valid_run_id(run_id), f"{run_id!r} is the validator's own refusal"
         with pytest.raises(Exception) as excinfo:  # noqa: PT011
-            S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_id, runs_base=base)
+            S.Run().under(base, run_id, tenant_id=S.DEFAULT_TENANT_ID)
         assert RUN_ID_ALLOWED in str(excinfo.value), (
             f"the handle refused {run_id!r} in its own words rather than surfacing today's "
             "validator's — decision 8 delegates BY REFERENCE, it does not restate the rule")
@@ -305,38 +317,48 @@ def test_run_id_admission_is_todays_validator_by_reference_not_a_second_one(base
     two_predicates = (
         "the two predicates answer different questions; if `is_valid_run_id` refused mixed "
         "case on its own there would be nothing for decision 20 to add")
-    assert is_valid_run_id("Run-1077"), two_predicates
-    assert not is_case_stable_id("Run-1077"), two_predicates
+    # #1187: the case variant is an uppercase uuid (O2 refuses it; N11 keeps the broad
+    # alphabet `is_valid_run_id` answers, so it still admits it).
+    upper = S.RUN_ID.upper()
+    assert is_valid_run_id(upper), two_predicates
+    assert not is_case_stable_id(upper), two_predicates
     with pytest.raises(Exception) as excinfo:  # noqa: PT011
-        S.Run().for_tenant(S.DEFAULT_TENANT_ID, "Run-1077", runs_base=base)
+        S.Run().under(base, upper, tenant_id=S.DEFAULT_TENANT_ID)
     assert CASE_STABLE_REQUIRED in str(excinfo.value), (
         "a mixed-case run id was admitted, or refused in the handle's own words. Decision 20 "
         "reaches `_run_id.is_case_stable_id` BY REFERENCE, exactly as `_family."
         "refuse_bad_episode_id` already does for the episode id — one rule, not two spellings")
-    # Positive control: an id both validators admit is admitted here, unchanged.
-    assert is_valid_run_id("run-1077")
-    assert is_case_stable_id("run-1077")
-    assert S.Run().for_tenant(S.DEFAULT_TENANT_ID, "run-1077", runs_base=base) is not None
+    # Positive control: an id both validators admit is admitted here, unchanged (#1187 declared
+    # change 1: a canonical uuid4 text).
+    assert is_valid_run_id(S.RUN_ID)
+    assert is_case_stable_id(S.RUN_ID)
+    assert S.Run().under(base, S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID) is not None
 
 
 def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base):
     """`Run.for_tenant`/`Run.under` apply `is_case_stable_id` beside `is_valid_run_id`, so a
     case-variant of an existing run id is REFUSED rather than silently resolving onto that
-    run's directory."""
+    run's directory.
+
+    #1187 declared change 1: every run id is a canonical lowercase uuid4 text, so the existing
+    run is a uuid and its case variants are upper- or mixed-case spellings of it."""
     from defender._run_id import CASE_STABLE_REQUIRED
     _with_record(base)
-    S.seed_run_tree(S.make_run_dir(base, "run-1"))
-    S.plant_stamp(base / "run-1", commit="c0ffee", dirty=False, tenant_id=S.DEFAULT_TENANT_ID)
+    one, two = fixture_uuid("handle-case-one"), fixture_uuid("handle-case-two")
+    S.seed_run_tree(S.make_run_dir(base, one))
+    S.plant_stamp(base / one, commit="c0ffee", dirty=False, tenant_id=S.DEFAULT_TENANT_ID)
+    mixed = "".join(c.upper() if i % 2 else c for i, c in enumerate(one))
 
-    for variant in ("Run-1", "RUN-1", "rUn-1"):
+    for variant in (one.upper(), mixed):
+        assert variant != one, "fixture: the variant must differ from the id only by case"
         with pytest.raises(Exception) as excinfo:  # noqa: PT011
-            S.Run().for_tenant(S.DEFAULT_TENANT_ID, variant, runs_base=base)
+            S.Run().under(base, variant, tenant_id=S.DEFAULT_TENANT_ID)
         said = str(excinfo.value)
         assert CASE_STABLE_REQUIRED in said, (
             f"{variant!r} was not refused by the case-stability rule: {said!r}. On a case-"
             "insensitive filesystem — macOS, which this repo supports, and where the default "
-            "runs base lives under a symlinked /tmp — it and `run-1` are ONE inode, so "
-            "decision 3's resumable setup would finish `run-1`'s directory as if it were "
+            "runs base lives under a symlinked /tmp — it and the lowercase id are ONE inode, so "
+            "decision 3's resumable setup would finish that run's directory as if it were "
             "this run's, re-stamp its identity and clear its three sidecars (h12, h13)")
         assert variant.casefold() in said, (
             "the refusal does not offer the spelling that would work; `_family."
@@ -344,45 +366,15 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
     # The refusal is the ID's, not the collision's: it holds with no existing directory too,
     # so the handle never has to look at the filesystem to know the id is unusable.
     with pytest.raises(Exception) as excinfo:  # noqa: PT011
-        S.Run().for_tenant(S.DEFAULT_TENANT_ID, "Run-2", runs_base=base)
+        S.Run().under(base, two.upper(), tenant_id=S.DEFAULT_TENANT_ID)
     assert CASE_STABLE_REQUIRED in str(excinfo.value)
     # And nothing was touched on the way to the refusal.
-    assert S.Run().at(base / "run-1").record.commit == "c0ffee", (
+    assert S.Run().at(base / one).record.commit == "c0ffee", (
         "the refused call re-stamped the run whose directory the case variant folds onto")
-    assert sorted(p.name for p in base.iterdir()) == ["_tenant.json", "run-1"], (
+    assert sorted(p.name for p in base.iterdir()) == [one], (
         f"the refused call created something: {sorted(p.name for p in base.iterdir())}")
     # Positive control: the case-stable spelling is admitted, unchanged.
-    assert S.Run().for_tenant(S.DEFAULT_TENANT_ID, "run-2", runs_base=base) is not None
-
-
-def test_for_tenant_refuses_a_tenant_id_the_record_at_the_resolved_base_disagrees_with(base):
-    """`Run.for_tenant(tenant_id, run_id)` refuses when the `tenant_id` argument disagrees with
-    the tenant record actually stored at the resolved runs base, and the refusal names both."""
-    S.plant_tenant_record(base, tenant_id="acme",
-                          base_world_id="feedfacefeedfacefeedfacefeedface")
-    S.seed_run_tree(S.make_run_dir(base, "run-mismatch"))
-
-    with pytest.raises(Exception) as excinfo:  # noqa: PT011
-        S.Run().for_tenant("globex", "run-mismatch", runs_base=base)
-    said = str(excinfo.value)
-    for named in ("globex", "acme"):
-        assert named in said, (
-            f"the refusal does not name {named!r}: {said!r}. Both sides belong in it — the "
-            "caller cannot tell which of the two is wrong from a message carrying one")
-    assert S.Run().at(base / "run-mismatch").record.tenant_id is None, (
-        "the refused construction stamped the run anyway — decision 22 refuses BEFORE the "
-        "constructor's caller can write a run under the tenant it does not belong to")
-
-    # Neither 'trust the argument' nor 'trust the record' was chosen, because both make the
-    # mismatch silent, which is what decision 1d promoted `for_tenant` to prevent.
-    assert not (base / "_tenant.json").read_text(encoding="utf-8").count("globex"), (
-        "the record was rewritten to agree with the argument — `for_tenant` is an enforcement "
-        "point, not a migration")
-    # POSITIVE CONTROL: the agreeing pair still constructs (h06), so the refusal above is the
-    # disagreement and not `for_tenant` refusing every non-default tenant.
-    agreeing = S.Run().for_tenant("acme", "run-mismatch", runs_base=base)
-    assert agreeing.tenant_id == "acme"
-    assert agreeing.runs_base == base
+    assert S.Run().under(base, two, tenant_id=S.DEFAULT_TENANT_ID) is not None
 
 
 # ---------------------------------------------------------------------------------------
@@ -440,14 +432,19 @@ def test_run_at_accepts_every_run_dir_shaped_directory_and_leaves_identity_none(
 
 
 def test_archived_world_exposes_exactly_the_copied_set_and_is_not_a_run(tmp_path: Path):
-    """`ArchivedWorld.at` exposes exactly the copied set and nothing else, and is not a `Run`."""
+    """`ArchivedWorld.at` exposes exactly the copied set and nothing else, and is not a `Run`.
+    #1187 R8: the `run_dir` pointer is no longer in the copied set (nothing reads it; it goes
+    with its write).
+    #1187 declared change 12
+    """
     world = tmp_path / "episodes" / S.EPISODE_ID / "worlds" / S.LABEL
     world.mkdir(parents=True)
     aw = S.ArchivedWorld().at(world)
 
     assert set(aw.members) == set(S.ARCHIVED_WORLD_MEMBERS), (
-        "the copied set is page §5's enumeration, extended by the four archive.py constants "
-        "claim C17 omitted (gather_summaries, lessons_loaded, alert, and the run_dir pointer)")
+        "the copied set is page §5's enumeration, extended by the archive.py constants claim "
+        "C17 omitted (gather_summaries, lessons_loaded, alert); #1187 R8 retired the run_dir "
+        "pointer")
     for name in S.ARCHIVED_WORLD_MEMBERS:
         assert getattr(aw, name).path.is_relative_to(world)
     for absent in ("tool_trace", "budget", "wire_log", "session_db", "review_record"):
@@ -467,7 +464,7 @@ def test_every_writer_method_reaches_todays_seam_unchanged(base, run_dir):
     subject was the budget state, which is the run process's memory now, and no handle member
     takes `update` any more.)"""
     recorder = S.RecordingIo()
-    run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base),
+    run = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID,
                              io=recorder)
 
     # #1111: the guarded seams are the ROOTED ones (`rooted_write` / `rooted_locked_for_rewrite`,
@@ -522,12 +519,12 @@ def test_run_under_run_id_containing_path_separator(base):
     escaped.mkdir(exist_ok=True)
     for run_id in ("../escaped", "a/b", "/etc"):
         with pytest.raises(Exception):  # noqa: B017,PT011
-            S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_id, runs_base=base)
+            S.Run().under(base, run_id, tenant_id=S.DEFAULT_TENANT_ID)
         with pytest.raises(Exception):  # noqa: B017,PT011
             S.Run().under(base, run_id)
     assert not (escaped / "provenance.json").exists(), "a refused construction wrote outside"
     # Positive control: an ordinary run id resolves, inside the base.
-    ok = S.Run().for_tenant(S.DEFAULT_TENANT_ID, "run-1077", runs_base=base)
+    ok = S.Run().under(base, S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID)
     assert ok.run_dir.is_relative_to(base)
 
 
@@ -538,12 +535,12 @@ def test_run_under_run_id_containing_parent_traversal(base):
     outside = base.parent / "outside"
     outside.mkdir(exist_ok=True)
     for run_id in ("..", "../..", "../outside", "x/../../outside"):
-        for build in (lambda r: S.Run().for_tenant(S.DEFAULT_TENANT_ID, r, runs_base=base),
+        for build in (lambda r: S.Run().under(base, r, tenant_id=S.DEFAULT_TENANT_ID),
                       lambda r: S.Run().under(base, r)):
             with pytest.raises(Exception):  # noqa: B017,PT011
                 build(run_id)
-    assert S.Run().for_tenant(
-        S.DEFAULT_TENANT_ID, "run-1077", runs_base=base).run_dir.is_relative_to(base), (
+    assert S.Run().under(
+        base, S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID).run_dir.is_relative_to(base), (
         "positive control: a traversal-free id still resolves, inside the base")
 
 
@@ -704,7 +701,7 @@ def test_a_handle_built_from_a_bare_directory_lacks_the_input_the_upward_accesso
         assert "forbidden" not in said.lower()
     # Positive control: given a runs base, the same accessors resolve.
     run_dir = S.seed_run_tree(S.make_run_dir(base))
-    tenanted = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    tenanted = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     assert S.member(tenanted, "facts", "run_end").path.parent == base
     pointer = S.member(tenanted, "observability", "session_pointer").path
     assert pointer == S.RunPaths(run_dir).session_pointer(base), \
@@ -874,7 +871,7 @@ def test_the_write_method_creates_the_directory_the_path_accessor_no_longer_does
     """The write method creates the directory its record needs, and it is the only thing that
     does."""
     recorder = S.RecordingIo()
-    run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base),
+    run = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID,
                              io=recorder)
     trace = S.member(run, "observability", "review_trace", S.ROLE)
 

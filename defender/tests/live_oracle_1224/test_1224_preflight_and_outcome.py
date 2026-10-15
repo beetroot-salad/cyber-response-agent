@@ -39,26 +39,32 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender import _yaml
 from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _state1135
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
-#: The configured episodes root (no default exists; `cli.episodes_root` refuses an unset one).
+#: The retired episodes variable (#1187 O9: read by nothing). Still set below, to a folder that
+#: is not the tenant's, as a decoy: no launch here may land an episode there.
 EPISODES_ENV = "DEFENDER_EPISODES_BASE"
 
 
 @pytest.fixture(autouse=True)
 def episodes_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Every launch here needs a configured episodes root outside the data root and the
-    checkout, and a learning-state root of its own (an accepted launch ends in the judge,
-    which would otherwise write into the checkout)."""
-    root = tmp_path / "episodes-root"
-    monkeypatch.setenv(EPISODES_ENV, str(root))
+    """Where every launch here puts its episode: the fixture tenant's own
+    `<data root>/<T>/episodes/` (#1187 Layout A — derived from the tenant, never configured),
+    and a learning-state root of its own (an accepted launch ends in the judge, which would
+    otherwise write into the checkout)."""
+    monkeypatch.setenv(EPISODES_ENV, str(tmp_path / "episodes-root"))
     S.T.isolate_learning_state(tmp_path, monkeypatch)
-    return root
+    return S.tenant_episodes()
+
+
+def _names(root: Path) -> set[str]:
+    """The entries of `root` (none when it does not exist yet: the tenant's `episodes/` is made
+    by the first launch)."""
+    return {p.name for p in Path(root).iterdir()} if Path(root).is_dir() else set()
 
 
 # --------------------------------------------------------------------------------------
@@ -276,13 +282,11 @@ class _Spawn(S.FakeSpawn):
         self._mine = threading.Lock()
 
     def _ep(self, argv: list[str]) -> Path:
-        """The episode this child belongs to: the episodes-root child its `--episode` id names
-        (#1105 PR 2: the sibling's command line names its episode by id), else the derived
-        episode id."""
-        for i, tok in enumerate(argv):
-            if tok == "--episode" and i + 1 < len(argv):
-                return self.root / argv[i + 1]
-        return self.root / S.EPISODE_ID
+        """The episode this child belongs to: the one its `--tenant` and `--episode` name,
+        `<data root>/<T>/episodes/<ep>` (#1105 PR 2: the sibling's command line names its
+        episode by id; #1187: under its tenant, the id the launcher minted)."""
+        ep = S.episode_of(list(argv))
+        return ep if ep is not None else self.root / S.NO_EPISODE
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None,
                  **kw: Any) -> int:
@@ -320,6 +324,10 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
         seams["verifier"] = verifier.model
     cli = S.mod(S.CLI)
     message = ""
+    # #1187 (O9): the episode is the new folder under the tenant's own `<T>/episodes/` (the
+    # launcher mints its id).
+    root = S.tenant_episodes(src.parent.parent.name)
+    already = _names(root)
     try:
         # #1105 PR 2 (declared change 1): the tenant and the source run by id.
         rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
@@ -329,7 +337,13 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
             rc = stop.code
         else:
             rc, message = 2, str(stop.code)
-    ep = EH.episode_dir(S.T.current_tenant().data_root, S.EPISODE_ID)
+    ep = S.new_episode(root, already)
+    S.log_refusal(rc, message)
+    eps = getattr(spawn, "eps", None)
+    if ep.name == S.NO_EPISODE and eps:
+        # A second launch nested inside this one's siblings (conc_36) made a second new
+        # folder: this launch's is the one its own siblings ran in.
+        ep = eps[0]
     return S.Launch(rc=rc, message=message, spawn=spawn, ep=ep)
 
 
@@ -416,9 +430,14 @@ def _new_episode(root: Path, before: set[str]) -> Path:
     return fresh[0]
 
 
-def _dead_launch(root: Path, *, manifest: bool = True, outcome: str | None = None,
+def _dead_launch(root: Path, *, est: S.Estate, manifest: bool = True, outcome: str | None = None,
                  forged: Iterable[Mapping[str, Any]] = ()) -> Path:
-    """The state a killed launcher leaves at the derived episode directory."""
+    """The state a killed launcher leaves in its episode directory, under the tenant's own
+    `<T>/episodes/` (#1187: at a fixed uuid, `S.EPISODE_ID`; a relaunch mints a fresh one and
+    must neither adopt nor touch it, N17). The tenant is placed first (`est.place()`), as the
+    killed launch found it: its folder must hold the tenant before anything is made in it."""
+    est.place()
+    root.mkdir(parents=True, exist_ok=True)
     if manifest:
         ep = S.episode_v2(root.parent, root=root, doc=_family(), base_rows=[
             S.captured("idp", "query", _Q1, _BASE)])
@@ -1014,7 +1033,8 @@ def test_1224_world_dir_holds_both_oracle_state_and_the_archived_run(tmp_path, e
     est = S.estate(tmp_path)
 
     def at_first_start() -> dict:
-        return _snapshot(S.oracle_dir(episodes_root / S.EPISODE_ID, "b"))
+        # #1187: the episode the launcher minted, which the first started sibling ran in.
+        return _snapshot(S.oracle_dir(spawn.eps[0], "b"))
 
     spawn = _Spawn(root=episodes_root, probe=at_first_start, plant=True)
     oracle = _by_world(_forging_b(), _passing())
@@ -1388,10 +1408,10 @@ def test_launcher_dies_with_some_worlds_preflighted_and_others_not(tmp_path, epi
     post-branch call (M01=A, R-01).
     """
     est = S.estate(tmp_path)
-    dead = _dead_launch(episodes_root, forged=[
+    dead = _dead_launch(episodes_root, est=est, forged=[
         {"forged_id": "fg-dead-1", "fact_id": "f1", "system": "idp", "row": _FORGED_B}])
     before_dead = _snapshot(dead)
-    before = {p.name for p in episodes_root.iterdir()}
+    before = _names(episodes_root)
     spawn = _Spawn(root=episodes_root)
     oracle = _by_world(_forging_b(), _passing())
     _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
@@ -1418,10 +1438,10 @@ def test_launcher_dies_after_the_accepted_record_before_any_sibling_starts(tmp_p
     N17. The relaunch's world b forges onto the source run's post-branch call (M01=A, R-01).
     """
     est = S.estate(tmp_path)
-    dead = _dead_launch(episodes_root, outcome="accepted", forged=[
+    dead = _dead_launch(episodes_root, est=est, outcome="accepted", forged=[
         {"forged_id": "fg-old-1", "fact_id": "f1", "system": "idp", "row": _FORGED_B}])
     before_dead = _snapshot(dead)
-    before = {p.name for p in episodes_root.iterdir()}
+    before = _names(episodes_root)
     spawn = _Spawn(root=episodes_root)
     oracle = _by_world(_forging_b(), _passing())
     _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
@@ -1524,7 +1544,7 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     def link_cs_report(world: str) -> None:
         if world != "c":
             return
-        tree = spawn.eps[-1] / "runs" / f"{S.EPISODE_ID}-{world}"
+        tree = spawn.eps[-1] / "runs" / S.T.read_roster(spawn.eps[-1])[world]  # #1187
         report = tree / "report.md"
         report.unlink()
         report.symlink_to(outside)
@@ -1753,9 +1773,9 @@ def test_conc_36_second_launch_while_the_first_is_running(tmp_path, episodes_roo
 
     def relaunch_once(world: str) -> None:
         if world == "a" and not second:
-            first_ep = episodes_root / S.EPISODE_ID
+            first_ep = spawn.eps[0]  # #1187: the minted episode the first launch's siblings run in
             second["first_before"] = _records(first_ep)
-            before = {p.name for p in episodes_root.iterdir()}
+            before = _names(episodes_root)
             spawn2 = _Spawn(root=episodes_root)
             routers.append(_by_world(_forging_b(), _passing()))
             _main(src, est, oracle=routers[-1], verifier=S.passing_verifier(), spawn=spawn2)
@@ -1786,7 +1806,7 @@ def test_1224_family_state_written_before_the_manifest_then_relaunch(tmp_path, e
     exploration or shared limiter).
     """
     est = S.estate(tmp_path)
-    dead = _dead_launch(episodes_root, manifest=False)
+    dead = _dead_launch(episodes_root, est=est, manifest=False)
     stale = json.dumps({"rows": [{**_ROW, "event_id": "e-stale-99"}]}, sort_keys=True)
     (dead / "served" / "base.jsonl").write_text(
         json.dumps(S.captured("idp", "query", _Q1, json.loads(stale))) + "\n", encoding="utf-8")
@@ -1797,7 +1817,7 @@ def test_1224_family_state_written_before_the_manifest_then_relaunch(tmp_path, e
                                                       "params": _Q1, "payload_text": stale})
                                           + "\n", encoding="utf-8")
     before_dead = _snapshot(dead)
-    before = {p.name for p in episodes_root.iterdir()}
+    before = _names(episodes_root)
     oracle = _passing()
     _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
 
@@ -1887,9 +1907,9 @@ def test_p095_relaunch_over_an_episode_folder_holding_a_prior_outcome(tmp_path, 
     N17.
     """
     est = S.estate(tmp_path)
-    old = _dead_launch(episodes_root, outcome=prior)
+    old = _dead_launch(episodes_root, est=est, outcome=prior)
     old_outcome = _outcome_text(old)
-    before = {p.name for p in episodes_root.iterdir()}
+    before = _names(episodes_root)
     spawn = _Spawn(root=episodes_root)
     _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=spawn)
 
@@ -2129,7 +2149,7 @@ def test_1224_outcome_record_is_written_once_and_each_world_record_has_one_write
     assert by_launcher["world"] == "c"
     assert S.read_world_record(first.ep, "a") is None
 
-    before = {p.name for p in episodes_root.iterdir()}
+    before = _names(episodes_root)
     _main(src, est, oracle=_passing(), verifier=S.passing_verifier(),
           spawn=_Spawn(root=episodes_root))
     second = _new_episode(episodes_root, before)
@@ -2176,14 +2196,14 @@ def test_1224_launcher_writes_only_shared_outcome_words_and_stamps_only_accepted
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls())
-    # First launch: the derived episode id, so the planted sibling trees carry the run names
-    # `verify_family` looks for (`T.sibling_run_dir` names them after `EPISODE_ID`).
+    # First launch: the planted sibling trees sit at the arm ids the launcher's roster holds
+    # (`T.sibling_run_dir` reads it, #1187), the run names `verify_family` opens.
     accepted = _main(src, est, oracle=_passing(), verifier=S.passing_verifier(),
                      spawn=_Spawn(root=episodes_root, plant=True)).ep
     assert S.read_outcome(accepted)["outcome"] == "accepted"
     assert (accepted / "provenance.json").is_file(), "the stamp is written for accepted"
 
-    before = {p.name for p in episodes_root.iterdir()}
+    before = _names(episodes_root)
     _main(src, est, oracle=_failing(), verifier=S.passing_verifier(),
           spawn=_Spawn(root=episodes_root))
     unusable = _new_episode(episodes_root, before)

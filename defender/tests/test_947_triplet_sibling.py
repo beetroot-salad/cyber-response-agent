@@ -31,6 +31,7 @@ import pytest
 
 from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.run_repository import RunPaths
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S1224
@@ -224,16 +225,24 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
     """A sibling run reaches the curation lane on none of its exits: the resume path forces the
     no-learn branch, so the enqueue seam records nothing at all for a sibling — asserted on the
     SAME seam the positive control below drives, because a directory that does not exist is
-    empty of a sibling's marker whatever the resume path did."""
+    empty of a sibling's marker whatever the resume path did.
+
+    #1187 declared change 2: the run the sibling made is at `<ep>/runs/<its roster id>` (the
+    host-written `arms.json` planted here), never `<episode_id>-<label>`. (Name kept.)"""
+    from defender.tests.ids_1187 import _spec1187 as S
+
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
+    roster = {w: S.new_id() for w in T.WORLDS}
+    S.write_roster(ep, roster)
     seen: list[str] = []
     rec = _Recorder([])
     _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=_no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen == [], "a sibling reached the curation lane"
-    assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
+    assert rec.kwargs["run_dir"] == ep / "runs" / roster["b"], (
+        "the sibling did not run at its roster id (#1187 declared change 2)")
 
 
 def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
@@ -242,8 +251,9 @@ def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
     channel that never carries anything."""
     base, src = T.runs_base(tmp_path)
     # #1105 PR 2: the request names the tenant whose location the run sits at
-    # (`tenant_of_run_dir` is gone, F-13); its runs-base record agrees.
-    tenant_id = T.mod("_tenant").read_tenant(base).tenant_id
+    # (`tenant_of_run_dir` is gone, F-13). #1187 (R1): no runs-base record — the tenant is the
+    # one whose folder holds the runs base.
+    tenant_id = base.parent.name
     seen: list[str] = []
     _run().main([str(RunPaths(src).alert), "--tenant", tenant_id], lifecycle=_Recorder([]),
                 visualize=lambda p, **kw: None, preflight=_no_preflight,
@@ -360,30 +370,6 @@ def test_a_sibling_resumes_through_its_requested_tenant(tmp_path):
     assert lifecycle.kwargs["tenant"].tenant_id == T1106.PLAYGROUND_ID
 
 
-def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_refused(
-        tmp_path):
-    """A sibling runs on the EPISODE's tenant — the one its request names, which the source
-    run's runs-base record agrees with. Its own runs base (`<episode>/runs`) holding a record
-    that names another tenant must refuse naming both, not stamp that tenant's record over a
-    run of the episode's world. The control is the resume above."""
-    from defender import _tenant
-
-    base, src = T.runs_base(tmp_path)
-    assert _tenant.read_tenant(base).tenant_id == T1106.PLAYGROUND_ID
-    ep = _episode(tmp_path, src, container=None)
-    other = ep / "runs"
-    other.mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(other, "acme")
-    lifecycle = _Recorder([])
-    with pytest.raises(SystemExit) as refused:
-        _run().main([*_sibling_argv(ep / "family.yaml"), "--no-learn"],
-                    lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=_no_preflight)
-    text = str(refused.value)
-    assert "'acme'" in text, text
-    assert repr(T1106.PLAYGROUND_ID) in text, text
-    assert lifecycle.order == []
-
-
 def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
     """Every site that compares a world reads ONE spelling of the world token: the resumed
     world's identity, the world ledger's filename, and the ledger the episode derives for that
@@ -413,22 +399,26 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     ep = _episode(tmp_path, src)
     order: list[str] = []
     rec = _Recorder(order)
-    tenant = T.mod("_tenant").read_tenant(base)
+    # #1187 (R1): no `_tenant.json` — a run's tenant is the one whose folder holds it.
+    tenant_id = base.parent.name
+    made: list[Any] = []
 
     def materialize(*_a, **_kw):
         # #1110: the seam answers the run's tenant-bound HANDLE, built the way the real builder
-        # builds it (the tenant record at the runs base, then `Run.for_tenant`) — `main` keeps
-        # it for the post-run page render and reads the run dir off it.
+        # builds it (#1187: `Run.under(container, id, tenant_id=)`, `Run.for_tenant` being
+        # retired with the record it read) — `main` keeps it for the post-run page render and
+        # reads the run dir off it.
         order.append("materialize")
         run_dir = T.sibling_run_dir(base, "b", stamp=False)
-        return T.sym("run_repository", "Run").for_tenant(
-            tenant.tenant_id, run_dir.name, runs_base=base)
+        made.append(run_dir)
+        return T.sym("run_repository", "Run").under(base, run_dir.name, tenant_id=tenant_id)
 
     _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=lambda m, **_kw: order.append("preflight") or 0,
                 materialize=materialize)
     assert order == ["preflight", "materialize", "lifecycle"]
-    assert rec.kwargs["run_dir"] == base / f"{T.EPISODE_ID}-b", (
+    assert made, "the materialize seam was never called"
+    assert rec.kwargs["run_dir"] == made[0], (
         "the lifecycle was not handed the run dir of the handle the builder answered")
 
 
@@ -440,7 +430,7 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
     events: list[str] = []
-    run_dir = base / f"{T.EPISODE_ID}-b"
+    run_dir = base / fixture_uuid("947-sibling-lifecycle-b")  # #1187: a run id is a uuid4
     (run_dir / "gather_raw").mkdir(parents=True)
     _run()._run_investigation_lifecycle(
         run=_run_handle_lifecycle_1165(run_dir), model="m", model_override=None, defender_dir=T.DEFENDER,
@@ -468,15 +458,29 @@ def test_947_each_sibling_captures_its_own_provenance_stamp(tmp_path):
 
 
 def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
-    """A sibling's run id is the episode id joined to its world label, and its run dir carries
-    that name — a grammar every naming rule between the manifest and the alias already admits."""
+    """A sibling's run id is the one the host wrote for its world, and its run dir carries that
+    name, in its episode's own `runs/`.
+
+    #1187 declared change 2 (O3, R2): the id is no longer the episode id joined to the world
+    label. It is the canonical UUID the launcher minted into the episode's arm roster
+    (`arms.json`, planted here as the launcher writes it at RUNS) for that label, and the arm
+    folder `<ep>/runs/<roster id>` holds neither the label nor the episode id. (Name kept.)"""
+    from defender.tests.ids_1187 import _spec1187 as S
+
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
+    roster = {w: S.new_id() for w in T.WORLDS}
+    S.write_roster(ep, roster)
     rec = _Recorder([])
     _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=_no_preflight)
-    assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
-    assert T.sym("_run_id", "is_valid_run_id")(f"{T.EPISODE_ID}-b")
+    run_dir = rec.kwargs["run_dir"]
+    assert run_dir == ep / "runs" / roster["b"], (
+        f"the sibling ran at {run_dir}, not at its roster id {roster['b']}")
+    assert S.is_canonical_uuid(run_dir.name), run_dir.name
+    assert ep.name not in run_dir.name, f"{run_dir.name} carries the episode id"
+    assert not run_dir.name.endswith("-b"), f"{run_dir.name} carries the label"
+    assert T.sym("_run_id", "is_valid_run_id")(run_dir.name)
 
 
 def test_947_run_py_screens_the_source_alert_before_reading_it(tmp_path):

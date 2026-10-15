@@ -29,13 +29,19 @@ import pytest
 from defender.tests._alert_plant import plant_alert
 from defender.tests import _state1135
 from defender.tests import _triplet_947 as T
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender._episode_handle import Episode  # noqa: E402
 
 TENANT = H.VALID_ID
 
 
-def _fresh_run(root: Path, run_id: str = "r2", tenant_id: str = TENANT) -> Path:
+#: #1187 declared change 1: every run id is canonical uuid4 text (`RunId` admits nothing else),
+#: so the fixture's two natural runs are named by uuids derived from their old handles.
+R1, R2 = fixture_uuid("1078-env-r1"), fixture_uuid("1078-env-r2")
+
+
+def _fresh_run(root: Path, run_id: str = R2, tenant_id: str = TENANT) -> Path:
     """A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the
     data root this process resolves (the tenant is created first, through `create_tenant`
     over a placed knowledge folder, then accepted there as the entry does)."""
@@ -46,14 +52,15 @@ def _fresh_run(root: Path, run_id: str = "r2", tenant_id: str = TENANT) -> Path:
     return H.run_common().materialize_run(alert, run_id, tenant=tenant).run_dir
 
 
-def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path, Path]:
-    """A pass-(A) sibling: its source at a tenant location, its episode under the OLD
-    episodes base (outside the data root — O4's gap until (B)), materialised by the real
-    `materialize_run`'s sibling arm — through the sibling's episode view, over the container
-    the launcher made with T's record (#1105 PR 2). Returns (sibling run dir, episode dir)."""
+def _sibling_run(tmp_path: Path, root: Path) -> tuple[Path, Path]:
+    """A sibling: its source at a tenant location, its episode at `<root>/<T>/episodes/<uuid>`
+    as RUNS leaves it (#1187 Layout A: `runs/` and the arm roster), materialised by the real
+    `materialize_run`'s sibling arm — through the sibling's episode view (#1105 PR 2). Returns
+    (sibling run dir, episode dir)."""
+    del tmp_path
     _base, src = H.tenant_source(root, TENANT, row=not H.row_path(root, TENANT).is_file())
-    episode_dir = episodes_root / T.EPISODE_ID
-    manifest = H.family_for(src, episode_dir)
+    manifest = H.family_for(src)
+    episode_dir = manifest.parent
     tenant = H.accept(H.resolve_data_root(), TENANT)
     with Episode.open(manifest.parent) as episode:
         world = H.run_py().resume_world(
@@ -90,9 +97,9 @@ def _plant_corpus_layout(root: Path) -> tuple[Path, Path, Path]:
     parses to nothing and every corpus assertion would read 0 == 0). Then a fresh run r2 of T,
     materialised for real. Returns (r2's run dir, r1's document, the planted document)."""
     H.make_tenant(root, TENANT)
-    prior = T.corpus_document(H.runs_dir(root, TENANT) / "r1")
+    prior = T.corpus_document(H.runs_dir(root, TENANT) / R1)
     planted = T.corpus_document(root / TENANT / "episodes" / "x" / "runs" / "y")
-    run_dir = _fresh_run(root, "r2")
+    run_dir = _fresh_run(root, R2)
     return Path(run_dir), prior, planted
 
 
@@ -110,7 +117,7 @@ def test_o8_corpus_is_own_runs_base(tmp_path, monkeypatch):
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     run_dir, prior, _planted = _plant_corpus_layout(root)
-    assert run_dir == H.runs_dir(root, TENANT) / "r2", f"the fresh run landed at {run_dir}"
+    assert run_dir == H.runs_dir(root, TENANT) / R2, f"the fresh run landed at {run_dir}"
     env = H.run_common().run_env(H.DEFENDER, run_dir)
     assert Path(env["DEFENDER_RUNS_BASE"]) == H.runs_dir(root, TENANT)
     assert prior.resolve() in _corpus_paths(env["DEFENDER_RUNS_BASE"]), (
@@ -139,19 +146,26 @@ def test_o8_episode_runs_absent(tmp_path, monkeypatch):
 
 
 def test_corpus_for_a_fresh_run_holds_the_record_and_sidecars(tmp_path, monkeypatch):
-    """A fresh run's corpus is <T>/runs, which holds _tenant.json and the sidecars as today's
-    base does; the tenant row sits beside runs/, outside the corpus; orient's own filtering is
-    unchanged."""
+    """A fresh run's corpus is <T>/runs, which holds the sidecars as today's base does; the
+    tenant row sits beside runs/, outside the corpus; orient's own filtering is unchanged.
+
+    #1187 declared changes 6 and 1 (R1): the runs base holds no `_tenant.json` — run setup no
+    longer writes one — so the corpus root holds run folders and their sidecars only; the ids
+    are UUIDs. (Name kept.)"""
+    import uuid
+
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, TENANT)
-    prior = T.corpus_document(H.runs_dir(root, TENANT) / "r1")
-    sidecar = H.runs_dir(root, TENANT) / "r1.run-end.json"
+    prior_id, fresh_id = str(uuid.uuid4()), str(uuid.uuid4())
+    prior = T.corpus_document(H.runs_dir(root, TENANT) / prior_id)
+    sidecar = H.runs_dir(root, TENANT) / f"{prior_id}.run-end.json"
     sidecar.write_text(json.dumps({"exit_class": "completed"}), encoding="utf-8")
-    run_dir = _fresh_run(root, "r2")
+    run_dir = _fresh_run(root, fresh_id)
     corpus_root = Path(H.run_common().run_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"])
     assert corpus_root == H.runs_dir(root, TENANT)
-    assert (corpus_root / H.RECORD_NAME).is_file(), "the runs-base record is not in the corpus"
+    assert not (corpus_root / H.RECORD_NAME).exists(), (
+        "run setup wrote the retired runs-base record into the corpus root")
     assert sidecar.parent == corpus_root
     row = H.row_path(root, TENANT)
     assert row.is_file(), "setup's row is missing"
@@ -172,8 +186,8 @@ def test_d5_derived_export_parity(tmp_path, monkeypatch):
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     box = H.mod("runtime.box")
-    fresh = _fresh_run(root, "r1")
-    sibling, episode_dir = _sibling_run(tmp_path, root, tmp_path / "episodes")
+    fresh = _fresh_run(root, R1)
+    sibling, episode_dir = _sibling_run(tmp_path, root)
     for run_dir, expected in ((fresh, H.runs_dir(root, TENANT)),
                               (sibling, episode_dir / "runs")):
         host = H.run_common().run_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"]
@@ -215,7 +229,7 @@ def test_data_root_value_reaches_host_subprocesses(tmp_path, monkeypatch):
     derived DEFENDER_RUNS_BASE."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
-    run_dir = _fresh_run(root, "r1")
+    run_dir = _fresh_run(root, R1)
     env = H.run_common().run_env(H.DEFENDER, run_dir)
     child = subprocess.run(  # noqa: S603 — the test's own interpreter
         [sys.executable, "-c",
@@ -269,15 +283,32 @@ def test_box_env_allowlist_survives_knob_retirement(tmp_path):
 
 
 def test_box_environment_for_a_sibling_under_the_old_episodes_base(tmp_path, monkeypatch):
-    """A pass-A sibling's box env exports DEFENDER_RUNS_BASE=run_dir.parent, its episode's
-    runs dir under the old episodes base (O4's gap until (B))."""
+    """A sibling's box env exports DEFENDER_RUNS_BASE=run_dir.parent: its episode's own arm
+    container.
+
+    #1187 declared change 5 (Layout A): there is no old episodes base. The arm the tenant's
+    repository hands out for a world of an episode that reached RUNS sits at
+    `<data root>/<T>/episodes/<ep>/runs/<roster id>` — inside the data root, under the tenant —
+    and its box exports that container (N12: the `episodes/` segment stays visible to the box,
+    #1255's). (Name kept.)"""
+    from defender import _yaml
+    from defender.run_repository import RunId
+    from defender.tests.ids_1187 import _spec1187 as S
+
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
-    old_episodes = tmp_path / "old-episodes-base"
-    run_dir, episode_dir = _sibling_run(tmp_path, root, old_episodes)
-    assert run_dir.parent == episode_dir / "runs"
-    assert root.resolve() not in run_dir.resolve().parents, (
-        "the sibling landed under the data root — that is pass (B)'s layout, not (A)'s")
+    H.tenant_source(root, TENANT, row=not H.row_path(root, TENANT).is_file())
+    tenant = H.accept(H.resolve_data_root(), TENANT)
+    episode_id = S.new_id()
+    episode_dir = S.make_episode(
+        root, TENANT, episode_id,
+        manifest=_yaml.safe_dump(T.family_doc(episode_id=episode_id, source_run_id=S.new_id())),
+        labels=T.WORLDS)
+    roster = S.read_roster(episode_dir)
+    with tenant.runs_repository().episode(episode_id, roster_label="b") as view:
+        run_dir = Path(view.create(RunId.parse(roster["b"])).run_dir)
+    assert run_dir == episode_dir / "runs" / roster["b"]
+    assert episode_dir.parent == root / TENANT / "episodes"
     env = H.mod("runtime.box").infra_env(H.DEFENDER, run_dir)
     assert env["DEFENDER_RUNS_BASE"] == str(episode_dir / "runs")
 
@@ -324,7 +355,9 @@ def test_n9_directory_tools_survive(tmp_path, monkeypatch, capsys):
     assert not (src / "runtime.html").exists(), "visualize_run rendered with no --tenant"
 
     # visualize_episode — the J8 edge: no --tenant is a usage error
-    ep = T.episode(tmp_path / "episodes-home")
+    # #1187: no data root is set here, so no tenant to place it under; the CLI refuses before
+    # reading anything, so the folder only has to exist.
+    ep = T.episode(tmp_path / "episodes-home", root=tmp_path / "episodes-home")
     rc = H.mod("scripts.visualize.visualize_episode").main([str(ep)])
     assert rc == 1, f"visualize_episode without --tenant returned {rc}, not its usage status"
     assert "--tenant" in capsys.readouterr().err
@@ -405,8 +438,8 @@ def test_pass_a_marker_consumed_by_the_pre_c_lead_author_drain(tmp_path, monkeyp
     H.set_data_root(monkeypatch, root)
     _state1135.set_state_dir(monkeypatch, tmp_path / "state")
     state = S791.loop_paths(tmp_path)
-    run_dir = _fresh_run(root, "r1")
-    assert run_dir == H.runs_dir(root, TENANT) / "r1"
+    run_dir = _fresh_run(root, R1)
+    assert run_dir == H.runs_dir(root, TENANT) / R1
     S791.populate_run_dir(run_dir, disposition="benign")
     scrub_mod.scrub(run_dir)
     # #1105 PR 2 (declared change 8): run end hands the request its `Run`, and the marker is

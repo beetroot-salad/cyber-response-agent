@@ -425,17 +425,21 @@ def test_1025_a_malformed_record_versus_an_absent_one(tmp_path):
     `reader=` seam for `samples.yaml` (the default stays permissive, F-4), and
     `outcome.read_outcome` for `outcome.yaml`, whose absent and refused records are both the
     "no record" state (M05=A) but each with its own reason.
+
+    #1187 declared change 10 (R5): the copies keep the episode's folder name.
     """
     ep = E.sample_episode(tmp_path)
     for name, absent, sentence in (
             ("samples.yaml", "absent", "samples record unreadable"),
             ("provenance.json", "absent", "provenance record unreadable"),
             ("outcome.yaml", "no record: outcome.yaml is absent", "does not parse")):
-        fresh = E.copy_episode(ep, tmp_path / f"absent-{name}")
+        # #1187 declared change 10 (R5): a copy keeps the episode's folder name (its
+        # manifest's episode id); only its root differs.
+        fresh = E.copy_episode(ep, tmp_path / f"absent-{name}" / ep.dir.name)
         (fresh.dir / name).unlink()
         assert absent in _records(render(fresh)), name
         assert sentence not in _records(render(fresh)), name
-        broken = E.copy_episode(ep, tmp_path / f"broken-{name}")
+        broken = E.copy_episode(ep, tmp_path / f"broken-{name}" / ep.dir.name)
         E.plant_raw(broken.dir / name, "{\n  [")
         text = _records(render(broken))
         assert sentence in text, (name, text)
@@ -769,9 +773,6 @@ def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malfor
     render_mod = E.mod("learning.judge.render")
     ep = E.sample_episode(tmp_path, judge=False)
     E.plant_raw(ep.dir / "samples.yaml", "logs-*: [\n  {")
-    # The judge's door judges the container's tenant record (#1105 PR 2, second review round),
-    # as the page's view does: the record the launcher leaves, planted before the grade.
-    E.plant_container_record(ep.dir)
     grade = J.grade_at(
         ep.dir, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(
             bucket="none", systems=[E.SYSTEM]))),

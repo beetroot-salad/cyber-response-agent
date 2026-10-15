@@ -25,6 +25,7 @@ from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.scripts.adapters.faults import TransportFault  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
@@ -101,7 +102,7 @@ def test_a_failing_query_whose_view_write_is_refused_ends_the_run_holding_its_ro
     outside = tmp_path / "outside.jsonl"
     outside.write_bytes(b"")
     cmdb = _Cmdb(run_dir, outside)
-    mine = RunState(run_dir, "r3-view-refused")
+    mine = RunState(run_dir, run_dir.name)
 
     with pytest.raises(OSError):  # noqa: PT011 — the refused append's own errno and words
         drive(run_dir, run_id="r3-view-refused", main=_main(),
@@ -140,7 +141,7 @@ def test_the_production_summary_carries_no_run_state_on_either_exit(tmp_path):
     the run's counted calls."""
     run_dir = materialize(tmp_path / "done", GOLDEN_AB3, run_id='r3-summary')
     cmdb = _Cmdb(run_dir, tmp_path / "unused")
-    mine = RunState(run_dir, "r3-summary")
+    mine = RunState(run_dir, run_dir.name)
     summary = driver_summary(run_dir, run_id="r3-summary", main=_main(), gather=_lead("up"),
                              verbs=cmdb.verbs(), run_state=mine)
     assert "run_state" not in summary, "production's summary still hands out the run's state"
@@ -151,7 +152,7 @@ def test_the_production_summary_carries_no_run_state_on_either_exit(tmp_path):
 
     store_dir = materialize(tmp_path / "store", GOLDEN_AB3, run_id='r3-store')
     cut = driver_summary(store_dir, run_id="r3-store", main=ReplayFn([Turn(text="done")]),
-                         store_factory=_store_down, run_state=RunState(store_dir, "r3-store"))
+                         store_factory=_store_down, run_state=RunState(store_dir, store_dir.name))
     assert cut["truncated_by"] == session_store.TRUNCATED_BY_STORE, cut
     assert "run_state" not in cut, "the store-setup exit still hands out the run's state"
 
@@ -179,7 +180,7 @@ def test_a_run_handed_no_state_resolves_its_own_at_the_boundary(tmp_path):
     state = carried[0]
     assert isinstance(state, RunState), f"the run's calls carried {state!r}"
     assert all(s is state for s in carried), "the run's calls carried more than one state"
-    assert (state.run_dir, state.run_id) == (run_dir, "r3-own-state"), \
+    assert (state.run_dir, state.run_id) == (run_dir, run_dir.name), \
         "the resolved state is not this run's"
     assert [r["params"] for r in state.lead_rows(LEAD)] == \
         [{"native_query": "one"}, {"native_query": "two"}]
@@ -198,8 +199,8 @@ def test_an_injected_state_for_another_run_is_refused_before_the_run_starts(tmp_
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='r3-mismatch')
     elsewhere = tmp_path / "elsewhere" / run_dir.name
     elsewhere.mkdir(parents=True)
-    stranger = (RunState(elsewhere, "r3-mismatch") if other == "folder"
-                else RunState(run_dir, "r3-someone-else"))
+    stranger = (RunState(elsewhere, run_dir.name) if other == "folder"
+                else RunState(run_dir, fixture_uuid("r3-someone-else")))
     main = _main()
     with pytest.raises(ValueError):  # noqa: PT011 — the wording is the implementation's
         driver_summary(run_dir, run_id="r3-mismatch", main=main, run_state=stranger)
@@ -208,7 +209,7 @@ def test_an_injected_state_for_another_run_is_refused_before_the_run_starts(tmp_
     assert stranger.breaker_snapshot() == {"systems": {}, "total_failures": 0}
 
     ok_dir = materialize(tmp_path / "ok", GOLDEN_AB3, run_id='r3-own')
-    own = RunState(ok_dir, "r3-own")
+    own = RunState(ok_dir, ok_dir.name)
     ok = driver_summary(ok_dir, run_id="r3-own", main=ReplayFn([Turn(text="done")]),
                         run_state=own)
     assert ok["truncated_by"] is None, ok

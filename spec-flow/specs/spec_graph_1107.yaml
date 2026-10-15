@@ -1457,14 +1457,15 @@ demands:
     and s7pg_box_planted_flag_and_receipt_render_no_ticket_line, post-gate §7, human, PG-2/PG-2a).
 - id: s7_mf13_launcher_refuses_box_mounted_tenants_root
   kind: behavior
-  form: test
+  form: clause
   binds:
   - _episode_tenant
   - branch.cli.main
   - resolve_tenant
   - episode_dir
   - interacts(_episode_tenant->episode_dir)
-  discharged_by: test_s7_mf13_launcher_refuses_box_mounted_tenants_root
+  status: retired
+  outcome: {nl: "RETIRED by #1187 — design items O9 and S-acc (declared change 5): `DEFENDER_EPISODES_BASE` is read by nothing, so there is no configured episodes base for a data root to sit inside; the box-mounted tree the launcher hands acceptance is `<T>/episodes`, computed from the tenant. `test_s7_mf13_launcher_refuses_box_mounted_tenants_root`, which drove a data root inside the configured episodes base, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_roster_consumers.py::test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder`."}
   seed_docstring: 'The branch launcher passes its box-mounted trees (the episodes base, and the runs base it resolves
     at cli.py:1374) to resolve_tenant as box_mounted: a tenants root inside either is refused at launch with LauncherRefused
     naming the tenant, before any episode dir exists and before any world is staged.'

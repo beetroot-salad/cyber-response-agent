@@ -76,10 +76,9 @@ def _gradable_episode(tmp_path: Path) -> Path:
 def _launcher_grade(ep: Path) -> BaseException | None:
     """The launcher's `_grade` over the episode at `ep`, caught (#1105 PR 2: by id, through the
     request's tenant's repository — `_grade(runs, episode_id=, judge=)` — the episode opened
-    under the configured episodes base, here its own parent)."""
-    with J.episodes_base(ep.parent):
-        return S.caught(lambda: branch_cli._grade(J.judge_runs(), episode_id=ep.name,
-                                                  judge=_model()))
+    under that tenant's own `<T>/episodes/`, #1187 O9)."""
+    return S.caught(lambda: branch_cli._grade(J.episode_runs_for(ep), episode_id=ep.name,
+                                              judge=_model()))
 
 
 def _model() -> J.FakeJudge:
@@ -416,9 +415,8 @@ def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, mon
         "enqueued_to does not name the queue the grade appended to"
 
     # #1105 PR 2 (declared change 4): the page builds from the episode view, opened by id
-    # through the tenant's repository under the configured episodes base.
-    with J.episodes_base(ep.parent), visualize_episode.open_episode_view(
-            J.judge_runs(), ep.name) as view:
+    # through the tenant's repository (#1187: under its own `<T>/episodes/`).
+    with visualize_episode.open_episode_view(J.episode_runs_for(ep), ep.name) as view:
         shown = visualize_episode.build_page(view)
     assert f"enqueued to {findings}" in shown, \
         "visualize_episode's defender 'enqueued to' line does not render describe(FINDINGS)"

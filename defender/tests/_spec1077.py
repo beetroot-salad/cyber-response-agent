@@ -152,8 +152,10 @@ def branch_cli() -> Any:
 # D2's tenant record and D5's grouped surface — the vocabulary the tests assert against.
 # ======================================================================================
 
-#: D2's file-backend location. The leading `_` is what keeps it out of the run-id space
-#: (claim C18, executed: `is_valid_run_id("_tenant.json")` is False, `"tenant.json"` is True).
+#: D2's file-backend location — RETIRED by #1187 (R1: no runs container holds a `_tenant.json`;
+#: a listing that meets one refuses, naming the one-time command). Kept as the OLD entry's name
+#: a test plants or censuses. The leading `_` is what kept it out of the run-id space (claim C18,
+#: executed: `is_valid_run_id("_tenant.json")` is False, `"tenant.json"` is True).
 TENANT_RECORD_NAME = "_tenant.json"
 
 #: D2's creation-time bootstrap value. Settled premise s31: it is a bootstrap default, NOT an
@@ -258,9 +260,11 @@ RUN_RECORD_FIELDS = (
 #: The archive's copied set (page §5, D5 / N5), as `ArchivedWorld` accessor names. Claim C17
 #: is REFUTED-AS-STATED and EXTENDED: `gather_summaries`, `lessons_loaded` and `alert` come
 #: from the four `archive.py` constants the design's enumeration omitted (:151, :153, :154).
+#: #1187 R8 (declared change 12): the fourth, the `run_dir` pointer, is retired with its write —
+#: nothing reads it and the arm roster supersedes it — so it is no longer a member.
 ARCHIVED_WORLD_MEMBERS = (
     "report", "investigation", "provenance", "scrub_verdict", "run_end", "lessons_loaded",
-    "alert", "gather_summaries", "executed_queries", "gather_raw", "run_dir_pointer")
+    "alert", "gather_summaries", "executed_queries", "gather_raw")
 
 #: Decision 6 / fork D-F5, reading 1: the gate's composed-PART set is the five DISCRIMINATING
 #: fragments only. The generic suffixes are dropped — `.json` alone matches 1065 non-test
@@ -290,10 +294,12 @@ UNSCANNED_TREES = ("defender/skills", "scripts", "experiments")
 class Accessor:
     """One row of the kinds table and the single accessor that owns its name.
 
-    `owner` is "run" (`RunPaths`), "episode" (`EpisodePaths`), "tenant" (`_tenant`) or
-    "repository" (the runs repository's record module, #1105); `attr`
-    is the accessor's name on that owner; `args` are the components a composing accessor takes,
-    in call order, as the concrete values this suite drives it with.
+    `owner` is "run" (`RunPaths`), "episode" (`EpisodePaths`), "episode_arm" (an arm folder:
+    `EpisodePaths.runs` — the container the layout owns — joined with the arm's id, the id the
+    episode's roster holds, #1187) or "tenant_row" (`_tenant._TenantPaths`); `attr` is the
+    accessor's name on that owner; `args` are the components a composing accessor takes, in
+    call order, as the concrete values this suite drives it with. (#1187 R1/R6 retired the
+    "tenant" and "repository" owners with `_tenant.json` and the `_episodes` record.)
     """
     kind: str
     owner: str
@@ -310,9 +316,16 @@ ROLE = "support"
 #: (the sibling run id's delimiter) and `.` (the world token's), and the sibling run id
 #: `<episode>-<label>` is recoverable only because of it.
 LABEL = "overlay_a"
-EPISODE_ID = "ep-2026-09-21"
+#: The fixture episode's id (#1187: a uuid4, as every episode id is) and the world token
+#: `world_token_for(episode_token_for(id), label)` renders for it — the id's `-` as `.` (R2-03).
+EPISODE_ID = "1d7e3c5b-2a4f-4b6c-9e8d-7f6a5b4c3d2e"
 LINEAGE_ID = "case-0011223344556677"
-WORLD_TOKEN = f"{EPISODE_ID}.{LABEL}"
+WORLD_TOKEN = f"{EPISODE_ID.replace('-', '.')}.{LABEL}"
+#: The fixture run's id (#1187: `RunId` admits canonical lowercase UUID text only) — the name
+#: `make_run_dir` gives a run folder by default, and an arm's folder name in the `episode_runs`
+#: row (an arm is named by the id the episode's roster holds for it, never `<episode>-<label>`).
+RUN_ID = "5e8f1a2b-3c4d-4e5f-a6b7-c8d9e0f1a2b3"
+ARM_ID = "7a6b5c4d-3e2f-4a1b-8c9d-0e1f2a3b4c5d"
 
 
 def report_text(body: str) -> str:
@@ -363,11 +376,15 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("priming_lock", "episode", "priming_lock"),
     Accessor("stage_trace", "episode", "stage_trace", (STAGE,), composing=True),
     Accessor("learning_html", "episode", "learning_html"),
-    Accessor("episode_runs", "episode", "sibling_run_dir", (EPISODE_ID, LABEL), composing=True),
+    # #1187 (O3): an arm's folder is `runs/<arm id>`, the id the episode's roster holds — the
+    # layout owns the container, never an `<episode>-<label>` composition (`sibling_run_dir`
+    # is deleted, design C1).
+    Accessor("episode_runs", "episode_arm", "runs", (ARM_ID,)),
     Accessor("archive_proj", "episode", "world_dir", (LABEL,), composing=True),
-    Accessor("tenant", "tenant", "record_path"),
-    # #1105 D3: the episode -> runs record, owned by the runs repository's record module.
-    Accessor("episode_runs_record", "repository", "episode_record_path", (EPISODE_ID,)),
+    # #1187 (R2, Sequencing §4): the host-written arm roster, named by `_episode_paths.LAYOUT`.
+    Accessor("arm_roster", "episode", "arm_roster"),
+    # (#1187 R1 and R6 retired the `tenant` row — `_tenant.json` — and the `episode_runs_record`
+    # row — PR 1's `_episodes/<episode_id>.json` — with their records.)
     Accessor("tenant_row", "tenant_row", "row"),
 )
 
@@ -392,7 +409,7 @@ def upward_root(attr: str, runs_base: Path) -> Path:
 #: and the component index decision 2's one rule must check. g10's census subjects.
 COMPOSING = tuple(a for a in ACCESSOR_FOR_KIND if a.composing) + (
     Accessor("served", "episode", "served_world", (WORLD_TOKEN,), composing=True),
-    Accessor("archive_proj", "episode", "run_dir_pointer", (LABEL,), composing=True),
+    # #1187 R8: `EpisodePaths.run_dir_pointer(label)` is retired with the archive pointer's write.
     Accessor("gather_raw", "run", "payload_relpath", (LEAD_ID, SEQ), composing=True),
 )
 
@@ -436,12 +453,10 @@ def resolve(acc: Accessor, *, run_dir: Path, runs_base: Path | None = None,
     accessor rather than a runs-base one.
     """
     values = acc.args if args is None else args
-    if acc.owner == "tenant":
-        return tenant().record_path(runs_base)
     if acc.owner == "tenant_row":
         return tenant()._TenantPaths(data_root, tenant_id).row
-    if acc.owner == "repository":
-        return getattr(mod("run_repository._record"), acc.attr)(runs_base, *values)
+    if acc.owner == "episode_arm":
+        return getattr(EpisodePaths(episode_dir), acc.attr) / values[0]
     owner = RunPaths(run_dir) if acc.owner == "run" else EpisodePaths(episode_dir)
     member = getattr(owner, acc.attr)
     if acc.attr in UPWARD_ACCESSORS:
@@ -485,7 +500,7 @@ def make_runs_base(tmp_path: Path, name: str = "runs") -> Path:
     return base
 
 
-def make_run_dir(runs_base: Path, run_id: str = "run-1077") -> Path:
+def make_run_dir(runs_base: Path, run_id: str = RUN_ID) -> Path:
     d = runs_base / run_id
     d.mkdir(parents=True, exist_ok=True)
     return d

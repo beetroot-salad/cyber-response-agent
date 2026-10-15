@@ -287,10 +287,14 @@ def test_the_sibling_prior_walks_a_runs_base_that_now_holds_run_end_records(tmp_
     scrub-verdict sidecar has sat there since #771), and every walker screens.
 
     Probe #32's own recommended test (claim p32): the tolerance is currently guaranteed by
-    screening. Two walkers are driven, not one, because a rule that lives in seven places can
-    be lost in one of them: the held-out index and the lesson tracer. (#1105 PR 2, J3: the third,
-    the judge's sibling prior `render.sibling_union`, left the judge, and its half went with
-    it.)"""
+    screening. The lesson tracer is driven. (#1105 PR 2, J3: the judge's sibling prior
+    `render.sibling_union` left the judge, and its half went with it.)
+
+    #1187 declared change 14: the held-out scorer no longer walks the runs base matching folder
+    names — `index_runs` and `_claimed_slug` are gone, and it opens only the runs its
+    operator-named index names, by id — so its half is retired (the index-only rule is pinned by
+    `ids_1187/test_1187_held_out.py::test_the_folder_name_matcher_is_gone` and
+    `::test_scoring_without_an_index_scores_no_folder_by_its_name`). (Name kept.)"""
     trace_lesson = S.mod("learning.ops.trace_lesson")
     base, src = S.runs_base(tmp_path)
     # The lesson tracer only counts a run dir that LOADED the lesson, so the fixture gives it
@@ -299,8 +303,6 @@ def test_the_sibling_prior_walks_a_runs_base_that_now_holds_run_end_records(tmp_
     (src / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": lesson, "ts": "2026-09-16T11:00:00Z"}) + "\n",
         encoding="utf-8")
-    slugs = [src.name]
-    index_before = S.mod("evals.held_out").index_runs(slugs, base)
     # #1105 PR 2 (declared change 10, J8): the tracer walks the tenant's own runs, by id
     # (`tenant_runs` lists them under the repository's listing rule).
     traced_before = trace_lesson.in_context_cases(
@@ -311,12 +313,10 @@ def test_the_sibling_prior_walks_a_runs_base_that_now_holds_run_end_records(tmp_
     S.plant_sidecar(src, truncated_by="request-limit")
     assert S.sidecar_path(src).parent == base, (
         "the fixture did not put the new leaf under the runs base, so this walks nothing new")
-    assert S.mod("evals.held_out").index_runs(slugs, base) == index_before, (
-        "the held-out index answered differently once a run-end record sat beside the run dir")
     assert trace_lesson.in_context_cases(
             lesson, None, trace_lesson.tenant_runs(base.parent.name)) == traced_before, (
         "the lesson tracer's walk answered differently once a run-end record sat beside the "
-        "run dir — the second of the seven screens the docstring names")
+        "run dir — one of the seven screens the docstring names")
 
 
 def test_the_review_record_and_the_provenance_stamp_are_unchanged_for_a_cut_short_world(

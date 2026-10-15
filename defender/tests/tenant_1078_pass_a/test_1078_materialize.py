@@ -32,11 +32,16 @@ from typing import Any
 
 import pytest
 
-from defender.tests import _triplet_947 as T
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender._episode_handle import Episode  # noqa: E402
 
 T_ID = H.VALID_ID
+#: #1187 declared change 1: a run id is a canonical lowercase uuid4 text (`--run-id` refuses an
+#: old one), so each pinned id is a fixture uuid named by its old label.
+R1, RESUME = fixture_uuid("1078-materialize-r1"), fixture_uuid("1078-materialize-resume-me")
+X1, X2, X = (fixture_uuid("1078-materialize-x1"), fixture_uuid("1078-materialize-x2"),
+             fixture_uuid("1078-materialize-x"))
 
 
 def _materialize(alert: Path, run_id: str | None, tenant_id: str, **kw):
@@ -100,13 +105,14 @@ def _golden_alert(tmp_path: Path) -> Path:
 
 
 def _sibling_world(tmp_path: Path, root: Path, label: str = "b", **family: Any):
-    """A pass-(A) episode (under the OLD episodes base, outside the data root) whose manifest
-    names a source at T's tenant location, and the `ResumeWorld` a sibling resolves from it.
-    `family` passes through to `H.family_for` (#1105 PR 2: the container the launcher makes
-    with T's record is planted unless `container=None`)."""
+    """An episode at `<root>/<T>/episodes/<uuid>` (#1187 Layout A) whose manifest names a
+    source at T's tenant location, and the `ResumeWorld` a sibling resolves from it. `family`
+    passes through to `H.family_for` (#1187 R2: the episode as RUNS leaves it — `runs/` and the
+    arm roster — unless `roster=False`). No container record (R1)."""
+    del tmp_path
     _base, src = H.tenant_source(root, T_ID, row=False)
-    ep = tmp_path / "episodes" / T.EPISODE_ID
-    manifest = H.family_for(src, ep, **family)
+    manifest = H.family_for(src, **family)
+    ep = manifest.parent
     world = H.run_py().resume_world(
         Episode.open(manifest.parent), label,
         tenant=lambda: H.T1106.run_tenant(H.accept(root, T_ID)))
@@ -118,22 +124,28 @@ def _sibling_world(tmp_path: Path, root: Path, label: str = "b", **family: Any):
 # ======================================================================================
 
 def test_o4_materialize_layout(tmp_path, tenant_root):
-    """materialize_run(alert, 'r1') with its tenant_id keyword set to T creates <root>/T/runs/r1/, the runs-base
-    record <root>/T/runs/_tenant.json names T, and the run's provenance stamp carries
-    tenant_id T."""
-    run_dir = _materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID)
-    expected = tenant_root / T_ID / "runs" / "r1"
+    """materialize_run(alert, <id>) with its tenant_id keyword set to T creates
+    <root>/T/runs/<id>/, and the run's provenance stamp carries tenant_id T.
+
+    #1187 declared changes 6 and 1 (R1): no runs-base record is written — the run's tenant is
+    where it sits (`<root>/T/runs/`), and `<root>/T/runs/_tenant.json` does not exist; the id is
+    a UUID. (Name kept.)"""
+    import uuid
+
+    pinned = str(uuid.uuid4())
+    run_dir = _materialize(H.plant_alert(tmp_path / "in"), pinned, T_ID)
+    expected = tenant_root / T_ID / "runs" / pinned
     assert Path(run_dir) == expected
     assert expected.is_dir()
-    record = json.loads((tenant_root / T_ID / "runs" / H.RECORD_NAME).read_text(encoding="utf-8"))
-    assert record["tenant_id"] == T_ID
+    assert not (tenant_root / T_ID / "runs" / H.RECORD_NAME).exists(), (
+        "run setup wrote the retired runs-base record")
     assert _stamp(expected)["tenant_id"] == T_ID
 
 
 def test_o4_run_store_location(tmp_path, tenant_root):
     """A fresh run under <root>/T/runs/ keeps its session store at
     <root>/T/sessions/<case>.db."""
-    run_dir = Path(_materialize(_golden_alert(tmp_path), "r1", T_ID))
+    run_dir = Path(_materialize(_golden_alert(tmp_path), R1, T_ID))
     _replay(run_dir)
     store = H.mod("runtime.session_store").resolve_store_path(_run_handle_1165(run_dir))
     assert store.parent == tenant_root / T_ID / "sessions", f"the store is at {store}"
@@ -149,7 +161,7 @@ def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
     exactly the row, the operator-placed `knowledge/` (#1120 DC2), `runs/` and `sessions/`, the row byte-identical to what create_tenant
     wrote, and the data root holds T alone."""
     row_bytes = H.row_path(tenant_root, T_ID).read_bytes()
-    run_dir = Path(_materialize(_golden_alert(tmp_path), "r1", T_ID))
+    run_dir = Path(_materialize(_golden_alert(tmp_path), R1, T_ID))
     # `knowledge/` is the operator's (#1120 DC2: placed before setup), never materialize's.
     assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "knowledge", "runs"]), (
         "materialize wrote beside runs/")
@@ -164,34 +176,23 @@ def test_d9_run_dir_file_set_unchanged(tmp_path, tenant_root):
     """The run-dir file-set pins pass unchanged: materialize adds no file inside the run dir.
 
     A fresh materialize leaves exactly what setup writes — the owner's alert, gather_raw and
-    provenance names — and beside the run dir only the runs-base record."""
-    run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID))
+    provenance names — and beside the run dir nothing at all.
+
+    #1187 declared changes 6 and 1 (R1): the runs-base record is no longer written, so the run
+    dir is the runs base's only entry; the id is a UUID. (Name kept.)"""
+    import uuid
+
+    pinned = str(uuid.uuid4())
+    run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), pinned, T_ID))
     paths = H.mod("run_repository._layout").RunPaths(run_dir)
     assert set(H.entries(run_dir)) == {paths.alert_input_dir.name, paths.gather_raw.name,
                                        paths.provenance.name}
-    assert H.entries(run_dir.parent) == sorted([H.RECORD_NAME, "r1"])
-
-
-def test_g_r7_family_base_world_id_coherence(tmp_path, tenant_root):
-    """The fresh-run family's base_world_id read (run_common.py:159, tenant_record.base_world_id)
-    is unaffected by which tenant_id the record now carries — read off a record minted under
-    pass (A)'s new derivation, base_world_id still round-trips into the stamp unchanged.
-
-    Two fresh runs of T share the base's one base_world_id, and the repository's own reader of
-    it (#1105 PR 2: `RunsRepository.base_world_id`, which replaced the launcher's
-    `cli._family_base_world_id`, F-13) answers the same value."""
-    alert = H.plant_alert(tmp_path / "in")
-    r1 = Path(_materialize(alert, "r1", T_ID))
-    r2 = Path(_materialize(alert, "r2", T_ID))
-    record = json.loads((r1.parent / H.RECORD_NAME).read_text(encoding="utf-8"))
-    assert record["tenant_id"] == T_ID
-    assert _stamp(r1)["world_id"] == _stamp(r2)["world_id"] == record["base_world_id"]
-    assert H.accept(tenant_root, T_ID).runs_repository().base_world_id() == \
-        record["base_world_id"]
+    assert H.entries(run_dir.parent) == [pinned], (
+        f"beside the run dir: {H.entries(run_dir.parent)}")
 
 
 # ======================================================================================
-# Refusals: the row (O2), the order (D2), the record (O6)
+# Refusals: the row (O2) and the order (D2) (the record's (O6) retired by #1187 R1)
 # ======================================================================================
 
 def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
@@ -205,14 +206,14 @@ def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
     root.mkdir()
     H.set_data_root(monkeypatch, root)
     alert = H.plant_alert(tmp_path / "in")
-    text = _refused(lambda: _materialize(alert, "r1", T_ID))
+    text = _refused(lambda: _materialize(alert, R1, T_ID))
     H.assert_verbatim(text, H.owner_refusal(H.require_tenant, root, T_ID),
                       entry="materialize_run")
     assert H.entries(root) == [], "the refused materialize created something"
 
     H.make_tenant(root, T_ID)
     row_bytes = H.row_path(root, T_ID).read_bytes()
-    _materialize(alert, "r1", T_ID)
+    _materialize(alert, R1, T_ID)
     assert H.row_path(root, T_ID).read_bytes() == row_bytes
 
 
@@ -227,84 +228,36 @@ def test_d2_materialize_order(tmp_path, monkeypatch):
     (step 5), and no run dir; (4) the ordinary case — the runs base made, the record minted.
 
     #1120 D1: step 1 is now the entry's `accept_tenant` (whose row check is `require_tenant`'s,
-    verbatim) ahead of `materialize_run(tenant=...)`; cells (1) and (2) observe that pipeline."""
+    verbatim) ahead of `materialize_run(tenant=...)`; cells (1) and (2) observe that pipeline.
+
+    #1187 declared change 6 (R1): `ensure_runs_base_record` and `Run.for_tenant` are retired
+    with the record, so cell (3) — a record naming U refused at step 4 — is gone (a record left
+    in cell (2) is a stray file, read by nothing), and cell (4) is the runs base and the run dir
+    made with NO record minted. The ids are UUIDs. (Name kept.)"""
+    import uuid
+
+    pinned = str(uuid.uuid4())
     alert = H.plant_alert(tmp_path / "in")
     root = tmp_path / "unknown"
     root.mkdir()
     H.set_data_root(monkeypatch, root)
-    _refused(lambda: _materialize(alert, "r1", T_ID))
+    _refused(lambda: _materialize(alert, pinned, T_ID))
     assert not (root / T_ID / "runs").exists(), "an unknown tenant left a runs base"
 
     root = tmp_path / "rowless"
     H.set_data_root(monkeypatch, root)
     H.plant_record(root / T_ID / "runs", "someone-else")
-    text = _refused(lambda: _materialize(alert, "r1", T_ID))
+    text = _refused(lambda: _materialize(alert, pinned, T_ID))
     H.assert_verbatim(text, H.owner_refusal(H.require_tenant, root, T_ID),
                       entry="materialize_run")
-
-    root = tmp_path / "disagreeing"
-    H.set_data_root(monkeypatch, root)
-    H.make_tenant(root, T_ID)
-    base = root / T_ID / "runs"
-    H.plant_record(base, "someone-else")
-    text = _refused(lambda: _materialize(alert, "r1", T_ID))
-    H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                      entry="materialize_run")
-    assert not (base / "r1").exists(), "the run dir was made before the record check"
 
     root = tmp_path / "ordinary"
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, T_ID)
-    _materialize(alert, "r1", T_ID)
-    assert (root / T_ID / "runs" / H.RECORD_NAME).is_file()
-
-
-def test_o6_record_mismatch_refused(tmp_path, tenant_root):
-    """materialize_run with its tenant_id keyword set to T, over a runs base whose record names U is refused by
-    ensure_runs_base_record's disagreement refusal at materialize step 4, and the record still
-    names U, byte-for-byte unmodified."""
-    base = tenant_root / T_ID / "runs"
-    record = H.plant_record(base, "someone-else")
-    before = record.read_bytes()
-    text = _refused(lambda: _materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID))
-    H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                      entry="materialize_run")
-    assert record.read_bytes() == before, "the disagreeing record was relabelled"
-    assert H.entries(base) == [H.RECORD_NAME], "the refused materialize created a run dir"
-
-
-@pytest.mark.parametrize("body", ["", '{"tenant_id": "playgr'], ids=["empty", "truncated"])
-def test_torn_runs_base_record_under_the_tenant(tmp_path, tenant_root, body):
-    """A torn or empty <T>/runs/_tenant.json refuses every later fresh run of T at materialize
-    (ensure_runs_base_record reads it as corrupt); the record is never re-minted or overwritten
-    (universal 4). No repair is designed; deleting it by hand re-mints base_world_id (C10)."""
-    base = tenant_root / T_ID / "runs"
-    record = H.plant_record(base, T_ID, body=body)
-    alert = H.plant_alert(tmp_path / "in")
-    for run_id in ("r1", "r2"):
-        text = _refused(lambda rid=run_id: _materialize(alert, rid, T_ID))
-        H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                          entry="materialize_run")
-        assert record.read_bytes() == body.encode("utf-8"), "the torn record was re-minted"
-    record.unlink()
-    _materialize(alert, "r3", T_ID)
-    assert json.loads(record.read_text(encoding="utf-8"))["tenant_id"] == T_ID
-
-
-def test_pre_a_process_with_the_old_knob_pointed_into_the_tenants_runs_base(tmp_path,
-                                                                             tenant_root):
-    """A <T>/runs/_tenant.json naming `default` (minted by pre-A code) refuses every pass-A run
-    of T at materialize, and the record is left unchanged (O6, universal 4)."""
-    base = tenant_root / T_ID / "runs"
-    record = H.plant_record(base, "default")
-    before = record.read_bytes()
-    alert = H.plant_alert(tmp_path / "in")
-    for run_id in ("r1", "r2"):
-        text = _refused(lambda rid=run_id: _materialize(alert, rid, T_ID))
-        H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                          entry="materialize_run")
-    assert record.read_bytes() == before
-    assert H.entries(base) == [H.RECORD_NAME]
+    _materialize(alert, pinned, T_ID)
+    assert (root / T_ID / "runs" / pinned).is_dir(), "the ordinary run dir was not made"
+    assert not (root / T_ID / "runs" / H.RECORD_NAME).exists(), (
+        "run setup minted the retired runs-base record")
 
 
 def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
@@ -329,12 +282,12 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
     previous = sys.getprofile()
     sys.setprofile(hook)
     try:
-        run_dir = Path(_materialize(alert, "r1", T_ID))
+        run_dir = Path(_materialize(alert, R1, T_ID))
     finally:
         sys.setprofile(previous)
     assert fired, "the pipeline never ran defender._tenant.accept_tenant (D2 step 1)"
     assert not row.exists()
-    assert run_dir == tenant_root / T_ID / "runs" / "r1"
+    assert run_dir == tenant_root / T_ID / "runs" / R1
     assert run_dir.is_dir()
     assert _stamp(run_dir)["tenant_id"] == T_ID
 
@@ -342,41 +295,6 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
 # ======================================================================================
 # The sibling's runs base (D2 step 2) and the widened refusal on that path (§7 J24)
 # ======================================================================================
-
-def test_d2_sibling_runs_base(tmp_path, tenant_root):
-    """A sibling's materialize puts its run dir under EpisodePaths(world.episode_dir).runs and
-    reads that base's record for T.
-
-    #1105 PR 2 (declared change 6, G5): the container is the launcher's to make — run setup
-    never creates it — so over an ABSENT container a sibling's materialize is refused and
-    nothing is made. Once the launcher has made it with T's record
-    (`EpisodeRuns.create_container`), two worlds of one pass-(A) episode both land in it and
-    read its one record (one base_world_id), and neither lands under `<root>/T/runs/` (O4's
-    gap until (B))."""
-    src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b", container=None)
-    world_c = H.run_py().resume_world(
-        Episode.open(ep), "c", tenant=lambda: H.T1106.run_tenant(H.accept(tenant_root, T_ID)))
-    alert = RunPaths(src).alert
-    with Episode.open(ep) as episode:
-        view = H.accept(tenant_root, T_ID).runs_repository().episode(ep.name, held=episode)
-        assert view.state == "absent"
-        _refused(lambda: _materialize(alert, world_b.run_id, T_ID, world=world_b,
-                                      episode_runs=view))
-        assert not (ep / "runs").exists(), "a sibling's run setup made the episode container"
-        view.create_container()
-        record_path = ep / "runs" / H.RECORD_NAME
-        minted = json.loads(record_path.read_text(encoding="utf-8"))
-        rb = Path(_materialize(alert, world_b.run_id, T_ID, world=world_b, episode_runs=view))
-        rc = Path(_materialize(alert, world_c.run_id, T_ID, world=world_c, episode_runs=view))
-    assert rb == ep / "runs" / world_b.run_id
-    assert rc == ep / "runs" / world_c.run_id
-    assert minted["tenant_id"] == T_ID
-    assert json.loads(record_path.read_text(encoding="utf-8")) == minted, "the record changed"
-    assert _stamp(rb)["world_id"] == world_b.world_id
-    # #1235 F2: the source run's case link is a host sidecar beside its run dir.
-    assert H.entries(tenant_root / T_ID / "runs") == sorted(
-        [H.RECORD_NAME, src.name, RunPaths(src).session_pointer().name])
-
 
 def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_root):
     """A sibling's materialize, whose runs base is EpisodePaths(ep).runs rather than
@@ -388,7 +306,7 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
     itself; `tenant_of_run_dir` is gone, F-13) and its materialize both carry the widened
     refusal verbatim, and no sibling run dir is made; the control is the same sibling with a
     disjoint learning root."""
-    src, ep, world = _sibling_world(tmp_path, tenant_root, "b", monkeypatch=monkeypatch)
+    src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
     alert = RunPaths(src).alert
     argv = H.sibling_argv(ep / "family.yaml", "b", "--tenant", T_ID)
     with Episode.open(ep) as episode:
@@ -422,13 +340,13 @@ def test_o6_resume_tests_survive(tmp_path, tenant_root):
     """The existing --run-id resume tests pass given --tenant T: a setup-only run dir under
     <root>/T/runs/<id> is resumed and one a run has been in is refused."""
     alert = H.plant_alert(tmp_path / "in")
-    first = Path(_materialize(alert, "resume-me", T_ID))
-    assert first == tenant_root / T_ID / "runs" / "resume-me"
-    assert Path(_materialize(alert, "resume-me", T_ID)) == first, "a setup-only dir not resumed"
+    first = Path(_materialize(alert, RESUME, T_ID))
+    assert first == tenant_root / T_ID / "runs" / RESUME
+    assert Path(_materialize(alert, RESUME, T_ID)) == first, "a setup-only dir not resumed"
     (first / "report.md").write_text("a run was here\n", encoding="utf-8")
     before = H.census(first)
     with pytest.raises(SystemExit):
-        _materialize(alert, "resume-me", T_ID)
+        _materialize(alert, RESUME, T_ID)
     assert H.census(first) == before, "the refused resume touched the run dir"
 
 
@@ -441,16 +359,16 @@ def test_old_style_setup_state_classification_runs_against_a_tenant_scoped_run_d
     Run = H.mod("run_repository._handle").Run
     base = H.runs_base_for(T_ID)
     alert = H.plant_alert(tmp_path / "in")
-    run_dir = Path(_materialize(alert, "x1", T_ID))
-    handle = Run.for_tenant(T_ID, "x1", runs_base=base)
-    assert handle.run_dir == base / "x1" == run_dir
+    run_dir = Path(_materialize(alert, X1, T_ID))
+    handle = Run.under(base, X1, tenant_id=T_ID)  # #1187: `Run.for_tenant` retired (R1)
+    assert handle.run_dir == base / X1 == run_dir
     assert rc._setup_state(handle) == "setup"
-    assert Path(_materialize(alert, "x1", T_ID)) == run_dir
-    assert rc._setup_state(Run.for_tenant(T_ID, "x2", runs_base=base)) == "absent"
+    assert Path(_materialize(alert, X1, T_ID)) == run_dir
+    assert rc._setup_state(Run.under(base, X2, tenant_id=T_ID)) == "absent"
     (run_dir / "investigation.md").write_text("+ ran\n", encoding="utf-8")
     assert rc._setup_state(handle) == "ran"
     with pytest.raises(SystemExit):
-        _materialize(alert, "x1", T_ID)
+        _materialize(alert, X1, T_ID)
 
 
 def test_existing_resume_tests_given_a_tenant_but_old_env_setup(tmp_path, monkeypatch,
@@ -462,14 +380,14 @@ def test_existing_resume_tests_given_a_tenant_but_old_env_setup(tmp_path, monkey
     the resume would be refused as `ran`. It is neither read nor touched."""
     stale = tmp_path / "stale-runs"
     H.plant_record(stale, "default")
-    (stale / "x1").mkdir()
-    (stale / "x1" / "report.md").write_text("an old run\n", encoding="utf-8")
+    (stale / X1).mkdir()
+    (stale / X1 / "report.md").write_text("an old run\n", encoding="utf-8")
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(stale))
     before = H.census(stale)
     alert = H.plant_alert(tmp_path / "in")
-    run_dir = Path(_materialize(alert, "x1", T_ID))
-    assert run_dir == tenant_root / T_ID / "runs" / "x1"
-    assert Path(_materialize(alert, "x1", T_ID)) == run_dir, "the setup-only dir not resumed"
+    run_dir = Path(_materialize(alert, X1, T_ID))
+    assert run_dir == tenant_root / T_ID / "runs" / X1
+    assert Path(_materialize(alert, X1, T_ID)) == run_dir, "the setup-only dir not resumed"
     assert H.census(stale) == before, "the stale DEFENDER_RUNS_BASE was touched"
 
 
@@ -478,13 +396,13 @@ def test_o6_old_run_id_fresh_under_tenant(tmp_path, monkeypatch, tenant_root):
     <root>/T/runs/X and leaves the old X untouched."""
     old = tmp_path / "defender-runs"
     H.plant_record(old, "default")
-    (old / "x").mkdir()
-    (old / "x" / "report.md").write_text("an old-layout run\n", encoding="utf-8")
-    (old / "x" / "alert.json").write_text('{"old": true}\n', encoding="utf-8")
+    (old / X).mkdir()
+    (old / X / "report.md").write_text("an old-layout run\n", encoding="utf-8")
+    (old / X / "alert.json").write_text('{"old": true}\n', encoding="utf-8")
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(old))
     before = H.census(old)
-    run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), "x", T_ID))
-    assert run_dir == tenant_root / T_ID / "runs" / "x"
+    run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), X, T_ID))
+    assert run_dir == tenant_root / T_ID / "runs" / X
     paths = H.mod("run_repository._layout").RunPaths(run_dir)
     assert set(os.listdir(run_dir)) == {paths.alert_input_dir.name, paths.gather_raw.name,
                                         paths.provenance.name}, "not a fresh setup"

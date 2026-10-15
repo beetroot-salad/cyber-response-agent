@@ -53,8 +53,9 @@ def _tmp_roots(tmp_path, monkeypatch):
 def _episode(tmp_path: Path, *, labels: tuple[str, ...] = ("b", "c"), **kw) -> Path:
     """An accepted, archived episode under a root spelled with `SECRET`: the control `a`
     (benign) plus `labels` (malicious), every world archived, every non-control world
-    carrying one served row."""
-    root = tmp_path / R.SECRET
+    carrying one served row. #1187 (Layout A): the SECRET-spelled folder is the data root of the
+    scene's own tenant, so the episode sits at `<SECRET>/<T>/episodes/<id>`, reachable by id."""
+    root = T.tenant_episodes(tmp_path / R.SECRET)
     return J.accepted_episode(
         root, root=root, labels=("a", *labels),
         dispositions={"a": "benign", **{label: "malicious" for label in labels}},
@@ -687,7 +688,13 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
     grammar (D-V1) this is the positive control, not the only defence (a traversing lead id
     cannot reach a sibling's summary either way). names_one_file now ALSO bars a NUL byte
     (D-V4); it still admits whitespace, HTML, newline, surrogates and backslash — plain
-    components, read and echoed (s-34); world_label_names_directory keeps both spellings.
+    components, read and echoed (s-34); world_label_names_directory refuses the traversing
+    label and admits `b` by the label's own rule.
+
+    #1187 declared change 4: `world_label_names_directory` loses its run-id half (the
+    `<episode_id>-<label>` spelling) and keeps the label's own rule; the two assertions on it
+    below are that rule's, unchanged (whether it still takes the episode id is the
+    implementer's).
     """
     ep = _episode(tmp_path)
     family = R.family()
@@ -857,6 +864,8 @@ def test_1049_samples_shape_arms_absent_none_empty_mapping_non_mapping_per_reade
     stays permissive over the same shapes. The manifest's own empty-document refusal
     (test_1025_family_yaml_is_zero_bytes) is untouched: the present-empty tolerance is the
     strict samples reader's.
+
+    #1187 declared change 10 (R5): the page's copies keep the episode's folder name.
     """
     ep = _episode(tmp_path)
     family = R.family()
@@ -875,12 +884,14 @@ def test_1049_samples_shape_arms_absent_none_empty_mapping_non_mapping_per_reade
         page._strict_samples_reader(bound, "samples.yaml")
     assert family.read_samples_record(bound) == {}
 
+    # #1187 declared change 10 (R5): a copy keeps the episode's folder name (its manifest's
+    # episode id); only its root differs.
     sample = E.sample_episode(tmp_path / "page")
-    absent = E.copy_episode(sample, tmp_path / "absent")
+    absent = E.copy_episode(sample, tmp_path / "absent" / sample.dir.name)
     (absent.dir / "samples.yaml").unlink()
-    empty = E.copy_episode(sample, tmp_path / "empty")
+    empty = E.copy_episode(sample, tmp_path / "empty" / sample.dir.name)
     R.write_bytes(empty.dir / "samples.yaml", "")
-    broken = E.copy_episode(sample, tmp_path / "broken")
+    broken = E.copy_episode(sample, tmp_path / "broken" / sample.dir.name)
     R.write_bytes(broken.dir / "samples.yaml", "- a list\n")
     present_text = E.render(sample).text_of("sec-records")
     absent_text = E.render(absent).text_of("sec-records")

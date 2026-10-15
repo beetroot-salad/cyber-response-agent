@@ -63,9 +63,6 @@ def main(root: Path) -> int:
         assert path.is_file(), f"{label}: the archive wrote nothing at {path}"
         assert want in path.read_text(encoding="utf-8"), f"{label}: wrong bytes at {path}"
 
-    assert world.run_dir_pointer.is_file(), "no run-dir pointer"
-    assert str(run_dir) in world.run_dir_pointer.read_text(encoding="utf-8")
-
     # And through the BOUND readers, which address by the owner's RELATIVE form — the half of
     # the tree the gate was blind to before D7, because a relative name carries no root a
     # dataflow pass can trace.

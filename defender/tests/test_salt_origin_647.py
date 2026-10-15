@@ -44,6 +44,7 @@ import pytest
 from defender import run_common
 from defender.run_repository import PROVENANCE, RunPaths
 from defender.scripts.workspace_map import _unlisted
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     GOLDEN_AB3,
@@ -80,7 +81,11 @@ def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-64
 
     Returned a `(run_dir, salt)` pair until #875. The builder no longer mints a token at all:
     `wrap_fresh` mints each frame's delimiter after its content is in hand, so there is no
-    run-scoped salt for a builder to originate."""
+    run-scoped salt for a builder to originate.
+
+    `run_id` is the scenario's LABEL: #1187 (declared change 1) admits a pinned run id only as
+    canonical UUID text, so the run is pinned at `fixture_uuid(label)`, as the replay harness's
+    `materialize` names its folder."""
     from defender.tests._data_root_1078 import set_up_tenant
 
     data_root = tmp_path / "data"
@@ -88,7 +93,8 @@ def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-64
     # The D9 tenant: the replay harness's `drive` runs the run under the fixture tenant it sets
     # up in this same data root, and a data root holds one tenant (O10).
     tenant = set_up_tenant(data_root)
-    return run_common.materialize_run(golden / "alert.json", run_id, tenant=tenant).run_dir
+    return run_common.materialize_run(golden / "alert.json", fixture_uuid(run_id),
+                                      tenant=tenant).run_dir
 
 
 def tokens(*transcripts: str) -> set[str]:
@@ -155,7 +161,7 @@ def test_materialize_run_dir_returns_only_the_run_dir(tmp_path, monkeypatch):
 
     assert isinstance(run_dir, Path), "the builder no longer returns a bare run dir"
     assert run_dir.is_dir(), "the builder's returned run dir is not a real directory"
-    assert run_dir.name == "origin-647"
+    assert run_dir.name == fixture_uuid("origin-647")
     assert RunPaths(run_dir).alert.is_file()
     assert (run_dir / "gather_raw").is_dir()
 

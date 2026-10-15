@@ -10,6 +10,11 @@ as today: this issue discharges the obligation it inherited as stated and grows 
 content/inode-level checking machinery. The hard-link evasion is therefore out of scope BY
 DECISION, not by omission — it is a follow-up GitHub issue, and this file deliberately pins no
 content-based check.
+
+#1187 (design rev 2, R1): the runs container's `_tenant.json` is retired, so
+`test_the_tenant_record_sits_outside_every_box_mount` (d49) was deleted with the record (the
+graph says so); what sits beside an arm's folder staying outside its box is pinned by
+`ids_1187/test_1187_arm_box.py::test_1187_an_arm_box_cannot_see_the_roster_the_manifest_or_a_sibling_arm`.
 """
 from __future__ import annotations
 
@@ -233,31 +238,3 @@ def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
         f"claim C4: `RunPaths` uses `@model` (pydantic) today while `_io.py` uses a stdlib "
         f"dataclass, so D1's conversion is a real constraint, not a formality:\n{done.stderr!r}")
     assert b"OK" in done.stdout
-
-
-def test_the_tenant_record_sits_outside_every_box_mount(run_dir):
-    """The tenant record's directory is mounted into no box, while the run dir still is."""
-    from defender.runtime.box._lifecycle import _create_argv
-    from defender.runtime.box._spec import BoxSpec
-
-    runs_base = run_dir.parent
-    record = S.tenant().ensure_runs_base_record(runs_base, "census-tenant")
-    record_path = S.tenant().record_path(runs_base)
-    assert record.tenant_id
-    assert record_path.parent == runs_base
-
-    argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), ()).argv
-    mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
-    for m in mounts:
-        source = Path(m.split("source=")[1].split(",")[0])
-        assert not record_path.is_relative_to(source), (
-            f"the tenant record is inside the box mount {source} — the box mounts "
-            "`<run_dir>` only (`runtime/box/_spec.py`), and the record sits one level up "
-            "under `<runs_base>`, which no box mounts")
-    # POSITIVE CONTROL, in the demand's own sentence: the run dir still IS mounted.
-    assert any(f"target={run_dir}" in m for m in mounts), (
-        "the run dir stopped being mounted, which would make the negative above pass "
-        "vacuously — and would break N1")
-    # N9 is the recorded scope: a hostile local user on a shared /tmp is outside the threat
-    # model, exactly as it is for today's sidecars beside the same runs base.
-    assert S.RunPaths(run_dir).run_end_sidecar(runs_base).parent == record_path.parent

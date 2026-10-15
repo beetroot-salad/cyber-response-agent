@@ -41,7 +41,6 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender.hooks.budget_enforcer import BUDGET_REFUSAL_MESSAGE, DEFAULT_LIMITS
 from defender.run_repository import RunPaths
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
@@ -1204,8 +1203,8 @@ class _SnapshotSpawn(S.FakeSpawn):
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **kw: Any) -> int:
         label = T._world_of(argv)
-        if label is not None:
-            ep = EH.episode_dir(T.current_tenant().data_root, S.EPISODE_ID)
+        ep = S.episode_of(list(argv))  # #1187: the episode the launcher minted, from the argv
+        if label is not None and ep is not None:
             snap = _snapshot(S.oracle_dir(ep, label))
             if snap:
                 self.snapshots[label] = snap
@@ -1295,14 +1294,9 @@ def test_1224_concurrent_preflight_worlds_and_stage_traces_leave_distinct_intact
 
 class _LazySibling(J.FakeSibling):
     """`FakeSibling`, its episode directory resolved when the launcher first starts a child
-    (the launcher names the directory; the test does not)."""
-
-    def __init__(self) -> None:
-        super().__init__(Path("/nonexistent-until-launch"))
-
-    def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **kw: Any) -> int:
-        self.episode_dir = EH.episode_dir(T.current_tenant().data_root, S.EPISODE_ID)
-        return super().__call__(argv, env=env, **kw)
+    (the launcher names the directory; the test does not). #1187: `J.FakeSibling` itself now
+    finds the episode from each child's `--tenant` and `--episode` (the launcher mints the
+    id), so this is the plain double, kept under its name for the scenarios that construct it."""
 
 
 class _ScopedJudgeForLaunch(J.FakeJudge):

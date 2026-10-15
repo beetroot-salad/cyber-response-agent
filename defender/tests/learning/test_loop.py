@@ -313,10 +313,12 @@ def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = curation_run_dir("case-a")
     enqueue_run(state_for_paths(paths), run_dir)
-    spec = json.loads((paths.state_root / "author-queue" / "case-a.json").read_text())
+    # #1187: the run's id is a uuid (`curation_run_dir` derives it from the label), and
+    # `enqueue_run` names the request for the run itself.
+    rid = run_dir.name
+    spec = json.loads((paths.state_root / "author-queue" / f"{rid}.json").read_text())
     # The row is the run's address (#1105 PR 2 declared change 8), where it named its folder.
-    assert spec == {"case_id": "case-a", "tenant_id": run_dir.parent.parent.name,
-                    "run_id": "case-a"}
+    assert spec == {"case_id": rid, "tenant_id": run_dir.parent.parent.name, "run_id": rid}
 
 
 class _FakeBranch:
@@ -597,7 +599,7 @@ def test_lead_author_drain_skips_when_lease_held(tmp_path: Path):
     assert rc == 0
     assert seen == []
     assert "start" not in branch.events
-    assert (paths.state_root / "author-queue" / "case-lease.json").exists()
+    assert (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
 
 
 def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
