@@ -359,31 +359,38 @@ _MODULES: dict[str, Any] = {}
 _MODULES_LOCK = threading.RLock()
 
 
+def _exec_adapter_module(resolved: Path, name: str) -> Any:
+    """Execute the adapter file at `resolved` as a new module object named `name` (never put
+    in `sys.modules`)."""
+    spec = importlib.util.spec_from_file_location(name, resolved)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not load adapter module {resolved}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_adapter_module(path: Path) -> Any:
     resolved = path.resolve()
     key = str(resolved)
     with _MODULES_LOCK:
         if key not in _MODULES:
-            spec = importlib.util.spec_from_file_location(
-                f"_defender_adapter_{abs(hash(key))}", resolved,
-            )
-            if spec is None or spec.loader is None:
-                raise ImportError(f"could not load adapter module {resolved}")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            _MODULES[key] = module
+            _MODULES[key] = _exec_adapter_module(resolved, f"_defender_adapter_{abs(hash(key))}")
         return _MODULES[key]
 
 
-def adapter_module(roster: RosterRead, system: str) -> Any:
-    """`system`'s adapter module, from the file `roster` accepted for it, imported once per
-    process: the one module its verbs (`ModuleVerbRegistry.verbs`) and its settings check
-    (`system_status.startup_check`, #1256) are read from. `KeyError` for a system the roster
-    does not accept; an import that fails raises its own exception, every time it is asked."""
+def fresh_adapter_module(roster: RosterRead, system: str) -> Any:
+    """`system`'s adapter module imported afresh from the file `roster` accepted for it, for
+    its settings check at run start (`system_status.startup_check`, #1256). Never cached: the
+    call-time load (`ModuleVerbRegistry.verbs`) keeps its own semantics — imported once per
+    process on success, retried on every call after a failure — and this read neither primes
+    nor consults it. `KeyError` for a system the roster does not accept; an import that fails
+    raises its own exception."""
     path = roster.accepted.get(system)
     if path is None:
         raise KeyError(system)
-    return _load_adapter_module(path)
+    resolved = path.resolve()
+    return _exec_adapter_module(resolved, f"_defender_adapter_check_{abs(hash(str(resolved)))}")
 
 
 def _adapter_path_under(root: Path, system: str) -> Path | None:
@@ -691,7 +698,10 @@ class ModuleVerbRegistry(VerbRegistry):
         # From the roster, so `verbs()` and `systems()` cannot disagree. A tree removed under a
         # live registry surfaces here as the import's `OSError` (a host fault), never as
         # "unknown system".
-        verbs = getattr(adapter_module(self.roster, system), "VERBS", None)
+        path = self.roster.accepted.get(system)
+        if path is None:
+            raise KeyError(system)
+        verbs = getattr(_load_adapter_module(path), "VERBS", None)
         if not isinstance(verbs, Mapping):
             return {}
         return dict(verbs)
@@ -699,7 +709,7 @@ class ModuleVerbRegistry(VerbRegistry):
 
 __all__ = [
     "ADAPTER_SUFFIX",
-    "adapter_module",
+    "fresh_adapter_module",
     "DENIED",
     "GRANTED",
     "SYSTEM_MAX_LEN",

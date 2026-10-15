@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from defender.learning.branch.redaction import redact_model_visible
 from defender.runtime import circuit_breaker
 from defender.runtime.verb_dispositions import HEALTH_CHECK, gather_query_systems
-from defender.runtime.verbs import adapter_module, redact_settings_path
+from defender.runtime.verbs import fresh_adapter_module, redact_settings_path
 # The run record's fault type, through the record's own module: the import edge into
 # `scripts/` stays `run_tenant`'s (#1080 O1's named pair, retired by #1172/#1121).
 from defender.runtime.run_tenant import ConfigFault
@@ -117,7 +117,7 @@ def startup_check(
     down: dict[str, StartCause] = {}
     for system in sorted(granted_systems(tenant.grants) & set(roster.accepted)):
         try:
-            module = adapter_module(roster, system)
+            module = fresh_adapter_module(roster, system)
         except Exception as e:  # noqa: BLE001 — an adapter that will not import is broken, not fatal
             down[system] = AdapterBroken(shown(
                 f"its adapter could not be imported ({type(e).__name__}: {e})"))
