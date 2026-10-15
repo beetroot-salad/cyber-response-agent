@@ -401,7 +401,9 @@ _REAL_EXCEPTIONS = {
 
 
 #: Guarded APIs that share a name with Path.read_bytes; each remains capped by _io.
-_BOUNDED_MATCHES = {"_alert_input.py"}
+#: `tenant_delivery.py` (#1108 P3): its one `Bound.read_bytes`, in `_regular_files`, reads the
+#: draft and worktree files rooted and no-follow from a bound folder, capped at READ_LIMIT.
+_BOUNDED_MATCHES = {"_alert_input.py", "learning/author/tenant_delivery.py"}
 
 
 @pytest.mark.gate
