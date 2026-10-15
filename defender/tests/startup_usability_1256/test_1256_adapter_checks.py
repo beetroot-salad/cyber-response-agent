@@ -543,7 +543,7 @@ def _replies(turns: list[Any], on_first: Callable[[], None] | None = None) -> An
     return _Replies()
 
 
-def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_roster, caplog):
+def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_roster, caplog):  # noqa: C901 — one scene, every broken-adapter kind judged on the same channels
     """O-5a: a granted adapter that fails to import, declares no check, or whose check raises
     anything but ConfigFault (a crash, or another adapter fault) is Down(AdapterBroken(reason))
     from the start: logged at ERROR or above naming its system before the agent's first turn
