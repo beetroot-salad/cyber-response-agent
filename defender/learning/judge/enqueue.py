@@ -10,11 +10,10 @@ handle — never a queue path of its own.
 Each appender refuses a row of the wrong shape outright (a row missing `finding_id`/`run_id`/
 `direction` would raise a bare `KeyError` inside the shared findings gate and stuck-record the
 whole keyed batch; a row carrying a retired name is refused by that name, A4). A world's rows are
-appended once, by its `queueing` -> `queued` commit (A6). The defender channel is never
-deduplicated (an id already on it never suppresses a new finding); the questioner channel drops a
-row whose `finding_id` it already holds, so re-appending one pass's rows adds none — and the pass
-names, on its ledger, any new finding whose id a row of an earlier pass already holds there, so
-the dedup never loses one silently (A25; `_Pass._place`).
+appended once, by its `queueing` -> `queued` commit (A6). Both channels drop a row whose
+`finding_id` they already hold, including an earlier row in one append, so re-appending one
+pass's rows adds none. The pass names, on its ledger, any new finding whose id a row of an
+earlier pass already holds, so dedup never loses one silently (A25; `_Pass._place`).
 """
 
 from __future__ import annotations
@@ -175,7 +174,7 @@ def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
     rows = list(rows)
     for row in rows:
         _validate_row(row, episode_dir=episode_dir)
-    return state.append(FINDINGS, rows)
+    return state.append(FINDINGS, rows, dedup_key="finding_id")
 
 
 def append_world_rows(episode_dir: Path, rows: list[dict[str, Any]], *,

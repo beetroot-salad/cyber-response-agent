@@ -102,6 +102,8 @@ def _episode(tmp_path: Path, name: str, *, raw: bytes | None = None,
     carrying `signature` (default `SIG-<name>`; None = no signature recorded). `copy=False`
     plants nothing: the episode a pre-change launcher left."""
     ep = J.accepted_episode(tmp_path, root=tmp_path / f"episodes-{name}", **world_kw)
+    # Distinct scenarios share a queue, so their episode identities must differ (#1241).
+    ep = ep.rename(ep.with_name(f"{ep.name}-{name}"))
     alert = _alert(name) if raw is None else raw
     if copy:
         sig = f"SIG-{name}" if signature == "" else signature

@@ -364,12 +364,8 @@ def test_producer_reenqueues_a_finding_id_mid_ledger_write_window_773(tmp_path):
     on the PENDING file (N7): the row survives a tick that timed out before it could rotate,
     so a producer racing that window sees the same row it already wrote, not an empty queue.
 
-    `enqueue.append_rows` (the JUDGE's own appender, #1007) carries NO idempotency of its own
-    at append time — that guard is deliberately downstream, at AUTHOR time
-    (`test_921_gate_family_is_idempotent_over_a_replayed_batch`: a `finding_id` already
-    authored into a lesson's provenance is what the drain refuses to re-author, not a second
-    queue line) — so calling it again with the same id genuinely appends a second row here;
-    this pins THAT, not a refusal the appender was never built to make."""
+    #1241 makes the judge appender idempotent on finding_id. Retrying the producer after
+    the failed rotation adds nothing and preserves the original pending row unchanged."""
     from defender.learning.judge import enqueue
 
     held: dict = {}
@@ -405,8 +401,8 @@ def test_producer_reenqueues_a_finding_id_mid_ledger_write_window_773(tmp_path):
     appended = enqueue.append_rows(
         tmp_path / "episode", [row], state=sc.cfg.state
     )
-    assert appended == 1
-    assert len([r for r in sc.pending() if r.get("finding_id") == "f1"]) == 2
+    assert appended == 0
+    assert [r for r in sc.pending() if r.get("finding_id") == "f1"] == sc.rows
 
 
 # ---------------------------------------------------------------------------

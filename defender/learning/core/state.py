@@ -565,10 +565,10 @@ class LearningState:
 
         A judge channel (`reads_on_append`) reads the queue under its append lock first: a torn
         trailing row is closed with a leading newline rather than concatenated onto, `dedup_key`
-        drops rows whose id the queue already holds, and `malformed` counts the unreadable lines
-        the read saw. The pitfalls channel appends without reading (`(len(rows), 0)`). An empty
-        append takes no lock and makes nothing: a pass that enqueued nothing must not create the
-        queue."""
+        drops rows whose id the queue or an earlier row of this append already holds, and
+        `malformed` counts the unreadable lines the read saw. The pitfalls channel appends
+        without reading (`(len(rows), 0)`). An empty append takes no lock and makes nothing:
+        a pass that enqueued nothing must not create the queue."""
         channel = self._channel(channel)
         if not rows:
             return 0, (self._read_rows(channel.queue)[1] if channel.reads_on_append else 0)
@@ -584,8 +584,14 @@ class LearningState:
                 # `TypeError` inside the lock, and a non-string id can only fail to suppress a
                 # write, the safe direction.
                 seen = {r[dedup_key] for r in existing if isinstance(r.get(dedup_key), str)}
-                to_write = [r for r in rows
-                            if not (isinstance(r.get(dedup_key), str) and r[dedup_key] in seen)]
+                to_write = []
+                for row in rows:
+                    identity = row.get(dedup_key)
+                    if isinstance(identity, str):
+                        if identity in seen:
+                            continue
+                        seen.add(identity)
+                    to_write.append(row)
             if not to_write:
                 return 0, malformed
             body = "".join(json.dumps(row) + "\n" for row in to_write)
