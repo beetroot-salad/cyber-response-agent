@@ -25,7 +25,7 @@ from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill, count_call
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
-from defender.runtime import circuit_breaker, run_end
+from defender.runtime import circuit_breaker, run_end, system_status
 from defender.runtime.run_state import RunState
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from ._spec import (
@@ -34,6 +34,8 @@ from ._spec import (
     ENDING_CLAIM_COLLIDED,
     ENDING_CLAIM_FAILED,
     ENDING_DISPATCH_RAISED,
+    ENDING_DOWN_AT_START,
+    ENDING_DOWN_MID_LEAD,
     ENDING_EMPTY_OUTPUT,
     ENDING_EVERY_CALL_FAILED,
     ENDING_REQUEST_LIMIT,
@@ -108,6 +110,9 @@ class CorrelationOutcome:
     ending: str | None = None
     #: The system the lead was dispatched on (names the one marked down, for `tripped_breaker`).
     system: str | None = None
+    #: Why that system is down (#1256), for the two endings that name a cause the breaker does
+    #: not count: `down_at_start` and `down_mid_lead`.
+    down: system_status.StartCause | None = None
 
 
 #: One fixed sentence per ending, each saying in its own words why there is no summary. No error
@@ -151,7 +156,30 @@ def _sentence(outcome: CorrelationOutcome, grant_home: str) -> str:
             f"The correlation lead's queries were refused: the circuit breaker marked "
             f"{outcome.system} as down for this run. There is no correlation summary, and "
             f"{outcome.system} is unavailable for the rest of the run.")
+    if outcome.ending == ENDING_DOWN_AT_START:
+        return _down_at_start_sentence(outcome)
+    if outcome.ending == ENDING_DOWN_MID_LEAD:
+        return (
+            f"The correlation lead's queries were refused: one of its calls showed that "
+            f"{outcome.system} is not configured for this run (its settings lack something its "
+            f"adapter needs), so {outcome.system} is down for the rest of the run. There is no "
+            "correlation summary for this alert.")
     return _SENTENCES[str(outcome.ending)]
+
+
+def _down_at_start_sentence(outcome: CorrelationOutcome) -> str:
+    """The `down_at_start` sentence: it names the cause (#1256 O-6), never the check's fault
+    text — the reason reaches MAIN in its workspace view (O-3), and these sentences stay
+    constants over the system name (A2)."""
+    if isinstance(outcome.down, system_status.AdapterBroken):
+        cause = (f"{outcome.system}'s adapter is broken (it could not be loaded, or its settings "
+                 "check failed unexpectedly)")
+    else:
+        cause = (f"{outcome.system} is not configured for this run (its settings, checked "
+                 "when the run started, do not make it usable)")
+    return (
+        f"No correlation was run on this alert and none is coming: {cause}, so "
+        f"{outcome.system} is down for the whole run and the correlation lead was not started.")
 
 
 def render_correlation_section(outcome: CorrelationOutcome, *, grant_home: str) -> str:
@@ -174,6 +202,10 @@ def _classify_end(end: LeadEnd, run_state: RunState, system: str) -> str | None:
         raise session_store.StoreError("the correlation lead's session could not be recorded")
     if end.breaker_refused is not None:
         return ENDING_TRIPPED_BREAKER
+    if isinstance(system_status.down_cause(run_state, system), system_status.NotConfigured):
+        # A call's `ConfigFault` escaped the start check: the system went down as not configured
+        # mid-lead, uncharged (#1256 O-5b) — never "tripped breaker" nor "every call failed".
+        return ENDING_DOWN_MID_LEAD
     summary = (end.summary or "").strip()
     if end.fault_terminator == session_store.TRUNCATED_BY_REQUEST_LIMIT or (
             end.ceiling is not None and not summary):
@@ -203,6 +235,12 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     system = dispatch.system
     if system is None:
         return CorrelationOutcome(ending=ENDING_WITHHELD)
+    # The run's one question (#1256 DP4). A system down from run start ends the lead here,
+    # before its claim and its gather count, as the withheld ending does (O-6): it never refuses
+    # the run. A trip keeps its own ending, after the claim (below).
+    down = system_status.down_cause(run_state, system)
+    if down is not None and not isinstance(down, system_status.Tripped):
+        return CorrelationOutcome(ending=ENDING_DOWN_AT_START, system=system, down=down)
     run_dir = run_state.run_dir
     pointer = RunPaths(run_dir).alert.relative_to(run_dir).as_posix()
     goal, what_to_summarize = correlation_contract(pointer, dispatch.template_id)
@@ -217,7 +255,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name, which a
     # harness dispatch never emits. It spends the run's one budget; nothing is reserved for it.
     count_call(run_state, "gather")
-    if circuit_breaker.is_tripped(run_state, system):
+    if down is not None:
         return CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system=system)
 
     from ..agent_role import GATHER_AGENT_ID_PREFIX

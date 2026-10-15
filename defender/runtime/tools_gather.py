@@ -16,6 +16,7 @@ from defender.hooks.budget_enforcer import BudgetKill
 from defender.run_repository import Run
 
 from . import circuit_breaker
+from . import system_status
 from .run_state import run_state_of
 from . import permission
 from . import run_end
@@ -58,16 +59,30 @@ class GatherRequest:
 GatherFactory = Callable[[str, str, int], Any]
 
 
-def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
+def _down_refusal(deps: GatherDeps, system: str | None) -> str | None:
+    """The query tool's in-call gate: the refusal of a call to a system that is down for this
+    run, rendered from its cause (`system_status`, DP4), or `None` when it is up."""
+    if not system:
+        return None
     state = run_state_of(deps)
-    if system and circuit_breaker.is_tripped(state, system):
-        # Remembered on the lead's stop, so the harness's correlation lead can name "a call was
-        # refused by the breaker" apart from "every call failed" (#1222 A2).
-        stop = getattr(deps, "stop", None)
-        if stop is not None:
-            stop.mark_breaker_refused(system)
-        return circuit_breaker.down_message(state, system)
-    return None
+    cause = system_status.down_cause(state, system)
+    if cause is None:
+        return None
+    if isinstance(cause, system_status.Tripped):
+        return _tripped_message(deps, system)
+    # Down for another cause: not the breaker's, so nothing is remembered on the lead's stop
+    # (lead zero asks the system's cause itself).
+    return system_status.message_for(state, system, cause)
+
+
+def _tripped_message(deps: GatherDeps, system: str) -> str:
+    """The breaker's refusal of a call to `system`, tripped during this run. Remembered on the
+    lead's stop, so the harness's correlation lead can name "a call was refused by the breaker"
+    apart from "every call failed" (#1222 A2)."""
+    stop = getattr(deps, "stop", None)
+    if stop is not None:
+        stop.mark_breaker_refused(system)
+    return circuit_breaker.down_message(run_state_of(deps), system)
 
 
 def _payload_note(deps: GatherDeps, record: dict) -> str:
@@ -503,9 +518,11 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
                 f"lead {lead_id!r} could not be claimed: the run's leads table could not be "
                 "written")
 
-    state = run_state_of(deps)
-    if circuit_breaker.is_tripped(state, system):
-        return circuit_breaker.down_message(state, system)
+    # The dispatch gate: a system down for this run — not configured or its adapter broken at
+    # start, or tripped since — is refused here, its gather never started (#1256 O-1, O-4).
+    refused = system_status.refusal_if_down(run_state_of(deps), system)
+    if refused is not None:
+        return refused
 
     from defender.runtime.agent_definition import RunScope, bind
     from defender.runtime.driver import gather_def_for
