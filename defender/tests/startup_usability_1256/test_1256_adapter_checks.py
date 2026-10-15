@@ -766,8 +766,9 @@ def test_o5a_any_exception_at_import_or_from_the_check_is_adapter_broken(
     assert main.calls == 3, f"control: MAIN played its whole script ({main.calls} of 3)"
     assert not (probe / "identity.ran").exists(), (
         f"{seam} {label}: the broken identity adapter's verb ran (O-5a)")
-    assert [r for r in rows if r.get("system") == "identity"] == [], (
-        f"{seam} {label}: a refused identity call wrote a row: {rows}")
+    identity_rows = [r for r in rows if r.get("system") == "identity"]
+    assert identity_rows == [], (
+        f"{seam} {label}: a refused identity call wrote a row: {identity_rows}")
     assert breaker.get("total_failures", 0) == 0, (
         f"{seam} {label}: the broken adapter was charged to the run: {breaker}")
     assert "identity" not in breaker.get("systems", {}), (

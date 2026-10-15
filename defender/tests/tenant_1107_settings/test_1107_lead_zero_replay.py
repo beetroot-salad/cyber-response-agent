@@ -470,7 +470,8 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
     an escape (O-5b): cmdb goes down as not configured and the refusal the gather model gets
     carries the escaped fault's reason — which reaches the model, so CX5 holds for it as for
     any ConfigFault text. The lead calls cmdb twice: what the escaped call itself answers is not
-    pinned (the design is silent), the second call's refusal names the reason (O-4, O-5b)."""
+    pinned beyond CX5 (the design is silent on its content; like any ConfigFault text it shows
+    no host path), and the second call's refusal names the reason (O-4, O-5b)."""
     # CX8: the shim first on the PATH the run env inherits (no call here should reach docker).
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
