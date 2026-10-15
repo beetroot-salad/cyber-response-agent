@@ -11,7 +11,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import ClassVar, Literal, Protocol, runtime_checkable
 
 from defender._model import model
 from defender.runtime import bash_exec
@@ -64,12 +64,27 @@ class BoxSpec:
 
 
 
+#: The file a `code` mount is checked by at box start (#1108 D7): read back through the box from
+#: `<code_dir>/MOUNT_CHECK` and compared with the host's own read. A committed, content-free file
+#: the box package owns by this one name; nothing the agent reads names it.
+CODE_CHECK_FILE = "MOUNT_CHECK"
+
+#: What a read-only mount holds, which decides how box start checks it (#1108 D7): `code` reads
+#: back `CODE_CHECK_FILE` under the request's code root, `agent` reads back the tenant's
+#: `.tenant-id`, `data` reads back its first regular file (an empty folder passes, #665 Decision
+#: 9). Never inferred from a name or a path.
+MountKind = Literal["code", "agent", "data"]
+
+
 @dataclass(frozen=True)
 class Mount:
 
     source: Path
     target: Path
     writable: bool = False
+    #: Required of a read-only mount, which box start refuses without one. A writable mount is
+    #: checked by a planted sentinel, so its kind is not read.
+    kind: MountKind | None = None
 
 
 def _code_dir(workdir: Path, explicit: Path | None) -> Path:

@@ -175,8 +175,8 @@ class TenantDelivery:
     def box_request(self, wt: Path, batch_id: str, *, writable_dirs: Sequence[str]) -> box.BoxRequest:
         with _delivery_errors():
             agent = self._worktree(wt)
-            mounts = [box.Mount(source=self.defender_dir, target=self.defender_dir),
-                      box.Mount(source=agent, target=agent)]
+            mounts = [box.Mount(source=self.defender_dir, target=self.defender_dir, kind="code"),
+                      box.Mount(source=agent, target=agent, kind="agent")]
             for relative in writable_dirs:
                 path = _path(f"agent/{relative}")
                 lane = wt / path

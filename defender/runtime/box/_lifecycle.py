@@ -19,6 +19,7 @@ from pathlib import Path
 from defender._io import read_text_utf8, READ_LIMIT, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
+from defender._tenants import TENANT_ID_FILE
 from defender.run_repository import RUN_LAYOUT
 from defender.runtime.box_codec import (
     BOX_ENV_ALLOWLIST,
@@ -35,7 +36,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     mark_unsandboxed,
     write_did_not_run,
 )
-from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
+from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
 from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
@@ -174,16 +175,9 @@ def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
                     unlink_on_fault=False)
 
 
-def _readonly_probe_file(source: Path) -> Path | None:
-    """Known instruction roots require their fixed file; generic empty data needs no read.
-
-    #665 Decision 9 permits an existing empty data source. Its host inode is the
-    non-absence evidence; code and tenant knowledge always require their fixed probe.
-    """
-    if source.name == "agent":
-        return Path(".tenant-id")
-    if source.name == "defender":
-        return Path("SKILL.md")
+def _data_probe_file(source: Path) -> Path | None:
+    """A `data` mount's read-back file: its first regular file by name, or `None` for an empty
+    folder, which #665 Decision 9 permits (its host inode is the non-absence evidence)."""
     try:
         info = source.lstat()
         if not stat.S_ISDIR(info.st_mode):
@@ -201,13 +195,41 @@ def _readonly_probe_file(source: Path) -> Path | None:
     raise BoxFault(f"read-only mount has no regular file for its readback probe: {source}")
 
 
+def _readonly_probe_file(mount: Mount, code_dir: Path | None) -> Path | None:
+    """The file a read-only mount is checked by, relative to both its source and its target,
+    chosen by the kind the mount declares (#1108 D7) and never by its name or path. `None`
+    only for an empty `data` mount. A mount that declares no kind is refused."""
+    if mount.kind == "code":
+        target = Path(mount.target)
+        if code_dir is None:
+            raise BoxFault(f"the read-only code mount at {target} was checked without the "
+                           "request's code root — the box's code could not be checked")
+        if not code_dir.is_relative_to(target):
+            raise BoxFault(
+                f"the code root {code_dir} does not lie inside the read-only code mount at "
+                f"{target} — the box's code could not be checked"
+            )
+        return code_dir.relative_to(target) / CODE_CHECK_FILE
+    if mount.kind == "agent":
+        return Path(TENANT_ID_FILE.name)
+    if mount.kind == "data":
+        return _data_probe_file(Path(mount.source))
+    raise BoxFault(
+        f"read-only mount {mount.source} declares no kind (code, agent or data) — box start "
+        f"cannot tell how to check it (got {mount.kind!r})"
+    )
+
+
 def _check_mount_sentinel(
-    mount: Mount, docker: DockerFn, name: str, *, probe_file: Path | None = None,
+    mount: Mount, docker: DockerFn, name: str, *, code_dir: Path | None = None,
 ) -> None:
-    """Compare an existing read-only file, or plant into a writable source only."""
+    """Check one mount through the started box. A writable source gets a planted sentinel. A
+    read-only source is never written: an existing file, chosen by the mount's kind, is read
+    back through the box and compared with the host's own read of it. `code_dir` is the
+    request's code root, which a `code` mount must contain."""
     if not mount.writable:
         source = Path(mount.source)
-        relative = probe_file if probe_file is not None else _readonly_probe_file(source)
+        relative = _readonly_probe_file(mount, code_dir)
         if relative is None:
             return
         try:
@@ -391,12 +413,9 @@ def _start_boxed_request(
         )
     try:
         for m in request.mounts:
-            # Code remains mandatory even for a legacy whole-checkout mount whose source
-            # basename is not `defender`; generic empty-data semantics never apply to it.
-            probe_file = None
-            if not m.writable and request.code_dir.is_relative_to(m.target):
-                probe_file = request.code_dir.relative_to(m.target) / "SKILL.md"
-            _check_mount_sentinel(m, docker, request.name, probe_file=probe_file)
+            # Each read-only mount is checked by the kind it declares; one with none is
+            # refused here, after create, so the container is reaped and the trees marked.
+            _check_mount_sentinel(m, docker, request.name, code_dir=request.code_dir)
         _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
     except BaseException as e:
         # The box is ours; best-effort reap, then mark (sentinels were already planted).

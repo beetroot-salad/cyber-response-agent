@@ -6,11 +6,12 @@ raises `BoxStartRefused`.
 
 The box's only in-box code is the transport's entry point, `python3 -m
 defender.runtime.bash_exec`, which imports the stdlib and `box_codec` alone. So the runner folder
-holds copies of exactly those modules (`RUNNER_FILES`), bound at the checkout's path: the
-request's workdir stays the checkout (the start path reads its `box.Dockerfile` on the host to
-name the image, and the box's `PYTHONPATH` is that path), but inside the box that path holds the
-runner and nothing more. The repository root, its `.env` and the rest of the tree are never a
-bind source, so oracle Python cannot read them.
+holds copies of exactly those modules, plus the content-free code check file box start reads back
+through a `code` mount (`RUNNER_FILES`), bound at the checkout's path: the request's workdir
+stays the checkout (the start path reads its `box.Dockerfile` on the host to name the image, and
+the box's `PYTHONPATH` is that path), but inside the box that path holds the runner and nothing
+more. The repository root, its `.env` and the rest of the tree are never a bind source, so oracle
+Python cannot read them.
 """
 from __future__ import annotations
 
@@ -26,18 +27,20 @@ from typing import Any
 from defender._io import guarded_mkdir, read_bytes_capped, write_guarded
 
 from . import _lifecycle
-from ._spec import BoxExecutor, BoxRequest, BoxSpec, Mount
+from ._spec import CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 
 #: The checkout: the request's workdir (the host reads its image recipe) and the in-box path the
 #: runner is bound at. Never itself a bind source.
 CHECKOUT = Path(__file__).resolve().parents[3]
 
 #: Everything the in-box transport imports (`bash_exec` and the stdlib-only `box_codec` it
-#: decodes frames with; `defender` is a namespace package), relative to the checkout.
+#: decodes frames with; `defender` is a namespace package), plus the code check file box start
+#: reads back through the runner's `code` mount (#1108 D7), relative to the checkout.
 RUNNER_FILES: tuple[str, ...] = (
     "defender/runtime/__init__.py",
     "defender/runtime/bash_exec.py",
     "defender/runtime/box_codec.py",
+    f"defender/{CODE_CHECK_FILE}",
 )
 
 
@@ -71,11 +74,11 @@ def _make_runner() -> Path:
 
 
 def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str]) -> BoxRequest:
-    """The oracle box's request: the runner read-only at the checkout's path, the scratch
-    folder writable, no env of the caller's."""
+    """The oracle box's request: the runner read-only at the checkout's path as the box's
+    `code` mount, the scratch folder writable, no env of the caller's."""
     return BoxRequest(
         name=f"defender-oracle-{secrets.token_hex(6)}",
-        mounts=(Mount(source=runner, target=CHECKOUT, writable=False),
+        mounts=(Mount(source=runner, target=CHECKOUT, writable=False, kind="code"),
                 Mount(source=scratch, target=scratch, writable=True)),
         workdir=CHECKOUT, env={}, spec=BoxSpec.from_env(env),
     )
