@@ -46,8 +46,9 @@ class RunAborted(Exception):
         self.systems = sorted(set(systems))
         super().__init__(
             f"run aborted by circuit breaker: {total_failures} connectivity/auth "
-            f"failures across systems {self.systems} — the environment appears "
-            f"unreachable. Escalate with the visibility gap named."
+            f"failures, timeouts or configuration faults across systems {self.systems} — "
+            f"the environment appears unreachable or unconfigured. Escalate with the "
+            f"visibility gap named."
         )
 
 
@@ -90,7 +91,8 @@ def down_message(state: RunState, system: str) -> str:
     n = state.breaker_failures(system) or PER_SYSTEM_FAIL_LIMIT
     return (
         f"[circuit-breaker] System '{system}' is DOWN for this run: {n} "
-        f"connectivity/auth failures or timeouts (adapter exit 2 / 124) tripped the "
+        f"connectivity/auth failures, timeouts or configuration faults "
+        f"(missing or broken settings; adapter exit 2 / 124) tripped the "
         f"breaker, so this dispatch did not run and {system}'s reference skill was "
         f"not loaded. This "
         f"is a visibility gap, not a query result. Do NOT re-dispatch {system}; "

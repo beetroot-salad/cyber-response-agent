@@ -81,7 +81,8 @@ that need to match `elastic_adapter.py`:
   across releases — drift breaks replay. Gather persists it by-ref under
   `gather_raw/{lead_id}/{seq}.json`.
 - Exit codes: `0` success, `1` query error (404, schema mismatch,
-  bad arg), `2` connectivity/auth failure.
+  bad arg), `2` connectivity/auth failure or a missing/broken config
+  (`TransportFault` / `ConfigFault`; both charge the circuit breaker).
 - **Don't** Read the CLI source to discover params — the SKILL.md +
   the `VERBS` registry's annotations are the authoritative surface (per the
   memory-recorded discipline in the elastic SKILL).
