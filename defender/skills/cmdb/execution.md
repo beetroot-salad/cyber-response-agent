@@ -46,7 +46,6 @@ reached: `CMDB_TRANSPORT=docker-exec` and `CMDB_DOCKER_CONTEXT=<docker context>`
 
 - `0` — success
 - `1` — query error (host not found, malformed arg)
-- `2` — connectivity / docker / upstream 5xx
 - `64` — a usage mistake in YOUR call: an unknown verb, or an
   unknown/missing/mistyped param name (e.g. `name` where the verb
   declares `host`). The one class you can fix yourself — the rejection
