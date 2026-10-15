@@ -142,7 +142,6 @@ def test_a_breaker_tripped_by_config_faults_names_configuration(tmp_path):
     )
     from defender.scripts.adapters.faults import ConfigFault
 
-    assert "settings" in cb.INFRA_CAUSES, cb.INFRA_CAUSES
 
     state = _state(tmp_path)
     for _ in range(cb.PER_SYSTEM_FAIL_LIMIT):
@@ -151,6 +150,12 @@ def test_a_breaker_tripped_by_config_faults_names_configuration(tmp_path):
     down = cb.down_message(state, "elastic")
     assert f"{cb.PER_SYSTEM_FAIL_LIMIT} {cb.INFRA_CAUSES}" in down, \
         f"the down message restates the causes: {down!r}"
+    # Exit 2 is also a 5xx, a garbled reply, an adapter crash: the causes are examples, not a
+    # closed list, and the codes are the breaker's own set.
+    assert "not configured" in down, f"the down message never names a config cause: {down!r}"
+    assert "e.g." in down, f"the down message closes its list of causes: {down!r}"
+    codes = " / ".join(str(c) for c in sorted(cb.INFRA_EXIT_CODES))
+    assert f"exit {codes}" in down, f"the down message restates the infra codes: {down!r}"
 
     aborted = str(cb.RunAborted(cb.RUN_FAIL_KILL_LIMIT, ["elastic"]))
     assert f"{cb.RUN_FAIL_KILL_LIMIT} {cb.INFRA_CAUSES}" in aborted, \
