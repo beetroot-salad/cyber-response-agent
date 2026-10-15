@@ -9,9 +9,11 @@ run as the record's `systems` field. Nothing below the entry point reads
 the process environment or the tenant folder for a setting again.
 
 FAULTS ARE VALUES, never raises, at resolve. A system whose `config.env` is missing, unreadable or
-not UTF-8 is kept as its `ConfigFault` under its name; the adapter that asks for it raises that
-fault when CALLED (exit 2 → the breaker), and the run goes on (O5). `TenantRefused` keeps only
-its tenant-acceptance reasons.
+not UTF-8 is kept as its `ConfigFault` under its name. At run start each granted system's adapter
+judges the record (`check_settings`, #1256) and raises that fault: the system is down for the
+run as not configured, no verb of it is called, and nothing is charged to the breaker. The run
+goes on unless no granted system is left usable, which the run's own start check refuses (O-8),
+never resolution. `TenantRefused` keeps only its tenant-acceptance reasons (D4).
 
 NO MODEL, NO PYDANTIC. The record's parts are plain read-only classes: a pydantic `ValidationError`
 echoes the offending field's repr into error text.

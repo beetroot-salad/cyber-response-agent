@@ -83,7 +83,8 @@ def _record_config(tenant: RunTenant) -> dict[str, str]:
     """This deployment's elastic config from the run's record (#1107): the keys of
     `systems/elastic/config.env` as written, prefix included. A missing or unusable file, an
     unimplemented access method, or a blank required key is a `ConfigFault` — Elasticsearch is
-    not configured for this run, and the run goes on. The record's `elastic` view judges the
+    not configured for this run (`check_settings` raises it at run start, so elastic is down from
+    the start, #1256). The record's `elastic` view judges the
     keys platform code reads; this reader judges the ones IT needs, so each reports its own view
     (MF-7 c).
 

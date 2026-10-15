@@ -108,11 +108,12 @@ def startup_check(
     granted system the roster does not hold is not judged here: a registry built over that
     roster refuses such a grant at construction (C11).
 
-    Reasons are made fit to show before they are kept (`_shown`): the settings folder named by
-    its pointer, and no host path of the data root, the defender tree or the adapters tree."""
+    Reasons are made fit to show before they are kept (`shown_reason`): the settings folder
+    named by its pointer, and no host path of the data root, the tenant's folder, the defender
+    tree or the adapters tree."""
     def shown(text: str) -> str:
-        return _shown(text, tenant=tenant, defender_dir=Path(defender_dir),
-                      adapters=Path(roster.root))
+        return shown_reason(text, tenant, (Path(defender_dir), "defender"),
+                            (Path(roster.root), "<adapters>"))
 
     down: dict[str, StartCause] = {}
     for system in sorted(granted_systems(tenant.grants) & set(roster.accepted)):
@@ -231,9 +232,9 @@ def mark_escaped(state: RunState, system: str, fault_text: str) -> None:
     """A verb of `system` raised `ConfigFault` at call time (O-5b): its settings check missed a
     fault its verbs can raise. The system is down as not configured from this call on — the same
     status and accounting the start check gives, reached late — and the escape is logged as the
-    adapter defect it is. `fault_text` is the fault as the model may read it (the caller's
-    redaction); it becomes the reason every later refusal carries. The call is not charged to
-    the breaker (the caller's row is written uncharged)."""
+    adapter defect it is. `fault_text` is the fault as `shown_reason` names it (the caller has
+    the run's tenant and tree); it becomes the reason every later refusal carries. The call is
+    not charged to the breaker (the caller's row is written uncharged)."""
     cause = NotConfigured(" ".join(fault_text.split())[:REASON_MAX])
     _logger.error(
         f"adapter defect: a {system} verb raised ConfigFault at call time — a settings fault "
@@ -255,19 +256,23 @@ def _mark(state: RunState, system: str, cause: StartCause) -> None:
         state.system_down.setdefault(system, cause)
 
 
-def _shown(text: str, *, tenant: RunTenant, defender_dir: Path, adapters: Path) -> str:
-    """A reason fit for the model and the operator: one line, bounded, with the tenant's
-    settings folder named by its pointer (`redact_settings_path`, the one settings redaction),
-    the tenant's folder under the data root, the defender tree and the adapters tree (which
-    need not sit in either — a branch estate's) named rather than located, and staged names and
-    world ids removed (`redact_model_visible`). An adapter's crash text often carries its own
-    file's absolute path."""
+def shown_reason(text: str, tenant: RunTenant, *trees: tuple[Path, str]) -> str:
+    """A down system's reason, fit for the model and the operator — THE redaction every reason
+    passes once, where its cause is made, so every surface that renders the cause (the start
+    log lines, the O-8 refusal, MAIN's workspace view, gather's system index, `list_verbs`, the
+    dispatch and call refusals) shows the same safe text. One line, bounded; the tenant's
+    settings folder named by its pointer (`redact_settings_path`, the one settings redaction);
+    staged names and world ids removed (`redact_model_visible`); and every host root named
+    rather than located — the tenant's folder and the data root (`Tenant.root_names`, their
+    owner's) and each of `trees` (a path and its name: the defender tree, the adapters tree,
+    which need not sit in either). An adapter's crash text often carries its own file's absolute
+    path, and a repr of the run's record carries the data root."""
     text = redact_settings_path(redact_model_visible(text), tenant.settings)
-    roots = ((tenant.tenant.dir, "<tenant folder>"), (defender_dir, "defender"),
-             (adapters, "<adapters>"))
-    named = {spelling: name for root, name in roots
-             for spelling in (str(Path(root)), str(Path(root).resolve()))}
-    # Longest first, so a root that is a prefix of the other's spelling cannot cut it in two.
+    named = dict(tenant.tenant.root_names())
+    for root, name in trees:
+        named.update({spelling: name for spelling in (str(Path(root)), str(Path(root).resolve()))
+                      if len(spelling) > 1})
+    # Longest first, so a root that is a prefix of another's spelling cannot cut it in two.
     for spelling in sorted(named, key=len, reverse=True):
         text = text.replace(spelling, named[spelling])
     one_line = " ".join(text.split())
@@ -291,5 +296,6 @@ __all__ = [
     "message_for",
     "refusal_if_down",
     "require_usable",
+    "shown_reason",
     "startup_check",
 ]

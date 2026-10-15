@@ -102,8 +102,9 @@ def access_context(ctx: VerbContext, system: str) -> str:
 
 def record_access_context(tenant: RunTenant, system: str) -> str:
     """The docker context `system` is reached on — its `<PREFIX>_DOCKER_CONTEXT` — or
-    `ConfigFault` (that system is not configured for this run; the run goes on). THE ONE CHECK of
-    how a system is reached (D2): `<PREFIX>_TRANSPORT` must be `docker-exec` exactly, and the
+    `ConfigFault` (that system is not configured for this run: down from its start, #1256).
+    THE ONE CHECK of how a system is reached (D2): `<PREFIX>_TRANSPORT` must be `docker-exec`
+    exactly, and the
     context must be named and not blank. There is NO default for either: an absent or empty
     context would be handed to docker as `--context ''`, which docker defers to its own
     `DOCKER_CONTEXT` or current context, re-opening the very steering this record removed (MF-3).
@@ -154,7 +155,13 @@ def load_config(
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> dict[str, str]:
     """`record_config` over the call's run record (`ctx.tenant`): the loader every verb calls,
-    under the signature the case-history ticket writer and the connect example keep."""
+    under the signature the case-history ticket writer and the connect example keep.
+
+    In a run its `ConfigFault` is no call-time outcome: the system's settings check raises the
+    same fault at run start, so such a system is down from the start and no verb of it is called
+    (#1256 O-5). A fault that still reaches a verb means the check missed a key: the query tool
+    marks the system down as not configured, uncharged (O-5b). The case-history ticket writer
+    calls it outside any start check (case-history is no gather system)."""
     return record_config(ctx.tenant, system, prefix, required)
 
 
