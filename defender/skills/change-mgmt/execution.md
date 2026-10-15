@@ -38,7 +38,6 @@ declares `CHANGE_MGMT_URL_BASE`, `CHANGE_MGMT_BASTION_HOST`,
 
 - `0` — success
 - `1` — query error (CR not found, malformed `--at`)
-- `2` — connectivity / docker / upstream 5xx
 - `64` — a usage mistake in YOUR call: an unknown verb, or an
   unknown/missing/mistyped param name (e.g. `cr` where the verb declares
   `cr_id`). The one class you can fix yourself — the rejection names the

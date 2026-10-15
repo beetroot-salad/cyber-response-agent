@@ -66,10 +66,6 @@ the connection.
 - `0` — success (includes a connected-but-empty result; 0 hits is a
   finding, not an error — see gather SKILL §3.5 validity check)
 - `1` — query error (malformed query string, unknown index)
-- `2` — connectivity / auth failure. The data source is unreachable:
-  **stop and escalate immediately** with the error. Do not retry-probe,
-  run `netstat`/`ss`/`docker`, or hunt for `.env` — that's a
-  data-source outage, not a query problem.
 - `64` — a usage mistake in YOUR call: an unknown verb, or an
   unknown/missing/mistyped param name (e.g. passing `kql` where the verb
   declares `native_query`). This is the one class you can fix yourself —
