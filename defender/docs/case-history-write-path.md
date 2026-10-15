@@ -41,7 +41,7 @@ what manufactures the read PR's fixtures.
 - **Cut-short runs record per exit class (#1047 O2), still as comments.** The exit
   class comes in-process from `run.py` off the driver's own summary, never off
   anything in the run dir. `aborted` → an escalation note (no verdict; "environment
-  appears unreachable, escalate"), ticket stays open. `request-limit` /
+  appears unreachable or unconfigured, escalate"), ticket stays open. `request-limit` /
   `retry-exhausted` → the record, proposing the host's forced `unresolved`; with no
   usable report (the forced close itself failed) → the escalation note.
   `budget` / `store` → no call at all. Anything else → the record off the report.

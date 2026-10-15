@@ -188,7 +188,7 @@ def test_a_healthy_state_still_reads_and_trips(tmp_path):
     cb.record_outcome(state, "elastic", 2)
     assert cb.is_tripped(state, "elastic") is True
     msg = cb.down_message(state, "elastic")
-    assert "2 connectivity/auth failures" in msg
+    assert "2 infra failures" in msg
     assert cb.is_tripped(state, "identity") is False, "one system's failures tripped another"
 
 

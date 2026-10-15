@@ -72,7 +72,7 @@ from defender.tests import _spec1047 as S
 
 def test_an_aborted_run_leaves_its_ticket_open_with_the_escalation(tmp_path):
     """A run whose exit class is `aborted` leaves its ticket open and records the breaker's
-    escalation — the environment appears unreachable, escalate with the visibility gap named —
+    escalation — the environment appears unreachable or unconfigured, escalate with the visibility gap named —
     rather than transitioning the ticket to any resolution.
 
     The note is addressed to the SAME ticket key the open leg wrote under, which is what makes

@@ -26,9 +26,12 @@ INFRA_ERROR_CLASS = "infra"
 AGENT_FIXABLE_ERROR_CLASS = "agent-fixable"
 DENIED_ERROR_CLASS = "denied"
 
-#: What a breaker charge can mean, named in every message the breaker produces. It sees exit
-#: codes alone, and exit 2 is both a `TransportFault` and a `ConfigFault` (#1246).
-INFRA_CAUSES = "connectivity/auth failures, timeouts or configuration faults"
+#: What a breaker charge can mean, after its count in both messages that name a cause (the
+#: down message and the run kill). It sees exit codes alone, and exit 2 is both a
+#: `TransportFault` and a `ConfigFault` (#1246).
+INFRA_CAUSES = (
+    "infra failures (exit 2: unreachable, refused credentials, or missing/broken settings; "
+    "exit 124: timed out)")
 
 
 def is_infra_failure(exit_code: int) -> bool:
@@ -95,8 +98,7 @@ def down_message(state: RunState, system: str) -> str:
     n = state.breaker_failures(system) or PER_SYSTEM_FAIL_LIMIT
     return (
         f"[circuit-breaker] System '{system}' is DOWN for this run: {n} {INFRA_CAUSES} "
-        f"(adapter exit 2: unreachable, refused credentials, or missing/broken settings; "
-        f"exit 124: timed out) tripped the "
+        f"tripped the "
         f"breaker, so this dispatch did not run and {system}'s reference skill was "
         f"not loaded. This "
         f"is a visibility gap, not a query result. Do NOT re-dispatch {system}; "
