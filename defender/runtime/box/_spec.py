@@ -69,11 +69,13 @@ class BoxSpec:
 #: the box package owns by this one name; nothing the agent reads names it.
 CODE_CHECK_FILE = "MOUNT_CHECK"
 
-#: What a read-only mount holds, which decides how box start checks it (#1108 D7): `code` reads
-#: back `CODE_CHECK_FILE` under the request's code root, `agent` reads back the tenant's
-#: `.tenant-id`, `data` reads back its first regular file (an empty folder passes, #665 Decision
-#: 9). Never inferred from a name or a path.
-MountKind = Literal["code", "agent", "data"]
+#: What a read-only mount holds, which decides how box start checks it (#1108 D7, amendment 2):
+#: `code` reads back `CODE_CHECK_FILE` under the request's code root; `data` reads back its first
+#: regular file (an empty folder passes, #665 Decision 9); `staged` is the root of a copy the host
+#: made (a drain's draft, a run's knowledge), holding only `agent/` (and a run copy's
+#: `settings/`), with a fresh token planted at its root and read back for each start. Never
+#: inferred from a name or a path. The retired `agent` kind is refused like any other word.
+MountKind = Literal["code", "data", "staged"]
 
 
 @dataclass(frozen=True)
@@ -83,7 +85,7 @@ class Mount:
     target: Path
     writable: bool = False
     #: Required of a read-only mount, which box start refuses without one. A writable mount is
-    #: checked by a planted sentinel, so its kind is not read.
+    #: checked by a planted sentinel and declares no kind; box start refuses one that does.
     kind: MountKind | None = None
 
 

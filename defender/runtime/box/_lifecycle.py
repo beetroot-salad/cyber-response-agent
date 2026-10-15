@@ -16,10 +16,9 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 from pathlib import Path
 
-from defender._io import read_text_utf8, READ_LIMIT, sweep_staged, write_guarded
+from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
-from defender._tenants import TENANT_ID_FILE
 from defender.run_repository import RUN_LAYOUT
 from defender.runtime.box_codec import (
     BOX_ENV_ALLOWLIST,
@@ -212,13 +211,45 @@ def _readonly_probe_file(mount: Mount, code_dir: Path | None) -> Path | None:
                 f"{target} — the box's code could not be checked"
             )
         return code_dir.relative_to(target) / CODE_CHECK_FILE
-    if mount.kind == "agent":
-        return Path(TENANT_ID_FILE.name)
     if mount.kind == "data":
         return _data_probe_file(Path(mount.source))
     raise BoxFault(
-        f"read-only mount {mount.source} declares no kind (code, agent or data) — box start "
+        f"read-only mount {mount.source} declares no kind (code, data or staged) — box start "
         f"cannot tell how to check it (got {mount.kind!r})"
+    )
+
+
+#: What a host-made copy's root may hold besides the token a start plants there (#1108
+#: amendment 2): its `agent/` half always, and a run copy's `settings/` half. Each must be a real
+#: folder; anything else (a stray file, a `.git`, a link) means the bind is not the copy the host
+#: made for this start.
+_STAGED_HALVES = frozenset({"agent", "settings"})
+
+
+def _check_staged_root(mount: Mount, docker: DockerFn, name: str) -> None:
+    """A `staged` mount is the root of a copy the host made (a drain's draft, a run's
+    knowledge): it holds exactly `agent/` (a real folder), at most a `settings/` beside it, and
+    nothing else, judged on the host without following any entry. Then a fresh random token is
+    planted at the root, outside `agent/`, read back through the box, and removed, so a box bound
+    to another copy, or to an empty or stale folder, refuses before any workload runs. The
+    copy's `agent/` is never written and `.tenant-id` is never a probe: identity was checked
+    once, when the copy's commit was published."""
+    source = Path(mount.source)
+    with bind(source) as root:
+        listed = stat_entries(root)
+    if listed.stats is None:
+        raise BoxFault(f"could not list the staged copy's root {source}: "
+                       f"{listed.refusal or 'it is absent'}")
+    halves = {entry: st for entry, st in listed.stats.items() if entry in _STAGED_HALVES}
+    strays = sorted(set(listed.stats) - set(halves))
+    if "agent" not in halves or strays or not all(stat.S_ISDIR(st.st_mode) for st in halves.values()):
+        raise BoxFault(
+            f"the staged copy's root {source} must hold exactly a real agent/ folder (and a run "
+            f"copy's settings/); it holds {sorted(listed.stats)} — not the copy made for this start"
+        )
+    _probe_sentinel(
+        source, Path(mount.target), docker, name,
+        f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
     )
 
 
@@ -229,7 +260,18 @@ def _check_mount_sentinel(
     read-only source is never written: an existing file, chosen by the mount's kind, is read
     back through the box and compared with the host's own read of it, line endings
     normalized on both sides and exact otherwise. `code_dir` is the request's code root,
-    which a `code` mount must contain."""
+    which a `code` mount must contain. A `staged` mount, a host-made copy's root, gets a token
+    planted at its root for this start (`_check_staged_root`). A writable mount declares no
+    kind: a writable `staged` mount, or any writable mount with a kind, is refused."""
+    if mount.writable and mount.kind is not None:
+        raise BoxFault(
+            f"the writable mount {mount.source} declares the kind {mount.kind!r} — a writable "
+            "mount is checked by its planted sentinel and declares none (a staged copy's root "
+            "is never writable)"
+        )
+    if mount.kind == "staged":
+        _check_staged_root(mount, docker, name)
+        return
     if not mount.writable:
         source = Path(mount.source)
         relative = _readonly_probe_file(mount, code_dir)
@@ -264,8 +306,7 @@ def _universal_newlines(text: object) -> str | None:
 
 
 def _refuse_a_second_code_mount(request: BoxRequest) -> None:
-    """A request has one code root, so it declares at most one `code` mount (#1108 D7). A
-    writable mount's kind is counted here too, the one place it is read."""
+    """A request has one code root, so it declares at most one `code` mount (#1108 D7)."""
     code_targets = [str(m.target) for m in request.mounts if m.kind == "code"]
     if len(code_targets) > 1:
         raise BoxFault(
