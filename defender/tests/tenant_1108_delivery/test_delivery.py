@@ -718,15 +718,35 @@ def test_revert_restores_what_a_lesson_held_before_the_commit_maker_changed_it(r
     assert _modes(repo[1], tip, "agent/lessons/seed.md") == {"agent/lessons/seed.md": "100644"}
 
 
-def test_revert_undoes_only_the_latest_of_several_commit_maker_changes(repo, tmp_path):
-    """Choice 5 (orchestrator ruling): the commit-maker created a lesson, then changed it in a
-    later batch, both merged. The revert undoes the latest change only, restoring the bytes
-    from just before it (the first batch's), not deleting the lesson."""
-    merged_agent_lesson(repo, tmp_path, "first", _LEARNED, b"the agent's first words\n")
-    merged_agent_lesson(repo, tmp_path, "second", _LEARNED, b"the agent's second words\n")
+@pytest.mark.parametrize("history", [(b"first\n", b"second\n"), (b"first\n", b"second\n", b"first\n")],
+                         ids=["changed-once", "back-to-the-first-bytes"])
+def test_revert_undoes_only_the_latest_of_several_commit_maker_changes(repo, tmp_path, history):
+    """Choice 5 (orchestrator ruling): the commit-maker created a lesson, then changed it in
+    later batches, all merged. The revert undoes the most recent change whose bytes equal
+    `main`'s, restoring the bytes from just before it: the previous batch's, never a
+    deletion. When the agent came back to its first bytes, an earlier change matches `main`
+    too; the most recent one is undone."""
+    for number, words in enumerate(history):
+        merged_agent_lesson(repo, tmp_path, f"batch-{number}", _LEARNED, words)
     tip = _reverted(repo, _LEARNED, "learned")
     assert _name_status(repo[1], tip) == {_LEARNED: "M"}
-    assert git_bytes(repo[1], "cat-file", "blob", f"{tip}:{_LEARNED}") == b"the agent's first words\n"
+    assert git_bytes(repo[1], "cat-file", "blob", f"{tip}:{_LEARNED}") == history[-2]
+
+
+def test_revert_ignores_a_later_commit_maker_change_whose_pr_is_still_open(repo, tmp_path):
+    """Choice 5 (orchestrator ruling): the change a revert undoes is the most recent
+    commit-maker change to the lesson whose resulting bytes equal `main`'s. The commit-maker
+    created a lesson (merged), then a later batch changed it and finished, its PR still open.
+    That unmerged change does not match `main` and is skipped: the revert undoes the merged
+    creation, deleting the lesson."""
+    merged_agent_lesson(repo, tmp_path, "created", _LEARNED, b"the agent's merged words\n")
+    writer = delivery(repo, ForgeHTTP())
+    batch = writer.start_batch("unmerged", lanes=LANES)
+    (batch.draft_root / _LEARNED).write_bytes(b"the agent's unmerged words\n")
+    batch.commit(batch.change_set(), "learning unmerged")
+    assert writer.finish(batch).endswith("/pulls/7")
+    tip = _reverted(repo, _LEARNED, "learned")
+    assert _name_status(repo[1], tip) == {_LEARNED: "D"}
 
 
 def test_revert_proceeds_when_main_again_holds_exactly_the_agents_bytes(repo, tmp_path):
