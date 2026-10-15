@@ -264,6 +264,8 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR091
     every prompt it was shown) and the rows the pass appended to the findings queue."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             alert=worlds_alert)
+    # Separate episode roots still share finding identity on the queue (#1241).
+    ep = ep.rename(ep.with_name(f"{ep.name}-{tmp_path.name}"))
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     S.plant_episode_copy(ep, alert=alert, record=record, facts=facts)
     if alter is not None:
