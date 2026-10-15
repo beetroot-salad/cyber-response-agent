@@ -206,13 +206,17 @@ def merge_on_remote(repo, tmp_path, branch, style="merge"):
 
 def merged_agent_lesson(repo, tmp_path, batch_id, path, content, style="merge"):
     """A lesson the commit-maker wrote and a human merged: one batch whose claim writes
-    `content` at `path` (repo-relative), finished as a PR by its own delivery object, then
-    merged on the remote in `style`. Returns the commit-maker's commit."""
+    `content` at `path` (repo-relative; `None` deletes it), finished as a PR by its own
+    delivery object, then merged on the remote in `style`. Returns the commit-maker's
+    commit."""
     writer = delivery(repo, ForgeHTTP())
     batch = writer.start_batch(batch_id, lanes=LANES)
     draft_file = batch.draft_root / path
-    draft_file.parent.mkdir(parents=True, exist_ok=True)
-    draft_file.write_bytes(content)
+    if content is None:
+        draft_file.unlink()
+    else:
+        draft_file.parent.mkdir(parents=True, exist_ok=True)
+        draft_file.write_bytes(content)
     sha = batch.commit(batch.change_set(), f"learning {batch_id}")
     writer.finish(batch)
     merge_on_remote(repo, tmp_path, batch.branch, style)
@@ -480,6 +484,42 @@ def http_repo(tmp_path):
         yield tenant, remote, credentials, server
     finally:
         server.close()
+
+
+# ---------------------------------------------------------------------------------------
+# A later drain: a delivery opened in a fresh process
+# ---------------------------------------------------------------------------------------
+
+_LATER_SCRIPT = """
+import json, sys
+from pathlib import Path
+from defender.tests import _tenants1106 as tenants
+from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, target
+root, tenant_id, verb, args = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4:]
+mod = target()
+http = ForgeHTTP()
+out = {}
+try:
+    later = mod.TenantDelivery.open(tenants.accept(root, tenant_id), defender_dir=DEFENDER,
+                                    client=http.client)
+    out["url"] = getattr(later, verb)(*args)
+except mod.DeliveryRefused as refused:
+    out["refused"] = str(refused)
+out["creates"] = http.creates
+print(json.dumps(out))
+"""
+
+
+def in_a_later_process(tenant, verb, *args):
+    """`verb(*args)` (`deliver` or `revert`) on a `TenantDelivery` opened in ANOTHER, freshly
+    started process with its own forge double, as a later drain would: nothing of this
+    process's objects or memory reaches it. Returns `{"url": ...}` or `{"refused": ...}`,
+    with `"creates"`, the PR requests it sent."""
+    proc = subprocess.run([sys.executable, "-c", _LATER_SCRIPT, str(tenant.data_root), str(tenant.id),
+                           verb, *map(str, args)], capture_output=True, text=True,
+                          env=_probe_env(), timeout=300, check=False)
+    assert proc.returncode == 0, f"the later process crashed: {proc.stderr}"
+    return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
 # ---------------------------------------------------------------------------------------

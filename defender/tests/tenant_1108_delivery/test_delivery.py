@@ -33,6 +33,7 @@ from ._support import (
     files_under,
     git,
     git_bytes,
+    in_a_later_process,
     install_planting_hook,
     merge_on_remote,
     merged_agent_lesson,
@@ -518,7 +519,8 @@ def test_a_foreign_commit_beneath_a_later_commit_maker_commit_is_refused(repo):
     batch.commit(batch.change_set(), "claim one")
     batch.reset()
     planted = plant_raw_commit(repo[0].knowledge, f"refs/heads/{batch.branch}",
-                               "agent/lessons/raw.md", b"raw git, not the commit-maker\n")
+                               "agent/lessons/raw.md", b"raw git, not the commit-maker\n",
+                               base=batch.export.commit)
     _write(lane / "second.md", "second claim\n")
 
     def claim_two_then_finish():
@@ -560,6 +562,34 @@ def test_retained_branch_delivery_pushes_only_commit_maker_commits(repo, planted
         with pytest.raises(target().DeliveryRefused):
             later.deliver("retained")
         assert len(http.creates) == posts
+    assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
+
+
+@pytest.mark.parametrize("planted", [None, "on-top"])
+def test_a_later_process_delivers_a_retained_branch_by_the_commit_maker_record(repo, planted):
+    """O-C, provenance across processes: finish pushed the branch but its PR request failed;
+    a delivery opened in a fresh process (a later drain) delivers the retained branch,
+    opening the PR, so the commit-maker's record outlives this process (where it lives is
+    not pinned). With a commit laid on the branch by plumbing meanwhile, that later process
+    refuses and requests no PR; the remote keeps the commit-maker's commit."""
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    batch = d.start_batch("retained", lanes=LANES)
+    _write(batch.draft_root / "agent/lessons/new.md", "retained\n")
+    sha = batch.commit(batch.change_set(), "retained")
+    http.fail_create = True
+    with pytest.raises(target().DeliveryRefused, match="503|forge|PR|pull"):
+        d.finish(batch)
+    if planted:
+        plant_raw_commit(repo[0].knowledge, f"refs/heads/{batch.branch}", "agent/lessons/raw.md",
+                         b"raw git, not the commit-maker\n", base=batch.export.commit)
+    later = in_a_later_process(repo[0], "deliver", "retained")
+    if planted is None:
+        assert later.get("url", "").endswith("/pulls/7"), later
+        assert [(c["base"], c["head"]) for c in later["creates"]] == [("main", batch.branch)]
+    else:
+        assert "refused" in later, later
+        assert later["creates"] == []
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
 
 
@@ -762,6 +792,18 @@ def test_revert_proceeds_when_main_again_holds_exactly_the_agents_bytes(repo, tm
     assert git_bytes(repo[1], "cat-file", "blob", f"{tip}:agent/lessons/seed.md") == b"seed\n"
 
 
+def test_revert_recreates_a_lesson_the_commit_maker_deleted(repo, tmp_path):
+    """Choice 5 (orchestrator ruling): a merged commit-maker deletion follows the same rule.
+    `main`'s state for the lesson (absent) equals that change's result, so the revert
+    recreates the bytes from just before it, mode 100644, as one commit-maker commit with a
+    PR against `main`."""
+    merged_agent_lesson(repo, tmp_path, "deleted", "agent/lessons/seed.md", None)
+    tip = _reverted(repo, "agent/lessons/seed.md", "seed")
+    assert _name_status(repo[1], tip) == {"agent/lessons/seed.md": "A"}
+    assert git_bytes(repo[1], "cat-file", "blob", f"{tip}:agent/lessons/seed.md") == b"seed\n"
+    assert _modes(repo[1], tip, "agent/lessons/seed.md") == {"agent/lessons/seed.md": "100644"}
+
+
 @pytest.mark.parametrize("path", [_LEARNED, "agent/lessons/seed.md"], ids=["agent-created", "agent-changed"])
 def test_revert_refuses_a_lesson_changed_on_main_since_the_commit_maker_wrote_it(repo, tmp_path, path):
     """Flow 4, choice 5 (user decision): revert proceeds only while `main`'s bytes for the
@@ -781,6 +823,39 @@ def test_revert_refuses_a_lesson_the_commit_maker_never_wrote(repo, tmp_path, pa
     nothing pushed or requested."""
     advance_remote(repo, tmp_path)
     _refused_revert(repo, path, "human")
+
+
+def test_a_later_process_reverts_by_the_commit_maker_record(repo, tmp_path):
+    """Choice 5 across processes: the commit-maker changed a lesson here and a human merged
+    it; a delivery opened in a fresh process finds that change from the commit-maker's
+    record alone and reverts it, restoring the earlier bytes as one commit on `main` with a
+    PR against `main`."""
+    remote = repo[1]
+    merged_agent_lesson(repo, tmp_path, "changed", "agent/lessons/seed.md", b"seed, as the agent rewrote it\n")
+    main = git(remote, "rev-parse", "main")
+    later = in_a_later_process(repo[0], "revert", "agent/lessons/seed.md", "seed")
+    assert later.get("url", "").endswith("/pulls/7"), later
+    [create] = later["creates"]
+    assert create["base"] == "main"
+    tip = git(remote, "rev-parse", f"refs/heads/{create['head']}")
+    assert git(remote, "rev-parse", f"{tip}^") == main
+    assert git(remote, "rev-parse", "main") == main
+    assert _name_status(remote, tip) == {"agent/lessons/seed.md": "M"}
+    assert git_bytes(remote, "cat-file", "blob", f"{tip}:agent/lessons/seed.md") == b"seed\n"
+
+
+def test_a_later_process_refuses_to_revert_a_lesson_changed_on_main(repo, tmp_path):
+    """Choice 5 across processes: after a human edit on `main` of the commit-maker's merged
+    lesson, a revert from a fresh process refuses with nothing pushed or requested."""
+    remote = repo[1]
+    merged_agent_lesson(repo, tmp_path, "written", _LEARNED, b"the agent's words\n")
+    push_to_remote(repo, tmp_path, lambda c: _write(c / _LEARNED, "a human's later edit\n"))
+    main, branches = git(remote, "rev-parse", "main"), _branches(remote)
+    later = in_a_later_process(repo[0], "revert", _LEARNED, "written")
+    assert "refused" in later, later
+    assert later["creates"] == []
+    assert _branches(remote) == branches
+    assert git(remote, "rev-parse", "main") == main
 
 
 def test_revert_refuses_a_commit_laid_on_its_branch_by_a_clone_hook(repo, tmp_path):
@@ -814,8 +889,9 @@ def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo, tmp_path
     fails. A commit is then laid by plumbing on that branch in the clone (the revert commit's
     exact message and identities, an allowed lesson). However the retried revert ends (how a
     retry ends is not pinned here), the laid commit never reaches the remote. (An
-    implementation that names each revert's branch afresh never meets the laid commit; the
-    README records that limit.)"""
+    implementation that names each revert's branch afresh never meets the laid commit, and
+    one that removes the branch when its PR request fails leaves nothing to lay it on; both
+    pass vacuously, as the README records.)"""
     tenant, remote, _ = repo
     merged_agent_lesson(repo, tmp_path, "learned", _LEARNED, b"the agent's lesson\n")
     http = ForgeHTTP()
@@ -824,7 +900,10 @@ def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo, tmp_path
     http.fail_create = True
     with pytest.raises(target().DeliveryRefused, match="503|forge|PR|pull"):
         d.revert(_LEARNED, "learned")
-    [branch] = set(_branches(remote)) - before
+    remaining = sorted(set(_branches(remote)) - before)
+    if not remaining:
+        return  # the failed request left no branch to lay a commit on (choice 16)
+    branch = remaining[0]
     made = git(remote, "rev-parse", branch)
     planted = plant_raw_commit(tenant.knowledge, branch, "agent/lessons/raw.md",
                                b"raw git, not the commit-maker\n", base=made)
@@ -838,7 +917,8 @@ def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo, tmp_path
                                   "agent/lessons/absent.md", "agent/lessons/../.tenant-id"])
 def test_revert_refuses_a_path_that_is_not_a_lesson_on_main(repo, path):
     """O-C: a revert's change set obeys the same rules: `agent/.tenant-id`, a settings file, a
-    traversal or a lesson that is not on `main` is refused, with nothing pushed or requested."""
+    traversal, or a lesson absent from `main` that no commit-maker change deleted, is refused,
+    with nothing pushed or requested."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     with pytest.raises(target().DeliveryRefused):
