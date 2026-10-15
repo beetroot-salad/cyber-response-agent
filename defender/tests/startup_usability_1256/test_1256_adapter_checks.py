@@ -56,10 +56,11 @@ CHECK = "check_settings"
 
 
 # =============================================================================================
-# O-5 — the fault table: one row per adapter, one entry per distinct ConfigFault family any of
-# its verbs can raise (code map item 2, grounded at d7b1886d). A family is (a mutation of a
-# COMPLETE planted tenant folder, the token(s) the fault must name). The premise half of every
-# case proves the family is real for that adapter: no entry here is taken on trust.
+# O-5 — the fault table: one row per adapter, one entry per FILE fault family its verbs can
+# raise (code map item 2, grounded at d7b1886d); the key families are generated in
+# `test_1256_check_census.py`. A family is (a mutation of a COMPLETE planted tenant folder, the
+# token(s) the fault must name). The premise half of every case proves the family is real for
+# that adapter: no entry here is taken on trust.
 # =============================================================================================
 
 @dataclass(frozen=True)
@@ -96,16 +97,6 @@ def _directory_at_file(folder: Path, system: str) -> None:
     path.mkdir()
 
 
-def _drop(key: str) -> Family:
-    return Family(f"{key}-missing", "drop", (key,),
-                  lambda folder, system: S.drop_key(folder, system, key), key=key)
-
-
-def _set(key: str, value: str, label: str) -> Family:
-    return Family(f"{key}-{label}", "set", (key,),
-                  lambda folder, system: S.set_key(folder, system, key, value), key=key, value=value)
-
-
 #: The file families every settings-reading adapter shares: no folder (the system is not
 #: configured at all — `system_entry`), and a folder whose `config.env` is a stored fault the
 #: record keeps (`tenant_settings.read_systems`): absent, not UTF-8, unreadable.
@@ -117,57 +108,18 @@ FILE_FAMILIES: tuple[Family, ...] = (
 )
 
 
-def access_families(prefix: str) -> tuple[Family, ...]:
-    """`_stub_transport.access_context`'s faults: the access method missing or not `docker-exec`,
-    the docker context missing or blank. Reached through the docker transport, never through
-    `load_config`."""
-    return (
-        _drop(f"{prefix}_TRANSPORT"),
-        _set(f"{prefix}_TRANSPORT", "http", "not-docker-exec"),
-        _drop(f"{prefix}_DOCKER_CONTEXT"),
-        _set(f"{prefix}_DOCKER_CONTEXT", "", "blank"),
-    )
-
-
-def template_families(prefix: str) -> tuple[Family, ...]:
-    """`_stub_transport.load_config`'s faults over the three-key template: each key missing, one
-    blank, and a TIMEOUT that is not a whole number of seconds above zero."""
-    return (
-        _drop(f"{prefix}_URL_BASE"),
-        _drop(f"{prefix}_BASTION_HOST"),
-        _drop(f"{prefix}_TIMEOUT_SEC"),
-        _set(f"{prefix}_URL_BASE", "", "blank"),
-        _set(f"{prefix}_TIMEOUT_SEC", "0", "not-above-zero"),
-    )
-
-
-def _stub(prefix: str, *extra: Family) -> tuple[Family, ...]:
-    return (*FILE_FAMILIES, *template_families(prefix), *extra, *access_families(prefix))
-
-
-#: Every adapter of the checkout's roster -> its fault families. tacit-knowledge reads no
-#: settings, so it has none (its check is driven by its own test below). A roster adapter with no
-#: row here fails `test_o5_every_roster_adapter_declares_a_settings_check`.
+#: Every adapter of the checkout's roster -> the FILE families of its settings. tacit-knowledge
+#: reads no settings, so it has none (its check is driven by its own test below). A roster
+#: adapter with no row here fails `test_o5_every_roster_adapter_declares_a_settings_check`.
+#:
+#: The KEY families — every key a complete planted `config.env` carries, absent, blank, and in
+#: each grammar a loader judges — are not listed here by hand: `test_1256_check_census.py`
+#: generates them from the planted settings themselves and lets the adapter's own verbs say
+#: which of them are faults (a hand list only ever named the families its author thought of,
+#: and a check covering exactly those passed it).
 FAULTS: dict[str, tuple[Family, ...]] = {
-    "cmdb": _stub("CMDB"),
-    "identity": _stub("IDENTITY"),
-    "change-mgmt": _stub("CHANGE_MGMT"),
-    "threat-intel": _stub("THREAT_INTEL"),
-    # ticket: the template plus its key grammar (`ticket_adapter.REQUIRED_CONFIG_KEYS`).
-    "ticket": _stub("TICKET", _drop("TICKET_KEY_PATTERN")),
-    # elastic: `elastic_adapter.load_config` (system_entry + access_context + its four keys), then
-    # the ES container read on EVERY request (`_es_container`) — the key `load_config` never
-    # checks, r1's demonstrated defect (C4).
-    "elastic": (
-        *FILE_FAMILIES,
-        _drop("ELASTICSEARCH_URL"), _drop("KIBANA_URL"),
-        _drop("ELASTIC_EVENTS_INDEX"), _drop("ELASTIC_ALERTS_INDEX"),
-        *access_families("ELASTIC"),
-        _drop("ELASTIC_ES_CONTAINER"),
-        _set("ELASTIC_ES_CONTAINER", "", "blank"),
-    ),
-    # host-state: `access_context` only (no keys of its own).
-    "host-state": (*FILE_FAMILIES, *access_families("HOST_STATE")),
+    **{system: FILE_FAMILIES for system in (
+        "cmdb", "identity", "change-mgmt", "threat-intel", "ticket", "elastic", "host-state")},
     "tacit-knowledge": (),
 }
 
@@ -478,30 +430,45 @@ _LOG_CONTROL = "log-channel control for #1256 O-5a (names no system)"
 _IN_RUN_LOG_CONTROL = "in-run log-channel control for #1256 O-5a"
 
 
-def _planted_source(system: str, probe: Path) -> str:
+#: Where the planted host-state check's fault points: a path under the DATA ROOT but outside the
+#: tenant's own folder (`<data root>/<tenant>/…`), so it is not the settings path #1106's
+#: redaction rewrites to its pointer — a reason that carries it verbatim shows a host path.
+_OUTSIDE_TENANT = Path("shared-1256", "credentials")
+
+
+def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
+                    at_import: list[str] | None = None, check: list[str] | None = None) -> str:
+    """`system`'s planted adapter (`_PLANTED[system]`'s verb, recording to `probe`), broken the
+    way `_PLANTED` says — or, given `at_import` / `check`, with those module lines instead (the
+    seams O-5a names: what runs at import, and the declared check)."""
     spec = _PLANTED[system]
     head = [f'"""Planted by #1256\'s contract (O-5a) as the {system} adapter."""',
             "import json", "import logging", "from pathlib import Path"]
-    check = ["def check_settings(*_a, **_k):", "    return None"]
-    if system == "identity":
+    declared = ["def check_settings(*_a, **_k):", "    return None"]
+    if at_import is not None or check is not None:
+        head += at_import or []
+        declared = check if check is not None else declared
+    elif system == "identity":
         head.append("import defender_planted_absent_module_1256  # noqa: F401 — the planted fault")
     elif system == "threat-intel":
-        check = []
+        declared = []
     elif system == "change-mgmt":
         # The crash's own text carries the adapter's absolute host path (as an exception's often
         # does), so the "no host path in what the agent is shown" negative can fail on a reason
         # passed through verbatim.
-        check = ["def check_settings(*_a, **_k):",
-                 f"    raise RuntimeError({spec['token']!r} + ': cannot read ' + __file__)"]
+        declared = ["def check_settings(*_a, **_k):",
+                    f"    raise RuntimeError({spec['token']!r} + ': cannot read ' + __file__)"]
     elif system == "host-state":
+        # Another adapter fault, its text pointing under the data root outside the tenant's own
+        # folder (`outside`): a host path no settings-path redaction rewrites.
         head.append("from defender.scripts.adapters.faults import TransportFault")
-        check = ["def check_settings(*_a, **_k):",
-                 f"    raise TransportFault({spec['token']!r})"]
+        declared = ["def check_settings(*_a, **_k):",
+                    f"    raise TransportFault({spec['token']!r} + ': see ' + {str(outside)!r})"]
     body = [
         f"SYSTEM = {system!r}",
         f"_PROBE = Path({str(probe)!r})",
         "",
-        *check,
+        *declared,
         "",
         f"def {spec['fn']}(ctx, *, {spec['param']}: str) -> dict:",
         "    with open(_PROBE / (SYSTEM + '.ran'), 'a', encoding='utf-8') as fh:",
@@ -514,12 +481,14 @@ def _planted_source(system: str, probe: Path) -> str:
     return "\n".join([*head, "", *body]) + "\n"
 
 
-def planted_tree(root: Path, probe: Path) -> Path:
+def planted_tree(root: Path, probe: Path, sources: dict[str, str] | None = None, *,
+                 outside: Path | None = None) -> Path:
     """A defender tree whose adapters are the planted ones (K2): every top-level entry of this
     checkout symlinked except `scripts/`, which is a real folder of symlinks except `adapters/`,
-    a real folder holding only `_PLANTED`'s files. `<root>/repo/defender`, as the catalog's
-    repo-relative locators expect. (Adapter files must be real: the roster refuses a file that
-    resolves outside the adapters directory.)"""
+    a real folder holding only the planted files — `sources` (system -> source), else every
+    `_PLANTED` system's. `<root>/repo/defender`, as the catalog's repo-relative locators expect.
+    (Adapter files must be real: the roster refuses a file that resolves outside the adapters
+    directory.)"""
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
     for entry in S.DEFENDER.iterdir():
@@ -532,14 +501,20 @@ def planted_tree(root: Path, probe: Path) -> Path:
             (scripts / entry.name).symlink_to(entry)
     adapters = scripts / "adapters"
     adapters.mkdir()
-    for system in _PLANTED:
-        (adapters / f"{system.replace('-', '_')}_adapter.py").write_text(
-            _planted_source(system, probe), encoding="utf-8")
+    if sources is None:
+        sources = {system: _planted_source(system, probe, outside=outside) for system in _PLANTED}
+    for system, source in sources.items():
+        (adapters / f"{system.replace('-', '_')}_adapter.py").write_text(source, encoding="utf-8")
     return tree
 
 
-_O5A_TABLE = "dispositions:\n" + "".join(
-    f"  {system}:\n    {spec['verb']}: {{roles: [gather]}}\n" for system, spec in _PLANTED.items())
+def _table(systems: tuple[str, ...]) -> str:
+    """A verb-disposition table granting gather each planted system's one verb."""
+    return "dispositions:\n" + "".join(
+        f"  {system}:\n    {_PLANTED[system]['verb']}: {{roles: [gather]}}\n" for system in systems)
+
+
+_O5A_TABLE = _table(tuple(_PLANTED))
 
 
 def _replies(turns: list[Any], on_first: Callable[[], None] | None = None) -> Any:
@@ -561,13 +536,32 @@ def _replies(turns: list[Any], on_first: Callable[[], None] | None = None) -> An
     return _Replies()
 
 
-def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_roster, caplog):  # noqa: C901 — one scene, every broken-adapter kind judged on the same channels
+def _token_lines(text: str, token: str) -> list[str]:
+    """The lines of `text` that carry `token` (case-insensitive)."""
+    return [ln for ln in text.splitlines() if token.lower() in ln.lower()]
+
+
+#: The broken systems whose reason carries a host path as raised: change-mgmt's crash names the
+#: planted adapter's own file, host-state's fault a path under the data root outside the tenant.
+_PATH_BEARING = ("change-mgmt", "host-state")
+
+
+def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_roster, caplog):  # noqa: C901, PLR0912, PLR0915 — one scene, every broken-adapter kind judged on the same channels
     """O-5a: a granted adapter that fails to import, declares no check, or whose check raises
     anything but ConfigFault (a crash, or another adapter fault) is Down(AdapterBroken(reason))
     from the start: logged at ERROR or above naming its system before the agent's first turn
     (K3), every dispatch and every call to it refused with a message that names it and the reason
-    — not a breaker trip and not "not configured" (DP4), and no host path of the planted tree or
-    the data root — its verb never run, no query row written, nothing charged to the breaker.
+    — not a breaker trip and not "not configured" (DP4) — its verb never run, no query row
+    written, nothing charged to the breaker; `list_verbs` for it names it down with the reason
+    (the statuses feed `list_verbs`, design flow step 4).
+
+    The reason carries no host path ON ANY SURFACE it reaches (#1106's host-only rule; the
+    contract's "AdapterBroken reasons carry no host path"): not the planted tree's, not the data
+    root's — including a path under the data root outside the tenant's own folder, which no
+    settings-path redaction rewrites. Two reasons carry one as raised (`_PATH_BEARING`); each must
+    reach MAIN's opening message and gather's system index (flow step 4: the statuses feed both)
+    on a line naming it, and on every surface — those two, `list_verbs`, both refusals, and the
+    log records — no line carrying the reason carries a host path.
 
     Positive control in the same run: the well-formed planted `cmdb` adapter IS called — its verb
     writes the probe file and its row — so the "never called" and "no row" observations can fail;
@@ -579,8 +573,8 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
         f"precondition: each planted system is a real one (its skill and catalog exist): {sorted(_PLANTED)}")
     probe = tmp_path / "probe"
     probe.mkdir()
-    tree = planted_tree(tmp_path / "tree", probe)
     root = tmp_path / "tenants"
+    tree = planted_tree(tmp_path / "tree", probe, outside=root / _OUTSIDE_TENANT)
     S.plant(root, marker="o5a", table=_O5A_TABLE)
     run_dir = materialize(tmp_path / "replay", GOLDEN_AB3, run_id="t1256a")
 
@@ -596,6 +590,7 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
         *[Turn(tool_calls=[("query", {
             "system": system, "verb": _PLANTED[system]["verb"],
             "params": {_PLANTED[system]["param"]: _PLANTED[system]["arg"]}})]) for system in order],
+        *[Turn(tool_calls=[("list_verbs", {"system": system})]) for system in _BROKEN],
         Turn(text="Summary: measured the lead."),
     ])
     with caplog.at_level(logging.WARNING):
@@ -614,6 +609,8 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
     assert [r.get("exit_code") for r in cmdb_rows] == [0], f"control: cmdb's one row: {cmdb_rows}"
     assert main.calls == len(order) + 1, (
         f"control: MAIN played its whole script ({main.calls} turns of {len(order) + 1})")
+    assert gather.calls == len(order) + len(_BROKEN) + 1, (
+        f"control: the gather lead played its whole script ({gather.calls} turns)")
 
     assert [r for r in at_start if r.getMessage() == _LOG_CONTROL], (
         "control: an ERROR logged before the run is among the records snapshotted at MAIN's "
@@ -622,10 +619,12 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
         "control: an ERROR logged inside the run (by the planted cmdb verb) reaches the capture")
     # Every broken system's observations are collected, then judged together, so one run reports
     # each one that does not hold. The replies are indexed by the script: MAIN's request i+1
-    # answers its dispatch of `_BROKEN[i-1]`; gather's request i+1 (lead l-001) answers its query.
+    # answers its dispatch of `_BROKEN[i-1]`; gather's request i+1 (lead l-001) answers its query,
+    # and its request len(order)+i answers its `list_verbs` of `_BROKEN[i-1]`.
     breaker = run_state.breaker_snapshot()
     host_paths = sorted({str(p) for base in (tmp_path / "tree", tree, root)
                          for p in (base, base.resolve())})
+    opening, index = main.seen[0], gather.seen[0]
     violations: list[str] = []
     for i, system in enumerate(_BROKEN, start=1):
         token = _PLANTED[system]["token"]
@@ -635,18 +634,20 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
             violations.append(f"{system}: a refused call wrote query row(s) {refused}")
         if system in breaker.get("systems", {}):
             violations.append(f"{system}: charged to the breaker {breaker}")
-        for where, text in (("query", gather.replies[i + 1]), ("dispatch", main.replies[i + 1])):
+        replies = (("query", gather.replies[i + 1]), ("dispatch", main.replies[i + 1]),
+                   ("list_verbs", gather.replies[len(order) + i]))
+        for where, text in replies:
             low = text.lower()
             if system not in low or token.lower() not in low:
                 violations.append(
-                    f"{system}: its {where} reply must refuse naming it and the reason "
+                    f"{system}: its {where} reply must name it down and the reason "
                     f"({token!r}) (O-5a, DP4): {text[-300:]!r}")
             # DP4: one notion of down, the message naming the ACTUAL cause — a broken adapter is
             # neither a breaker trip nor a system whose settings do not configure it.
             for wrong_cause in ("tripped", "not configured"):
                 if wrong_cause in low:
                     violations.append(
-                        f"{system}: its {where} refusal says {wrong_cause!r}, not the adapter "
+                        f"{system}: its {where} reply says {wrong_cause!r}, not the adapter "
                         f"fault (DP4): {text[-300:]!r}")
             # The reason shown to the agent carries no host path: not the planted tree's, not the
             # data root's (as written or resolved).
@@ -657,8 +658,131 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
             violations.append(
                 f"{system}: no ERROR-or-above record naming it before the agent's first turn "
                 f"(O-5a, K3)")
+        if system not in _PATH_BEARING:
+            continue
+        # The start surfaces: each shows the reason beside the system (non-vacuity of the sweep
+        # below), and no line carrying the reason carries a host path.
+        for where, text in (("MAIN's opening message", opening), ("gather's system index", index)):
+            carrying = _token_lines(text, token)
+            if not [ln for ln in carrying if system in ln]:
+                violations.append(
+                    f"{system}: {where} has no line naming it with its reason ({token!r}) "
+                    f"(flow step 4: the statuses feed it)")
+            for ln in carrying:
+                if leaked := [p for p in host_paths if p in ln]:
+                    violations.append(f"{system}: {where} shows host path(s) {leaked}: {ln!r}")
+        for record in caplog.records:
+            message = record.getMessage()
+            if token in message and (leaked := [p for p in host_paths if p in message]):
+                violations.append(
+                    f"{system}: a {record.levelname} log record carries its reason with host "
+                    f"path(s) {leaked}: {message[:300]!r}")
     if breaker.get("total_failures", 0) != 0:
         violations.append(f"failures were charged to the run-wide breaker: {breaker}")
     assert violations == [], "O-5a — a broken granted adapter is down from the start:\n  " + (
         "\n  ".join(violations) + "\n  records at the first turn: "
         + repr([(r.levelname, r.getMessage()[:160]) for r in at_start]))
+
+
+# --- O-5a at both seams, whatever the adapter raises (#678: a catch-all discharged at one seam) --
+
+#: What a broken identity adapter does, at each seam O-5a names, with an exception class the scene
+#: above does not plant: (seam, label, module lines at import, the declared check's lines, the
+#: token its reason carries). The source always parses (C11: one that does not is a grant
+#: refusal at roster read, not this obligation).
+_ANY_BREAK: tuple[tuple[str, str, list[str], list[str] | None, str], ...] = (
+    ("import", "NameError", ["planted_undefined_name_1256  # noqa: F821"], None,
+     "planted_undefined_name_1256"),
+    ("import", "ValueError", ["raise ValueError('planted-import-value-1256')"], None,
+     "planted-import-value-1256"),
+    ("import", "AttributeError", ["json.planted_missing_attribute_1256"], None,
+     "planted_missing_attribute_1256"),
+    ("import", "own-Exception-subclass",
+     ["class PlantedFault1256(Exception):", "    pass",
+      "raise PlantedFault1256('planted-import-own-1256')"], None, "planted-import-own-1256"),
+    ("check", "ValueError", [],
+     ["def check_settings(*_a, **_k):", "    raise ValueError('planted-check-value-1256')"],
+     "planted-check-value-1256"),
+    ("check", "KeyError", [],
+     ["def check_settings(*_a, **_k):", "    raise KeyError('planted-check-key-1256')"],
+     "planted-check-key-1256"),
+    ("check", "TypeError-wrong-signature", [],
+     ["def check_settings():", "    return None"], CHECK),
+    ("check", "own-Exception-subclass",
+     ["class PlantedFault1256(Exception):", "    pass"],
+     ["def check_settings(*_a, **_k):", "    raise PlantedFault1256('planted-check-own-1256')"],
+     "planted-check-own-1256"),
+    ("check", "not-callable", [], ["check_settings = 'planted-not-callable-1256'"], CHECK),
+)
+
+
+@pytest.mark.parametrize(("seam", "label", "at_import", "check", "token"),
+                         [pytest.param(*case, id=f"{case[0]}-{case[1]}") for case in _ANY_BREAK])
+def test_o5a_any_exception_at_import_or_from_the_check_is_adapter_broken(
+        tmp_path, checkout_roster, caplog, seam, label, at_import, check, token):
+    """O-5a: an adapter that fails to import — whatever it raises — or whose declared check
+    raises anything but ConfigFault, or cannot be called as one, is Down(AdapterBroken) from the
+    start, and the run goes on: the run neither raises nor stops, identity's verb never runs, its
+    dispatch and its call are refused naming it and the reason (never "not configured", never
+    "tripped"), no row, nothing charged, an ERROR record naming it before the agent's first turn.
+    The well-formed cmdb in the same run is called (the control)."""
+    pytest.importorskip("pydantic_ai")
+    from defender.tests.e2e._replay_harness import GOLDEN_AB3, Turn, drive, materialize
+
+    probe = tmp_path / "probe"
+    probe.mkdir()
+    tree = planted_tree(tmp_path / "tree", probe, {
+        "cmdb": _planted_source("cmdb", probe),
+        "identity": _planted_source("identity", probe, at_import=at_import, check=check)})
+    root = tmp_path / "tenants"
+    S.plant(root, marker="o5x", table=_table(("cmdb", "identity")))
+    run_dir = materialize(tmp_path / "replay", GOLDEN_AB3, run_id="t1256x")
+    at_start: list[logging.LogRecord] = []
+    main = _replies([
+        *[Turn(tool_calls=[("gather", {
+            "lead_id": f"l-00{i + 1}", "system": system, "goal": f"measure {system} for #1256",
+            "what_to_summarize": ["what the system says"]})])
+          for i, system in enumerate(("cmdb", "identity"))],
+        Turn(text="Investigation complete."),
+    ], on_first=lambda: at_start.extend(caplog.records))
+    gather = _replies([
+        *[Turn(tool_calls=[("query", {
+            "system": system, "verb": _PLANTED[system]["verb"],
+            "params": {_PLANTED[system]["param"]: _PLANTED[system]["arg"]}})])
+          for system in ("cmdb", "identity")],
+        Turn(text="Summary: measured the lead."),
+    ])
+    with caplog.at_level(logging.WARNING):
+        try:
+            summary = drive(run_dir, run_id="t1256x", main=main, gather=gather,
+                            defender_dir=tree, tenant=S.tenant_folder_of(root))
+        except Exception as raised:  # noqa: BLE001 — the run must not raise; shown whole
+            pytest.fail(f"{seam} {label}: the run raised instead of taking identity down "
+                        f"(O-5a): {type(raised).__name__}: {raised}")
+    rows = list(read_jsonl_rows(run_dir / "executed_queries.jsonl"))
+    breaker = summary["run_state"].breaker_snapshot()
+
+    assert (probe / "cmdb.ran").is_file(), "control: the well-formed cmdb verb ran"
+    assert main.calls == 3, f"control: MAIN played its whole script ({main.calls} of 3)"
+    assert not (probe / "identity.ran").exists(), (
+        f"{seam} {label}: the broken identity adapter's verb ran (O-5a)")
+    assert [r for r in rows if r.get("system") == "identity"] == [], (
+        f"{seam} {label}: a refused identity call wrote a row: {rows}")
+    assert breaker.get("total_failures", 0) == 0, (
+        f"{seam} {label}: the broken adapter was charged to the run: {breaker}")
+    assert "identity" not in breaker.get("systems", {}), (
+        f"{seam} {label}: the broken adapter was charged: {breaker}")
+    for where, text in (("query", gather.replies[2]), ("dispatch", main.replies[2])):
+        low = text.lower()
+        assert "identity" in low, (
+            f"{seam} {label}: identity's {where} reply must refuse naming it: {text[-300:]!r}")
+        assert token.lower() in low, (
+            f"{seam} {label}: identity's {where} reply must name the reason ({token!r}): "
+            f"{text[-300:]!r}")
+        for wrong_cause in ("tripped", "not configured"):
+            assert wrong_cause not in low, (
+                f"{seam} {label}: identity's {where} refusal says {wrong_cause!r} (DP4): "
+                f"{text[-300:]!r}")
+    assert [r for r in at_start if r.levelno >= logging.ERROR and "identity" in r.getMessage()], (
+        f"{seam} {label}: no ERROR-or-above record naming identity before the agent's first "
+        f"turn (O-5a, K3): {[(r.levelname, r.getMessage()[:160]) for r in at_start]}")

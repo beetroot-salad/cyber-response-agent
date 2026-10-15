@@ -1781,6 +1781,7 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     before: Callable[[Path], None] | None = None,
     extra_argv: Sequence[str] = (),
     catch: bool = True,
+    roster: Any = None,
 ) -> Drive:
     """Drive one alert through the PRODUCTION front door (`run.main`) and return what happened.
 
@@ -1792,7 +1793,10 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     fault through (a pre-claimed `l-00c` sidecar, a directory squatting an artifact's name).
     `catch=False` lets an exception out of `run.main` (a setup fault that must stop the run
     loudly); with `catch=True` it is kept on `.raised`. `run_id` defaults to `fresh_run_id()`
-    (unique per call); pass one to re-drive a folder or to pin a name."""
+    (unique per call); pass one to re-drive a folder or to pin a name. `roster` is handed to
+    `run.main(roster=…)` when given: the adapters roster the run reads (#1256: the one whose
+    declared checks judge each granted system at run start); omitted, `run.main` is called
+    without it, as before."""
     tmp_path = Path(tmp_path)
     planted = tenant if tenant is not None else plant_tenant()
     raw = alert if isinstance(alert, bytes) else alert_bytes(
@@ -1838,10 +1842,12 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     run_main = sym("run", "main")
     writer = tickets if tickets is not None else NoTicket()
     d.tickets = writer
+    seams: dict[str, Any] = {} if roster is None else {"roster": roster}
     try:
         d.rc = run_main(
             argv, lifecycle=lifecycle_fn, preflight=lambda *_a, **_k: 0,
-            visualize=lambda *_a, **_k: None, ticket_writer=writer, enqueue=record_enqueue)
+            visualize=lambda *_a, **_k: None, ticket_writer=writer, enqueue=record_enqueue,
+            **seams)
     except SystemExit as exit_:
         d.refusal = exit_.code if isinstance(exit_.code, str) else None
         d.rc = exit_.code if isinstance(exit_.code, int) else 1

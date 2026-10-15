@@ -28,9 +28,10 @@ HOW EACH IS SEEN. Every scenario goes through the production front door (`S.run_
 `run.main`, the real driver behind `_ReplayLifecycle`), with the REAL adapters under the checkout
 judging the planted tenant's settings (K2) — except where an adapter must be broken: those
 arms point run start at a planted tree holding only the test's own adapters (`_planted_tree`),
-both the adapter-broken O-6 arm and the mixed O-8 arm through the driver's `defender_dir`
-(`run.main` reads its own checkout's tree; the O-8 arms through `run.main` and the one through
-the driver together cover both entry paths; see the mixed arm's docstring for what that pins). A system is made unusable the way an operator would:
+the adapter-broken O-6 arm and one mixed O-8 arm through the driver's `defender_dir`, and the
+other mixed O-8 arm through `run.main` handed the planted tree's roster (`run.main(roster=…)`,
+the adapters roster the run reads) — so run.py's pre-check and the driver are each held to
+judging a broken adapter down (see the mixed arms' docstrings). A system is made unusable the way an operator would:
 its `config.env` missing a key its adapter requires (`_spec1107.drop_key`), or absent. The
 correlation sentence is read from MAIN's opening message's ONE correlation section
 (`S.correlation_section`), not from the whole-prose diff `_ending` takes against the summary
@@ -50,6 +51,8 @@ from typing import Any
 
 import pytest
 
+from defender._paths import adapters_under
+from defender.runtime.verbs import read_roster
 from defender.scripts import policy_cli
 from defender.scripts import tenant as tenant_py
 from defender.tests import _tenants1106 as T6
@@ -643,7 +646,7 @@ def _drive_over(tree: Path, tenant: S.Planted, where: Path) -> tuple[Any, Any, B
 
 @pytest.mark.usefixtures("_import_state_restored")
 def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one(tmp_path: Path) -> None:
-    """Every granted system down for two different causes — cmdb's adapter broken (its check raises something other than ConfigFault), elastic not configured — and the run does not start: the real driver, over the tree whose roster says so (K2), raises naming each system with its reason before MAIN's first request and before any gather or adapter call. A pre-check that counts only 'not configured' as down misses cmdb and lets the run start blind. With cmdb's adapter well formed (elastic still down) the same tenant's run proceeds. The exception's type is not pinned; its site is, by composition: the run.main arms require run.py to refuse before the lifecycle, the D4 test keeps the refusal out of the resolution that setup and `defender-policy` share, and this arm requires the driver itself to refuse an all-down start (the design's flow judges statuses there). A run.py pre-check that ignores broken adapters is NOT caught here — run.main cannot be pointed at a planted tree — and is left to the code stage (contract note N1)."""
+    """Every granted system down for two different causes — cmdb's adapter broken (its check raises something other than ConfigFault), elastic not configured — and the run does not start: the real driver, over the tree whose roster says so (K2), raises naming each system with its reason before MAIN's first request and before any gather or adapter call. A pre-check that counts only 'not configured' as down misses cmdb and lets the run start blind. With cmdb's adapter well formed (elastic still down) the same tenant's run proceeds. The exception's type is not pinned; its site is, by composition: the run.main arms require run.py to refuse before the lifecycle, the D4 test keeps the refusal out of the resolution that setup and `defender-policy` share, and this arm requires the driver itself to refuse an all-down start (the design's flow judges statuses there). The same mixed tenant through `run.main` (handed the planted roster) is `test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one_through_run_main`: a run.py pre-check that ignores broken adapters is caught there (N1)."""
     tenant = S.plant_tenant("acme-mixed-down", alert_mapping=S.DEFAULT_MAPPING,
                             table=S.TABLE_ELASTIC)
 
@@ -671,6 +674,40 @@ def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one(tmp_path:
     assert "not configured" in text.lower(), f"the refusal does not name elastic's cause: {text!r}"
     assert main.seen == [], f"MAIN was asked {len(main.seen)} times before the refusal"
     assert gather.seen == [], f"a gather agent was asked {len(gather.seen)} times before the refusal"
+    assert _planted_calls(mixed_root) == [], (
+        f"an adapter verb ran before the refusal: {_planted_calls(mixed_root)}")
+
+
+@pytest.mark.usefixtures("_import_state_restored")
+def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one_through_run_main(
+        tmp_path: Path) -> None:
+    """N1 (adversary A2): the mixed all-down tenant through the production front door. `run.main` handed the planted tree's roster (`roster=`: the adapters roster the run reads, the one whose declared checks judge each granted system at start, K2) — cmdb's adapter broken (its check crashes), elastic not configured — refuses the run at start, before the run folder, the lifecycle, any model call or any adapter call, naming each system with its reason. With cmdb's adapter well formed (elastic still down) the same tenant passes run start and reaches its lifecycle. A run.py pre-check that counts only 'not configured' as down (or that judges a roster other than the one the run reads) lets the mixed run reach the lifecycle, where only the driver would refuse it — after its run folder and box exist."""
+    tenant = S.plant_tenant("acme-mixed-main", alert_mapping=S.DEFAULT_MAPPING,
+                            table=S.TABLE_ELASTIC)
+
+    repaired_root = tmp_path / "repaired"
+    repaired = _planted_tree(repaired_root,
+                             {"cmdb": _PLANTED_CMDB, "elastic": _NOT_CONFIGURED_ELASTIC})
+    ran = S.run_alert(tmp_path / "run-repaired", alert=_alert(), tenant=tenant,
+                      backend=_backend(), defender_dir=repaired,
+                      roster=read_roster(adapters_under(repaired)))
+    assert ran.refusal is None, (
+        f"control: with cmdb's adapter well formed (elastic still down) run start refused: "
+        f"{ran.refusal!r}")
+    assert ran.lifecycle_calls, (
+        f"control: the run with one usable system never reached its lifecycle "
+        f"(rc={ran.rc!r}, raised={ran.raised!r})")
+
+    mixed_root = tmp_path / "mixed"
+    mixed = _planted_tree(mixed_root, {"cmdb": _CRASHING_CMDB, "elastic": _NOT_CONFIGURED_ELASTIC})
+    before = _runs_entries(tenant)
+    d = S.run_alert(tmp_path / "run-mixed", alert=_alert(), tenant=tenant, backend=_backend(),
+                    defender_dir=mixed, roster=read_roster(adapters_under(mixed)))
+    text = _refusal_text(d, tenant)
+    _assert_names_each(text, (("cmdb", CRASH_MARK), ("elastic", ELASTIC_PLANTED_KEY)),
+                       "broken + not configured, through run.main")
+    assert "not configured" in text.lower(), f"the refusal does not name elastic's cause: {text!r}"
+    _assert_refused_before_anything(d, tenant, before, "broken + not configured, through run.main")
     assert _planted_calls(mixed_root) == [], (
         f"an adapter verb ran before the refusal: {_planted_calls(mixed_root)}")
 

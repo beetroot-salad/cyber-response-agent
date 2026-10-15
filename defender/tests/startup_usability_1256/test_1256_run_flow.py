@@ -298,10 +298,20 @@ def _names(text: str, system: str) -> bool:
 
 
 _NOT_CONFIGURED = re.compile(r"(?i)not configured")
-#: "do not dispatch", "Do NOT re-dispatch", "never dispatch", "not to dispatch" — loosely.
+#: "Do not dispatch", "Do NOT re-dispatch", "never dispatch", "not to dispatch", "must not be
+#: dispatched": the prohibition governs `dispatch` ITSELF. A negation somewhere before the word
+#: is not one — "Do not hesitate to dispatch" is the opposite instruction (adversary A5).
 _DONT_DISPATCH = re.compile(
-    r"(?i)\b(?:do not|don't|never|must not|should not|not to)\b[^.\n]{0,60}\bdispatch")
+    r"(?i)\b(?:do not|don't|never|must not|should not|not to)\s+(?:be\s+)?(?:re-?)?dispatch")
 _VISIBILITY_GAP = re.compile(r"(?i)visibility gap")
+#: The gap denied rather than named: "is not a visibility gap", "no visibility gap".
+_GAP_DENIED = re.compile(r"(?i)\b(?:not|no|never|isn't)\b(?:\s+\w+){0,2}?\s+visibility gap")
+#: `name` as the instruction ("name the missing evidence", "name it") ...
+_NAME = re.compile(r"(?i)\bname\b")
+#: ... and denied ("nothing to name", "no need to name", "do not name").
+_NAME_DENIED = re.compile(
+    r"(?i)\b(?:nothing to|no need to|do not|don't|never|not)\s+(?:\w+\s+)?name\b")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
 def _down_lines(text: str, system: str, token: str) -> list[str]:
@@ -328,7 +338,54 @@ def _sections_holding(text: str, lines: list[str]) -> list[str]:
 
 
 def _told_not_to_dispatch(section: str) -> bool:
-    return bool(_DONT_DISPATCH.search(section)) and bool(_VISIBILITY_GAP.search(section))
+    """O-3's instruction, read for its POLARITY, not its vocabulary: `section` prohibits
+    dispatching (the prohibition's object is `dispatch`), and some sentence of it calls the down
+    system a visibility gap without denying it, with the instruction to name it in that sentence
+    or the next — never "nothing to name"."""
+    if not _DONT_DISPATCH.search(section):
+        return False
+    sentences = [x for x in _SENTENCE_END.split(section) if x.strip()]
+    for i, sentence in enumerate(sentences):
+        if not _VISIBILITY_GAP.search(sentence) or _GAP_DENIED.search(sentence):
+            continue
+        near = " ".join(sentences[i:i + 2])
+        if _NAME.search(near) and not _NAME_DENIED.search(near):
+            return True
+    return False
+
+
+#: Instructions `_told_not_to_dispatch` must accept: the shapes an implementation may well write.
+_TELLS: tuple[str, ...] = (
+    "Do not dispatch these systems: their calls are refused. Each is a visibility gap — name the "
+    "missing evidence in a `ceiling_test` row and escalate if it blocks disposition.",
+    "Do NOT dispatch gather leads to them; each is a visibility gap: name it in your "
+    "ceiling_test row, and escalate if it blocks the disposition.",
+    "Never dispatch a system listed here. Treat each as a visibility gap.\nName the missing "
+    "evidence in a ceiling_test row.",
+)
+#: ... and must refuse: the opposite instruction in the same vocabulary (adversary A5's own
+#: sentence), and each half of the instruction inverted on its own.
+_INVERTED: tuple[str, ...] = (
+    "Do not hesitate to dispatch these systems as you would any other: a refusal from one is not "
+    "a visibility gap, so there is nothing to name — retry it later in the run.",
+    "Do not hesitate to dispatch these systems: each is a visibility gap — name the missing "
+    "evidence in a ceiling_test row.",
+    "Do not dispatch these systems. A refusal from one is not a visibility gap, so there is "
+    "nothing to name.",
+    "Do not dispatch these systems. Each is a visibility gap, but there is no need to name it.",
+)
+
+
+def test_the_dispatch_instruction_matcher_reads_polarity():
+    """The O-3 assertion's own discrimination (its positive and negative controls): the matcher
+    accepts the instruction in the shapes an implementation may write it, and refuses the
+    opposite instruction worded in the same vocabulary — "Do not hesitate to dispatch", "not a
+    visibility gap", "nothing to name" — which a vocabulary-only matcher accepted."""
+    for text in _TELLS:
+        assert _told_not_to_dispatch(text), f"control: the instruction is not recognised: {text!r}"
+    for text in _INVERTED:
+        assert not _told_not_to_dispatch(text), (
+            f"the matcher accepts an instruction that tells the agent the opposite: {text!r}")
 
 
 def _assert_not_configured_refusal(text: str, token: str, what: str) -> None:
@@ -738,7 +795,10 @@ class _AtFirstRequest:
 def test_the_operator_log_names_each_down_system_and_why_at_start(tmp_path, caplog):
     """O-7 (K3). Three systems down at start for three reasons, one configured: before MAIN's
     first request, the log carries exactly one line at WARNING or above per down system, naming
-    the system and its reason; none names the configured system."""
+    the system and its reason; none names the configured system. "A line per system" is a
+    record per system: the three are three distinct records, and no record names two down
+    systems (one combined line naming all three satisfies "one line naming cmdb" three times —
+    adversary A4)."""
     caplog.set_level(logging.INFO)
     root = _plant(tmp_path, "o7", down=THREE_DOWN)
     main = _AtFirstRequest(R.MainScript([R.text(R.DONE)]), caplog)
@@ -751,6 +811,7 @@ def test_the_operator_log_names_each_down_system_and_why_at_start(tmp_path, capl
     assert main.records_before is not None, "MAIN was never asked for a turn"
     at_start = [r for r in caplog.records[:main.records_before] if r.levelno >= logging.WARNING]
     shown = [(r.levelname, r.getMessage()) for r in at_start]
+    per_system: dict[str, logging.LogRecord] = {}
     for system in THREE_DOWN:
         token = _token(system)
         lines = [r for r in at_start
@@ -758,5 +819,13 @@ def test_the_operator_log_names_each_down_system_and_why_at_start(tmp_path, capl
         assert len(lines) == 1, (
             f"the start log must carry one line naming {system} and its reason ({token}) at "
             f"WARNING or above (O-7); found {len(lines)} among {shown}")
+        per_system[system] = lines[0]
+    assert len({id(r) for r in per_system.values()}) == len(THREE_DOWN), (
+        f"O-7: one line PER down system — these systems share one record: {shown}")
+    for system, record in per_system.items():
+        others = [s for s in THREE_DOWN if s != system and _names(record.getMessage(), s)]
+        assert others == [], (
+            f"O-7: {system}'s start line also names {others} — one line per system: "
+            f"{record.getMessage()!r}")
     assert [m for _lvl, m in shown if _names(m, CONFIGURED)] == [], \
         f"the start log names a configured system as if it were down: {shown}"
