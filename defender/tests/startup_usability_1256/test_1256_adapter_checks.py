@@ -443,9 +443,9 @@ _PLANTED: dict[str, dict[str, str]] = {
     # a grant naming an undeclared verb (C11), which is not this obligation.
     "identity": {"verb": "get-user", "fn": "get_user", "param": "user", "arg": "dev.dana",
                  "token": "defender_planted_absent_module_1256"},
-    # Declares no check.
+    # Declares no check: the reason names the missing declaration, K1's `check_settings`.
     "threat-intel": {"verb": "lookup", "fn": "lookup", "param": "value", "arg": "203.0.113.7",
-                     "token": "check"},
+                     "token": CHECK},
     # Its check raises something that is not a ConfigFault (a crash).
     "change-mgmt": {"verb": "get-change", "fn": "get_change", "param": "cr_id", "arg": "CR-1256",
                     "token": "planted-check-crash-1256"},
@@ -470,8 +470,11 @@ def _planted_source(system: str, probe: Path) -> str:
     elif system == "threat-intel":
         check = []
     elif system == "change-mgmt":
+        # The crash's own text carries the adapter's absolute host path (as an exception's often
+        # does), so the "no host path in what the agent is shown" negative can fail on a reason
+        # passed through verbatim.
         check = ["def check_settings(*_a, **_k):",
-                 f"    raise RuntimeError({spec['token']!r})"]
+                 f"    raise RuntimeError({spec['token']!r} + ': cannot read ' + __file__)"]
     elif system == "host-state":
         head.append("from defender.scripts.adapters.faults import TransportFault")
         check = ["def check_settings(*_a, **_k):",
@@ -545,8 +548,8 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
     anything but ConfigFault (a crash, or another adapter fault) is Down(AdapterBroken(reason))
     from the start: logged at ERROR or above naming its system before the agent's first turn
     (K3), every dispatch and every call to it refused with a message that names it and the reason
-    and not a breaker trip (DP4), its verb never run, no query row written, nothing charged to the
-    breaker.
+    — not a breaker trip and not "not configured" (DP4), and no host path of the planted tree or
+    the data root — its verb never run, no query row written, nothing charged to the breaker.
 
     Positive control in the same run: the well-formed planted `cmdb` adapter IS called — its verb
     writes the probe file and its row — so the "never called" and "no row" observations can fail;
@@ -603,6 +606,8 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
     # each one that does not hold. The replies are indexed by the script: MAIN's request i+1
     # answers its dispatch of `_BROKEN[i-1]`; gather's request i+1 (lead l-001) answers its query.
     breaker = run_state.breaker_snapshot()
+    host_paths = sorted({str(p) for base in (tmp_path / "tree", tree, root)
+                         for p in (base, base.resolve())})
     violations: list[str] = []
     for i, system in enumerate(_BROKEN, start=1):
         token = _PLANTED[system]["token"]
@@ -618,8 +623,18 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
                 violations.append(
                     f"{system}: its {where} reply must refuse naming it and the reason "
                     f"({token!r}) (O-5a, DP4): {text[-300:]!r}")
-            if "tripped" in low:
-                violations.append(f"{system}: its {where} refusal names a breaker trip (DP4)")
+            # DP4: one notion of down, the message naming the ACTUAL cause — a broken adapter is
+            # neither a breaker trip nor a system whose settings do not configure it.
+            for wrong_cause in ("tripped", "not configured"):
+                if wrong_cause in low:
+                    violations.append(
+                        f"{system}: its {where} refusal says {wrong_cause!r}, not the adapter "
+                        f"fault (DP4): {text[-300:]!r}")
+            # The reason shown to the agent carries no host path: not the planted tree's, not the
+            # data root's (as written or resolved).
+            if leaked := [p for p in host_paths if p in text]:
+                violations.append(
+                    f"{system}: its {where} reply shows host path(s) {leaked}: {text[-300:]!r}")
         if not [r for r in at_start if r.levelno >= logging.ERROR and system in r.getMessage()]:
             violations.append(
                 f"{system}: no ERROR-or-above record naming it before the agent's first turn "

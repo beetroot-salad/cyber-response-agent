@@ -167,25 +167,10 @@ def config_texts(marker: str, *, events_index: str | None = None,
                  alerts_index: str | None = None) -> dict[str, str]:
     """One COMPLETE post-#1107 `config.env` per system, host-state's new one included.
 
-    `_tenants1106.config_texts` (complete for its five systems, access method included) plus
-    the three systems it omits: change-mgmt, threat-intel and host-state. A fixture without the
-    access lines is a tenant whose every system is down once #1107 lands (no default), so a
-    scenario about one fault would ride on eight."""
-    out = T1106.config_texts(marker, events_index=events_index, alerts_index=alerts_index)
-    extra = {
-        "change-mgmt": (
-            f'CHANGE_MGMT_URL_BASE="http://change-mgmt-{marker}:8080"\n'
-            f'CHANGE_MGMT_BASTION_HOST="bastion-{marker}"\n'
-            'CHANGE_MGMT_TIMEOUT_SEC="10"\n'),
-        "threat-intel": (
-            f'THREAT_INTEL_URL_BASE="http://threat-intel-{marker}:8080"\n'
-            f'THREAT_INTEL_BASTION_HOST="bastion-{marker}"\n'
-            'THREAT_INTEL_TIMEOUT_SEC="10"\n'),
-        "host-state": "",
-    }
-    for system, text in extra.items():
-        out[system] = text + T1106.access_lines(marker, system)
-    return out
+    Since #1256 that is `_tenants1106.config_texts` itself: it writes every system, access
+    method and elastic's containers included, because a system whose settings check fails is
+    down from run start. A scenario about one fault must not ride on eight."""
+    return T1106.config_texts(marker, events_index=events_index, alerts_index=alerts_index)
 
 
 def plant(root: Path, tenant_id: str = PLAYGROUND_ID, *, marker: str = "t1107",

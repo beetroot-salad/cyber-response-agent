@@ -661,6 +661,10 @@ def test_p006_correlation_system_granted_but_unconfigured(tmp_path: Path) -> Non
         f"the run-wide failure count was charged: {down.breaker!r}")
     _assert_continued(down, "unconfigured correlation system", requests=3)
     _assert_closed(down, "unconfigured correlation system")
+    # Exactly one correlation section (A4), counted by its host heading alone — not `_alone`'s
+    # frame census, which would also forbid O-3 framing the down system's reason (undecided).
+    sections = S.correlation_sections(down.opening_message)
+    assert len(sections) == 1, f"not exactly one correlation section: {[h for h, _ in sections]}"
 
 
 def test_p008_l00c_own_failures_trip_its_system(tmp_path: Path) -> None:

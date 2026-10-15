@@ -52,8 +52,8 @@ TEMPLATE_AGENT = TEMPLATE_DIR / "agent"
 RETIRED_KNOWLEDGE = DEFENDER / "knowledge"
 
 #: D3's three files required at run start, relative to a tenant's `settings/`. A system's
-#: `config.env` is deliberately NOT here: some adapters need none, and its absence stays the
-#: per-call `ConfigFault`.
+#: `config.env` is deliberately NOT here: some adapters need none, and its absence is that
+#: system's own settings check failing at run start (#1256: the system is down, not the run).
 REQUIRED_FILES: tuple[str, ...] = (
     "verb-grants.yaml",
     "lead-zero.yaml",
@@ -338,6 +338,17 @@ def config_texts(marker: str, *, events_index: str | None = None,
             f'ELASTIC_ALERTS_INDEX="{alerts}"\n'
             'ELASTIC_SSL_VERIFY="true"\n'
         ),
+        "change-mgmt": (
+            f'CHANGE_MGMT_URL_BASE="http://change-mgmt-{marker}:8080"\n'
+            f'CHANGE_MGMT_BASTION_HOST="bastion-{marker}"\n'
+            'CHANGE_MGMT_TIMEOUT_SEC="10"\n'
+        ),
+        "threat-intel": (
+            f'THREAT_INTEL_URL_BASE="http://threat-intel-{marker}:8080"\n'
+            f'THREAT_INTEL_BASTION_HOST="bastion-{marker}"\n'
+            'THREAT_INTEL_TIMEOUT_SEC="10"\n'
+        ),
+        "host-state": "",
     }
     return {system: text + access_lines(marker, system) for system, text in base.items()}
 

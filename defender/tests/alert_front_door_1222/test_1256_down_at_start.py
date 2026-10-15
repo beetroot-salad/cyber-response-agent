@@ -34,8 +34,12 @@ from __future__ import annotations
 
 import importlib
 import re
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from defender.tests import _tenants1106 as T6
 from defender.tests.alert_front_door_1222 import _spec1222 as S
@@ -224,14 +228,39 @@ raise ImportError("{BROKEN_MARK}")
 VERBS = {{"health-check": None, "query": None, "alerts": None, "esql": None}}
 '''
 
+#: A minimal, well-formed cmdb adapter: the scene's one usable gather system (TABLE_A grants
+#: gather its three verbs), declaring a check that needs nothing. Written here, never copied from
+#: the checkout, and importing nothing from it — so loading it touches no `sys.path`.
+_PLANTED_CMDB = '''\
+"""#1256 planted: a minimal cmdb adapter whose settings check needs nothing."""
+
+
+def check_settings(*_a, **_k):
+    return None
+
+
+def get_host(ctx, *, host: str) -> dict:
+    return {"host": host, "planted": True}
+
+
+def list_hosts(ctx, *, role=None, criticality=None, owner=None) -> dict:
+    return {"hosts": [], "planted": True}
+
+
+def health_check(ctx) -> dict:
+    return {"ok": True, "planted": True}
+
+
+VERBS = {"get-host": get_host, "list-hosts": list_hosts, "health-check": health_check}
+'''
+
 
 def _tree_with_broken_elastic(root: Path) -> Path:
     """A defender tree the run is pointed at: every top-level entry of the checkout symlinked
-    except `scripts/`, whose entries are symlinked except `adapters/`, copied for REAL (a roster
-    file must resolve inside its directory) with `elastic_adapter.py` replaced by `_BROKEN_ELASTIC`.
+    except `scripts/`, whose entries are symlinked except `adapters/` — a real folder holding ONLY
+    the two adapters written here (`_PLANTED_CMDB`, `_BROKEN_ELASTIC`); no shipped adapter is
+    copied (a copy that bootstraps `sys.path` would leak the planted tree into later imports).
     `<root>/repo/defender`, so `defender_dir.parent` is a repo root as the catalog expects."""
-    import shutil
-
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
     for entry in S.DEFENDER.iterdir():
@@ -244,12 +273,31 @@ def _tree_with_broken_elastic(root: Path) -> Path:
         if entry.name in _NOT_MIRRORED or entry.name == "adapters":
             continue
         (scripts / entry.name).symlink_to(entry)
-    shutil.copytree(S.DEFENDER / "scripts" / "adapters", scripts / "adapters",
-                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    (scripts / "adapters" / "elastic_adapter.py").write_text(_BROKEN_ELASTIC, encoding="utf-8")
+    adapters = scripts / "adapters"
+    adapters.mkdir()
+    (adapters / "cmdb_adapter.py").write_text(_PLANTED_CMDB, encoding="utf-8")
+    (adapters / "elastic_adapter.py").write_text(_BROKEN_ELASTIC, encoding="utf-8")
     return tree
 
 
+@pytest.fixture
+def _import_state_restored(tmp_path: Path) -> Iterator[None]:
+    """Belt and braces around a run pointed at a planted tree: `sys.path` restored and every
+    module loaded from under `tmp_path` evicted, so nothing planted is importable by a later
+    test in the same worker."""
+    saved = list(sys.path)
+    try:
+        yield
+    finally:
+        sys.path[:] = saved
+        root = str(tmp_path.resolve())
+        for name, module in list(sys.modules.items()):
+            where = getattr(module, "__file__", None)
+            if where and str(Path(where).resolve()).startswith(root):
+                del sys.modules[name]
+
+
+@pytest.mark.usefixtures("_import_state_restored")
 def test_o6_lead_on_a_system_whose_adapter_is_broken_ends_down_at_start(tmp_path: Path) -> None:
     """A correlation system whose adapter cannot be imported is down at start (adapter broken): l-00c ends before its claim and count with an ending that names the system and is not the 'not configured' one, nor 'tripped breaker', 'every call failed' or 'withheld'; nothing runs or is charged; the run goes on."""
     # Every reference runs on the checkout's own tree (its elastic adapter intact), so none of
@@ -289,6 +337,35 @@ def test_o6_lead_on_a_system_whose_adapter_is_broken_ends_down_at_start(tmp_path
     _assert_never_started(broken, "down at start (adapter broken)")
     _assert_continued(broken, "down at start (adapter broken)", requests=3)
     _assert_closed(broken, "down at start (adapter broken)")
+
+
+# --- a ConfigFault escaping the start check, met by l-00c itself (O-5b, DP3, DP4) ----------------
+
+def test_o5b_l00c_call_time_config_fault_marks_its_system_not_configured_uncharged(
+        tmp_path: Path) -> None:
+    """Elastic passes the start check, so l-00c is dispatched; its first call raises ConfigFault (an escape the check missed). Elastic goes down as not configured on the spot, uncharged: the lead's later calls never run the verb, MAIN's correlation section names elastic and 'not configured' and never the breaker's words (DP4), and the breaker holds nothing for elastic or the run (DP3). Which ending constant this is, the design has not named: not pinned."""
+    scene = _Scene(tmp_path)
+    d = scene.run("escaped-config-fault", backend=_fail_alerts(_config_fault),
+                  leads={S.L3: [_q(1), _q(2), _q(3), S.text("FD1256-ESCAPE-NARRATION")]})
+
+    assert d.router.dispatched(S.L3), (
+        "premise: l-00c was not dispatched — elastic did not pass the start check")
+    calls = d.backend.rec.calls
+    assert len(calls) == 1, (
+        f"after elastic's first call raised ConfigFault, {len(calls)} calls reached the verb "
+        "(O-5b: the system is down from that call on; its later calls run no adapter)")
+    body = _section(d)
+    low = body.lower()
+    assert _names_system(body, "elastic"), f"the ending does not name the system: {body!r}"
+    assert "not configured" in low, (
+        f"the ending does not name the cause 'not configured' (DP4): {body!r}")
+    said = [w for w in TRIPPED_WORDS if w in low]
+    assert not said, f"the ending names the breaker's cause ({said}) for a config fault: {body!r}"
+    assert d.run_state is not None, "the run left no state to read the breaker from"
+    assert d.run_state.breaker_failures("elastic") == 0, (
+        f"the escaped ConfigFault was charged to elastic's breaker: {d.breaker!r}")
+    assert d.breaker.get("total_failures", 0) == 0, (
+        f"the escaped ConfigFault was charged to the run-wide count: {d.breaker!r}")
 
 
 # =================================================================================================
