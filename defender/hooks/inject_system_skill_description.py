@@ -1,7 +1,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
@@ -37,9 +39,17 @@ def read_description(system: str, skills_dir: Path = SKILLS_DIR) -> str | None:
     return desc or None
 
 
+#: No system down: the catalog of a run that judged none.
+NONE_DOWN: Mapping[str, str] = MappingProxyType({})
+
+
 def descriptor_catalog(
     skills_dir: Path, roster: RosterRead, grant: VerbGrant,
+    *, down: Mapping[str, str] = NONE_DOWN,
 ) -> str | None:
+    """Gather's system index: one line per system `grant` reaches — its skill's description, or,
+    for a system in `down` (down for this run from its start, with its cause as
+    `system_status.cause_text` names it), that it is DOWN and why (#1256 O-3)."""
     # DENY_ALL, not `grant`: the registry only enumerates systems and probes that each adapter
     # imports; narrowing to `grant.systems` happens below. Constructing with `grant` would run
     # the registry's load check, which a grant naming an undeclared system/verb would fail for a
@@ -49,6 +59,12 @@ def descriptor_catalog(
     lines = []
     for system in registry.systems():
         if system not in grant.systems:
+            continue
+        if system in down:
+            lines.append(
+                f"- `{system}`: DOWN for this run, {down[system]}. Do not query it: what it "
+                "would have shown is a visibility gap — name the missing evidence in your "
+                "summary.")
             continue
         try:
             verbs = registry.verbs(system)

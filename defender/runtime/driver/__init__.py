@@ -22,7 +22,7 @@ import sqlite3
 import sys
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -50,6 +50,7 @@ from .. import providers
 from .. import run_end
 from .. import selection
 from .. import session_store
+from .. import system_status
 from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
@@ -382,17 +383,36 @@ async def _close_a_run_cut_short(
 
 def _dispatch_catalogs(
     defender_dir: Path, roster: RosterRead, grants: RunGrants,
+    down: Mapping[str, system_status.StartCause],
 ) -> tuple[str | None, str | None]:
     """The descriptor index each dispatch prompt opens with: MAIN's (narrowed to the gather
-    grant) and lead-0's (narrowed to the correlation grant).
+    grant) and lead-0's (narrowed to the correlation grant), each marking the systems down at
+    run start with their cause (#1256 O-3).
 
     Built once at run start so a roster fault fails here, not mid-tool. Uses the run's grants,
     not the injected `verbs=` registry, so a narrower registry does not narrow the catalog."""
     skills = KnowledgePaths.of_defender_dir(defender_dir).skills_dir
+    notes = system_status.down_notes(down, down)
     return (
-        descriptor_catalog(skills, roster, grants.gather),
-        descriptor_catalog(skills, roster, grants.correlation),
+        descriptor_catalog(skills, roster, grants.gather, down=notes),
+        descriptor_catalog(skills, roster, grants.correlation, down=notes),
     )
+
+
+def _systems_at_run_start(
+    state: RunState, roster: RosterRead, tenant: RunTenant, defender_dir: Path,
+) -> dict[str, system_status.StartCause]:
+    """Judge each granted system usable or down by its own adapter's settings check over the
+    run's frozen record (#1256 step 3), hold the verdict on the run's state and log each down
+    system — before the budget, the logger or any model — and refuse a start at which no
+    granted system that is up gives gather a query verb (O-8), naming each down system.
+
+    `run.py` asks the same predicate before the run exists; the driver asks it again, itself,
+    for every other way in (a direct caller, a branch sibling's world)."""
+    down = system_status.startup_check(roster, tenant, defender_dir=defender_dir)
+    system_status.hold_at_start(state, down)
+    system_status.require_usable(tenant.grants, down)
+    return down
 
 
 def _correlation_dispatch_at_run_start(
@@ -558,11 +578,12 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
     roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs, tenant)
+    down = _systems_at_run_start(state, roster, tenant, defender_dir)
     _bind_call_ids(state, verbs, run_id)
     correlation = _correlation_dispatch_at_run_start(
         tenant=tenant, resume=resume, lead_zero_verbs=lead_zero_verbs,
     )
-    catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster, tenant.grants)
+    catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster, tenant.grants, down)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     # A usable deadline or no run: checked before the run folder is touched, never replaced by a
     # fallback. A lead the table withholds is never run, so it owes no deadline.
@@ -655,6 +676,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt = _opening_prompt(
         resume, run_dir, alert_path, defender_dir,
         systems=tuple(roster.accepted), correlation_section=correlation_section,
+        down=system_status.down_notes(down, roster.accepted),
         orient_shim=orient_shim, tenant_agent=tenant.agent,
     )
 

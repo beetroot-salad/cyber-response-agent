@@ -20,7 +20,8 @@ import argparse
 from pathlib import Path
 
 #: Files required at start, relative to `settings/`. A system's `config.env` is not here: some
-#: adapters need none, and its absence is the per-call `ConfigFault` (exit 2, trips the breaker).
+#: adapters need none, and its absence is that system's own settings check failing at run start
+#: (#1256: the system is down for the run, the agent is told why, and the run goes on).
 REQUIRED_SETTINGS: tuple[str, ...] = (
     "verb-grants.yaml",
     "lead-zero.yaml",

@@ -429,6 +429,29 @@ def _resolve_run_tenant(
         sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
 
 
+def _refuse_unusable_start(tenant: RunTenant, *, defender_dir: Path) -> None:
+    """#1256 O-8, before the run exists: judge each granted system by its own adapter's settings
+    check (`system_status.startup_check`, over the roster of the tree this run reads) and refuse
+    a run — fresh or a sibling's — at whose start gather could query nothing through the systems
+    that are up (`system_status.require_usable`, the predicate the driver asks again), naming
+    each down system and its cause. Before the run folder, the box and any model call; nothing
+    is logged or held here — the driver does that once, when the run starts. Never in the tenant
+    resolution `tenant.py setup` and `defender-policy` share: whether a system is usable is a
+    run's question, not the tenant's (D4)."""
+    from defender.runtime import system_status
+    from defender.runtime.verbs import RegistryError
+
+    try:
+        roster = read_roster(adapters_under(defender_dir))
+    except RegistryError as unreadable:
+        sys.exit(f"[run.py] {unreadable}")
+    down = system_status.startup_check(roster, tenant, defender_dir=defender_dir)
+    try:
+        system_status.require_usable(tenant.grants, down)
+    except system_status.NoUsableSystem as refusal:
+        sys.exit(f"[run.py] this run's tenant {tenant.tenant_id!r} cannot be used: {refusal}")
+
+
 def _announce_provenance(run_dir: Path) -> None:
     """Log what this run was made against, read back from the stamp (not re-asking git) so
     the operator sees the record itself, including whether the tree was dirty."""
@@ -684,6 +707,9 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         # The tenant's settings (and with them the one tenant check), resolved before the input
         # is read and before anything is spent; nothing below reads them again.
         tenant = tenant_of()
+        # Whether any granted system is usable — decided by the adapters' own settings checks
+        # over those settings — before the run is made (#1256 O-8, a sibling's own start too).
+        _refuse_unusable_start(tenant, defender_dir=DEFENDER_DIR)
 
         model = driver.resolve_main_model(ns.model)
         # Runs in siblings too: models are resolved per process, so each sibling must check (and
