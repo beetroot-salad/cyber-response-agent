@@ -1,16 +1,113 @@
 # Issue 1108 P3 executable contract
 
-Status: reviewed contract repair ready for code-stage integration and verification. The original 49-case contract is revised on its contract-only lineage after implementation-stage adversarial findings; production implementation is absent from this branch. The D7 amendment repair (2026-10-15) below awaits independent review.
+Status: **amendment 2 rewrite (2026-10-15), awaiting independent intent review.** The current contract is the "Amendment 2 rewrite" section, the "Local test API seams" section and the obligations table below; the earlier repair records are history. Regions of `d9a55b4a` that amendment 2 invalidates are listed there and removed from the suite. Production implementation is absent from this branch.
 
 - Branch: `contract/1108-p3-repair`.
 - Original immutable contract: `810b70d8a5c8c9935c5eaeb3bdb9b4b311abbdeb`; this repair descends directly from it and retains the original base.
 - Base: `d4fea4cfd53a89fcdfff93f1c4ca6ef9c943e490` (merged P2).
-- Design: [issue design comment](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6063781627), fetched 2026-10-14, plus the user's session clarification: the tenant bot can read protection but cannot modify it.
+- Design: [issue design comment](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6063781627), fetched 2026-10-14, plus the user's session clarification: the tenant bot can read protection but cannot modify it; [D7 amendment 1](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6190547938); [D7 amendment 2](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6195623857), which supersedes the box half of D7 and of amendment 1 where they conflict (the `agent` mount kind is retired; `code`/`data` and `MOUNT_CHECK` stay).
 - Workflow: `spec-flow/skills/write-tests/SKILL.md` at base. No production skeleton or policy substitute is included.
 - Contract identity: the immutable git commit containing this suite and record; the final handoff names its SHA.
 - Next stage: `write-code-from-tests`, beginning from that contract commit. P3 stays dormant; P4 performs production wiring and removes GhForge.
 
 Design snapshot SHA256: `e5b00f610d2faa408f46da6920621272be3ff09c5faea54b9ba7b94ca1fdff26`. Project profile SHA256: `0ed34f09127ea22f8c1fcdf178fbb1f732b5c2b41c4f3ed74688c98439d1941d`. Skill SHA256: `fe077f6f53b31e2aef672e351e442260cfdde16b23ce56ecec9fa1e3c6f095e2`.
+
+## Amendment 2 rewrite (2026-10-15)
+
+Decided amendment: [issue comment 6195623857](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6195623857) (owner decision): boxes see only host-made copies; git and credentials never touch a box's folders. Authored on `contract/1108-p3-repair` from `d9a55b4a` (base `d4fea4cf`). The author did not open the honest implementation, any adversary worktree or adversary material; production source on this branch is pre-P3, so every target below is absent and the suite is expected red. This is a contract rewrite after implementation exists, not a fresh tests-first run.
+
+### Removed regions of `d9a55b4a` (the amendment's invalidation list)
+
+- `test_delivery.py`: `test_commit_gate_refuses_forbidden_paths_before_staging_or_commit`, `test_mixed_allowed_and_forbidden_commit_is_atomic_and_does_not_include_staged_settings` (commit gate over paths), `test_finish_refuses_out_of_policy_commit_that_bypassed_gate` (with G1's whitespace-led names), `test_retained_delivery_refuses_forbidden_commit_added_after_failed_pr` (A2), `test_delivery_refuses_forbidden_history_even_when_reverted_before_allowed_lesson` (A3), `test_git_operations_explicitly_reset_helpers_and_use_only_tenant_file` (Trace2 argv), `test_commit_refuses_foreign_repository_under_worktree_base_regardless_of_process_cwd` (G4: the commit-maker takes a `Batch`, never a path, so a foreign repository is unreachable by construction). The pushed-history policy these enforced is deleted by the amendment; their intent (nothing but commit-maker commits is pushed) is re-pinned below. G1's whitespace-led names survive as `ChangeSet` path refusals. G2 (ambient `GIT_DIR`/`GIT_WORK_TREE`) is kept, rewritten on the new flow.
+- `test_box.py`: every `agent`-kind row (`_PROBE_CASES`, `test_startup_applies_the_declared_kind_never_the_folder_name`, `test_a_host_side_read_fault_is_a_box_fault`), `test_drain_request_mounts_only_code_agent_and_explicit_lane`, `test_drain_start_wires_real_lifecycle_readback_before_returning_executor`, the agent half of `test_drain_start_requires_fixed_probe_for_code_and_agent`, and `test_drain_request_refuses_writable_lane_outside_agent` (A4: the amendment deletes the writable-lane escape checks; lanes are host constants inside a git-free copy, and a claim outside them is refused at `ChangeSet` derivation).
+- `test_forgejo.py`: the pagination and exact-head cases, rewritten as `ForgeAddress` and fork-exclusion cases; the negative Link deck is kept and extended.
+
+Kept as they were: `open()` refusals (O9), protection (A10/C21), the credential single read and the agent-text census, the `code` and `data` kinds with `MOUNT_CHECK`, the oracle cases, the dormancy and credential-owner censuses.
+
+### Obligations, tests and the violation each discriminates
+
+| Obligation | Tests | Discriminated violation |
+|---|---|---|
+| **O-A** bound copy | `test_box.py`: `test_a_staged_copy_starts_only_on_the_token_the_host_planted_for_this_start` (another copy's token, unreadable, empty), `test_a_staged_token_is_fresh_for_every_start` (a replayed earlier token), `test_a_staged_root_holding_anything_but_agent_is_refused` (stray file, `.git`, missing `agent/`, `agent` a link or a file), `test_a_lane_inside_a_staged_copy_keeps_its_planted_sentinel`, `test_a_staged_mount_is_never_writable`, `test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_a_box` (wrong token, `settings/` at a draft root), `test_tenant_drain_entry_refuses_a_readonly_mount_without_a_kind[staged]`; `"agent"` added to `_NOT_KINDS`; `.tenant-id` asserted never a probe. Generic cases run on both request-lane entries | a box bound to another, empty or stale copy starts; a constant or reused token; a root holding anything but `agent/`; a writable `staged` mount; the retired `agent` kind or its `.tenant-id` probe still accepted |
+| **O-B** one revision (input side) | `test_publish.py`: `test_publish_writes_the_commits_blobs_and_points_current_at_them`, `test_current_export_reads_the_pointer_without_git`, `test_current_export_refuses_a_pointer_that_names_no_export`; `test_delivery.py::test_start_batch_cuts_a_host_only_worktree_and_a_git_free_draft_at_the_export_commit` | export via `git archive` (`export-ignore`, `export-subst`) or from the clone's checkout (`eol=crlf` conversion); `current` naming another commit or a folder outside `exports/`; a reader that runs git; worktree or draft at another commit |
+| **O-C** knowledge-only commits by construction | `test_delivery.py`: `test_change_set_is_the_draft_against_the_worktree_and_commits_as_plain_files`, `test_the_commit_maker_takes_nothing_but_a_change_set`, `test_no_change_set_commits_outside_the_lanes_or_touches_a_forbidden_name`, `test_claims_commit_and_reset_one_after_another_within_one_batch`, `test_finish_refuses_a_branch_holding_a_commit_the_commit_maker_did_not_make` (on top, amend, only raw, forbidden path), `test_retained_branch_delivery_pushes_only_commit_maker_commits` (planted on top or amended, by a later delivery object), `test_revert_builds_its_change_set_from_history_and_pushes_one_commit_maker_commit`, `test_revert_refuses_a_commit_the_commit_maker_did_not_make`, `test_revert_refuses_a_path_that_is_not_a_lesson_on_main` | a mode other than 100644 (a box-executable file, an already-executable base file); a path outside `agent/` or the lanes (a prefix-sibling lane included), a traversal, a whitespace-led name, `agent/.tenant-id`, a git control file at any depth; a non-`ChangeSet` input; a raw or amended commit pushed by finish, retained deliver or revert, even with an allowed path and the commit-maker's exact message and identities (so a path re-check or a message/trailer test cannot pass); provenance that dies with the delivery object |
+| **O-D** box output is inert data | `test_delivery.py`: `test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole` (15 rows: file links, a symlinked directory, FIFO, socket, device, oversized sparse file, out-of-lane file and deletion, prefix sibling, `.tenant-id`, git control files added or deleted), `test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links`; `test_publish.py`: `test_publish_refuses_a_tree_entry_that_is_not_a_regular_blob` (5 rows) with `test_publish_accepts_an_executable_blob` as control | a symlinked directory skipped by `os.walk`; a link followed; a FIFO blocking derivation or reset; a claim committed in part ("nothing skipped"); a reset deleting through a link; a link or submodule published |
+| **O-E** credential read-only, non-interactive | `test_credential.py::test_git_never_stores_erases_prompts_for_or_shares_the_tenant_credential` (success, fetch refused, push refused) against a real smart-HTTP remote; spies on local, global (`GIT_CONFIG_GLOBAL`, `$HOME`, XDG) helpers and on `GIT_ASKPASS`/`SSH_ASKPASS`/`core.askPass`, each proven live first | git's `store` helper rewriting or erasing the file (K1); a helper list not reset (a global or local helper sees the request); a prompt program invoked; `forge/` gaining a lock or temp file |
+| **O-F** no mutation under a reader, no interleaving | `test_publish.py`: `test_a_later_publish_leaves_every_earlier_export_as_it_was`, `test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder`, `test_the_tenant_lock_is_free_during_network_io_and_box_windows`; `test_delivery.py::test_publishing_after_a_batch_starts_never_changes_its_draft_or_worktree` | an export or `current` rewritten in place; a blocking second taker; a refusal not naming the holder's pid; a fast-forward, export or worktree made without the lock; one lock shared across tenants; a lock under `forge/`; the lock held across the fetch, the push, the PR request, the box create or its window, or past `start_batch` |
+| **O-G** one forge address | `test_forgejo.py`: `test_the_origin_is_parsed_once_into_one_forge_address`, `test_an_origin_that_is_not_one_forge_repository_is_refused`, `test_pagination_refuses_outside_origin_repository_before_request`, `test_pagination_follows_an_equivalent_spelling_of_the_origin`, `test_prefix_listing_counts_only_prs_whose_head_is_the_base_repository`, `test_exact_head_lookup_ignores_a_fork_with_the_same_branch_name`, `test_the_writer_lease_is_not_held_by_a_fork_pr`, `test_a_pr_row_without_its_head_repository_is_a_forge_error`; `test_delivery.py`: `test_credentials_agree_with_an_equivalent_spelling_of_the_origin`, `test_finish_and_deliver_ignore_a_fork_pr_with_the_same_branch_name` | an equivalent URL (host case, explicit or implicit default port, scheme case) treated as foreign; a fork PR taken as ours, by exact head, by prefix or as the writer lease; owner-only or name-only repository comparison; a row without a head repository silently excluded |
+| Kept O7/O7b/O8/O9/A10/C21 | `test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_write`, `test_refresh_refuses_local_state_without_creating_batch`, `test_delivery_refuses_unusable_tenant_with_named_reason`, `test_credentials_require_scheme_host_and_port_agreement_before_http`, `test_main_requires_known_protected_and_bot_cannot_push`, `test_credentials_loaded_once_and_token_not_in_representation`, `test_delivery_git_context_cannot_be_redirected_by_ambient_repository`, `test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes`, `test_tenant_drain_refuses_unsandboxed_even_when_operator_opted_out`, the protection and wire-format cases in `test_forgejo.py`, both censuses in `test_architecture.py` | as recorded for the original contract, on the new seams |
+
+### Choices where the amendment was silent
+
+1. **Locations.** Exports are exactly `<T>/exports/<commit>/` with the pointer `<T>/exports/current`; drafts are exactly `<T>/drafts/<batch>/agent`. The batch worktree is under the layout's `tenant.worktrees` (`<T>/learning/worktrees`): the amendment's `<T>/worktrees/<batch>` is read as the layout owner's worktree base (D7), not a new folder.
+2. **`AgentChange.path`** is repo-relative POSIX (`agent/lessons/x.md`), like revert's lesson path and git pathspecs; `content` is `bytes`, or `None` for a deletion.
+3. **Lanes** are declared once per batch, `start_batch(batch_id, lanes=...)`, and govern the box request, derivation and the commit-maker. Lane spellings are not validated by the contract: the amendment deletes the escape checks.
+4. **Lock seam.** `tenant_lock(tenant)` is the production context manager the three locked steps use; a busy lock raises `LockBusy` (a `DeliveryRefused`) at once, naming the holder's pid. Probes run in another process, since same-process lock semantics differ by primitive.
+5. **Revert.** The prior content is the path's content before the newest commit on `main` that changed it; when that commit added it, the revert deletes it.
+6. **Staged startup.** The token's file name is not pinned; whether it stays after startup is not pinned. The root-entry check may be the host's own no-follow listing (the fakes answer only `cat`). A draft root holding `settings/` refuses (`settings/` is a run copy's half).
+7. **Foreign commits refuse.** Pushing the commit-maker's recorded sha while a foreign commit sits on the branch would also keep it off the remote, but principle 2 asks for the refusal, and the brief names it; the contract requires `DeliveryRefused` before any push. Commit-maker provenance must outlive the delivery object (a later drain delivers the retained branch).
+8. **Exact-head lookup stays the paginated listing** (C19). `/pulls/{base}/{head}` is not answered by the fake; using it needs K3's executed result and a contract amendment.
+9. **A PR row without a head repository is a `ForgeError`**: excluding it would release the writer lease on unknown evidence.
+10. `current_export` refusals are `DeliveryRefused`; `current_export` returns a `TenantExport` (`.commit`, `.path`). It lives in `tenant_delivery` for P3, so P4 must move it (or narrow the dormancy census) before runs import it.
+11. `ForgeAddress` has no base path (the design's fields are scheme, host, port, owner, repo), so a forge served under a sub-path is refused.
+12. Generic `staged` cases never plant `settings/`: whether a request-lane copy may hold it is left to P4's run copy; only the drain's draft refuses it.
+
+### Not pinned in P3, and why
+
+- **O-B run side** (`RunKnowledge`, the run's settings and stamp from one copy) is P4's; only the export it copies is pinned here.
+- **O-D for mid-batch host readers** (typed tools, `open_drain_trees` views, the gates between claims, `stop_and_scrub`) has no P3 caller: those readers are wired onto drafts in P4, which owes the reader census the amendment's security dive names. P3 pins derivation and reset only.
+- **"The commit-maker is the only creator of tenant commits"** is pinned behaviourally on all three push routes (a foreign commit is refused on each); no lexical census of production `commit`/`commit-tree` call sites is asserted.
+- **`GIT_TERMINAL_PROMPT=0`** is not separately discriminated: there is no tty under pytest, and git never prompts while the read-only helper answers. The askpass spies cover `GIT_ASKPASS`, `SSH_ASKPASS` and `core.askPass`.
+- The device-node row skips without `CAP_MKNOD` (CI runs non-root); the FIFO and socket rows always run.
+
+### Deferred executed checks (code stage; no network in the suite)
+
+**K3: Forgejo's `/pulls/{base}/{head}` semantics.** On the dev Forgejo with the playground bot's token, after creating (a) an open same-repo PR, (b) a closed same-repo PR, (c) a fork PR whose head branch has the same name as an open one, run:
+
+```sh
+T="$DEFENDER_DATA_ROOT/playground"
+TOKEN=$(sed -E 's#^[a-z]+://[^:]*:([^@]*)@.*#\1#' "$T/forge/git-credentials")
+API=http://forgejo:3000/api/v1/repos/tenants/playground
+for head in "<open-head>" "<closed-head>" "<fork-head>" lessons/k3-none; do
+  curl -sS -o /tmp/k3.json -w "%{http_code} $head\n" -H "Authorization: token $TOKEN" "$API/pulls/main/$head"
+  jq '{number, state, head: {ref: .head.ref, repo: .head.repo.full_name}}' /tmp/k3.json
+done
+```
+
+Completion: record each status and row in this README. The contract keeps the paginated listing either way; the endpoint may replace it only by amendment, and only if (b) and (c) return no row.
+
+**K8: a host-made `<T>/` copy binds under DooD.** In the devcontainer with the real daemon:
+
+```sh
+export DEFENDER_DATA_ROOT=/workspace/.defender-data
+PYTHONPATH="$PWD" defender/.venv/bin/python - <<'EOF'
+from pathlib import Path
+from defender.runtime import box
+root = Path("/workspace/.defender-data/k8/drafts/k8")
+(root / "agent").mkdir(parents=True, exist_ok=True)
+(root / "agent" / "probe.md").write_text("k8\n", encoding="utf-8")
+code = Path.cwd() / "defender"
+request = box.BoxRequest(name="defender-k8", workdir=root / "agent", defender_dir=code, env={},
+                         mounts=(box.Mount(source=code, target=code, kind="code"),
+                                 box.Mount(source=root, target=root, kind="staged")))
+executor = box.start_box(request)
+print("sandboxed:", executor.sandboxed)
+box.stop_box(executor)
+EOF
+```
+
+Completion: `sandboxed: True` with no `BoxFault`; a C46/DooD `BoxFault` means the copy location must move before P4.
+
+### Validation
+
+Author validation, on the committed tree:
+
+- **Collection:** 384 cases in this suite, zero setup errors. No file outside `tenant_1108_delivery/` is touched.
+- **Expected red on this pre-P3 base: all 384**, by class: absent `box.CODE_CHECK_FILE` 132; absent `Mount(kind=)` 74; absent `tenant_delivery` 125 (one through the out-of-process lock holder); absent `ForgejoForge` 43; absent `ForgeAddress` 8; absent `BoxRequest.defender_dir` 1; the oracle's start still probing by planted sentinel 1 (red since `d9a55b4a`).
+- **Throwaway scratch implementation** (a scratch clone, never committed; written by this author without honest or adversary source): `staged`/`code`/`data` startup checks, `ForgeAddress`/`ForgejoForge`, and `tenant_delivery` as the seams above describe. Against it the suite reports 380 passed and 4 failed: the two oracle cases (three rows) and the `CODE_CHECK_FILE` census, amendment-1 oracle work the scratch did not implement. It and the mutants below exposed three test defects, fixed before commit: a fixture whose `git add -A` dropped the executable base file; a writable-`staged` case that passed vacuously on the base; and a `forge/` listing captured after the first publish, so a lock under `forge/` survived (now the listing must be exactly `git-credentials`).
+- **27 single mutants of that scratch, each killed by the intended assertion:** export copied from the clone's checkout; no non-blob refusal; a strict byte compare of `.tenant-id`; `current` rewritten in place; an unvalidated pointer; a blocking lock; one lock for the data root; the lock under `forge/`; the fetch inside the lock; a holder not named; a fast-forward outside the lock; non-regular entries skipped; symlinked directories skipped (`os.walk` `dirnames`); lanes matched by prefix; forbidden names checked at the lane root only; the draft's mode committed (`git add` of a copied file); no provenance check; provenance by commit message; git's `store` helper; no helper reset; fork filtering by owner only and by repository name only; a row without a head repository excluded; next-page Links compared as raw strings; a constant staged token; no staged root listing; a staged read-back judged by exit status only.
+- **Lints:** full `ruff check defender`, `ruff check . --select E,F --ignore E402,E501`, and all 34 `scripts/lint/lint_*.py` that `ci.yml` runs pass with no new finding.
+- Not run here: mypy (it excludes this test directory), the deferred K3/K8 checks above, and an independent intent review (dispatched by the orchestrator).
 
 ## Repair record (2026-10-14)
 
@@ -64,6 +161,8 @@ Remaining code-stage completion: the two architecture censuses in an integrated 
 
 ## D7 amendment repair (2026-10-15)
 
+History. Its `agent`-kind rows and drain mount set are superseded by amendment 2 (see above).
+
 Decided amendment: [issue comment 6190547938](https://github.com/beetroot-salad/cyber-response-agent/issues/1108#issuecomment-6190547938) (user decision; box-request lane only, run lane unchanged). Authored on `contract/1108-p3-repair` from 7d9b2dba. The author did not see honest or adversary source; production source here is the pre-P3 base. It supersedes F1/F5's and 7d9b2dba's `SKILL.md` probe copies.
 
 | Finding / obligation | Assertions | Complementary control |
@@ -106,31 +205,51 @@ Validation: 271 P3 cases collect, zero setup errors, all red on this base. Acros
 
 ## Local test API seams (implementation choices, not new persisted models)
 
-`defender.learning.author.tenant_delivery` exports `DeliveryRefused` and `TenantDelivery.open(accepted_tenant, defender_dir=Path, client=httpx.Client)`; this is a dormant factory, never production default wiring. One credential read belongs here. The object owns real `AuthorBranch` as `.branch`, and `start_batch(id)`, `commit(wt, relative_paths, message)`, `finish_batch(id,wt)`, `deliver(id)`, `box_request(wt,id,writable_dirs=agent_relative_lane_names)`, `start_box(request,docker=...)`. Host-only credential material must be absent from representation. Delivery errors normalize to DeliveryRefused; box startup faults remain BoxFault.
+Shared by the honest implementer and the adversary. All of P3 stays dormant: no production module may name `tenant_delivery` or `TenantDelivery` (census), and P4 wires curators and runs.
 
-`ForgejoForge(origin=network_url, token=loaded_token, client=httpx.Client)` is in existing forge module, retains three-method dict-shaped Forge interface and adds `verify_main_protection()`. It does not read the credential file itself. Protection reads `/branches/main` (C21 actual endpoint), requires strict true `protected` and strict false `user_can_push`, fails on missing/invalid evidence. PR normalization remains `number/headRefName/url`, retaining GhForge for P4.
+**`defender.learning.author.tenant_delivery`** exports:
 
-`BoxRequest.defender_dir` explicitly owns code geography. `TenantDelivery.box_request` uses code ro + agent ro + explicit lane rw, workdir agent, DEFENDER_AGENT_DIR agent. Existing `_render_argv` and `_host_fallback_env` must honor explicit code. Read-only mounts are `Mount(source=..., target=..., kind="code"|"agent"|"data")`; writable mounts carry no kind. Startup (`start_box(request)`, observed only through `docker=`) refuses a read-only mount without a known kind and applies the declared kind's read-back: `code` reads `<code_dir>/<box.CODE_CHECK_FILE>` (`"MOUNT_CHECK"`), `code_dir` being `defender_dir` or `<workdir>/defender` and lying inside the `code` mount; `agent` reads `.tenant-id`; `data` reads its first regular file, empty allowed. A request has at most one `code` mount, and "inside" is by path components. Read-backs compare line-ending-normalized text with the host's own read; a host read fault is a `BoxFault`. Both request-lane entries are contract seams: `start_box(request, docker=)` and `_lifecycle._start_boxed_request(request, docker)`, which `_oracle.start_oracle_box` reaches. The private `_check_mount_sentinel` signature is no longer a contract seam. The request-lane fakes (`FakeDaemon`, `RecordingDocker`, `MountedReadDocker`) answer a read-back as `cat <in-box path>`, operand last, stdout the file's text; the run lane's base64 `.tenant-id` reader is not that shape. `start_box` must not return an unsandboxed executor for tenant requests.
+- `DeliveryRefused(Exception)`; `LockBusy(DeliveryRefused)`, raised at once when the tenant's lock is held elsewhere, its message naming the holder's pid.
+- `TenantExport` with `.commit: str` and `.path: Path` (`<T>/exports/<commit>`, holding exactly that commit's `agent/` and `settings/` regular blobs, written from git objects, immutable once published).
+- `current_export(tenant) -> TenantExport`: reads `<T>/exports/current` (a pointer file replaced atomically) and spawns no process; an absent, empty or escaping pointer, or one naming a missing export, is `DeliveryRefused`.
+- `tenant_lock(tenant)`: the per-tenant file lock under `<T>/` (not `forge/`), a context manager; held only for fast-forward, export publish and worktree creation.
+- `AgentChange(path: str, content: bytes | None)`: `path` repo-relative POSIX under `agent/`; `None` deletes. `ChangeSet(changes)`: immutable, built positionally from a sequence of `AgentChange`, iterable. A path outside `agent/`, a traversal or whitespace-led name, `agent/.tenant-id`, `.gitattributes`/`.gitignore`/`.gitmodules` at any depth, or non-bytes content is refused at construction or at commit (`DeliveryRefused`, `ValueError` or `TypeError`).
+- `TenantDelivery.open(tenant, *, defender_dir: Path, client: httpx.Client)`: the dormant factory and the single reader of `<T>/forge/git-credentials`. Refusals (O9), origin/credential agreement over the parsed `ForgeAddress`, and protection (A10) as before. No token in `repr`. Methods:
+  - `publish() -> TenantExport`: fetch (no lock), then under the lock fast-forward the clone (refusing dirty, untracked or diverged state), refuse any non-blob tree entry under `agent/` or `settings/` and any `agent/.tenant-id` not naming this tenant through `_tenant.parse_tenant_id_bytes`, write the export, replace `current`. Nothing is published on refusal.
+  - `start_batch(batch_id, *, lanes: tuple[str, ...]) -> Batch`: publish, then under the lock a worktree of the clone at the export commit under `tenant.worktrees` (host-only, never mounted); then the draft `<T>/drafts/<batch_id>/agent`, a git-free copy.
+  - `start_box(request, *, docker) -> BoxExecutor`: the tenant drain's start; never an unsandboxed executor, whatever the operator opt-out.
+  - `finish(batch) -> str`: push the batch branch, then the PR found by exact head (forks excluded) or opened against `main`; the PR url.
+  - `deliver(batch_id) -> str`: a retained branch (pushed, PR creation failed), by a later delivery object too.
+  - `revert(lesson_path: str, lesson_name: str) -> str`: a `ChangeSet` from history (the prior content, or a deletion) through the commit-maker, pushed with its own PR.
+  - Every push route first checks that each commit between the base and the branch head is one the commit-maker made, refusing (`DeliveryRefused`, before any push or PR) otherwise. Each route's commits sit on a local branch `refs/heads/<branch>` of the clone before its push.
+- `Batch`: `.id`, `.branch` (the branch name), `.export` (`TenantExport`), `.worktree`, `.draft_root` (`<T>/drafts/<batch_id>`), `.lanes`; `.box_request() -> BoxRequest`; `.change_set() -> ChangeSet` (draft against worktree; regular files only, read no-follow, under `READ_LIMIT`; any other entry, an out-of-lane path or a forbidden name refuses the claim whole); `.commit(change_set, message) -> str` (the commit-maker, the only maker of tenant commits: accepts only a `ChangeSet` within the lanes, commits in the worktree with mode 100644, returns the sha); `.reset()` (re-syncs the draft from the worktree without following links).
+- Git runs with every credential helper reset and one read-only helper answering only `get` from the tenant file, `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=` empty; the clone's own hooks are not disabled (the revert case observes through a `reference-transaction` hook).
+
+**`defender.learning.author.forge`**: `ForgeAddress` (`scheme`, `host`, `port`, `owner`, `repo`; `ForgeAddress.parse(url)`; default port explicit, scheme and host case folded, `.git` optional; anything but `http(s)://host[:port]/owner/repo[.git]` is a `ForgeError`; equality is the comparison). `ForgejoForge(origin=, token=, client=)` parses once into `.address`, keeps the three-method `Forge` interface plus `verify_main_protection()`, compares every next-page Link's parsed address and repository path against `.address` before requesting it, and counts only rows whose head repository is the base repository (`head.repo.full_name`, with `head.repo_id`, in the observed schema); a row without a head repository is a `ForgeError`. Exact-head lookup is the paginated listing. PR rows normalize to `number/headRefName/url`.
+
+**`defender.runtime.box`**: `BoxRequest.defender_dir` owns code geography (`_render_argv`, `_host_fallback_env`, image resolution). Read-only mounts declare `Mount(..., kind="code"|"data"|"staged")`; writable mounts carry no kind, and a writable `staged` mount is refused. `code` reads back `<code_dir>/<box.CODE_CHECK_FILE>` (`"MOUNT_CHECK"`) inside the one `code` mount; `data` reads its first regular file, empty allowed; `staged` (a host-made copy's root) gets a fresh random token planted at its root for each start, read back as `cat <root>/<token file>`; the root holds `agent/` (a real folder), `settings/` only for a run copy (P4), and that token, and anything else refuses. The tenant drain's start refuses a draft root holding `settings/`. The `agent` kind is retired and refused like any non-kind word. Read-backs compare line-ending-normalized text. Both request-lane entries, `start_box(request, docker=)` and `_lifecycle._start_boxed_request(request, docker)`, are seams. The fakes (`FakeDaemon`, `_Boundary`, `RecordingDocker`, `MountedReadDocker`) answer only `cat <in-box path>` reads (operand last) and the alias probe; any other in-box command answers empty, so a root listing done in the box cannot be judged by them. Drain request: `{(defender_dir, code), (draft_root, staged), (draft_root/agent/<lane>, writable)}`, workdir and `DEFENDER_AGENT_DIR` = `draft_root/agent`.
+
+**Test machinery** (`_support.py`): `build_tenant`/`repo` (local transport behind a network-shaped origin), `http_repo` with `GitHTTP` (real `git http-backend` behind Basic auth, recording `(service, token sent, accepted)` per request), `ForgeHTTP` (`on_request` probe hook), `LockHolder` and `lock_probe` (out-of-process lock holder and taker through `tenant_lock`), `plant_raw_commit` and `install_planting_hook` (commits the commit-maker did not make, with its exact message and identities), `bounded` (no hang on FIFOs).
 
 ## Obligations and enforcing assertions
 
 | Obligation | Scenarios / target | Assertion groups / discriminated violation | Status |
 |---|---|---|---|
-| O7 real delivery | test_tenant_batch_commits_pushes_and_opens_tenant_main_without_product_write | real git batch under tenant worktrees + quarantine; exact commit path; remote batch SHA equals local; remote main unchanged; HTTP repo path/base/head; product SHA unchanged | target missing |
-| O7 commit gate | test_commit_gate_refuses_forbidden_paths_before_staging_or_commit; test_mixed_allowed_and_forbidden_commit_is_atomic_and_does_not_include_staged_settings | actual forbidden edits, marker/settings/product/traversal; unchanged HEAD/index; scoped allowed commit excludes staged forbidden with positive SHA/path assertion; mixed requested forbidden atomic refusal | target missing |
-| O7 push gate | test_finish_refuses_out_of_policy_commit_that_bypassed_gate | real bypass marker/settings/product commits cannot push or create PR; exact branch ref absent | target missing |
-| O7 retained delivery | test_failed_pr_creation_can_deliver_retained_branch_without_reauthoring | real push followed by HTTP failure, cleanup, retry branch without author, same remote SHA | target missing |
-| O7b | test_next_batch_fast_forwards_clone_before_creating_worktree; test_refresh_refuses_local_state_without_creating_batch | remote human merge reaches clone and batch; tracked dirty/untracked/diverged refused without HEAD change or worktree | target missing |
+| O7 real delivery | test_tenant_batch_commits_pushes_and_opens_tenant_main_without_product_write | real git batch under tenant worktrees + quarantine; exact commit path; remote batch SHA equals local; remote main unchanged; HTTP repo path/base/head; product SHA unchanged | target missing; now `test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_write` (amendment 2) |
+| O7 commit gate | test_commit_gate_refuses_forbidden_paths_before_staging_or_commit; test_mixed_allowed_and_forbidden_commit_is_atomic_and_does_not_include_staged_settings | actual forbidden edits, marker/settings/product/traversal; unchanged HEAD/index; scoped allowed commit excludes staged forbidden with positive SHA/path assertion; mixed requested forbidden atomic refusal | target missing; **removed by amendment 2**; see O-C |
+| O7 push gate | test_finish_refuses_out_of_policy_commit_that_bypassed_gate | real bypass marker/settings/product commits cannot push or create PR; exact branch ref absent | target missing; **removed by amendment 2**; see O-C |
+| O7 retained delivery | test_failed_pr_creation_can_deliver_retained_branch_without_reauthoring | real push followed by HTTP failure, cleanup, retry branch without author, same remote SHA | target missing; now `test_retained_branch_delivery_pushes_only_commit_maker_commits` |
+| O7b | test_next_batch_fast_forwards_clone_before_creating_worktree; test_refresh_refuses_local_state_without_creating_batch | remote human merge reaches clone and batch; tracked dirty/untracked/diverged refused without HEAD change or worktree | target missing; next-batch case now `test_start_batch_cuts_a_host_only_worktree_and_a_git_free_draft_at_the_export_commit` |
 | O8 credentials | test_credentials_require_scheme_host_and_port_agreement_before_http; test_credentials_loaded_once_and_token_not_in_representation | scheme/host/port negatives before HTTP; process-local audit hook counts one file read (with read_bytes positive control); modify file after open yet HTTP token same; repr/env exclusion with successful request control | target missing |
 | O8/P3 architecture | test_git_credential_location_has_one_production_owner; test_tenant_delivery_has_no_production_callers_until_p4 | AST census excludes docstrings/tests; credential literal only delivery owner or layout path construction; production imports/names/dynamic-import strings cannot wire dormant target; target import prerequisite prevents zero-implementation pass | target missing |
-| O8 git credential source | test_git_operations_explicitly_reset_helpers_and_use_only_tenant_file | real Git Trace2 fetch/push argv helper sequence equals exactly reset + store credential path; no token argv | target missing; local transport does not invoke helper, argv enforces by-construction commitment |
-| O8 box isolation | test_drain_request_mounts_only_code_agent_and_explicit_lane | exact mount set excludes all ancestors of settings/git/forge; explicit code and agent env, token/forge absent in actual rendered argv | target missing |
+| O8 git credential source | test_git_operations_explicitly_reset_helpers_and_use_only_tenant_file | real Git Trace2 fetch/push argv helper sequence equals exactly reset + store credential path; no token argv | target missing; local transport does not invoke helper, argv enforces by-construction commitment; **removed by amendment 2**; see O-E (`test_credential.py`) |
+| O8 box isolation | test_drain_request_mounts_only_code_agent_and_explicit_lane | exact mount set excludes all ancestors of settings/git/forge; explicit code and agent env, token/forge absent in actual rendered argv | target missing; now `test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes` |
 | O8 unsandboxed | test_tenant_drain_refuses_unsandboxed_even_when_operator_opted_out | opt-out set + real startup fault seam still raises, no unboxed return | target missing |
 | O9 | test_delivery_refuses_unusable_tenant_with_named_reason | unversioned/local-origin/missing credentials/missing main individually named | target missing |
 | A10/C21 | test_main_requires_known_protected_and_bot_cannot_push; test_protection_read_failure_or_unknown_push_permission_refuses; test_protection_verification_reads_branch_but_never_changes_rules | unprotected/pushable/unknown/API denied/malformed refused; valid branch read only exact endpoint | target missing |
 | A5/C19 | test_open_pr_listing_traverses_pages_and_filters_head_prefix; test_exact_head_lookup_does_not_accept_prefix_match; test_create_sends_all_pr_fields_to_origin_repository | real HTTP adapter observes page Link, filters head.ref, exact head matching, PR POST body/path/url | target missing |
-| D7 RO probes | test_readonly_probe_reads_existing_file_and_never_plants | declared code/agent positive/mismatch/read fault through real `start_box`; snapshot during boundary detects transient plants; exact existing file read | target missing (`Mount.kind`) |
-| D7 RO startup wiring | test_drain_start_wires_real_lifecycle_readback_before_returning_executor | real lifecycle via existing FakeDaemon, successful sandbox control, wrong agent readback refuses/reaps; git clean after success | target missing |
+| D7 RO probes | test_readonly_probe_reads_existing_file_and_never_plants | declared code/agent positive/mismatch/read fault through real `start_box`; snapshot during boundary detects transient plants; exact existing file read | target missing (`Mount.kind`); `agent` rows removed (amendment 2); `code`/`data` kept |
+| D7 RO startup wiring | test_drain_start_wires_real_lifecycle_readback_before_returning_executor | real lifecycle via existing FakeDaemon, successful sandbox control, wrong agent readback refuses/reaps; git clean after success | target missing; now `test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_a_box` |
 | D7 explicit code env | test_explicit_defender_dir_also_owns_host_fallback_environment | host fallback DEFENDER_DIR/PATH/PYTHONPATH come from code, not workdir | BoxRequest field missing |
 
 ## Grounding
@@ -154,7 +273,9 @@ All assertions downstream of absent production targets require implementation-st
 Run from the worktree root with the project interpreter and worktree import root:
 
 ```sh
-PYTHONPATH="$PWD" flock /tmp/defender-pytest.lock /workspace/defender/.venv/bin/python -m pytest defender/tests/tenant_1108_delivery -q
+PYTHONPATH="$PWD" flock /tmp/defender-pytest.lock /workspace/defender/.venv/bin/python -m pytest defender/tests/tenant_1108_delivery -q -n 4
 ```
+
+The lock and credential cases start short-lived Python probe processes and a loopback `git http-backend` server; nothing leaves the host.
 
 The interpreter path above is this dev host's existing venv; other machines use their project interpreter. Product CI needs no tenant repository, credential, or dev Forgejo for this suite.

@@ -1,10 +1,13 @@
 """D7/O8: distinct code and knowledge geography, no forge exposure, read-only probes.
 
-D7 as amended (issue comment 6190547938): every read-only `Mount` declares its kind (`code`,
-`agent` or `data`); startup applies that kind's check and never infers one from a name or path.
-A `code` mount is proven by reading back `<code_dir>/<box.CODE_CHECK_FILE>`, where `code_dir`
-is the request's explicit `defender_dir` or the legacy `<workdir>/defender`, inside the one
-mount declared `code`. Every rule holds on both request-lane entries (`_ENTRIES`).
+D7 as amended (issue comments 6190547938 and 6195623857): every read-only `Mount` declares its
+kind (`code`, `data` or `staged`); startup applies that kind's check and never infers one from
+a name or path. A `code` mount is proven by reading back `<code_dir>/<box.CODE_CHECK_FILE>`,
+where `code_dir` is the request's explicit `defender_dir` or the legacy `<workdir>/defender`,
+inside the one mount declared `code`. A `staged` mount is a host-made copy's root: the host
+plants a fresh random token there before each start and the box reads it back; the root holds
+exactly `agent/` and that token. The `agent` kind is retired (amendment 2): tenant identity is
+checked once, at publish. Every rule holds on both request-lane entries (`_ENTRIES`).
 """
 from __future__ import annotations
 
@@ -23,7 +26,7 @@ import pytest
 from defender.runtime import box
 from defender.runtime.box import _lifecycle
 
-from ._support import DEFENDER, TOKEN, ForgeHTTP, delivery, git, target
+from ._support import DEFENDER, LANES, TOKEN, ForgeHTTP, delivery, files_under, git
 
 #: A pinned image, so these requests never resolve one from a made-up tree.
 _PINNED = box.BoxSpec(runtime="runc", rootfs="defender-box:test1108")
@@ -52,17 +55,31 @@ class _Boundary:
     The watched read-only sources are snapshotted at every call, so even a transient plant
     during startup is seen."""
 
-    def __init__(self, base: Path, watched, replies=None, under=None):
+    def __init__(self, base: Path, watched, replies=None, under=None, root=None, root_reply=None):
         from defender.tests._box1195 import FakeDaemon
         self.daemon = FakeDaemon(base)
         self.watched = tuple(watched)
         self.before = _snapshot(*self.watched)
         self.replies = dict(replies or {})
         self.under = {Path(folder): reply for folder, reply in (under or {}).items()}
+        #: A staged copy's root: reads of an entry directly in it (not `agent`) are its token
+        #: reads; `root_reads` records the host's bytes at that path as each is asked for, and
+        #: `root_reply`, when set, answers them instead of the daemon.
+        self.root = None if root is None else Path(root)
+        self.root_reply = root_reply
+        self.root_reads: list[tuple[str, bytes | None]] = []
         self.execs: list[list[str]] = []
         self.snapshots: list[dict] = []
 
     def _scripted(self, operand: str):
+        if self.root is not None and _at_root(operand, self.root):
+            try:
+                held = Path(operand).read_bytes()
+            except OSError:
+                held = None
+            self.root_reads.append((operand, held))
+            if self.root_reply is not None:
+                return self.root_reply
         if operand in self.replies:
             return self.replies[operand]
         path = Path(operand)
@@ -88,6 +105,20 @@ class _Boundary:
     def assert_never_written(self) -> None:
         assert all(s == self.before for s in self.snapshots), "a read-only source changed during startup"
         assert _snapshot(*self.watched) == self.before
+
+
+def _at_root(operand: str, root: Path) -> bool:
+    """A read of an entry directly in a staged copy's root, other than its `agent/`."""
+    path = Path(operand)
+    return path.is_absolute() and path.parent == root and path.name != "agent"
+
+
+def _copy(root: Path) -> Path:
+    """A host-made copy root, as the host makes one: `agent/` and nothing else."""
+    (root / "agent" / "lessons").mkdir(parents=True)
+    (root / "agent" / ".tenant-id").write_text("blue\n", encoding="utf-8")
+    (root / "agent" / "lessons" / "seed.md").write_text("seed\n", encoding="utf-8")
+    return root
 
 
 def _request(name: str, workdir: Path, *mounts, **extra) -> box.BoxRequest:
@@ -120,29 +151,39 @@ def test_code_check_file_is_one_box_constant_committed_in_the_product_tree():
     git(DEFENDER.parent, "ls-files", "--error-unmatch", f"defender/{box.CODE_CHECK_FILE}")
 
 
-def test_drain_request_mounts_only_code_agent_and_explicit_lane(repo):
+def _batch(repo, batch_id="box"):
     d = delivery(repo, ForgeHTTP())
-    wt = d.start_batch("box")
-    request = d.box_request(wt, "box", writable_dirs=("lessons",))
+    return d, d.start_batch(batch_id, lanes=LANES)
+
+
+def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(repo):
+    """Amendment 2: the drain box sees product code (`code`), the draft's root read-only
+    (`staged`, never the worktree, the clone, an export, `settings/`, `.git` or `forge/`), and
+    the declared lanes writable inside it. `agent/` is `DEFENDER_AGENT_DIR` and the workdir."""
+    d, batch = _batch(repo)
+    tenant, draft = repo[0], batch.draft_root
+    request = batch.box_request()
     assert request.defender_dir == DEFENDER
-    assert request.workdir == wt / "agent"
-    assert {(m.source, m.target, m.writable) for m in request.mounts} == {
-        (DEFENDER, DEFENDER, False), (wt / "agent", wt / "agent", False),
-        (wt / "agent/lessons", wt / "agent/lessons", True)}
-    # D7 amendment 5: the tenant drain declares each read-only mount's kind.
-    assert {m.source: m.kind for m in request.mounts if not m.writable} == {
-        DEFENDER: "code", wt / "agent": "agent"}
-    assert request.env["DEFENDER_AGENT_DIR"] == str(wt / "agent")
+    assert request.workdir == draft / "agent"
+    assert {(Path(m.source), Path(m.target), m.writable, m.kind) for m in request.mounts} == {
+        (DEFENDER, DEFENDER, False, "code"), (draft, draft, False, "staged"),
+        (draft / "agent/lessons", draft / "agent/lessons", True, None)}
+    assert request.env["DEFENDER_AGENT_DIR"] == str(draft / "agent")
+    host_only = (tenant.knowledge, batch.worktree, tenant.worktrees, tenant.dir / "exports",
+                 tenant.dir / "forge")
+    for mount in request.mounts:
+        source = Path(mount.source)
+        assert not any(source.is_relative_to(h) or h.is_relative_to(source) for h in host_only), source
     create = _lifecycle._render_argv(request, [], "probe-token")
     env = [create.argv[i + 1] for i, part in enumerate(create.argv) if part == "--env"]
     assert f"DEFENDER_DIR={DEFENDER}" in env
     assert f"PYTHONPATH={DEFENDER.parent}" in env
     assert any(e.startswith(f"PATH={DEFENDER / 'bin'}:") for e in env)
-    assert f"DEFENDER_AGENT_DIR={wt / 'agent'}" in env
-    assert TOKEN not in json.dumps(create.argv)
-    assert str(repo[0].dir / "forge") not in json.dumps(create.argv)
-    assert not any(m.source == wt or m.source.is_relative_to(wt / "settings") or
-                   m.source.is_relative_to(wt / ".git") for m in request.mounts)
+    assert f"DEFENDER_AGENT_DIR={draft / 'agent'}" in env
+    rendered = json.dumps(create.argv)
+    assert TOKEN not in rendered
+    for path in host_only:
+        assert str(path) not in rendered, path
 
 
 def test_explicit_defender_dir_also_owns_host_fallback_environment(tmp_path):
@@ -157,9 +198,8 @@ def test_explicit_defender_dir_also_owns_host_fallback_environment(tmp_path):
 
 def test_tenant_drain_refuses_unsandboxed_even_when_operator_opted_out(repo, monkeypatch):
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
-    d = delivery(repo, ForgeHTTP())
-    wt = d.start_batch("no-box")
-    request = d.box_request(wt, "no-box", writable_dirs=("lessons",))
+    d, batch = _batch(repo, "no-box")
+    request = batch.box_request()
     calls = []
     def unavailable(argv, **kwargs):
         calls.append(argv)
@@ -175,7 +215,7 @@ def test_tenant_drain_refuses_unsandboxed_even_when_operator_opted_out(repo, mon
 #: other difference refuses, a trailing newline lost or added or a space included.
 _TEXT_DIFFERENCES = ("newline-lost", "newline-added", "space-added")
 _PROBE_CASES = [
-    *((kind, fault) for kind in ("agent", "code", "data") for fault in (None, "mismatch", "read-error")),
+    *((kind, fault) for kind in ("code", "data") for fault in (None, "mismatch", "read-error")),
     *((kind, fault) for kind in ("code", "data") for fault in (*_TEXT_DIFFERENCES, "crlf-on-host")),
 ]
 
@@ -189,7 +229,6 @@ def test_readonly_probe_reads_existing_file_and_never_plants(tmp_path, start, ki
     only a CRLF/LF difference compares equal. `data` reads its first regular file, here its
     only one."""
     folder, marker, expected = {
-        "agent": ("tenant-half", ".tenant-id", "blue\n"),
         "code": ("product-tree", _check_file(), _check_bytes()),
         "data": ("evidence-store", "result.json", f'{{"made-up": "{secrets.token_hex(8)}"}}\n'),
     }[kind]
@@ -197,7 +236,7 @@ def test_readonly_probe_reads_existing_file_and_never_plants(tmp_path, start, ki
     source.mkdir()
     on_host = expected.replace("\n", "\r\n") if fault == "crlf-on-host" else expected
     (source / marker).write_bytes(on_host.encode())
-    if kind != "data":
+    if kind == "code":
         (source / "unrelated.txt").write_text("not a probe\n", encoding="utf-8")
     probe = str(source / marker)
     reply = {None: (0, expected), "crlf-on-host": (0, expected), "mismatch": (0, "wrong\n"),
@@ -277,11 +316,13 @@ def test_readonly_mount_without_a_declared_kind_is_refused_at_startup(tmp_path, 
     accepted.assert_never_written()
 
 
-#: Words that are not kinds: the design's own folder names, near-synonyms, and case and
-#: whitespace variants of the three kinds (A08/A17). Only `code`, `agent` and `data` are kinds.
+#: Words that are not kinds: the design's own folder names, near-synonyms, case and
+#: whitespace variants of the three kinds (A08/A17), and the retired `agent` kind
+#: (amendment 2). Only `code`, `data` and `staged` are kinds.
 _NOT_KINDS = ["defender", "tenant", "", "product", "checkout", "repo", "source", "identity",
               "evidence", "runs", "ro", "readonly", "none", "None", "Code", "CODE", " code",
-              "code ", "codes", "Agent", "DATA"]
+              "code ", "codes", "Agent", "DATA", "agent", "Staged", "STAGED", " staged",
+              "stage", "draft", "copy", "export"]
 
 
 @pytest.mark.parametrize("kind", _NOT_KINDS)
@@ -305,46 +346,51 @@ def test_a_word_that_is_not_a_kind_is_refused_not_mapped(tmp_path, start, kind):
 @pytest.mark.parametrize(("case", "folder", "kind", "starts"), [
     ("data-at-legacy-code-dir", "defender", "data", True),
     ("data-named-agent", "agent", "data", True),
-    ("agent-named-defender", "defender", "agent", True),
+    ("staged-named-defender", "defender", "staged", True),
     ("code-not-named-defender", "srv-tree", "code", False),
-    ("agent-not-named-agent", "tenant-half", "agent", False),
+    ("staged-holding-no-agent", "tenant-half", "staged", False),
 ])
 def test_startup_applies_the_declared_kind_never_the_folder_name(
         tmp_path, start, case, folder, kind, starts):
-    """D7 amendment 1: the rule comes from the declared kind. Empty `data` folders named
+    """D7 amendments 1-2: the rule comes from the declared kind. Empty `data` folders named
     `defender` (at the legacy code dir) or `agent` start with nothing read (#665 Decision 9);
-    an `agent` folder named `defender` needs only its identity; a `code` folder by any other
-    name still needs the check file, and an `agent` one still needs `.tenant-id`."""
+    a `staged` copy whose root is named `defender` gets its token check and no code check; a
+    `code` folder by any other name still needs the check file, and a `staged` root holding no
+    `agent/` refuses."""
     wt = tmp_path / "wt"
     source = wt / folder
-    source.mkdir(parents=True)
     extra = {}
-    if case == "agent-named-defender":
-        (source / ".tenant-id").write_text("blue\n", encoding="utf-8")
-    elif case == "code-not-named-defender":
+    if case == "staged-named-defender":
+        _copy(source)
+    else:
+        source.mkdir(parents=True)
+    if case == "code-not-named-defender":
         shutil.copyfile(DEFENDER / "SKILL.md", source / "SKILL.md")
         (source / "unrelated.txt").write_text("not the check file\n", encoding="utf-8")
         extra = {"defender_dir": source}
-    elif case == "agent-not-named-agent":
-        (source / "unrelated.txt").write_text("not an identity\n", encoding="utf-8")
-    boundary = _Boundary(tmp_path, [source])
+    elif case == "staged-holding-no-agent":
+        (source / "unrelated.txt").write_text("not a copy of agent/\n", encoding="utf-8")
+    watched = source / "agent" if case == "staged-named-defender" else source
+    boundary = _Boundary(tmp_path, [watched], root=source if kind == "staged" else None)
     request = _request("defender-kind-1108", wt,
                        box.Mount(source=source, target=source, kind=kind), **extra)
     if not starts:
         with pytest.raises(box.BoxFault):
             start(request, boundary)
         assert boundary.daemon.names() == []
-        boundary.assert_never_written()
+        if kind != "staged":
+            boundary.assert_never_written()
         return
     assert start(request, boundary).sandboxed
     assert boundary.daemon.names() == [request.name]
     operands = boundary.operands()
     assert not any(op.endswith("/" + _check_file()) for op in operands), "a non-code mount got the code check"
+    assert not any(op.endswith("/.tenant-id") for op in operands), "identity is checked at publish"
     if kind == "data":
         assert not any(Path(op).is_relative_to(source) for op in operands), \
             "an empty data folder was read or asked for an identity"
     else:
-        assert str(source / ".tenant-id") in operands
+        assert boundary.root_reads, "the staged copy's token was never read back"
     boundary.assert_never_written()
 
 
@@ -454,17 +500,17 @@ def test_a_request_declares_at_most_one_code_mount(tmp_path, start, second):
     boundary.assert_never_written()
 
 
-@pytest.mark.parametrize("kind", ["code", "agent"])
+@pytest.mark.parametrize("kind", ["code"])
 def test_a_host_side_read_fault_is_a_box_fault(tmp_path, start, kind):
     """A13: the host's own read of the probe file failing (here: a folder in its place) is a
     `BoxFault` like every other startup fault, with no box left. The box's side answers, so
     the refusal can only come from the host read or the comparison."""
-    source = tmp_path / ("product-tree" if kind == "code" else "tenant-half")
-    marker = source / (_check_file() if kind == "code" else ".tenant-id")
+    source = tmp_path / "product-tree"
+    marker = source / _check_file()
     marker.mkdir(parents=True)
     (source / "unrelated.txt").write_text("not a probe\n", encoding="utf-8")
     boundary = _Boundary(tmp_path, [source], {str(marker): (0, "blue\n")})
-    extra = {"defender_dir": source} if kind == "code" else {}
+    extra = {"defender_dir": source}
     request = _request("defender-hostread-1108", source,
                        box.Mount(source=source, target=source, kind=kind), **extra)
     with pytest.raises(box.BoxFault):
@@ -577,54 +623,169 @@ def test_oracle_runner_is_a_code_mount_holding_only_runner_files_and_starts_sand
         shutil.rmtree(runner, ignore_errors=True)
 
 
-@pytest.mark.parametrize("wrong_readback", [False, True])
-def test_drain_start_wires_real_lifecycle_readback_before_returning_executor(repo, tmp_path, wrong_readback):
+#: How a staged copy's token read-back can go wrong: another copy's token, nothing to read
+#: (an empty or stale folder with no token), or an empty answer.
+_TOKEN_FAULTS = {"another-copy": (0, "a token another copy holds\n"), "unreadable": (1, ""),
+                 "empty": (0, "")}
+
+
+@pytest.mark.parametrize("fault", [None, *sorted(_TOKEN_FAULTS)])
+def test_a_staged_copy_starts_only_on_the_token_the_host_planted_for_this_start(
+        tmp_path, start, fault):
+    """Amendment 2, O-A: the host plants a fresh random token at the copy's root, outside
+    `agent/`, and the box must read those bytes back before any workload; a box bound to
+    another copy, or to an empty or stale folder, refuses with no container left. `agent/` is
+    never written, and `.tenant-id` is never a probe (identity was checked at publish)."""
+    root = _copy(tmp_path / "copy")
+    boundary = _Boundary(tmp_path, [root / "agent"], root=root,
+                         root_reply=None if fault is None else _TOKEN_FAULTS[fault])
+    request = _request("defender-staged-1108", root, box.Mount(source=root, target=root, kind="staged"))
+    if fault is None:
+        assert start(request, boundary).sandboxed
+        assert boundary.daemon.names() == [request.name]
+        [(operand, held)] = boundary.root_reads
+        assert held, "the token the box read back must be the host's planted, non-empty bytes"
+    else:
+        with pytest.raises(box.BoxFault):
+            start(request, boundary)
+        assert boundary.daemon.names() == [], "a refused box was left behind"
+        assert boundary.root_reads, "startup never asked the box for the copy's token"
+    assert not any(op.endswith("/.tenant-id") for op in boundary.operands())
+    boundary.assert_never_written()
+
+
+def test_a_staged_token_is_fresh_for_every_start(tmp_path, start):
+    """O-A: each start plants new bytes, so a box answering with an earlier start's token (a
+    stale bind) refuses, while a plain restart of the same copy starts (control)."""
+    root = _copy(tmp_path / "copy")
+    request = _request("defender-fresh-1108", root, box.Mount(source=root, target=root, kind="staged"))
+    tokens = []
+    for attempt in ("first", "second"):
+        boundary = _Boundary(tmp_path / attempt, [root / "agent"], root=root)
+        executor = start(request, boundary)
+        assert executor.sandboxed
+        [(_operand, held)] = boundary.root_reads
+        tokens.append(held)
+        box.stop_box(executor)
+    assert all(tokens), "each start plants non-empty token bytes"
+    assert tokens[0] != tokens[1], "the token must be fresh per start"
+    replay = _Boundary(tmp_path / "replay", [root / "agent"], root=root,
+                       root_reply=(0, tokens[0].decode()))
+    with pytest.raises(box.BoxFault):
+        start(request, replay)
+    assert replay.daemon.names() == []
+
+
+@pytest.mark.parametrize("extra", ["stray-file", "git-dir", "agent-missing", "agent-is-a-link",
+                                   "agent-is-a-file"])
+def test_a_staged_root_holding_anything_but_agent_is_refused(tmp_path, start, extra):
+    """O-A: a staged root holds exactly `agent/` (a real folder) and the token; a leftover
+    file, a `.git`, a missing `agent/`, or one that is a link or a file refuses startup with
+    no container. A clean copy starts (control)."""
+    root = tmp_path / "copy"
+    if extra in {"stray-file", "git-dir"}:
+        _copy(root)
+        if extra == "stray-file":
+            (root / "stale.md").write_text("left by another copy\n", encoding="utf-8")
+        else:
+            (root / ".git").mkdir()
+            (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    else:
+        root.mkdir()
+        if extra == "agent-is-a-link":
+            elsewhere = _copy(tmp_path / "elsewhere")
+            (root / "agent").symlink_to(elsewhere / "agent", target_is_directory=True)
+        elif extra == "agent-is-a-file":
+            (root / "agent").write_text("not a folder\n", encoding="utf-8")
+        else:
+            (root / "lessons").mkdir()
+    refused = _Boundary(tmp_path / "refused", [], root=root)
+    with pytest.raises(box.BoxFault):
+        start(_request("defender-root-1108", root, box.Mount(source=root, target=root, kind="staged")),
+              refused)
+    assert refused.daemon.names() == []
+
+    clean = _copy(tmp_path / "clean")
+    accepted = _Boundary(tmp_path / "accepted", [clean / "agent"], root=clean)
+    assert start(_request("defender-root-1108", clean,
+                          box.Mount(source=clean, target=clean, kind="staged")), accepted).sandboxed
+
+
+@pytest.mark.parametrize("fault", [False, True])
+def test_a_lane_inside_a_staged_copy_keeps_its_planted_sentinel(tmp_path, start, fault):
+    """Amendment 2: the copy's root is read-only and its declared lanes are writable mounts
+    inside it, each still proven by its planted sentinel: a wrong mapping of the lane alone
+    refuses; in the control the lane is read back and left as it was."""
+    root = _copy(tmp_path / "copy")
+    lane = root / "agent" / "lessons"
+    boundary = _Boundary(tmp_path, [], under={lane: (0, "a different tree\n")} if fault else {},
+                         root=root)
+    request = _request("defender-lane-1108", root,
+                       box.Mount(source=root, target=root, kind="staged"),
+                       box.Mount(source=lane, target=lane, writable=True))
+    if fault:
+        with pytest.raises(box.BoxFault):
+            start(request, boundary)
+        assert boundary.daemon.names() == []
+    else:
+        assert start(request, boundary).sandboxed
+        assert sorted(p.name for p in lane.iterdir()) == ["seed.md"], "the sentinel was left behind"
+        assert boundary.root_reads
+    assert any(Path(op).parent == lane for op in boundary.operands()), "the lane was never read back"
+
+
+def test_a_staged_mount_is_never_writable(tmp_path, start):
+    """A host-made copy's root is read-only in the box; a writable `staged` mount is refused
+    at construction or startup, never started."""
+    root = _copy(tmp_path / "copy")
+    box.Mount(source=root, target=root, kind="staged")  # prerequisite: the kind exists
+    boundary = _Boundary(tmp_path, [])
+    with pytest.raises((box.BoxFault, ValueError, TypeError)):
+        start(_request("defender-rwstaged-1108", root,
+                       box.Mount(source=root, target=root, kind="staged", writable=True)), boundary)
+    assert boundary.daemon.names() == []
+
+
+@pytest.mark.parametrize("wrong", [None, "token", "settings-at-root"])
+def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_a_box(
+        repo, tmp_path, wrong):
+    """The tenant drain's own start: the product check file and the draft root's token are
+    read back through the box before an executor is handed out. A box answering another
+    draft's token, or a draft root that also holds `settings/` (a run copy's half, never a
+    draft's), refuses and reaps. The worktree and the draft's `agent/` are never touched."""
     from defender.tests._box1195 import FakeDaemon
-    d = delivery(repo, ForgeHTTP())
-    wt = d.start_batch("lifecycle")
-    request = d.box_request(wt, "lifecycle", writable_dirs=("lessons",))
-    request = replace(request, spec=box.BoxSpec(runtime="runc", rootfs="defender-box:test1108"))
+    d, batch = _batch(repo, "lifecycle")
+    root = batch.draft_root
+    request = replace(batch.box_request(), spec=_PINNED)
+    if wrong == "settings-at-root":
+        (root / "settings").mkdir()
+        (root / "settings" / "lead-zero.yaml").write_text("not in a draft\n", encoding="utf-8")
     daemon = FakeDaemon(tmp_path)
-    before = git(wt, "status", "--porcelain")
-    reads, execs = [], []
+    reads = []
+    agent_before = files_under(root / "agent")
+    status_before = git(batch.worktree, "status", "--porcelain")
+
     def boundary(argv, **kwargs):
-        if argv[:2] == ["docker", "exec"]:
-            execs.append([str(a) for a in argv])
-        if argv[:2] == ["docker", "exec"] and str(wt / "agent/.tenant-id") in argv:
-            reads.append(argv)
-            if wrong_readback:
-                return subprocess.CompletedProcess(argv, 0, "another-tenant\n", "")
+        argv = [str(a) for a in argv]
+        if argv[1:2] == ["exec"]:
+            reads.append(argv[-1])
+            if wrong == "token" and _at_root(argv[-1], root):
+                return subprocess.CompletedProcess(argv, 0, "another draft's token\n", "")
         return daemon(argv, **kwargs)
-    if wrong_readback:
-        with pytest.raises(box.BoxFault, match="match|read|tenant|probe"):
+    if wrong is not None:
+        with pytest.raises(box.BoxFault):
             d.start_box(request, docker=boundary)
         assert daemon.names() == []
     else:
         executor = d.start_box(request, docker=boundary)
         assert executor.sandboxed
         assert daemon.names() == [request.name]
-        assert git(wt, "status", "--porcelain") == before
-        assert str(DEFENDER / box.CODE_CHECK_FILE) in [argv[-1] for argv in execs], \
-            "startup must read the product check file through the box"
-    assert reads, "startup must actually read the agent identity through the box"
-    assert not any(argv[-1].endswith("/SKILL.md") for argv in execs)
-
-
-@pytest.mark.parametrize("escape", ["../settings", "lessons/../../settings", "absolute", "symlink"])
-def test_drain_request_refuses_writable_lane_outside_agent(repo, escape):
-    """O8: writable mounts resolve inside the worktree's agent half."""
-    d = delivery(repo, ForgeHTTP())
-    wt = d.start_batch("mount-escape")
-    if escape == "absolute":
-        lane = str(wt / "settings")
-    elif escape == "symlink":
-        (wt / "agent/escape").symlink_to(wt / "settings", target_is_directory=True)
-        lane = "escape"
-    else:
-        lane = escape
-    assert (wt / "agent" / lane).resolve() == (wt / "settings").resolve()
-    with pytest.raises(target().DeliveryRefused, match="path|agent|writ|mount|lane"):
-        d.box_request(wt, "mount-escape", writable_dirs=(lane,))
+        assert str(DEFENDER / box.CODE_CHECK_FILE) in reads, "the product check file was never read"
+        assert files_under(root / "agent") == agent_before
+    if wrong != "settings-at-root":
+        assert [r for r in reads if _at_root(r, root)], "the draft's token was never read back"
+    assert not any(r.endswith("/.tenant-id") or r.endswith("/SKILL.md") for r in reads)
+    assert git(batch.worktree, "status", "--porcelain") == status_before
 
 
 def _with_code_at(request, source: Path):
@@ -633,30 +794,22 @@ def _with_code_at(request, source: Path):
         for mount in request.mounts))
 
 
-@pytest.mark.parametrize("which", ["agent", "code"])
 @pytest.mark.parametrize("contents", ["no-files", "unrelated-file", "skill-md-only"])
-def test_drain_start_requires_fixed_probe_for_code_and_agent(repo, tmp_path, which, contents):
-    """D7/O3: generic empty-data handling cannot bypass required code or tenant probes, and
-    SKILL.md is neither (D7 amendment 6)."""
+def test_drain_start_requires_the_code_check_file(repo, tmp_path, contents):
+    """D7/O3: generic empty-data handling cannot bypass the required code probe, and SKILL.md
+    is not it (D7 amendment 6)."""
     from defender.tests._box1195 import FakeDaemon
-    d = delivery(repo, ForgeHTTP())
-    wt = d.start_batch("required-probe")
-    request = d.box_request(wt, "required-probe", writable_dirs=("lessons",))
-    if which == "code":
-        source = tmp_path / "arbitrary-code-location"
-        source.mkdir()
-        request = _with_code_at(request, source)
-    else:
-        source = wt / "agent"
-        shutil.rmtree(source)
-        (source / "lessons").mkdir(parents=True)
+    d, batch = _batch(repo, "required-probe")
+    source = tmp_path / "arbitrary-code-location"
+    source.mkdir()
+    request = _with_code_at(batch.box_request(), source)
     if contents == "unrelated-file":
-        (source / "unrelated.txt").write_text("not the required identity or product probe\n")
+        (source / "unrelated.txt").write_text("not the product probe\n", encoding="utf-8")
     elif contents == "skill-md-only":
         shutil.copyfile(DEFENDER / "SKILL.md", source / "SKILL.md")
-    request = replace(request, spec=box.BoxSpec(runtime="runc", rootfs="defender-box:test1108"))
+    request = replace(request, spec=_PINNED)
     daemon = FakeDaemon(tmp_path)
-    with pytest.raises(box.BoxFault, match="read|probe|tenant|missing|file|" + re.escape(_check_file())):
+    with pytest.raises(box.BoxFault, match="read|probe|missing|file|" + re.escape(_check_file())):
         d.start_box(request, docker=daemon)
     assert daemon.names() == []
 
@@ -665,13 +818,11 @@ def test_drain_start_accepts_a_code_folder_holding_only_the_check_file(repo, tmp
     """D7 amendment 6, positive arm: the tenant drain's code mount needs a check file and
     nothing else, at an arbitrary code root. Its bytes are fresh, never the product's (A09)."""
     from defender.tests._box1195 import FakeDaemon
-    d = delivery(repo, ForgeHTTP())
-    wt = d.start_batch("check-only")
+    d, batch = _batch(repo, "check-only")
     source = tmp_path / "arbitrary-code-location"
     source.mkdir()
     (source / box.CODE_CHECK_FILE).write_text(_check_bytes(), encoding="utf-8")
-    request = _with_code_at(d.box_request(wt, "check-only", writable_dirs=("lessons",)), source)
-    request = replace(request, spec=_PINNED)
+    request = replace(_with_code_at(batch.box_request(), source), spec=_PINNED)
     daemon = FakeDaemon(tmp_path)
     executor = d.start_box(request, docker=daemon)
     assert executor.sandboxed
@@ -679,18 +830,16 @@ def test_drain_start_accepts_a_code_folder_holding_only_the_check_file(repo, tmp
     assert sorted(p.name for p in source.iterdir()) == [box.CODE_CHECK_FILE]
 
 
-@pytest.mark.parametrize("which", ["code", "agent"])
+@pytest.mark.parametrize("which", ["code", "staged"])
 def test_tenant_drain_entry_refuses_a_readonly_mount_without_a_kind(repo, tmp_path, which):
     """D7 amendment 1 on the tenant drain's own start (A24): its request with one read-only
     mount's kind removed is refused, no box left; the unaltered request is the control in
-    `test_drain_start_wires_real_lifecycle_readback_before_returning_executor`."""
+    `test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_a_box`."""
     from defender.tests._box1195 import FakeDaemon
-    d = delivery(repo, ForgeHTTP())
-    wt = d.start_batch("kindless")
-    request = d.box_request(wt, "kindless", writable_dirs=("lessons",))
-    request = replace(request, spec=_PINNED, mounts=tuple(
+    d, batch = _batch(repo, "kindless")
+    request = replace(batch.box_request(), spec=_PINNED, mounts=tuple(
         replace(mount, kind=None) if not mount.writable and mount.kind == which else mount
-        for mount in request.mounts))
+        for mount in batch.box_request().mounts))
     assert [m for m in request.mounts if not m.writable and m.kind is None]
     daemon = FakeDaemon(tmp_path)
     with pytest.raises(box.BoxFault, match="(?i)kind"):
