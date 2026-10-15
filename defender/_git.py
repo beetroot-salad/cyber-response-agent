@@ -166,9 +166,8 @@ def git_show_head(cwd: Path, path: str) -> str | None:
     return proc.stdout if proc.returncode == 0 else None
 
 
-def git_head_sha(cwd: Path, *, timeout: float | None = None,
-                 env: Mapping[str, str] | None = None) -> str:
-    return git(["rev-parse", "HEAD"], cwd=cwd, timeout=timeout, env=env)
+def git_head_sha(cwd: Path, *, timeout: float | None = None) -> str:
+    return git(["rev-parse", "HEAD"], cwd=cwd, timeout=timeout)
 
 
 def git_show_file(
@@ -210,6 +209,16 @@ def _run_bytes(
     if proc.returncode != 0:
         raise GitError(args, proc.returncode, proc.stderr.decode("utf-8", "surrogateescape"))
     return proc.stdout
+
+
+def git_bytes(
+    args: Sequence[str], *, cwd: Path, input: bytes | None = None,
+    env: Mapping[str, str] | None = None, timeout: float | None = None,
+) -> bytes:
+    """`git <args>` with raw bytes in and out, untrimmed: for blob bytes and NUL-framed
+    listings, where a stripped or decoded answer would change what was stored. A non-zero
+    exit raises `GitError`; `timeout` passing first, `subprocess.TimeoutExpired`."""
+    return _run_bytes(args, cwd=cwd, input=input, env=env, timeout=timeout)
 
 
 def _regular_blobs(
@@ -311,28 +320,14 @@ def git_worktree_files(cwd: Path, pathspec: str, *, timeout: float | None = None
     return [p.decode("utf-8", "surrogateescape") for p in out.split(b"\0") if p]
 
 
-def git_commit_changed_paths(
-    cwd: Path, commit: str, *, env: Mapping[str, str] | None = None,
-) -> list[str]:
-    """Paths changed by a commit, losslessly delimited, including every merge parent.
-
-    Git's text helper strips stdout for scalar reads. Paths must retain leading whitespace;
-    NUL framing also preserves embedded newlines and avoids Git's display quoting.
-    """
-    proc = _run(["diff-tree", "--root", "-m", "--no-commit-id", "--no-renames",
-                 "--name-only", "-z", "-r", commit], cwd=cwd, env=env)
-    return [path for path in proc.stdout.split("\x00") if path]
-
-
 def git_rev_list_count(
-    cwd: Path, *, grep: str | None = None, rev_range: str = "HEAD",
-    env: Mapping[str, str] | None = None,
+    cwd: Path, *, grep: str | None = None, rev_range: str = "HEAD"
 ) -> int:
     args = ["rev-list", "--count"]
     if grep is not None:
         args.append(f"--grep={grep}")
     args.append(rev_range)
-    return int(git(args, cwd=cwd, env=env))
+    return int(git(args, cwd=cwd))
 
 
 def git_commit(
@@ -396,16 +391,15 @@ def git_commit_paths(
     for key, val in trailers or []:
         trailer_args += ["--trailer", f"{key}: {val}"]
     git(["commit", "-F", "-", *trailer_args, "--", *paths], cwd=cwd, input=message, env=env)
-    return git_head_sha(cwd, env=env)
+    return git_head_sha(cwd)
 
 
-def git_fetch(cwd: Path, *, config: Sequence[str] = ()) -> None:
-    git([*config, "fetch", "origin"], cwd=cwd, env=env_for_cwd())
+def git_fetch(cwd: Path) -> None:
+    git(["fetch", "origin"], cwd=cwd)
 
 
-def git_push(cwd: Path, branch: str, *, config: Sequence[str] = ()) -> None:
-    git([*config, "push", "--set-upstream", "origin", f"refs/heads/{branch}:refs/heads/{branch}"],
-        cwd=cwd, env=env_for_cwd())
+def git_push(cwd: Path, branch: str) -> None:
+    git(["push", "--set-upstream", "origin", branch], cwd=cwd)
 
 
 def git_worktree_add(
@@ -415,7 +409,6 @@ def git_worktree_add(
     *,
     branch: str | None = None,
     detach: bool = False,
-    env: Mapping[str, str] | None = None,
 ) -> None:
     args = ["worktree", "add"]
     if branch is not None:
@@ -423,17 +416,16 @@ def git_worktree_add(
     if detach:
         args.append("--detach")
     args += [str(path), ref]
-    git(args, cwd=cwd, env=env)
+    git(args, cwd=cwd)
 
 
-def git_worktree_remove(cwd: Path, path: Path | str, *, force: bool = True,
-                        env: Mapping[str, str] | None = None) -> None:
+def git_worktree_remove(cwd: Path, path: Path | str, *, force: bool = True) -> None:
     args = ["worktree", "remove"]
     if force:
         args.append("--force")
     args.append(str(path))
-    git(args, cwd=cwd, env=env)
+    git(args, cwd=cwd)
 
 
-def git_worktree_prune(cwd: Path, *, env: Mapping[str, str] | None = None) -> None:
-    git(["worktree", "prune"], cwd=cwd, env=env)
+def git_worktree_prune(cwd: Path) -> None:
+    git(["worktree", "prune"], cwd=cwd)
