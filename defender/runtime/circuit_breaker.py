@@ -26,6 +26,10 @@ INFRA_ERROR_CLASS = "infra"
 AGENT_FIXABLE_ERROR_CLASS = "agent-fixable"
 DENIED_ERROR_CLASS = "denied"
 
+#: What a breaker charge can mean, named in every message the breaker produces. It sees exit
+#: codes alone, and exit 2 is both a `TransportFault` and a `ConfigFault` (#1246).
+INFRA_CAUSES = "connectivity/auth failures, timeouts or configuration faults"
+
 
 def is_infra_failure(exit_code: int) -> bool:
     return exit_code in INFRA_EXIT_CODES
@@ -45,8 +49,8 @@ class RunAborted(Exception):
         self.total_failures = total_failures
         self.systems = sorted(set(systems))
         super().__init__(
-            f"run aborted by circuit breaker: {total_failures} connectivity/auth "
-            f"failures, timeouts or configuration faults across systems {self.systems} — "
+            f"run aborted by circuit breaker: {total_failures} {INFRA_CAUSES} across "
+            f"systems {self.systems} — "
             f"the environment appears unreachable or unconfigured. Escalate with the "
             f"visibility gap named."
         )
@@ -90,9 +94,9 @@ def down_message(state: RunState, system: str) -> str:
     # A system never charged has no count to name; the trip boundary stands in for it.
     n = state.breaker_failures(system) or PER_SYSTEM_FAIL_LIMIT
     return (
-        f"[circuit-breaker] System '{system}' is DOWN for this run: {n} "
-        f"connectivity/auth failures, timeouts or configuration faults "
-        f"(missing or broken settings; adapter exit 2 / 124) tripped the "
+        f"[circuit-breaker] System '{system}' is DOWN for this run: {n} {INFRA_CAUSES} "
+        f"(adapter exit 2: unreachable, refused credentials, or missing/broken settings; "
+        f"exit 124: timed out) tripped the "
         f"breaker, so this dispatch did not run and {system}'s reference skill was "
         f"not loaded. This "
         f"is a visibility gap, not a query result. Do NOT re-dispatch {system}; "

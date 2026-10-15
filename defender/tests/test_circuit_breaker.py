@@ -131,7 +131,14 @@ def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
 def test_a_breaker_tripped_by_config_faults_names_configuration(tmp_path):
     """#1246: a missing or broken config (`ConfigFault`) exits 2 like a transport failure and
     charges the same breaker — intended — so the messages it produces cannot blame
-    connectivity alone; the breaker sees exit codes, not which fault raised them."""
+    connectivity alone; the breaker sees exit codes, not which fault raised them. The causes
+    are one phrase both messages read, and MAIN's opening correlation sentence for a tripped
+    system claims no cause at all."""
+    from defender.runtime.lead_zero import (
+        ENDING_TRIPPED_BREAKER,
+        CorrelationOutcome,
+        render_correlation_section,
+    )
     from defender.scripts.adapters.faults import ConfigFault
 
     state = _state(tmp_path)
@@ -139,11 +146,18 @@ def test_a_breaker_tripped_by_config_faults_names_configuration(tmp_path):
         cb.record_outcome(state, "elastic", ConfigFault.exit_code)
     assert cb.is_tripped(state, "elastic"), "config faults no longer charge the breaker"
     down = cb.down_message(state, "elastic")
-    assert "configuration" in down, f"the down message never names a config cause: {down!r}"
+    assert "configuration" in cb.INFRA_CAUSES, cb.INFRA_CAUSES
+    assert cb.INFRA_CAUSES in down, f"the down message restates the causes: {down!r}"
 
     for i in range(cb.RUN_FAIL_KILL_LIMIT - cb.PER_SYSTEM_FAIL_LIMIT - 1):
         cb.record_outcome(state, f"system-{i}", ConfigFault.exit_code)
     with pytest.raises(cb.RunAborted) as aborted:
         cb.record_outcome(state, "system-last", ConfigFault.exit_code)
-    assert "configuration" in str(aborted.value), \
-        f"the run-kill message never names a config cause: {aborted.value}"
+    assert cb.INFRA_CAUSES in str(aborted.value), \
+        f"the run-kill message restates the causes: {aborted.value}"
+
+    opening = render_correlation_section(
+        CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system="elastic"), grant_home="-")
+    assert "elastic" in opening, opening
+    assert "unreachable" not in opening, \
+        f"MAIN's opening message blames connectivity for a tripped breaker: {opening!r}"
