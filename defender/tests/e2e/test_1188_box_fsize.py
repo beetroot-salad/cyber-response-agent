@@ -445,11 +445,12 @@ def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
 def _drain_worktree(base: Path) -> Path:
     """A throwaway git worktree in test_1178's shape: a committed seed under
     `defender/skills/`, then the files the box image's name is a function of copied into
-    `defender/`, so the drain request resolves the image this checkout's CI built."""
+    `defender/`, so the drain request resolves the image this checkout's CI built, and the
+    product's code check file its read-only `code` mount is read back at (#1108 D7 amended)."""
     wt = init_git(base / "wt")
     write(wt / "defender" / "skills" / "seed-1188.md", "seed\n")
     commit_all(wt, "seed")
-    for name in HASH_INPUTS:
+    for name in (*HASH_INPUTS, box_mod.CODE_CHECK_FILE):
         shutil.copyfile(DEFENDER / name, wt / "defender" / name)
     assert box_mod.image_tag(wt / "defender") == box_mod.image_tag(DEFENDER)
     return wt

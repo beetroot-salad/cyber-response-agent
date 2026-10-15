@@ -307,17 +307,25 @@ def reaped_after_create(calls) -> bool:
 
 # The future box.py geography seam (O8/M2: callers own the geography, box.py
 # renders + validates the boundary). Referenced lazily so HEAD still collects.
-def Mount(source: Path, target: Path, writable: bool = False):
-    """box.Mount(source, target, writable) — future symbol; AttributeError at HEAD."""
-    return box_mod.Mount(source=source, target=target, writable=writable)  # type: ignore[attr-defined]
+def Mount(source: Path, target: Path, writable: bool = False, kind: str | None = None):
+    """box.Mount(source, target, writable[, kind]) — future symbol; AttributeError at HEAD.
+    `kind` (#1108 D7 amended: `code`, `agent` or `data`) is what a read-only mount declares;
+    it is passed only when given, so a writable mount names none."""
+    kw: dict[str, Any] = dict(source=source, target=target, writable=writable)
+    if kind is not None:
+        kw["kind"] = kind
+    return box_mod.Mount(**kw)  # type: ignore[attr-defined]
 
 
-def BoxRequest(*, name: str, mounts, workdir: Path, env, spec=None):
-    """box.BoxRequest(name, mounts, workdir, env, spec) — future symbol; the caller-owned
-    geography box.py renders. AttributeError/TypeError at HEAD (the boundary is unbuilt)."""
+def BoxRequest(*, name: str, mounts, workdir: Path, env, spec=None, defender_dir=None):
+    """box.BoxRequest(name, mounts, workdir, env, spec[, defender_dir]) — future symbol; the
+    caller-owned geography box.py renders. AttributeError/TypeError at HEAD (the boundary is
+    unbuilt). `defender_dir` (#1108 P3) is the explicit code root, passed only when given."""
     kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env))
     if spec is not None:
         kw["spec"] = spec
+    if defender_dir is not None:
+        kw["defender_dir"] = defender_dir
     return box_mod.BoxRequest(**kw)  # type: ignore[attr-defined]
 
 

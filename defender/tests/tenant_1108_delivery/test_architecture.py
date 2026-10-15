@@ -71,3 +71,26 @@ def test_tenant_delivery_has_no_production_callers_until_p4():
             if any(name == "TenantDelivery" or "tenant_delivery" in name.split(".") for name in names):
                 uses.append(f"{path}:{node.lineno}")
     assert uses == [], f"P3 delivery is dormant; production wiring belongs to P4: {uses}"
+
+
+def _agent_facing_text():
+    """Model-facing prose: the runtime spec, the skills, the lesson corpora, learning prompts."""
+    yield DEFENDER / "SKILL.md"
+    for pattern in ("skills/**/*.md", "lessons*/**/*.md", "learning/**/*.md"):
+        yield from (p for p in sorted(DEFENDER.glob(pattern)) if p.name != "README.md")
+
+
+def test_code_check_file_name_is_owned_by_the_box_package_and_absent_from_agent_text():
+    """D7 amendment 2: one name, owned by the box package; nothing agent-facing names it.
+    Lexical census over string constants, like the credential census above."""
+    from defender.runtime import box
+    name = box.CODE_CHECK_FILE  # a zero-implementation tree is not a successful census
+    spelled = sorted({path for path, tree in production_trees() for node in non_docstring_nodes(tree)
+                      if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                      and name in node.value})
+    assert spelled, "the check file's name must be spelled in its owning package"
+    assert all(path.startswith("runtime/box/") for path in spelled), \
+        f"the check file's name is spelled outside the box package: {spelled}"
+    named = [str(p.relative_to(DEFENDER)) for p in _agent_facing_text()
+             if name in p.read_text(encoding="utf-8")]
+    assert named == [], f"agent-facing text names the box's check file: {named}"

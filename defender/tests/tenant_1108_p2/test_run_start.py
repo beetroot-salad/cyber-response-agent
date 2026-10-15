@@ -164,34 +164,42 @@ def test_explicit_unsandboxed_lane_reads_the_accepted_path_before_message_zero(
 
 def test_box_request_and_oracle_lanes_do_not_require_a_run_tenant(tmp_path):
     """P2 scope: neither existing non-run lane gains an agent mount or identity requirement."""
-    from defender.runtime.box._oracle import oracle_box_request
+    import shutil
+
+    from defender.runtime.box._oracle import _make_runner, oracle_box_request
 
     root = tmp_path / 'learning-worktree'
     root.mkdir()
-    # D7 (#1108 P3): a read-only code mount is verified by reading its fixed product file
-    # back, so the legacy drain checkout carries one, as the real learning worktree does.
+    # D7 as amended (#1108 P3): the legacy drain checkout is a declared `code` mount, read
+    # back at `<workdir>/defender/<box.CODE_CHECK_FILE>`; it carries the product's committed
+    # check file, as the real learning worktree does.
     (root / 'defender').mkdir()
-    (root / 'defender' / 'SKILL.md').write_text('made-up product spec\n', encoding='utf-8')
+    check = box_mod.CODE_CHECK_FILE
+    shutil.copyfile(T.DEFENDER / check, root / 'defender' / check)
     scratch = tmp_path / 'oracle-scratch'
-    runner = tmp_path / 'oracle-runner'
     scratch.mkdir()
-    runner.mkdir()
-    requests = [box_mod.BoxRequest(
-        name='defender-drain-p2', workdir=root, env={},
-        mounts=(box_mod.Mount(source=root, target=root),),
-        spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS)),
-        oracle_box_request(scratch, runner, env={})]
-    # Pin a stock image at the existing BoxRequest seam; no real Docker/image is needed.
-    from dataclasses import replace
-    for request in requests:
-        request = replace(request, spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS))
-        docker = MountedReadDocker()
-        box = box_mod.start_box(request, docker=docker)
-        assert box.sandboxed
-        assert all('.tenant-id' not in ' '.join(call) for call in docker.calls)
-        assert all('/tenant/agent' not in m['target'] for m in docker.mounts())
-        assert docker.env().get('DEFENDER_AGENT_DIR', '') != '/wrong/inherited/agent'
-        box_mod.stop_box(box)
+    # The oracle's runner as production makes it: whatever the code check needs must come
+    # from the oracle's own RUNNER_FILES, never from this fixture.
+    runner = _make_runner()
+    try:
+        requests = [box_mod.BoxRequest(
+            name='defender-drain-p2', workdir=root, env={},
+            mounts=(box_mod.Mount(source=root, target=root, kind='code'),),
+            spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS)),
+            oracle_box_request(scratch, runner, env={})]
+        # Pin a stock image at the existing BoxRequest seam; no real Docker/image is needed.
+        from dataclasses import replace
+        for request in requests:
+            request = replace(request, spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS))
+            docker = MountedReadDocker()
+            box = box_mod.start_box(request, docker=docker)
+            assert box.sandboxed
+            assert all('.tenant-id' not in ' '.join(call) for call in docker.calls)
+            assert all('/tenant/agent' not in m['target'] for m in docker.mounts())
+            assert docker.env().get('DEFENDER_AGENT_DIR', '') != '/wrong/inherited/agent'
+            box_mod.stop_box(box)
+    finally:
+        shutil.rmtree(runner, ignore_errors=True)
 
 
 def test_daemon_path_translation_preserves_the_run_process_agent_target(tmp_path):
