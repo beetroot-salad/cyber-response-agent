@@ -180,6 +180,31 @@ def advance_remote(repo, tmp_path):
     return push_to_remote(repo, tmp_path, merged)
 
 
+def merge_on_remote(repo, tmp_path, branch):
+    """A human merging a PR: `branch` merged into the remote's `main` with a merge commit
+    (Forgejo's default merge style). Returns the new `main`."""
+    writer = tmp_path / f"merger-{len(list(tmp_path.glob('merger-*')))}"
+    git(tmp_path, "clone", repo[1], writer)
+    git(writer, "merge", "--no-ff", "-m", f"Merge {branch}", f"origin/{branch}")
+    git(writer, "push", "origin", "main")
+    return git(writer, "rev-parse", "HEAD")
+
+
+def merged_agent_lesson(repo, tmp_path, batch_id, path, content):
+    """A lesson the commit-maker wrote and a human merged: one batch whose claim writes
+    `content` at `path` (repo-relative), finished as a PR by its own delivery object, then
+    merged on the remote. Returns the commit-maker's commit."""
+    writer = delivery(repo, ForgeHTTP())
+    batch = writer.start_batch(batch_id, lanes=LANES)
+    draft_file = batch.draft_root / path
+    draft_file.parent.mkdir(parents=True, exist_ok=True)
+    draft_file.write_bytes(content)
+    sha = batch.commit(batch.change_set(), f"learning {batch_id}")
+    writer.finish(batch)
+    merge_on_remote(repo, tmp_path, batch.branch)
+    return sha
+
+
 def index_entry(checkout, mode, path, *, blob=None, data=None):
     """Stage a raw tree entry (a link, a gitlink, an executable) the way git stores it."""
     if blob is None:

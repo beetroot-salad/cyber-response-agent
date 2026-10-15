@@ -31,6 +31,7 @@ from ._support import (
     git,
     index_entry,
     lock_probe,
+    merge_on_remote,
     push_to_remote,
     target,
 )
@@ -282,9 +283,9 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
     """Flow 6: the lock is held for fast-forward, export and worktree creation only. Probed
     from another process at each moment the host waits on something else, on every route: a
     batch (its fetch and push on a real smart-HTTP remote, its PR request, the box's create
-    and its window), the retained branch's delivery (its PR request and any git it runs) and
-    a revert (its push, its PR request and any fetch). The probe's own positive control sees
-    a held lock as busy."""
+    and its window), the retained branch's delivery (its PR request and any git it runs) and,
+    once a human has merged that PR, the revert of its lesson (its push, its PR request and
+    any fetch). The probe's own positive control sees a held lock as busy."""
     from defender.runtime import box
     from defender.tests._box1195 import FakeDaemon
 
@@ -328,9 +329,10 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
     server.rearm()
     assert d.deliver("io").endswith("/pulls/7")
 
+    merge_on_remote(http_repo, tmp_path, batch.branch)
     phase[0] = "revert"
     server.rearm()
-    assert d.revert("agent/lessons/seed.md", "seed").endswith("/pulls/7")
+    assert d.revert("agent/lessons/io.md", "io").endswith("/pulls/7")
 
     required = {("batch", "git-upload-pack"), ("batch", "git-receive-pack"), ("batch", "pr-post"),
                 ("batch", "after-start-batch"), ("batch", "box-create"), ("batch", "box-window"),

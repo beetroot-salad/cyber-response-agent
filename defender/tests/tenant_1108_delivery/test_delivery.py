@@ -33,6 +33,8 @@ from ._support import (
     git,
     git_bytes,
     install_planting_hook,
+    merge_on_remote,
+    merged_agent_lesson,
     odd_entries,
     plain_file,
     plant_raw_commit,
@@ -602,10 +604,11 @@ def _census(events, kinds):
             if sub in kinds and not (sub == "merge" and "--ff-only" in args)}
 
 
-def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo):
+def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo, tmp_path):
     """O-C census, executed at the public boundary (no private name is pinned): every git
     process delivery spawns is recorded under the public call it ran in, across a whole
-    drain (publish, batch, box request, claim, reset, finish, retained deliver) and a revert.
+    drain (publish, batch, box request, claim, reset, finish, retained deliver) and, once a
+    human has merged it (unobserved), the revert of its lesson.
     A commit is made only under the commit-maker (`commit`) and the revert; commits are sent
     only by finish, deliver and revert. An audit hook sees every spawn; its positive control
     comes first."""
@@ -639,7 +642,10 @@ def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo)
             under("finish", lambda: d.finish(batch))
         http.fail_create = False
         under("deliver", lambda: d.deliver("census"))
-        under("revert", lambda: d.revert("agent/lessons/seed.md", "seed"))
+        active[0] = False
+        merge_on_remote(repo, tmp_path, batch.branch)
+        active[0] = True
+        under("revert", lambda: d.revert("agent/lessons/census.md", "census"))
     finally:
         active[0] = False
     assert _census(events, _MAKES_COMMITS) == {"commit", "revert"}, events
@@ -657,26 +663,33 @@ def _revert_commit(remote, http, main):
     return tip
 
 
-def test_revert_deletes_a_lesson_its_last_commit_added(repo):
-    """Flow 4: a revert of a lesson that the latest commit touching it on `main` added builds
-    its change set from history: a deletion, as exactly one commit-maker commit on `main`,
-    pushed to its own branch with a PR against `main`; `main` itself does not move."""
+#: A lesson the commit-maker wrote and a human merged, for the revert cases.
+_LEARNED = "agent/lessons/learned.md"
+
+
+def test_revert_deletes_a_lesson_the_commit_maker_created(repo, tmp_path):
+    """Flow 4, user decision (README choice 5): a lesson the commit-maker created, merged by a
+    human and unchanged on `main` since (another file changed there meanwhile), reverts to
+    what was there before the agent's change, which is nothing: a deletion, as exactly one
+    commit-maker commit on `main`, pushed to its own branch with a PR against `main`; `main`
+    itself does not move."""
     remote = repo[1]
+    merged_agent_lesson(repo, tmp_path, "created", _LEARNED, b"the agent's lesson\n")
+    advance_remote(repo, tmp_path)
     http = ForgeHTTP()
     d = delivery(repo, http)
     main = git(remote, "rev-parse", "main")
-    assert d.revert("agent/lessons/seed.md", "seed").endswith("/pulls/7")
+    assert d.revert(_LEARNED, "learned").endswith("/pulls/7")
     tip = _revert_commit(remote, http, main)
-    assert _name_status(remote, tip) == {"agent/lessons/seed.md": "D"}
+    assert _name_status(remote, tip) == {_LEARNED: "D"}
 
 
-def test_revert_restores_the_prior_content_of_a_lesson_its_last_commit_changed(repo, tmp_path):
-    """Flow 4, PENDING A USER DECISION (README, choice 5): a revert of a lesson the latest
-    commit touching it on `main` changed restores the content before that commit, mode
-    100644, as one commit-maker commit on `main` with a PR against `main`. Kept apart from
-    the deletion case so the decision can change this case alone."""
+def test_revert_restores_what_a_lesson_held_before_the_commit_maker_changed_it(repo, tmp_path):
+    """Flow 4, user decision (README choice 5): a lesson the commit-maker changed, merged by a
+    human and unchanged on `main` since, reverts to its content before the agent's change,
+    mode 100644, as one commit-maker commit on `main` with a PR against `main`."""
     remote = repo[1]
-    push_to_remote(repo, tmp_path, lambda c: _write(c / "agent/lessons/seed.md", "seed, merged edit\n"))
+    merged_agent_lesson(repo, tmp_path, "changed", "agent/lessons/seed.md", b"seed, as the agent rewrote it\n")
     http = ForgeHTTP()
     d = delivery(repo, http)
     main = git(remote, "rev-parse", "main")
@@ -687,6 +700,25 @@ def test_revert_restores_the_prior_content_of_a_lesson_its_last_commit_changed(r
     assert _modes(remote, tip, "agent/lessons/seed.md") == {"agent/lessons/seed.md": "100644"}
 
 
+@pytest.mark.parametrize("path", [_LEARNED, "agent/lessons/seed.md"], ids=["agent-created", "agent-changed"])
+def test_revert_refuses_a_lesson_changed_on_main_since_the_commit_maker_wrote_it(repo, tmp_path, path):
+    """Flow 4, user decision (README choice 5): revert proceeds only while `main` still holds
+    exactly what the commit-maker wrote for the lesson. A human edit of it on `main` after
+    the merge refuses the revert (`DeliveryRefused`): nothing is pushed, no PR is requested,
+    and `main` is unchanged."""
+    remote = repo[1]
+    merged_agent_lesson(repo, tmp_path, "written", path, b"the agent's words\n")
+    push_to_remote(repo, tmp_path, lambda c: _write(c / path, "a human's later edit\n"))
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    main, branches = git(remote, "rev-parse", "main"), _branches(remote)
+    with pytest.raises(target().DeliveryRefused):
+        d.revert(path, "written")
+    assert _branches(remote) == branches
+    assert git(remote, "rev-parse", "main") == main
+    assert not http.creates
+
+
 def test_revert_refuses_a_commit_laid_on_its_branch_by_a_clone_hook(repo, tmp_path):
     """O-C on the revert route: something else lays a commit (the commit-maker's own message
     and identities, an allowed lesson) on the revert's branch right after the commit-maker
@@ -695,23 +727,25 @@ def test_revert_refuses_a_commit_laid_on_its_branch_by_a_clone_hook(repo, tmp_pa
     git without the clone's hooks (`core.hooksPath`, say) never sees the commit, and its
     revert completes normally instead; the hook-free case is the next test."""
     tenant, remote, _ = repo
+    merged_agent_lesson(repo, tmp_path, "learned", _LEARNED, b"the agent's lesson\n")
     http = ForgeHTTP()
     d = delivery(repo, http)
+    branches = _branches(remote)
     marker = tmp_path / "planted"
     install_planting_hook(tenant.knowledge, git(remote, "rev-parse", "main"), marker,
                           "agent/lessons/raw.md", b"raw git, not the commit-maker\n")
-    _, error, hung = bounded(lambda: d.revert("agent/lessons/seed.md", "seed"))
+    _, error, hung = bounded(lambda: d.revert(_LEARNED, "learned"))
     assert not hung
     if marker.exists():
         assert isinstance(error, target().DeliveryRefused), error
-        assert _branches(remote) == ["refs/heads/main"]
+        assert _branches(remote) == branches
         assert not http.creates
     else:
         assert error is None, f"the revert refused though nothing was laid on its branch: {error}"
         assert len(http.creates) == 1
 
 
-def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo):
+def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo, tmp_path):
     """O-C on the revert route, with no hook: a revert pushes its branch, then its PR request
     fails. A commit is then laid by plumbing on that branch in the clone (the revert commit's
     exact message and identities, an allowed lesson). However the retried revert ends (how a
@@ -719,17 +753,19 @@ def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo):
     implementation that names each revert's branch afresh never meets the laid commit; the
     README records that limit.)"""
     tenant, remote, _ = repo
+    merged_agent_lesson(repo, tmp_path, "learned", _LEARNED, b"the agent's lesson\n")
     http = ForgeHTTP()
     d = delivery(repo, http)
+    before = set(_branches(remote))
     http.fail_create = True
     with pytest.raises(target().DeliveryRefused, match="503|forge|PR|pull"):
-        d.revert("agent/lessons/seed.md", "seed")
-    [branch] = set(_branches(remote)) - {"refs/heads/main"}
+        d.revert(_LEARNED, "learned")
+    [branch] = set(_branches(remote)) - before
     made = git(remote, "rev-parse", branch)
     planted = plant_raw_commit(tenant.knowledge, branch, "agent/lessons/raw.md",
                                b"raw git, not the commit-maker\n", base=made)
     http.fail_create = False
-    _, _error, hung = bounded(lambda: d.revert("agent/lessons/seed.md", "seed"))
+    _, _error, hung = bounded(lambda: d.revert(_LEARNED, "learned"))
     assert not hung
     assert planted not in git(remote, "rev-list", "--all").split()
 
