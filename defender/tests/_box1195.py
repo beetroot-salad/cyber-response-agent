@@ -621,9 +621,10 @@ def fail_stop(daemon: FakeDaemon, stop: str, *, at: int, inspect_at: int) -> Non
 
 def plant_image_inputs(repo: Path) -> None:
     """Copy this checkout's image inputs under `<repo>/defender`, so a real `start_box` over a
-    drain request on `repo` resolves an image name rather than faulting on a missing input."""
+    drain request on `repo` resolves an image name rather than faulting on a missing input.
+    The fixed product probe file is present for D7 read-only mount read-back too."""
     (repo / "defender").mkdir(parents=True, exist_ok=True)
-    for name in IMAGE_INPUTS:
+    for name in (*IMAGE_INPUTS, "SKILL.md"):
         shutil.copyfile(DEFENDER / name, repo / "defender" / name)
 
 

@@ -446,11 +446,13 @@ def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive",
     """A finished defender run dir the run cycle accepted: alert.json + report.md (its
     disposition drives which direction legs dispatch) + investigation.md + gather_raw/.
     `gather_raw=False` omits the evidence dir (the legitimately-absent conditional-mount
-    case, decision 9)."""
+    case, decision 9). Present evidence holds one made-up result for read-only read-back;
+    the explicit present-empty test removes it."""
     run_dir = tmp_path / "inv-665"
     run_dir.mkdir(parents=True)
     if gather_raw:
         (run_dir / "gather_raw").mkdir()
+        (run_dir / "gather_raw" / "fixture.json").write_text("{}\n", encoding="utf-8")
     plant_alert(run_dir, {"rule": {"key": "spec.rule"}})
     (run_dir / "report.md").write_text(
         f"---\ndisposition: {disposition}\n---\n\nspec run\n", encoding="utf-8"

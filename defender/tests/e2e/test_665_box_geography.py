@@ -57,16 +57,12 @@ def _run_cycle_mounts(run_dir: Path):
 
 
 def _populate_mount_sources(mounts, tmp_path: Path) -> None:
-    """Make each mount source NON-EMPTY — the contrast case against the present-empty
-    gather_raw above — for the sources this test owns, i.e. those under `tmp_path`.
+    """Populate only test-owned sources with an existing read-back file.
 
-    The DEFENDER mount is deliberately skipped. `_run_cycle_mounts` sources it from the real
-    checked-out tree, so it is non-empty by construction and needs no marker; the inline loops
-    this replaces wrote their `entry.txt` into it anyway, leaving an untracked file in the repo
-    after every run of this suite — a suite about read-only mount discipline littering the
-    source tree it declares `writable=False`. The marker is setup, never read: `_probe_sentinel`
-    plants and cats back its own `.box-sentinel-<uuid>`, so only NON-EMPTINESS is being modeled
-    here, not this file's contents."""
+    D7 forbids planting during a read-only mount check. The checked-out DEFENDER already
+    has its fixed product file and is never edited by this fixture. The marker below is
+    deliberate setup in temporary sources, available before startup begins.
+    """
     for m in mounts:
         source = Path(m.source)
         if not source.is_relative_to(tmp_path):
@@ -253,20 +249,31 @@ def test_env_reaching_the_program_differs_between_the_boxed_path_and_the_loud_fa
 
 
 # The startup sentinel (O2/M11) + startup-fault loudness (M4/decision 5)
-def test_sentinel_probes_every_mount_ro_readback(tmp_path):
-    """sentinel_probes_every_mount — under M2 the startup sentinel is a PER-MOUNT obligation
-    (M11): every mount the box carries (the rw tree AND each ro tree) is individually probed
-    by a read-back at start, not only the original single rw run_dir. DC1: the sentinel's
-    residual scope is a bind that SUCCEEDED but mapped the wrong/empty tree (an absent source
-    is refused loudly at create). Asserts one read-back exec per mount over a 3-mount box."""
+def test_sentinel_probes_every_mount_ro_readback_without_planting(tmp_path):
+    """D7/M11: nonempty read-only mounts are read back without even transient writes."""
     run_dir = make_run_dir(tmp_path)
-    for m in _run_cycle_mounts(run_dir):
-        Path(m.source).mkdir(parents=True, exist_ok=True)
+    evidence = tmp_path / "separate-evidence"
+    evidence.mkdir()
+    (evidence / "result.json").write_text("{}\n", encoding="utf-8")
+    # Disjoint roots give each mount its own observation: a repeated child read cannot
+    # masquerade as a separate read-back of an enclosing mount.
+    mounts = (Mount(source=run_dir, target=run_dir, writable=False),
+              Mount(source=DEFENDER, target=DEFENDER, writable=False),
+              Mount(source=evidence, target=evidence, writable=False))
+    before = {m.source: frozenset(m.source.iterdir()) for m in mounts}
     rec = RecordingDocker()
-    start_box_request(_request(run_dir), docker=rec)
-    readbacks = [c for c in rec.calls if len(c) > 1 and c[1] == "exec"]
-    assert len(readbacks) >= len(_run_cycle_mounts(run_dir)), \
-        "the sentinel probed fewer mounts than the box carries (single-mount sentinel survived)"
+    def boundary(argv, **kwargs):
+        assert {m.source: frozenset(m.source.iterdir()) for m in mounts} == before
+        return rec(argv, **kwargs)
+    start_box_request(_request(run_dir, mounts=mounts), docker=boundary)
+    readbacks = [Path(c[-1]) for c in rec.calls if len(c) > 1 and c[1] == "exec"
+                 and Path(c[-1]).is_absolute()
+                 and any(Path(c[-1]).is_relative_to(mount.source) for mount in mounts)]
+    assert len(readbacks) == len(mounts)
+    assert all(path.is_file() for path in readbacks)
+    for mount in mounts:
+        assert any(path.is_relative_to(mount.source) for path in readbacks)
+    assert {m.source: frozenset(m.source.iterdir()) for m in mounts} == before
 
 
 def test_mount_source_directory_absent_at_box_creation(tmp_path):
@@ -297,7 +304,9 @@ def test_gather_raw_mount_exists_but_has_no_entry_to_read_back_at_sentinel_time(
     time as the non-absence proof. Asserts an empty-but-present mount does not fail the box on
     a read-back it cannot satisfy."""
     run_dir = make_run_dir(tmp_path)
-    (run_dir / "gather_raw").mkdir(exist_ok=True)  # present, but EMPTY
+    evidence = run_dir / "gather_raw"
+    (evidence / "fixture.json").unlink()
+    assert list(evidence.iterdir()) == []  # present, but EMPTY
     for m in _run_cycle_mounts(run_dir):
         Path(m.source).mkdir(parents=True, exist_ok=True)
     rec = RecordingDocker()
@@ -306,6 +315,10 @@ def test_gather_raw_mount_exists_but_has_no_entry_to_read_back_at_sentinel_time(
     # captured at request time, not an in-box cat. The box starts.
     box = start_box_request(_request(run_dir), docker=rec)
     assert box.name, "a present-empty mount wrongly failed the per-mount startup sentinel"
+    readbacks = [Path(c[-1]) for c in rec.calls if len(c) > 1 and c[1] == "exec"
+                 and Path(c[-1]).is_absolute()]
+    assert not any(path.is_relative_to(evidence) for path in readbacks)
+    assert list(evidence.iterdir()) == []
 
 
 def test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state(tmp_path):

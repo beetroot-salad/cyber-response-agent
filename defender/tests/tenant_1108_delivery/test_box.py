@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 
 import pytest
@@ -9,7 +10,7 @@ import pytest
 from defender.runtime import box
 from defender.runtime.box import _lifecycle
 
-from ._support import DEFENDER, TOKEN, ForgeHTTP, delivery, git
+from ._support import DEFENDER, TOKEN, ForgeHTTP, delivery, git, target
 
 
 def test_drain_request_mounts_only_code_agent_and_explicit_lane(repo):
@@ -112,3 +113,48 @@ def test_drain_start_wires_real_lifecycle_readback_before_returning_executor(rep
         assert daemon.names() == [request.name]
         assert git(wt, "status", "--porcelain") == before
     assert reads, "startup must actually read the agent identity through the box"
+
+
+@pytest.mark.parametrize("escape", ["../settings", "lessons/../../settings", "absolute", "symlink"])
+def test_drain_request_refuses_writable_lane_outside_agent(repo, escape):
+    """O8: writable mounts resolve inside the worktree's agent half."""
+    d = delivery(repo, ForgeHTTP())
+    wt = d.start_batch("mount-escape")
+    if escape == "absolute":
+        lane = str(wt / "settings")
+    elif escape == "symlink":
+        (wt / "agent/escape").symlink_to(wt / "settings", target_is_directory=True)
+        lane = "escape"
+    else:
+        lane = escape
+    assert (wt / "agent" / lane).resolve() == (wt / "settings").resolve()
+    with pytest.raises(target().DeliveryRefused, match="path|agent|writ|mount|lane"):
+        d.box_request(wt, "mount-escape", writable_dirs=(lane,))
+
+
+@pytest.mark.parametrize("which", ["agent", "code"])
+@pytest.mark.parametrize("contents", ["no-files", "unrelated-file"])
+def test_drain_start_requires_fixed_probe_for_code_and_agent(repo, tmp_path, which, contents):
+    """D7/O3: generic empty-data handling cannot bypass required code or tenant probes."""
+    from dataclasses import replace
+    from defender.tests._box1195 import FakeDaemon
+    d = delivery(repo, ForgeHTTP())
+    wt = d.start_batch("required-probe")
+    request = d.box_request(wt, "required-probe", writable_dirs=("lessons",))
+    if which == "code":
+        source = tmp_path / "arbitrary-code-location"
+        source.mkdir()
+        request = replace(request, defender_dir=source, mounts=tuple(
+            replace(mount, source=source, target=source) if mount.source == DEFENDER else mount
+            for mount in request.mounts))
+    else:
+        source = wt / "agent"
+        shutil.rmtree(source)
+        (source / "lessons").mkdir(parents=True)
+    if contents == "unrelated-file":
+        (source / "unrelated.txt").write_text("not the required identity or product probe\n")
+    request = replace(request, spec=box.BoxSpec(runtime="runc", rootfs="defender-box:test1108"))
+    daemon = FakeDaemon(tmp_path)
+    with pytest.raises(box.BoxFault, match="read|probe|tenant|SKILL|file"):
+        d.start_box(request, docker=daemon)
+    assert daemon.names() == []

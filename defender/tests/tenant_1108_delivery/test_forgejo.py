@@ -52,7 +52,9 @@ def test_create_sends_all_pr_fields_to_origin_repository():
 
 @pytest.mark.parametrize("response", [httpx.Response(403, json={"message": "denied"}),
                                       httpx.Response(200, text="not json"),
-                                      httpx.Response(200, json={"protected": True})])
+                                      httpx.Response(200, json={"protected": True}),
+                                      *[httpx.Response(200, text=value) for value in
+                                        ["null", "[]", "true", "1", '"main"']]])
 def test_protection_read_failure_or_unknown_push_permission_refuses(response):
     from defender.learning.author.forge import ForgeError
     calls = []
@@ -71,3 +73,40 @@ def test_protection_verification_reads_branch_but_never_changes_rules():
     forge(http).verify_main_protection()
     assert [(r.method, r.url.path) for r in http.requests] == [
         ("GET", "/api/v1/repos/tenants/blue/branches/main")]
+
+
+@pytest.mark.parametrize("next_url", [
+    "http://other.invalid:3000/api/v1/repos/tenants/blue/pulls?page=2",
+    "https://forge.invalid:3000/api/v1/repos/tenants/blue/pulls?page=2",
+    "http://forge.invalid:3001/api/v1/repos/tenants/blue/pulls?page=2",
+    "http://forge.invalid:3000/api/v1/repos/tenants/red/pulls?page=2",
+    "http://forge.invalid:bad/api/v1/repos/tenants/blue/pulls?state=open&page=2",
+    "http://[invalid]/api/v1/repos/tenants/blue/pulls?page=2",
+])
+@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
+def test_pagination_refuses_outside_origin_repository_before_request(next_url, method):
+    """O8/A5: an untrusted next-page Link cannot redirect the bot token."""
+    from defender.learning.author.forge import ForgeError
+    calls = []
+    def reply(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(200, json=[row(1, "lessons/ab")], headers={
+                "Link": f'<{next_url}>; rel="next"'})
+        return httpx.Response(200, json=[])
+    client = httpx.Client(transport=httpx.MockTransport(reply))
+    cls = importlib.import_module("defender.learning.author.forge").ForgejoForge
+    with pytest.raises(ForgeError, match="origin|host|repo|page|credential|[Ll]ink|URL|[Ii]nvalid (port|IPv6)"):
+        getattr(cls(origin=ORIGIN, token=TOKEN, client=client), method)("lessons/a")
+    assert len(calls) == 1, "refuse the foreign Link before contacting its target"
+    assert TOKEN in calls[0].headers["Authorization"]
+
+
+def test_exact_head_lookup_traverses_same_origin_next_page_with_credentials():
+    """O8/A5 positive control: accepted pagination still authenticates to the origin."""
+    http = ForgeHTTP()
+    http.pages = {1: [row(1, "lessons/ab")], 2: [row(2, "lessons/a")]}
+    assert forge(http).list_prs_for_head("lessons/a") == [
+        {"number": 2, "headRefName": "lessons/a", "url": row(2, "")["html_url"]}]
+    assert len(http.requests) == 2
+    assert all(TOKEN in request.headers["Authorization"] for request in http.requests)
