@@ -255,13 +255,61 @@ released:
 """
 
 
+#: The one implemented access method (#1107 D2).
+DOCKER_EXEC = "docker-exec"
+
+#: Each system folder's key prefix, as the adapters spell it.
+PREFIX: dict[str, str] = {
+    "cmdb": "CMDB",
+    "identity": "IDENTITY",
+    "ticket": "TICKET",
+    "case-history": "CASE_HISTORY",
+    "change-mgmt": "CHANGE_MGMT",
+    "threat-intel": "THREAT_INTEL",
+    "elastic": "ELASTIC",
+    "host-state": "HOST_STATE",
+}
+
+
+def context_name(marker: str, system: str) -> str:
+    """The docker context a fixture tenant names for `system` — distinct per system and per
+    tenant, and never `soc-playground` (the base's built-in default, CX17)."""
+    return f"ctx-{marker}-{system}"
+
+
+def es_container(marker: str) -> str:
+    return f"es-{marker}"
+
+
+def kibana_container(marker: str) -> str:
+    return f"kibana-{marker}"
+
+
+def access_lines(marker: str, system: str) -> str:
+    """What #1107 D2 adds to `system`'s `config.env`: its access method and docker context, and
+    for elastic its two containers. Without them the system's own settings check fails at run
+    start (#1256), so a fixture missing them starts with that system down."""
+    prefix = PREFIX[system]
+    text = (f'{prefix}_TRANSPORT="{DOCKER_EXEC}"\n'
+            f'{prefix}_DOCKER_CONTEXT="{context_name(marker, system)}"\n')
+    if system == "elastic":
+        text += (f'ELASTIC_ES_CONTAINER="{es_container(marker)}"\n'
+                 f'ELASTIC_KIBANA_CONTAINER="{kibana_container(marker)}"\n')
+    return text
+
+
 def config_texts(marker: str, *, events_index: str | None = None,
                  alerts_index: str | None = None) -> dict[str, str]:
-    """One `config.env` per system, every value carrying `marker` so a reader that returns
-    another tenant's (or the checkout's) value is caught by the value alone."""
+    """One COMPLETE `config.env` per system, every value carrying `marker` so a reader that
+    returns another tenant's (or the checkout's) value is caught by the value alone.
+
+    Complete means every key its adapter's settings check reads, the access method included
+    (`access_lines`): since #1256 a system whose check fails is down from run start, and a run
+    whose every granted system is down is refused, so an incomplete fixture would turn a
+    scenario about one thing into a refused run."""
     events = events_index if events_index is not None else f"{marker}-events-*"
     alerts = alerts_index if alerts_index is not None else f"{marker}-alerts-*"
-    return {
+    base = {
         "cmdb": (
             f'CMDB_URL_BASE="http://cmdb-{marker}:8080"\n'
             f'CMDB_BASTION_HOST="bastion-{marker}"\n'
@@ -291,6 +339,7 @@ def config_texts(marker: str, *, events_index: str | None = None,
             'ELASTIC_SSL_VERIFY="true"\n'
         ),
     }
+    return {system: text + access_lines(marker, system) for system, text in base.items()}
 
 
 def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each part overridable

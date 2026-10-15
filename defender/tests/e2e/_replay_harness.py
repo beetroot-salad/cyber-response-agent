@@ -73,7 +73,7 @@ from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
-from defender.runtime.verbs import VerbRegistry  # noqa: E402
+from defender.runtime.verbs import RosterRead, VerbRegistry  # noqa: E402
 from defender.tests import _review_bundle  # noqa: E402
 from defender.tests import _tenants1106  # noqa: E402
 
@@ -499,7 +499,8 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
-        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None) -> dict:
+        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
+        roster: Any = None) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -604,6 +605,12 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     injects it, and returns it in ITS OWN result under `"run_state"` — the one place a driven
     test reaches a run's state. A scenario whose run ends by RAISING (no result comes back)
     builds the state first and passes it here, so it still holds what the run decided on.
+    `roster` is the adapters roster the run reads (`run_investigation(roster=…)`): the adapter
+    modules whose declared settings checks judge each granted system at run start (#1256).
+    Omitted, an injected registry that carries its own roster (`ModuleVerbRegistry.roster`,
+    e.g. a planted estate's) hands the run that one, so the run judges the adapters it calls,
+    as production's one roster does; otherwise the run reads `defender_dir`'s.
+
     `driver_summary` is the same drive returning production's summary untouched."""
     # Legacy replay labels are retained in this helper's call shape. The real run identity
     # comes from its directory; materialize(run_id=...) preserves labels that are asserted.
@@ -612,7 +619,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, limits=limits, box=box,
         store_factory=store_factory, review_stages=review_stages, bounds=bounds,
         toolset=toolset, resume=resume, source_run=source_run, defender_dir=defender_dir, tenant=tenant,
-        orient_shim=orient_shim, run_state=state,
+        orient_shim=orient_shim, run_state=state, roster=roster,
     )
     return {**summary, "run_state": state}
 
@@ -621,7 +628,8 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
-        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None) -> dict:
+        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
+        roster: Any = None) -> dict:
     """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
     summary exactly as production's caller gets it. `run_state` is what the run is handed
     (`run_investigation(run_state=…)`), the caller keeping its reference; omitted, it is not
@@ -673,6 +681,10 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         seams["source_run"] = source_run
     if run_state is not None:
         seams["run_state"] = run_state
+    if roster is None and isinstance(getattr(verbs, "roster", None), RosterRead):
+        roster = verbs.roster
+    if roster is not None:
+        seams["roster"] = roster
     # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
     # grant is fixed per process, and no reader finds the settings folder itself). A scenario
     # names its own tenant when it is about one; every other replay runs as the committed
