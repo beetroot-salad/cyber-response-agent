@@ -208,9 +208,10 @@ def held_refusal(system: str, cause: StartCause) -> str:
     """The refusal of a dispatch or call to `system`, down for `cause` (not a trip)."""
     return (
         f"[system-status] System '{system}' is DOWN for this run — {cause_text(cause)}. "
-        f"No dispatch or call to {system} runs in this run: this one did not, and "
-        f"{system}'s reference skill was not loaded. This is a visibility gap, not a query "
-        f"result. Do NOT re-dispatch {system}; name the missing evidence in your analysis and in "
+        f"Nothing more is asked of {system} in this run: a dispatch to it starts no gather (its "
+        "reference skill is not loaded) and a call to it reaches no adapter. This is a "
+        f"visibility gap, not a query result. Do NOT re-dispatch {system}; name the missing "
+        "evidence in your analysis and in "
         "a `:T conclude` `ceiling_test` row (the entry price `inconclusive` owes), then escalate "
         "(inconclusive) if it blocks disposition."
     )
