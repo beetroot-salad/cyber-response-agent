@@ -34,7 +34,9 @@ from defender.learning.branch.redaction import redact_model_visible
 from defender.runtime import circuit_breaker
 from defender.runtime.verb_dispositions import HEALTH_CHECK, gather_query_systems
 from defender.runtime.verbs import adapter_module, redact_settings_path
-from defender.scripts.adapters.faults import ConfigFault
+# The run record's fault type, through the record's own module: the import edge into
+# `scripts/` stays `run_tenant`'s (#1080 O1's named pair, retired by #1172/#1121).
+from defender.runtime.run_tenant import ConfigFault
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.runtime.run_state import RunState
@@ -107,9 +109,10 @@ def startup_check(
     roster refuses such a grant at construction (C11).
 
     Reasons are made fit to show before they are kept (`_shown`): the settings folder named by
-    its pointer, and no host path of the data root or the defender tree."""
+    its pointer, and no host path of the data root, the defender tree or the adapters tree."""
     def shown(text: str) -> str:
-        return _shown(text, tenant=tenant, defender_dir=Path(defender_dir))
+        return _shown(text, tenant=tenant, defender_dir=Path(defender_dir),
+                      adapters=Path(roster.root))
 
     down: dict[str, StartCause] = {}
     for system in sorted(granted_systems(tenant.grants) & set(roster.accepted)):
@@ -251,15 +254,17 @@ def _mark(state: RunState, system: str, cause: StartCause) -> None:
         state.system_down.setdefault(system, cause)
 
 
-def _shown(text: str, *, tenant: RunTenant, defender_dir: Path) -> str:
+def _shown(text: str, *, tenant: RunTenant, defender_dir: Path, adapters: Path) -> str:
     """A reason fit for the model and the operator: one line, bounded, with the tenant's
     settings folder named by its pointer (`redact_settings_path`, the one settings redaction),
-    the data root and the defender tree named rather than located, and staged names and world
-    ids removed (`redact_model_visible`). An adapter's crash text often carries its own file's
-    absolute path."""
+    the tenant's folder under the data root, the defender tree and the adapters tree (which
+    need not sit in either — a branch estate's) named rather than located, and staged names and
+    world ids removed (`redact_model_visible`). An adapter's crash text often carries its own
+    file's absolute path."""
     text = redact_settings_path(redact_model_visible(text), tenant.settings)
-    named = {spelling: name
-             for root, name in ((tenant.tenant.data_root, "<data root>"), (defender_dir, "defender"))
+    roots = ((tenant.tenant.dir, "<tenant folder>"), (defender_dir, "defender"),
+             (adapters, "<adapters>"))
+    named = {spelling: name for root, name in roots
              for spelling in (str(Path(root)), str(Path(root).resolve()))}
     # Longest first, so a root that is a prefix of the other's spelling cannot cut it in two.
     for spelling in sorted(named, key=len, reverse=True):
