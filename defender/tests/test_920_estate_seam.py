@@ -139,6 +139,11 @@ from defender.runtime.verbs import VerbContext, verb
 CALLS = "adapter-calls.jsonl"
 
 
+def check_settings(*_a, **_k):
+    """A fake system needs no settings (#1256 O-5: every adapter declares its check)."""
+    return None
+
+
 def _record(ctx: VerbContext, name: str, params: dict) -> int:
     """Log this call and hand back the run's call ORDINAL.
 

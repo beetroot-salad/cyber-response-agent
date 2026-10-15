@@ -3,7 +3,10 @@ under a live registry, and what its rows charge the breaker.
 
 WHAT IS DRIVEN, and why a real registry rather than the harness's `FakeVerbs`: every claim here
 is about the roster the REAL `ModuleVerbRegistry` hands the REAL `QueryCapture` after the real
-fault — the directory it was built over is `rmtree`d between construction and the first call.
+fault — the directory it was built over is `rmtree`d after the run's start and before the first
+call. (#1256: the run imports every granted adapter at its start, and an adapter that cannot be
+imported then is down for the whole run, so a directory gone BEFORE the start leaves a run whose
+`elastic` no call reaches; the fault this file is about is the one met during the run.)
 A fake registry's `systems()` cannot have that fault; the one it could have (a raise) is N1's
 broken fake. The registry is injected through `run_investigation(verbs=…)`, the harness's own
 seam (#611), and everything between the replay models and the row is production code. The
@@ -46,6 +49,7 @@ from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests._declared869 import write  # noqa: E402
+from defender.tests._after_start_1256 import AfterStart  # noqa: E402
 from defender.tests._verb_authorization_632 import breaker_doc, grant_of  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER, GOLDEN_AB3, materialize  # noqa: E402
 from defender.tests.e2e.test_1015_rejection_budget import _assert_budget_stop  # noqa: E402
@@ -70,6 +74,11 @@ from pathlib import Path
 from defender.runtime.verbs import VerbContext, verb
 
 REACHED = "adapter-reached.txt"
+
+
+def check_settings(*_a, **_k):
+    """This system needs no settings (#1256 O-5: every adapter declares its check)."""
+    return None
 
 
 @verb()
@@ -133,10 +142,11 @@ def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_remo
         _bad_args("ghostone", verb="ghostverb"), q("ghosttwo", "otherverb", PARAMS),
     ]
     adapters, registry = _real_registry(tmp_path / "removed")
-    shutil.rmtree(adapters)
-    assert not adapters.exists()
+    removal = AfterStart(rejections[0], lambda: shutil.rmtree(adapters))
     r = _run(tmp_path / "removed", run_id="d1031-removed", verbs=registry,
-             turns=[*rejections, DONE])
+             turns=[removal, *rejections[1:], DONE])
+    assert removal.fired, "premise: the adapters directory was not removed during the run"
+    assert not adapters.exists(), "premise: the adapters directory is still there"
 
     rows = _above_guard(r)
     assert len(rows) == 4, f"the four rejections did not all leave counted rows: {r.own_rows!r}"
@@ -191,11 +201,13 @@ def test_a_loop_of_rejections_against_a_declared_system_is_ended_by_the_budget(t
     changes the shape of; what fails today is the name on the counted rows (`""` beside
     `sha256("elastic")`), O3's failure inside O4's population."""
     adapters, registry = _real_registry(tmp_path)
-    shutil.rmtree(adapters)
+    loop = [_bad_args("elastic", verb=f"ghostverb{i}") for i in range(REJECTION_BUDGET + 3)]
+    removal = AfterStart(loop[0], lambda: shutil.rmtree(adapters))
     r = _run(tmp_path, run_id="d1031-budget", verbs=registry, turns=[
-        *[_bad_args("elastic", verb=f"ghostverb{i}") for i in range(REJECTION_BUDGET + 3)],
-        q("elastic", "query", PARAMS), DONE,
+        removal, *loop[1:], q("elastic", "query", PARAMS), DONE,
     ])
+    assert removal.fired, "premise: the adapters directory was not removed during the run"
+    assert not adapters.exists(), "premise: the adapters directory is still there"
     rows = _above_guard(r)
     assert len(rows) == REJECTION_BUDGET, \
         f"the lead wrote {len(rows)} above-guard rejections against a budget of {REJECTION_BUDGET}"

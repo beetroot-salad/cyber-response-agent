@@ -464,7 +464,13 @@ def _elastic_envelope_carries_no_incidental_fields(world1007: Any, where: Path) 
 def test_d_record_settings_redacted(tmp_path, monkeypatch):
     """record.settings is the tenant's settings folder path. A ConfigFault whose text names that
     path, either as given or resolved, reaches the model with the path replaced by
-    SETTINGS_POINTER ("the tenant's settings/") (CX5)."""
+    SETTINGS_POINTER ("the tenant's settings/") (CX5).
+
+    #1256: cmdb is configured, so it passes its start check, and this call-time ConfigFault is
+    an escape (O-5b): cmdb goes down as not configured and the refusal the gather model gets
+    carries the escaped fault's reason — which reaches the model, so CX5 holds for it as for
+    any ConfigFault text. The lead calls cmdb twice: what the escaped call itself answers is not
+    pinned (the design is silent), the second call's refusal names the reason (O-4, O-5b)."""
     # CX8: the shim first on the PATH the run env inherits (no call here should reach docker).
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
@@ -491,6 +497,8 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
     gather = ReplayFn([
         Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
                                     "params": {"host": "web-1"}})]),
+        Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
+                                    "params": {"host": "web-2"}})]),
         Turn(text="Summary: the host."),
     ])
     drive(run_dir, run_id="red1107", tenant=tenant, gather=gather,

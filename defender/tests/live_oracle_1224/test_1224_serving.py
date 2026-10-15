@@ -256,6 +256,11 @@ _STATE = Path({state!r})
 SYSTEM = "ticket"
 
 
+def check_settings(*_a, **_k):
+    """A fixture store needs no settings (#1256 O-5: every adapter declares its check)."""
+    return None
+
+
 def _answer(ctx: VerbContext, name: str, params: dict):
     as_of = getattr(ctx, "as_of", None)
     row = {{"system": SYSTEM, "verb": name, "params": params,
