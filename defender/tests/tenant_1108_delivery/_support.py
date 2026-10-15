@@ -180,20 +180,34 @@ def advance_remote(repo, tmp_path):
     return push_to_remote(repo, tmp_path, merged)
 
 
-def merge_on_remote(repo, tmp_path, branch):
-    """A human merging a PR: `branch` merged into the remote's `main` with a merge commit
-    (Forgejo's default merge style). Returns the new `main`."""
+#: How a human merges a PR on Forgejo. Each lands the branch's changes on `main`; only
+#: `merge` keeps the commit-maker's commits (by sha) in `main`'s history.
+MERGE_STYLES = ("merge", "squash", "rebase")
+_FORGE_COMMITTER = {"GIT_COMMITTER_NAME": "Forgejo", "GIT_COMMITTER_EMAIL": "forgejo@test.invalid"}
+
+
+def merge_on_remote(repo, tmp_path, branch, style="merge"):
+    """A human merging a PR into the remote's `main`: `merge` makes a merge commit (Forgejo's
+    default), `squash` one new commit holding the branch's changes, `rebase` re-commits each
+    of the branch's commits on `main` under the forge's committer (new shas). Returns the new
+    `main`."""
     writer = tmp_path / f"merger-{len(list(tmp_path.glob('merger-*')))}"
     git(tmp_path, "clone", repo[1], writer)
-    git(writer, "merge", "--no-ff", "-m", f"Merge {branch}", f"origin/{branch}")
+    if style == "merge":
+        git(writer, "merge", "--no-ff", "-m", f"Merge {branch}", f"origin/{branch}")
+    elif style == "squash":
+        git(writer, "merge", "--squash", f"origin/{branch}")
+        git(writer, "commit", "-m", f"{branch} (squashed)", env=_FORGE_COMMITTER)
+    else:
+        git(writer, "cherry-pick", f"main..origin/{branch}", env=_FORGE_COMMITTER)
     git(writer, "push", "origin", "main")
     return git(writer, "rev-parse", "HEAD")
 
 
-def merged_agent_lesson(repo, tmp_path, batch_id, path, content):
+def merged_agent_lesson(repo, tmp_path, batch_id, path, content, style="merge"):
     """A lesson the commit-maker wrote and a human merged: one batch whose claim writes
     `content` at `path` (repo-relative), finished as a PR by its own delivery object, then
-    merged on the remote. Returns the commit-maker's commit."""
+    merged on the remote in `style`. Returns the commit-maker's commit."""
     writer = delivery(repo, ForgeHTTP())
     batch = writer.start_batch(batch_id, lanes=LANES)
     draft_file = batch.draft_root / path
@@ -201,7 +215,7 @@ def merged_agent_lesson(repo, tmp_path, batch_id, path, content):
     draft_file.write_bytes(content)
     sha = batch.commit(batch.change_set(), f"learning {batch_id}")
     writer.finish(batch)
-    merge_on_remote(repo, tmp_path, batch.branch)
+    merge_on_remote(repo, tmp_path, batch.branch, style)
     return sha
 
 

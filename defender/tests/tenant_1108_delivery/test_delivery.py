@@ -24,6 +24,7 @@ from ._support import (
     DEFENDER,
     FORK,
     LANES,
+    MERGE_STYLES,
     TOKEN,
     ForgeHTTP,
     advance_remote,
@@ -667,56 +668,99 @@ def _revert_commit(remote, http, main):
 _LEARNED = "agent/lessons/learned.md"
 
 
-def test_revert_deletes_a_lesson_the_commit_maker_created(repo, tmp_path):
-    """Flow 4, user decision (README choice 5): a lesson the commit-maker created, merged by a
-    human and unchanged on `main` since (another file changed there meanwhile), reverts to
-    what was there before the agent's change, which is nothing: a deletion, as exactly one
-    commit-maker commit on `main`, pushed to its own branch with a PR against `main`; `main`
-    itself does not move."""
+def _reverted(repo, lesson, name):
+    """Revert `lesson` through a fresh delivery object; returns the revert's one commit on
+    the remote (directly on `main`, which does not move)."""
     remote = repo[1]
-    merged_agent_lesson(repo, tmp_path, "created", _LEARNED, b"the agent's lesson\n")
-    advance_remote(repo, tmp_path)
     http = ForgeHTTP()
     d = delivery(repo, http)
     main = git(remote, "rev-parse", "main")
-    assert d.revert(_LEARNED, "learned").endswith("/pulls/7")
-    tip = _revert_commit(remote, http, main)
-    assert _name_status(remote, tip) == {_LEARNED: "D"}
+    assert d.revert(lesson, name).endswith("/pulls/7")
+    return _revert_commit(remote, http, main)
 
 
-def test_revert_restores_what_a_lesson_held_before_the_commit_maker_changed_it(repo, tmp_path):
-    """Flow 4, user decision (README choice 5): a lesson the commit-maker changed, merged by a
-    human and unchanged on `main` since, reverts to its content before the agent's change,
-    mode 100644, as one commit-maker commit on `main` with a PR against `main`."""
+def _refused_revert(repo, lesson, name):
+    """Revert `lesson`, expecting `DeliveryRefused` with nothing pushed or requested."""
     remote = repo[1]
-    merged_agent_lesson(repo, tmp_path, "changed", "agent/lessons/seed.md", b"seed, as the agent rewrote it\n")
-    http = ForgeHTTP()
-    d = delivery(repo, http)
-    main = git(remote, "rev-parse", "main")
-    assert d.revert("agent/lessons/seed.md", "seed").endswith("/pulls/7")
-    tip = _revert_commit(remote, http, main)
-    assert _name_status(remote, tip) == {"agent/lessons/seed.md": "M"}
-    assert git_bytes(remote, "cat-file", "blob", f"{tip}:agent/lessons/seed.md") == b"seed\n"
-    assert _modes(remote, tip, "agent/lessons/seed.md") == {"agent/lessons/seed.md": "100644"}
-
-
-@pytest.mark.parametrize("path", [_LEARNED, "agent/lessons/seed.md"], ids=["agent-created", "agent-changed"])
-def test_revert_refuses_a_lesson_changed_on_main_since_the_commit_maker_wrote_it(repo, tmp_path, path):
-    """Flow 4, user decision (README choice 5): revert proceeds only while `main` still holds
-    exactly what the commit-maker wrote for the lesson. A human edit of it on `main` after
-    the merge refuses the revert (`DeliveryRefused`): nothing is pushed, no PR is requested,
-    and `main` is unchanged."""
-    remote = repo[1]
-    merged_agent_lesson(repo, tmp_path, "written", path, b"the agent's words\n")
-    push_to_remote(repo, tmp_path, lambda c: _write(c / path, "a human's later edit\n"))
     http = ForgeHTTP()
     d = delivery(repo, http)
     main, branches = git(remote, "rev-parse", "main"), _branches(remote)
     with pytest.raises(target().DeliveryRefused):
-        d.revert(path, "written")
+        d.revert(lesson, name)
     assert _branches(remote) == branches
     assert git(remote, "rev-parse", "main") == main
     assert not http.creates
+
+
+@pytest.mark.parametrize("style", MERGE_STYLES)
+def test_revert_deletes_a_lesson_the_commit_maker_created(repo, tmp_path, style):
+    """Flow 4, choice 5: a lesson the commit-maker created, merged by a human (merge commit,
+    squash or rebase: the style must not matter) and unchanged on `main` since (another file
+    changed there meanwhile), reverts to what was there before the agent's change, which is
+    nothing: a deletion, as exactly one commit-maker commit on `main`, pushed to its own
+    branch with a PR against `main`; `main` itself does not move."""
+    merged_agent_lesson(repo, tmp_path, "created", _LEARNED, b"the agent's lesson\n", style)
+    advance_remote(repo, tmp_path)
+    tip = _reverted(repo, _LEARNED, "learned")
+    assert _name_status(repo[1], tip) == {_LEARNED: "D"}
+
+
+@pytest.mark.parametrize("style", MERGE_STYLES)
+def test_revert_restores_what_a_lesson_held_before_the_commit_maker_changed_it(repo, tmp_path, style):
+    """Flow 4, choice 5: a lesson the commit-maker changed, merged by a human in any style and
+    unchanged on `main` since, reverts to its bytes from just before the agent's change, mode
+    100644, as one commit-maker commit on `main` with a PR against `main`."""
+    merged_agent_lesson(repo, tmp_path, "changed", "agent/lessons/seed.md",
+                        b"seed, as the agent rewrote it\n", style)
+    tip = _reverted(repo, "agent/lessons/seed.md", "seed")
+    assert _name_status(repo[1], tip) == {"agent/lessons/seed.md": "M"}
+    assert git_bytes(repo[1], "cat-file", "blob", f"{tip}:agent/lessons/seed.md") == b"seed\n"
+    assert _modes(repo[1], tip, "agent/lessons/seed.md") == {"agent/lessons/seed.md": "100644"}
+
+
+def test_revert_undoes_only_the_latest_of_several_commit_maker_changes(repo, tmp_path):
+    """Choice 5 (orchestrator ruling): the commit-maker created a lesson, then changed it in a
+    later batch, both merged. The revert undoes the latest change only, restoring the bytes
+    from just before it (the first batch's), not deleting the lesson."""
+    merged_agent_lesson(repo, tmp_path, "first", _LEARNED, b"the agent's first words\n")
+    merged_agent_lesson(repo, tmp_path, "second", _LEARNED, b"the agent's second words\n")
+    tip = _reverted(repo, _LEARNED, "learned")
+    assert _name_status(repo[1], tip) == {_LEARNED: "M"}
+    assert git_bytes(repo[1], "cat-file", "blob", f"{tip}:{_LEARNED}") == b"the agent's first words\n"
+
+
+def test_revert_proceeds_when_main_again_holds_exactly_the_agents_bytes(repo, tmp_path):
+    """Choice 5 (orchestrator ruling): the test is content, not history. A human edits the
+    agent's lesson on `main` and later restores it to the agent's exact bytes; `main` again
+    holds what the commit-maker wrote, so the revert proceeds, restoring the bytes from just
+    before the agent's change."""
+    agent_bytes = b"seed, as the agent rewrote it\n"
+    merged_agent_lesson(repo, tmp_path, "changed", "agent/lessons/seed.md", agent_bytes)
+    push_to_remote(repo, tmp_path, lambda c: _write(c / "agent/lessons/seed.md", "a human's edit\n"))
+    push_to_remote(repo, tmp_path, lambda c: (c / "agent/lessons/seed.md").write_bytes(agent_bytes))
+    tip = _reverted(repo, "agent/lessons/seed.md", "seed")
+    assert git_bytes(repo[1], "cat-file", "blob", f"{tip}:agent/lessons/seed.md") == b"seed\n"
+
+
+@pytest.mark.parametrize("path", [_LEARNED, "agent/lessons/seed.md"], ids=["agent-created", "agent-changed"])
+def test_revert_refuses_a_lesson_changed_on_main_since_the_commit_maker_wrote_it(repo, tmp_path, path):
+    """Flow 4, choice 5 (user decision): revert proceeds only while `main`'s bytes for the
+    lesson equal those of the commit-maker's latest change to it. A human edit on `main`
+    after the merge refuses the revert (`DeliveryRefused`): nothing is pushed, no PR is
+    requested, and `main` is unchanged."""
+    merged_agent_lesson(repo, tmp_path, "written", path, b"the agent's words\n")
+    push_to_remote(repo, tmp_path, lambda c: _write(c / path, "a human's later edit\n"))
+    _refused_revert(repo, path, "written")
+
+
+@pytest.mark.parametrize("path", ["agent/lessons/seed.md", "agent/lessons/merged.md"],
+                         ids=["seeded", "human-merged"])
+def test_revert_refuses_a_lesson_the_commit_maker_never_wrote(repo, tmp_path, path):
+    """Choice 5 (orchestrator ruling): a lesson only humans wrote (the tenant's seed, or one a
+    human merged later) has no commit-maker change to undo; its revert is refused with
+    nothing pushed or requested."""
+    advance_remote(repo, tmp_path)
+    _refused_revert(repo, path, "human")
 
 
 def test_revert_refuses_a_commit_laid_on_its_branch_by_a_clone_hook(repo, tmp_path):
