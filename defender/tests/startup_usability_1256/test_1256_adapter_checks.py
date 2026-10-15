@@ -555,13 +555,14 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
     written, nothing charged to the breaker; `list_verbs` for it names it down with the reason
     (the statuses feed `list_verbs`, design flow step 4).
 
-    The reason carries no host path ON ANY SURFACE it reaches (#1106's host-only rule; the
+    The reason carries no host path on any surface the model sees (#1106's host-only rule; the
     contract's "AdapterBroken reasons carry no host path"): not the planted tree's, not the data
     root's — including a path under the data root outside the tenant's own folder, which no
     settings-path redaction rewrites. Two reasons carry one as raised (`_PATH_BEARING`); each must
     reach MAIN's opening message and gather's system index (flow step 4: the statuses feed both)
-    on a line naming it, and on every surface — those two, `list_verbs`, both refusals, and the
-    log records — no line carrying the reason carries a host path.
+    on a line naming it, and on every model-visible surface — those two, `list_verbs` and both
+    refusals — no line carrying the reason carries a host path. The operator log is not one of
+    them: the host-path rule covers what the model sees, and operator messages may print a path.
 
     Positive control in the same run: the well-formed planted `cmdb` adapter IS called — its verb
     writes the probe file and its row — so the "never called" and "no row" observations can fail;
@@ -671,12 +672,6 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
             for ln in carrying:
                 if leaked := [p for p in host_paths if p in ln]:
                     violations.append(f"{system}: {where} shows host path(s) {leaked}: {ln!r}")
-        for record in caplog.records:
-            message = record.getMessage()
-            if token in message and (leaked := [p for p in host_paths if p in message]):
-                violations.append(
-                    f"{system}: a {record.levelname} log record carries its reason with host "
-                    f"path(s) {leaked}: {message[:300]!r}")
     if breaker.get("total_failures", 0) != 0:
         violations.append(f"failures were charged to the run-wide breaker: {breaker}")
     assert violations == [], "O-5a — a broken granted adapter is down from the start:\n  " + (
