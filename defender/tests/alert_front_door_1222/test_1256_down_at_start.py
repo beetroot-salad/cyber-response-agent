@@ -30,7 +30,7 @@ judging the planted tenant's settings (K2) — except where an adapter must be b
 arms point run start at a planted tree holding only the test's own adapters (`_planted_tree`),
 both the adapter-broken O-6 arm and the mixed O-8 arm through the driver's `defender_dir`
 (`run.main` reads its own checkout's tree; the O-8 arms through `run.main` and the one through
-the driver together cover both entry paths, and none pins where the refusal is raised). A system is made unusable the way an operator would:
+the driver together cover both entry paths; see the mixed arm's docstring for what that pins). A system is made unusable the way an operator would:
 its `config.env` missing a key its adapter requires (`_spec1107.drop_key`), or absent. The
 correlation sentence is read from MAIN's opening message's ONE correlation section
 (`S.correlation_section`), not from the whole-prose diff `_ending` takes against the summary
@@ -642,7 +642,7 @@ def _drive_over(tree: Path, tenant: S.Planted, where: Path) -> tuple[Any, Any, B
 
 @pytest.mark.usefixtures("_import_state_restored")
 def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one(tmp_path: Path) -> None:
-    """Every granted system down for two different causes — cmdb's adapter broken (its check raises something other than ConfigFault), elastic not configured — and the run does not start: the real driver, over the tree whose roster says so (K2), raises naming each system with its reason before MAIN's first request and before any gather or adapter call. A pre-check that counts only 'not configured' as down misses cmdb and lets the run start blind. With cmdb's adapter well formed (elastic still down) the same tenant's run proceeds. Where the refusal is raised, and as what type, is not pinned: the run.main arms (every-granted-system-down, the load_config one) and this driver arm together cover both entry paths."""
+    """Every granted system down for two different causes — cmdb's adapter broken (its check raises something other than ConfigFault), elastic not configured — and the run does not start: the real driver, over the tree whose roster says so (K2), raises naming each system with its reason before MAIN's first request and before any gather or adapter call. A pre-check that counts only 'not configured' as down misses cmdb and lets the run start blind. With cmdb's adapter well formed (elastic still down) the same tenant's run proceeds. The exception's type is not pinned; its site is, by composition: the run.main arms require run.py to refuse before the lifecycle, the D4 test keeps the refusal out of the resolution that setup and `defender-policy` share, and this arm requires the driver itself to refuse an all-down start (the design's flow judges statuses there). A run.py pre-check that ignores broken adapters is NOT caught here — run.main cannot be pointed at a planted tree — and is left to the code stage (contract note N1)."""
     tenant = S.plant_tenant("acme-mixed-down", alert_mapping=S.DEFAULT_MAPPING,
                             table=S.TABLE_ELASTIC)
 
