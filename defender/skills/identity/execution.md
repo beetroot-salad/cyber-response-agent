@@ -29,11 +29,10 @@ host on the compose network — every host has Docker DNS for the stub.
 No SSH tunnel needed; the same docker context already used by
 elastic_adapter for rule installs is reused here.
 
-If a call exits 2 (connectivity / docker / upstream, or settings that do
-not configure this system — the error says which), the data source
-is unavailable: **stop and escalate immediately** with the error — do
+If a call exits 2 (connectivity / docker / upstream), the data source
+is unreachable: **stop and escalate immediately** with the error — do
 not probe with `docker`/`netstat`/`ss` or hunt for config. That's a
-data-source fault, not a query problem (see gather SKILL §3.5 validity check).
+data-source outage, not a query problem (see gather SKILL §3.5 validity check).
 
 ## Config
 
