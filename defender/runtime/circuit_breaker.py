@@ -26,6 +26,15 @@ INFRA_ERROR_CLASS = "infra"
 AGENT_FIXABLE_ERROR_CLASS = "agent-fixable"
 DENIED_ERROR_CLASS = "denied"
 
+#: What a breaker charge can mean, after its count in both messages that name a cause (the
+#: down message and the run kill). It sees exit codes alone, and one code covers many causes —
+#: exit 2 is a missing config, a refused connection, a 5xx, an adapter crash (#1246) — so the
+#: causes are examples, never a closed list.
+INFRA_CAUSES = (
+    f"infra failures (adapter exit {' / '.join(str(c) for c in sorted(INFRA_EXIT_CODES))}: "
+    f"the system could not answer, e.g. unreachable, erroring, timed out, or not configured "
+    f"for this tenant)")
+
 
 def is_infra_failure(exit_code: int) -> bool:
     return exit_code in INFRA_EXIT_CODES
@@ -45,9 +54,10 @@ class RunAborted(Exception):
         self.total_failures = total_failures
         self.systems = sorted(set(systems))
         super().__init__(
-            f"run aborted by circuit breaker: {total_failures} connectivity/auth "
-            f"failures across systems {self.systems} — the environment appears "
-            f"unreachable. Escalate with the visibility gap named."
+            f"run aborted by circuit breaker: {total_failures} {INFRA_CAUSES} across "
+            f"systems {self.systems} — "
+            f"the environment appears unreachable or unconfigured. Escalate with the "
+            f"visibility gap named."
         )
 
 
@@ -89,12 +99,12 @@ def down_message(state: RunState, system: str) -> str:
     # A system never charged has no count to name; the trip boundary stands in for it.
     n = state.breaker_failures(system) or PER_SYSTEM_FAIL_LIMIT
     return (
-        f"[circuit-breaker] System '{system}' is DOWN for this run: {n} "
-        f"connectivity/auth failures or timeouts (adapter exit 2 / 124) tripped the "
-        f"breaker, so this dispatch did not run and {system}'s reference skill was "
-        f"not loaded. This "
-        f"is a visibility gap, not a query result. Do NOT re-dispatch {system}; "
-        f"name the missing evidence in your analysis and in a `:T conclude` "
-        f"`ceiling_test` row (the entry price `inconclusive` owes), then escalate "
-        f"(inconclusive) if it blocks disposition."
+        f"[circuit-breaker] System '{system}' is DOWN for this run: "
+        f"{n} {INFRA_CAUSES} tripped the breaker, "
+        f"so this dispatch did not run and {system}'s reference skill was not loaded. "
+        f"This is a visibility gap, not a query result. "
+        f"Do NOT re-dispatch {system}; "
+        f"name the missing evidence in your analysis and in a `:T conclude` `ceiling_test` row "
+        f"(the entry price `inconclusive` owes), "
+        f"then escalate (inconclusive) if it blocks disposition."
     )

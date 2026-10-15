@@ -150,7 +150,7 @@ def _sentence(outcome: CorrelationOutcome, grant_home: str) -> str:
         return (
             f"The correlation lead's queries were refused: the circuit breaker marked "
             f"{outcome.system} as down for this run. There is no correlation summary, and "
-            f"{outcome.system} is unreachable for the rest of the run.")
+            f"{outcome.system} is unavailable for the rest of the run.")
     return _SENTENCES[str(outcome.ending)]
 
 

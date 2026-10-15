@@ -12,11 +12,11 @@ report a raw unchecked zero or a null.
 
 ## Branch on the query's exit code
 
-- **exit 2 — connectivity / auth / config:** the source is **unreachable**.
-  Escalate immediately with the error the tool returned and stop. Do **not** probe
-  the connection or the harness (no `netstat`/`ss`/`docker`/`/dev/tcp`), do **not**
-  hunt `.env`/credentials, do **not** re-run "to confirm" — a `2` is a data-source
-  outage for a human to resolve, not something you can fix.
+- **exit 2 — the system could not answer:** the error the tool returned says why.
+  Escalate immediately with that error and stop. Do **not** probe the connection
+  or the harness (no `netstat`/`ss`/`docker`/`/dev/tcp`), do **not** hunt
+  `.env`/credentials, do **not** re-run "to confirm" — a `2` is for a human to
+  resolve, not something you can fix.
 - **exit 77 — withheld by policy:** the verb is not granted to your role. Not an
   outage, not your mistake: do **not** re-run it, try another verb or spelling to
   reach the same data, or escalate it as a fault. Move on with what this lead has

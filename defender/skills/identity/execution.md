@@ -29,11 +29,6 @@ host on the compose network — every host has Docker DNS for the stub.
 No SSH tunnel needed; the same docker context already used by
 elastic_adapter for rule installs is reused here.
 
-If a call exits 2 (connectivity / docker / upstream), the data source
-is unreachable: **stop and escalate immediately** with the error — do
-not probe with `docker`/`netstat`/`ss` or hunt for config. That's a
-data-source outage, not a query problem (see gather SKILL §3.5 validity check).
-
 ## Config
 
 The run's tenant's `systems/identity/config.env` (host-only, in the tenant's
@@ -47,7 +42,6 @@ context>` (neither has a default). An exported variable no longer overrides a
 
 - `0` — success (including `authorized: false` as a legitimate answer)
 - `1` — query error (user not found, malformed arg)
-- `2` — connectivity / docker / upstream 5xx
 - `64` — a usage mistake in YOUR call: an unknown verb, or an
   unknown/missing/mistyped param name (e.g. a quoted `"false"` where the
   verb declares a boolean `enabled`). The one class you can fix yourself

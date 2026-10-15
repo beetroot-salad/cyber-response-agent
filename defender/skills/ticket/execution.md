@@ -38,7 +38,6 @@ down (`ConfigFault`, exit 2), never a default.
 
 - `0` — success
 - `1` — query error (ticket not found, malformed arg)
-- `2` — connectivity / docker / upstream 5xx
 - `64` — a usage mistake in YOUR call: an unknown verb, or an
   unknown/missing/mistyped param name (e.g. `query` where the verb declares
   `q`). The one class you can fix yourself — the rejection names the

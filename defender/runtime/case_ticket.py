@@ -48,7 +48,7 @@ UNREADABLE_COMMENT_BODY = (
 #: `{exit}` is the driver's exit class, from a closed vocabulary — never box-written text.
 ESCALATION_COMMENT_BODY = (
     "Investigation ended without a verdict (exit: {exit}) — the environment appears "
-    "unreachable or the investigation could not complete automatically. Escalate for manual "
+    "unreachable or unconfigured, or the investigation could not complete automatically. Escalate for manual "
     "review; this ticket is left open."
 )
 

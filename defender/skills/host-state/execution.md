@@ -63,7 +63,6 @@ else to configure.
 - `0` — success (including absent `authorized_keys` file)
 - `1` — verb-level error (host unknown to docker, user not present,
   file not found)
-- `2` — docker context unreachable / timeout
 - `64` — a usage mistake in YOUR call: an unknown verb, or an
   unknown/missing/mistyped param name (e.g. `container` where the verb
   declares `container_id`). The one class you can fix yourself — the
