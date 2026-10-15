@@ -323,7 +323,7 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
     try:
         # #1105 PR 2 (declared change 1): the tenant and the source run by id.
         rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
-                       "--continuation-prompt", "go"], spawn=spawn, **seams)
+                       *S.T.retired_continuation_argv()], spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code

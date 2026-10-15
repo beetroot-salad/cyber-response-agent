@@ -138,6 +138,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests import _episode_1025 as E
+from defender.tests import _triplet_947 as T947
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.tenant_1105_run_repository import _spec1105_pr2 as P
 
@@ -958,7 +959,7 @@ ABSENT_ID = "20990101t000000z-pr2-absent"
 
 #: Each migrated CLI with an otherwise-complete id-taking argv, minus `--tenant`.
 _J8_CASES = {
-    "launcher": (_launcher_main, [ABSENT_ID, "59", "--continuation-prompt", "go"]),
+    "launcher": (_launcher_main, [ABSENT_ID, "59", *T947.retired_continuation_argv()]),
     "lead_author": (_lead_author_main, [ABSENT_ID]),
     "tracer": (_tracer_main, ["--all"]),
     "run_page": (P.run_page_main, ["visualize_run.py", ABSENT_ID]),

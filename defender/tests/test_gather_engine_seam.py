@@ -115,12 +115,16 @@ def test_the_dispatch_prompt_settles_whether_this_system_has_an_execution_md(tmp
     split = tools._gather_prompt(deps, tools.GatherRequest("l-001", "split", "g", ("d",)), cat)
     inline = tools._gather_prompt(deps, tools.GatherRequest("l-002", "inline", "g", ("d",)), cat)
 
-    assert f"{tmp_path}/skills/split/execution.md" in split
+    # #1255 (design rev 4, P1 outbound): the path gather is handed is the checkout's MODEL path
+    # (`/defender/...`), never the host tree it was read from.
+    assert "/defender/skills/split/execution.md" in split
+    assert str(tmp_path) not in split
     assert "NO `execution.md`" not in split
     assert "NO `execution.md`" in inline
-    assert f"{tmp_path}/skills/inline/execution.md" not in inline, (
+    assert "/defender/skills/inline/execution.md" not in inline, (
         "the prompt still hands gather a path that does not exist"
     )
+    assert str(tmp_path) not in inline, "the prompt hands gather a host path"
 
 
 def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():

@@ -58,8 +58,8 @@ from typing import Any
 
 import pytest
 
-from defender.tests import _session_store_705 as SS
 from defender.tests import _triplet_947 as T
+from defender.tests._1255_snapshot import tool_calling_responses
 from defender.tests._branch_947 import spec_at
 from defender.tests._data_root_1078 import DATA_ROOT_ENV
 from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
@@ -646,10 +646,18 @@ def test_gather_instructions_name_the_alerts_place(tmp_path):
 
 
 def _coordinate(opening: str, run_dir: Path) -> Path:
+    """The host file MAIN's `alert:` coordinate names. Since #1255 (design rev 4, P1) the
+    coordinate is a MODEL path under the run folder's fixed `/runs/current`; it is translated
+    through the design's table (`/runs/current` -> this run's folder) — an absolute host path
+    is no longer an acceptable coordinate."""
     m = re.search(r"(?m)^alert: (.+)$", opening)
     assert m, f"MAIN's opening message carries no `alert:` coordinate:\n{opening[:600]}"
     named = Path(m.group(1).strip())
-    return named if named.is_absolute() else Path(run_dir) / named
+    if not named.is_absolute():
+        return Path(run_dir) / named
+    assert named.is_relative_to("/runs/current"), (
+        f"MAIN's `alert:` coordinate ({named}) is not in the model view (/runs/current/…)")
+    return Path(run_dir) / named.relative_to("/runs/current")
 
 
 def test_p147_agent_reads_the_alert_at_its_former_place(tmp_path):
@@ -1261,9 +1269,9 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     src = _branchable_source(tmp_path, planted)
     assert src.run_dir is not None
     store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
-    ss = SS.store_mod()
-    spec = spec_at(store, src.run_dir, ss.path_row_ids(store, ss.main_session_id(store))[2],
-                   prompt="Continue this investigation from where it stands.")
+    # #1255 (D1): a branch point is a MAIN response that called tools, and the arm resumes with
+    # no continuation prompt — the source's first one (its `append_block` call).
+    spec = spec_at(store, src.run_dir, tool_calling_responses(store)[0])
     sibling_dir = planted.runs / f"{src.run_dir.name}-sibling"
     sibling_dir.mkdir(parents=True)
     for name, source in _held_files(src.run_dir).items():

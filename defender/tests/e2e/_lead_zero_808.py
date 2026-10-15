@@ -61,6 +61,8 @@ from typing import Any
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
@@ -542,7 +544,7 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         if verbs is ... else verbs
     )
     main = ReplayFn(main_turns if main_turns is not None else [
-        Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})]),
+        Turn(tool_calls=[("read_file", {"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)})]),
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(gather_turns if gather_turns is not None

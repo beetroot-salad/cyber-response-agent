@@ -29,6 +29,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
@@ -148,9 +150,11 @@ def test_the_operand_set_the_four_post_decision_consumers_read_is_the_one_the_ga
     object is only safe if this derivation is bound under O1."""
     deps, _box, payload = _gather_scene(tmp_path, BoxResult(0, b"x" * 20000, b""))
 
-    opened = _tool_bash(deps, f"cat {payload}")
+    opened = _tool_bash(deps, f"cat {model_path(payload, run_dir=deps.run_dir)}")
     assert "untrusted" in opened, "the payload operand did not reach the frame decision"
-    assert str(payload) in opened, "the overflow hint names a file the operand set did not carry"
+    # #1255 C5: the hint names the operand as the model handed it (its model path), never the
+    # host path this used to assert.
+    assert model_path(payload, run_dir=deps.run_dir) in opened, "the overflow hint names a file the operand set did not carry"
     assert len(opened) < 12000, (
         "the capture ceiling the payload operand chose was not applied - the ceiling is a "
         "property of the DATA the command opened, read off the same operand set"
@@ -168,7 +172,7 @@ def test_the_operand_set_the_four_post_decision_consumers_read_is_the_one_the_ga
     # the model did not write.
     deps3 = dataclasses.replace(deps, box=Box(BoxResult(0, b"z", b"")))
     with pytest.raises(ModelRetry) as refusal:
-        _tool_bash(deps3, f"cat {payload}" + NBSP)
+        _tool_bash(deps3, f"cat {model_path(payload, run_dir=deps.run_dir)}" + NBSP)
     assert "untrusted" not in str(refusal.value)
 
 
@@ -183,7 +187,7 @@ def test_the_audit_rows_system_attribution_derives_from_the_authorised_operand_s
         raw_command="seed", payload_text="{}", exit_code=0, payload_status="ok",
         payload_digest="d", system_key="",
     )
-    _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT 1'")
+    _tool_bash(deps, f"cat {model_path(payload, run_dir=deps.run_dir)} | defender-sql 'SELECT 1'")
     rows = [json.loads(line) for line in (run / "executed_queries.jsonl").read_text().splitlines()]
     shim = [r for r in rows if r["query_id"] == _query_rules.BASH_SHIM_QUERY_ID]
     assert len(shim) == 1, "the shim-failure row never reached the queries table"
@@ -219,13 +223,13 @@ def test_the_audit_rows_raw_command_is_unmoved_for_every_shape_outside_the_enume
     deps, _box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"boom"))
     run = deps.run_dir
 
-    short = f"cat {payload} | defender-sql 'SELECT 1'"
+    short = f"cat {model_path(payload, run_dir=deps.run_dir)} | defender-sql 'SELECT 1'"
     _tool_bash(deps, short)
     rows = [json.loads(line) for line in (run / "executed_queries.jsonl").read_text().splitlines()]
     assert rows[-1]["raw_command"] == short, "a realistic command is recorded verbatim"
 
     cap = record_query.SHIM_COMMAND_MAX_CHARS
-    prefix = f"cat {payload} | defender-sql "
+    prefix = f"cat {model_path(payload, run_dir=deps.run_dir)} | defender-sql "
     for marker_at, survives in ((cap - 1, True), (cap, False)):
         pad = marker_at - len(prefix)
         assert pad > 0, "the tmp path is too long to place the marker"
@@ -362,16 +366,15 @@ def test_the_object_the_gate_authorised_is_the_object_the_box_runs(tmp_path):
     unmodified and unre-encoded. That is what makes every argv-divergence demand here an
     EXECUTION-change demand and not merely an authorisation one."""
     deps, box, payload = _gather_scene(tmp_path, BoxResult(0, b"ok", b""))
-    cmd = f"cat {payload}"
+    m_payload = model_path(payload, run_dir=deps.run_dir)
+    cmd = f"cat {m_payload}"
     _tool_bash(deps, cmd)
     assert len(box.calls) == 1
     sent = box.calls[0]
-    authorised = permission.decide_bash(
-        cmd, policy=deps.policy, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
-        cwd_anchor=deps.cwd_anchor,
-    )
+    # #1255 C8/C11: the decomposition the box receives, stated literally in the model view — how
+    # the gate's own functions spell their inputs is the implementer's choice (C11).
     assert [[list(st.argv) for st in pl.stages] for pl in sent["pipelines"]] == \
-        _argv_of(authorised), "the box ran something other than what the gate authorised"
+        [[["cat", m_payload]]], "the box ran something other than what the gate authorised"
     assert sent["command"] == cmd
 
     # ...and an argv entry carrying the character the scanner no longer splits on crosses as
@@ -392,7 +395,8 @@ def test_nothing_mutates_the_authorised_pipelines_between_authorisation_and_exec
     graph above it has no declared immutability on either side, so the property that makes the
     check meaningful is asserted rather than assumed."""
     deps, box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"boom"))
-    _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT 1'")
+    m_payload = model_path(payload, run_dir=deps.run_dir)
+    _tool_bash(deps, f"cat {m_payload} | defender-sql 'SELECT 1'")
     sent = box.calls[0]
     live = [[list(st.argv) for st in pl.stages] for pl in sent["pipelines"]]
     at_receipt = [[list(st.argv) for st in pl.stages] for pl in sent["snapshot"]]
@@ -400,13 +404,9 @@ def test_nothing_mutates_the_authorised_pipelines_between_authorisation_and_exec
         "the authorised pipelines were mutated after they crossed into the box - the audit "
         "path and the operand walk read this object graph and must not write to it"
     )
-    # ...and the decision the gate would reach for the same text is still that object: the gate
-    # is a pure function of its inputs, so two identical calls produce identical decisions.
-    again = permission.decide_bash(
-        f"cat {payload} | defender-sql 'SELECT 1'", policy=deps.policy, run_dir=deps.run_dir,
-        defender_dir=deps.defender_dir, cwd_anchor=deps.cwd_anchor,
-    )
-    assert live == _argv_of(again)
+    # ...and what crossed is still the command's own decomposition, in the model view (#1255
+    # C8/C11: stated literally — the gate's own input spelling is the implementer's choice).
+    assert live == [[["cat", m_payload], ["defender-sql", "SELECT 1"]]], live
 
 
 # What the model is told, and what the operator can see.

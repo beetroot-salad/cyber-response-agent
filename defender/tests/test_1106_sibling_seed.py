@@ -145,7 +145,7 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None) -> tuple[A
         # `<root>/<T>/runs/<run id>` the source sits at, and the source by its id.
         outcome = T.mod("learning.branch.cli").main(
             ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID),
-             "--continuation-prompt", "go"],
+             *P.retired_continuation_argv()],
             spawn=spawn, questioner=O.questioner_for(), preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
             oracle=O.oracle(then=O.submit(_BASE, O.EMPTY_CLAIM)).model,
@@ -292,7 +292,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
         T.mod("learning.branch.cli").main(
             ["--tenant", "acme", src.name, str(P.BRANCH_MESSAGE_ID),
-             "--continuation-prompt", "go"],
+             *P.retired_continuation_argv()],
             spawn=spawn, questioner=questioner,
             preflight=O.no_preflight, live_tree=P.source_capture(tenant_id="acme"))
     text = f"{refused.value} {capsys.readouterr().err}"

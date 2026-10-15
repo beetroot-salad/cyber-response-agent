@@ -39,6 +39,7 @@ from defender.run_repository import RunPaths
 from defender.tests import _data_root_1078 as D
 from defender.tests import _session_store_705 as SS
 from defender.tests import _tenants1106 as T6
+from defender.tests import _1255_snapshot as S1255
 from defender.tests._branch_947 import spec_at
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
@@ -1129,9 +1130,6 @@ def test_p173_run_request_count_now_includes_the_leads_request(tmp_path):
 # The resume trio: p034, p037, p040
 # =================================================================================================
 
-CONTINUATION = "Continue this investigation from where it stands."
-
-
 def _plant_sibling(source_dir: Path, sibling_dir: Path) -> Path:
     """A sibling's run folder holding the source run's alert (and its record once it has one) — the
     case input a resumed run starts from (`_branch_947.ALERT_DOC`'s reasoning)."""
@@ -1150,22 +1148,30 @@ def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
                          sibling_turns: list[S.Turn],
                          before: Callable[[Path], None] | None = None,
                          ) -> tuple[S.Drive, S.Drive]:
-    """A source run through `run.main` (production's default store), branched at MAIN's FIRST tool
-    return — the earliest branch point, before any later turn — and a sibling resumed there."""
+    """A source run through `run.main` (production's default store), branched at MAIN's `echo`
+    CALL after the document landed and the capturing lead returned, and a sibling resumed
+    there. Before #1255 this branched at the append's tool RETURN, which D1 refuses; the
+    `echo` is a tool-calling MAIN response (D1) that is not the gather turn (an arm re-runs a
+    gather at its branch turn against its own backend), and it sits after `l-009`'s capture so
+    the branch point holds a capture however the capture rule reads the source's table (cut at
+    the snapshot or whole — the design does not say)."""
     golden = (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")
     system, verb, params = capture
     src = S.run_alert(
         tmp_path / "source", alert=S.fixture_alert(), tenant=planted, run_id=run_id,
         backend=_resolving_backend(), before=before,
         main=[S.call("append_block", text=golden),
-              S.gather("l-009", system, "capture one fact"), S.text(S.DONE)],
+              S.gather("l-009", system, "capture one fact"), S.call("bash", command="echo held"),
+              S.text(S.DONE)],
         leads={S.L3: corr, "l-009": [S.query(system, verb, params), S.text("L9 captured.")]})
     _run_with_turns(src)
     assert src.run_dir is not None
     store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
     ss = SS.store_mod()
     path = ss.path_row_ids(store, ss.main_session_id(store))
-    spec = spec_at(store, src.run_dir, path[2], prompt=CONTINUATION)
+    point = S1255.tool_calling_responses(store)[2]  # the `echo` call
+    assert S1255.calls_of(S1255.message_at(store, point))[0].tool_name == "bash", path
+    spec = spec_at(store, src.run_dir, point)
     sibling_dir = _plant_sibling(src.run_dir, planted.runs / f"{run_id}-sibling")
     sib = S.new_drive(tmp_path / "sibling", tenant=planted, main=sibling_turns)
     S.drive_run(sib, sibling_dir, tenant=planted.accept(), resume=spec)
@@ -1176,8 +1182,8 @@ def test_p034_sibling_branched_before_the_correlation_entry_la(tmp_path):
     """A sibling's inherited history holds the source run's correlation section. A resumed sibling
     dispatches no correlation.
 
-    Branched at MAIN's first tool return (PR-16: on base, before the late entry); the sibling is
-    handed a verb registry and still issues nothing."""
+    Branched early (PR-16: on base, before the late entry; #1255: at a tool-calling response
+    after the capture, D1); the sibling is handed a verb registry and still issues nothing."""
     marker = "CORR-P034-INHERIT"
     planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
     src, sib = _source_then_sibling(
@@ -1234,6 +1240,7 @@ def test_p037_ancestor_heading_asserts_a_claim_that_then_fails(tmp_path):
         "the opening message names no ending for a lead whose claim collided — it says what the "
         "summary run says, which is not the true outcome")
     assert src.run_dir is not None
+    assert sib.main.seen, "the sibling never reached its model"
     inherited = S.normalize("\n".join(sib.main.seen[0].user_prompts), run_dir=src.run_dir,
                             run_id=src.run_dir.name)
     for line in ending:

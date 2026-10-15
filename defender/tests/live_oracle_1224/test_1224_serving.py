@@ -3,8 +3,10 @@ query tool's handling of what the registry returns or raises, and the world ledg
 
 What this file owns (one test per slice entry of `w01_serving`):
   * the served-answer contract — an uncached call in a world with facts gets an oracle turn and a
-    verifier pass and the oracle decides `passthrough` (M01=A); a facts-free world serves the base
-    with no oracle turn (M07=A); N failed attempts raise `OracleUnservable` (M03=A);
+    verifier pass and the oracle decides `passthrough` (M01=A); a facts-free world serves a
+    RECORDED base with no oracle turn, and (#1255 D3, reversing M07=A's "the control world has
+    no oracle") a base read live goes through its oracle; N failed attempts raise
+    `OracleUnservable` (M03=A);
   * the world ledger's vocabulary and row count — one row per investigator call, `passthrough`,
     `oracle`, `real-error` or `refused`; `staged` / `patched` refused; a live base answer lives
     in the world's own oracle-side `base.jsonl`, never as a ledger row; an unservable call leaves
@@ -567,26 +569,36 @@ def test_1224_oracle_and_verifier_enter_through_injection_seams(tmp_path):
 
 
 def test_1224_world_with_no_facts_serves_base_with_no_oracle_turn(tmp_path):
-    """d00h_world_without_facts_is_passthrough — a world whose facts list is empty serves every
-    call's base unchanged with no oracle or verifier turn, each row `passthrough`.
+    """d00h_world_without_facts_is_passthrough (name kept: `spec_graph_1224.yaml` binds it) — REWRITTEN by #1255 D3 (design rev 4: "every world,
+    the control included, answers a question the source never asked through its oracle"). A
+    world whose facts list is empty (today's control world) serves a call the family RECORDED
+    unchanged with no oracle turn; a call the source never asked, whose base is a live read,
+    takes an oracle turn — the oracle is handed the call — and is served what that turn
+    verified. Each row is `passthrough` (the answer is the base, unchanged).
 
-    The world's manifest entry has an explicit empty facts list (today's control world). M07=A."""
+    Was (M07=A): every call of a facts-free world, the live one included, served with no oracle
+    turn — a raw live read past the fork."""
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
     est.answer("idp", "query", BOB, BOB_BASE)
-    oracle, verifier = S.oracle(*_forged_moves()), S.passing_verifier()
-    control = S.sandboxed_registry(ep, "a", est, oracle=oracle, verifier=verifier)
+    control_oracle = S.oracle(S.submit(BOB_BASE, S.EMPTY_CLAIM))
+    control = S.sandboxed_registry(ep, "a", est, oracle=control_oracle,
+                                   verifier=S.passing_verifier())
     ctx = est.ctx(tmp_path / "run")
 
     captured_call = S.call(control, "idp", "query", ctx, **ALICE)
-    live_call = S.call(control, "idp", "query", ctx, **BOB)
     assert _text(captured_call) == _text(BASE_ALICE)
+    assert control_oracle.requests == 0, "a recorded answer cost the control world an oracle turn"
+    live_call = S.call(control, "idp", "query", ctx, **BOB)
     assert _text(live_call) == _text(BOB_BASE)
-    assert oracle.requests == 0
-    assert verifier.requests == 0
+    assert control_oracle.requests >= 1, (
+        "the control world served a question the source never asked as a raw live read (D3)")
+    assert "user:bob" in control_oracle.all_seen(), "the oracle was not handed the live call"
     assert _decisions(ep, "a") == [S.PASSTHROUGH, S.PASSTHROUGH]
+    assert not control_oracle.overrun
 
-    # Positive control: the same doubles ARE driven for a world with facts.
+    # Positive control: a world with facts takes a turn for the recorded call too.
+    oracle, verifier = S.oracle(*_forged_moves()), S.passing_verifier()
     fact_world = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
     assert S.call(fact_world, "idp", "query", ctx, **ALICE) == SERVED_ALICE
     assert oracle.requests >= 1
@@ -748,7 +760,9 @@ def test_input_world_facts_key_absent_null_or_empty(tmp_path, facts):
     world with an empty facts list serves every call's base unchanged as `passthrough` with no
     oracle or verifier turn.
 
-    M07=A: the control world has no oracle and an explicit empty facts list is required."""
+    M07=A: an explicit empty facts list is required. #1255 D3 reverses M07=A's "the control
+    world has no oracle": the facts-free world serves its RECORDED call with no turn, and its
+    live call through its oracle."""
     doc = S.family_v2()
     world_b = next(w for w in doc["worlds"] if w["world_id"] == "b")
     if facts == "absent":
@@ -768,14 +782,15 @@ def test_input_world_facts_key_absent_null_or_empty(tmp_path, facts):
 
     est = S.estate(tmp_path)
     est.answer("idp", "query", BOB, BOB_BASE)
-    oracle, verifier = S.oracle(), S.verifier()
+    oracle, verifier = S.oracle(S.submit(BOB_BASE, S.EMPTY_CLAIM)), S.passing_verifier()
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
     ctx = est.ctx(tmp_path / "run")
     assert _text(S.call(reg, "idp", "query", ctx, **ALICE)) == _text(BASE_ALICE)
+    assert oracle.requests == 0, "the recorded call cost the facts-free world an oracle turn"
     assert _text(S.call(reg, "idp", "query", ctx, **BOB)) == _text(BOB_BASE)
-    assert oracle.requests == 0
-    assert verifier.requests == 0
+    assert oracle.requests >= 1, "the live call was served without its oracle (#1255 D3)"
     assert _decisions(ep, "b") == [S.PASSTHROUGH, S.PASSTHROUGH]
+    assert not oracle.overrun
 
 
 def test_1224_fact_names_an_entity_no_real_answer_contains(tmp_path):
@@ -1036,11 +1051,16 @@ def test_base_answer_is_a_non_answer_body(tmp_path, body):
     est.answer("idp", "query", BOB, payload)
     ctx = est.ctx(tmp_path / "run")
 
-    control_oracle = S.oracle()
-    control = S.sandboxed_registry(ep, "a", est, oracle=control_oracle, verifier=S.verifier())
+    # #1255 D3: the control world's live base goes through its oracle too, framed the same way
+    # (was M07=A: served with no turn).
+    control_oracle = S.oracle(S.submit(payload, S.EMPTY_CLAIM))
+    control = S.sandboxed_registry(ep, "a", est, oracle=control_oracle,
+                                   verifier=S.passing_verifier())
     assert _text(S.call(control, "idp", "query", ctx, **BOB)) == _text(payload)
-    assert control_oracle.requests == 0
+    assert control_oracle.requests >= 1
     assert _decisions(ep, "a") == [S.PASSTHROUGH]
+    if marker is not None:
+        S.assert_wrapped_untrusted(control_oracle.seen[0], marker, f"the {body} base body")
 
     oracle = S.oracle(S.submit(payload, S.EMPTY_CLAIM))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
@@ -1559,8 +1579,10 @@ def test_control_world_when_every_other_world_is_unservable(tmp_path, monkeypatc
     left, the outcome record says `unusable` naming both failed worlds, no sibling starts and no
     findings are graded.
 
-    M07=A: the control world has no oracle; it can be unservable only through a non-oracle cause
-    and then counts toward O5 like any world. Settled regardless: with two or more unservable
+    The control world takes no pre-flight replay (#1255 D3: "calibration still has nothing to
+    calibrate for the control" — its oracle serves only its own new questions, at run time), so
+    it cannot fail pre-flight through the oracle; it can be unservable only through a
+    non-pre-flight cause and then counts toward O5 like any world. Settled regardless: with two or more unservable
     worlds the family is unusable (O5). Every fact-world turn here ends without a valid
     submission (M03=A), one attempt allowed."""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
@@ -1585,7 +1607,9 @@ def test_input_oracle_budget_is_zero_or_unreadable(tmp_path, monkeypatch):
     its first call that needs the oracle and fails pre-flight, a facts-free world still serves,
     and a negative or non-numeric budget is refused naming the knob.
 
-    M07=A: a facts-free world spends no oracle budget. D1 (M10): no unit is pinned. Settled
+    A facts-free world spends no oracle budget on a RECORDED call (#1255 D3: its new questions
+    do go through its oracle — `test_1255_a_control_world_whose_oracle_cannot_serve_never_falls_
+    back_to_a_live_read`). D1 (M10): no unit is pinned. Settled
     regardless (O14): a refused budget is never read as unlimited."""
     est = S.estate(tmp_path / "serving")
     ep = _episode(tmp_path / "serving")

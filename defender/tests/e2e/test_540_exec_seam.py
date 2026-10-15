@@ -26,7 +26,10 @@ the scrub, the lifecycle and the survival demands live in their sibling spec fil
   3. **The three-site cwd invariant (M9 / C52).** The cwd is coupled at THREE sites: the
      gate's rebase of a relative operand (`permission/bash.py:234`), `_resolve_operand`'s
      rebase (`tools.py:304-313`), and the executor's `cwd=`. Move fewer than three and the
-     validator/executor differential reopens at the same moment O12 is fixed.
+     validator/executor differential reopens at the same moment O12 is fixed. Since #1255
+     (C8, C8-extended) the box mounts each tree at its model path and receives the command
+     AND the working directory in the model view (`/runs/current`); the host sites keep the
+     host run folder that path maps to.
 
   4. **The deps seam.** `_tool_bash` executes through an INJECTED box on `AgentDeps`, and
      every bash-enabled role has one (H3).
@@ -57,6 +60,8 @@ from pathlib import Path
 from defender.run_repository import RunPaths
 
 import pytest
+
+from defender.tests._1255_view import MODEL_RUN, model_path
 
 from _replay_harness import DEFENDER, GOLDEN_AB3, ReplayFn, Turn, drive, materialize
 
@@ -105,13 +110,26 @@ class RecordingTransport:
     program's, and what the caller is told are all `BoxExecutor`'s job — a fake that
     decided any of that would be asserting against itself."""
 
-    def __init__(self, *replies):
+    def __init__(self, *replies, view: dict[str, Path] | None = None):
         self._replies = list(replies) or [framed(0, b"", b"")]
+        self._view = dict(view) if view is not None else {}
         self.calls: list[ExecCall] = []
+
+    def _bound(self, cwd: Path) -> Path:
+        """Where `cwd` lives for the box: a model path under a mount target in `view` is the
+        directory bound there (#1255 C8-extended — `/runs/current` exists in the box iff the
+        run folder bound at it exists); any other cwd is itself."""
+        for target, source in self._view.items():
+            try:
+                return Path(source) / Path(cwd).relative_to(target)
+            except ValueError:
+                continue
+        return Path(cwd)
 
     def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> box.RawExec:
         self.calls.append(ExecCall(
-            frame=frame, cwd=Path(cwd), cwd_existed=Path(cwd).is_dir(), timeout=timeout,
+            frame=frame, cwd=Path(cwd), cwd_existed=self._bound(Path(cwd)).is_dir(),
+            timeout=timeout,
         ))
         reply = self._replies[min(len(self.calls) - 1, len(self._replies) - 1)]
         if isinstance(reply, BaseException):
@@ -187,7 +205,13 @@ def _bash(deps, command: str) -> str:
 
 
 def _cat_alert(run_dir: Path) -> str:
-    return f"cat {RunPaths(run_dir).alert}"
+    """The alert read the model types, by its model path (#1255 P1 inbound: the model hands back
+    model paths; a host path is refused)."""
+    return f"cat {_alert_model_path(run_dir)}"
+
+
+def _alert_model_path(run_dir: Path) -> str:
+    return model_path(RunPaths(run_dir).alert, run_dir=run_dir)
 
 
 
@@ -238,9 +262,13 @@ def test_unframed_stdout_is_never_returned_as_program_output(tmp_path):
     with pytest.raises(box.BoxFault):
         executor2.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=run_dir, timeout=5.0)
 
-    deps = _main_deps(run_dir, RecordingTransport(noise))
+    t3 = RecordingTransport(noise)
+    deps = _main_deps(run_dir, t3)
     with pytest.raises((ModelRetry, box.BoxFault)) as caught:
         _bash(deps, _cat_alert(run_dir))
+    # Control (#1255 RC-3): the gate admitted the command and the daemon-noise transport was
+    # reached, so the negatives below are about unframed stdout — not a gate refusal.
+    assert len(t3.calls) == 1, "the command never reached the box; the negatives are vacuous"
     shown = str(caught.value)
     assert "exit=0" not in shown, "daemon text was dressed up as a successful program result"
     assert "--- stdout ---\nError response from daemon" not in shown
@@ -443,7 +471,7 @@ def test_hostile_argv_crosses_byte_exact(tmp_path):
     and `$(` never reach the box at all: the host gate denies them, which is checked here so
     their absence from this list is a recorded fact rather than an oversight."""
     run_dir = _run_dir(tmp_path)
-    alert = RunPaths(run_dir).alert
+    alert = _alert_model_path(run_dir)   # #1255 P1/C8: the model's spelling, and the box's
 
     cases = [
         (f"cat {alert} | grep -n 'a b'", ["grep", "-n", "a b"]),
@@ -457,13 +485,15 @@ def test_hostile_argv_crosses_byte_exact(tmp_path):
 
         crossed = t.argvs()
         assert crossed[-1] == expected_tail, f"argv was rewritten on the wire for {command!r}"
-        assert crossed[0] == ["cat", str(alert)]
-        decision = permission.decide_bash(
-            command, policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER)
-        assert crossed == [list(st.argv) for pl in decision.pipelines for st in pl.stages], \
-            "the box ran a different decomposition than the gate approved"
+        assert crossed[0] == ["cat", alert]
+        # #1255 C8/C11: the decomposition the box ran, stated literally in the model view — how
+        # the gate's own functions spell their inputs is the implementer's choice (C11).
+        assert crossed == [["cat", alert], expected_tail], \
+            "the box ran a different decomposition than the command's own"
 
-    for denied in (f"cat {alert} | grep -n '`id`'", f"cat {alert} | grep -n '$(whoami)'"):
+    # The gate called directly keeps its own (host) spelling (C11).
+    host_alert = RunPaths(run_dir).alert
+    for denied in (f"cat {host_alert} | grep -n '`id`'", f"cat {host_alert} | grep -n '$(whoami)'"):
         assert not permission.decide_bash(
             denied, policy=deps.policy, run_dir=run_dir, defender_dir=DEFENDER).allow
 
@@ -528,7 +558,7 @@ def test_box_accepts_no_raw_command_string(tmp_path):
     doubled spaces and quoting that vanish under `parse` — so a raw string riding along would
     be visible in the frame bytes."""
     run_dir = _run_dir(tmp_path)
-    alert = RunPaths(run_dir).alert
+    alert = _alert_model_path(run_dir)   # #1255 P1/C8: the model's spelling, and the box's
     command = f"cat   {alert}    |   grep -n   'a b'"
 
     t = RecordingTransport(framed(0, b"", b""))
@@ -538,7 +568,7 @@ def test_box_accepts_no_raw_command_string(tmp_path):
     frame = t.only().frame
     assert command.encode() not in frame, "the raw command string crossed into the box"
     assert b"   " not in frame, "raw command spacing survived into the frame"
-    assert t.argvs() == [["cat", str(alert)], ["grep", "-n", "a b"]]
+    assert t.argvs() == [["cat", alert], ["grep", "-n", "a b"]]
     assert box.decode_request(frame) == bash_exec.parse(command), \
         "the box received something other than the host's single parse"
 
@@ -568,7 +598,10 @@ def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
     """relative_operand_names_the_same_file_at_all_three_sites — a RELATIVE operand names one
     and the same absolute file at ALL THREE sites the cwd is coupled at: the gate's rebase
     (`permission/bash.py:234`), `_resolve_operand`'s rebase (`tools.py:304-313`), and the
-    executor's `cwd=` (now the box's working directory). All three are the run dir (F4).
+    executor's `cwd=` (now the box's working directory). All three are the run folder (F4):
+    the two host sites name the host run folder, and the box's working directory is the model
+    path that folder is mounted at (`/runs/current`, #1255 C8-extended), so the file the box
+    opens is the model path of the file the host resolved.
 
     C52 is why this asserts THREE and not two: move fewer than three and the
     validator/executor differential reopens at the very moment O12 is fixed — the gate would
@@ -592,13 +625,13 @@ def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
         "the gate is still rebasing onto the repo root — site 1 did not move"
 
     _bash(deps, f"cat {ALERT_REL}")
-    assert t.only().cwd == run_dir, "the box ran at a different cwd than the gate validated"
+    assert t.only().cwd == Path(MODEL_RUN), "the box ran at a different cwd than the gate validated"
 
     assert runtime_tools._resolve_operand(deps, ALERT_REL) == RunPaths(run_dir).alert
 
     assert (RunPaths(run_dir).alert).exists()
-    assert (t.only().cwd / ALERT_REL).resolve() == \
-        runtime_tools._resolve_operand(deps, ALERT_REL).resolve()
+    assert (t.only().cwd / ALERT_REL).as_posix() == \
+        model_path(runtime_tools._resolve_operand(deps, ALERT_REL), run_dir=run_dir)
 
 
 def test_cwd_is_reapplied_per_call_and_does_not_persist(tmp_path):
@@ -616,10 +649,10 @@ def test_cwd_is_reapplied_per_call_and_does_not_persist(tmp_path):
     deps = _main_deps(run_dir, t)
 
     _bash(deps, _cat_alert(run_dir))
-    _bash(deps, f"cat {RunPaths(run_dir).alert} | wc -l")
+    _bash(deps, f"{_cat_alert(run_dir)} | wc -l")
 
     assert len(t.calls) == 2
-    assert [c.cwd for c in t.calls] == [run_dir, run_dir], \
+    assert [c.cwd for c in t.calls] == [Path(MODEL_RUN), Path(MODEL_RUN)], \
         "the cwd was not re-applied on the second call"
     assert all(c.cwd.is_absolute() for c in t.calls), \
         "a relative cwd would resolve against whatever the previous exec left behind"
@@ -636,14 +669,16 @@ def test_the_chosen_cwd_exists_before_the_first_exec(tmp_path):
     rc=127 a program's own `command not found` produces. The frame absence distinguishes
     them after the fact; the anchor existing beforehand is what stops the confusion arising."""
     run_dir = _run_dir(tmp_path)
-    t = RecordingTransport(framed(0, b"", b""))
+    # #1255 C8-extended: the cwd is the model path `/runs/current`, which exists in the box iff
+    # the run folder bound there exists — so existence is read off the bound folder.
+    t = RecordingTransport(framed(0, b"", b""), view={MODEL_RUN: run_dir})
     deps = _main_deps(run_dir, t)
 
     _bash(deps, _cat_alert(run_dir))
 
     call = t.only()
     assert call.cwd_existed, f"the box's cwd {call.cwd} did not exist at the first exec"
-    assert call.cwd == run_dir
+    assert call.cwd == Path(MODEL_RUN)
 
 
 
@@ -667,7 +702,9 @@ def test_tool_bash_executes_through_the_injected_box_seam(tmp_path):
     shown = _bash(deps, _cat_alert(run_dir))
 
     assert len(t.calls) == 1, "the bash tool did not reach the injected box"
-    assert t.argvs() == [["cat", str(RunPaths(run_dir).alert)]]
+    # #1255 C8: a box mounts each tree at its model path, so the command it receives names the
+    # model path the gate admitted, never the host path (which does not exist inside the box).
+    assert t.argvs() == [["cat", _alert_model_path(run_dir)]]
     assert "<<from-the-box>>" in shown
     assert real_content.strip() not in shown, \
         "the host executed the command in-process; the box seam was bypassed"
@@ -749,8 +786,8 @@ def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):
     t = RecordingTransport(framed(0, b"3\n", b""))
 
     main = ReplayFn([
-        Turn(tool_calls=[("bash", {"command": f"cat {alert}"})]),
-        Turn(tool_calls=[("bash", {"command": f"cat {alert} | wc -l"})]),
+        Turn(tool_calls=[("bash", {"command": f"cat {model_path(alert, run_dir=run_dir)}"})]),
+        Turn(tool_calls=[("bash", {"command": f"cat {model_path(alert, run_dir=run_dir)} | wc -l"})]),
         Turn(text="done"),
     ])
     drive(run_dir, run_id=RUN_ID, main=main,
@@ -758,8 +795,8 @@ def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):
 
     assert main.calls == 3, "the run did not complete its script through the box"
     assert len(t.calls) == 2, "a bash turn did not reach the box"
-    assert t.argvs(0) == [["cat", str(alert)]]
-    assert t.argvs(1) == [["cat", str(alert)], ["wc", "-l"]]
+    assert t.argvs(0) == [["cat", model_path(alert, run_dir=run_dir)]]
+    assert t.argvs(1) == [["cat", model_path(alert, run_dir=run_dir)], ["wc", "-l"]]
     assert "3" in main.seen[-1], "the box's result never came back to the model"
 
 

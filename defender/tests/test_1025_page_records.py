@@ -193,7 +193,7 @@ def test_1025_markup_in_every_model_authored_field_renders_as_text_on_every_sect
 def test_1025_markup_in_the_records_no_planted_field_covers(tmp_path):
     """Every record string the page renders passes the untrusted escape: markup planted in a
     samples system and answer, a provenance `dirty_paths` entry, a served call's params, the
-    outcome record's reason and drift entry, a world record's detail, the continuation prompt,
+    outcome record's reason and drift entry, a world record's detail,
     a `noise_floor_note`, an unqueueable reason (a ledger entry's, #1234), a world row's and the
     family row's `draws_failed_reason`, an integrity note, a correlation and a derivation is
     never on the page raw; positive control: the bound ones (samples, dirty path, served
@@ -203,8 +203,9 @@ def test_1025_markup_in_the_records_no_planted_field_covers(tmp_path):
     ep = E.sample_episode(tmp_path)
     E.write_samples(ep.dir, {f"system {MARKUP}": {"verbs": {"esql": [f"answer {MARKUP}"]}}})
     E.write_stamp(ep.dir, dirty=True, dirty_paths=[f"path {MARKUP}"])
-    manifest = E.sample_manifest(continuation_prompt=f"continue {MARKUP}")
-    T.write_family(ep.dir, manifest)
+    # (#1255 P4, D1: the manifest's continuation prompt, once among the markup carriers below,
+    # no longer exists to carry any.)
+    T.write_family(ep.dir, E.sample_manifest())
     J.write_ledger(ep.dir, E.GRADED_WORLD, [E.served_row(
         E.GRADED_WORLD, "oracle", params={"query": f"FROM logs {MARKUP}"})])
     E.write_outcome(ep.dir, reason=f"outcome {MARKUP}", drift=[{

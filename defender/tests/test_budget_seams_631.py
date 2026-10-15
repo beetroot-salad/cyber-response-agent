@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 import yaml  # noqa: E402
@@ -492,14 +494,14 @@ def test_same_tool_name_on_two_agents(tmp_path):
     main_state = _state(main_dir)
     _seed_calls(main_state, 1)
     main_result, _ = drive_agent(
-        MAIN_DEF, main_dir, [[("read_file", {"path": str(main_dir / "alert.json")})]],
+        MAIN_DEF, main_dir, [[("read_file", {"path": model_path(main_dir / "alert.json", run_dir=main_dir)})]],
         limits=limits, enforce=True, state=main_state)
 
     gather_dir = _run_dir(tmp_path, "pair-gather")
     gather_state = _state(gather_dir)
     _seed_calls(gather_state, 1)
     gather_result, _ = drive_agent(
-        T1106.fixture_gather_def(), gather_dir, [[("read_file", {"path": str(gather_dir / "alert.json")})]],
+        T1106.fixture_gather_def(), gather_dir, [[("read_file", {"path": model_path(gather_dir / "alert.json", run_dir=gather_dir)})]],
         limits=limits, enforce=True, agent_id="gather:l-001", state=gather_state)
 
     assert "BUDGET" not in str(main_result.all_messages()).upper(), (
@@ -539,7 +541,7 @@ def test_gather_keeps_its_request_limit(tmp_path):
     from pydantic_ai.exceptions import UsageLimitExceeded
 
     run_dir = _run_dir(tmp_path, "grl")
-    never_stops = [[("read_file", {"path": str(run_dir / "alert.json")})]] * 200
+    never_stops = [[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})]] * 200
     with pytest.raises(UsageLimitExceeded):
         drive_agent(T1106.fixture_gather_def(), run_dir, never_stops, limits=DEFAULT_LIMITS,
                     enforce=False, agent_id="gather:l-001",
@@ -689,7 +691,7 @@ def test_every_agent_construction_pins_retries_explicitly(tmp_path):
     assert driver.DEFAULT_TOOL_RETRIES == 10
 
     run_dir = _run_dir(tmp_path, "retries")
-    missing = str(run_dir / "nope" / "absent.json")
+    missing = model_path(run_dir / "nope" / "absent.json", run_dir=run_dir)
     script = [[("read_file", {"path": missing})],
               [("read_file", {"path": missing})],
               []]

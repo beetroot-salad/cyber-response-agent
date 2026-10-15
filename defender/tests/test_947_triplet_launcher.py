@@ -131,7 +131,7 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     agent = T.FakeAgent()
     with pytest.raises(SystemExit):
         _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                     "--continuation-prompt", "go"],
+                     *T.retired_continuation_argv()],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
     assert agent.calls == 0
@@ -169,7 +169,7 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
             # names, and an uncredentialed host would otherwise satisfy every one of them with
             # the preflight's own refusal before the check under test was ever reached.
             _cli().main(["--tenant", src.parent.parent.name, src.name, *argv_extra,
-                         "--continuation-prompt", "go"],
+                         *T.retired_continuation_argv()],
                         spawn=T.FakeSpawn(), questioner=agent,
                         preflight=S.no_preflight, live_tree=T.source_capture())
         assert agent.calls == 0, "the questioner was paid for before the preflight refused"
@@ -194,7 +194,7 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     with pytest.raises(T.refusals()) as refusal:
         _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                     "--continuation-prompt", "go"],
+                     *T.retired_continuation_argv()],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
     assert "alert" in str(refusal.value)
@@ -202,34 +202,37 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     assert "ROOT-PRIVATE-KEY" not in str(refusal.value)
 
 
-def test_947_the_step_one_command_line_requires_a_continuation_prompt(tmp_path):
-    """The step-1 command line requires the operator's continuation prompt: it is part of the
-    measured instrument and the design names no other author for it, so a launch without one
-    refuses at the parser rather than inventing a string."""
-    import contextlib
-    import io
-
+def test_947_the_step_one_command_line_needs_only_the_source_and_the_branch_point(tmp_path):
+    """#1255 P4 (D1) REVERSES the test that stood here, `..._requires_a_continuation_prompt`:
+    the operator's prompt was "part of the measured instrument" and the parser refused a launch
+    without one. An arm now resumes with no injected message, so a launch names the tenant, the
+    source run and the branch point and nothing else: that request parses, carries the branch
+    point it was given, and the episode id is still derived (not an operator argument). That the
+    prompt is no longer accepted is `test_947_branch_cli`'s demand, not repeated here."""
     base, src = T.runs_base(tmp_path)
-    err = io.StringIO()
-    with contextlib.redirect_stderr(err), pytest.raises(SystemExit) as bad:
-        _cli().parse_branch_args(["--tenant", src.parent.parent.name, src.name,
-                                  str(T.BRANCH_MESSAGE_ID)])
-    assert bad.value.code == 2
-    assert "--continuation-prompt" in err.getvalue()
-    assert "--episode-id" not in err.getvalue(), (
-        "the episode id is still an operator argument; the design derives it")
+    request = _cli().parse_branch_args(["--tenant", src.parent.parent.name, src.name,
+                                        str(T.BRANCH_MESSAGE_ID)])
+    assert request.branch_message_id == T.BRANCH_MESSAGE_ID
+    assert not hasattr(request, "episode_id"), (
+        "the episode id is an operator argument again; the design derives it")
 
 
-def test_947_all_siblings_in_one_family_share_one_continuation_prompt(tmp_path):
-    """Every sibling in one family is launched with the SAME continuation prompt: the manifest
-    carries one string and each child's command line names that one, so a family cannot become
-    a comparison across two different instructions."""
+def test_947_all_siblings_in_one_family_are_launched_from_one_manifest_and_no_prompt(tmp_path):
+    """#1255 P4 (D1) REVERSES `..._share_one_continuation_prompt`: there is no instrument string
+    for a family to share, because the arm is told nothing on arrival. The manifest carries no
+    continuation prompt and no child's command line names one, so a family can only differ in
+    its worlds' answers; the siblings still all name the one manifest (their episode).
+    Positive control: the same manifest carries the family's own fields, and the launch started
+    more than one sibling."""
     import yaml
 
     rc, spawn, ep, _message = _launch(tmp_path)
     manifest = yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    assert manifest["continuation_prompt"] == "go"
+    assert manifest["base_story"] and manifest["worlds"], "the manifest was not the family's"
+    assert "continuation_prompt" not in manifest
     assert len(spawn.launches) >= 2
+    for la in spawn.launches:
+        assert not any("continuation" in str(arg) for arg in la["argv"]), la["argv"]
     # #1105 PR 2 (declared change 6): a sibling names its episode by id, `--episode <ep>`.
     seen = {la["argv"][la["argv"].index("--episode") + 1] for la in spawn.launches}
     assert len(seen) == 1, "the siblings were launched from different manifests"

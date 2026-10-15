@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender import _io, _tenant, run_common
 from defender.run_repository import Run
 from defender.tests.e2e._replay_harness import GOLDEN, ReplayFn, Turn, drive, materialize
@@ -41,9 +43,9 @@ def golden_replay(run_dir: Path) -> ReplayFn:
     investigation = (GOLDEN / "investigation.md").read_text(encoding="utf-8")
     report = (GOLDEN / "report.md").read_text(encoding="utf-8")
     return ReplayFn([
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "investigation.md"),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
                                          "content": investigation})]),
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "report.md", run_dir=run_dir),
                                          "content": report})]),
         Turn(text=MARKER),
     ])

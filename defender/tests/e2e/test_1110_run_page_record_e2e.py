@@ -575,6 +575,10 @@ def test_1110_o4_o5_a_failed_copy_is_a_warning_not_a_failed_render(
     Positive control on the same run: with the override back on a writable folder, the copy
     lands and nothing is warned — so the warning is this fault's, not one every render emits."""
     run_dir = driven_run(tmp_path)
+    # The drive that made the run takes production's unboxed mode (#1255 C6), whose opt-out
+    # logs a WARNING; it is the drive's, not the page step's. Counted from here, every
+    # logger's warnings are the page step's.
+    caplog.clear()
     run = tenant_run(run_dir)
     monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
     if fault == "unwritable-destination":
@@ -1037,6 +1041,10 @@ def test_1110_a_saved_page_is_logged_and_so_is_what_the_copy_did(
     (`production`) and copies nothing; under `dev` it logs ONE INFO line naming the copy it
     made. Nothing is warned either way — the positive control for every "warned" test."""
     run_dir = driven_run(tmp_path / "runs-base")
+    # The drive that made the run takes production's unboxed mode (#1255 C6), whose opt-out
+    # logs a WARNING; it is the drive's, not the page step's. Counted from here, every
+    # logger's warnings are the page step's.
+    caplog.clear()
     run = tenant_run(run_dir)
     record = run.observability.runtime_html.path
     if deployment is not None:
@@ -1114,6 +1122,10 @@ def test_1110_publish_page_saves_the_record_and_answers_what_the_copy_did(
     in every case — each is the others' positive control."""
     vr = _renderer()
     run_dir = driven_run(tmp_path / "runs-base")
+    # The drive that made the run takes production's unboxed mode (#1255 C6), whose opt-out
+    # logs a WARNING; it is the drive's, not the page step's. Counted from here, every
+    # logger's warnings are the page step's.
+    caplog.clear()
     io = ArgRecordingIo()
     run = tenant_run(run_dir, io=io)
     record = run.observability.runtime_html.path

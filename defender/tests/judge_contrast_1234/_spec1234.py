@@ -99,6 +99,7 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
+from defender.tests import _branch_947 as B947
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S24
@@ -1935,9 +1936,13 @@ class InProcessSiblings:
             self.run_dirs[label] = run_dir
             fam = kw["world"].family
             src = Path(kw["source"].run_dir)
+            # #1255 (D1, P4) COMPAT: the prompt is read off the family and handed to the spec
+            # only while both still carry it (`_branch_947.declares_retired_prompt`).
+            retired = ({B947.RETIRED_PROMPT_FIELD: fam.continuation_prompt}
+                       if B947.declares_retired_prompt() else {})
             spec = branch_mod.BranchSpec(
                 source_run_dir=src, branch_message_id=fam.branch_message_id,
-                continuation_prompt=fam.continuation_prompt, as_of=fam.as_of)
+                as_of=fam.as_of, **retired)
             leads = [("gather", {"lead_id": lid, "system": "idp", "goal": f"measure {lid}",
                                  "what_to_summarize": ["what the system says"]})
                      for lid in script.main_leads]
@@ -2069,7 +2074,7 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
     with _launcher_judge_suppressed(tmp_path):
         try:
             rc = mod(CLI).main(["--tenant", src.parent.parent.name, src.name,
-                                str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+                                str(T.BRANCH_MESSAGE_ID), *T.retired_continuation_argv()],
                                spawn=spawn, **seams)
         except SystemExit as stop:
             rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))

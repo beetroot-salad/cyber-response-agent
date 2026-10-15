@@ -12,12 +12,14 @@ import os
 
 import pytest
 
+from defender.tests import _1255_view as V
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
-    ReplayFn,
     Turn,
     drive,
     materialize,
@@ -39,19 +41,24 @@ def test_a_hard_link_read_is_a_retry_and_the_run_reads_and_appends_on(tmp_path):
     os.link(host, run_dir / "notes.txt")
     alert_marker = RunPaths(run_dir).alert.read_text(encoding="utf-8").strip()[:40]
 
-    main = ReplayFn([
+    # A recorder, not a bare replay: the plain read is judged by ITS OWN tool return (#1255
+    # RC-P3) — message 0 inlines the alert too, so the alert's text anywhere in a later request
+    # would hold whether the read worked or not.
+    main = V.Recorder([
         Turn(tool_calls=[("read_file", {"path": "notes.txt"})]),
-        Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})]),
+        Turn(tool_calls=[("read_file", {"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)})]),
         Turn(tool_calls=[("append_block", {"text": "+ recovered after a refused read\n"})]),
         Turn(text="done"),
     ])
     drive(run_dir, run_id="rooted-1136", main=main)
 
     assert main.calls == 4, "the loop did not survive the refused read"
-    assert not any(HOST_MARK in seen for seen in main.seen), (
+    assert HOST_MARK not in main.all_text(), (
         "read_file handed the bytes of a hard-linked host file to the model"
     )
-    assert alert_marker in main.seen[2], "the plain read after the refusal returned nothing"
+    kind, text = main.answer_to(2)
+    assert kind == "return" and alert_marker in text, (
+        f"the plain read after the refusal returned nothing: {kind} {text[:300]}")
     assert (run_dir / "investigation.md").read_text(encoding="utf-8") == (
         "+ recovered after a refused read\n"
     )

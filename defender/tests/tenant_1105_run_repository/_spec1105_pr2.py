@@ -82,7 +82,7 @@ def new_launch_argv(tenant_id: str, source_run_id: str,
                     branch_message_id: int = BRANCH_MESSAGE_ID, *extra: str) -> list[str]:
     """Declared change 1: `branch --tenant T <source_run_id> <branch_message_id>`."""
     return ["--tenant", tenant_id, source_run_id, str(branch_message_id),
-            "--continuation-prompt", "go", *extra]
+            *T.retired_continuation_argv(), *extra]
 
 
 def sibling_argv(tenant_id: str, episode_dir: Path, label: str, *extra: str) -> list[str]:

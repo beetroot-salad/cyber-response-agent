@@ -287,13 +287,16 @@ def _run_inherited(
 ) -> _Res:
     """Drive a REAL branch sibling (`drive(..., resume=spec)`) whose source's queries table is
     `table` — the shape a resumed lead's run starts from. The source is
-    `_branch_947.legal_source` (a store, a case link, the golden document), which carries no
+    `_branch_947.planted_source` (a store, a case link, the golden document; not the N4
+    fixture — the implementer's fixture-only snapshot planting may snapshot it), which carries no
     claim for its leads, so the sibling's MAIN can dispatch `lead` again; seeding copies the
     table's rows for the inherited leads, and each `rows` entry's sidecar, into the sibling and
     records them on the sibling's state (#1235 round 2) before its first turn."""
-    from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at
+    from defender.tests._branch_947 import (
+        GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
+    )
 
-    store, source, _session, path_ids = legal_source(
+    store, source, _session, path_ids = planted_source(
         root, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None)
     RunPaths(source).executed_queries.write_bytes(table)
     for row in rows:
@@ -301,7 +304,9 @@ def _run_inherited(
         if rel:
             (source / rel).parent.mkdir(parents=True, exist_ok=True)
             (source / rel).write_text("" if row.get("exit_code") else "[]", encoding="utf-8")
-    spec = spec_at(store, source, path_ids[-1])
+    # #1255 (D1): a tool-calling MAIN response after the document landed, not the RETURN the
+    # pre-#1255 shape branched at. The source is hand-planted (`planted_source`, not N4's).
+    spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
     store.close()
     sibling = root / "defender-runs" / "run-sibling-807"
     RunPaths(sibling).gather_raw.mkdir(parents=True)
