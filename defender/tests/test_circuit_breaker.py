@@ -126,3 +126,24 @@ def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
     snapshot = state.breaker_snapshot()
     assert snapshot["systems"]["elastic"]["failures"] == 2, snapshot
     assert "cmdb" not in snapshot["systems"], snapshot
+
+
+def test_a_breaker_tripped_by_config_faults_names_configuration(tmp_path):
+    """#1246: a missing or broken config (`ConfigFault`) exits 2 like a transport failure and
+    charges the same breaker — intended — so the messages it produces cannot blame
+    connectivity alone; the breaker sees exit codes, not which fault raised them."""
+    from defender.scripts.adapters.faults import ConfigFault
+
+    state = _state(tmp_path)
+    for _ in range(cb.PER_SYSTEM_FAIL_LIMIT):
+        cb.record_outcome(state, "elastic", ConfigFault.exit_code)
+    assert cb.is_tripped(state, "elastic"), "config faults no longer charge the breaker"
+    down = cb.down_message(state, "elastic")
+    assert "configuration" in down, f"the down message never names a config cause: {down!r}"
+
+    for i in range(cb.RUN_FAIL_KILL_LIMIT - cb.PER_SYSTEM_FAIL_LIMIT - 1):
+        cb.record_outcome(state, f"system-{i}", ConfigFault.exit_code)
+    with pytest.raises(cb.RunAborted) as aborted:
+        cb.record_outcome(state, "system-last", ConfigFault.exit_code)
+    assert "configuration" in str(aborted.value), \
+        f"the run-kill message never names a config cause: {aborted.value}"
