@@ -42,8 +42,13 @@ def _current(tenant):
 
 
 def _exports(tenant):
+    """The export folders and the `current` pointer; other files (a lock, say) are not
+    exports and are not counted."""
     folder = tenant.dir / "exports"
-    return sorted(p.name for p in folder.iterdir()) if folder.exists() else []
+    if not folder.exists():
+        return []
+    return sorted(p.name for p in folder.iterdir()
+                  if p.name == "current" or (p.is_dir() and not p.is_symlink()))
 
 
 def _knowledge_files(checkout):
@@ -253,16 +258,18 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
     with LockHolder(tenant, tmp_path / "holder") as holder:
         for attempt in (d.publish, lambda: d.start_batch("busy", lanes=LANES)):
             started = time.monotonic()
-            _, error, hung = bounded(attempt, seconds=30)
+            _, error, hung = bounded(attempt, seconds=10)
             assert not hung, "a second taker waited on the lock instead of failing fast"
             assert isinstance(error, mod.LockBusy), error
             assert isinstance(error, mod.DeliveryRefused)
             assert str(holder.pid) in str(error), "the refusal must name the holder"
-            assert time.monotonic() - started < 30
+            assert time.monotonic() - started < 5, "a second taker must fail fast, not wait"
         assert git(tenant.knowledge, "rev-parse", "HEAD") == head
         assert _current(tenant) == (first.commit, first.path)
         assert _exports(tenant) == sorted([first.commit, "current"])
         assert not tenant.worktrees.exists() or not any(tenant.worktrees.iterdir())
+        assert len(git(tenant.knowledge, "worktree", "list", "--porcelain").split("\nworktree ")) == 1, \
+            "a batch worktree was cut under a busy lock"
         assert not (tenant.dir / "drafts" / "busy").exists()
         red = mod.TenantDelivery.open(red_tenant, defender_dir=DEFENDER, client=ForgeHTTP().client)
         assert red.publish().commit == git(red_remote, "rev-parse", "main")
@@ -273,44 +280,60 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
 
 def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tmp_path):
     """Flow 6: the lock is held for fast-forward, export and worktree creation only. Probed
-    from another process at each moment the host waits on something else: the fetch and the
-    push (a real smart-HTTP remote), the PR request, the box's create and its window. The
-    probe's own positive control sees a held lock as busy."""
+    from another process at each moment the host waits on something else, on every route: a
+    batch (its fetch and push on a real smart-HTTP remote, its PR request, the box's create
+    and its window), the retained branch's delivery (its PR request and any git it runs) and
+    a revert (its push, its PR request and any fetch). The probe's own positive control sees
+    a held lock as busy."""
     from defender.runtime import box
     from defender.tests._box1195 import FakeDaemon
 
     tenant = http_repo[0]
     server = http_repo[3]
-    probes = {}
-    server.on_service = lambda service: probes.setdefault(service, lock_probe(tenant))
+    probes, phase = {}, ["batch"]
+    server.on_service = lambda service: probes.setdefault((phase[0], service), lock_probe(tenant))
 
     def on_request(request):
-        if request.method == "POST":
-            probes.setdefault("pr-create", lock_probe(tenant))
+        if request.url.path.endswith("/pulls"):
+            probes.setdefault((phase[0], f"pr-{request.method.lower()}"), lock_probe(tenant))
     http = ForgeHTTP(on_request=on_request)
     with LockHolder(tenant, tmp_path / "holder"):
         assert "busy" in lock_probe(tenant), "the probe must see a held lock"
     d = delivery(http_repo, http)
     advance_remote(http_repo, tmp_path)
     batch = d.start_batch("io", lanes=LANES)
-    probes["after-start-batch"] = lock_probe(tenant)
+    probes["batch", "after-start-batch"] = lock_probe(tenant)
 
     daemon = FakeDaemon(tmp_path)
 
     def docker(argv, **kwargs):
         if [str(a) for a in argv[1:2]] == ["run"]:
-            probes.setdefault("box-create", lock_probe(tenant))
+            probes.setdefault(("batch", "box-create"), lock_probe(tenant))
         return daemon(argv, **kwargs)
     request = replace(batch.box_request(), spec=box.BoxSpec(runtime="runc",
                                                             rootfs="defender-box:test1108"))
     executor = d.start_box(request, docker=docker)
-    probes["box-window"] = lock_probe(tenant)
+    probes["batch", "box-window"] = lock_probe(tenant)
     box.stop_box(executor)
 
     (batch.draft_root / "agent/lessons/io.md").write_text("written in the window\n",
                                                           encoding="utf-8")
     batch.commit(batch.change_set(), "claim")
-    assert d.finish(batch).endswith("/pulls/7")
-    assert set(probes) == {"git-upload-pack", "git-receive-pack", "pr-create",
-                           "after-start-batch", "box-create", "box-window"}, probes
+    http.fail_create = True
+    with pytest.raises(target().DeliveryRefused):
+        d.finish(batch)
+    http.fail_create = False
+
+    phase[0] = "deliver"
+    server.rearm()
+    assert d.deliver("io").endswith("/pulls/7")
+
+    phase[0] = "revert"
+    server.rearm()
+    assert d.revert("agent/lessons/seed.md", "seed").endswith("/pulls/7")
+
+    required = {("batch", "git-upload-pack"), ("batch", "git-receive-pack"), ("batch", "pr-post"),
+                ("batch", "after-start-batch"), ("batch", "box-create"), ("batch", "box-window"),
+                ("deliver", "pr-post"), ("revert", "git-receive-pack"), ("revert", "pr-post")}
+    assert required <= set(probes), sorted(required - set(probes))
     assert all(result.get("free") for result in probes.values()), probes

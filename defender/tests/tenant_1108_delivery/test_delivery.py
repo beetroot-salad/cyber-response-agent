@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import socket
 import stat
@@ -33,6 +34,7 @@ from ._support import (
     git_bytes,
     install_planting_hook,
     odd_entries,
+    plain_file,
     plant_raw_commit,
     pr_row,
     push_to_remote,
@@ -124,8 +126,8 @@ def test_refresh_refuses_local_state_without_creating_batch(repo, tmp_path, stat
 
 
 def test_publishing_after_a_batch_starts_never_changes_its_draft_or_worktree(repo, tmp_path):
-    """O-F: a later publish (another drain, a setup update) advances the clone and `current`,
-    yet the running batch's draft, worktree and export stay exactly as they were."""
+    """O-F: a later publish (another drain, or `tenant.py setup`) advances the clone and
+    `current`, yet the running batch's draft, worktree and export stay exactly as they were."""
     tenant = repo[0]
     batch = delivery(repo, ForgeHTTP()).start_batch("pinned", lanes=LANES)
     draft = files_under(batch.draft_root)
@@ -199,10 +201,22 @@ def _oversized(lane):
         big.truncate(_io.READ_LIMIT + 1)
 
 
+def _replace(entry, plant):
+    """Replace an existing draft entry (a file, or a whole subdirectory) by `plant(entry)`."""
+    if entry.is_dir() and not entry.is_symlink():
+        shutil.rmtree(entry)
+    else:
+        entry.unlink()
+    plant(entry)
+
+
 #: Box output a claim must refuse whole, each beside a valid in-lane change: `(entry) ->
 #: plant(lane, agent, outside, worktree)`. A symlinked directory is listed by `os.walk` among
 #: `dirnames` and not descended, so a naive derivation skips it silently; `agent/.tenant-id`
-#: is also outside every lane. The FIFO and socket rows are planted by the test itself.
+#: is also outside every lane. The FIFO and socket rows are planted by the test itself. The
+#: `replace-*` rows put the entry where a file (or a subdirectory) of the base already is, so
+#: a reset that copies the worktree's file onto it writes through the link, or blocks on the
+#: FIFO, instead of replacing the entry.
 _REFUSED_OUTPUT = {
     "file-link-absolute": lambda lane, agent, outside, wt: (lane / "link.md").symlink_to(outside / "secret.md"),
     "file-link-into-worktree": lambda lane, agent, outside, wt: (lane / "link.md").symlink_to(
@@ -221,6 +235,17 @@ _REFUSED_OUTPUT = {
     "gitignore-nested": lambda lane, agent, outside, wt: _write(lane / "deep/.gitignore", "*\n"),
     "gitmodules": lambda lane, agent, outside, wt: _write(lane / ".gitmodules", '[submodule "x"]\n\tpath = x\n'),
     "gitattributes-deletion": lambda lane, agent, outside, wt: (lane / ".gitattributes").unlink(),
+    "replace-file-with-link": lambda lane, agent, outside, wt: _replace(
+        lane / "seed.md", lambda e: e.symlink_to(outside / "secret.md")),
+    "replace-dir-with-link": lambda lane, agent, outside, wt: _replace(
+        lane / "deep", lambda e: e.symlink_to(outside, target_is_directory=True)),
+    "replace-file-with-fifo": lambda lane, agent, outside, wt: _replace(lane / "seed.md", os.mkfifo),
+}
+
+#: Base content a row needs before the batch starts (pushed as a human merge).
+_REFUSED_BASE = {
+    "gitattributes-deletion": {"agent/lessons/.gitattributes": "* -text\n"},
+    "replace-dir-with-link": {"agent/lessons/deep/x.md": "a planted subdirectory\n"},
 }
 
 
@@ -229,12 +254,16 @@ def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
         repo, tmp_path, monkeypatch, entry):
     """O-C/O-D: a link (to a file or a directory), FIFO, socket, device or oversized file, a
     path outside the lanes (a prefix sibling of one included), `agent/.tenant-id`, or a
-    `.gitattributes`/`.gitignore`/`.gitmodules` at any depth (added or deleted) refuses the
-    claim: nothing is skipped and nothing committed, no link is followed, nothing blocks.
-    After a reset the draft equals the worktree again and the host folder a link pointed at
-    is intact."""
-    if entry == "gitattributes-deletion":
-        push_to_remote(repo, tmp_path, lambda c: _write(c / "agent/lessons/.gitattributes", "* -text\n"))
+    `.gitattributes`/`.gitignore`/`.gitmodules` at any depth (added or deleted), new or put in
+    place of a base file or subdirectory, refuses the claim: nothing is skipped and nothing
+    committed, no link is followed, nothing blocks. After a reset the draft equals the
+    worktree again, every base file back as a regular file with the worktree's bytes, and the
+    host folder a link pointed at is intact."""
+    if entry in _REFUSED_BASE:
+        def base(checkout):
+            for rel, text in _REFUSED_BASE[entry].items():
+                _write(checkout / rel, text)
+        push_to_remote(repo, tmp_path, base)
     batch = delivery(repo, ForgeHTTP()).start_batch("inert", lanes=LANES)
     agent = batch.draft_root / "agent"
     lane = agent / "lessons"
@@ -249,9 +278,10 @@ def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
         sockets[0].bind("sock.md")
     else:
         _REFUSED_OUTPUT[entry](lane, agent, outside, batch.worktree)
+    fifos = [lane / "pipe.md", lane / "seed.md"]
     head = git(batch.worktree, "rev-parse", "HEAD")
     try:
-        _, error, hung = bounded(batch.change_set, fifos=[lane / "pipe.md"] if entry == "fifo" else [])
+        _, error, hung = bounded(batch.change_set, fifos=fifos)
     finally:
         for listener in sockets:
             listener.close()
@@ -260,11 +290,48 @@ def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
     assert git(batch.worktree, "rev-parse", "HEAD") == head
     assert git(batch.worktree, "status", "--porcelain") == ""
 
-    batch.reset()
+    _, error, hung = bounded(batch.reset, fifos=fifos)
+    assert not hung, "the reset blocked on box output"
+    assert error is None, error
+    assert files_under(outside) == {"secret.md": b"host only\n"}, "a reset wrote through a link"
+    for rel, data in files_under(batch.worktree / "agent").items():
+        assert plain_file(agent / rel, data), f"the reset left agent/{rel} other than the worktree's file"
     assert odd_entries(agent) == []
     assert files_under(agent) == files_under(batch.worktree / "agent")
     assert _changes(batch.change_set()) == {}
-    assert files_under(outside) == {"secret.md": b"host only\n"}
+
+
+def _gitdir_file(lane, clone):
+    _write(lane / ".git", f"gitdir: {clone / '.git'}\n")
+
+
+def _nested_repository(lane, clone):
+    nested = lane / "sub"
+    _write(nested / "x.md", "a repository of its own\n")
+    git(nested, "init", "-q", "-b", "main")
+    git(nested, "add", ".")
+    git(nested, "commit", "-q", "-m", "nested")
+
+
+@pytest.mark.parametrize("plant", [_gitdir_file, _nested_repository], ids=["gitdir-file", "repository"])
+def test_git_metadata_in_a_lane_never_becomes_a_commit(repo, plant):
+    """O-C/O-D: a `.git` in a lane, as a `gitdir:` file naming the host's tenant clone or as
+    a nested repository's directory, is refused at derivation or at commit: the worktree's
+    tree gains no gitlink (mode 160000), its HEAD does not move, it stays clean, and the
+    tenant clone is untouched."""
+    batch = delivery(repo, ForgeHTTP()).start_batch("nested", lanes=LANES)
+    clone = repo[0].knowledge
+    lane = batch.draft_root / "agent/lessons"
+    _write(lane / "valid.md", "a valid change beside it\n")
+    plant(lane, clone)
+    head, clone_head = git(batch.worktree, "rev-parse", "HEAD"), git(clone, "rev-parse", "HEAD")
+    with pytest.raises(target().DeliveryRefused):
+        batch.commit(batch.change_set(), "nested repository")
+    assert git(batch.worktree, "rev-parse", "HEAD") == head
+    assert git(batch.worktree, "status", "--porcelain") == ""
+    assert "160000" not in git(batch.worktree, "ls-tree", "-r", "HEAD")
+    assert git(clone, "rev-parse", "HEAD") == clone_head
+    assert git(clone, "status", "--porcelain") == ""
 
 
 @pytest.mark.parametrize("shape", ["list-of-changes", "tuple-of-changes", "bare-change",
@@ -357,26 +424,34 @@ def test_claims_commit_and_reset_one_after_another_within_one_batch(repo):
 def test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links(repo, tmp_path):
     """Flow 3: a reset makes the draft byte-equal to the worktree's `agent/` again: box
     additions gone, deletions and edits restored, links and FIFOs removed without following
-    them (the host folder a link named keeps its files) and without blocking."""
+    them (the host folder a link named keeps its files) and without blocking. A committed
+    file the box replaced by a link or a FIFO, and a committed subdirectory it replaced by a
+    directory link, come back as regular files with the worktree's bytes."""
     batch = delivery(repo, ForgeHTTP()).start_batch("reset", lanes=LANES)
     lane = batch.draft_root / "agent/lessons"
-    _write(lane / "a.md", "committed\n")
+    for name in ("a.md", "edited.md", "fifo.md", "deep/b.md"):
+        _write(lane / name, "committed\n")
     batch.commit(batch.change_set(), "claim")
     outside = tmp_path / "host-folder"
     outside.mkdir()
     (outside / "keep.md").write_text("host\n", encoding="utf-8")
-    _write(lane / "a.md", "changed after the commit\n")
+    _write(lane / "edited.md", "changed after the commit\n")
     _write(lane / "stray.md", "stray\n")
-    _write(lane / "deep/stray.md", "stray\n")
+    _write(lane / "fresh/stray.md", "stray\n")
     (lane / "seed.md").unlink()
     (lane / "linked").symlink_to(outside, target_is_directory=True)
     os.mkfifo(lane / "pipe")
-    _, error, hung = bounded(batch.reset, fifos=[lane / "pipe"])
+    _replace(lane / "a.md", lambda e: e.symlink_to(outside / "keep.md"))
+    _replace(lane / "fifo.md", os.mkfifo)
+    _replace(lane / "deep", lambda e: e.symlink_to(outside, target_is_directory=True))
+    _, error, hung = bounded(batch.reset, fifos=[lane / "pipe", lane / "fifo.md"])
     assert not hung, "the reset blocked on box output"
     assert error is None, error
+    assert files_under(outside) == {"keep.md": b"host\n"}, "the reset wrote through a link"
+    for name in ("a.md", "edited.md", "fifo.md", "deep/b.md"):
+        assert plain_file(lane / name, b"committed\n"), name
     assert odd_entries(batch.draft_root) == []
     assert files_under(batch.draft_root / "agent") == files_under(batch.worktree / "agent")
-    assert files_under(outside) == {"keep.md": b"host\n"}
 
 
 # ---------------------------------------------------------------------------------------
@@ -404,26 +479,52 @@ def test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_
 
 @pytest.mark.parametrize("how", ["on-top", "amend", "only-raw", "forbidden-path"])
 def test_finish_refuses_a_branch_holding_a_commit_the_commit_maker_did_not_make(repo, how):
-    """O-C: a `git commit` in the batch worktree by anything but the commit-maker (reusing the
-    last commit's message and author, touching an allowed lesson, or a forbidden path) refuses
-    the finish before any push: no remote branch, no PR."""
+    """O-C: a commit laid on the batch branch (the clone's `refs/heads/<batch.branch>`, which
+    finish pushes) by anything but the commit-maker refuses the finish before any push: on
+    top of a commit-maker commit, amending it, alone, or touching a forbidden path. It is
+    written by plumbing, under the last commit's exact message, author and committer, so
+    nothing in the commit itself tells it apart, and no worktree or hook is involved. No
+    remote branch, no PR."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("foreign", lanes=LANES)
-    wt = batch.worktree
     if how != "only-raw":
         _write(batch.draft_root / "agent/lessons/made.md", "made by the commit-maker\n")
         batch.commit(batch.change_set(), "commit-maker claim")
     path = "settings/rogue.yaml" if how == "forbidden-path" else "agent/lessons/raw.md"
-    _write(wt / path, "raw git, not the commit-maker\n")
-    git(wt, "add", path)
-    if how == "amend":
-        git(wt, "commit", "--amend", "-C", "HEAD")
-    else:
-        git(wt, "commit", "-C", "HEAD")
+    plant_raw_commit(repo[0].knowledge, f"refs/heads/{batch.branch}", path,
+                     b"raw git, not the commit-maker\n", amend=how == "amend",
+                     base=batch.export.commit)
     with pytest.raises(target().DeliveryRefused):
         d.finish(batch)
     assert _branches(repo[1]) == ["refs/heads/main"]
+    assert not http.creates
+
+
+def test_a_foreign_commit_beneath_a_later_commit_maker_commit_is_refused(repo):
+    """O-C: provenance covers every commit the branch would send, not only its tip. A
+    commit-maker claim, then a commit laid on the batch branch by plumbing (the claim's
+    message and identities), then another commit-maker claim: the second commit or the
+    finish refuses, so a check of the tip alone cannot pass. Nothing reaches the remote and
+    no PR is requested."""
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    batch = d.start_batch("sandwich", lanes=LANES)
+    lane = batch.draft_root / "agent/lessons"
+    _write(lane / "first.md", "first claim\n")
+    batch.commit(batch.change_set(), "claim one")
+    batch.reset()
+    planted = plant_raw_commit(repo[0].knowledge, f"refs/heads/{batch.branch}",
+                               "agent/lessons/raw.md", b"raw git, not the commit-maker\n")
+    _write(lane / "second.md", "second claim\n")
+
+    def claim_two_then_finish():
+        batch.commit(batch.change_set(), "claim two")
+        return d.finish(batch)
+    with pytest.raises(target().DeliveryRefused):
+        claim_two_then_finish()
+    assert _branches(repo[1]) == ["refs/heads/main"]
+    assert planted not in git(repo[1], "rev-list", "--all").split()
     assert not http.creates
 
 
@@ -475,48 +576,162 @@ def test_finish_and_deliver_ignore_a_fork_pr_with_the_same_branch_name(repo):
     assert len(http.creates) == 1
 
 
-@pytest.mark.parametrize("history", ["added-once", "modified-later"])
-def test_revert_builds_its_change_set_from_history_and_pushes_one_commit_maker_commit(
-        repo, tmp_path, history):
-    """Flow 4: a lesson revert restores the lesson's prior content (before the latest commit
-    that changed it on `main`), or deletes it when that commit added it, as exactly one
-    commit on `main` with mode 100644, pushed to its own branch with a PR against `main`."""
-    remote = repo[1]
-    if history == "modified-later":
-        push_to_remote(repo, tmp_path, lambda c: _write(c / "agent/lessons/seed.md", "seed, merged edit\n"))
+#: git subcommands that make a commit, and those that send commits to a remote. A merge
+#: that may only fast-forward makes none.
+_MAKES_COMMITS = {"commit", "commit-tree", "cherry-pick", "revert", "am", "rebase", "merge"}
+_SENDS_COMMITS = {"push", "send-pack"}
+_GIT_OPTION_VALUES = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+
+
+def _git_subcommand(argv):
+    """`(subcommand, argv)` of a spawned `git`, or `(None, argv)` for any other program."""
+    args = shlex.split(argv) if isinstance(argv, str) else [os.fsdecode(a) for a in argv]
+    if not args or os.path.basename(args[0]) != "git":
+        return None, args
+    rest = iter(args[1:])
+    for arg in rest:
+        if arg in _GIT_OPTION_VALUES:
+            next(rest, None)
+        elif not arg.startswith("-"):
+            return arg, args
+    return None, args
+
+
+def _census(events, kinds):
+    return {phase for phase, sub, args in events
+            if sub in kinds and not (sub == "merge" and "--ff-only" in args)}
+
+
+def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo):
+    """O-C census, executed at the public boundary (no private name is pinned): every git
+    process delivery spawns is recorded under the public call it ran in, across a whole
+    drain (publish, batch, box request, claim, reset, finish, retained deliver) and a revert.
+    A commit is made only under the commit-maker (`commit`) and the revert; commits are sent
+    only by finish, deliver and revert. An audit hook sees every spawn; its positive control
+    comes first."""
     http = ForgeHTTP()
-    d = delivery(repo, http)
-    main = git(remote, "rev-parse", "main")
-    assert d.revert("agent/lessons/seed.md", "seed").endswith("/pulls/7")
+    events, phase, active = [], ["control"], [True]
+
+    def audit(event, args):
+        if active[0] and event == "subprocess.Popen":
+            sub, argv = _git_subcommand(args[1])
+            if sub is not None:
+                events.append((phase[0], sub, argv))
+
+    def under(name, call):
+        phase[0] = name
+        return call()
+    sys.addaudithook(audit)
+    try:
+        git(repo[0].knowledge, "rev-parse", "HEAD")
+        assert [(p, sub) for p, sub, _ in events] == [("control", "rev-parse")], events
+        events.clear()
+        d = under("open", lambda: delivery(repo, http))
+        under("publish", d.publish)
+        batch = under("start_batch", lambda: d.start_batch("census", lanes=LANES))
+        under("box_request", batch.box_request)
+        _write(batch.draft_root / "agent/lessons/census.md", "one claim\n")
+        change_set = under("change_set", batch.change_set)
+        under("commit", lambda: batch.commit(change_set, "claim"))
+        under("reset", batch.reset)
+        http.fail_create = True
+        with pytest.raises(target().DeliveryRefused):
+            under("finish", lambda: d.finish(batch))
+        http.fail_create = False
+        under("deliver", lambda: d.deliver("census"))
+        under("revert", lambda: d.revert("agent/lessons/seed.md", "seed"))
+    finally:
+        active[0] = False
+    assert _census(events, _MAKES_COMMITS) == {"commit", "revert"}, events
+    sent = _census(events, _SENDS_COMMITS)
+    assert {"finish", "revert"} <= sent <= {"finish", "deliver", "revert"}, events
+
+
+def _revert_commit(remote, http, main):
+    """The one commit the revert's PR offers: its head branch's tip, directly on `main`."""
     [create] = http.creates
     assert create["base"] == "main"
     tip = git(remote, "rev-parse", f"refs/heads/{create['head']}")
     assert git(remote, "rev-parse", f"{tip}^") == main
-    if history == "added-once":
-        assert _name_status(remote, tip) == {"agent/lessons/seed.md": "D"}
-    else:
-        assert _name_status(remote, tip) == {"agent/lessons/seed.md": "M"}
-        assert git_bytes(remote, "cat-file", "blob", f"{tip}:agent/lessons/seed.md") == b"seed\n"
-        assert _modes(remote, tip, "agent/lessons/seed.md") == {"agent/lessons/seed.md": "100644"}
     assert git(remote, "rev-parse", "main") == main
+    return tip
 
 
-def test_revert_refuses_a_commit_the_commit_maker_did_not_make(repo, tmp_path):
+def test_revert_deletes_a_lesson_its_last_commit_added(repo):
+    """Flow 4: a revert of a lesson that the latest commit touching it on `main` added builds
+    its change set from history: a deletion, as exactly one commit-maker commit on `main`,
+    pushed to its own branch with a PR against `main`; `main` itself does not move."""
+    remote = repo[1]
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    main = git(remote, "rev-parse", "main")
+    assert d.revert("agent/lessons/seed.md", "seed").endswith("/pulls/7")
+    tip = _revert_commit(remote, http, main)
+    assert _name_status(remote, tip) == {"agent/lessons/seed.md": "D"}
+
+
+def test_revert_restores_the_prior_content_of_a_lesson_its_last_commit_changed(repo, tmp_path):
+    """Flow 4, PENDING A USER DECISION (README, choice 5): a revert of a lesson the latest
+    commit touching it on `main` changed restores the content before that commit, mode
+    100644, as one commit-maker commit on `main` with a PR against `main`. Kept apart from
+    the deletion case so the decision can change this case alone."""
+    remote = repo[1]
+    push_to_remote(repo, tmp_path, lambda c: _write(c / "agent/lessons/seed.md", "seed, merged edit\n"))
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    main = git(remote, "rev-parse", "main")
+    assert d.revert("agent/lessons/seed.md", "seed").endswith("/pulls/7")
+    tip = _revert_commit(remote, http, main)
+    assert _name_status(remote, tip) == {"agent/lessons/seed.md": "M"}
+    assert git_bytes(remote, "cat-file", "blob", f"{tip}:agent/lessons/seed.md") == b"seed\n"
+    assert _modes(remote, tip, "agent/lessons/seed.md") == {"agent/lessons/seed.md": "100644"}
+
+
+def test_revert_refuses_a_commit_laid_on_its_branch_by_a_clone_hook(repo, tmp_path):
     """O-C on the revert route: something else lays a commit (the commit-maker's own message
     and identities, an allowed lesson) on the revert's branch right after the commit-maker
-    moves it; the revert refuses before any push or PR. The clone's `reference-transaction`
-    hook is that something; its marker proves it fired."""
+    moves it; here that is the clone's `reference-transaction` hook. If the hook ran (its
+    marker exists), the revert refuses before any push or PR. An implementation that runs
+    git without the clone's hooks (`core.hooksPath`, say) never sees the commit, and its
+    revert completes normally instead; the hook-free case is the next test."""
     tenant, remote, _ = repo
     http = ForgeHTTP()
     d = delivery(repo, http)
     marker = tmp_path / "planted"
     install_planting_hook(tenant.knowledge, git(remote, "rev-parse", "main"), marker,
                           "agent/lessons/raw.md", b"raw git, not the commit-maker\n")
-    with pytest.raises(target().DeliveryRefused):
+    _, error, hung = bounded(lambda: d.revert("agent/lessons/seed.md", "seed"))
+    assert not hung
+    if marker.exists():
+        assert isinstance(error, target().DeliveryRefused), error
+        assert _branches(remote) == ["refs/heads/main"]
+        assert not http.creates
+    else:
+        assert error is None, f"the revert refused though nothing was laid on its branch: {error}"
+        assert len(http.creates) == 1
+
+
+def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo):
+    """O-C on the revert route, with no hook: a revert pushes its branch, then its PR request
+    fails. A commit is then laid by plumbing on that branch in the clone (the revert commit's
+    exact message and identities, an allowed lesson). However the retried revert ends (how a
+    retry ends is not pinned here), the laid commit never reaches the remote. (An
+    implementation that names each revert's branch afresh never meets the laid commit; the
+    README records that limit.)"""
+    tenant, remote, _ = repo
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    http.fail_create = True
+    with pytest.raises(target().DeliveryRefused, match="503|forge|PR|pull"):
         d.revert("agent/lessons/seed.md", "seed")
-    assert marker.exists(), "the revert's commit never reached a branch, so nothing was laid on it"
-    assert _branches(remote) == ["refs/heads/main"]
-    assert not http.creates
+    [branch] = set(_branches(remote)) - {"refs/heads/main"}
+    made = git(remote, "rev-parse", branch)
+    planted = plant_raw_commit(tenant.knowledge, branch, "agent/lessons/raw.md",
+                               b"raw git, not the commit-maker\n", base=made)
+    http.fail_create = False
+    _, _error, hung = bounded(lambda: d.revert("agent/lessons/seed.md", "seed"))
+    assert not hung
+    assert planted not in git(remote, "rev-list", "--all").split()
 
 
 @pytest.mark.parametrize("path", ["agent/.tenant-id", "settings/lead-zero.yaml",

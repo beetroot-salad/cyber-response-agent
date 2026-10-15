@@ -86,7 +86,8 @@ def test_protection_verification_reads_branch_but_never_changes_rules():
 def test_the_origin_is_parsed_once_into_one_forge_address():
     """O-G: `ForgeAddress` holds scheme, host, port, owner and repo with the default port made
     explicit and scheme and host case folded, so equivalent spellings are one address; the
-    forge keeps the one it parsed at construction."""
+    forge keeps the one it parsed at construction. (Owner and repository case: the next
+    test.)"""
     address = _forge_module().ForgeAddress
     ours = address.parse(ORIGIN)
     assert (ours.scheme, ours.host, ours.port, ours.owner, ours.repo) == (
@@ -102,6 +103,32 @@ def test_the_origin_is_parsed_once_into_one_forge_address():
                   "http://forge.invalid:3000/mallory/blue.git"):
         assert address.parse(other) != ours, other
     assert forge(ForgeHTTP()).address == ours
+
+
+def test_owner_and_repository_compare_without_case():
+    """O-G, orchestrator decision (README): Forgejo resolves owner and repository names
+    without regard to case, so an origin or a Link spelling them in another case is the same
+    address: equal once parsed, its next page followed with the token, and the forge's own
+    canonical rows counted as ours under a cased origin. A fork stays excluded."""
+    address = _forge_module().ForgeAddress
+    cased = "http://forge.invalid:3000/Tenants/Blue.git"
+    assert address.parse(cased) == address.parse(ORIGIN)
+    assert address.parse("HTTP://FORGE.INVALID:3000/TENANTS/BLUE") == address.parse(ORIGIN)
+    assert address.parse("http://forge.invalid:3000/Tenants/Red.git") != address.parse(ORIGIN)
+    for origin, next_url in [
+            (ORIGIN, "http://forge.invalid:3000/api/v1/repos/Tenants/Blue/pulls?state=open&page=2"),
+            (cased, "http://forge.invalid:3000/api/v1/repos/tenants/blue/pulls?state=open&page=2")]:
+        calls, client = _paged([row(1, "lessons/ab")], next_url, [row(2, "lessons/a")])
+        found = _forge_module().ForgejoForge(origin=origin, token=TOKEN, client=client).list_prs_for_head("lessons/a")
+        assert found == [normalized(2, "lessons/a")], (origin, next_url)
+        assert len(calls) == 2
+        assert all(TOKEN in call.headers["Authorization"] for call in calls)
+    http = ForgeHTTP()
+    http.pages = {1: [pr_row(1, "lessons/a", repo=FORK), pr_row(2, "lessons/a"),
+                      pr_row(3, "lessons/b", repo=SIBLING_FORK), pr_row(4, "lessons/b")]}
+    assert forge(http, origin=cased).list_open_prs("lessons/") == [normalized(2, "lessons/a"),
+                                                                   normalized(4, "lessons/b")]
+    assert forge(http, origin=cased).list_prs_for_head("lessons/a") == [normalized(2, "lessons/a")]
 
 
 @pytest.mark.parametrize("origin", ["ssh://git@forge.invalid/tenants/blue.git", "/srv/tenants/blue.git",
@@ -222,8 +249,9 @@ def test_the_writer_lease_is_not_held_by_a_fork_pr(tmp_path):
 
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_a_pr_row_without_its_head_repository_is_a_forge_error(method):
-    """Fail closed: a row whose head repository is missing cannot be shown to be ours, and
-    excluding it would release the lease; it is a `ForgeError`."""
+    """PENDING A USER DECISION (README, choice 9). Fail closed: a row whose head repository
+    is missing cannot be shown to be ours, and excluding it would release the lease; it is a
+    `ForgeError`. Kept alone so the decision can change this case alone."""
     http = ForgeHTTP()
     http.pages = {1: [pr_row(1, "lessons/a", repo=None)]}
     with pytest.raises(_forge_module().ForgeError):

@@ -10,6 +10,7 @@ import contextlib
 import importlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -205,12 +206,22 @@ def files_under(root):
     return out
 
 
-def plant_raw_commit(clone, ref, path, content, *, amend=False):
+def plain_file(path, data):
+    """`path` is itself a regular file (not a link to one, not a FIFO) holding exactly `data`;
+    nothing is opened unless it is."""
+    return stat.S_ISREG(os.lstat(path).st_mode) and Path(path).read_bytes() == data
+
+
+def plant_raw_commit(clone, ref, path, content, *, amend=False, base=None):
     """A commit the commit-maker did not make, written with the clone's own plumbing straight
-    onto `ref`: the tip's tree plus `path`, under the tip's exact message, author and
-    committer, so nothing in the commit itself tells it apart. `amend` replaces the tip (same
-    parents) instead of building on it."""
-    tip = git(clone, "rev-parse", ref)
+    onto `ref` (no hook, no worktree involved): the tip's tree plus `path`, under the tip's
+    exact message, author and committer, so nothing in the commit itself tells it apart.
+    `amend` replaces the tip (same parents) instead of building on it; `base` is the tip to
+    build on when `ref` does not exist yet (it is then created)."""
+    listed = dict(line.split(" ", 1) for line in git(
+        clone, "for-each-ref", "--format=%(refname) %(objectname)", ref).splitlines())
+    existing = listed.get(ref)
+    tip = existing or git(clone, "rev-parse", base)
     index = Path(clone) / ".git" / f"p3-plant-{os.getpid()}.index"
     env = {"GIT_INDEX_FILE": str(index)}
     git(clone, "read-tree", tip, env=env)
@@ -226,7 +237,7 @@ def plant_raw_commit(clone, ref, path, content, *, amend=False):
         "GIT_AUTHOR_NAME": who[0], "GIT_AUTHOR_EMAIL": who[1], "GIT_AUTHOR_DATE": who[2],
         "GIT_COMMITTER_NAME": who[3], "GIT_COMMITTER_EMAIL": who[4], "GIT_COMMITTER_DATE": who[5],
     }).decode().strip()
-    git(clone, "update-ref", ref, planted, tip)
+    git(clone, "update-ref", ref, planted, existing or "")
     return planted
 
 
@@ -385,6 +396,11 @@ class GitHTTP:
         handler.end_headers()
         handler.wfile.write(payload)
 
+    def rearm(self):
+        """Let `on_service` fire again, once per service, from the next request on."""
+        with self._lock:
+            self._fired.clear()
+
     def authorized(self, service):
         """Some request for `service` carried the bot's token and was served."""
         return any(s == service and ok for s, _sent, ok in self.seen)
@@ -505,8 +521,9 @@ class LockHolder:
 
 
 def bounded(fn, *, seconds=30.0, fifos=()):
-    """Run `fn` in a thread, failing instead of hanging: past `seconds`, any reader blocked on
-    one of `fifos` is released (a writer opens and closes it) before the verdict. Returns
+    """Run `fn` in a thread, failing instead of hanging: past `seconds`, anything blocked on
+    one of `fifos` is released before the verdict (a reader opens and closes it, releasing a
+    blocked writer; a writer does the same for a blocked reader). Returns
     `(result, exception, hung)`."""
     box = {}
 
@@ -521,7 +538,8 @@ def bounded(fn, *, seconds=30.0, fifos=()):
     hung = thread.is_alive()
     if hung:
         for fifo in fifos:
-            with contextlib.suppress(OSError):
-                os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+            for flags in (os.O_RDONLY, os.O_WRONLY):
+                with contextlib.suppress(OSError):
+                    os.close(os.open(fifo, flags | os.O_NONBLOCK))
         thread.join(10)
     return box.get("result"), box.get("error"), hung
