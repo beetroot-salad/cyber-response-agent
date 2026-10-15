@@ -375,6 +375,17 @@ def _load_adapter_module(path: Path) -> Any:
         return _MODULES[key]
 
 
+def adapter_module(roster: RosterRead, system: str) -> Any:
+    """`system`'s adapter module, from the file `roster` accepted for it, imported once per
+    process: the one module its verbs (`ModuleVerbRegistry.verbs`) and its settings check
+    (`system_status.startup_check`, #1256) are read from. `KeyError` for a system the roster
+    does not accept; an import that fails raises its own exception, every time it is asked."""
+    path = roster.accepted.get(system)
+    if path is None:
+        raise KeyError(system)
+    return _load_adapter_module(path)
+
+
 def _adapter_path_under(root: Path, system: str) -> Path | None:
     """The adapter file `system` dispatches from under the already-resolved `root`, or `None`.
 
@@ -680,10 +691,7 @@ class ModuleVerbRegistry(VerbRegistry):
         # From the roster, so `verbs()` and `systems()` cannot disagree. A tree removed under a
         # live registry surfaces here as the import's `OSError` (a host fault), never as
         # "unknown system".
-        path = self.roster.accepted.get(system)
-        if path is None:
-            raise KeyError(system)
-        verbs = getattr(_load_adapter_module(path), "VERBS", None)
+        verbs = getattr(adapter_module(self.roster, system), "VERBS", None)
         if not isinstance(verbs, Mapping):
             return {}
         return dict(verbs)
@@ -691,6 +699,7 @@ class ModuleVerbRegistry(VerbRegistry):
 
 __all__ = [
     "ADAPTER_SUFFIX",
+    "adapter_module",
     "DENIED",
     "GRANTED",
     "SYSTEM_MAX_LEN",
