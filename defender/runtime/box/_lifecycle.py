@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 from pathlib import Path
 
-from defender._io import read_text_utf8, READ_LIMIT, sweep_staged, write_guarded
+from defender._io import read_bytes_capped, READ_LIMIT, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
 from defender._tenants import TENANT_ID_FILE
@@ -204,7 +204,9 @@ def _readonly_probe_file(mount: Mount, code_dir: Path | None) -> Path | None:
         if code_dir is None:
             raise BoxFault(f"the read-only code mount at {target} was checked without the "
                            "request's code root — the box's code could not be checked")
-        if not code_dir.is_relative_to(target):
+        # By path components, not a string prefix, and with no `..` climbing back out: the
+        # check file is read at the same relative path on the host source and in the box.
+        if not code_dir.is_relative_to(target) or ".." in code_dir.relative_to(target).parts:
             raise BoxFault(
                 f"the code root {code_dir} does not lie inside the read-only code mount at "
                 f"{target} — the box's code could not be checked"
@@ -225,7 +227,8 @@ def _check_mount_sentinel(
 ) -> None:
     """Check one mount through the started box. A writable source gets a planted sentinel. A
     read-only source is never written: an existing file, chosen by the mount's kind, is read
-    back through the box and compared with the host's own read of it. `code_dir` is the
+    back through the box and compared, exactly, with the host's own read of its bytes (no
+    newline translation, so a whitespace-only difference refuses). `code_dir` is the
     request's code root, which a `code` mount must contain."""
     if not mount.writable:
         source = Path(mount.source)
@@ -235,7 +238,7 @@ def _check_mount_sentinel(
         try:
             if not stat.S_ISREG((source / relative).lstat().st_mode):
                 raise BoxFault(f"mount readback probe is not a regular file: {source / relative}")
-            expected = read_text_utf8(source / relative)
+            expected = read_bytes_capped(source / relative).decode("utf-8")
             proc = _call(docker, ["docker", "exec", name, "cat", str(Path(mount.target) / relative)])
         except (OSError, UnicodeError) as e:
             raise BoxFault(f"could not read mount probe at {source / relative}: {e}") from e
@@ -247,6 +250,17 @@ def _check_mount_sentinel(
         Path(mount.source), Path(mount.target), docker, name,
         f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
     )
+
+
+def _refuse_a_second_code_mount(request: BoxRequest) -> None:
+    """A request has one code root, so it declares at most one `code` mount (#1108 D7). A
+    writable mount's kind is counted here too, the one place it is read."""
+    code_targets = [str(m.target) for m in request.mounts if m.kind == "code"]
+    if len(code_targets) > 1:
+        raise BoxFault(
+            f"the box request {request.name} declares {len(code_targets)} code mounts "
+            f"({', '.join(code_targets)}) — a request declares at most one"
+        )
 
 
 def _check_tenant_identity(path: Path, expected: TenantId, docker: DockerFn, name: str) -> None:
@@ -412,9 +426,11 @@ def _start_boxed_request(
             f"could not create the box {request.name}: {(created.stderr or '').strip()}"
         )
     try:
+        # Each read-only mount is checked by the kind it declares; a second code mount, or a
+        # read-only mount with no kind, is refused here, after create, so the container is
+        # reaped and the trees marked like any other startup fault.
+        _refuse_a_second_code_mount(request)
         for m in request.mounts:
-            # Each read-only mount is checked by the kind it declares; one with none is
-            # refused here, after create, so the container is reaped and the trees marked.
             _check_mount_sentinel(m, docker, request.name, code_dir=request.code_dir)
         _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
     except BaseException as e:
