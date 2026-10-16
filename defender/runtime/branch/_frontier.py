@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from pydantic_ai.messages import RetryPromptPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import ModelRequest, RetryPromptPart, ToolCallPart, ToolReturnPart
 
 from defender import _clock
 from defender.run_repository import Run, RUN_LAYOUT, RunPaths, artifact_dir
@@ -298,3 +298,27 @@ def _lead_of(name: str) -> str:
     """The lead a per-lead entry belongs to: the name up to the first dot (`l-001/`,
     `l-001.lead.json`, `l-001.md`). Suffix-stripping, so an unknown shape is not dropped."""
     return name.split(".", 1)[0]
+
+
+def carried_retries(prefix: list) -> dict[str, int]:
+    """The retry count each tool carries into the step after `prefix` — the framework's own
+    bookkeeping, replayed over the conversation (rev 5 C1).
+
+    The framework keeps a tool's count across later steps until that tool succeeds: at each
+    step, a tool with a returned call is cleared, and a tool whose call was refused for retry
+    counts one more on what it carried (`pydantic_ai.ToolManager.for_run_step`). Those counts
+    live only in the framework's run and cannot be seeded into a resumed one, so a branch
+    point at which any tool carries one is a step a resumed run would take differently."""
+    retries: dict[str, int] = {}
+    for message in prefix:
+        if not isinstance(message, ModelRequest):
+            continue
+        failed = {p.tool_name for p in message.parts
+                  if isinstance(p, RetryPromptPart) and p.tool_name}
+        succeeded = {p.tool_name for p in message.parts if isinstance(p, ToolReturnPart)}
+        if not failed and not succeeded:
+            continue
+        carried = {tool: n for tool, n in retries.items() if tool not in succeeded}
+        carried.update({tool: retries.get(tool, 0) + 1 for tool in failed})
+        retries = carried
+    return {tool: n for tool, n in retries.items() if n}

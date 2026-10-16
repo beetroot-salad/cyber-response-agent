@@ -1,8 +1,8 @@
-"""Writing a turn-N branch sibling: the inherited document prefix, the evidence, the lead
-directories.
+"""Writing a turn-N branch sibling's folder: restored from the fork snapshot of its branch
+point (`_snapshot`), its alert inherited when it has none.
 
-A valid source does not guarantee a valid prefix, so the seed meets the artifact schema like
-every other writer.
+The restored document meets the artifact schema like every other writer
+(`run.documents.investigation.seed`).
 """
 
 from __future__ import annotations
@@ -17,9 +17,13 @@ from defender._io import (
 )
 from defender.run_repository import RecordHandle, Run, RUN_LAYOUT, RunPaths, artifact_dir
 
+from pydantic_ai.messages import ModelResponse
+
+from .. import session_store
 from ..run_state import RunState
+from . import _snapshot
 from ._spec import BranchError, BranchSpec
-from ._frontier import _lead_dirs, fence_count_at, leads_at, source_session
+from ._frontier import _lead_dirs, source_session
 
 
 #: Derived from `_lead_dirs()` so the census, the copy and the seeded-dir refusal cannot name
@@ -60,68 +64,49 @@ def _holds_content(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
 
-def seed_investigation(store: Any, spec: BranchSpec | None, run_state: RunState, *, run: Run, source_run: Run | None = None) -> int:
-    """Write the sibling's `investigation.md`: the source's document as it stood at the branch,
-    then its evidence (`_inherit_evidence`, which records the inherited queries rows into the
-    sibling's `run_state`).
+def seed_investigation(store: Any, spec: BranchSpec | None, run_state: RunState, *, run: Run,
+                       source_run: Run | None = None) -> int:
+    """Write a resumed run's folder as its source held it at the branch point, from the fork
+    snapshot recorded for that MAIN response (`_snapshot`), and return how many invlang fences
+    the restored document holds.
 
-    A fresh run (`spec is None`) seeds nothing and returns 0. A resume gets a fresh run dir, so
-    without this the inherited history would point at a document that does not exist there.
-
-    Truncated at the branch point, at the same fence count `frontier_at_branch` uses, so the
-    sibling does not inherit the source's later conclusions and the seed matches the frontier
-    `validate` accepted. Sliced from the original bytes (keeping prose between blocks) and cut
-    at a fence end, so trailing prose — where the `## REPORT` section goes — is excluded.
-
-    Returns the fence count written.
+    A fresh run (`spec is None`) seeds nothing and returns 0: its first `append_block` creates
+    the document. A resume with no snapshot for its branch point is refused (N4). Only the
+    restore is done here; `validate` is what judges whether the branch point is one an arm may
+    be launched from.
     """
     if spec is None:
         return 0
-    from defender._artifact_schema import validate_artifact
     from defender.skills.invlang.parser import scan_fences
 
-    run_dir = run_state.run_dir
-    refuse_seeded_run_dir(run_dir)
-    # `read_guarded`, not `read_text_soft`: the source run dir was a box's rw bind, so the
-    # document may be a planted link. Unreadable seeds empty, like missing.
     if source_run is None:
         raise BranchError("a resumed run requires its source Run")
-    source_text = source_run.documents.investigation.read()
-    text = source_text if source_text is not None else ""
-    fences = fence_count_at(store, source_session(store, spec, source_run=source_run), spec.branch_message_id, text)
-    bounds = scan_fences(text).spans
-    if fences > len(bounds):
-        # `validate` already refuses a snapped frontier; re-checked because a fork separates
-        # the two reads and slicing short would be silent.
+    session = source_session(store, spec, source_run=source_run)
+    path = session_store.path_row_ids(store, session)
+    if spec.branch_message_id not in path:
         raise BranchError(
-            f"{RunPaths(Path(spec.source_run_dir)).investigation} holds {len(bounds)} "
-            f"fence(s) but the branch point maps to {fences} — the document and the session "
-            "disagree about what had landed, and a seed cut from either is a guess")
-    seed = text[: bounds[fences - 1][1]] if fences else ""
-    # The seed meets the schema: this host write has no `decide_write` in front of it, and a
-    # valid source does not guarantee a valid prefix (reference rules are order-independent, so
-    # a lead declared one fence later is `undeclared` in the cut). Raises rather than seeding
-    # anyway: append-only would leave the sibling unable to repair bytes it did not write.
-    #
-    # The seed is its own baseline: checks keyed on the baseline ask what a write introduces,
-    # and a prefix introduces nothing its source had not committed (e.g. an unfenced header, or
-    # a `:V` whose `:E` lands later). Document-global rules still apply.
-    reason = validate_artifact(RUN_LAYOUT.investigation.name, seed, seed)
-    if reason is not None:
+            f"message {spec.branch_message_id} is not on the source run's MAIN path")
+    upto = session_store.hydrate(store, session, role="analysis")[
+        : path.index(spec.branch_message_id) + 1]
+    request = sum(isinstance(m, ModelResponse) for m in upto)
+    snapshot = _snapshot.load(store, session, request)
+    if snapshot is None:
         raise BranchError(
-            f"the {fences}-fence prefix of "
-            f"{RunPaths(Path(spec.source_run_dir)).investigation} does not pass validation, so "
-            f"the sibling cannot be seeded from it — the source document is well-formed only "
-            f"as a whole, and a run started on the prefix could never repair it "
-            f"(append-only). {reason}"
-        )
-    # The record retains pristine-sibling refusal and validates the inherited baseline.
-    run.documents.investigation.seed(seed)
-    _inherit_evidence(
-        source_run, run_state,
-        leads_at(store, source_session(store, spec, source_run=source_run), spec.branch_message_id,
-                 Path(spec.source_run_dir), source_run=source_run), run=run)
-    return fences
+            f"{spec.source_run_dir} recorded no fork snapshot for message "
+            f"{spec.branch_message_id}, so there is nothing to restore the sibling from")
+    snapshot.verify(source_run)
+    refuse_seeded_run_dir(run_state.run_dir)
+    restore_run_folder(snapshot, run_state, run=run, source_run=source_run)
+    return len(scan_fences(snapshot.document or "").bodies)
+
+
+def restore_run_folder(snapshot: _snapshot.ForkSnapshot, run_state: RunState, *, run: Run,
+                       source_run: Run) -> None:
+    """Restore a sibling's folder from its branch point's snapshot (`ForkSnapshot.
+    restore_files`), after giving it the source's verified alert when it has none of its own
+    (the front door normally placed it at setup, #1222)."""
+    _inherit_alert(source_run, run)
+    snapshot.restore_files(source_run, run, run_state)
 
 
 def source_alert(source_run: Run) -> dict[str, Any] | None:
@@ -140,21 +125,32 @@ def source_alert(source_run: Run) -> dict[str, Any] | None:
     return doc if unreadable is None and isinstance(doc, dict) else None
 
 
+def _inherit_alert(source_run: Run, run: Run) -> None:
+    """Give a sibling with no alert of its own the source's, verified against its record."""
+    if RunPaths(run.run_dir).alert.exists():
+        return
+    alert = source_run.facts.alert.read_bytes()  # lint-whole-read: ok — RecordHandle delegates to the bounded no-follow core
+    if alert.absent:
+        return
+    try:
+        raw, record_text = _alert_input.verify_input_bytes(
+            alert.data, source_run.facts.alert_record.read(), run_name=source_run.run_dir.name)
+    except _alert_input.AlertReplaced as replaced:
+        raise BranchError(str(replaced)) from replaced
+    run.facts.alert.write(raw)
+    run.facts.alert_record.replace(record_text)
+
+
 def _inherit_evidence(source_run: Run, run_state: RunState, leads: set[str], *, run: Run) -> None:
-    """Copy only the canonical evidence selected at the branch point, through both Runs."""
+    """Copy only the canonical evidence of `leads`, through both Runs: the queries rows (also
+    recorded into `run_state`), claims, payloads and summaries.
+
+    No longer how a branch sibling is seeded (the fork snapshot restores its folder, #1255 P2);
+    kept as the copy the row-schema suites seed a sibling's table with."""
     source_run_dir = source_run.run_dir
     sibling = RunPaths(run.run_dir)
     source = RunPaths(source_run_dir)
-    if not sibling.alert.exists():
-        alert = source_run.facts.alert.read_bytes()  # lint-whole-read: ok — RecordHandle delegates to the bounded no-follow core
-        if not alert.absent:
-            try:
-                raw, record_text = _alert_input.verify_input_bytes(
-                    alert.data, source_run.facts.alert_record.read(), run_name=source_run_dir.name)
-            except _alert_input.AlertReplaced as replaced:
-                raise BranchError(str(replaced)) from replaced
-            run.facts.alert.write(raw)
-            run.facts.alert_record.replace(record_text)
+    _inherit_alert(source_run, run)
     rows, _malformed, result = source_run.tables.queries.read_rows()
     if result.reason is not None:
         raise BranchError(f"{source.executed_queries} could not be copied: {result.reason}")

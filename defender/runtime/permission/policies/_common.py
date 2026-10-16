@@ -1,6 +1,8 @@
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 from defender.run_repository import (
@@ -21,6 +23,12 @@ from defender.runtime.permission.grant import (
 _CORPUS_SUBDIRS = ("lessons", "skills", "examples")
 
 _INERT = ("echo", "true")
+
+#: The corpus page that explains how runs are branched into sibling worlds. An investigator
+#: must not be able to read how an arm differs from a natural run (#1255 P3), so the corpus
+#: shape admits every page but this one, through `cat` and the read tool alike. Relative to
+#: the defender checkout.
+BRANCHING_PAGE = "skills/handbook/content/learning-loop.md"
 
 
 def read_shapes(
@@ -43,8 +51,10 @@ def read_shapes(
         # gather is denied its own payload.
 
         shapes.append(under(run, GATHER_RAW_SHAPE))
-    bases = (dfn,) if tenant_agent is None else (dfn, tenant_agent.resolve())
-    shapes.extend(under(base, rf"(?:{corpus})(?:/{SEG})*/{SEG}\.md") for base in bases)
+    corpus_page = rf"(?:{corpus})(?:/{SEG})*/{SEG}\.md"
+    shapes.append(under(dfn, rf"(?!{re.escape(BRANCHING_PAGE)}\Z){corpus_page}"))
+    if tenant_agent is not None:
+        shapes.append(under(tenant_agent.resolve(), corpus_page))
     return PathShapes(shapes)
 
 
@@ -60,4 +70,4 @@ def reader_grants(run_dir: Path, defender_dir: Path, *, raw: bool, tenant_agent:
     )
 
 
-__all__ = ["read_shapes", "reader_grants"]
+__all__ = ["BRANCHING_PAGE", "read_shapes", "reader_grants"]

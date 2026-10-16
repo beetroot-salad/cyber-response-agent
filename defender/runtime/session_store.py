@@ -131,6 +131,26 @@ CREATE TABLE IF NOT EXISTS message_payload (
     payload_sha TEXT NOT NULL
 ) STRICT;
 
+-- fork_snapshot — what MAIN's run held when its `request`-th model response arrived, before
+-- any of that response's tool calls ran (#1255 P2): the per-run counters the model can feel and
+-- the model-readable files by length, hash or content. One row per tool-calling response,
+-- keyed by the session that drove it and the framework's request count (a resumed session
+-- starts its count at the branch point's, so the numbering runs on along the lineage). Host
+-- bookkeeping: it lives here, beside the runs base, where no box mount reaches (P3). `body`
+-- is `runtime/branch/_snapshot.py`'s JSON; a document's text is kept once per digest in
+-- `fork_snapshot_blob`, since it rarely changes between two responses.
+CREATE TABLE IF NOT EXISTS fork_snapshot (
+    session_id TEXT NOT NULL REFERENCES session(session_id),
+    request INTEGER NOT NULL,
+    body TEXT NOT NULL,
+    PRIMARY KEY (session_id, request)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS fork_snapshot_blob (
+    sha256 TEXT PRIMARY KEY,
+    body TEXT NOT NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS session_head_log (
     id INTEGER PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES session(session_id),
@@ -309,9 +329,10 @@ class StoreHandle:
         `session_head_log` entry, both inside one `BEGIN IMMEDIATE`: a fault between the two
         writes would leave a session with a head and no branch-point record.
 
-        `last_render_len` is seeded to the send-role length of the inherited prefix, not the
-        raw row count, which over-counts by one when `at_message_id` is a response with an
-        unresolved tool call."""
+        `last_render_len` is seeded to the send-role length of the inherited prefix: the whole
+        prefix, since its tail is the fork point, which send-role reads keep even when it is a
+        response whose tool calls are still unanswered (#1255 D1: the resumed run's framework
+        runs those calls)."""
         new_id = uuid.uuid4().hex
         conn = self.connection
         conn.execute("BEGIN IMMEDIATE")
@@ -326,8 +347,10 @@ class StoreHandle:
             prefix_ids.reverse()
             prefix_payloads = _fetch_payloads(conn, prefix_ids)
             _require_resolved(prefix_ids, prefix_payloads)
-            prefix_messages = [_message_from_payload(prefix_payloads[i]) for i in prefix_ids]
-            prefix_len = _complete_prefix_len(prefix_messages)
+            # The fork point is the child's head, so the whole prefix — a call-bearing
+            # response at its tail included (#1255 D1) — is what the child is charged for:
+            # `hydrate(role="send")` hands the same list back (`_send_len`).
+            prefix_len = len(prefix_ids)
             conn.execute(
                 "INSERT INTO session (session_id, case_id, parent_session_id, agent_id, "
                 "head_message_id, truncated_by, last_render_len) "
@@ -415,6 +438,42 @@ class StoreHandle:
             "SELECT last_render_len FROM session WHERE session_id = ?", (session_id,)
         ).fetchone()
         return row[0] if row else None
+
+    def write_fork_snapshot(self, session_id: str, request: int, body: str,
+                            blobs: dict[str, str]) -> None:
+        """Record one fork snapshot (the `fork_snapshot` DDL comment), with the texts it names
+        by digest. One transaction, so a snapshot is never left naming a blob that is not
+        there. A second write for the same response replaces the first."""
+        conn = self.connection
+        conn.execute("BEGIN IMMEDIATE")
+        committed = False
+        try:
+            for sha, text in blobs.items():
+                conn.execute("INSERT INTO fork_snapshot_blob (sha256, body) VALUES (?, ?) "
+                             "ON CONFLICT(sha256) DO NOTHING", (sha, text))
+            conn.execute(
+                "INSERT INTO fork_snapshot (session_id, request, body) VALUES (?, ?, ?) "
+                "ON CONFLICT(session_id, request) DO UPDATE SET body = excluded.body",
+                (session_id, request, body))
+            conn.execute("COMMIT")
+            committed = True
+        except BaseException:
+            if not committed:
+                with contextlib.suppress(sqlite3.Error):
+                    conn.execute("ROLLBACK")
+            raise
+
+    def fork_snapshot(self, session_id: str, request: int) -> str | None:
+        """The fork snapshot `session_id` recorded at its `request`-th response, or `None`."""
+        row = self.connection.execute(
+            "SELECT body FROM fork_snapshot WHERE session_id = ? AND request = ?",
+            (session_id, request)).fetchone()
+        return row[0] if row is not None else None
+
+    def fork_snapshot_blob(self, sha256: str) -> str | None:
+        row = self.connection.execute(
+            "SELECT body FROM fork_snapshot_blob WHERE sha256 = ?", (sha256,)).fetchone()
+        return row[0] if row is not None else None
 
     def close(self) -> None:
         self.connection.close()
@@ -888,6 +947,17 @@ def _complete_prefix_len(messages: list) -> int:
     return len(messages)
 
 
+def _send_len(store: Any, session_id: str, ids: list[int], messages: list) -> int:
+    """How much of a session's path a send-role read hands over: through the last complete
+    pair (`_complete_prefix_len`), except that a session whose head is still its own fork
+    point keeps that point whole. Since #1255 (D1) a branch is taken AT a response whose tool
+    calls are unanswered, and the resumed run is handed that response so its framework runs
+    the calls; anywhere else a trailing unanswered call is a turn that never finished."""
+    if ids and branch_point(store, session_id) == ids[-1]:
+        return len(messages)
+    return _complete_prefix_len(messages)
+
+
 def _require_resolved(ids: list[int], table: dict[int, Any]) -> None:
     """Fail closed on a phantom id (which `_walk_parents` returns rather than raising) with a
     named store error instead of a `KeyError`."""
@@ -913,7 +983,7 @@ def hydrate(store: Any, session_id: str, role: Any, *,
     _require_resolved(ids, payloads)
     messages = [_message_from_payload(payloads[i]) for i in ids]
     if role == "send":
-        messages = messages[: _complete_prefix_len(messages)]
+        messages = messages[: _send_len(store, session_id, ids, messages)]
     return messages
 
 
@@ -930,7 +1000,7 @@ def synthesized_flags(store: Any, session_id: str, role: Any) -> list[bool]:
         payloads = _fetch_payloads(store.connection, ids)
         _require_resolved(ids, payloads)
         messages = [_message_from_payload(payloads[i]) for i in ids]
-        ids = ids[: _complete_prefix_len(messages)]
+        ids = ids[: _send_len(store, session_id, ids, messages)]
     return [bool(rows[i]["synthesized"]) for i in ids]
 
 
