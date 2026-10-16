@@ -169,13 +169,6 @@ def test_d_lint_suppression(tmp_path):
     assert gate._scan(bare) == []
 
 
-@pytest.mark.gate
-def test_d_lint_real_tree_clean():
-    """`gate`-marked: the code-smells step runs this same `main([])` and blocks on it."""
-    gate = _GATE
-    assert gate.main([]) == 0
-
-
 def test_d_lint_baseline_lifecycle(tmp_path):
     gate = _GATE
     tree = tmp_path / "scope"

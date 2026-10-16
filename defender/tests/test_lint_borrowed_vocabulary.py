@@ -203,14 +203,6 @@ def test_an_unparseable_file_fails_the_gate_rather_than_passing_it(gate, tmp_pat
 
 
 @pytest.mark.gate
-def test_the_real_tree_passes_the_ratchet(gate):
-    """The gate is green on the tree it ships with, through its own baseline.
-
-    `gate`-marked: the code-smells step runs this same `main([])` and blocks on it."""
-    assert gate.main([]) == 0
-
-
-@pytest.mark.gate
 def test_no_disposition_site_is_baselined(gate):
     """#785's own claim, stated as the property rather than as "the baseline is empty": every
     borrow of the run vocabulary is folded, and the one deliberate exemption — the write gate,

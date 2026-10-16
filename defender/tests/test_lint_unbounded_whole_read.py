@@ -421,15 +421,6 @@ def test_the_shipped_baseline_header_is_the_gates():
     assert json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["//"] == _GATE.HEADER
 
 
-@pytest.mark.gate
-def test_real_run_scans_the_real_tree_and_reports(capsys):
-    """The real path runs the ratchet over the real tree: its summary is printed, with no
-    finding. A real run that returned 0 without scanning prints nothing."""
-    assert _GATE.main([]) == 0
-    out = capsys.readouterr().out
-    assert "[lint_unbounded_whole_read] 0 finding(s): 0 baselined, 0 new" in out
-
-
 @pytest.mark.parametrize("rel", sorted(_REAL_EXCEPTIONS))
 def test_each_exception_module_imports_only_the_standard_library(rel):
     """Why these reads are the exceptions: each module runs where `defender` cannot be imported

@@ -143,16 +143,6 @@ def test_clean_tree_still_scans(tmp_path):
     assert all("prod.py" in f.fingerprint for f in _GATE._scan(tree))
 
 
-@pytest.mark.gate
-def test_real_tree_clean():
-    """The regression check: the shipped baseline is EMPTY, so the real tree must
-    scan clean. Any new finding here is a live site the refactor introduced.
-
-    `gate`-marked: the code-smells step runs this same `main([])` over this same tree and
-    blocks on it, so the `test` job's copy was pure duplicate cost on CI's critical path."""
-    assert _GATE.main([]) == 0
-
-
 def test_aliased_json_reader_is_flagged(tmp_path):
     assert _flags(tmp_path, _reader("import json as j", "j.loads"))
 

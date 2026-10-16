@@ -19,7 +19,6 @@ import ast
 
 from defender.tests._by_path import import_lint_lib
 
-import pytest
 
 
 def _gate():
@@ -131,7 +130,3 @@ def test_the_resolver_itself_is_out_of_scope():
     assert gate.OWNER.is_file(), "the gate points at a resolver that is not there"
 
 
-@pytest.mark.gate
-def test_the_shipped_tree_has_no_unbaselined_site():
-    """The ratchet itself, over the real tree."""
-    assert _gate().main([]) == 0

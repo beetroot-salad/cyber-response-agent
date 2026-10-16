@@ -428,8 +428,3 @@ def test_its_motivating_finding_is_fixed_and_not_baselined(real_tree_findings):
     ), "a close_tool finding is baselined without pointing at the #923 bypass — #879 may be back"
 
 
-@pytest.mark.gate
-def test_real_tree_clean():
-    """`gate`-marked: the code-smells step runs this same `main([])` over this same tree and
-    blocks on it, so the `test` job's copy was pure duplicate cost on CI's critical path."""
-    assert _GATE.main([]) == 0

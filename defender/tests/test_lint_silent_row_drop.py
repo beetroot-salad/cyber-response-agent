@@ -360,8 +360,3 @@ def test_every_baseline_entry_carries_a_reason():
     assert all(reason.strip() for reason in data["entries"].values())
 
 
-@pytest.mark.gate
-def test_real_tree_clean():
-    """`gate`-marked: the code-smells step runs this same `main([])` over this same tree and
-    blocks on it, so the `test` job's copy would be duplicate cost on CI's critical path."""
-    assert _GATE.main([]) == 0
