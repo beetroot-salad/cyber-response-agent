@@ -107,14 +107,16 @@ def correlation_deadline(limits: dict) -> float:
 @dataclass(frozen=True)
 class CorrelationOutcome:
     """How the correlation lead ended: exactly one of `summary` (the lead's framed result) and
-    `ending` (a member of A2's closed list, named to MAIN as one fixed sentence)."""
+    `ending` (a member of A2's closed list, named to MAIN as one fixed sentence). A summary kept
+    from a lead whose system went down while it ran carries that cause in `down` (D5)."""
 
     summary: str | None = None
     ending: str | None = None
     #: The system the lead was dispatched on (names the one marked down, for `tripped_breaker`).
     system: str | None = None
-    #: Why that system is down (#1256), for the two endings that name a cause the breaker does
-    #: not count: `down_at_start` and `down_mid_lead`.
+    #: Why that system is down (#1256): for the two endings that name a cause the breaker does
+    #: not count (`down_at_start`, `down_mid_lead`), and for a summary the lead wrote before
+    #: its system went down mid-lead (D5), which MAIN gets with a note naming the cause.
     down: system_status.StartCause | None = None
 
 
@@ -185,30 +187,72 @@ def _down_at_start_sentence(outcome: CorrelationOutcome) -> str:
         f"{outcome.system} is down for the whole run and the correlation lead was not started.")
 
 
+def _went_down_note(system: str | None) -> str:
+    """D5's note under a summary kept from a lead whose system went down while it ran (O-5b): it
+    names the cause, never the fault's text (A2), and stays outside the summary's frame — it is
+    the host's, not the lead's."""
+    return (
+        f"Note from the harness: {system} went down while the correlation lead ran — one of its "
+        f"calls showed that {system} is not configured for this run (its settings lack "
+        f"something its adapter needs), so {system} is down for the rest of the run and every "
+        "later dispatch or call to it is refused. The summary above is the lead's own, written "
+        f"before or as {system} went down; what it did not measure there is a visibility gap.")
+
+
 def render_correlation_section(outcome: CorrelationOutcome, *, grant_home: str) -> str:
     """The ONE correlation section of MAIN's opening message: a host heading naming the reserved
-    id, the lead's framed summary or its ending's sentence (never both), nothing else."""
+    id, the lead's framed summary or its ending's sentence (never both), nothing else — save,
+    under a summary whose lead saw its system go down (D5), the note saying so."""
     reserved = (
         f"The lead id {L3} is reserved by the harness: it was dispatched, or its absence "
         "decided, before your first turn. Do not attach new work to it.")
-    body = outcome.summary if outcome.summary is not None else _sentence(outcome, grant_home)
+    if outcome.summary is None:
+        return f"{CORRELATION_HEADING}\n{reserved}\n\n{_sentence(outcome, grant_home)}"
+    body = outcome.summary
+    if outcome.down is not None:
+        body = f"{body}\n\n{_went_down_note(outcome.system)}"
     return f"{CORRELATION_HEADING}\n{reserved}\n\n{body}"
+
+
+def _went_down(run_state: RunState, system: str) -> system_status.NotConfigured | None:
+    """The cause `system` went down for while the lead ran, if it did: a call's `ConfigFault`
+    escaped the start check (O-5b) — a system down at start never reaches the lead."""
+    cause = system_status.down_cause(run_state, system)
+    return cause if isinstance(cause, system_status.NotConfigured) else None
 
 
 def _classify_end(end: LeadEnd, run_state: RunState, system: str) -> str | None:
     """The ending of a lead that ran to its own end, or `None` for a usable summary. Decided
     from what the lead did (the harness's stops, the lead's call results), in a fixed order:
-    a refused call names the breaker before any count of failures."""
+    a refused call names the breaker before any count of failures. A lead whose system went
+    down while it ran (an escaped `ConfigFault`, O-5b) keeps a usable summary (D5, the caller
+    notes the cause beside it); without one it ends `down_mid_lead` — never "tripped breaker"
+    nor "every call failed", which the escaped call would otherwise read as."""
+    ending = _breaker_ending(end)
+    if ending is not None:
+        return ending
+    ending = _ending_of(end, run_state)
+    if ending is not None and _went_down(run_state, system) is not None:
+        return ENDING_DOWN_MID_LEAD
+    return ending
+
+
+def _breaker_ending(end: LeadEnd) -> str | None:
+    """The two endings decided before the lead's results are read: a store that could not
+    record the lead stops the run; a call the breaker refused names the breaker."""
     from defender.runtime import session_store  # lazy: the store needs the agent framework, and the operator tools that read this package's census run without it
 
     if end.fault_terminator == session_store.TRUNCATED_BY_STORE:
         raise session_store.StoreError("the correlation lead's session could not be recorded")
     if end.breaker_refused is not None:
         return ENDING_TRIPPED_BREAKER
-    if isinstance(system_status.down_cause(run_state, system), system_status.NotConfigured):
-        # A call's `ConfigFault` escaped the start check: the system went down as not configured
-        # mid-lead, uncharged (#1256 O-5b) — never "tripped breaker" nor "every call failed".
-        return ENDING_DOWN_MID_LEAD
+    return None
+
+
+def _ending_of(end: LeadEnd, run_state: RunState) -> str | None:
+    """The ending the lead's own results give, or `None` for a usable summary."""
+    from defender.runtime import session_store  # lazy, as in `_breaker_ending`
+
     summary = (end.summary or "").strip()
     if end.fault_terminator == session_store.TRUNCATED_BY_REQUEST_LIMIT or (
             end.ceiling is not None and not summary):
@@ -233,7 +277,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     Every way it fails to run or yields nothing is a returned ending, never a raise (A2); a
     run-level kill (`BudgetKill`, `RunAborted`), an interrupt, a store fault after the lead
     began, and a run folder that refuses its produced summary propagate and stop the run."""
-    from defender.runtime import session_store  # lazy, as in `_classify_end`
+    from defender.runtime import session_store  # lazy, as in `_breaker_ending`
 
     system = dispatch.system
     if system is None:
@@ -296,12 +340,16 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
     ending = _classify_end(ends[-1], run_state, system)
     if ending is not None:
-        return CorrelationOutcome(ending=ending, system=system)
+        return CorrelationOutcome(
+            ending=ending, system=system,
+            down=_went_down(run_state, system) if ending == ENDING_DOWN_MID_LEAD else None)
     # A run folder that refuses a produced summary stops the run: it is not the lead's ending.
     path = RunPaths(run_dir).gather_summary(L3)
     if read_text_utf8(path) != wrapped:
         raise OSError("the correlation lead's summary could not be persisted in the run folder")
-    return CorrelationOutcome(summary=wrapped, system=system)
+    # Kept even when its system went down while the lead ran (D5): MAIN gets the summary and a
+    # note naming the cause.
+    return CorrelationOutcome(summary=wrapped, system=system, down=_went_down(run_state, system))
 
 
 def _stamp_timed_out(store: Any, session_id: str | None) -> None:
