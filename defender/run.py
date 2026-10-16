@@ -57,7 +57,13 @@ from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.run_tenant import RunTenant  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry, ServingAbort, read_roster  # noqa: E402
+from defender.runtime.verbs import (  # noqa: E402
+    ModuleVerbRegistry,
+    RegistryError,
+    RosterRead,
+    ServingAbort,
+    read_roster,
+)
 from defender.scripts.case_history import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
@@ -244,7 +250,7 @@ class _Investigate(Protocol):
         self, *, alert_path: Path, run: Run, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
-        source: Run | None = None,
+        source: Run | None = None, roster: RosterRead | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -277,6 +283,11 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     source: Run | None = None,
     registry_cls: Any = ModuleVerbRegistry,
     investigate: Callable[..., dict[str, Any]] = _run_the_driver,
+    #: The adapters roster this run reads — the one `main` read once and judged each granted
+    #: system's settings check over at run start (#1256), so the registry and the driver use
+    #: the very roster run start judged. `None` (a direct caller with no `main` before it)
+    #: reads `defender_dir`'s here.
+    roster: RosterRead | None = None,
 ) -> dict[str, Any]:
     """The production investigation call, as a synchronous callable (injected by the
     lifecycle so tests can pass a plain function).
@@ -289,8 +300,8 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     would route uncaptured keys to real adapters. The two registries are built in separate
     arms of one `if` so both can never exist.
     """
-    # Read once and handed down to the registry and `run_investigation`.
-    roster = read_roster(adapters_under(defender_dir))
+    # Read once (by `main`, normally) and handed down to the registry and `run_investigation`.
+    roster = roster if roster is not None else read_roster(adapters_under(defender_dir))  # lint-default: ok — DI seam owning its default (a direct caller with no `main` before it)
     if world is not None:
         if episode is None:
             # The world's ledger is written through the episode `main` holds; there is no path
@@ -367,6 +378,9 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     serving: Any = None,
     #: The opened source run a world forks, threaded beside `world`.
     source: Run | None = None,
+    #: The adapters roster `main` read once and judged run start over (#1256), threaded to the
+    #: investigation so the run reads that same roster.
+    roster: RosterRead | None = None,
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
@@ -400,6 +414,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             episode=episode,
             serving=serving,
             source=source,
+            roster=roster,
         )
         investigation_ok = True
     finally:
@@ -429,22 +444,27 @@ def _resolve_run_tenant(
         sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
 
 
-def _refuse_unusable_start(tenant: RunTenant, *, defender_dir: Path) -> None:
-    """#1256 O-8, before the run exists: judge each granted system by its own adapter's settings
-    check (`system_status.startup_check`, over the roster of the tree this run reads) and refuse
-    a run — fresh or a sibling's — at whose start gather could query nothing through the systems
-    that are up (`system_status.require_usable`, the predicate the driver asks again), naming
-    each down system and its cause. Before the run folder, the box and any model call; nothing
-    is logged or held here — the driver does that once, when the run starts. Never in the tenant
-    resolution `tenant.py setup` and `defender-policy` share: whether a system is usable is a
-    run's question, not the tenant's (D4)."""
-    from defender.runtime import system_status
-    from defender.runtime.verbs import RegistryError
-
+def _run_roster(defender_dir: Path) -> RosterRead:
+    """The adapters roster of the tree this run reads, read ONCE by `main` — or its refusal: an
+    adapters tree that cannot be read stops the run before it exists."""
     try:
-        roster = read_roster(adapters_under(defender_dir))
+        return read_roster(adapters_under(defender_dir))
     except RegistryError as unreadable:
         sys.exit(f"[run.py] {unreadable}")
+
+
+def _refuse_unusable_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path) -> None:
+    """#1256 O-8, before the run exists: judge each granted system by its own adapter's settings
+    check (`system_status.startup_check`) over `roster` — the roster this run reads, which
+    `main` hands on to the investigation unchanged, so the run start judged is the one the run
+    uses — and refuse a run (fresh or a sibling's) at whose start gather could query nothing
+    through the systems that are up (`system_status.require_usable`, the predicate the driver
+    asks again), naming each down system and its cause. Before the run folder, the box and any
+    model call; nothing is logged or held here — the driver does that once, when the run
+    starts. Never in the tenant resolution `tenant.py setup` and `defender-policy` share:
+    whether a system is usable is a run's question, not the tenant's (D4)."""
+    from defender.runtime import system_status
+
     down = system_status.startup_check(roster, tenant, defender_dir=defender_dir)
     try:
         system_status.require_usable(tenant.grants, down)
@@ -665,9 +685,10 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
     roster: Any = None,
 ) -> int:
     """`oracle` / `verifier` are a sibling's oracle and verifier models (#1224; `None` builds
-    them from their knobs); `roster` is accepted for the launcher's seam parity and unused
-    here (the sibling reads its roster where the investigation starts)."""
-    del roster
+    them from their knobs). `roster` is the adapters roster this run reads (`None`: the
+    checkout's, read once here): run start judges each granted system's settings check over it
+    (#1256 O-8) and the lifecycle hands that same roster to the investigation, so the roster
+    judged and the roster used are one value."""
     # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
     # injection seams defaulting to production.
     ns = parse_args(argv)
@@ -707,9 +728,12 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         # The tenant's settings (and with them the one tenant check), resolved before the input
         # is read and before anything is spent; nothing below reads them again.
         tenant = tenant_of()
+        # The adapters roster this run reads, read once: judged here, then handed to the
+        # lifecycle, so run start and the investigation never read two rosters.
+        run_roster = roster if roster is not None else _run_roster(DEFENDER_DIR)  # lint-default: ok — DI seam owning its default (the checkout's roster)
         # Whether any granted system is usable — decided by the adapters' own settings checks
         # over those settings — before the run is made (#1256 O-8, a sibling's own start too).
-        _refuse_unusable_start(tenant, defender_dir=DEFENDER_DIR)
+        _refuse_unusable_start(tenant, roster=run_roster, defender_dir=DEFENDER_DIR)
 
         model = driver.resolve_main_model(ns.model)
         # Runs in siblings too: models are resolved per process, so each sibling must check (and
@@ -749,6 +773,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
                     tenant=tenant,
                     world=world,
                     episode=episode,
+                    roster=run_roster,
                     **seams,
                 )
             except (ServingAbort, BaseExceptionGroup) as escaped:
