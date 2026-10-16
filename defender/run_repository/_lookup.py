@@ -599,9 +599,11 @@ class EpisodeRuns:
         `RunRefused` naming the roster: its decoding (`_roster_document`), each label by the
         family model's label rule, each id by `RunId.parse`, no two labels on one id, and a
         label set exactly the manifest's worlds — so a torn or partial roster cannot pass as a
-        subset. The manifest is read through the one loader, held to this episode's id
-        (`load_family(..., expected_episode_id=)`; its refusal is `FamilyError`)."""
-        from defender.runtime.branch._family import load_family
+        subset. The manifest's world labels are read through the one loader, held to this
+        episode's id (`manifest_world_labels(..., expected_episode_id=)`: R5 and the worlds'
+        shape only, so the roster check needs no loadable family; its refusal is
+        `FamilyError`)."""
+        from defender.runtime.branch._family import manifest_world_labels
 
         doc = self._roster_document()
         if doc is None:
@@ -621,8 +623,8 @@ class EpisodeRuns:
                 raise self._roster_refused(
                     f"the worlds {quoted(owners[arm])} and {quoted(label)} share one arm id")
             owners[arm] = label
-        family = load_family(self.episode.view(), expected_episode_id=self.episode_id)
-        worlds = {world.world_id for world in family.worlds}
+        worlds = set(manifest_world_labels(self.episode.view(),
+                                           expected_episode_id=self.episode_id))
         if set(arms) != worlds:
             missing = sorted(worlds - set(arms))
             extra = sorted(set(arms) - worlds)

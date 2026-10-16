@@ -567,6 +567,24 @@ def load_manifest_document(view: Bound, *, expected_episode_id: str) -> dict:
     return cast(dict, doc)
 
 
+def manifest_world_labels(view: Bound, *, expected_episode_id: str) -> list[str]:
+    """The world labels the manifest declares, in its order, for a reader that holds something
+    else to them (the arm roster, #1187 R2) without loading the whole family: the manifest read
+    through the one loader (`_read_document`: R5, the pre-oracle refusal), required to name
+    `expected_episode_id` itself, and only its `worlds` narrowed — a list of mappings, each with
+    a text `world_id`. Every other rule is `load_family`'s. Anything else is `FamilyError`."""
+    doc = _read_document(view, expected_episode_id=expected_episode_id)
+    if not isinstance(doc, dict) or doc.get("episode_id") != expected_episode_id:
+        raise FamilyError(f"the manifest ({LAYOUT.family}) does not name episode "
+                          f"{quoted(expected_episode_id)}")
+    worlds = doc.get("worlds")
+    if not isinstance(worlds, list) or not all(
+            isinstance(w, dict) and isinstance(w.get("world_id"), str) for w in worlds):
+        raise FamilyError(f"the manifest ({LAYOUT.family}) declares no list of worlds, each "
+                          "with a text world_id")
+    return [w["world_id"] for w in worlds]
+
+
 def _read_manifest(view: Bound) -> str:
     """The manifest's text, read through the view: nothing below the episode dir is followed,
     so a planted link is never read or certified. An absent or refused manifest is
@@ -784,6 +802,7 @@ __all__ = [
     "refuse_reserved_world_label",
     "load_family",
     "load_manifest_document",
+    "manifest_world_labels",
     "parse_as_of",
     "parse_family",
     "parse_world",

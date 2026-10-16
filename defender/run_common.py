@@ -104,7 +104,7 @@ def materialize_run(
         else:
             run = tenant.runs_repository().create(admitted, pinned=pinned)
             world_id = None
-    except (RunRefused, _tenant.TenantRefused) as refused:
+    except RunRefused as refused:
         sys.exit(str(refused))
     run_dir = run.run_dir
     paths = RunPaths(run_dir)
