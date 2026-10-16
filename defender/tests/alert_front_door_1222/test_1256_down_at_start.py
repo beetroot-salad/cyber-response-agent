@@ -25,11 +25,11 @@ arms discriminate HOW run start judges "down": one whose systems are down only f
 one mixing a broken adapter with a not-configured one (a broken adapter is down too).
 
 D5 (r4) — a `ConfigFault` escaping during l-00c (O-5b) still downs its system on the spot,
-uncharged; a lead that has written a usable summary keeps it — a summary written beside the call
-that escaped counts even when the lead's last turn is empty (D5 as written, confirmed in r4 review) — and
-MAIN gets it with a host note naming the system and the cause (never the fault text, #1222 A2); a
-lead that ends with no summary takes the `down_mid_lead` ending, told apart by its correlation
-section.
+uncharged; a lead that has written a usable summary keeps it, and MAIN gets it with a host note
+naming the system and the cause (never the fault text, #1222 A2); a lead that ends with no
+summary takes the `down_mid_lead` ending, told apart by its correlation section. Only the lead's
+FINAL text counts as its summary (D5a, human ruling): text written beside the call that escaped
+is not kept, so a lead whose last turn is empty ends `down_mid_lead` whatever it wrote before.
 
 HOW EACH IS SEEN. Every scenario goes through the production front door (`S.run_alert`: the real
 `run.main`, the real driver behind `_ReplayLifecycle`), with the REAL adapters under the checkout
@@ -450,7 +450,7 @@ def test_d5_l00c_keeps_a_usable_summary_and_main_is_told_its_system_went_down(
         tmp_path: Path) -> None:
     """D5: l-00c's first call is served; it writes its summary and, in the same response, makes a second call, which escapes the start check (ConfigFault): elastic goes Down(NotConfigured) on the spot, uncharged, and a later call never reaches the verb. The lead's summary is usable (one call succeeded, the text is not empty: A2's classifier) and was written before the system went down — and, should the lead run on, it ends on the same text. MAIN's correlation section carries that summary, framed as the lead's own text, AND a host note — outside the frame — naming elastic and the cause 'not configured'; never the fault's text (A2 stands) and never the breaker's words (DP4). Rejected by D5: ending `down_mid_lead` and discarding the summary. Red at base, which delivers the summary with no note.
 
-    The summary is written both beside the escaping call and as the lead's last text, so this arm holds whether an implementation stops the lead at the escape or lets it run to its own end. That a summary written beside the escaping call counts even when the lead's last turn is empty is the next arm's (D5 as written, confirmed in r4 review)."""
+    Only the lead's final text counts as its summary (D5a, human ruling): the lead runs on after the escape (its third call is refused without reaching the verb) and ends on its summary, which is what is kept. The same text written beside the escaping call is not what keeps it — a lead that wrote it there and then ended on an empty turn ends `down_mid_lead` (the next arm)."""
     scene = _Scene(tmp_path)
     written_then_escaped = S.Turn(text=D5_SUMMARY, tool_calls=_q(2).tool_calls)
     d = scene.run("d5-summary", backend=_backend(fault=T.Fault(raise_after=1), exc=_escape),
@@ -485,9 +485,9 @@ def test_d5_l00c_keeps_a_usable_summary_and_main_is_told_its_system_went_down(
         f"the escaped ConfigFault was charged to the run-wide count: {d.breaker!r}")
 
 
-def test_d5_l00c_keeps_a_summary_written_beside_the_escape_though_its_last_turn_is_empty(
+def test_d5_l00c_whose_last_turn_is_empty_ends_down_mid_lead_and_its_text_beside_the_escape_is_not_shown(
         tmp_path: Path) -> None:
-    """D5, as written ("if the lead has written a usable summary, MAIN receives that summary"; its rejected alternative "discards evidence already gathered") and as confirmed in r4 review: a usable summary the lead wrote beside the call that escaped counts even when the lead's last turn is empty. l-00c's first call is served; its next response carries its summary AND a second call, which raises a ConfigFault the start check missed (O-5b); its last turn is empty. MAIN's correlation section carries that summary, framed as the lead's own text, and a host note outside the frame naming elastic and 'not configured' — not the `down_mid_lead` ending, which is for a lead that wrote no summary; never the fault's text (A2) or the breaker's words (DP4). Elastic is down from the escape, uncharged. Red at base, which names the lead's empty turn `dispatch_raised` and discards the summary."""
+    """D5a (human ruling): only the correlation lead's FINAL text counts as its summary. l-00c's first call is served; its next response carries summary-shaped text AND a second call, which raises a ConfigFault the start check missed (O-5b); its last turn is empty. The text written beside the escaping call is not kept: the lead has no summary and ends `down_mid_lead` — MAIN's correlation section names elastic and 'not configured', frames no lead output, and does not carry that text at all (mid-lead narration must not be framed to MAIN as a finding; the accepted cost is that a real summary written there is lost). Never the fault's text (A2) or the breaker's words (DP4); elastic is down from the escape, uncharged. Red at base, which names the lead's empty turn `dispatch_raised` and names no system."""
     scene = _Scene(tmp_path)
     written_then_escaped = S.Turn(text=D5_SUMMARY, tool_calls=_q(2).tool_calls)
     d = scene.run("d5-empty-end", backend=_backend(fault=T.Fault(raise_after=1), exc=_escape),
@@ -500,21 +500,23 @@ def test_d5_l00c_keeps_a_summary_written_beside_the_escape_though_its_last_turn_
         f"premise: {len(calls)} of l-00c's calls reached the verb — the first served, the second "
         "escaping")
     body = _section(d)
-    framed = [b for b in S.outer_frames(body) if D5_SUMMARY in b]
-    assert framed, (
-        "the usable summary l-00c wrote beside the call that escaped is not framed in MAIN's "
-        "correlation section because the lead's last turn was empty (D5: a lead that has written "
-        f"a usable summary keeps it; the evidence already gathered is not discarded): {body!r}")
-    note = S.harness_text(body)
-    assert _names_system(note, "elastic"), (
-        f"no host note beside the summary names elastic (D5): {note!r}")
-    assert "not configured" in note.lower(), (
-        f"the host note beside the summary does not name the cause 'not configured' (D5): "
-        f"{note!r}")
+    low = body.lower()
+    assert _names_system(body, "elastic"), (
+        f"l-00c ended on an empty turn after elastic went down, and its section does not name "
+        f"elastic (D5a: it ends `down_mid_lead`, which names the cause): {body!r}")
+    assert "not configured" in low, (
+        f"the section does not name the cause 'not configured' (D5a, DP4): {body!r}")
+    assert D5_SUMMARY not in body, (
+        "MAIN's correlation section carries the text l-00c wrote beside the call that escaped "
+        "though its last turn was empty (D5a: only the lead's final text counts as its summary; "
+        f"text beside the escaping call is not kept): {body!r}")
+    assert S.outer_frames(body) == [], (
+        f"the section frames lead output though the lead has no summary (D5a): "
+        f"{S.outer_frames(body)}")
     assert ESCAPE_TOKEN not in body, (
         f"the correlation section carries the escaped fault's text (D5, #1222 A2): {body!r}")
-    said = [w for w in TRIPPED_WORDS if w in note.lower()]
-    assert not said, f"the note names the breaker's cause ({said}) for a config fault: {note!r}"
+    said = [w for w in TRIPPED_WORDS if w in low]
+    assert not said, f"the section names the breaker's cause ({said}): {body!r}"
     assert d.run_state is not None, "the run left no state to read the breaker from"
     assert d.run_state.breaker_failures("elastic") == 0, (
         f"the escaped ConfigFault was charged to elastic's breaker: {d.breaker!r}")
