@@ -1,7 +1,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+
+from defender._clock import parse_iso_utc
 
 from defender.runtime.agent_role import AgentRole
 
@@ -131,17 +134,31 @@ def enforcement_state(state: RunState) -> dict:
     return {**state.budget_snapshot(), _ELAPSED: state.elapsed}
 
 
+def _wall_origin(state: dict) -> datetime | None:
+    """A bare budget's origin as an aware UTC datetime. A naive one (from a preserved
+    offset-less stamp) would make `_elapsed`'s subtraction raise `TypeError`."""
+    for key in ("created_at", "started_at"):
+        parsed = parse_iso_utc(state.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _elapsed(state: dict) -> float | None:
-    """The run's elapsed seconds on its run clock (#1255 "Time": the clock is the only source),
-    read through the live reader `enforcement_state` carries. `None` for a view that carries
-    none — a bare budget names no clock, and every enforcing check fails closed on it."""
+    """The run's elapsed seconds. A view `enforcement_state` built reads the run clock alone
+    (#1255 "Time"), through the live reader it carries. A bare budget carries no run clock: it
+    reads the wall clock since its origin stamp, as anything outside a run does (rev 5 C4).
+    `None` when it names neither — every enforcing check then fails closed."""
     reader = state.get(_ELAPSED)
-    if not callable(reader):
+    if callable(reader):
+        value = reader()
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+    origin = _wall_origin(state)
+    if origin is None:
         return None
-    value = reader()
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value)
+    return (datetime.now(UTC) - origin).total_seconds()
 
 
 def tail_exhausted(state: dict, limits: dict) -> bool:
