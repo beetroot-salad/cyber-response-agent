@@ -36,6 +36,7 @@ from collections.abc import Callable, Iterator
 from functools import partial
 from typing import Any
 
+from defender._clock import parse_iso_utc
 from defender._io import parse_jsonl_row
 from defender.run_repository import RecordHandle, Run
 
@@ -226,8 +227,12 @@ class ForkSnapshot:
     def fork_time(self) -> datetime:
         """The run clock's reading when the response arrived, whole seconds, aware UTC: the
         arm's cut-off (`as_of`) and the fork time the oracle is handed (rev 5 C4)."""
-        return datetime.fromisoformat(self.body["counters"]["clock"]["reading"]).astimezone(
-            UTC).replace(microsecond=0)
+        raw = self.body["counters"]["clock"]["reading"]
+        reading = parse_iso_utc(raw)
+        if reading is None:
+            raise BranchError(f"the fork snapshot's run-clock reading {raw!r} is not an ISO-8601 "
+                              "timestamp, so the branch point has no moment")
+        return reading.astimezone(UTC).replace(microsecond=0)
 
     @property
     def review(self) -> dict:

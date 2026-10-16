@@ -80,9 +80,10 @@ def _sha256_hex(text: str) -> str:
 
 
 def payload_text_of(payload: Any) -> str:
-    """@owns the payload sidecar's spelling — an adapter's answer as the text the query tool
-    persists (`gather_raw/<lead>/<seq>.json`) and hands the model: the answer's own key order,
-    never re-sorted, `default=str` so a `datetime` or `Decimal` cannot raise mid-call.
+    """@owns payload_text — the payload sidecar's spelling: an adapter's answer as the
+    text the query tool persists (`gather_raw/<lead>/<seq>.json`) and hands the model: the
+    answer's own key order, never re-sorted, `default=str` so a `datetime` or `Decimal` cannot
+    raise mid-call.
 
     A branched world serves an answer read live in exactly this spelling (#1255 G8), so the
     investigator's file and tool result are the bytes a natural run over the same system gets."""

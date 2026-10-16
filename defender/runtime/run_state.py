@@ -36,7 +36,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .._clock import now_iso
+from .._clock import now_iso, parse_iso_utc
 from .run_clock import ClockSource, RunClock
 
 
@@ -216,7 +216,11 @@ class RunState:
             self.budget["subagent_spawns"] = int(counters["subagent_spawns"])
             self.breaker = copy.deepcopy(counters["breaker"])
             clock = counters["clock"]
-            self.resume_clock(datetime.fromisoformat(clock["reading"]), float(clock["elapsed"]))
+            reading = parse_iso_utc(clock["reading"])
+            if reading is None:
+                raise ValueError(f"the recorded run-clock reading {clock['reading']!r} is not "
+                                 "an ISO-8601 timestamp")
+            self.resume_clock(reading, float(clock["elapsed"]))
 
     def inherit_rows(self, rows: Iterable[dict]) -> None:
         """Record rows this run did not write: a branch sibling's inherited prefix, handed over
