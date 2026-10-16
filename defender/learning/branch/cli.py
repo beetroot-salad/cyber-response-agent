@@ -667,6 +667,8 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     family_answers = read_family_answers(recording.base_path)
     # M01=A's fixed prefix, by the one rule the sibling's registry is handed too (`run.py`).
     prebranch = prebranch_calls(source, family.branch_message_id)
+    # D6 (#1255): the calls the primer recorded unanswered are never fixed.
+    unrecorded = recording.unrecorded_keys()
 
     drift: list[dict[str, Any]] = []
     calibrated: list[tuple[_Original, Any, bool, bool]] = []
@@ -690,10 +692,11 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
                 if canonical_json(json.loads(recorded)) != canonical_json(json.loads(live_text)):
                     drift.append({**call.entry, "status": "drifted"})
                 base_text = recorded
-        # D6 (#1255): only an answer the recording holds is fixed; a live base is the system
-        # now, which the oracle serves as it stood at the fork.
+        # D6 (#1255): a pre-branch call the primer recorded unanswered is never fixed; a live
+        # base is the system now, which the oracle serves as it stood at the fork.
         live = recorded is None
-        fixed = not live and request_key(call.system, call.verb, call.params) in prebranch
+        key = request_key(call.system, call.verb, call.params)
+        fixed = key in prebranch and key not in unrecorded
         calibrated.append((call, json.loads(base_text), fixed, live))
 
     stop = threading.Event()

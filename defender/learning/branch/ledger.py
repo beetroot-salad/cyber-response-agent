@@ -275,6 +275,7 @@ class Ledger:
                 "outside the episode or onto the capture its siblings replay") from None
         ledger = cls(path=served.path, base_path=episode.served_base.path)
         ledger._served = served
+        ledger._unrecorded_path = episode.served_unrecorded.path
         return ledger
 
     def declare(self) -> Ledger:
@@ -304,6 +305,8 @@ class Ledger:
     def __post_init__(self) -> None:
         #: This world's `served_world` record, the ledger's one write lane; set by `for_world`.
         self._served: AppendRecord | None = None
+        #: The primer's skip record beside the base (#1255 D6); set by `for_world`.
+        self._unrecorded_path: Path | None = None
         #: Family tier only, keyed by request key: `base_payload` never reads a world's own
         #: rows, so memoizing them would only hold every served payload in memory.
         self._memo: dict[str, str] = {}
@@ -343,6 +346,19 @@ class Ledger:
         A key the capture never recorded gets a live read per world, which may differ.
         """
         return self._memo.get(request_key(system, verb, params))
+
+    def unrecorded_keys(self) -> frozenset[str]:
+        """The request keys of the calls the source asked whose answer the base lacks — the call
+        failed, or its payload was unreadable — from the primer's skip record
+        (`capture.unrecorded_line`, #1255 D6). A world serves such a call through its oracle at
+        the fork time, never as a fixed pre-branch answer. An episode primed before the record
+        existed (or a ledger not built by `for_world`) has none: the empty set."""
+        if self._unrecorded_path is None:
+            return frozenset()
+        return frozenset(
+            request_key(str(row.get("system")), str(row.get("verb")), row.get("params"))
+            for row in read_jsonl_rows(self._unrecorded_path)
+            if isinstance(row.get("system"), str) and isinstance(row.get("verb"), str))
 
     def _absorb(self, path: Path) -> None:
         """Fold one file's family-tier rows into the memo, first row wins.

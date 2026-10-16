@@ -51,6 +51,9 @@ RUNS_DIRNAME = "runs"
 SERVED_DIRNAME = SERVED_PREFIX.rstrip("/")
 JUDGE_DRAWS_DIRNAME = "judge"
 BASE_FILENAME = "base.jsonl"
+#: The primer's skip record (#1255 D6): the calls the source asked whose answer the recording
+#: lacks because the call failed or its payload was unreadable.
+UNRECORDED_FILENAME = "unrecorded.jsonl"
 PRIMING_LOCK_NAME = f"{SERVED_PREFIX}.priming"
 RUN_DIR_POINTER_NAME = "run_dir"
 
@@ -338,6 +341,12 @@ class EpisodeLayout:
         return self.served / BASE_FILENAME
 
     @property
+    def served_unrecorded(self) -> PurePosixPath:
+        """The primer's skip record beside the base (#1255 D6): each call the source asked
+        whose answer the base lacks because the call failed or its payload was unreadable."""
+        return self.served / UNRECORDED_FILENAME
+
+    @property
     def priming_lock(self) -> PurePosixPath:
         return PurePosixPath(PRIMING_LOCK_NAME)
 
@@ -547,6 +556,10 @@ class EpisodePaths:
     @property
     def served_base(self) -> Path:
         return self.episode_dir / LAYOUT.served_base
+
+    @property
+    def served_unrecorded(self) -> Path:
+        return self.episode_dir / LAYOUT.served_unrecorded
 
     @property
     def priming_lock(self) -> Path:
