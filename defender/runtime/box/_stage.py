@@ -26,8 +26,9 @@ import os
 import shutil
 import stat
 import tempfile
+import threading
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from defender._io import guarded_mkdir
@@ -106,6 +107,9 @@ class StagingTree:
     run_dir: Path
     #: Run-folder entries not carried (the wire logs: no role may read them).
     unmirrored: frozenset[str]
+    #: Held across a refresh: concurrent gather leads run their commands at once, and two walks
+    #: over one `runs/current` would remove and copy under each other.
+    _refreshing: threading.Lock = field(default_factory=threading.Lock, compare=False, repr=False)
 
     @property
     def run_view(self) -> Path:
@@ -130,7 +134,8 @@ class StagingTree:
 
     def refresh(self) -> None:
         """Carry the run folder's current content into `runs/current` (C6)."""
-        _mirror_tree(Path(self.run_dir), self.run_view, base=self.root, skip=self.unmirrored)
+        with self._refreshing:
+            _mirror_tree(Path(self.run_dir), self.run_view, base=self.root, skip=self.unmirrored)
 
 
 def make_staging_tree(
