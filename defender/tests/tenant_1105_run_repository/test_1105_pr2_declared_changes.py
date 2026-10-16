@@ -13,7 +13,7 @@ tests whose change IS the edge's arguments call the declared shape (`new_*_argv`
 |---------------------------------------------------------------|--------|-------------------------------------------------------|
 | test_dc0_the_door_no_longer_serves_the_tenant_taking_lookups  | 0      | the door serves `open_run` & co.                       |
 | test_dc1_the_launcher_takes_a_tenant_and_a_source_run_id_only | 1      | the launcher takes a path (`--tenant` unrecognised)    |
-| test_dc1_a_source_under_a_linked_runs_folder_is_refused       | 1, 11  | `tenant_of_run_dir` compares resolved paths: it passes |
+| test_dc1_a_source_under_a_linked_runs_folder_is_refused       | 1, 11  | `tenant_of_run_dir` resolves it; G16 refuses instead   |
 | test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally   | J3     | VIEW 4 / TRIAL SPREAD name the same-alert prior run    |
 | test_dc3_a_world_label_equal_to_a_natural_run_id_grades        | 3, J3  | the label probe over `<T>/runs` refuses (G17)          |
 | test_dc4_the_episode_page_takes_a_tenant_and_an_episode_id    | 4, J8  | the page CLI takes a folder path                       |
@@ -235,15 +235,16 @@ def test_dc1_a_source_under_a_linked_runs_folder_is_refused(tmp_path):
     so the launch is refused before the questioner, with no episode. The positive control
     puts the real folder back at `<T>/runs`: the same launch runs.
 
-    The source carries no session store (still branchable: imported, replayed or pruned
-    sources are, `_check_branch_point`), because a source WITH one is already refused today by
-    G16's store compare (the store derived from the resolved folder is not the recorded one).
-    RED at base: `tenant_of_run_dir` compares resolved paths, so the linked storeless source
-    launches."""
+    The source is a LEGAL one: it keeps its session store, so it carries the fork snapshot
+    #1255 requires (N4/C2: a storeless source is refused before the questioner for having no
+    snapshot, and the control could then never launch). The negative and the control differ
+    only in the link, and the refusal is pinned to the link by its text: it names `<T>/runs`
+    as a link, and neither the snapshot check (C2) nor G16's store compare (the store derived
+    from the resolved folder is not the recorded one) is what spoke. Both read the source's
+    store, which is found only once the source is open, and `runs.open` refuses the link first.
+    RED at base: `tenant_of_run_dir` compares resolved paths, so the linked source is opened
+    and only G16's compare refuses it — a refusal that does not name the link."""
     est, src = P.launch_source(tmp_path)
-    from defender.run_repository import RunPaths
-
-    RunPaths(src).session_pointer().unlink()
     runs = src.parent
     moved = tmp_path / "runs-elsewhere"
     runs.rename(moved)
@@ -253,6 +254,16 @@ def test_dc1_a_source_under_a_linked_runs_folder_is_refused(tmp_path):
     refused = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
     assert _refused_unspent(refused), "a source under a linked runs folder launched"
     assert _episode_names() == before
+    # The cause is the link: the refusal names `<T>/runs` as one, and (its paths set aside, so
+    # a temp folder's name cannot speak for it) it is neither C2's nor G16's.
+    assert str(runs) in refused.message, (
+        f"the refusal does not name the runs folder: {refused.message!r}")
+    assert "is a link" in refused.message, (
+        f"the refusal does not call the runs folder a link: {refused.message!r}")
+    said = refused.message.replace(str(src), "<source>").replace(str(runs), "<runs>")
+    for other in ("snapshot", "store"):
+        assert other not in said, (
+            f"refused for the source's {other}, not the link: {refused.message!r}")
 
     os.unlink(runs)
     moved.rename(runs)

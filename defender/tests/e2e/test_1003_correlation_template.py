@@ -41,7 +41,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.run_repository import RunPaths  # noqa: E402
-from defender.tests._1255_view import model_path  # noqa: E402
+from defender.tests._1255_view import MODEL_DEFENDER, model_path  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     CORRELATION_SUMMARY,
     L3,
@@ -134,7 +134,11 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
     assert res.has_sidecar(L3), f"positive control: the planted tree did not dispatch l-00c ({res.gather_raw_names()})"
     assert res.gather is not None
     assert len(res.gather.seen) == 1, "positive control: item 3 was not dispatched"
-    assert str(tree) in res.gather.seen[0], "positive control: the lead was not dispatched from the planted tree"
+    # #1255 P1/O3: the dispatch names the run's checkout as the model holds it (`/defender`),
+    # never its host path — so the planted tree is no longer told apart from this checkout in the
+    # dispatch text; the refusal below (the planted edit's doing) is what pins the tree read.
+    assert re.search(rf"^defender_dir: {re.escape(MODEL_DEFENDER)}$", res.gather.seen[0],
+                     re.MULTILINE), "positive control: the lead was not dispatched with its checkout"
     assert res.budget, "positive control: the budget did not open"
 
     tree = _mismatched(tmp_path / "bad")

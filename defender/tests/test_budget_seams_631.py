@@ -126,9 +126,15 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, state, enforce: bool | No
         make_model=lambda name, effort: BuiltModel(FunctionModel(model), None),
         limits=limits,
     )
-    from defender import run_common
     from defender.runtime import box as box_mod
-    box = box_mod.unboxed_executor(env=run_common.run_env(DEFENDER, run_dir))
+    from defender.tests.e2e._replay_harness import _no_docker_daemon, _unsandboxed_allowed
+
+    # #1255 C6/C9: the bash lane is production's unboxed mode — `start_box`'s own fallback, taken
+    # the way a hermetic replay takes it (no daemon, the operator's opt-out for this one call) —
+    # never a bare host executor. Deps from `bind` carry the model view (cwd `/runs/current`), and
+    # only the fallback stages that view on the host; a bare executor has no tree for it to name.
+    with _unsandboxed_allowed():
+        box = box_mod.start_box(run_dir, DEFENDER, docker=_no_docker_daemon)
     # effective_tools_for (#632, §7 R7): a bare bind() of a role whose static tools/verb_grant
     # disagree (the judge — see agent_definition.effective_tools_for) would raise; this probe
     # is about the budget/accounting hooks, not the verb grant.

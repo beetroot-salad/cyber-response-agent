@@ -60,7 +60,7 @@ import pytest
 
 from defender.tests import _1255_view as V
 from defender.tests import _triplet_947 as T
-from defender.tests._1255_snapshot import tool_calling_responses
+from defender.tests._1255_snapshot import calls_of, message_at, tool_calling_responses
 from defender.tests._branch_947 import spec_at
 from defender.tests._data_root_1078 import DATA_ROOT_ENV
 from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
@@ -1293,13 +1293,18 @@ def _held_files(run_dir: Path) -> dict[str, Path]:
     return {k: p for k, p in held.items() if p.is_file()}
 
 
-#: The source run a sibling is branched from: a fenced document and one gathered query, so the
-#: branch point at MAIN's first tool return passes `validate` (S04's resume trio does the same).
+#: The source run a sibling is branched from: a fenced document, one gathered query, then one
+#: more MAIN tool call (`echo held`) — the branch point. #1255 (D1, C7): a branch point is a MAIN
+#: response that called tools, and its fork snapshot must already hold a query that reached a
+#: system. The capture lands INSIDE the gather call, so neither the append's response nor the
+#: gather dispatch has it in its snapshot; the response after the gather returns does (the
+#: shape `test_1222_correlation_dispatch`'s sibling source uses).
 def _branchable_source(tmp_path: Path, planted: S.Planted) -> S.Drive:
     golden = (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")
     src = _run(tmp_path / "source", tenant=planted,
                main=[S.call("append_block", text=golden),
-                     S.gather("l-009", "elastic", "capture one fact"), S.text(S.DONE)],
+                     S.gather("l-009", "elastic", "capture one fact"),
+                     S.call("bash", command="echo held"), S.text(S.DONE)],
                leads={"l-009": [S.query("elastic", "query", {"native_query": "s08:capture"}),
                                 S.text("L9 captured.")]})
     assert src.raised is None, f"the source run did not end cleanly: {src.raised!r}"
@@ -1315,9 +1320,12 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     src = _branchable_source(tmp_path, planted)
     assert src.run_dir is not None
     store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
-    # #1255 (D1): a branch point is a MAIN response that called tools, and the arm resumes with
-    # no continuation prompt — the source's first one (its `append_block` call).
-    spec = spec_at(store, src.run_dir, tool_calling_responses(store)[0])
+    # #1255 (D1, C7): a branch point is a MAIN response that called tools, and the arm resumes
+    # with no continuation prompt — the source's third one (its `echo`), after the capture.
+    point = tool_calling_responses(store)[2]
+    assert calls_of(message_at(store, point))[0].tool_name == "bash", (
+        "the branch point is not the source's `echo` call")
+    spec = spec_at(store, src.run_dir, point)
     sibling_dir = planted.runs / f"{src.run_dir.name}-sibling"
     sibling_dir.mkdir(parents=True)
     for name, source in _held_files(src.run_dir).items():
