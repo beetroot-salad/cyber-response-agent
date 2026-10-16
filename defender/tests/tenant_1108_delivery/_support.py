@@ -42,8 +42,34 @@ def target():
     return importlib.import_module("defender.learning.author.tenant_delivery")
 
 
+#: Git's automatic upkeep, off for every git the fixtures run. Git >= 2.47 starts
+#: `maintenance run --auto` detached after a fetch, commit or merge: still taking
+#: `maintenance.lock` once the fixture's git has returned, it races a test that deletes the clone
+#: (CI: `FileNotFoundError` mid-`rmtree`). Never in the code under test's environment
+#: (`os.environ`, `GitConfigHome`, `fresh_process_env`): whether ITS git leaves upkeep behind is
+#: a case of its own (`test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call`).
+_NO_UPKEEP = (("maintenance.auto", "false"), ("maintenance.autoDetach", "false"),
+              ("gc.auto", "0"), ("gc.autoDetach", "false"))
+#: The same, as `git clone -c` writes it into a bare remote's own config: receive-pack runs with
+#: that config alone (local transport drops the pusher's `GIT_CONFIG_*`), after every push the
+#: fixtures or the code under test make.
+BARE_NO_UPKEEP = tuple(arg for key, value in (("receive.autogc", "false"), *_NO_UPKEEP)
+                       for arg in ("-c", f"{key}={value}"))
+
+
+def no_upkeep(env):
+    """`env` with `_NO_UPKEEP` as `GIT_CONFIG_KEY_n`/`VALUE_n`, after any entries it carries."""
+    env = dict(env)
+    base = int(env.get("GIT_CONFIG_COUNT") or "0")
+    for i, (key, value) in enumerate(_NO_UPKEEP, start=base):
+        env[f"GIT_CONFIG_KEY_{i}"] = key
+        env[f"GIT_CONFIG_VALUE_{i}"] = value
+    env["GIT_CONFIG_COUNT"] = str(base + len(_NO_UPKEEP))
+    return env
+
+
 def _git_env(extra=None):
-    return {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", **_IDENTITY, **(extra or {})}
+    return no_upkeep({**os.environ, "GIT_CONFIG_NOSYSTEM": "1", **_IDENTITY, **(extra or {})})
 
 
 def git(cwd, *args, env=None):
@@ -144,7 +170,7 @@ def build_tenant(tmp_path, tenant_id="blue", *, root=None):
     git(clone, "add", ".")
     git(clone, "commit", "-m", "seed")
     remote = tmp_path / ("origin.git" if tenant_id == "blue" else f"{tenant_id}-origin.git")
-    git(tmp_path, "clone", "--bare", clone, remote)
+    git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, clone, remote)
     origin = f"http://forge.invalid:3000/tenants/{tenant_id}.git"
     git(clone, "remote", "add", "origin", origin)
     # Git performs real local transport; delivery still validates the actual network origin.
@@ -302,7 +328,7 @@ if sys.argv[1] != "committed" or MARK.exists():
     sys.stdin.read()
     sys.exit(0)
 ENV = {{k: v for k, v in os.environ.items() if not k.startswith("GIT_")}}
-ENV["GIT_CONFIG_NOSYSTEM"] = "1"
+ENV.update({upkeep!r}, GIT_CONFIG_NOSYSTEM="1")
 def git(*args, extra=None, data=None):
     return subprocess.run(["git", "--git-dir", {gitdir!r}, *args], input=data, check=True,
                           capture_output=True, env={{**ENV, **(extra or {{}})}}).stdout.decode().strip()
@@ -331,6 +357,7 @@ def install_planting_hook(clone, base, marker, path, content):
     hook.parent.mkdir(exist_ok=True)
     hook.write_text(_PLANTING_HOOK.format(
         python=sys.executable, marker=str(marker), gitdir=str(Path(clone) / ".git"), base=base,
+        upkeep=no_upkeep({}),
         index=str(Path(clone) / ".git" / "p3-hook.index"), content=content, path=path),
         encoding="utf-8")
     hook.chmod(0o755)
@@ -429,6 +456,7 @@ class GitHTTP:
             env["HTTP_CONTENT_ENCODING"] = handler.headers["Content-Encoding"]
         if handler.headers.get("Git-Protocol"):
             env["GIT_PROTOCOL"] = handler.headers["Git-Protocol"]
+        env = no_upkeep(env)
         # lint-raw-git: test-only smart-HTTP server; the CGI is the remote, not the code under test.
         proc = subprocess.run(["git", "http-backend"], input=body, env=env, capture_output=True,
                               check=False)
@@ -520,7 +548,7 @@ def http_repo(tmp_path, monkeypatch):
     served = tmp_path / "served"
     remote = served / "tenants" / "blue.git"
     remote.parent.mkdir(parents=True)
-    git(tmp_path, "clone", "--bare", clone, remote)
+    git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, clone, remote)
     server = GitHTTP(served)
     try:
         git(clone, "remote", "add", "origin", f"{server.url}/tenants/blue.git")
