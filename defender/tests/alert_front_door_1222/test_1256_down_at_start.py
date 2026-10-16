@@ -368,7 +368,10 @@ def test_o6_lead_on_a_system_whose_adapter_is_broken_ends_down_at_start(tmp_path
     # The broken adapter's calls would be answered (the injected registry serves them): a run that
     # dispatches the lead anyway is seen calling.
     tree = _tree_with_broken_elastic(tmp_path / "planted")
+    # Run start judges the tree the run reads (`roster=`, as production's one DEFENDER_DIR):
+    # the lifecycle hands run.py's judgement on to the driver (r4), so it must be this tree's.
     broken = scene.run("adapter-broken", defender_dir=tree, backend=_backend(),
+                       roster=read_roster(adapters_under(tree)),
                        main=S.closing_main_turns("inconclusive"),
                        leads={S.L3: [_q(1), _q(2), S.text("FD1256-BROKEN-NARRATION")]})
 

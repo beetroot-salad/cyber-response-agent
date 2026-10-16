@@ -63,8 +63,10 @@ def test_a_broken_adapter_module_does_not_kill_the_catalog(tmp_path):
     Reading the roster IMPORTS each adapter (the filename glob never did), so an adapter with a
     syntax error — a newly onboarded system, say — would otherwise raise straight out of
     `descriptor_catalog`, killing prompt construction for EVERY system and with it the whole run.
-    The healthy systems must still be advertised."""
-    from defender.hooks.inject_system_skill_description import descriptor_catalog
+    The healthy systems must still be advertised. (#1256 r4: the catalog is gather's system
+    index, built once at run start by `descriptor_index` and rendered at use; read here rendered
+    with nothing down.)"""
+    from defender.tests import _system_index_1256 as SI
 
     adapters = tmp_path / "adapters"
     adapters.mkdir()
@@ -85,8 +87,8 @@ def test_a_broken_adapter_module_does_not_kill_the_catalog(tmp_path):
         role="gather",
         entries=(("good", "health-check", "r"), ("broken", "health-check", "r")),
     )
-    catalog = descriptor_catalog(skills, read_roster(adapters), grant)
-    assert catalog is not None, "one broken adapter emptied the whole catalog"
+    catalog = SI.index_text(SI.index_module(), skills, read_roster(adapters), grant)
+    assert SI.listing(catalog), "one broken adapter emptied the whole catalog"
     assert "`good`" in catalog
     assert "`broken`" not in catalog, "a system that cannot be imported was still advertised"
 

@@ -165,7 +165,10 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     a third `elastic` call IN-GATHER (the _tripped_message gate — a down-message
     return, not a captured query). A SECOND dispatch of the now-tripped system
     short-circuits at the DISPATCH gate: the nested gather is never spawned and the
-    main loop gets the transparent 'system down' summary instead."""
+    main loop gets the transparent 'system down' summary instead.
+
+    #1256 r4: the down gate comes before the lead claim for every down cause, a trip included,
+    so the short-circuited `l-002` writes no lead record (it did before r4)."""
     run_id = "tripped"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -191,7 +194,9 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     qlines = _own_qlines(run_dir)
     assert len(qlines) == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file()
-    assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()
+    assert not (run_dir / "gather_raw" / "l-002.lead.json").exists(), (
+        "the dispatch to the tripped system claimed l-002 before its down gate refused it "
+        "(#1256 r4: the down gate comes before the lead claim)")
     assert "DOWN for this run" in main.seen[-1]
 
 
