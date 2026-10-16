@@ -74,8 +74,10 @@ from defender.tests import _triplet_947 as T
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
 from defender.tests import _state1135
 from defender.tests._state1135 import env_state
+from defender.tests._fixture_uuid import fixture_uuid
 
-EPISODE_ID = "ep-1133"
+#: #1187: an episode id is a uuid4 (`fixture_uuid` of the readable label).
+EPISODE_ID = fixture_uuid("ep-1133")
 #: Where a primer waits for its rival, and a launcher for the other: generous, since a wedged
 #: wait costs one failed test, never a hung worker.
 WAIT = 10.0

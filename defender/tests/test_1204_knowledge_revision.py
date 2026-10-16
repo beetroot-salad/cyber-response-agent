@@ -718,10 +718,13 @@ def _tenant_with_knowledge(tmp_path: Path, monkeypatch, *, versioned: bool) -> t
     return tenant, head
 
 
-def _materialise(tmp_path: Path, tenant: Any, run_id: str) -> tuple[Path, dict]:
-    """One run through the real `materialize_run`, and its stamp as the JSON on disk."""
+def _materialise(tmp_path: Path, tenant: Any, label: str) -> tuple[Path, dict]:
+    """One run through the real `materialize_run`, and its stamp as the JSON on disk. The run is
+    pinned at the uuid4 `label` names (#1187: a run id is a uuid4; `fixture_uuid`)."""
     from defender import run_common
+    from defender.tests._fixture_uuid import fixture_uuid
 
+    run_id = fixture_uuid(label)
     alert = tmp_path / f"{run_id}.alert.json"
     alert.write_text(json.dumps({"id": run_id}), encoding="utf-8")
     run_dir = run_common.materialize_run(alert, run_id, tenant=tenant).run_dir
@@ -739,7 +742,7 @@ def test_1204_a_run_on_a_versioned_tenant_stamps_its_knowledge_clones_commit(
     back with the same revision. Not via the e2e replay harness, which writes its own stamp
     (C15)."""
     tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
-    run_dir, doc = _materialise(tmp_path, tenant, "20260101t000000z-versioned")
+    run_dir, doc = _materialise(tmp_path, tenant, "1204-versioned")
 
     assert doc["knowledge"] == {"commit": knowledge_head}
     assert doc["commit"] != knowledge_head, "the knowledge commit is the PRODUCT's"
@@ -755,7 +758,7 @@ def test_1204_a_run_on_a_plain_copy_tenant_stamps_unversioned(tmp_path, monkeypa
     explicitly — never `null`, never a commit. Without the pair a writer that always wrote
     `"unversioned"` (or always the product's commit) would pass one of the two."""
     tenant, _ = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=False)
-    _run_dir, doc = _materialise(tmp_path, tenant, "20260101t000000z-plain")
+    _run_dir, doc = _materialise(tmp_path, tenant, "1204-plain")
 
     assert doc["knowledge"] == "unversioned"
     assert doc["tenant_id"] == TENANT_ID
@@ -771,7 +774,7 @@ def test_1204_an_unreadable_knowledge_git_stamps_unavailable_and_the_run_goes_on
     shutil.rmtree(git_dir)
     git_dir.write_text(f"gitdir: {tmp_path / 'nowhere'}\n", encoding="utf-8")
 
-    _run_dir, doc = _materialise(tmp_path, tenant, "20260101t000000z-gitfile")
+    _run_dir, doc = _materialise(tmp_path, tenant, "1204-gitfile")
     _assert_unavailable(doc["knowledge"])
     assert doc["commit"] is not None or doc["unavailable"] is not None
     assert doc["tenant_id"] == TENANT_ID
@@ -792,7 +795,7 @@ def test_1204_a_read_fault_inside_the_knowledge_git_still_writes_the_whole_stamp
     _plant_site_fault(tenant.knowledge, "loose-ref", fault, knowledge_head)
     product = _provenance.capture_tree(run_common.REPO_ROOT)
 
-    _run_dir, doc = _materialise(tmp_path, tenant, f"20260101t000000z-{fault}")
+    _run_dir, doc = _materialise(tmp_path, tenant, f"1204-{fault}")
     _assert_unavailable(doc["knowledge"], never=(knowledge_head,))
     assert doc["commit"] == product.commit
     assert doc["scope"] == _provenance.CODE_SCOPE

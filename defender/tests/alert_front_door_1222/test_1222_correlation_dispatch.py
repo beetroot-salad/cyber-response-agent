@@ -1167,7 +1167,7 @@ def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
     ss = SS.store_mod()
     path = ss.path_row_ids(store, ss.main_session_id(store))
     spec = spec_at(store, src.run_dir, path[2], prompt=CONTINUATION)
-    sibling_dir = _plant_sibling(src.run_dir, planted.runs / f"{run_id}-sibling")
+    sibling_dir = _plant_sibling(src.run_dir, planted.runs / fixture_uuid(f"{run_id}-sibling"))
     sib = S.new_drive(tmp_path / "sibling", tenant=planted, main=sibling_turns)
     S.drive_run(sib, sibling_dir, tenant=planted.accept(), resume=spec)
     return src, sib

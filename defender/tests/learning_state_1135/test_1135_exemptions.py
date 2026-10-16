@@ -131,8 +131,8 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     # #1105 PR 2 (declared change 8): run end hands the curation request its `Run` — a natural
     # run of a real tenant (`S.curation_run_dir`) — and the row it files is that run's address.
-    run_dir = make_run_dir(S.curation_run_dir("case-1135").parent, name="case-1135",
-                           disposition="benign")
+    planted = S.curation_run_dir("case-1135")
+    run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
     scrub_mod.scrub(run_dir)
     case_id = case_ref(RunPaths(run_dir).alert.read_bytes())
 

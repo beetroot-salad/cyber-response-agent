@@ -1479,17 +1479,22 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     """d_hostile_run_id_fails_loudly — a hostile run id fails LOUDLY rather than splitting the
     container-name grammar or the colon-separated bind spec.
 
-    The operator's pinned id is trusted by construction; the half pinned here is the
-    ATTACKER-INFLUENCED one — the id minted from the alert's own filename stem at the real mint
-    site. A stem carrying a colon, a comma or whitespace would, interpolated unchecked, append
-    a mount option or a whole second bind source to the argv, or open a second flag. The alert
-    file is created with that literal name on the real filesystem and passed through the real
-    mint, so the id under test is one the system can actually produce.
+    #1187 declared change 2: a minted run id carries no alert label. The ATTACKER-INFLUENCED
+    half — the alert's own filename stem, which the mint used to interpolate into the id — no
+    longer reaches the id at all. A stem carrying a colon, a comma and whitespace would,
+    interpolated unchecked, append a mount option or a whole second bind source to the argv,
+    or open a second flag. The alert file is created with that literal name on the real
+    filesystem and passed through the real mint: the run it yields is named by a canonical
+    UUID, nothing under the runs folder is named by the stem, and no argv the box start hands
+    the daemon — its `--name`, its bind specs — carries any of the stem; every bind spec keeps
+    its own fields and no more.
 
-    The refusal is asserted as BOTH a raise and the absence of any emitted argv: a start that
-    refused only after handing the daemon a split spec would not be a refusal."""
+    The guard stands (N11 keeps the container-name grammar): a run folder that does carry such
+    a name fails loudly, asserted as BOTH a raise and the absence of any emitted argv — a start
+    that refused only after handing the daemon a split spec would not be a refusal."""
     from defender import _tenant
     from defender.tests._data_root_1078 import set_up_tenant
+    from defender.tests._fixture_uuid import is_fixture_uuid_shape
 
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
@@ -1498,24 +1503,48 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     runs_base.mkdir(parents=True)
     fixture = tmp_path / "fixtures"
     fixture.mkdir()
-    alert = fixture / "evil:x:ro,y --privileged.json"
+    stem = "evil:x:ro,y --privileged"
+    alert = fixture / f"{stem}.json"
     alert.write_text('{"id": "a"}\n', encoding="utf-8")
 
-    with pytest.raises(SystemExit, match="invalid run id"):
-        run_common.materialize_run(alert, None, tenant=tenant)
-    assert list(runs_base.iterdir()) == [], (
-        "the hostile id created run artifacts before it was refused"
-    )
+    try:
+        run = run_common.materialize_run(alert, None, tenant=tenant)
+    except SystemExit as refused:
+        pytest.fail(f"the alert's filename stem still reaches the minted run id: {refused}")
+    run_id = run.run_dir.name
+    assert is_fixture_uuid_shape(run_id), (
+        f"the minted run id is not a canonical lowercase UUID: {run_id!r}")
+    assert run.run_dir.parent == runs_base
+    assert [p.name for p in runs_base.iterdir() if "evil" in p.name] == [], (
+        "an entry under the runs folder is named by the alert's stem")
 
-    run = runs_base / "evil:x:ro,y --privileged"
-    run.mkdir()
+    docker = FakeDocker()
+    start_box(run.run_dir, DEFENDER, docker=docker)
+    named = docker.argv_containing("--name")
+    assert named, "the create passed no --name"
+    assert named[0][named[0].index("--name") + 1] == f"defender-run-{run_id}"
+    leaked = [token for call in docker.calls for token in call.argv
+              if "evil" in token or token == "--privileged"]
+    assert leaked == [], f"the alert's stem reached the daemon as argv: {leaked}"
+    specs = [value for call in docker.calls
+             for flag, value in zip(call.argv[:-1], call.argv[1:], strict=True)
+             if flag == "--mount"]
+    assert any(spec.endswith(f",target={run.run_dir}") for spec in specs), (
+        f"the create bound no run folder: {specs}")
+    for spec in specs:
+        keys = sorted(field.split("=", 1)[0] for field in spec.split(","))
+        assert keys in (["source", "target", "type"], ["readonly", "source", "target", "type"]), (
+            f"a bind spec was split into extra fields: {spec!r}")
+
+    planted = runs_base / stem
+    planted.mkdir()
     with pytest.raises((BoxFault, ValueError)) as e:
-        container_name(run.name)
+        container_name(planted.name)
     assert type(e.value).__name__ in ("BoxFault", "ValueError")
 
     docker = FakeDocker()
     with pytest.raises((BoxFault, ValueError)):
-        start_box(run, DEFENDER, docker=docker)
+        start_box(planted, DEFENDER, docker=docker)
     assert docker.calls == [], "a hostile id reached the daemon as argv before being refused"
 
 

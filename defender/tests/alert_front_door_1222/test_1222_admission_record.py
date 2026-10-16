@@ -276,13 +276,14 @@ def _union_shown(tmp_path: Path, source_alert: bytes, runs_base: Path, tag: str)
     return "\n".join(judge.prompts)
 
 
-def _launch(planted: S.Planted, source_run_dir: Path, episode_id: str) -> tuple[Path | None, str | None]:
+def _launch(planted: S.Planted, source_run_dir: Path, label: str) -> tuple[Path | None, str | None]:
     """The branch launcher's `prepare_episode` over `source_run_dir` (priming stubbed through its
-    `prime=` seam). Returns (episode dir, None) or (None, the refusal's text)."""
+    `prime=` seam), for the episode `label` names (#1187: the id is its uuid4, `fixture_uuid`).
+    Returns (episode dir, None) or (None, the refusal's text)."""
     cli = S.mod("learning.branch.cli")
     capture = S.mod("learning.branch.capture")
     try:
-        held = cli.prepare_episode(episode_id, Run.at(Path(source_run_dir)), data_root=planted.accept().data_root,
+        held = cli.prepare_episode(fixture_uuid(label), Run.at(Path(source_run_dir)), data_root=planted.accept().data_root,
                                    prime=lambda _src, _ep: capture.PrimeReport(primed=1))
     except SystemExit as refused:
         return None, str(refused.code if refused.code is not None else refused)

@@ -236,18 +236,19 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
     from defender.tests._state1135 import curation_run_dir
 
     run_dir = curation_run_dir("r-real", tenant_id=d9_tenant)
-    opened = open_command_line_run(d9_tenant, "r-real")
+    run_id = run_dir.name  # #1187: the run's id is the uuid4 its label names (`fixture_uuid`)
+    opened = open_command_line_run(d9_tenant, run_id)
     assert isinstance(opened, Run), opened
     assert Path(opened.run_dir) == run_dir
 
     argv, main, status = {
-        "lead_author": (["--tenant", d9_tenant, "r-real"], R1._lead_author_main(), 2),
-        "visualize_run": (P.new_run_page_argv(d9_tenant, "r-real"), P.run_page_main(), 1),
-        "workspace_map": (["workspace_map.py", "--tenant", d9_tenant, "r-real"],
+        "lead_author": (["--tenant", d9_tenant, run_id], R1._lead_author_main(), 2),
+        "visualize_run": (P.new_run_page_argv(d9_tenant, run_id), P.run_page_main(), 1),
+        "workspace_map": (["workspace_map.py", "--tenant", d9_tenant, run_id],
                           R1._workspace_map_main(), 2),
     }[cli]
     monkeypatch.delenv(P.DATA_ROOT_ENV)
-    refused = open_command_line_run(d9_tenant, "r-real")
+    refused = open_command_line_run(d9_tenant, run_id)
     assert isinstance(refused, str), refused
     assert P.DATA_ROOT_ENV in refused, refused
     with R1._no_logging():
@@ -300,11 +301,13 @@ def test_4_a_quarantined_curation_row_shows_its_address(tmp_path):
     `run_dir`. Positive control: the row is there, with its failure. RED before the fix: the
     view reads `run_dir`, which no row carries (always null), and drops the address."""
     from defender.learning.frontend import serialize_queues
+    from defender.tests._fixture_uuid import fixture_uuid
     from defender.tests._state1135 import state_for_paths
 
     R1._good(tmp_path)
     paths = P.loop_paths(tmp_path)
-    P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": H.T_ID, "run_id": "nope"})
+    gone_run = fixture_uuid("nope")  # #1187: a well-formed run id (a uuid4) naming no run
+    P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": H.T_ID, "run_id": gone_run})
     assert R1._tick(paths, lane=P.Lane(), pitfalls=[], box=R1._Box()) == 0
     assert P.dead_letter(paths, "gone") is not None, "control: the row was not quarantined"
 
@@ -313,7 +316,7 @@ def test_4_a_quarantined_curation_row_shows_its_address(tmp_path):
     assert len(rows) == 1, view["quarantine"]["markers"]
     row = rows[0]
     assert row["failed"] == "artifact-missing"
-    assert (row.get("tenant_id"), row.get("run_id")) == (H.T_ID, "nope"), row
+    assert (row.get("tenant_id"), row.get("run_id")) == (H.T_ID, gone_run), row
     assert "run_dir" not in row, row
 
 

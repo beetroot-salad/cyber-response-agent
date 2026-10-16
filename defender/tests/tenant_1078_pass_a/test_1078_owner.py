@@ -17,7 +17,11 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+
+#: The run a round-trip opens: a uuid4 (#1187: `RunId.parse` admits nothing else), labelled `r1`.
+RUN_ID = fixture_uuid("r1")
 
 GRAMMAR = re.compile(H.GRAMMAR)
 
@@ -95,9 +99,9 @@ def test_o3_valid_id_round_trip(tmp_path, monkeypatch, tenant_id):
     assert H.TenantPaths(root, tenant_id).runs == root / tenant_id / "runs"
     base = H.runs_dir(root, tenant_id)
     H.plant_record(base, tenant_id)
-    run_dir = base / "r1"
+    run_dir = base / RUN_ID
     run_dir.mkdir()
-    assert _opened_tenant(root, tenant_id, "r1") == tenant_id
+    assert _opened_tenant(root, tenant_id, RUN_ID) == tenant_id
 
 
 def _opened_tenant(root: Path, tenant_id: str, run_id: str) -> str:
@@ -481,8 +485,8 @@ def _d0_return_values(root: Path) -> None:
         assert paths.dir in value.parents, f"TenantPaths.{name} is not under .dir"
     base = H.runs_dir(root, "playground")
     H.plant_record(base, "playground")
-    (base / "r1").mkdir()
-    derived = _opened_tenant(root, "playground", "r1")
+    (base / RUN_ID).mkdir()
+    derived = _opened_tenant(root, "playground", RUN_ID)
     assert derived == "playground"
     assert isinstance(derived, H.tenant().TenantId)  # a str subtype: the id, parsed
 

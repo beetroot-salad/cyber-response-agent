@@ -417,7 +417,7 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
                      dispositions: dict[str, str] | None = None,
                      ledgers: dict[str, list[dict]] | None = None,
                      outcome: str = "accepted", family_stamp: bool = True,
-                     **world_kw: Any) -> Path:
+                     episode_id: str = EPISODE_ID, **world_kw: Any) -> Path:
     """A fully archived, ACCEPTED episode in the #947 layout — the judge's whole input.
 
     HAND-BUILT, and the known limit is declared rather than hidden: no real archived episode
@@ -427,6 +427,10 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
     Every non-control world carries a NON-NULL role. A world declared `role: null` is the
     REPLICATE arm — `runnable_worlds` drops it, so it is never run, and a fixture holding one pins a family the launcher would never have produced (the
     trap `47-runtime-probes.md` red flag 5 records this probe's own first draft hitting).
+
+    `episode_id` names the folder AND the manifest's `episode_id`, written together (#1187 R5:
+    every manifest reader refuses a manifest whose id is not its folder's name) — a scene that
+    needs an id of its own passes one here rather than renaming the folder afterwards.
     """
     declared = dispositions or {"a": "benign", "b": "malicious", "c": "malicious"}
     if worlds is None:
@@ -436,11 +440,11 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
                         facts=[fact(f"f-{label}")])
               for label in labels if label != "a"],
         ]
-    doc = family_doc(worlds=worlds)
+    doc = family_doc(worlds=worlds, episode_id=episode_id)
     doc["discriminator"] = {
         "predicate": "did the analyst re-query the holding system after the branch",
     }
-    ep = episode(tmp_path, doc=doc, root=root)
+    ep = episode(tmp_path, doc=doc, root=root, episode_id=episode_id)
     base_capture(ep, [captured_row(system=holding_system, verb="esql")])
     planted = {w.get("world_id") for w in worlds if w.get("role") != "A"}
     for label in labels:

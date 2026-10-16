@@ -13,6 +13,7 @@ from defender.runtime import scrub as scan
 from defender.tests import _tenants1106 as tenants
 from defender.tests._1165_flows import RecordIO, run_handle
 from defender.tests._alert_plant import plant_alert
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.e2e._replay_harness import DEFENDER
 from defender.tests.e2e.test_540_scrub_lifecycle import FakeDocker
 
@@ -29,7 +30,7 @@ def callbacks(run):
 @pytest.mark.parametrize("fault", [False, True])
 def test_scrub_verdict_write_uses_the_injected_record_even_when_it_fails(tmp_path, fault):
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     _read, write = callbacks(run)
     record = run.facts.scrub_verdict
     if fault:
@@ -45,7 +46,7 @@ def test_scrub_verdict_write_uses_the_injected_record_even_when_it_fails(tmp_pat
 @pytest.mark.parametrize("in_flight", [False, True])
 def test_failed_teardown_records_the_skipped_scan_via_the_run(tmp_path, in_flight):
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     read, write = callbacks(run)
     scanned = []
 
@@ -72,7 +73,7 @@ def test_failed_teardown_records_the_skipped_scan_via_the_run(tmp_path, in_fligh
 
 def test_unsandboxed_marking_reads_and_writes_through_the_run(tmp_path):
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     read, write = callbacks(run)
 
     def scrub(tree):
@@ -89,7 +90,7 @@ def test_unsandboxed_marking_reads_and_writes_through_the_run(tmp_path):
 
 def test_launch_binds_the_run_verdict_writer_before_startup_can_fail(tmp_path):
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     reached = []
     tenant = SimpleNamespace(agent=Path("tenant-agent"), tenant_id=tenants.fixture_tenant().id)
 
@@ -117,7 +118,7 @@ def test_real_box_startup_refusals_use_the_handed_verdict_backend(tmp_path, monk
     """O1/O4: real start_box threads the callback through every startup refusal arm."""
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     plant_alert(run.run_dir, {"id": "alert-1165"})
     record = run.facts.scrub_verdict
     _read, write = callbacks(run)
@@ -142,7 +143,7 @@ def test_real_box_startup_refusals_use_the_handed_verdict_backend(tmp_path, monk
 
 def test_launch_forwards_the_same_run_and_binds_both_teardown_callbacks(tmp_path):
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     seen = []
     tenant = SimpleNamespace(agent=Path("tenant-agent"), tenant_id=tenants.fixture_tenant().id)
 

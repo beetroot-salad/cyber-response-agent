@@ -35,6 +35,7 @@ from defender.tests._declared869 import (
     write,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._lead_author_1134 import drafts_under, lead_deps, skills_view
 from defender.tests._state1135 import curation_run_dir, run_of
 
@@ -137,7 +138,7 @@ def test_synthesize_drafts_screens_a_row_recorded_before_the_writer_rule(tmp_pat
     both screens are asserted here — the second is not made redundant by the first, because a
     coined id can name a declared system just as easily as a phantom one.
     """
-    run_dir = tmp_path / "run-x"
+    run_dir = tmp_path / fixture_uuid("run-x")  # #1187: a run folder is named by its uuid4
     seed_executed_query(run_dir, query_id="fakesys.hunt-creds")
     _joined, executed = extract(run_dir)
     assert [lead.query_id for lead in executed] == ["fakesys.hunt-creds"]

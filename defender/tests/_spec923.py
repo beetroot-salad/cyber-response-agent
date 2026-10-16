@@ -368,7 +368,8 @@ def ab3_deps(tmp_path: Path) -> tuple[Any, Path]:
     from defender.agents import MAIN_DEF
     from defender.runtime.agent_definition import bind
 
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     (run_dir / "alert.json").write_bytes((GOLDEN_AB3 / "alert.json").read_bytes())
     (run_dir / "investigation.md").write_bytes((GOLDEN_AB3 / "investigation.md").read_bytes())

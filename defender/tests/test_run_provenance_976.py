@@ -20,6 +20,7 @@ from defender import _git, _provenance  # type: ignore[import-not-found]
 from defender._provenance import RunProvenance  # type: ignore[import-not-found]
 from defender.run_repository import PROVENANCE, RunPaths  # type: ignore[import-not-found]
 from defender.tests._data_root_1078 import set_up_tenant  # type: ignore[import-not-found]
+from defender.tests._fixture_uuid import fixture_uuid  # type: ignore[import-not-found]
 from defender.tests._repo import seed_repo  # type: ignore[import-not-found]
 
 TENANT_ID = "t976"
@@ -197,7 +198,7 @@ def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
 
-    run_dir = run_common.materialize_run(alert, "20260101t000000z-a1", tenant=tenant).run_dir
+    run_dir = run_common.materialize_run(alert, fixture_uuid("976-a1"), tenant=tenant).run_dir
     stamp = RunPaths(run_dir).provenance
     assert stamp.is_file()
     rec = _provenance.read(stamp)
@@ -533,7 +534,7 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     alert.write_text(json.dumps({"id": "a1"}))
     # A real failure, not an authored exception: a DIRECTORY at the stamp's name is one of the
     # shapes `write_guarded` refuses, and it is the shape a previous crashed run can leave.
-    run_id = "20260101t000000z-wedge"
+    run_id = fixture_uuid("976-wedge")  # #1187: a run id is a uuid4
     (runs / run_id).mkdir(parents=True)
     (runs / run_id / PROVENANCE).mkdir()
 
@@ -559,7 +560,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
     run_dir = run_common.materialize_run(
-        alert, "20260101t000000z-solo", tenant=tenant).run_dir
+        alert, fixture_uuid("976-solo"), tenant=tenant).run_dir
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
@@ -567,10 +568,11 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     # hoisted-capture path this change removed, and it is refused rather than accepted and
     # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
     handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
+    handed_id = fixture_uuid("976-handed")
     with pytest.raises(TypeError):
         run_common.materialize_run(
-            alert, "20260101t000000z-handed", tenant=tenant, provenance=handed)
-    assert not (runs / "20260101t000000z-handed").exists()
+            alert, handed_id, tenant=tenant, provenance=handed)
+    assert not (runs / handed_id).exists()
 
 
 # The coherence rules as a CONSTRUCTOR invariant, not a parser habit.

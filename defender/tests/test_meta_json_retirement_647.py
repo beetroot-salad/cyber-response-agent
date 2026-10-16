@@ -867,7 +867,7 @@ def test_the_subprocess_environment_carries_no_path_to_the_run_salt(tmp_path):
     os.environ["DEFENDER_DATA_ROOT"] = str(data_root)
     try:
         tenant = set_up_tenant(data_root, "t647b")
-        run_dir = run_common.materialize_run(alert, "env-boundary-647", tenant=tenant).run_dir
+        run_dir = run_common.materialize_run(alert, fixture_uuid("env-boundary-647"), tenant=tenant).run_dir
     finally:
         os.environ.pop("DEFENDER_DATA_ROOT", None)
 

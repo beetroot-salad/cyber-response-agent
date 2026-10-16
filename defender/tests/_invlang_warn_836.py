@@ -57,6 +57,7 @@ from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.tests import _review_bundle  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import ReplayFn, Turn  # noqa: E402
 
 __all__ = [
@@ -179,7 +180,8 @@ def main_deps(tmp_path: Path) -> tuple[Any, Path]:
 
     Same shape `test_append_only_write_lane_810.py::_main_deps` uses, so the two suites
     exercise one construction path rather than two."""
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    run = tmp_path / fixture_uuid("run")
     run.mkdir(parents=True)
     dfn = tmp_path / "defender"
     dfn.mkdir(parents=True)

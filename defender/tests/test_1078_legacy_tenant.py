@@ -313,7 +313,8 @@ def test_reusing_a_run_id_clears_all_three_sidecars_not_only_the_named_one(tenan
     run-end one today's code names."""
     base = tenant_root / T_ID / "runs"
     base.mkdir(parents=True, exist_ok=True)
-    run_dir = base / "run-recycled"
+    run_id = fixture_uuid("run-recycled")  # #1187: a run id is a uuid4
+    run_dir = base / run_id
     sidecars = {
         name: getattr(S.RunPaths(run_dir), name)(base) for name in S.SIDECAR_ACCESSORS}
     for name, path in sidecars.items():
@@ -322,7 +323,7 @@ def test_reusing_a_run_id_clears_all_three_sidecars_not_only_the_named_one(tenan
         assert path.parent == base, f"{name} lands beside the runs base, keyed `<run_id><suffix>`"
 
     alert = H.plant_alert(tmp_path / "in")
-    _materialize(alert, "run-recycled")
+    _materialize(alert, run_id)
 
     left = {name: path for name, path in sidecars.items() if path.exists()}
     assert left == {}, (

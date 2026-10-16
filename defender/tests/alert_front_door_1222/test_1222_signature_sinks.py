@@ -265,10 +265,12 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR091
     """An accepted episode carrying the launch's copies of the source run's alert and record
     (A1), graded end to end by `grade_episode`; returns the episode, the judge seam (holding
     every prompt it was shown) and the rows the pass appended to the findings queue."""
+    # Separate episode roots still share finding identity on the queue (#1241), so each pass
+    # gets an episode id of its own — a uuid, given to the folder and the manifest together
+    # (#1187 R5: a manifest's `episode_id` is its folder's name).
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
-                            alert=worlds_alert)
-    # Separate episode roots still share finding identity on the queue (#1241).
-    ep = ep.rename(ep.with_name(f"{ep.name}-{tmp_path.name}"))
+                            alert=worlds_alert,
+                            episode_id=fixture_uuid(f"1222-signature-sinks:{tmp_path}"))
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     S.plant_episode_copy(ep, alert=alert, record=record, facts=facts)
     if alter is not None:

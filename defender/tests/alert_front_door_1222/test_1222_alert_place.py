@@ -1274,7 +1274,7 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     ss = SS.store_mod()
     spec = spec_at(store, src.run_dir, ss.path_row_ids(store, ss.main_session_id(store))[2],
                    prompt="Continue this investigation from where it stands.")
-    sibling_dir = planted.runs / f"{src.run_dir.name}-sibling"
+    sibling_dir = planted.runs / fixture_uuid(f"{src.run_dir.name}-sibling")
     sibling_dir.mkdir(parents=True)
     for name, source in _held_files(src.run_dir).items():
         target = S.alert_file(sibling_dir) if name == "alert" else S.record_file(sibling_dir)

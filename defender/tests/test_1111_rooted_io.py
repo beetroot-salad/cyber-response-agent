@@ -1844,18 +1844,16 @@ def test_create_with_the_default_open_unnamed_links_an_unnamed_file_and_never_op
 #: A child looping over the handle's production write-once write (run setup's alert), each in
 #: a fresh run dir, until it is killed.
 _ALERT_CRASH_CHILD = r"""
-import os, sys
+import os, sys, uuid
 from pathlib import Path
 from defender.run_repository import Run
 root = Path(sys.argv[1])
 body = b"A" * (int(sys.argv[2]) - 1) + b"\n"
 print("ready", flush=True)
-i = 0
 while True:
-    run_id = f"r{i}"
+    run_id = str(uuid.uuid4())  # #1187: a run id is canonical uuid4 text
     os.mkdir(root / run_id)
     Run.under(root, run_id).facts.alert.write(body)
-    i += 1
 """
 
 #: The odds, measured before authoring with this loop's shape: against an exploit-shaped

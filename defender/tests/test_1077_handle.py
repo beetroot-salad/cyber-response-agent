@@ -293,56 +293,51 @@ def test_run_at_refuses_a_nonexistent_path_and_a_file(base, tmp_path: Path):
 
 
 def test_run_id_admission_is_todays_validator_by_reference_not_a_second_one(base):
-    """Run-id admission at both surviving public constructors reaches today's validators by
-    reference — `is_valid_run_id`, and after §7 decision 20 `is_case_stable_id` beside it —
-    and restates neither rule on the handle."""
-    from defender._run_id import (
-        CASE_STABLE_REQUIRED,
-        RUN_ID_ALLOWED,
-        is_case_stable_id,
-        is_valid_run_id,
-    )
+    """Run-id admission at the surviving public constructor reaches the one run-id rule by
+    reference and restates none on the handle: an id the rule refuses is refused here, by name,
+    and an id it admits is admitted unchanged.
+
+    #1187 declared change 1: the rule is canonical lowercase UUID text only, and its refusal's
+    wording is the implementation's — so what is pinned is what any wording carries: the
+    refused id, repr-quoted, on one line. Case stability survives as part of the rule (an
+    uppercase UUID is refused) where the broad run-id alphabet alone would admit it."""
+    from defender._run_id import is_valid_run_id
     _with_record(base)
     bad = ("", "-leading-dash", "has space", "héllo", "a/b", "..")
     for run_id in bad:
         assert not is_valid_run_id(run_id), f"{run_id!r} is the validator's own refusal"
         with pytest.raises(Exception) as excinfo:  # noqa: PT011
             S.Run().under(base, run_id, tenant_id=S.DEFAULT_TENANT_ID)
-        assert RUN_ID_ALLOWED in str(excinfo.value), (
-            f"the handle refused {run_id!r} in its own words rather than surfacing today's "
-            "validator's — decision 8 delegates BY REFERENCE, it does not restate the rule")
-    # The SECOND predicate is delegated the same way. `is_valid_run_id` admits upper case by
-    # construction (its own docstring says so), so before decision 20 this whole surface had
-    # exactly one rule and the case fold was nobody's — see h54, which drives the collision.
-    two_predicates = (
-        "the two predicates answer different questions; if `is_valid_run_id` refused mixed "
-        "case on its own there would be nothing for decision 20 to add")
-    # #1187: the case variant is an uppercase uuid (O2 refuses it; N11 keeps the broad
-    # alphabet `is_valid_run_id` answers, so it still admits it).
+        said = str(excinfo.value)
+        assert repr(run_id) in said, (
+            f"the handle's refusal does not name the id it refused, {run_id!r}: {said!r}")
+        assert "\n" not in said, f"the refusal of {run_id!r} is not one line: {said!r}"
+    # The case rule is the run-id rule's too, not the handle's. `is_valid_run_id` is the broad
+    # alphabet N11 keeps (box names, judge labels) and admits upper case by construction, so an
+    # uppercase uuid is an id ONLY the run-id rule refuses — the witness that the handle reaches
+    # that rule rather than the alphabet.
     upper = S.RUN_ID.upper()
-    assert is_valid_run_id(upper), two_predicates
-    assert not is_case_stable_id(upper), two_predicates
+    assert is_valid_run_id(upper), (
+        "fixture: the broad alphabet admits upper case, so the refusal below is the run-id rule's")
     with pytest.raises(Exception) as excinfo:  # noqa: PT011
         S.Run().under(base, upper, tenant_id=S.DEFAULT_TENANT_ID)
-    assert CASE_STABLE_REQUIRED in str(excinfo.value), (
-        "a mixed-case run id was admitted, or refused in the handle's own words. Decision 20 "
-        "reaches `_run_id.is_case_stable_id` BY REFERENCE, exactly as `_family."
-        "refuse_bad_episode_id` already does for the episode id — one rule, not two spellings")
-    # Positive control: an id both validators admit is admitted here, unchanged (#1187 declared
-    # change 1: a canonical uuid4 text).
-    assert is_valid_run_id(S.RUN_ID)
-    assert is_case_stable_id(S.RUN_ID)
+    said = str(excinfo.value)
+    assert repr(upper) in said, (
+        f"an uppercase uuid was refused without naming it: {said!r}")
+    assert "\n" not in said, f"the refusal of {upper!r} is not one line: {said!r}"
+    # Positive control: an id the rule admits (a canonical uuid4 text) is admitted here,
+    # unchanged.
     assert S.Run().under(base, S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID) is not None
 
 
 def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base):
-    """`Run.for_tenant`/`Run.under` apply `is_case_stable_id` beside `is_valid_run_id`, so a
-    case-variant of an existing run id is REFUSED rather than silently resolving onto that
-    run's directory.
+    """`Run.under` applies the run-id rule's case stability, so a case-variant of an existing
+    run id is REFUSED rather than silently resolving onto that run's directory.
 
     #1187 declared change 1: every run id is a canonical lowercase uuid4 text, so the existing
-    run is a uuid and its case variants are upper- or mixed-case spellings of it."""
-    from defender._run_id import CASE_STABLE_REQUIRED
+    run is a uuid and its case variants are upper- or mixed-case spellings of it; the refusal's
+    wording is the implementation's, so what is pinned is that it names the variant,
+    repr-quoted, on one line."""
     _with_record(base)
     one, two = fixture_uuid("handle-case-one"), fixture_uuid("handle-case-two")
     S.seed_run_tree(S.make_run_dir(base, one))
@@ -354,20 +349,18 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
         with pytest.raises(Exception) as excinfo:  # noqa: PT011
             S.Run().under(base, variant, tenant_id=S.DEFAULT_TENANT_ID)
         said = str(excinfo.value)
-        assert CASE_STABLE_REQUIRED in said, (
-            f"{variant!r} was not refused by the case-stability rule: {said!r}. On a case-"
-            "insensitive filesystem — macOS, which this repo supports, and where the default "
-            "runs base lives under a symlinked /tmp — it and the lowercase id are ONE inode, so "
-            "decision 3's resumable setup would finish that run's directory as if it were "
-            "this run's, re-stamp its identity and clear its three sidecars (h12, h13)")
-        assert variant.casefold() in said, (
-            "the refusal does not offer the spelling that would work; `_family."
-            "refuse_bad_episode_id` names it, and this is the same rule reached by reference")
+        assert repr(variant) in said, (
+            f"{variant!r} was not refused by name: {said!r}. On a case-insensitive filesystem — "
+            "macOS, which this repo supports, and where the default runs base lives under a "
+            "symlinked /tmp — it and the lowercase id are ONE inode, so decision 3's resumable "
+            "setup would finish that run's directory as if it were this run's, re-stamp its "
+            "identity and clear its three sidecars (h12, h13)")
+        assert "\n" not in said, f"the refusal of {variant!r} is not one line: {said!r}"
     # The refusal is the ID's, not the collision's: it holds with no existing directory too,
     # so the handle never has to look at the filesystem to know the id is unusable.
     with pytest.raises(Exception) as excinfo:  # noqa: PT011
         S.Run().under(base, two.upper(), tenant_id=S.DEFAULT_TENANT_ID)
-    assert CASE_STABLE_REQUIRED in str(excinfo.value)
+    assert repr(two.upper()) in str(excinfo.value)
     # And nothing was touched on the way to the refusal.
     assert S.Run().at(base / one).record.commit == "c0ffee", (
         "the refused call re-stamped the run whose directory the case variant folds onto")
