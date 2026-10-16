@@ -504,10 +504,9 @@ def _joined_params(func: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[int, st
                 node.right, ast.Constant) and isinstance(node.right.value, str) and (
                 node.right.value.startswith("-")):
             fields = [_rightmost(node.left)]
-        for index, name in enumerate(args):
-            if index or name not in ("self", "cls"):
-                if any(reaches(f, name) for f in fields):
-                    out[index - (1 if args[:1] in (["self"], ["cls"]) else 0)] = name
+        offset = 1 if args[:1] in (["self"], ["cls"]) else 0
+        out.update({index - offset: name for index, name in enumerate(args)
+                    if index >= offset and any(reaches(f, name) for f in fields)})
     return out
 
 

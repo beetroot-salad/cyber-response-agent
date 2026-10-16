@@ -126,48 +126,49 @@ def _door_wrappers(parsed: list[tuple[str, ast.Module, object]]) -> tuple[frozen
     a module-level function or a class's static/class method by its dotted origin."""
     names: set[str] = set()
     methods: set[str] = set()
-    defs = []
-    for rel, tree, env in parsed:
-        if not _owned(rel):
-            continue
-        module, _package = _astlib.module_and_package(rel, root="defender")
-        for owner, node in _functions(tree, module):
-            defs.append((rel, env, owner, node, module))
+    defs = [(env, owner, node, is_method)
+            for rel, tree, env in parsed if _owned(rel)
+            for owner, node, is_method in _functions(
+                tree, _astlib.module_and_package(rel, root="defender")[0])]
     grew = True
     while grew:
         grew = False
-        for rel, env, owner, node, module in defs:
+        for env, owner, node, is_method in defs:
             dotted = f"{owner}.{node.name}"
-            if dotted in names:
-                continue
-            params = {a.arg for a in (*node.args.posonlyargs, *node.args.args,
-                                      *node.args.kwonlyargs)} - {"self", "cls"}
-            values = R.bound_values(node)
-            for call in ast.walk(node):
-                if not isinstance(call, ast.Call) or not call.args:
-                    continue
-                called = _astlib.callee(call, env) or ""
-                bare = call.func.attr if isinstance(call.func, ast.Attribute) else None
-                if (called.endswith(DOORS) or called in names or (
-                        bare in methods and called == "")) and _passes_a_parameter(
-                        call.args[0], params, values):
-                    names.add(dotted)
-                    if owner != module:
-                        methods.add(node.name)
-                    grew = True
-                    break
+            if dotted not in names and _opens_at_a_parameter(node, env, names, methods):
+                names.add(dotted)
+                if is_method:
+                    methods.add(node.name)
+                grew = True
     return frozenset(names), frozenset(methods)
 
 
-def _functions(tree: ast.Module, module: str) -> list[tuple[str, ast.FunctionDef]]:
-    """`(owner dotted name, def)` for every module-level function (owner = the module) and every
-    method of a module-level class (owner = `<module>.<Class>`)."""
+def _opens_at_a_parameter(node, env, names: set[str], methods: set[str]) -> bool:
+    """Does `node` call a door, or a known wrapper (by dotted origin, or an instance method by
+    bare name), handing it one of `node`'s own parameters as the path?"""
+    params = {a.arg for a in (*node.args.posonlyargs, *node.args.args,
+                              *node.args.kwonlyargs)} - {"self", "cls"}
+    values = R.bound_values(node)
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call) or not call.args:
+            continue
+        called = _astlib.callee(call, env) or ""
+        bare = call.func.attr if isinstance(call.func, ast.Attribute) else None
+        wrapper = called.endswith(DOORS) or called in names or (bare in methods and not called)
+        if wrapper and _passes_a_parameter(call.args[0], params, values):
+            return True
+    return False
+
+
+def _functions(tree: ast.Module, module: str) -> list[tuple[str, ast.FunctionDef, bool]]:
+    """`(owner dotted name, def, is a method)` for every module-level function (owner = the
+    module) and every method of a module-level class (owner = `<module>.<Class>`)."""
     out = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            out.append((module, node))
+            out.append((module, node, False))
         elif isinstance(node, ast.ClassDef):
-            out.extend((f"{module}.{node.name}", m) for m in node.body
+            out.extend((f"{module}.{node.name}", m, True) for m in node.body
                        if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)))
     return out
 
@@ -178,6 +179,28 @@ def _is_path_call(node: ast.expr, env) -> bool:
         return False
     called = _astlib.callee(node, env)
     return called is not None and called.endswith("pathlib.Path")
+
+
+def _kind(node: ast.Call, rel: str, env, values: dict,
+          wrappers: tuple[frozenset[str], frozenset[str]]) -> tuple[str, str] | None:
+    """`(kind, what)` of the opener `node` is, or `None` (see `census`)."""
+    names, methods = wrappers
+    called = _astlib.callee(node, env)
+    if called is None:
+        if node.args and isinstance(node.func, ast.Attribute) and node.func.attr in methods:
+            return "laundered", ast.unparse(node.func)
+        return None
+    if called.endswith(DOORS):
+        return "door", ast.unparse(node.func)
+    if called in names:
+        return "laundered", ast.unparse(node.func)
+    if called in IMPORTERS and node.args and isinstance(node.args[0], ast.Constant) and str(
+            node.args[0].value).startswith(OWNER_PACKAGES):
+        return "dynamic", ast.unparse(node)
+    if called in PATH_OPENERS and not rel.startswith(REBIND_EXEMPT) and (
+            rel in REBIND_MODULES or (node.args and R.spells(node.args[0], "episode", values))):
+        return "rebind", ast.unparse(node)
+    return None
 
 
 def census(root: Path) -> list[Hit]:
@@ -200,33 +223,16 @@ def census(root: Path) -> list[Hit]:
     The listing is `_astlib.source_files` (tracked plus untracked, unignored `.py`), `tests/`
     and virtualenvs dropped."""
     parsed = _parsed(Path(root))
-    wrappers, wrapper_methods = _door_wrappers(parsed)
+    wrappers = _door_wrappers(parsed)
     hits: list[Hit] = []
     for rel, tree, env in parsed:
         if _owned(rel):
             continue
         with _astlib.scan_guard(rel):
             for node, values in R.scoped_nodes(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                called = _astlib.callee(node, env)
-                if called is None:
-                    if node.args and isinstance(node.func, ast.Attribute) and (
-                            node.func.attr in wrapper_methods):
-                        hits.append(Hit(rel, node.lineno, "laundered", ast.unparse(node.func)))
-                    continue
-                if called.endswith(DOORS):
-                    hits.append(Hit(rel, node.lineno, "door", ast.unparse(node.func)))
-                elif called in wrappers:
-                    hits.append(Hit(rel, node.lineno, "laundered", ast.unparse(node.func)))
-                elif called in IMPORTERS and node.args and isinstance(
-                        node.args[0], ast.Constant) and str(node.args[0].value).startswith(
-                        OWNER_PACKAGES):
-                    hits.append(Hit(rel, node.lineno, "dynamic", ast.unparse(node)))
-                elif called in PATH_OPENERS and not rel.startswith(REBIND_EXEMPT) and (
-                        rel in REBIND_MODULES or (node.args and R.spells(
-                            node.args[0], "episode", values))):
-                    hits.append(Hit(rel, node.lineno, "rebind", ast.unparse(node)))
+                if isinstance(node, ast.Call) and (kind := _kind(node, rel, env, values,
+                                                                  wrappers)):
+                    hits.append(Hit(rel, node.lineno, kind[0], kind[1]))
     return sorted(hits)
 
 

@@ -694,9 +694,9 @@ def _episode_doors(a: dict, bare_id: str) -> dict:
             view.open(_rid(a["roster"]["b"]))
 
     def arms(runs) -> None:
-        with runs.episode(a["episode_id"]) as view:
-            with view.arms([_rid(a["roster"]["b"])]) as handout:
-                handout[_rid(a["roster"]["b"])]
+        with runs.episode(a["episode_id"]) as view, view.arms(
+                [_rid(a["roster"]["b"])]) as handout:
+            handout[_rid(a["roster"]["b"])]
 
     def sibling(runs) -> None:
         with runs.episode(a["episode_id"], roster_label="b") as view:
@@ -795,9 +795,8 @@ def test_the_path_open_recorder_sees_a_path_walk_and_not_a_handle_walk(tmp_path)
     with S.PathOpens() as audit:
         by_hold()
     assert audit.below(tenant_dir, allow=[ep / "runs"]) == [], "an allowed folder was reported"
-    with S.PathOpens() as audit:
-        with _io.hold(tenant_dir, follow=False):
-            pass
+    with S.PathOpens() as audit, _io.hold(tenant_dir, follow=False):
+        pass
     assert audit.below(tenant_dir) == [], "opening <T> itself was reported as below <T>"
 
 
