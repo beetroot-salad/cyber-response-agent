@@ -167,7 +167,8 @@ def test_build_pairs_model_with_settings(monkeypatch):
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     built = providers.build_for_effort("glm-5.3", providers.effort_for_role("glm-5.3", AgentRole.MAIN))
     assert isinstance(built, BuiltModel)
-    assert isinstance(built.model, OpenAIChatModel)
+    # Behind the one retrier (#1243): the provider's own model is what it wraps.
+    assert isinstance(built.model.wrapped, OpenAIChatModel)
     assert built.settings == {"extra_body": {"reasoning_effort": "low"}}
 
 

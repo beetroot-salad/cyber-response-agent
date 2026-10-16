@@ -6,6 +6,7 @@ from ..agent_role import AgentRole
 from .anthropic import AnthropicProvider
 from .base import BuiltModel, Provider
 from .openai_compat import OpenAICompatProvider
+from .retry import ProviderDown, RetryPolicy, with_retries
 
 if TYPE_CHECKING:
     from pydantic_ai.settings import ModelSettings
@@ -76,10 +77,15 @@ def effort_for_role(name: str, role: AgentRole) -> str | None:
     return provider_for(name).effort_for_role(name, role)
 
 
-def build_for_effort(name: str, effort: str | None) -> BuiltModel:
+def build_for_effort(name: str, effort: str | None, *, retry: RetryPolicy | None = None) -> BuiltModel:
+    """The model every agent in the product gets, behind the one retrier (#1243): the provider
+    builders switch the client libraries' own retries off, so this wrapper owns them all.
+    `retry` is the clock, sleep and jitter the retrier uses; omitted, the real ones."""
     p = provider_for(name)
     # `BuiltModel.settings` is typed as a plain dict so provider extension keys survive.
-    return BuiltModel(p.build_model(name), cast("dict | None", p.settings_for_effort(effort)))
+    return BuiltModel(
+        with_retries(p.build_model(name), retry),
+        cast("dict | None", p.settings_for_effort(effort)))
 
 
 def cache_affinity(
@@ -107,6 +113,8 @@ __all__ = [
     "PROVIDERS",
     "BuiltModel",
     "Provider",
+    "ProviderDown",
+    "RetryPolicy",
     "api_key_vars",
     "build_for_effort",
     "cache_affinity",
@@ -114,4 +122,5 @@ __all__ = [
     "provider_for",
     "provider_id_for",
     "selectable_aliases",
+    "with_retries",
 ]

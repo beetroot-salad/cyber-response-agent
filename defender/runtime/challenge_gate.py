@@ -24,13 +24,14 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import field
 from typing import Any
 
 from defender._env import env_int
 from defender._model import model
 from defender.run_repository import Run
+from defender.runtime.providers import ProviderDown
 from defender.runtime.tools._deps import run_of
 from defender._untrusted import wrap_fresh
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION
@@ -148,6 +149,9 @@ class StageOutcome:
     #: `None` when the call completed, otherwise a member of `close_tool.FAILURE_KINDS`.
     failure_kind: str | None
     detail: str | None = None
+    #: The `ProviderDown` that failed the call, if one did: it ends the run rather than failing
+    #: the review, so the gate raises it once its concurrent stages have settled (#1243).
+    provider_down: Any = None
 
     @property
     def ok(self) -> bool:
@@ -163,6 +167,9 @@ async def _call_stage(role: str, stage_fn, request: StageRequest) -> StageOutcom
         return StageOutcome(text=text, failure_kind=None)
     except TimeoutError:
         return StageOutcome(text=None, failure_kind=TIMEOUT, detail=f"{role} timed out after {request.timeout}s")
+    except ProviderDown as e:
+        return StageOutcome(
+            text=None, failure_kind=STAGE_ERROR, detail=f"{role} failed: {e!r}", provider_down=e)
     except Exception as e:  # noqa: BLE001 — any stage fault fails the whole review closed
         return StageOutcome(text=None, failure_kind=STAGE_ERROR, detail=f"{role} failed: {e!r}")
 
@@ -236,6 +243,17 @@ class GateVerdict:
     material: tuple[tuple[str, str], ...]  # (target, ask) pairs
     turns_used: int
     failure_kind: str | None
+
+
+def _end_run_if_provider_down(deps: Any, round_no: int, outcomes: Sequence[StageOutcome]) -> None:
+    """Raise the first `ProviderDown` among settled stage outcomes (#1243, D5): a review that
+    cannot run because the provider is down ends the run, like every other caller's. Called
+    only after the stages have settled, so no sibling is orphaned, and after the round's trace
+    rows are written; the round's traces are marked incomplete first."""
+    for outcome in outcomes:
+        if outcome.provider_down is not None:
+            _mark_traces_incomplete(deps, round_no, outcome.detail or "the provider is down")
+            raise outcome.provider_down
 
 
 def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
@@ -418,6 +436,7 @@ async def challenge_gate(
             raw_reply=wrap_fresh(outcome.text or outcome.detail or "", "untrusted"),
         )
 
+    _end_run_if_provider_down(deps, round_no, outcomes)
     readings: dict[str, str] = {}
     for lens, outcome in zip(lenses, outcomes, strict=True):
         if not outcome.ok:
@@ -440,6 +459,7 @@ async def challenge_gate(
         run_of(deps), "composer", round_no, {"ok": composer.ok},
         raw_reply=wrap_fresh(composer.text or composer.detail or "", "untrusted"),
     )
+    _end_run_if_provider_down(deps, round_no, [composer])
     if not composer.ok:
         _mark_traces_incomplete(deps, round_no, composer.detail or "stage fault")
         return _fail("composer", composer, turns_used=state.turns)

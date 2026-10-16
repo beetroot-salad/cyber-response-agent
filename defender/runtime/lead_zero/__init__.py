@@ -25,7 +25,7 @@ from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill, count_call
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
-from defender.runtime import circuit_breaker, run_end
+from defender.runtime import circuit_breaker, providers, run_end
 from defender.runtime.run_state import RunState
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from ._spec import (
@@ -196,8 +196,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     """Run `l-00c` to its end inside `deadline` seconds and say how it ended.
 
     Every way it fails to run or yields nothing is a returned ending, never a raise (A2); a
-    run-level kill (`BudgetKill`, `RunAborted`), an interrupt, a store fault after the lead
-    began, and a run folder that refuses its produced summary propagate and stop the run."""
+    run-level kill (`BudgetKill`, `RunAborted`), a provider that stayed down (`ProviderDown`,
+    #1243), an interrupt, a store fault after the lead began, and a run folder that refuses its produced summary propagate and stop the run."""
     from defender.runtime import session_store  # lazy, as in `_classify_end`
 
     system = dispatch.system
@@ -245,7 +245,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
             return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
         _stamp_timed_out(store, session_id)
         return CorrelationOutcome(ending=ENDING_TIMED_OUT, system=system)
-    except (BudgetKill, circuit_breaker.RunAborted, run_end.CallRecordWriteFailed, session_store.StoreError, sqlite3.Error,
+    except (BudgetKill, circuit_breaker.RunAborted, providers.ProviderDown,
+            run_end.CallRecordWriteFailed, session_store.StoreError, sqlite3.Error,
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
     except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run

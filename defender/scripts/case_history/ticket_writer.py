@@ -202,7 +202,8 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     case_id = key if key is not None else run_dir.name
     try:
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
-        if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE)
+        if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE,
+                             run_end.TRUNCATED_BY_PROVIDER_DOWN)
                 and not closed_before_cut):
             clear_receipt(run)
             _logger.info(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")

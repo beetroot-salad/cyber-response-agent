@@ -429,11 +429,11 @@ def test_an_unconfigured_ticket_lane_stays_silent_for_every_exit_class(tmp_path)
     """An operator with no case-history configuration makes NO call for any exit class,
     `aborted` included, and (#1107 O6) a run that reached the config says so in an `error`
     receipt naming no store: configuring no ticket system is no longer silent on the run page.
-    The two no-verdict exits stay silent — their no-verdict check runs BEFORE the config is
+    The no-verdict exits (budget, store, provider-down) stay silent — their no-verdict check runs BEFORE the config is
     read, so those runs write no receipt whatever their tenant says (#1047).
 
     Positive control: the same run and exit class with a configured lane makes its call."""
-    no_verdict = ("budget", "store")
+    no_verdict = ("budget", "store", "provider-down")
     for exit_class in (*S.vocabulary(), None):
         run_dir = S.closed_run_dir(tmp_path / f"unconfigured-{exit_class}")
         fake = S.record_ticket(run_dir, ticket=S.FakeTicketSystem(configured=False),

@@ -18,6 +18,7 @@ from defender.run_repository import Run
 from . import circuit_breaker
 from .run_state import run_state_of
 from . import permission
+from . import providers
 from . import run_end
 from . import session_store
 from . import tools
@@ -580,6 +581,11 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
     except circuit_breaker.RunAborted:
         # Run-level abort: passes through; the driver stamps the main session likewise.
         stamp(session_store.TRUNCATED_BY_ABORTED)
+        raise
+    except providers.ProviderDown:
+        # The provider stayed down (#1243): ends the run, this lead stamped so its session
+        # doesn't read as finished.
+        stamp(session_store.TRUNCATED_BY_PROVIDER_DOWN)
         raise
     except run_end.CallRecordWriteFailed as failed:
         # A call record could not be written (A12): the run ends, this lead with it, stamped

@@ -279,6 +279,12 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
+    except providers.ProviderDown as e:
+        # A model request kept failing temporarily past the retrier (#1243): an infrastructure
+        # end, so like the budget kill it writes no report.
+        _logger.error(f"{e}; ending the run")
+        truncated_by = session_store.TRUNCATED_BY_PROVIDER_DOWN
+        exit_reason = "ProviderDown"
     except (run_end.CallRecordWriteFailed, BaseExceptionGroup) as e:
         # A call record the run could not write ends it (A12, #1234), stamped with the record
         # that failed. Concurrent leads may deliver it inside an exception group; a group that
@@ -495,6 +501,9 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         return None, stop(
             session_store.TRUNCATED_BY_BUDGET if isinstance(kill, BudgetKill)
             else session_store.TRUNCATED_BY_ABORTED, type(kill).__name__)
+    except providers.ProviderDown as down:
+        _logger.error(f"{down}; stopping before the agent starts")
+        return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
     except (sqlite3.Error, session_store.StoreError) as e:
         _logger.error(f"store fault during the correlation lead ({e!r}); ending the run")
         return None, stop(session_store.TRUNCATED_BY_STORE, "StoreAppendError")
