@@ -75,12 +75,14 @@ def _make_runner() -> Path:
 
 def oracle_box_request(scratch: Path, runner: Path, *, env: Mapping[str, str]) -> BoxRequest:
     """The oracle box's request: the runner read-only at the checkout's path as the box's
-    `code` mount, the scratch folder writable, no env of the caller's."""
+    `code` mount, the scratch folder writable, no env of the caller's. It requires a sandbox
+    (#1108 amendment 3, C3): a start fault raises, never an unsandboxed fallback, and leaves
+    no did-not-run marker beside the scratch folder."""
     return BoxRequest(
         name=f"defender-oracle-{secrets.token_hex(6)}",
         mounts=(Mount(source=runner, target=CHECKOUT, writable=False, kind="code"),
                 Mount(source=scratch, target=scratch, writable=True)),
-        workdir=CHECKOUT, env={}, spec=BoxSpec.from_env(env),
+        workdir=CHECKOUT, env={}, spec=BoxSpec.from_env(env), require_sandbox=True,
     )
 
 
@@ -108,7 +110,9 @@ def start_oracle_box(*, env: Mapping[str, str]) -> Any:
         return _lifecycle._docker(argv, env=merged, **kw)
 
     try:
-        box = _lifecycle._start_boxed_request(request, docker)
+        # The one entry for a `BoxRequest`; the request requires a sandbox, so a start fault
+        # raises whatever the operator's opt-out says.
+        box = _lifecycle.start_box(request, docker=docker)
     except Exception as exc:
         discard()
         raise BoxStartRefused(f"the oracle's box could not start sandboxed: {exc}") from exc

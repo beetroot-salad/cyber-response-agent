@@ -444,7 +444,14 @@ def _render_argv(
 
 def _did_not_run_for_request(request: BoxRequest, reason: str) -> None:
     """The did-not-run marker for the request lane: one per writable mount source, since a
-    tree needs a verdict exactly when the box could write it. Best-effort per tree."""
+    tree needs a verdict exactly when the box could write it. Best-effort per tree.
+
+    None for a request that requires a sandbox (#1108 amendment 3, C3): its start fault raises
+    and nothing runs, sandboxed or not, so there is no workload to judge, and its writable
+    sources (a tenant draft's lanes, the oracle's scratch folder) are the host's own copies,
+    judged or discarded by their owner; a marker beside one would be a stray file there."""
+    if request.require_sandbox:
+        return
     for m in request.mounts:
         if m.writable:
             write_did_not_run(Path(m.source), reason)
