@@ -501,21 +501,23 @@ def _open_world_source(runs: Any, world: Any) -> Run:
         sys.exit(f"[run.py] the episode's source run cannot be opened: {refused}")
 
 
-def _resume_target(ns: argparse.Namespace, *, episode_runs: Any,
-                   tenant: Callable[[], Any]) -> Any:
+def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
+                   tenant: Callable[[], Any],
+                   arm_ids: Callable[[], Mapping[str, Any] | None] = lambda: None) -> Any:
     """The world this process is, or `None` for an ordinary run — plus the sibling's
     refusals, before anything is spent.
 
     `--update-ticket` is refused outright rather than ignored: the two ticket calls are paired
     around the curation marker. The manifest is read here, right after the roster gate, held to
-    the episode's id (R5); an undeclared world label, a manifest the loader refuses and an arm
-    roster its full reader refuses (`arm_ids`: an id off the rule, two labels on one id, a label
-    set other than the manifest's worlds) are each refused before a run dir exists.
+    the episode's id (R5); an undeclared world label and a manifest the loader refuses are each
+    refused before a run dir exists. `arm_ids` reads the episode's arm roster in full (`main`
+    hands the view's `arm_ids`), so a roster its reader refuses — an id off the rule, two labels
+    on one id, a label set other than the manifest's worlds — is refused here too.
     """
     if ns.episode is None:
         return None
-    if episode_runs is None:
-        # A sibling is only ever resumed through its episode's view; without one it must not
+    if episode is None:
+        # A sibling is only ever resumed through its held episode; without one it must not
         # run on as an ordinary investigation.
         sys.exit(f"[run.py] --episode {ns.episode}: no episode is held for it")
     from defender.run_repository import RunRefused
@@ -527,8 +529,7 @@ def _resume_target(ns: argparse.Namespace, *, episode_runs: Any,
             "continuation of someone else's case, and a ticket row for it would enter the "
             "case history as a real investigation of a real alert")
     try:
-        return resume_world(episode_runs.episode, ns.world, tenant=tenant,
-                            arm_ids=episode_runs.arm_ids())
+        return resume_world(episode, ns.world, tenant=tenant, arm_ids=arm_ids())
     except (FamilyError, RunRefused) as refusal:
         sys.exit(f"[run.py] --episode {ns.episode}: {refusal}")
 
@@ -690,7 +691,9 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         # no corpus patterns) and the run.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
             accepted, defender_dir=DEFENDER_DIR, dispatches_lead_zero=ns.episode is None))
-        world = _resume_target(ns, episode_runs=episode_runs, tenant=tenant_of)
+        world = _resume_target(ns, episode=episode, tenant=tenant_of,
+                               arm_ids=(lambda: None) if episode_runs is None
+                               else episode_runs.arm_ids)
         source = (None if world is None
                   else _open_world_source(accepted.runs_repository(), world))
 

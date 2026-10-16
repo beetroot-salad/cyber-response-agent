@@ -59,7 +59,7 @@ from defender._world_label import world_label_fault
 from defender.run_repository._errors import RunAbsent, RunRefused, RunUnreachable
 from defender.run_repository._handle import Run
 from defender.run_repository._held import (
-    RetirePlan, level_fault, listing, plan_retire, refuse_sidecar_id, require_accepted_tenant,
+    RetirePlan, hold_level, listing, plan_retire, refuse_sidecar_id, require_accepted_tenant,
     require_run_id, tenant_levels, walk_from_tenant,
 )
 from defender.run_repository._id import RunId
@@ -329,21 +329,17 @@ class RunsRepository:
 
     # -- episodes -------------------------------------------------------------------------------
 
-    def _episodes_levels(self) -> tuple[str, ...]:
-        return tenant_levels(self._tenant, self._tenant.episodes)
-
     def _walk_episode(self, episode_id: str) -> Episode:
         """`<T>/episodes/<episode_id>`, walked from the tenant's folder no-follow and wrapped in
         the owner's handle. Absent is `FileNotFoundError` naming the episode; a link or a
         non-directory at any level is `TenantRefused` naming that level."""
         path = Path(self._tenant.episodes) / episode_id
         try:
-            held = walk_from_tenant(self._tenant, self._io, (*self._episodes_levels(), episode_id))
+            return Episode.open(path, io=_EpisodeWalk(self._tenant, self._io))
         except FileNotFoundError:
             raise FileNotFoundError(
                 errno.ENOENT, f"tenant {quoted(self._tenant.id)} has no episode "
                 f"{quoted(episode_id)}", str(path)) from None
-        return Episode._walked(held, path)  # noqa: SLF001 — the repository is the episode's door by id; the handle wraps the folder its walk holds
 
     def create_episode(self) -> EpisodeRuns:
         """Claim a fresh episode: mint a UUID and make `<T>/episodes/<uuid>` with ONE exclusive
@@ -354,9 +350,9 @@ class RunsRepository:
         it closes it."""
         episode_id = mint_uuid()
         path = Path(self._tenant.episodes) / episode_id
-        episodes = walk_from_tenant(self._tenant, self._io, self._episodes_levels(), create=True)
         try:
-            held = self._io.hold_under(episodes, episode_id, exclusive=True)
+            episode = Episode.create(path, io=_EpisodeWalk(self._tenant, self._io),
+                                     exclusive=True)
         except FileExistsError:
             raise RunRefused(
                 f"{path} already exists — a freshly minted episode id names nothing, so "
@@ -364,9 +360,6 @@ class RunsRepository:
         except OSError as exc:
             raise TenantRefused(f"the episode folder {path} could not be made: "
                                 f"{exc.strerror or exc}") from None
-        finally:
-            episodes.close()
-        episode = Episode._walked(held, path)  # noqa: SLF001 — the repository is the episode's door by id; the handle wraps the folder it just claimed
         return EpisodeRuns(self._tenant, episode_id, episode, owns=True, roster_label=None,
                            io=self._io)
 
@@ -408,6 +401,33 @@ class RunsRepository:
         with its destination below `<T>`, and every fault found — nothing moved. A link at
         `<T>` or `<T>/runs` is `TenantRefused`. The caller closes the plan."""
         return plan_retire(self._tenant, old_episodes_root, io=self._io)
+
+
+class _EpisodeWalk:
+    """The episode doors' `io` seam as the repository hands it (#1187 S-iso): `Episode.open` /
+    `Episode.create` take a folder handed down from the held `<T>`, never a path they resolve.
+    `hold(folder)` walks `folder`'s levels from the tenant's folder, every one off its parent's
+    handle and no-follow (`walk_from_tenant`); `hold_new(parent, name, exclusive=)` walks
+    `parent` the same way (each missing level made) and then makes `name` off it, never
+    followed — with `exclusive`, ONE mkdir that refuses any entry already there
+    (`FileExistsError`), adopting nothing. A folder outside `<T>` is `ValueError`."""
+
+    def __init__(self, tenant: Tenant, io: Any) -> None:
+        self._tenant = tenant
+        self._io = io
+
+    def hold(self, root: Path) -> _io.Held:
+        return walk_from_tenant(self._tenant, self._io, tenant_levels(self._tenant, root))
+
+    def hold_new(self, parent: Path, name: str, *, exclusive: bool = False) -> _io.Held:
+        held = walk_from_tenant(self._tenant, self._io, tenant_levels(self._tenant, parent),
+                                create=True)
+        try:
+            if exclusive:
+                return self._io.hold_under(held, name, exclusive=True)
+            return hold_level(held, name, Path(parent) / name, io=self._io, create=True)
+        finally:
+            held.close()
 
 
 # -- the episode view and its arm roster ---------------------------------------------------------
@@ -468,12 +488,8 @@ class EpisodeRuns:
     def _hold_container(self, *, create: bool = False) -> _io.Held:
         """`runs/` held off the episode's handle, never followed; absent is
         `FileNotFoundError`, a link or a non-directory `TenantRefused` naming it."""
-        try:
-            return self.episode._hold_runs(io=self._io, create=create)  # noqa: SLF001 — the view is built on the owner's handle; its container is the view's alone
-        except FileNotFoundError:
-            raise
-        except OSError as exc:
-            raise TenantRefused(f"the arm container {self._folder} {level_fault(exc)}") from None
+        return hold_level(self.episode._held_folder(), LAYOUT.runs.as_posix(), self._folder,  # noqa: SLF001 — the view is built on the owner's handle; its container is the view's alone
+                          io=self._io, create=create, what="the arm container")
 
     def _judge(self) -> None:
         """Record the container's state. A container that cannot be held (a link, a
@@ -651,7 +667,8 @@ class EpisodeRuns:
         if len(set(arms.values())) != len(arms):
             raise RunRefused("two freshly minted arm ids are one; the roster is not written")
         try:
-            self.episode._create_complete(LAYOUT.arm_roster, _roster_text(arms), io=self._io)  # noqa: SLF001 — the view writes the roster through the owner's held folder
+            self._io.create_complete(self.episode._held_folder(), LAYOUT.arm_roster,  # noqa: SLF001 — the view writes the roster through the owner's held folder
+                                     _roster_text(arms))
         except FileExistsError:
             raise RunRefused(
                 f"the arm roster {self._roster_path} is already written: it is written once, at "

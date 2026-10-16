@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path, PurePosixPath
 
-from defender._run_id import CASE_STABLE_REQUIRED, is_case_stable_id
+from defender._run_id import CASE_STABLE_REQUIRED, episode_id_fault, is_case_stable_id
 from defender.run_repository._layout import (
     RUN_LAYOUT,
     ALERT,
@@ -61,6 +61,24 @@ PRIMING_LOCK_NAME = f"{SERVED_PREFIX}.priming"
 #: dir's own, from `run_repository._layout`.
 ARCHIVED_SCRUB_VERDICT_NAME = "scrub_verdict.json"
 ARCHIVED_RUN_END_NAME = "run_end.json"
+
+
+class EpisodeRefused(ValueError):
+    """The episode owner refused an episode id, before any path was built from it. The message
+    is operator-ready; each door adds its own prefix."""
+
+
+def refuse_bad_episode_id(episode_id: object) -> str:  # lint-dup: ok — one rule, two error classes: `_family` raises `FamilyError` for a manifest; the episode owner raises `EpisodeRefused` before any path is built (both state the rule once, in `_run_id.episode_id_fault`)
+    """`episode_id`, when it may name an episode folder under `<T>/episodes` — canonical
+    lowercase UUID text (`_run_id.episode_id_fault`, the one statement of the rule) — else
+    `EpisodeRefused`, before any path is built from it. Kept beside the layout, not in the
+    handle, so the handle stays a pure holder (#1133 D6': it defines no public function); the
+    handle re-exports it, where the doors' callers look for it."""
+    if type(episode_id) is not str:
+        raise EpisodeRefused(f"an episode id must be text, not {type(episode_id).__name__}")
+    if (why := episode_id_fault(episode_id)) is not None:
+        raise EpisodeRefused(why)
+    return episode_id
 
 
 def _check_label(label: object, *, what: str = "label") -> str:

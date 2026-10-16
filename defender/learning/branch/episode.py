@@ -303,8 +303,8 @@ def delta_o(view: EpisodeRuns, *, invoke: Invoke | None = None) -> dict[str, dic
 
     `view` is the episode's walked view: every read below is a no-follow walk off the folder
     it holds, the manifest is held to the view's episode id (R5), and the arm ids every prompt
-    is cleaned of are the view's own roster (`view.arm_ids()`), so no caller hands them in or
-    forgets them (#1187 S-red).
+    is cleaned of are the view's own roster (`view.arm_ids()`, none when there is no roster), so
+    no caller hands them in or forgets them (#1187 S-red).
     """
     return _delta_o(_walked(view), view, invoke)
 
@@ -316,11 +316,10 @@ def _delta_o(bound: Bound, view: EpisodeRuns,
     if not labels:
         return {}
     family = load_family(bound, expected_episode_id=view.episode_id)
-    arm_ids = view.arm_ids()
-    if arm_ids is None:
-        raise EpisodeError(
-            f"episode {view.episode_id} has archived worlds but no arm roster — it never "
-            "reached RUNS, so its worlds' arms cannot be named or kept out of a prompt")
+    # No roster: the episode never reached RUNS, so it has no arm ids to keep out of a prompt
+    # (the design's S-red: the question does not arise). A roster that is there but refused
+    # raises its own refusal here.
+    arm_ids = view.arm_ids() or {}
     token = episode_token_for(family.episode_id)
     control = next((w.world_id for w in family.worlds if w.role == BASE_ROLE), None)
 

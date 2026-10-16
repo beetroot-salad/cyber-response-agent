@@ -1,15 +1,17 @@
 """The file-backed `Episode` handle (#1133): every write into an episode tree goes through it,
 and it writes only through a folder the rooted core holds open (`_io.Held`, #1111).
 
-A door opens the handle once and holds it for its own duration. An episode is reached by id
-through its tenant's runs repository (`runs.episode(episode_id)`, `runs.create_episode()`,
-`runs.episode_files(episode_id)`, #1187 S-iso): the repository walks `<T>/episodes/<id>` from
-the tenant's folder, every level no-follow, and wraps the folder it holds (`Episode._walked`).
-`Episode.open(episode_dir)` (its spelling followed, as `bind` follows it) and `Episode.create`
-(judged from its parent, never followed) remain for a folder handed in whole; no production
-caller outside the repository uses them. All are context managers. Every verb then works
-relative to the held folder, so the episode dir is never resolved by name again and a verb
-never makes it.
+A door opens the handle once and holds it for its own duration: `Episode.open(episode_dir)` for
+an episode that exists, `Episode.create` for the one door that makes it. Both reach the folder
+through their `io=` seam only (`io.hold` / `io.hold_new`). An episode is reached by id through
+its tenant's runs repository (`runs.episode(episode_id)`, `runs.create_episode()`,
+`runs.episode_files(episode_id)`, #1187 S-iso), the one production caller of the doors: it
+hands them its walk as the seam, so the folder they hold is the one walked from the tenant's
+folder with every level no-follow, never a path they resolve. With the default seam (the core's
+`hold`, following the spelling as `bind` does; `hold_new`, judging the name from its parent)
+they serve a folder handed in whole. Both are context managers. Every verb then works relative
+to the held folder, so the episode dir is never resolved by name again and a verb never makes
+it.
 
 Records and folders are handed out by `_episode_paths.LAYOUT`'s relative names, the only place
 those names are spelled. A record answers `.path` plus exactly the verbs its row in
@@ -21,12 +23,12 @@ judge). Readers that bind the episode dir on their own keep their `_io.bind`. Th
 copy lane (`learning/branch/archive.py`) is the declared exception and does not go through here.
 
 `refuse_bad_episode_id` is the episode id's rule (`_run_id.episode_id_fault`: canonical
-lowercase UUID text), refused as `EpisodeRefused` before any path is built from the id. The
-owner never reads inside the episode's `runs/`: that container, its arms and the arm roster
-(`arms.json`, `LAYOUT.arm_roster`) are the runs repository's episode view
-(`tenant.runs_repository().episode(episode_id)`), built on this handle through its two private
-steps (`_hold_runs`, `_create_complete`). The one hand-out of the container's path is
-`box_mounted_container`.
+lowercase UUID text), refused as `EpisodeRefused` before any path is built from the id; both
+live beside the layout (`_episode_paths`) and are re-exported here. The owner never reads
+inside the episode's `runs/`: that container, its arms and the arm roster (`arms.json`,
+`LAYOUT.arm_roster`) are the runs repository's episode view
+(`tenant.runs_repository().episode(episode_id)`), built on this handle's held folder
+(`_held_folder`). The one hand-out of the container's path is `box_mounted_container`.
 """
 from __future__ import annotations
 
@@ -34,24 +36,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from defender import _io as _real_io
-from defender._episode_paths import LAYOUT, _check_label, check_minted_token
-from defender._run_id import episode_id_fault
-
-
-class EpisodeRefused(ValueError):
-    """The episode owner refused an episode id, before any path was built from it. The message
-    is operator-ready; each door adds its own prefix."""
-
-
-def refuse_bad_episode_id(episode_id: object) -> str:  # lint-dup: ok — one rule, two error classes: `_family` raises `FamilyError` for a manifest; the episode owner raises `EpisodeRefused` before any path is built (both state the rule once, in `_run_id.episode_id_fault`)
-    """`episode_id`, when it may name an episode folder under `<T>/episodes` — canonical
-    lowercase UUID text (`_run_id.episode_id_fault`, the one statement of the rule) — else
-    `EpisodeRefused`, before any path is built from it."""
-    if type(episode_id) is not str:
-        raise EpisodeRefused(f"an episode id must be text, not {type(episode_id).__name__}")
-    if (why := episode_id_fault(episode_id)) is not None:
-        raise EpisodeRefused(why)
-    return episode_id
+from defender._episode_paths import (
+    LAYOUT, EpisodeRefused, _check_label, check_minted_token, refuse_bad_episode_id,
+)
 
 #: Every record the handle hands out, keyed by its address (a bare name is an attribute of the
 #: episode, `world.<name>` one of `episode.world(label)`), mapped to the verbs its row grants.
@@ -174,8 +161,8 @@ class EpisodeWorld:
 
 
 class Episode:
-    """The file-backed episode handle: one held folder, the episode dir. Built only by its
-    doors: `Episode.open` / `Episode.create`, and the runs repository's walk (`_walked`)."""
+    """The file-backed episode handle: one held folder, the episode dir. Built only by
+    `Episode.open` / `Episode.create`."""
 
     def __init__(self, held: _real_io.Held, episode_dir: Path, *, _door: object) -> None:
         if _door is not _DOOR:
@@ -202,14 +189,6 @@ class Episode:
         else:
             held = io.hold_new(episode_dir.parent, episode_dir.name)
         return cls(held, episode_dir, _door=_DOOR)
-
-    @classmethod
-    def _walked(cls, held: _real_io.Held, episode_dir: Path) -> Episode:
-        """The handle over the episode folder the runs repository holds: walked from the
-        tenant's folder, every level no-follow (#1187 S-iso), so this door resolves nothing.
-        `episode_dir` names it in messages and argv only. Private: the repository is the one
-        door of an episode by id."""
-        return cls(held, Path(episode_dir), _door=_DOOR)
 
     def close(self) -> None:
         self._held.close()
@@ -315,17 +294,12 @@ class Episode:
         arms are the runs repository's episode view, which is built on this handle."""
         return self._folder(LAYOUT.runs)
 
-    def _hold_runs(self, *, io: Any, create: bool = False) -> _real_io.Held:
-        """`runs/` held off this episode's own handle and never followed (`io.hold_under`; made
-        first when `create`): a link or a non-directory there is the step's refusal. The runs
-        repository's one way into its arm container (#1187 S-iso); the caller closes it."""
-        return io.hold_under(self._held, LAYOUT.runs.as_posix(), create=create)
-
-    def _create_complete(self, rel: PurePosixPath, text: str, *, io: Any) -> None:
-        """Create the record `rel` once, through the complete-or-absent lane only
-        (`io.create_complete`: never the named fallback a crash can leave torn). The runs
-        repository's write of the arm roster (#1187 R2), whose presence is itself a fact."""
-        io.create_complete(self._held, rel, text)
+    def _held_folder(self) -> _real_io.Held:
+        """The held episode folder itself, for the runs repository's episode view, which is
+        built on this handle (#1187 S-iso): it holds `runs/` off it and writes the arm roster
+        through it, so neither is ever reached by a path. Asking does no I/O; the handle still
+        owns (and closes) the folder."""
+        return self._held
 
     @property
     def box_mounted_container(self) -> Path:
