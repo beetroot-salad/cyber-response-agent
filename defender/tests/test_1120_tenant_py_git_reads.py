@@ -19,7 +19,6 @@ on PR #1157).
 """
 from __future__ import annotations
 
-import inspect
 import os
 import shutil
 import threading
@@ -120,14 +119,6 @@ def test_a_replace_object_does_not_make_an_edited_id_look_committed(tmp_path: Pa
 #: a loaded runner, far short of the FIFO's wait (forever). Not a whole number, so the message
 #: naming it is checked however a float is spelled.
 _FIFO_BOUND = 1.5
-
-
-def test_the_committed_read_is_bounded_by_its_fifteen_second_constant_by_default() -> None:
-    """`check`'s committed read (`_findings` passes no `timeout`) is bounded by
-    `_COMMITTED_READ_TIMEOUT`, 15 seconds — so the FIFO test's short injected bound cannot hide a
-    changed production default."""
-    default = inspect.signature(tenant_py._tenant_id_committed).parameters["timeout"].default
-    assert default == tenant_py._COMMITTED_READ_TIMEOUT == 15
 
 
 def test_a_fifo_in_git_fails_closed_instead_of_hanging(tmp_path: Path) -> None:

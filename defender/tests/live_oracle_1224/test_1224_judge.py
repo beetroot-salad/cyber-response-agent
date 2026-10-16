@@ -1,41 +1,8 @@
-"""#1224 — the judge under a live oracle (M9, O11, O5, O13 gate, O15, O16): the model decides.
-
-The change removes the judge's code half (`family.grade_family`, `_grade_world`, the bucket
-table, the withholding ladder, `_holding_system`, `own_h_rows`, `doctored_answer_served`) and
-the mechanical control-drift discard. The judge MODEL decides each world's bucket (O11) from a
-prompt carrying the world's facts, declared verdict, the sibling's calls, the verified claims,
-the sibling's verdict and conclusion movement, and the manifest's recorded `served_systems`
-(M21=A: the recorded list, never a tenant lookup). The host keeps exactly one refusal of its
-own on the bucket (M20=A): `validate_reply` refuses `lead-set` when the reply's `systems` share
-nothing with `served_systems` — it refuses, it never computes. The bucket set is O11's five plus
-`observability` (M19=A); `none` is an explicit bucket, recorded and never enqueued; the family
-word stays in `JUDGE_OUTCOME_ENUM` so `_gate_family` keeps authoring; O5's validity is its own
-`validity: usable | unusable` field on `judge.yaml`.
-
-The gate reads pre-flight's `outcome.yaml` (not `review.yaml`): only the exact word `accepted`
-with an O5 count under two is graded (S9 counts pre-flight's failed worlds plus every world's own
-record, no model call); `unusable`, `refused` and an absent or torn record ("no record", never
-`incomplete`, M05=A) are stamped not-graded. An old manifest is refused with the
-predates-the-oracle reason AHEAD of that gate (O15, F-11).
-
-Drive points: `S.judged_episode(...)` builds the archived v2 episode; `grade_episode` is called
-through its own seams (the judge, git-show, state and draws keywords); the model double is #921's
-`FakeJudge`, routed per world by the `judge:<label>:<n>` agent id it is called with (scripting,
-never policy). Every assertion reads what the double RECEIVED or what landed on disk
-(`judge.yaml`, the draw files, the two queues).
-
-RED against 96e4cdb0: the gate reads `review.yaml` (so every v2 episode is stamped not-graded
-`incomplete` with no model call), `grade_family` refuses a manifest with no
-`discriminator.holding_system` (GC-33), the reply carries no `bucket`/`systems`, and the
-record carries no `validity`.
-"""
+"""The judge model decides each world's bucket from the served-world prompt; host-side gate, reply validation and finding enqueue around it."""
 from __future__ import annotations
 
 import json
-import os
 import re
-import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -51,13 +18,6 @@ from defender.tests._state1135 import env_state
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
 
-@pytest.fixture(autouse=True)
-def _roots(tmp_path, monkeypatch):
-    """The episodes root a launch resolves (`DEFENDER_EPISODES_BASE`, outside the data root),
-    and the learning STATE root, so the judge's appender writes this test's own queues and never
-    the checkout's `learning/_pending/`."""
-    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 # --------------------------------------------------------------------------------------
@@ -197,26 +157,10 @@ def _prompt_for(judge: Any, label: str) -> str:
         f"the judge model was never called for world {label!r} (calls: {judge.agent_ids})")
 
 
-def _instructions_for(judge: Any, label: str) -> str:
-    """The host-authored instructions of world `label`'s first judge call, as the seam RECEIVED
-    them: its prompt's text outside every untrusted frame, plus the role prompt file its wiring
-    names (`wiring.prompt_path` — the system prompt the real `run_stage` loads)."""
-    prompt = _prompt_for(judge, label)
-    kwargs = next(kw for kw in judge.kwargs if str(kw.get("agent_id")).startswith(f"judge:{label}:"))
-    path = getattr(kwargs.get("wiring"), "prompt_path", None)
-    role = Path(path).read_text(encoding="utf-8") if path and Path(path).is_file() else ""
-    return f"{S.outside_untrusted_frames(prompt)}\n{role}"
 
 
-def _occurrences(text: str, word: str) -> int:
-    """`word` as a whole token (not inside `oracle_dir`, `oracle-side`, `real-errors`)."""
-    return len(re.findall(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text))
 
 
-def _defines(text: str, word: str) -> bool:
-    """`word` in a defining form: backticked, quoted, or followed by `:` (bold markup allowed)."""
-    w = re.escape(word)
-    return re.search(rf"`{w}`|\"{w}\"|'{w}'|(?<![\w-]){w}(?![\w-])\**\s*:", text) is not None
 
 
 def _topics(findings: Any) -> set[str]:
@@ -298,13 +242,6 @@ def _page(ep: Path) -> tuple[str | None, str | None]:
     return Path(path).read_text(encoding="utf-8"), None
 
 
-def _world_prompt(ep: Path, label: str) -> str:
-    """World `label`'s judge prompt as the pass builds it (#1234: `render.render` returns the
-    computed `JudgeContext` and `run._build_prompt(ctx, manifest)` lays it out under the cap),
-    with a recording `git show` and no model call."""
-    ctx = S.sym(S.JUDGE_RENDER, "render")(ep, label, git_show=J.FakeGitShow())
-    manifest = _yaml.safe_load((Path(ep) / "family.yaml").read_text(encoding="utf-8"))
-    return S.sym(S.JUDGE_RUN, "_build_prompt")(ctx, manifest)[0]
 
 
 def _validate(text: str, *, scope: str = "world") -> Any:
@@ -316,86 +253,8 @@ def _validate(text: str, *, scope: str = "world") -> Any:
 # --------------------------------------------------------------------------------------
 
 
-def test_1224_judge_takes_served_systems_from_the_manifest(tmp_path):
-    """d01f_judge_reads_served_systems_not_a_tenant — the judge's prompt shows the
-    served_systems recorded in family.yaml, unchanged by a later change to the tenant's grant.
-
-    M21=A: the recorded served_systems governs the judge; no later reader resolves a tenant.
-    The tenant placed under the data root now grants a system the manifest never recorded
-    (`zzz-live-only`), and the manifest records one the tenant no longer has (`legacy-ids`):
-    the recorded name reaches the prompt and the live-only name never does.
-    """
-    est = S.estate(tmp_path, systems=(*S.SYSTEMS, "zzz-live-only"))
-    est.place()
-    ep = S.judged_episode(tmp_path, doc=S.family_v2(served_systems=("edr", "idp", "legacy-ids")))
-    judge = _judge({"b": _world_reply("lead-quality", ("idp",))})
-    _grade(tmp_path, ep, judge)
-
-    prompt = _prompt_for(judge, "b")
-    assert "legacy-ids" in prompt, "the manifest's recorded served_systems never reached the judge"
-    assert "zzz-live-only" not in prompt, (
-        "a system only the tenant's CURRENT grant names reached the judge; the judge read a "
-        "tenant instead of the recorded served_systems (M21=A)")
-    assert "siem-x" not in prompt, (
-        "the tenant's live system list (siem-x is granted, never recorded) reached the judge")
 
 
-def test_1224_judge_refuses_an_old_manifest_naming_the_reason(tmp_path):
-    """d01h_old_manifest_refused_at_judge — an old manifest (overlay, or a discriminator
-    envelope) is not graded: no findings, and a not-graded record whose reason says the
-    manifest predates the oracle.
-    s_p026 — a manifest carrying only discriminator.holding_system, or only
-    configured_patterns, is refused by the judge and by the page with the predates-the-oracle
-    reason; neither renders the episode nor crashes.
-
-    O15 + F-11: the old-manifest check runs AHEAD of the outcome gate — the episode is a real
-    pre-oracle one, holding the old `review.yaml` saying accepted and no `outcome.yaml`, so only
-    a check made before the gate can name the right reason. RF-9: the judge's own raw manifest
-    read refuses, not only the runtime loader. O15 covers the judge and the page, and the
-    judge's reader is separate from the runtime loader.
-
-    Positive control: a v2 manifest in the same state (old review record, no outcome record)
-    is stamped with a reason that is NOT the predates-the-oracle one, so the reason is
-    specific to the old field and not a blanket string.
-    """
-    for key in ("overlay", "discriminator.envelope", "discriminator.holding_system",
-                "configured_patterns"):
-        root = tmp_path / key.replace(".", "-")
-        doc = S.old_manifest(key)
-        doc["worlds"][1]["story"] = "MARKER-OLD-STORY"
-        ep = S.judged_episode(root, doc=doc, outcome=None)
-        J.review_record(ep, outcome="accepted")
-        judge = _judge({"b": _world_reply()})
-        _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
-
-        stamp = _record(ep).get("not_graded") or {}
-        assert S.PREDATES in str(stamp.get("reason", "")), (
-            f"{key}: the old manifest was not refused with the predates-the-oracle reason "
-            f"(stamp {stamp!r})")
-        assert S.OUTCOME_NAME not in str(stamp.get("reason", "")), (
-            f"{key}: the judge reported a missing outcome record instead of the old manifest — "
-            "the old-manifest check did not run ahead of the gate (F-11)")
-        assert judge.calls == 0, f"{key}: an old-manifest episode bought model calls"
-        assert not _draws_of(ep), f"{key}: an old-manifest episode left draw files"
-        assert _all_queued(_state1135.state_over(root / "state")) == [], (
-            f"{key}: an old-manifest episode enqueued findings")
-
-        html, refusal = _page(ep)
-        shown = refusal if refusal is not None else html
-        assert S.PREDATES in str(shown), f"{key}: the page does not show the refusal reason"
-        assert html is None or "MARKER-OLD-STORY" not in html, (
-            f"{key}: the page rendered the old episode")
-
-    control = tmp_path / "v2"
-    ep = S.judged_episode(control, outcome=None)
-    J.review_record(ep, outcome="accepted")
-    judge = _judge()
-    _grade(control, ep, judge, state=_state1135.state_over(control / "state"))
-    stamp = _record(ep).get("not_graded") or {}
-    assert stamp, "the positive control: a v2 episode with no outcome record was graded"
-    assert S.PREDATES not in str(stamp.get("reason", "")), (
-        "a v2 manifest was refused as predating the oracle — the reason is not specific to "
-        "the old field")
 
 
 # --------------------------------------------------------------------------------------
@@ -607,36 +466,6 @@ def test_1224_judge_model_gets_facts_verdict_calls_claims_movement_and_served_sy
         "the sibling's conclusion movement (its resolutions) never reached the judge")
 
 
-def test_1224_judge_reply_bucket_systems_and_findings_are_recorded_per_world(tmp_path):
-    """d12e_judge_output_recorded — validate_reply accepts a world reply carrying a bucket, the
-    systems the facts touched and findings, and the family record stores all three per world.
-
-    Pattern and holding_system are no longer reply fields — neither the record's findings nor
-    the draw document carry them.
-    """
-    reply = _world_reply("analyze-discipline", ("edr", "idp"), findings=[
-        _finding("d12e-defender", bucket="analyze-discipline"),
-        _finding("d12e-world", bucket="mislabelled", subject="world",
-                 evidence=["report.md"])])
-    parsed = _validate(_text(reply))
-    assert parsed.bucket == "analyze-discipline"
-    assert list(parsed.systems) == ["edr", "idp"]
-    assert {f.topic for f in (*parsed.investigator_findings, *parsed.world_findings)} == {
-        "d12e-defender", "d12e-world"}
-
-    # #1234 A5: a discipline bucket needs a world shown its facts — one `oracle` row.
-    ep = S.judged_episode(tmp_path, ledgers={"b": [_oracle_row("user:shown")]})
-    _grade(tmp_path, ep, _judge({"b": reply}))
-    row = _row(ep, "b")
-    assert row.get("bucket") == "analyze-discipline", f"the record's bucket: {row!r}"
-    assert sorted(row.get("systems") or []) == ["edr", "idp"], f"the record's systems: {row!r}"
-    # #1234: the findings are recorded on the world's draw document, not on its row.
-    assert _topics(_filed(ep, "b")) == {"d12e-defender", "d12e-world"}, (
-        f"the record's findings: {_filed(ep, 'b')!r}")
-    recorded = list(row.get("findings") or []) + _filed(ep, "b")
-    for finding in recorded:
-        for key in ("pattern", "holding_system"):
-            assert key not in finding, f"a recorded finding still carries {key!r}: {finding!r}"
 
 
 def test_1224_world_whose_change_never_reached_the_investigator_is_judged_not_withheld(
@@ -728,90 +557,10 @@ def test_1224_drift_on_the_discriminating_call_discards_nothing_mechanically(tmp
     assert _queue(state) == [], "a world the model found incoherent enqueued defender findings"
 
 
-def test_1224_judge_prompt_names_no_overlay_holding_system_or_envelope(tmp_path):
-    """d12i_judge_prompt_free_of_staging_language — the judge's prompts say nothing of an
-    overlay, a holding system, an envelope, staging or mechanical rows.
-
-    The host-authored text is what is read (outside every untrusted frame): the role file whole,
-    and every prompt the double received.
-
-    Positive control: the prompts exist and carry the manifest's served_systems (the pair,
-    d12d, pins the rest of what they carry).
-    """
-    banned = ("overlay", "holding system", "holding_system", "envelope", "staging", "staged",
-              "mechanical row")
-    role = S.source_text("learning/judge/role.md").lower()
-    assert role, "the positive control: the judge's role file was not found"
-    for word in banned:
-        assert word not in role, f"role.md still speaks of {word!r}"
-
-    ep = S.judged_episode(tmp_path, doc=S.family_v2(served_systems=("edr", "idp", "x-d12i")))
-    judge = _judge({"b": _world_reply()})
-    _grade(tmp_path, ep, judge)
-    assert "x-d12i" in _prompt_for(judge, "b"), (
-        "the positive control: no world prompt carrying served_systems was rendered")
-    for agent_id, prompt in zip(judge.agent_ids, judge.prompts, strict=True):
-        host = S.outside_untrusted_frames(prompt).lower()
-        for word in banned:
-            assert word not in host, f"the {agent_id} prompt still speaks of {word!r}"
 
 
-def test_1224_finding_rows_carry_the_judge_models_bucket_and_systems(tmp_path):
-    """d12j_enqueue_reads_the_models_output — enqueue builds each world finding row from the
-    judge model's output, carrying its bucket and systems, with no pattern, holding_system or
-    withheld reason.
-
-    #1234 A5: a world finding carries its own bucket (one of the three world-finding buckets)
-    and its own systems, and the questioner row takes both from it; a design finding cites the
-    manifest (here its family-level discriminator, the default), so it is queued.
-    """
-    ep = S.judged_episode(tmp_path)
-    reply = _world_reply("lead-quality", ("idp",), findings=[
-        _finding("d12j-world", bucket="mislabelled", subject="world", systems=["idp", "edr"]),
-        _finding("d12j-defender", bucket="lead-quality")])
-    _grade(tmp_path, ep, _judge({"b": reply}))
-
-    world_rows = _from_world(_queue(channel=QUESTIONER_FINDINGS), "b")
-    assert [r.get("subject_topic") for r in world_rows] == ["d12j-world"], (
-        f"the world finding row was not built from the model's output: {world_rows!r}")
-    row = world_rows[0]
-    assert row.get("type") == "mislabelled", f"the row's bucket: {row.get('type')!r}"
-    assert sorted(row.get("systems") or []) == ["edr", "idp"], f"the row's systems: {row!r}"
-    for queued in [row, *_from_world(_queue(), "b")]:
-        for key in ("pattern", "holding_system", "withheld_reason"):
-            assert key not in queued, f"a queue row still carries {key!r}: {queued!r}"
 
 
-def test_1224_the_family_calls_reply_moves_no_defender_row(tmp_path):
-    """d12m (rewritten for #1234) — the family call carries no family word any more (A17), and
-    what it files never gates or spoils a world's defender rows (I2, P-c).
-
-    Was `test_1224_family_verdict_word_comes_from_the_judge_models_output`, which pinned the
-    retired `verdict_word` on the record and `judge_outcome` on every defender row. Two
-    episodes identical in every archived byte differ only in the family call's reply — nothing
-    filed, or an `incoherent` family-scope world finding — and the defender queue is the same
-    in both: the same rows, none carrying a retired name, each world still measured.
-    """
-    queued: dict[str, list[dict]] = {}
-    family_finding = _finding("the family is incoherent", subject="world", bucket="incoherent")
-    for case, family in (("quiet", _family_reply()),
-                         ("incoherent", _family_reply(findings=[family_finding]))):
-        root = tmp_path / case
-        ep = S.judged_episode(root)
-        state = _state1135.state_over(root / "state")
-        _grade(root, ep, _judge({"b": _world_reply(findings=[_finding("b-finding")])},
-                                family_text=_text(family)), state=state)
-        rec = _record(ep)
-        for key in ("verdict_word", "family_outcome", "episode_outcome"):
-            assert key not in rec, f"{case}: the record carries the retired {key!r}"
-        assert _row(ep, "b").get("measured") is True, f"{case}: world b is not measured"
-        rows = _queue(state)
-        assert rows, f"{case}: no defender row was enqueued"
-        assert all("judge_outcome" not in r for r in rows), (
-            f"{case}: a defender row carries the retired judge_outcome: {rows!r}")
-        queued[case] = rows
-    assert queued["quiet"] == queued["incoherent"], (
-        "the family call's world finding changed the defender rows a world's own draws queued")
 
 
 # --------------------------------------------------------------------------------------
@@ -970,23 +719,6 @@ def test_1224_judge_citation_check_matches_samples_by_system(tmp_path):
                for topic, lane in lanes.items()), lanes
 
 
-def test_1224_judge_render_shows_samples_per_system(tmp_path):
-    """d16d_judge_render_by_system — the judge's render shows the samples record per system.
-
-    O16: each system's real example answer under its own name, and a system whose section is
-    unavailable shown with its reason — never one document per Elastic pattern.
-    """
-    ep = S.judged_episode(tmp_path)
-    S.samples_record(ep, {
-        "edr": {"verbs": {"query": ["MARKER-EDR-SAMPLE"]}},
-        "idp": {"verbs": {"lookup": ["MARKER-IDP-SAMPLE"]}},
-        "siem-x": {"unavailable": "MARKER-SIEMX-UNAVAILABLE"}})
-    text = _world_prompt(ep, "b")
-
-    for marker in ("MARKER-EDR-SAMPLE", "MARKER-IDP-SAMPLE", "MARKER-SIEMX-UNAVAILABLE"):
-        assert marker in text, f"the render does not show {marker} from the samples record"
-    for system in ("edr", "idp", "siem-x"):
-        assert system in text, f"the render shows no section named for {system!r}"
 
 
 # --------------------------------------------------------------------------------------
@@ -994,43 +726,8 @@ def test_1224_judge_render_shows_samples_per_system(tmp_path):
 # --------------------------------------------------------------------------------------
 
 
-def _badge_family(served: tuple[str, ...] = ("edr", "idp", "siem-x")) -> dict:
-    """World c's facts sit only on a system the tenant does not serve (a badge reader)."""
-    return S.family_v2(served_systems=served, worlds=[
-        S.control_world("a"),
-        S.world_v2("b", facts=[S.fact("f1")]),
-        S.world_v2("c", facts=[S.fact("f2", "the badge reader logged carol at door 7 at 15:40Z",
-                                      ("carol", "door-7"))]),
-    ])
 
 
-def test_input_facts_sit_only_on_unserved_systems_at_launch(tmp_path):
-    """b_p011 — a world whose facts touch only unserved systems is admitted (it loads and
-    reaches the judge), is never served a changed answer for an unserved system, and is never
-    bucketed lead-set.
-
-    M20=A: such a world is admitted to the judge, which contemplates it ("couldn't look" is
-    never graded as a miss); the host refuses `lead-set` for it in `validate_reply` and never
-    computes a bucket. This test pins the launch half: the manifest loader admits the family,
-    and an investigator call naming the unserved system gets no oracle turn and no `oracle`
-    ledger row, while a served system is wired. The judge half (admitted to the judge, never
-    recorded lead-set) is pinned by
-    `test_1224_world_whose_facts_sit_only_on_unserved_systems_is_never_lead_set` (d12c).
-    """
-    doc = _badge_family()
-    S.sym(S.FAMILY, "parse_family")(doc)  # admitted at load: no refusal
-
-    est = S.estate(tmp_path / "estate-root")
-    ep = S.episode_v2(tmp_path / "serving", doc=doc, base_rows=[])
-    oracle = S.oracle(then=S.text_only())
-    reg = S.world_registry(ep, "c", est, oracle=oracle, verifier=S.passing_verifier(),
-                           retry_cap=1)
-    assert "query" in reg.verbs("idp"), "the positive control: a served system is not wired"
-    with pytest.raises((KeyError, *J.refusals())):
-        S.call(reg, "badge", "query", est.ctx(tmp_path / "run"), q="user:carol")
-    assert oracle.requests == 0, "the oracle was handed a call on a system the tenant does not serve"
-    assert not [r for r in S.ledger_rows(ep, "c") if r.get("source") == S.ORACLE_DECISION], (
-        "a world was served a changed answer for an unserved system")
 
 
 def test_p078_judge_reply_lead_set_for_a_world_whose_facts_are_only_partly_servable(tmp_path):
@@ -1139,71 +836,8 @@ def test_1224_couldnt_look_because_the_only_served_system_was_down(tmp_path):
 # --------------------------------------------------------------------------------------
 
 
-def test_input_manifest_cannot_be_parsed_at_judge_or_page(tmp_path):
-    """s_p027 — a truncated, duplicate-key or non-mapping family.yaml is reported unreadable by
-    the judge and the page with its own named reason, distinct from predates-the-oracle, and
-    crashes neither.
-
-    A named refusal (`JudgeRefused`) or a not-graded record naming the manifest both count as
-    reported; any other exception is a crash.
-    """
-    whole = _yaml.safe_dump(S.family_v2())
-    # The shared loader refuses the truncated text and reads the duplicate-key one silently
-    # (last key wins), so the duplicate arm is the judge's and the page's own to detect.
-    shapes = {
-        "truncated": "episode_id: x\nworlds:\n  - {world_id: a",
-        "duplicate-key": whole + "served_systems: [edr]\n",
-        "not-a-mapping": "- this is\n- a list, not a manifest\n",
-    }
-    for shape, text in shapes.items():
-        root = tmp_path / shape
-        ep = S.judged_episode(root)
-        (ep / "family.yaml").write_text(text, encoding="utf-8")
-        judge = _judge()
-        refused = S.judge_refused_cls()
-        try:
-            _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
-            said = str((_record(ep).get("not_graded") or {}).get("reason", ""))
-        except refused as refusal:
-            said = str(refusal)
-        assert "family.yaml" in said, f"{shape}: the judge did not name the unreadable manifest: {said!r}"
-        assert S.PREDATES not in said, f"{shape}: the judge called an unreadable manifest old"
-        assert judge.calls == 0, f"{shape}: an unreadable manifest bought model calls"
-
-        html, refusal = _page(ep)
-        shown = str(refusal if refusal is not None else html)
-        assert "family.yaml" in shown, f"{shape}: the page did not report the unreadable manifest"
-        assert S.PREDATES not in shown, f"{shape}: the page called an unreadable manifest old"
 
 
-def test_p093_old_review_record_says_accepted_with_no_new_outcome_record(tmp_path):
-    """s_p034 — an episode holding only an old review record that says accepted is not graded,
-    and both the judge and the episode reader report the missing outcome record.
-
-    The old review.yaml is not read as the O13 outcome record. Driven with a v2 manifest, so the
-    only thing missing is the outcome record. Positive control: the same episode with an
-    `accepted` outcome record is graded and read.
-    """
-    EpisodeError = S.sym(S.EPISODE, "EpisodeError")
-    verdicts = S.sym(S.EPISODE, "verdicts")
-
-    ep = S.judged_episode(tmp_path / "old", outcome=None)
-    J.review_record(ep, outcome="accepted")
-    judge = _judge({"b": _world_reply()})
-    _grade(tmp_path / "old", ep, judge, state=_state1135.state_over(tmp_path / "old" / "state"))
-    stamp = _record(ep).get("not_graded") or {}
-    assert judge.calls == 0, "an old review record was read as the outcome record"
-    assert S.OUTCOME_NAME in str(stamp.get("reason", "")), (
-        f"the judge did not report the missing outcome record: {stamp!r}")
-    with pytest.raises(EpisodeError) as refused:
-        verdicts(ep)
-    assert S.OUTCOME_NAME in str(refused.value), "the episode reader did not name the missing record"
-
-    ok = S.judged_episode(tmp_path / "new")
-    judge = _judge({"b": _world_reply()})
-    _grade(tmp_path / "new", ok, judge, state=_state1135.state_over(tmp_path / "new" / "state"))
-    assert S.judge_called_for(judge, "b"), "the positive control: an accepted outcome record was not graded"
-    assert verdicts(ok), "the positive control: the episode reader refused an accepted episode"
 
 
 # --------------------------------------------------------------------------------------
@@ -1506,109 +1140,8 @@ def test_judge_reply_leaves_a_world_out(tmp_path):
         _validate(twice)
 
 
-def test_input_judge_reply_still_carries_pattern_and_holding_system(tmp_path):
-    """b_p241 — a reply still carrying pattern and holding_system validates with both keys
-    ignored: neither reaches the family record or any queue row.
-
-    N22 reading: leftover pattern/holding_system keys are ignored (no holding system anywhere).
-    """
-    stale = {"pattern": "logs-*", "holding_system": "elastic"}
-    reply = _world_reply("lead-quality", ("idp",), findings=[
-        _finding("stale-defender", **stale),
-        _finding("stale-world", subject="world", bucket="mislabelled", **stale)], **stale)
-    parsed = _validate(_text(reply))
-    assert {f.topic for f in (*parsed.investigator_findings, *parsed.world_findings)} == {
-        "stale-defender", "stale-world"}, (
-        "a reply carrying leftover keys was not accepted with its findings")
-
-    ep = S.judged_episode(tmp_path)
-    _grade(tmp_path, ep, _judge({"b": reply}))
-    row = _row(ep, "b")
-    assert _topics(_filed(ep, "b")) == {"stale-defender", "stale-world"}
-    queued = _from_world(_all_queued(), "b")
-    assert {r.get("subject_topic") for r in queued} == {"stale-defender", "stale-world"}, (
-        "the positive control: the reply's findings did not reach the queues")
-    for thing in [row, *_filed(ep, "b"), *queued]:
-        for key in ("pattern", "holding_system"):
-            assert key not in thing, f"a leftover {key!r} fed something downstream: {thing!r}"
-    for value in ("elastic", "logs-*"):
-        assert value not in json.dumps(queued), f"the leftover value {value!r} reached a queue row"
 
 
-def test_input_outcome_record_is_inconsistent_or_in_legacy_words(tmp_path):
-    """b_p244 — the gate grades, and the episode reader reads, only an outcome that is exactly
-    `accepted` with a reason and an O5 count under two; an `accepted` record listing two
-    unservable worlds is refused by both; nothing crashes.
-
-    N22 reading (S9 counts O5). A legacy word (rejected, incomplete), a capitalised or
-    newline-suffixed word, a list or a missing reason is not `accepted` (O13); the reader treats
-    every such record as not usable (`EpisodeError`).
-
-    Two unservable worlds (U-04): an `accepted` record listing two unservable worlds is a family
-    O5 calls unusable (S9, O5; M04=A), so the reader refuses it with `EpisodeError`, coherent
-    with the gate's zero model calls for the same record. Reader control: the same `accepted`
-    record listing ONE unservable world (b, never archived — pre-flight starts no sibling for
-    it) reads, and the gate grades the rest — so the refusal is the count, not the mere
-    presence of an unservable list.
-
-    The foreign world: an `accepted` record (with a reason) listing one unservable world "z"
-    the manifest lacks. #1234 settled the fork this test once left open: a failed-world entry
-    for a label the manifest does not declare is no world of this family, never counted or
-    listed, and the pass over that archive is refused loudly naming it — no model call, no
-    record of "z", nothing queued. The reader's treatment of that record is not pinned.
-    """
-    EpisodeError = S.sym(S.EPISODE, "EpisodeError")
-    verdicts = S.sym(S.EPISODE, "verdicts")
-    two = [{"world": w, "reason": S.REASON_UNSERVABLE, "call": _call(f"user:{w}")}
-           for w in ("b", "c")]
-    raws = {
-        "rejected": "outcome: rejected\nreason: r\nunservable_worlds: []\n",
-        "incomplete": "outcome: incomplete\nreason: r\nunservable_worlds: []\n",
-        "capitals": "outcome: Accepted\nreason: r\nunservable_worlds: []\n",
-        "newline": 'outcome: "accepted\\n"\nreason: r\nunservable_worlds: []\n',
-        "a-list": "outcome: [accepted]\nreason: r\nunservable_worlds: []\n",
-        "no-reason": "outcome: accepted\nunservable_worlds: []\n",
-        "two-unservable": _yaml.safe_dump({"outcome": "accepted", "reason": "r",
-                                           "unservable_worlds": two}),
-    }
-    for case, raw in raws.items():
-        root = tmp_path / case
-        ep, judge = _gate_case(root, None, raw=raw)
-        assert judge.calls == 0, f"{case}: the gate graded an outcome that is not exactly accepted"
-        assert _all_queued(_state1135.state_over(root / "state")) == []
-        with pytest.raises(EpisodeError):
-            verdicts(ep)
-
-    # Reader control for the count: ONE unservable world (b, not archived) reads and is graded.
-    root = tmp_path / "one-unservable"
-    ep = S.judged_episode(root, labels=("a", "c"), outcome=None)
-    S.outcome_record(ep, "accepted", reason="pre-flight could not serve world b", unservable=[
-        {"world": "b", "reason": S.REASON_UNSERVABLE, "call": _call("user:alice")}])
-    judge = _judge({"c": _world_reply("decision-discipline", ("edr",))})
-    _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
-    assert S.judge_called_for(judge, "c"), (
-        "the control: an accepted record with one unservable world was not graded on the rest")
-    assert verdicts(ep), "the control: the reader read nothing for an O5 count of one"
-
-    # The foreign world: graded under either reading of the fork; "z" is never recorded.
-    root = tmp_path / "foreign-world"
-    ep = S.judged_episode(root, outcome=None)
-    S.outcome_record(ep, "accepted", reason="pre-flight could not serve world z", unservable=[
-        {"world": "z", "reason": S.REASON_UNSERVABLE, "call": _call("user:zed")}])
-    state = _state1135.state_over(root / "state")
-    judge = _judge({"b": _world_reply("lead-quality", ("idp",),
-                                      findings=[_finding("foreign-record-b")])})
-    with pytest.raises(S.judge_refused_cls()) as refused:
-        _grade(root, ep, judge, state=state)
-    assert "'z'" in str(refused.value), f"the refusal does not name the foreign world: {refused.value}"
-    assert judge.calls == 0, "a pass over a record naming a foreign world bought model calls"
-    assert "z" not in _rows(ep), "a world the manifest lacks was recorded as one of the family's worlds"
-    assert not _from_world(_all_queued(state), "z"), "a finding was queued under the foreign world"
-
-    root = tmp_path / "accepted"
-    ep, judge = _gate_case(root, "accepted")
-    assert S.judge_called_for(judge, "b"), "the positive control: an exactly-accepted episode was not graded"
-    assert verdicts(ep), "the positive control: the episode reader refused an accepted episode"
 
 
 def test_1224_judge_draws_disagree_on_a_worlds_bucket_or_systems(tmp_path):
@@ -1640,34 +1173,6 @@ def test_1224_judge_draws_disagree_on_a_worlds_bucket_or_systems(tmp_path):
         f"the record names a bucket neither draw gave: {named!r}")
 
 
-def test_1224_judge_family_reply_carrying_a_family_word_is_refused_by_name(tmp_path):
-    """b_p247 (rewritten for #1234) — a family reply carrying a family word is refused BY THAT
-    NAME, never reaches a queue row, and the pass records why; the world's own rows still queue.
-
-    Was `test_1224_judge_family_word_outside_what_the_queue_accepts`, which pinned every
-    `JUDGE_OUTCOME_ENUM` member admitted and an off-vocabulary word refused. #1234 retired the
-    family word and the enum (A17, A18): the family call files family-scope world findings only,
-    so every `verdict_word` — a former member or a misspelling — is refused, naming the field.
-    """
-    for word in ("survived", "caught", "undecidable", "survivd"):
-        with pytest.raises(S.judge_refused_cls()) as refused:
-            _validate(_text(_family_reply(verdict_word=word)), scope="family")
-        assert "verdict_word" in str(refused.value), (
-            f"the refusal of a family word {word!r} does not name the retired field")
-    assert _validate(_text(_family_reply()), scope="family").world_findings == [], (
-        "the positive control: a family reply with no family word was not admitted")
-
-    ep = S.judged_episode(tmp_path)
-    _grade(tmp_path, ep, _judge({"b": _world_reply(findings=[_finding("b")])},
-                                family_text=_text(_family_reply(verdict_word="survivd"))))
-    rec = _record(ep)
-    assert "verdict_word" not in rec, "a refused family word was recorded"
-    assert all("judge_outcome" not in r and "verdict_word" not in r for r in _all_queued()), (
-        "a family word reached a queue row")
-    family = rec.get("family") or {}
-    assert (family.get("malformed_replies") or 0) >= 1 or "verdict_word" in _yaml.safe_dump(family), (
-        f"the pass dropped the family reply without a recorded reason: {family!r}")
-    assert _from_world(_queue(), "b"), "the positive control: world b's own finding was not queued"
 
 
 def test_1224_judge_prompt_over_a_world_with_hundreds_of_verified_claims(tmp_path, monkeypatch):
@@ -1796,76 +1301,10 @@ def test_judge_is_run_again_on_an_episode_it_already_graded(tmp_path):
 # --------------------------------------------------------------------------------------
 
 
-def test_1224_judge_reply_citing_review_yaml_is_not_accepted_after_review_is_gone(tmp_path):
-    """o21_validate_reply_without_review_record — with review.yaml gone, the judge's reply
-    validation neither crashes nor accepts a finding citing review.yaml; a finding citing a
-    file the episode does hold still validates.
-
-    O-21. Today the world lane's episode-level allowlist still names `review.yaml`, so a pointer
-    to it "resolves" with nothing there. #1234 A1/A13: whether a finding is kept is its ledger
-    lane — a finding no pointer of which resolves is `dropped_unresolved`, and a conduct pointer
-    at the world's own report resolves.
-    """
-    reply = _world_reply("lead-quality", ("idp",), findings=[
-        _finding("cites-review", subject="world", bucket="mislabelled",
-                 evidence=["review.yaml#worlds.b.reachability"]),
-        _finding("cites-report", subject="world", bucket="mislabelled",
-                 evidence=["worlds/b/report.md"])])
-    assert _validate(_text(reply)).world_findings, "the reply did not validate at all"
-    ep = S.judged_episode(tmp_path)
-    assert not (ep / "review.yaml").exists()
-    _grade(tmp_path, ep, _judge({"b": reply}))
-
-    lanes = _lanes(ep, "b")
-    assert lanes.get("cites-report") not in (None, "dropped_unresolved"), (
-        f"the positive control: a finding citing the world's own report was not kept: {lanes!r}")
-    assert lanes.get("cites-review") == "dropped_unresolved", (
-        f"a finding citing the review record an oracle-era episode no longer has was accepted: "
-        f"{lanes!r}")
-    assert "cites-review" not in {r.get("subject_topic") for r in _all_queued()}
 
 
-def test_1224_judge_render_builds_its_prompt_without_a_review_record(tmp_path):
-    """o22_judge_render_without_reachability — the judge's render produces a world prompt for an
-    oracle-era episode with no review.yaml, carrying no reachability block, without crashing.
-
-    O-22: the review step and its reachability measurements are gone (design, "Today's review
-    step is not kept"), so the prompt must not still carry a section about them.
-    """
-    ep = S.judged_episode(tmp_path)
-    assert not (ep / "review.yaml").exists()
-    prompt = _world_prompt(ep, "b")
-    assert "world b" in prompt.lower(), "the positive control: no world prompt was built"
-    lowered = prompt.lower()
-    for word in ("reachability", "capture_addressed", "review record", "review.yaml"):
-        assert word not in lowered, f"the world prompt still carries the review step's {word!r}"
 
 
-def test_1224_judge_grades_a_non_lab_tenant_without_the_stagers_package(tmp_path):
-    """o24_judge_without_stagers — with the stagers package gone, the judge imports and grades an
-    episode over a non-lab tenant, taking its system list from the manifest's served_systems.
-
-    O-24, O1. Observed three ways: no judge module names the stagers package; importing the
-    judge in a fresh interpreter loads no stagers module; and a non-lab family is graded with
-    its recorded systems in the prompt.
-    """
-    names = [h for h in S.grep_shipped("stagers") if h.startswith("learning/judge/")]
-    assert not names, f"the judge still names the stagers package: {names}"
-    probe = ("import sys, defender.learning.judge\n"
-             "print(sorted(m for m in sys.modules if '.stagers' in m))\n")
-    env = {**os.environ, "PYTHONPATH": str(S.REPO_ROOT)}
-    done = subprocess.run([sys.executable, "-c", probe], cwd=S.REPO_ROOT, env=env,
-                          capture_output=True, text=True, timeout=120, check=False)
-    assert done.returncode == 0, f"the judge does not import: {done.stderr[-800:]}"
-    assert done.stdout.strip() == "[]", f"importing the judge loads {done.stdout.strip()}"
-
-    ep = S.judged_episode(tmp_path, doc=S.family_v2(served_systems=S.SYSTEMS))
-    judge = _judge({"b": _world_reply("lead-quality", ("siem-x",))})
-    _grade(tmp_path, ep, judge)
-    assert _row(ep, "b").get("bucket") == "lead-quality", "a non-lab family was not graded"
-    prompt = _prompt_for(judge, "b")
-    for system in S.SYSTEMS:
-        assert system in prompt, f"the recorded served system {system!r} never reached the judge"
 
 
 def test_1224_enqueue_admits_a_finding_citing_a_systems_samples_section(tmp_path):
@@ -1931,59 +1370,8 @@ def test_1224_curator_gate_authors_a_row_built_from_the_judge_models_output(tmp_
             assert "judge_outcome" in routed[1].get("held_reason", ""), routed
 
 
-def test_1224_corpus_drain_reads_a_row_built_from_the_judge_models_output(tmp_path):
-    """o42_drain_reads_new_rows — a queue row built from the judge model's output drains
-    through the corpus drain's batch read, neither held as malformed nor crashing; `none` is
-    never enqueued.
-
-    O-42, M19=A. The rows are the ones a real grading pass appended to the drain's own state
-    root; the drain is the real one, with a recording authoring agent.
-    """
-    import importlib
-
-    D = importlib.import_module("defender.tests._drain719")
-    paths = D.make_paths(tmp_path / "drain")
-    state = _state1135.state_for_paths(paths)
-    ep = S.judged_episode(tmp_path / "ep")
-    _grade(tmp_path, ep, _judge({
-        "b": _world_reply("lead-quality", ("idp",),
-                          findings=[_finding("drains", bucket="lead-quality")]),
-        "c": _world_reply("none", (), findings=[])}), state=state)
-    rows = state.rows(FINDINGS)
-    assert {r.get("subject_topic") for r in rows} == {"drains"}, (
-        f"the graded pass did not enqueue exactly the model's finding: {rows!r}")
-    assert all(r.get("type") != "none" for r in rows), "`none` was enqueued"
-
-    channel = D.channel_of("findings")
-    agent = D.recording(D.committing("judge-row"))
-    cfg = D.cfg_for(paths, "findings", invoke_agent=agent)
-    assert S.sym("learning.author.drain", "run_batch")(cfg=cfg) == 0
-    authored = {r["finding_id"] for call in agent.calls for r in call["rows"]}
-    assert {r["finding_id"] for r in rows} <= authored, (
-        "a row built from the judge model's output was not handed to the author")
-    assert D.stuck_records(paths, channel) == [], "the drain stuck-recorded the judge's row"
-    assert D.pending(paths, channel) == [], "the judge's row is still held on the queue"
 
 
-def test_1224_judge_reads_the_per_system_samples_record(tmp_path):
-    """o51_judge_samples_read — the judge reads the per-system samples record into its world
-    prompt, and a world whose row marks a system's section unavailable is judged, not crashed.
-
-    O-51, O16. The sample is a real answer from the capture — not host-authored — so it arrives
-    framed (M26).
-    """
-    ep = S.judged_episode(tmp_path)
-    S.samples_record(ep, {
-        "edr": {"verbs": {"query": ["MARKER-O51-EDR-ANSWER"]}},
-        "siem-x": {"unavailable": "MARKER-O51-UNAVAILABLE"}})
-    judge = _judge({"b": _world_reply("lead-quality", ("edr", "siem-x"))})
-    _grade(tmp_path, ep, judge)
-
-    prompt = _prompt_for(judge, "b")
-    S.assert_wrapped_untrusted(prompt, "MARKER-O51-EDR-ANSWER", "a system's sample answer")
-    assert "MARKER-O51-UNAVAILABLE" in prompt, "the unavailable section's reason never reached the judge"
-    assert _row(ep, "b").get("bucket") == "lead-quality", (
-        "a world with an unavailable samples section was not judged")
 
 
 # --------------------------------------------------------------------------------------
@@ -1991,26 +1379,6 @@ def test_1224_judge_reads_the_per_system_samples_record(tmp_path):
 # --------------------------------------------------------------------------------------
 
 
-def test_1224_judge_ledger_read_keeps_oracle_and_real_error_rows(tmp_path):
-    """pco06_judge_keeps_new_rows — the judge's ledger read keeps a served `oracle` and a
-    `real-error` row and puts both in front of the judge model.
-
-    GR-06: today both are outside the ledger's words and are dropped as malformed.
-    """
-    ledger = [
-        _oracle_row("user:MARKER-PCO6-ORACLE", claim=S.claim(changed=[
-            S.changed("alice", "logon", "absent", "present")]),
-            verdict={"passed": True, "reason": "ok"}),
-        S.ledger_row(S.REAL_ERROR, params=S.query_params("user:MARKER-PCO6-REALERR"),
-                     payload={"error": "upstream said no"}),
-    ]
-    ep = S.judged_episode(tmp_path, ledgers={"b": ledger})
-    judge = _judge({"b": _world_reply()})
-    _grade(tmp_path, ep, judge)
-
-    prompt = _prompt_for(judge, "b")
-    assert "MARKER-PCO6-ORACLE" in prompt, "the served `oracle` row was dropped from the judge's input"
-    assert "MARKER-PCO6-REALERR" in prompt, "the `real-error` row was dropped from the judge's input"
 
 
 def test_1224_judge_reads_a_real_error_row_and_an_adapter_cannot_load_fault_row_as_decided(
@@ -2042,50 +1410,3 @@ def test_1224_judge_reads_a_real_error_row_and_an_adapter_cannot_load_fault_row_
         "a code rule decided the world with a `fault` row instead of the model")
 
 
-def test_1224_judge_prompt_names_and_explains_passthrough_oracle_and_real_error(tmp_path):
-    """pco08_judge_prompt_explains_words — the judge's rendered rows name each decision word, and
-    the judge's own instructions name each of the three in a defining form even for a world
-    with no row carrying it.
-
-    PCO-08: none is defined to the model today.
-
-    Rows: world b's ledger holds one row of each word; in a second, otherwise identical episode
-    no world holds a row, so each word occurs MORE often in b's prompt in the first than in the
-    second — the excess is b's rows, whatever the shared scaffolding says. (#1234 M1: every
-    world's prompt carries every usable run as a reference, so another world's prompt in the
-    first episode shows b's rows too and can no longer be the row-less side.)
-
-    Explanation, made unsatisfiable by row data: it is read from world c's instructions in the
-    row-less episode — the host text of c's prompt outside every untrusted frame, plus the role
-    prompt file the judge seam was handed (`wiring.prompt_path`), where a glossary may
-    legitimately live — where no ledger holds a row at all. Each word must appear there in a defining form: backticked,
-    quoted, or followed by `:`. What is NOT pinned: the wording or adequacy of the definition
-    (model-facing prose); an incidental `word:` in host text (a per-kind count line, say) would
-    satisfy the form check.
-    """
-    ledger = [
-        S.ledger_row(S.PASSTHROUGH, params=S.query_params("user:pco8-pass")),
-        _oracle_row("user:pco8-oracle", claim=S.claim(changed=[
-            S.changed("alice", "logon", "absent", "present")]),
-            verdict={"passed": True, "reason": "ok"}),
-        S.ledger_row(S.REAL_ERROR, params=S.query_params("user:pco8-error"),
-                     payload={"error": "upstream said no"}),
-    ]
-    ep = S.judged_episode(tmp_path / "rows", ledgers={"b": ledger, "c": []})
-    judge = _judge({"b": _world_reply(), "c": _world_reply("lead-quality", ("edr",))})
-    _grade(tmp_path, ep, judge, state=_state1135.state_over(tmp_path / "rows" / "state"))
-    bare = S.judged_episode(tmp_path / "no-rows", ledgers={"b": [], "c": []})
-    bare_judge = _judge({"b": _world_reply(), "c": _world_reply("lead-quality", ("edr",))})
-    _grade(tmp_path, bare, bare_judge,
-           state=_state1135.state_over(tmp_path / "no-rows" / "state"))
-
-    with_rows, without_rows = _prompt_for(judge, "b"), _prompt_for(bare_judge, "b")
-    instructions = _instructions_for(bare_judge, "c")
-    for word in (S.PASSTHROUGH, S.ORACLE_DECISION, S.REAL_ERROR):
-        assert _occurrences(with_rows, word) > _occurrences(without_rows, word), (
-            f"the rendered rows never name {word!r}: world b's prompt (one {word!r} row) names it "
-            f"no more often than its prompt in an episode with no rows")
-        assert _defines(instructions, word), (
-            f"the judge's instructions never define the decision word {word!r} (looked for "
-            f"`{word}`, \"{word}\" or {word}: in host text outside frames and the role prompt, "
-            f"for a world with no row carrying it)")

@@ -1,7 +1,6 @@
 """Drain hardening: read-only git probe failures, bounded append-lock wait at retire, and strays that must not whitelist themselves."""
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,13 +25,6 @@ def _break_index(repo: Path) -> None:
 def _repair_index(repo: Path) -> None:
     (repo / ".git" / "index").rmdir()
     h.git(repo, "reset", "-q")
-
-
-def _git_log(repo: Path) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), "log", "--oneline"],
-        capture_output=True, text=True, check=True,
-    ).stdout
 
 
 # A read-only git probe is repo contention, not a failing batch

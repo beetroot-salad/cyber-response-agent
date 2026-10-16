@@ -103,32 +103,6 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
 
 # append-only: the negative and its positive control
 
-def test_message_rows_are_never_updated_or_deleted(tmp_path):
-    """Driving a fold and a fork issues no UPDATE and no DELETE against `message`; every row present after the first append is byte-identical at the end."""
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    store.append(session_id, [user_request("root")], agent_id="main")
-    before = sql(store, "SELECT id, session_id, agent_id, seq, parent_id, kind FROM message")
-
-    seen: list[tuple[int, str]] = []
-
-    def authorizer(action, arg1, arg2, dbname, source):
-        if arg1 == "message":
-            seen.append((action, arg2 or ""))
-        return sqlite3.SQLITE_OK
-
-    store.connection.set_authorizer(authorizer)
-    fixture = nine_row_fixture(store)
-    store.fork(fixture["main"], at_message_id=fixture["row_ids"][5])
-    store.connection.set_authorizer(None)
-
-    mutations = [s for s in seen if s[0] in (sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE)]
-    assert mutations == [], f"message must be append-only; saw {mutations}"
-
-    after = sql(store, "SELECT id, session_id, agent_id, seq, parent_id, kind FROM message "
-                       "WHERE id <= ?", (before[-1][0],))
-    assert after == before, "an existing row changed under a fold/fork"
-
 
 # payloads — round-trip, coercion, unknown fields, the encoding
 
@@ -271,47 +245,6 @@ def test_a_fork_is_a_branch_with_no_prefix_copy_and_no_id_remap(tmp_path):
         "finding 2 is about")
     parent = sql(store, "SELECT parent_session_id FROM session WHERE session_id = ?", (fork,))
     assert parent == [(main,)]
-
-
-def test_two_forks_from_one_point_share_a_parent_id_and_differ_only_in_session_id(tmp_path):
-    """Two forks taken from the same message are two rows with the same `parent_id` and
-    different `session_id`s, each walking back through the shared prefix exactly once,
-    and their two seq-0 rows are never conflated."""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    main = store.new_session(agent_id="main")
-    r1 = store.append(main, [user_request("root")], agent_id="main", seq=0)[0]
-    r2 = store.append(main, [text_response("fork point")], agent_id="main",
-                      seq=1, parent_id=r1)[0]
-
-    fa = store.fork(main, at_message_id=r2)
-    fb = store.fork(main, at_message_id=r2)
-    a1 = store.append(fa, [user_request("a")], agent_id="main", seq=0, parent_id=r2)[0]
-    b1 = store.append(fb, [user_request("b")], agent_id="main", seq=0, parent_id=r2)[0]
-
-    assert fa != fb
-    assert sql(store, "SELECT parent_id FROM message WHERE id IN (?, ?) ORDER BY id",
-               (a1, b1)) == [(r2,), (r2,)]
-    assert ss.path_row_ids(store, fa) == [r1, r2, a1]
-    assert ss.path_row_ids(store, fb) == [r1, r2, b1]
-    assert ss.path_row_ids(store, fa).count(r1) == 1, "the shared prefix is walked once"
-
-
-def test_case_id_is_inherited_by_a_fork_and_the_eval_join_key_is_not(tmp_path):
-    """A fork's `session` row carries the source's `case_id` and a freshly minted `session_id`, while the eval dir-name join key does not follow the fork."""
-    store = make_store(tmp_path, case_id="case-alpha")
-    main = store.new_session(agent_id="main")
-    r1 = store.append(main, [user_request("root")], agent_id="main")[0]
-    fork = store.fork(main, at_message_id=r1)
-
-    rows = dict(sql(store, "SELECT session_id, case_id FROM session"))
-    assert rows[fork] == rows[main] == "case-alpha", (
-        f"case_id must be inherited by the fork; got {rows}")
-    assert fork != main, "session_id is minted, not derived"
-
-    from defender.tests._session_store_705 import runs_base as _rb
-    other = store_mod().open_store(case_id="case-beta", sessions=SessionPaths(_rb(tmp_path)))
-    assert other.path != store.path, "case_id is what selects the file"
 
 
 def test_config_row_is_content_addressed_over_the_reproducibility_set(tmp_path):

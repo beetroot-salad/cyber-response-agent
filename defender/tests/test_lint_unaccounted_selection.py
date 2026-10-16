@@ -1,19 +1,4 @@
-"""The gate that keeps the fence-scan fold from regressing: lint_unaccounted_selection
-(#932).
-
-`scan_fences` is the one place that knows which bytes of an investigation are invlang
-content, and it returns what the fences ORPHAN alongside what they hold. Three readers had
-derived that split independently and all three dropped the complement in silence, which is
-how a run's whole PLAN section came to sit outside a fence, parse to an empty companion, and
-clear every hypothesis-side rule vacuously.
-
-A lint whose baseline ships empty is indistinguishable from a lint that scans nothing, so
-every arm is exercised against a synthetic tree here, and each violation is paired with the
-clean spelling of the same read.
-
-Driven through the gate's testability seam — `main(argv, *, scope, baseline_path)` and
-`_scan(root)` — so nothing is hardcoded to a checkout path.
-"""
+"""The gate that keeps the fence-scan fold from regressing: lint_unaccounted_selection"""
 
 from __future__ import annotations
 

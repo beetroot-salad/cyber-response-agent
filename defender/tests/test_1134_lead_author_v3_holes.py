@@ -63,11 +63,7 @@ def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
     opens its own trees under the queue lock and serves the whole claim inside them. Both coined
     rows' drafts land with their ids, the agent spawn is reached (`FatalConfigError` from the
     unroutable model), nothing is recorded done, no log line says `Bad file descriptor`, and
-    once the run has unwound nothing under the worktree is held.
-
-    Catches: `_run_locked` called after the `with` that opened the trees closed them, which
-    answers every read and write `Bad file descriptor`: no draft, no agent, and a done
-    sentinel with no commit."""
+    once the run has unwound nothing under the worktree is held."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     caplog.set_level(logging.DEBUG)
     repo = _worktree(tmp_path)
@@ -102,10 +98,7 @@ def test_a_refused_listing_alone_does_not_refuse_the_draft(
     folder (its `scandir`, or the reopen of `.` for reading), not the step into it: the
     existence probe's `entry_kind` answers that listing's `reason` (asked and refused once), the
     probe falls through to the write, and the write lands. Both drafts are created with their
-    bytes, in order, and nothing is logged.
-
-    Catches: a probe that treats `.reason` as the draft's refusal (or as "already there") and
-    skips the write: the wazuh draft is lost to a fault the write never met."""
+    bytes, in order, and nothing is logged."""
     repo = bare_skills(tmp_path)
     skills_dir = repo / "defender" / "skills"
     refuser = RefusesFolder(skills_dir / "gather/queries/wazuh/_draft", route, err)
@@ -160,10 +153,7 @@ def test_a_refused_draft_folder_neither_clears_the_twin_nor_departs_a_draft(
     route), the half-promote twin probe refuses an established template (something it cannot
     see past stands where the twin goes), and a minted draft below it is not counted departed.
     Control: the same folder listed for real, with no twin and no draft, passes the twin probe
-    and departs the draft.
-
-    Catches: a refusal mapped to `"absent"`, which lets an established template land beside a
-    draft twin nobody could see and calls a draft departed that may still stand."""
+    and departs the draft."""
     (scene.skills_dir / DRAFT_FOLDER).mkdir(parents=True, exist_ok=True)
     place(scene, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain")
     assert not os.path.lexists(scene.at(TWIN_NAME))

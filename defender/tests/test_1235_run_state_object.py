@@ -1,6 +1,5 @@
 """#1235, round 2 — the `RunState` object itself: fresh at its start, the only holder of a run's
 live state, its operations atomic under its own lock, and its oracle clock its own.
-
 """
 from __future__ import annotations
 

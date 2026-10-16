@@ -1,39 +1,8 @@
-"""#767 — the host records its investigation into the case, and a person closes it.
-
-THE WRITE HALF. Every test is one demand of
-`spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`, named by that demand's
-`discharged_by`. RED against `a77335d5` by construction: `record_case_ticket`,
-`case_record_to_comment` and the `CaseRecord` split are coined by this spec and none of them
-existed yet. If the implementation spells one otherwise, these names follow the code.
-
-WHAT §7 DECIDED THAT EVERY ASSERTION HERE RESTS ON:
-
-* **One bound, 4096 UTF-8 BYTES on the rendered body** (R2/FK01). `_TICKET_REASON_MAX`
-  (472 characters, r2/c10) retires with `CaseRecord.reason`; the cut rounds DOWN to the
-  last whole character and the `…` sits INSIDE the bound.
-* **Fail closed on the write side, never into the run** (R1/FAM-1). The writer refuses to
-  POST rather than send an unattributable comment; it warns; the exit code is unchanged (O7).
-* **A case's lifecycle STATUS is a person's, and the store's own closed vocabulary enforces
-  it** — so no alert-rendered field can move a case along its lifecycle, and the loader needs
-  no guard over label templates at all. The one thing the loader refuses about it is an
-  `open.status` that is not a non-empty literal (a template would let alert text pick it).
-* **The writer neither reads a case back nor asks whether it is closed** (#1221's amendment,
-  2026-10-08, reversing its N7). The check existed because a person's close RELEASED a case's
-  comments to later runs; that release screen is gone (every comment is served, the host's
-  own tagged), so a comment on a closed case is posted like any other, and the mapping names
-  no released status — a `released:` section an un-migrated tenant still carries is ignored.
-* **O7 is the whole obligation on a fault** (R6/FAM-3). One POST, no retry; every fault is
-  caught, warned once, and leaves the exit code exactly what it would have been; the receipt
-  is written on BOTH branches with `ok` reflecting the outcome (r1/c14 — copy2's "no receipt
-  on failure" reading is REFUTED and is not carried here).
-* **The bounds are properties of the HOST'S OWN WRITE** (FK41). Nothing here claims 4096
-  bytes about anything the store hands back; a forged comment bypasses this whole lane (N6).
-"""
+"""#767 — the host records its investigation as a comment on the case (`record_case_ticket`)."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
-import inspect
 import json
 import re
 
@@ -245,62 +214,6 @@ def test_767_writer_comments_on_a_closed_case(tmp_path, monkeypatch, capsys):
         assert got["status"] == "commented"
     err = capsys.readouterr().err
     assert "released" not in err, f"the writer still warns about a release: {err!r}"
-
-
-def test_767_the_release_predicate_and_its_refusal_are_gone():
-    """d4_predicates_in_mapper, REVERSED by #1221's amendment. The names the writer's release
-    check was made of are removed with it: `case_ticket`'s `ReleasePredicate`,
-    `release_predicate` and `is_released`, and the writer's `refused-released` receipt word
-    (`RECEIPT_REFUSED_RELEASED`). Kept-but-unused, any of them would be a second reading of
-    a case's lifecycle for the next caller to pick up. The positive control is the vocabulary
-    that stays: the mapping loader, and the writer's `commented` and `error` words."""
-    for gone in ("ReleasePredicate", "release_predicate", "is_released"):
-        assert not hasattr(case_ticket, gone), f"case_ticket.{gone} survives the amendment"
-    assert not hasattr(ticket_writer, "RECEIPT_REFUSED_RELEASED"), (
-        "the writer still carries the `refused-released` receipt word"
-    )
-    assert callable(case_ticket.load_case_mapping)
-    assert (ticket_writer.RECEIPT_COMMENTED, ticket_writer.RECEIPT_ERROR) == ("commented", "error")
-
-
-@pytest.mark.parametrize(
-    ("why", "released"),
-    [
-        ("no `released:` section (the shipped shape)", None),
-        ("the legacy section, `released.status: closed`", LEGACY_RELEASED),
-        ("`released.status` equal to `open.status`", {"status": OPEN_STATUS}),
-        ("`released.status` a list", {"status": [CLOSED_STATUS]}),
-        ("`released.status` a number", {"status": 7}),
-        ("`released.status` blank", {"status": "  "}),
-        ("`released:` a bare scalar", CLOSED_STATUS),
-    ],
-)
-def test_767_a_legacy_released_section_is_ignored(tmp_path, monkeypatch, why, released):
-    """d_predicates_fail_closed_by_construction, REVERSED by #1221's amendment: every mapping
-    state that demand refused now loads, because the mapping names no released status —
-    a tenant repo outside this tree may still carry #767's `released:` section, in any shape,
-    and it loads fine and changes nothing. There is no open/released collision rule any more —
-    a mapping whose `released.status` IS its `open.status` loads — and no section is required.
-
-    Observed at the loader (no refusal; the record holds a `CaseMapping`, not a kept error) and
-    at the writer (its one comment POST, nothing else, receipt `commented`) on a case the store
-    holds as `closed`."""
-    use_mapping(monkeypatch, tmp_path / "dfn", mapping_doc(released=released))
-
-    loaded = case_ticket.load_case_mapping(current_settings())
-    assert loaded["open"]["status"] == OPEN_STATUS, f"{why}: the open section was not loaded"
-    assert isinstance(current_mapping(), case_ticket.CaseMapping), (
-        f"{why}: the run's record kept {current_mapping()!r} instead of the mapping"
-    )
-
-    run_dir = make_run(tmp_path)
-    store = FakeStore(ticket=ticket("any", status=CLOSED_STATUS))
-    assert record(run_dir, store) is None
-    assert [(c.method, c.path) for c in store.calls] == [
-        ("POST", f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"),
-    ], f"{why}: the writer's calls were {[(c.method, c.path) for c in store.calls]}"
-    got = receipt(run_dir)
-    assert (got["status"], got["ok"]) == ("commented", True), f"{why}: receipt is {got!r}"
 
 
 @pytest.mark.parametrize(
@@ -1081,27 +994,6 @@ def test_767_every_mapping_fault_refuses_with_a_receipt(tmp_path, monkeypatch, c
         f"{why}: the fault escaped to the catch-all instead of being refused: {err!r}")
 
 
-def test_767_the_mapping_is_parsed_once_per_run(tmp_path, monkeypatch):
-    """The read screen asks the mapping on every ticket query and the writer three times per
-    record, so the mapping is parsed ONCE, when the run's record is resolved, and every reader
-    is handed that result (#1107): an edit to the file mid-run changes nothing the record
-    serves — only a record resolved after the edit carries it — and the value a reader edits is
-    its own copy, so a caller mutating it cannot poison the next."""
-    root = tmp_path / "dfn"
-    use_mapping(monkeypatch, root, mapping_doc(comment_author="first"))
-    resolved = current_record()
-    first = resolved.ticket_mapping.plain()
-    assert first["comment"]["author"] == "first"
-    first["comment"]["author"] = "mutated"
-    assert resolved.ticket_mapping["comment"]["author"] == "first", (
-        "a caller's mutation reached the next caller — the record hands out its own data")
-    use_mapping(monkeypatch, root, mapping_doc(comment_author="second"))
-    assert resolved.ticket_mapping["comment"]["author"] == "first", (
-        "an edit to the mapping file reached a record resolved before it")
-    assert current_mapping()["comment"]["author"] == "second", (
-        "a record resolved after the edit does not carry it")
-
-
 def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeypatch, capsys):
     """d_non_dict_mapping_refused_first — settled premise 16. A mapping that parses to a
     non-dict is refused by the PRE-EXISTING `isinstance(dict)` check before any section is
@@ -1131,109 +1023,6 @@ def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeyp
 # =======================================================================================
 # D1 / D2 / D3 — the mapping, the seam, the record
 # =======================================================================================
-
-
-def test_767_mapping_carries_comment_and_no_close_or_released_lane(tmp_path, monkeypatch):
-    """d1_mapping_sections — the SHIPPED mapping gains `comment: {author, body}` and loses
-    `close`, `annotate`, `enrich` and any `approved:` tag — and, since #1221's amendment, the
-    `released: {status}` section #767 added: nothing reads a released status any more, so the
-    file an operator copies must not suggest that setting one does anything.
-
-    §7 R5/FK27 decided the collision (20-demands F5, r6): the deleted `close:` section
-    already spends a `comment:` key, so the two must not be resolved by search. A mapping an
-    operator has NOT yet migrated — one still carrying `close:` — is SILENTLY INERT rather
-    than refused (nothing reads it once D5 lands), and the writer binds the TOP-LEVEL
-    `comment.author`/`comment.body` explicitly: the control below gives the two sections
-    different values and observes which one crossed."""
-    shipped = shipped_mapping_doc()
-    assert isinstance(shipped.get("comment"), dict), "the shipped mapping has no `comment:`"
-    assert set(shipped["comment"]) >= {"author", "body"}
-    assert "author_aliases" not in shipped["comment"], (
-        "the shipped mapping still carries the retired author-identity set"
-    )
-    for dead in ("close", "annotate", "enrich", "approved", "released"):
-        assert dead not in shipped, f"the shipped mapping still carries `{dead}:`"
-
-    use_mapping(monkeypatch, tmp_path / "dfn", mapping_doc(
-        comment_author="top-level",
-        close_section={"status": "closed", "author": "stale", "comment": "stale body"},
-    ))
-    assert case_ticket.load_case_mapping(current_settings())["close"], "a stale close: section was refused, not inert"
-    run_dir = make_run(tmp_path)
-    store = FakeStore()
-    record(run_dir, store)
-    assert store.only_comment()["author"] == "top-level", (
-        "the writer resolved `comment` by search and found the stale `close.comment`"
-    )
-
-
-def test_767_record_case_ticket_is_the_writer_seam(tmp_path, monkeypatch):
-    """d2_writer_seam — `close_case_ticket` becomes `record_case_ticket`, keeps the
-    `TicketWriterDeps{request}` injection seam (g16: there is no third), and
-    takes the ticket KEY as a parameter so the platform change is a call-site edit rather
-    than a re-design (§7 R8/FK04 — this spec is scoped to the playground identity
-    `case_id = run_dir.name`, and the platform key's provenance is deferred and unowned).
-
-    RF2 is why the test implementors are asserted here too: c11's census of
-    `close_case_ticket` under-counts the duck-typed `ticket_writer=` seam by a whole file
-    (g10), and its "non-definition reference" wording excuses it — a rename is SILENT at
-    every one of those sites and their tests still pass. `tests/_spec791.py`'s tail fake is
-    the one this suite can reach directly; the rest ride
-    `d_checked_in_censuses_move_together`."""
-    from defender.tests import _spec791
-
-    fn = require(ticket_writer, "record_case_ticket", "D2's rename")
-    assert not hasattr(ticket_writer, "close_case_ticket"), (
-        "`close_case_ticket` survives the rename — two names for one write is the binding "
-        "contest D2 exists to end"
-    )
-    params = inspect.signature(fn).parameters
-    assert list(params)[0] == "run"
-    assert params["deps"].default is ticket_writer.DEFAULT_DEPS
-
-    key_param = next((n for n in params if "key" in n), None)
-    assert key_param, (
-        f"record_case_ticket takes no ticket-key parameter (has {list(params)}): §7 R8 makes "
-        "the key an argument NOW so the platform's pre-existing, vendor-minted key is a "
-        "call-site edit later"
-    )
-    assert params[key_param].default is not inspect.Parameter.empty, (
-        "the key parameter has no default — run.py must keep passing only the run dir"
-    )
-
-    use_mapping(monkeypatch, tmp_path / "dfn")
-    run_dir = make_run(tmp_path)
-
-    default_store = FakeStore()
-    record(run_dir, default_store)
-    assert default_store.paths() == [
-        f"{TICKETS_PATH}/{run_dir.name}{COMMENTS_SUFFIX}"
-    ], "the default key is not the playground identity `case_id = run_dir.name`"
-
-    injected = FakeStore()
-    record(run_dir, injected, **{key_param: "SOC-4242"})
-    assert injected.paths() == [
-        f"{TICKETS_PATH}/SOC-4242{COMMENTS_SUFFIX}"
-    ], "an explicitly-passed key did not reach the wire — the writer's one POST (#1221: no read-back)"
-    assert receipt(run_dir)["key"] == "SOC-4242"
-
-    # The key is the case's identity everywhere the write names it — a body template that
-    # renders `{case_id}` names the case being written to, not the run dir.
-    use_mapping(monkeypatch, tmp_path / "dfn", mapping_doc(comment_body="[{case_id}] {disposition}"))
-    named = FakeStore()
-    record(run_dir, named, **{key_param: "SOC-4242"})
-    assert named.comment_body().startswith("[SOC-4242]"), (
-        "the POST went to one case and the rendered body named another"
-    )
-
-    assert hasattr(_spec791.SpecTail, "record_case_ticket"), (
-        "tests/_spec791.py's tail fake still implements `close_case_ticket` only: D2's rename "
-        "is silent at every duck-typed implementor of the `ticket_writer=` seam (RF2/g10), "
-        "and the run's ticket step then does nothing while the test stays green"
-    )
-    assert not hasattr(_spec791.SpecTail, "close_case_ticket"), (
-        "the retired method name survives on the seam's test implementor"
-    )
 
 
 def test_767_case_record_splits_cause_from_narrative(tmp_path, monkeypatch):

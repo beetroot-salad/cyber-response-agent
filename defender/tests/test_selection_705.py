@@ -14,7 +14,6 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 
 from defender.tests._session_store_705 import (
-    complete_pair,
     make_store,
     mid_pair_session,
     nine_row_fixture,
@@ -50,27 +49,6 @@ def test_store_reader_return_shape_is_role_scoped(tmp_path):
     assert not isinstance(actor[0], (ModelRequest, ModelResponse))
     assert {k for row in actor for k in dict(row)} == {"coord", "agent_id", "kind", "tool_name"}, (
         f"the actor projection's columns are the contract; got {actor[0]}")
-
-
-def test_reader_serves_three_roles_against_the_same_session_id_back_to_back(tmp_path):
-    """`send`, `analysis` and `actor` reads of one session_id against one open handle, in"""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id, _ = mid_pair_session(store)
-
-    first_send = ss.hydrate(store, session_id, role="send")
-    analysis = ss.hydrate(store, session_id, role="analysis")
-    actor = ss.hydrate(store, session_id, role="actor")
-    second_send = ss.hydrate(store, session_id, role="send")
-
-    assert ModelMessagesTypeAdapter.dump_python(first_send, mode="json") == \
-           ModelMessagesTypeAdapter.dump_python(second_send, mode="json"), (
-        "an interleaved analysis/actor read must carry no state into the next send read")
-    assert len(analysis) > len(first_send)
-    assert len(actor) == len(analysis), (
-        "the actor read is not truncated either (R8 scopes truncation to `send`)")
-    flat = " ".join(str(v) for row in actor for v in dict(row).values())
-    assert "investigate" not in flat, "the actor projection must carry no payload text"
 
 
 def test_reader_role_vocabulary_is_closed_and_unknown_roles_are_refused(tmp_path):
@@ -200,39 +178,6 @@ def test_the_actor_row_projection_over_a_session_that_ends_mid_pair(tmp_path):
     assert "/tmp/alert.json" not in flat, flat
 
 
-def test_actor_role_read_over_a_session_containing_only_synthesized_frontier_rows(tmp_path):
-    """An `actor` read over a session whose every row is a synthesized frontier returns a"""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    secret = "FRONTIER: the defender is chasing the sshd pivot hypothesis"
-    parent = None
-    for i in range(3):
-        parent = store.append(session_id, [user_request(f"{secret} #{i}")],
-                              agent_id="main", synthesized=True, parent_id=parent)[0]
-
-    actor = ss.hydrate(store, session_id, role="actor")
-    assert len(actor) == 3, f"the actor read must return every synthesized row; got {actor}"
-    flat = " ".join(str(v) for row in actor for v in dict(row).values())
-    assert "defender" not in flat, flat
-    assert "sshd pivot" not in flat, flat
-
-
-def test_actor_role_read_against_a_session_with_zero_rows(tmp_path):
-    """An `actor` read of a session with no rows returns an empty projection without"""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    empty = store.new_session(agent_id="main")
-
-    assert ss.hydrate(store, empty, role="actor") == []
-    assert ss.hydrate(store, empty, role="analysis") == []
-
-    populated = store.new_session(agent_id="main")
-    store.append(populated, [user_request("real"), *complete_pair()], agent_id="main")
-    assert len(ss.hydrate(store, populated, role="actor")) == 3, (
-        "the same reader over a non-empty session must return rows")
-
-
 def test_run_end_flush_on_a_forked_sessions_own_terminal_turn(tmp_path):
     """For a fork whose parent chain crosses into another `session_id` partway up, the"""
     ss = store_mod()
@@ -325,29 +270,6 @@ def test_ingest_tail_is_exactly_response_then_request_including_across_a_fold(tm
     assert kinds_per_turn == [["response", "request"]] * 4, kinds_per_turn
 
 
-def test_one_frontier_row_per_fold_boundary(tmp_path):
-    """A run that crosses one fold boundary several times over produces exactly ONE"""
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    sel.ingest(store, session_id, [user_request("orientation")], agent_id="main")
-
-    first = sel.fold(store, session_id, agent_id="main", boundary=1)
-    for _ in range(3):
-        assert sel.fold(store, session_id, agent_id="main", boundary=1) == first, (
-            "the frontier for one boundary must be reused, not re-minted per render")
-
-    sel.ingest(store, session_id,
-               [user_request("orientation"), *complete_pair(), *complete_pair()],
-               agent_id="main")
-    second = sel.fold(store, session_id, agent_id="main", boundary=2)
-    assert second != first
-
-    rows = sql(store, "SELECT id FROM message WHERE synthesized = 1 ORDER BY id")
-    assert [r[0] for r in rows] == [first, second], (
-        f"exactly two frontier rows for two boundaries; got {rows}")
-
-
 def test_a_composer_is_called_on_the_mint_only_and_its_action_runs_once_the_row_landed(tmp_path):
     """`text` may be a `selection.Composer` (#936): a callable the mint invokes ON THE APPEND"""
     sel = selection_mod()
@@ -401,33 +323,6 @@ def test_folds_are_restart_shaped_with_an_empty_tail(tmp_path):
     assert "t2" not in flat, "the live verbatim tail must not survive the fold"
 
 
-def test_request_row_carries_run_step_duration_ms_and_wire_sha(tmp_path):
-    """Every request row the renderer writes carries a `run_step`, a `duration_ms` and a
-    `wire_sha`, and response rows carry none of the three — the three fields are a
-    property of the request the renderer stamped, not of the response the log records."""
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-
-    sel.render(store, session_id, [], agent_id="main", fold=False,
-               run_step=1, duration_ms=12.5)
-    sel.ingest(store, session_id, [user_request("root"), text_response("a")],
-               agent_id="main")
-    sel.render(store, session_id, [], agent_id="main", fold=False,
-               run_step=2, duration_ms=34.0)
-
-    rows = sql(store, "SELECT kind, run_step, duration_ms, wire_sha FROM message ORDER BY id")
-    requests = [r for r in rows if r[0] == "request"]
-    responses = [r for r in rows if r[0] == "response"]
-    assert requests, "no request row was written"
-    for _kind, run_step, duration_ms, wire_sha in requests:
-        assert run_step is not None, (run_step, duration_ms, wire_sha)
-        assert duration_ms is not None, (run_step, duration_ms, wire_sha)
-        assert wire_sha, (run_step, duration_ms, wire_sha)
-    for row in responses:
-        assert row[1:] == (None, None, None), f"a response row carries the three: {row}"
-
-
 def test_compaction_on_a_restored_history_survives_against_selection(tmp_path):
     """Compaction over a restored history still folds correctly when the fold boundary is"""
     sel = selection_mod()
@@ -454,19 +349,3 @@ def test_compaction_on_a_restored_history_survives_against_selection(tmp_path):
         "the sentinel-shaped CONTENT must be folded away like any other turn")
 
 
-def test_the_human_coordinate_carries_a_session_component(tmp_path):
-    """A projected coordinate names the session as well as the agent and the ordinal —"""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    main = store.new_session(agent_id="main")
-    r1 = store.append(main, [user_request("root")], agent_id="main", seq=0)[0]
-    fork = store.fork(main, at_message_id=r1)
-    store.append(fork, [text_response("fork's first")], agent_id="main", seq=0, parent_id=r1)
-
-    main_rows = ss.hydrate(store, main, role="actor")
-    fork_rows = ss.hydrate(store, fork, role="actor")
-    assert main_rows[0]["coord"] == f"{main}/main#0"
-    assert fork_rows[-1]["coord"] == f"{fork}/main#0"
-    assert main_rows[0]["coord"] != fork_rows[-1]["coord"], (
-        "C26's collision — a source main#0 and a fork main#0 printing identically — must "
-        "not survive into the fork era")

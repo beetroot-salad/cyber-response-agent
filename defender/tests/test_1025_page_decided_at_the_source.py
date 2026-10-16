@@ -1,12 +1,4 @@
-"""#1025 (PR #1042 review, fifth pass) — a fact is decided where it is produced, once.
-
-Every finding this module pins is one of two shapes the earlier passes kept meeting: a fact
-computed twice (the step wall, the role costs, the draw-read totals, the judge-trace census)
-so two surfaces of one page could disagree, or a guard applied at one site and not its
-sibling (the refusal scrub, the `esc`/`_uv` split, the duration gate, the gather-summary
-read). Each fix here moves the decision to its owner — the model at load, the reader in the
-package — and the test asks the two surfaces to agree by construction.
-"""
+"""#1025 (PR #1042 review, fifth pass) — a fact is decided where it is produced, once."""
 from __future__ import annotations
 
 import contextlib
@@ -53,12 +45,7 @@ def _world(page: E.Page, label: str) -> str:
 
 def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
     """Rendered from `re` — a directory named with a substring of `report.md` and `read` — the
-    report slot's refusal still says `report.md` and `could not be read`, whole: no scrub runs
-    over the sentence at all (#1049: the loader's `_sentence` is gone — the reader formats the
-    relative name `worlds/<w>/report.md` at its source and never holds the root, so a short
-    relative spelling of the root has nothing to leak from and nothing to be cut out of a
-    word). Before, the same page read "<episode>port.md could not be <episode>ad" (review of
-    PR #1042). Positive control: the root's spelling is absent from the page."""
+    report slot's refusal still says `report.md` and `could not be read`, whole: no."""
     ep = E.sample_episode(tmp_path)
     short = tmp_path / "re"
     ep.dir.rename(short)
@@ -82,11 +69,7 @@ def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
 
 
 def test_1025_the_runs_launcher_line_and_the_runs_row_show_one_wall(tmp_path):
-    """A repeated `runs` step whose FIRST entry is inverted and whose second spans four
-    minutes: the stage table's `runs` row and the launcher line under it both read the step's
-    trusted span, 4m00s. Before, the launcher line read the first entry verbatim — "—" beside
-    a row that said 4m00s, or 1m00s under 4m00s with the entries swapped (review of
-    PR #1042, J15/p5)."""
+    """A repeated `runs` step whose FIRST entry is inverted and whose second spans four minutes."""
     ep = E.sample_episode(tmp_path)
     steps = [s for s in E.every_step() if s[0] != "runs"]
     steps += [("runs", "2026-09-09T10:20:00Z", "2026-09-09T10:19:00Z"),
@@ -108,11 +91,8 @@ def test_1025_the_runs_launcher_line_and_the_runs_row_show_one_wall(tmp_path):
 
 
 def test_1025_the_stage_table_reads_the_role_costs_the_model_decided(tmp_path):
-    """The verdict tile's total, the header's lower bound and the stage table's per-role rows
-    are one computation: `_Episode.role_costs`, filled at load, is what the table renders —
-    the renderer holds no second walk of the wire logs. Pinned structurally (the render
-    function names no `role_cost` / `comparator_cost` call) and by value (the model's numbers
-    are the table's)."""
+    """The verdict tile's total, the header's lower bound and the stage table's per-role rows are
+    one computation."""
     module = visualize_episode()
     ep = E.sample_episode(tmp_path)
     loaded = E.load_episode(ep.dir, module=module)
@@ -126,10 +106,7 @@ def test_1025_the_stage_table_reads_the_role_costs_the_model_decided(tmp_path):
 
 
 def test_1025_a_framed_only_judge_trace_naming_no_roster_label_is_listed_as_unattributed(tmp_path):
-    """A launcher-produced episode writes only the framed twin for a judge call. One naming
-    a label off the roster is neither a world's block nor the family's — so it is listed on
-    the "unattributed traces" line exactly as a plain-file stranger is; before, the census
-    walked plain files alone and the framed-only stranger vanished (review of PR #1042)."""
+    """A launcher-produced episode writes only the framed twin for a judge call."""
     ep = E.sample_episode(tmp_path)
     E.write_framed(ep.dir, "judge:zz_gone:0", prompt="a world removed after a re-grade")
     page = render(ep)
@@ -140,15 +117,7 @@ def test_1025_a_framed_only_judge_trace_naming_no_roster_label_is_listed_as_unat
 
 
 def test_1025_the_draw_read_totals_count_every_directory_the_world_sections_count(tmp_path):
-    """A world whose draw directory holds one unparsable document: its world section says "1
-    draw documents unreadable", and the findings section's total says the same — one
-    directory, one count. Before, the totals summed the WALKED labels alone and omitted it
-    (review of PR #1042).
-
-    #1105 PR 2 (declared change 4/J3): a world present only as a `runs/` directory (no
-    manifest entry, no grade row) is no roster line any more — no section, and its draws are
-    counted nowhere, so the two counts still agree (both silent). The counted case is the same
-    world named by a grade-record row."""
+    """A world whose draw directory holds one unparsable document."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / f"{E.EPISODE_ID}-orphan").mkdir()
     E.plant_raw(ep.dir / "worlds" / "orphan" / "judge" / "0.yaml", b"- not: [a mapping")
@@ -170,12 +139,7 @@ def test_1025_the_draw_read_totals_count_every_directory_the_world_sections_coun
 
 
 def test_1025_a_negative_duration_is_that_slots_own_absence(tmp_path):
-    """A negative `duration_ms` off a box-writable trace is gated like a negative cost: the
-    control's result event with `duration_ms: -600000` contributes no wall, so the worlds'
-    wall range spans the other two runs (3m00s–5m00s) and the lower bound reads over the
-    longest REAL world; a questioner response row with a negative duration adds nothing to
-    the questioner wall. Before, the range read "—–5m00s" and the estimate went backwards
-    (review of PR #1042)."""
+    """A negative `duration_ms` off a box-writable trace is gated like a negative cost."""
     ep = E.sample_episode(tmp_path)
     E.run_dir(ep.dir, E.CONTROL, cost=0.40, duration_ms=-600_000)
     page = render(ep)
@@ -191,10 +155,7 @@ def test_1025_a_negative_duration_is_that_slots_own_absence(tmp_path):
 
 
 def test_1025_a_refused_wire_trace_is_named_as_refused(tmp_path):
-    """A link planted at a questioner trace's own name is refused at load and SAID in its
-    block — "trace refused" — never the "no response recorded" a benign empty call reads
-    as: a planted alias must not look like nothing happened (review of PR #1042). The stage
-    row still counts it as a trace that did not price."""
+    """A link planted at a questioner trace's own name is refused at load and SAID in its block ."""
     ep = E.sample_episode(tmp_path)
     target = tmp_path / "elsewhere.jsonl"
     target.write_text("{}\n", encoding="utf-8")
@@ -207,11 +168,8 @@ def test_1025_a_refused_wire_trace_is_named_as_refused(tmp_path):
 
 
 def test_1025_record_derived_refusals_take_the_untrusted_escape(tmp_path):
-    """A refusal sentence quotes the record's own bytes (a YAML error echoes the offending
-    line), so it is rendered through `_uv` like every other record field — the page's own O9
-    rule — and a planted `onerror=alert(1)` inside a mis-indented `judge.yaml` value reaches
-    the verdict band split across the element boundary, never as the literal substring.
-    Same for `timing.json` and the records section's four slots."""
+    """A refusal sentence quotes the record's own bytes (a YAML error echoes the offending line), so
+    it is rendered through `_uv` like every other record field ."""
     ep = E.sample_episode(tmp_path)
     hostile = "onerror=alert(1)"
     E.plant_raw(ep.dir / "judge.yaml", f"worlds:\n  - world: b\n   bad: {hostile}\n")
@@ -231,12 +189,7 @@ def test_1025_record_derived_refusals_take_the_untrusted_escape(tmp_path):
 @NOT_ROOT
 def test_1025_an_unreadable_gather_summary_is_the_chains_own_sentence_for_the_judge_and_the_page(
         tmp_path):
-    """`family.lead_chain` reads the gather summary through `read_guarded`: a mode-000
-    `gather_summaries/<lead>.md` makes that lead's summary a sentence naming the world-relative
-    file and the fault — returned, not raised — so the grading pass keeps its grade and the
-    page shows the same chain. Neither carries the operator's absolute path. Before, the read
-    was a bare `read_text`: the page caught the `PermissionError` at its call site and printed
-    "lead unreadable", while the grade unwound whole (review of PR #1042)."""
+    """`family.lead_chain` reads the gather summary through `read_guarded`."""
     family = E.mod("learning.judge.family")
     ep = E.sample_episode(tmp_path)
     world = ep.world(E.GRADED_WORLD)

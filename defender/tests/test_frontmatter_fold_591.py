@@ -11,7 +11,6 @@ from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp
 from defender.runtime.verbs import read_roster
 
-WORKTREE = Path(__file__).resolve().parents[2]
 
 
 def _hook():

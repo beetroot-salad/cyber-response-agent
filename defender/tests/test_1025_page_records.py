@@ -1,33 +1,5 @@
-"""#1025 — the records section, the per-record refusal policy, the value-channel escape, the
-one-reader discipline, and the housekeeping the page PR owes.
-
-O8/O9 and J6/J12 as the human resolved them (§7 Q5, Q10, Q11): only `family.yaml` refuses the
-page; every other record a reader refuses renders the reader's refusal sentence, escaped, in
-its own slot — "grade record unreadable" in the band, "timing record unreadable" with an empty
-wall column, "samples record unreadable" / "provenance record unreadable" and the outcome's
-"no record" state (with the reader's reason) in the records section — never folded into
-"absent", each read inside its own boundary catching the reader's refusal class AND `OSError`
-(readers that leak a bare `PermissionError`, p6). Reader-side
-moves this PR makes (O8, as the human restated Q5 at the second §7 sitting, 71-resolutions-f
-F-4): the PAGE reads `samples.yaml` strictly — a strict reader passed through
-`read_samples_record`'s existing `reader=` seam — while the
-DEFAULT reader stays permissive, so `grade_episode` / `judge_render` keep
-grading an episode whose `samples.yaml` is malformed exactly as today (#1007 M4/O5; the
-coherence test at the end of this file); the root `provenance.json` is read through a new
-public accessor in the record-names home (`archive.read_family_stamp`, beside
-`FAMILY_STAMP_NAME`, moved there from `branch/cli.py`) that refuses a directory or a document
-that is not the stamp; the symlink/FIFO screen on `report.md` / `investigation.md` lives INSIDE
-the world-archive reader path — `_read_archived_text` and the `read_report` call inside
-`read_world_facts` — and NOT in the repo-wide `_report.read_report` (nine production callers
-outside this graph), so the grading pass and the judge input builder read `world_archive`
-through the same screen the page does (the two coherence demands minted at §7). The page
-encodes with `errors="replace"` before `write_guarded`, lets no NUL byte through and puts
-U+FFFD where a NUL stood (the R6 hole; F-7): a NUL or a lone surrogate in a record never fails
-the render.
-
-RED AGAINST HEAD: the page module does not exist; the reader-side accessor and screen do not
-exist either, and their tests fail on the reader, once each.
-"""
+"""#1025 — the records section, the per-record refusal policy, the value-channel escape, the one-reader
+discipline, and the housekeeping the page PR owes."""
 from __future__ import annotations
 
 import json
@@ -104,14 +76,7 @@ def _sections(page: E.Page) -> dict[str, str]:
 
 def test_1025_each_record_in_the_records_section_renders_as_absent_when_missing_and_its_content_when_present(
         tmp_path):
-    """The live-996 shape renders `samples.yaml` as "absent" and the other records present; a
-    copy with `provenance.json` removed renders it as "absent" and one with `outcome.yaml`
-    removed renders the outcome's distinct "no record" state, without raising; the sample
-    renders the base story, the discriminator predicate, the served systems, the three worlds,
-    pre-flight's outcome word and reason with its drift / not-replayable / unservable entries,
-    each failed world's own record, every samples section (a system's real answers, another's
-    unavailable reason) and the provenance stamp's `agreed` commit.
-    """
+    """The live-996 shape renders `samples.yaml` as "absent" and the other records present."""
     ep = E.sample_episode(tmp_path)
     call = {"system": E.SYSTEM, "verb": "esql", "params": {"query": "FROM drifted-index"}}
     E.write_outcome(ep.dir, drift=[{**call, "status": "the live answer drifted"}],
@@ -148,14 +113,8 @@ def test_1025_each_record_in_the_records_section_renders_as_absent_when_missing_
 
 
 def test_1025_markup_in_every_model_authored_field_renders_as_text_on_every_section(tmp_path):
-    """A copied episode with `<script>alert(1)</script><img src=x onerror=alert(1)>` planted in
-    a finding's `claim`, `root_cause`, `anchor`, `topic`, `evidence[0]`, a world's `axis` and
-    fact statement, the base story, an `ungradable_reason`, a framed `prompt` and `reply`, a
-    lead's goal and summary, `enqueued_to` and an `unqueueable_findings` entry renders each
-    occurrence escaped (`&lt;script&gt;`, the handler split) and
-    the raw `<script>` nowhere; positive control: the planted text is visible, escaped, in every
-    section and the header.
-    """
+    """A copied episode with `<script>alert(1)</script><img src=x onerror=alert(1)>` planted in a
+    finding's `claim`, `root_cause`, `anchor`, `topic`, `evidence[0]`, a world's."""
     ep = E.sample_episode(tmp_path)
     manifest = E.sample_manifest(base_story=f"story {MARKUP}")
     manifest["worlds"][2]["axis"] = f"axis {MARKUP}"
@@ -188,14 +147,7 @@ def test_1025_markup_in_every_model_authored_field_renders_as_text_on_every_sect
 
 
 def test_1025_non_ascii_and_control_characters_in_rendered_strings(tmp_path):
-    """The page declares and writes UTF-8; an em dash, a zero-width space and a bidi override
-    survive as text (only markup characters are escaped). A record string carrying a NUL or a
-    lone surrogate — reachable through a YAML `"\\uD800"` scalar in a draw document and a JSON
-    `\\ud800` escape in `alert.json` (p4) — does not crash the render: the page renders, the
-    rest of the string survives, no 0x00 byte lands in `learning.html`, and the NUL is
-    replaced by U+FFFD exactly where it stood (the human's F-7 decision: `errors="replace"`
-    does nothing to a NUL, so the page substitutes it on the same path as a lone surrogate).
-    """
+    """The page declares and writes UTF-8."""
     ep = E.sample_episode(tmp_path)
     exotic = "a—b​c‮d"
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(
@@ -225,14 +177,7 @@ def test_1025_non_ascii_and_control_characters_in_rendered_strings(tmp_path):
 
 def test_1025_the_page_encodes_with_errors_replace_before_the_guarded_write(tmp_path):
     """The R6 hole, resolved: the page encodes its document with `errors="replace"` before the
-    guarded write, so a lone surrogate in a record becomes the encoder's replacement character
-    rather than a `UnicodeEncodeError` out of the render (p4: `write_guarded` is strict), and a
-    NUL — which `errors="replace"` leaves untouched (p4 writes it verbatim) — is substituted
-    with U+FFFD on the same path, never written through (71-resolutions-f, F-7). Observable: a
-    record with `"x\\uD800y and n\\0l"` renders to a page whose bytes decode as UTF-8, carry `x`
-    and `y` with one replacement character between them, carry `n\\uFFFDl` where the NUL was,
-    and carry no 0x00.
-    """
+    guarded write, so a lone surrogate in a record becomes the encoder's replacement."""
     ep = E.sample_episode(tmp_path)
     doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable",
                      "x\ud800y and n\x00l")
@@ -252,13 +197,7 @@ def test_1025_the_page_encodes_with_errors_replace_before_the_guarded_write(tmp_
 
 
 def test_1025_judge_yaml_has_invalid_yaml_syntax(tmp_path):
-    """A present-but-corrupt `judge.yaml` is a different state from absence: `read_grade`
-    raises rather than returning `None` (F25), and the band renders "grade record unreadable"
-    with the reader's reason — never the "no grade record" band — while the leads section
-    renders as on the intact episode and the stage table still renders. (The stage section's
-    judge transcripts follow the draws a readable record names, #1234 A6, so with no readable
-    record they are not shown and that section legitimately differs.)
-    """
+    """A present-but-corrupt `judge.yaml` is a different state from absence."""
     ep = E.sample_episode(tmp_path)
     intact_page = render(ep)
     intact = _sections(intact_page)
@@ -272,11 +211,7 @@ def test_1025_judge_yaml_has_invalid_yaml_syntax(tmp_path):
 
 
 def test_1025_timing_json_is_present_but_not_the_stageclock_record_shape(tmp_path):
-    """A `timing.json` that is not the record's shape — planted, or torn mid-rewrite, the two
-    are byte-identical to the reader — is a distinguishable REFUSED state: the stage table
-    renders "timing record unreadable" with an empty wall column, never "not on the record"
-    for every step, and the other sections render as on the intact episode.
-    """
+    """A `timing.json` that is not the record's shape ."""
     ep = E.sample_episode(tmp_path)
     intact = _sections(render(ep))
     for raw in ('{"steps": [{"step": "questioner"}]}', '{"steps": [{"step": "questioner", "st'):
@@ -295,12 +230,7 @@ def test_1025_timing_json_is_present_but_not_the_stageclock_record_shape(tmp_pat
 
 
 def test_1025_an_alias_planted_at_each_record_name(tmp_path):
-    """A symlink planted at each record's name — `judge.yaml`, `timing.json`, `outcome.yaml`,
-    `samples.yaml`, `provenance.json` — is refused by that record's reader and renders that
-    record's own refusal sentence in its own slot (the outcome's "no record" state naming the
-    refused read); the link's target content
-    appears nowhere; `family.yaml` alone refuses the whole page (d01).
-    """
+    """A symlink planted at each record's name ."""
     ep = E.sample_episode(tmp_path)
     outside = tmp_path / "outside.txt"
     outside.write_text("OUTSIDE-TARGET-CONTENT", encoding="utf-8")
@@ -321,14 +251,8 @@ def test_1025_an_alias_planted_at_each_record_name(tmp_path):
 
 
 def test_1025_a_malformed_record_versus_an_absent_one(tmp_path):
-    """For each of `samples.yaml`, `provenance.json`, `outcome.yaml` the page shows two
-    DIFFERENT states: the absent one when the file is missing and the refused one when it is
-    present and refused — the page reads each through a reader that refuses corruption (J6,
-    O8): the root-stamp accessor for `provenance.json`, a strict samples reader through the
-    `reader=` seam for `samples.yaml` (the default stays permissive, F-4), and
-    `outcome.read_outcome` for `outcome.yaml`, whose absent and refused records are both the
-    "no record" state (M05=A) but each with its own reason.
-    """
+    """For each of `samples.yaml`, `provenance.json`, `outcome.yaml` the page shows two DIFFERENT
+    states."""
     ep = E.sample_episode(tmp_path)
     for name, absent, sentence in (
             ("samples.yaml", "absent", "samples record unreadable"),
@@ -347,13 +271,7 @@ def test_1025_a_malformed_record_versus_an_absent_one(tmp_path):
 
 @NOT_ROOT
 def test_1025_an_unreadable_regular_file_at_a_record_name(tmp_path):
-    """A permission-denied regular file at each record's name takes that record's refusal
-    slot — `read_guarded` answers EACCES with a refusal tuple (p6) and the three readers that
-    leak a bare `PermissionError` (the served ledger, a lead summary) are held by
-    the page's per-record boundary — so the render never raises and each slot reads
-    "<record> unreadable"; a permission-denied `family.yaml` alone refuses the whole page
-    (d01's arm: `render_episode` raises the manifest reader's `JudgeRefused`).
-    """
+    """A permission-denied regular file at each record's name takes that record's refusal slot ."""
     ep = E.sample_episode(tmp_path)
     names = ("judge.yaml", "timing.json", "outcome.yaml", "samples.yaml", "provenance.json")
     E.write_timing(ep.dir, E.every_step())
@@ -385,21 +303,7 @@ def test_1025_an_unreadable_regular_file_at_a_record_name(tmp_path):
 
 
 def test_1025_one_malformed_sidecar_record_sits_beside_otherwise_intact_ones(tmp_path):
-    """Only the section fed by the bad record carries a refusal sentence; every other section
-    renders exactly as on the intact episode — each record is read inside its own boundary.
-
-    Spec resolution (human-authorized, see the PR body's "Spec resolution" note): this test
-    and `test_1025_timing_json_is_present_but_not_the_stageclock_record_shape` asserted
-    mutually exclusive behavior for `sec-verdict`'s own "lower bound on wall" fallback under a
-    malformed `timing.json` — one wanted it to match the never-had-timing render, the other the
-    had-valid-timing render, and no single implementation can satisfy both from the same
-    on-disk bytes. The kept behavior: a `timing.json` that is present but does not parse gives
-    the verdict tile nothing more to show than one that was never written at all, so its own
-    "lower bound" fallback is owed in both cases — the sibling test now pins this directly.
-    `sec-verdict` is therefore checked against a NEVER-had-timing baseline here, not against
-    this test's own valid-timing `intact` snapshot; every other section is untouched by
-    `timing.json`'s health either way and still checks against `intact`.
-    """
+    """Only the section fed by the bad record carries a refusal sentence."""
     ep = E.sample_episode(tmp_path, timing=True)
     intact = _sections(render(ep))
     never_timing = _sections(render(E.sample_episode(tmp_path / "never-timing")))
@@ -432,13 +336,8 @@ def _refused():
 
 
 def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_page(tmp_path):
-    """`grade_episode` reads `world_archive` through `read_world_facts`, and the symlink/FIFO
-    screen on `report.md` / `investigation.md` now lives in that reader (O8): a symlink at
-    `report.md` reads as a refused report (no disposition, the target's body absent), a symlink
-    at `investigation.md` is `JudgeRefused`, and the grading pass's row for that world carries
-    an ungradable reason naming the leaf while the target's content reaches neither
-    `judge.yaml` nor a draw document.
-    """
+    """`grade_episode` reads `world_archive` through `read_world_facts`, and the symlink/FIFO screen
+    on `report.md` / `investigation.md` now lives in that reader (O8)."""
     family = E.mod("learning.judge.family")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [E.served_row("b", "oracle")], "c": []})
     outside = tmp_path / "outside"
@@ -468,13 +367,8 @@ def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_p
 
 
 def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_page(tmp_path):
-    """The judge's input builder (`judge/render.py::render`) reads `world_archive` through the
-    same `read_world_facts`, so it inherits the reader's screen: a FIFO at `investigation.md`
-    is refused promptly (`JudgeRefused`, the render returns within two seconds, the FIFO is
-    never opened) instead of blocking the pass (p2), and a symlink at `report.md` never puts the
-    target's report into the judge's input — #1234 A3: the usability read sets that world
-    aside, so it is no reference run of the world that IS judged.
-    """
+    """The judge's input builder (`judge/render.py::render`) reads `world_archive` through the same
+    `read_world_facts`, so it inherits the reader's screen."""
     render_mod = E.mod("learning.judge.render")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [E.served_row("b", "oracle")], "c": []})
     fifo = E.plant_fifo(ep / "worlds" / "b" / "investigation.md")
@@ -495,17 +389,7 @@ def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_pa
 
 
 def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malformed(tmp_path):
-    """The page's strict reading of `samples.yaml` is the page's alone (71-resolutions-f F-4):
-    `read_samples_record`'s DEFAULT stays permissive (#1007 M4/O5), so on an episode whose
-    `samples.yaml` is torn `grade_episode` still grades — `judge.yaml` lands with every world
-    judged, and the standalone judge input builder (`judge/render.py::render`, the other caller
-    of the default reader) still returns an input rather than a `JudgeRefused` — while the page
-    rendered over the SAME directory says "samples record unreadable" in its records section
-    and carries the grade the judge wrote in its verdict band (never "no grade record", never
-    "grade record unreadable"). Two readers of one source, deliberately different: the
-    strictness lives in the reader the page passes through the `reader=` seam, not in the
-    default.
-    """
+    """The page's strict reading of `samples.yaml` is the page's alone (71-resolutions-f F-4)."""
     render_mod = E.mod("learning.judge.render")
     ep = E.sample_episode(tmp_path, judge=False)
     E.plant_raw(ep.dir / "samples.yaml", "logs-*: [\n  {")

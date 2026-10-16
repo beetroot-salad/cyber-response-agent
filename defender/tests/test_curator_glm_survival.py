@@ -9,7 +9,6 @@ from pathlib import Path
 
 from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
 from defender._io import read_jsonl_rows
-from defender.tests._repo import head_message, seed_repo
 from defender.learning.core.state import FINDINGS
 
 
@@ -229,24 +228,6 @@ def test_survival_agent_no_git(tmp_repo, helpers):
     assert _commit_count(tmp_repo) == commits_before + 1
     assert _head_files(tmp_repo) == ["defender/lessons/noGit.md"]
     assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
-
-
-def _env_repo(tmp_path: Path):
-    """A tmp git repo with the shared ``defender/lessons-environment/`` corpus + its
-    pending dir — stands in for the layout both env directions (C benign, D adversarial)
-    drain into. Returns the repo path."""
-    repo = tmp_path / "repo"
-    corpus = repo / "defender" / "lessons-environment"
-    pending = repo / "defender" / "learning" / "_pending"
-    corpus.mkdir(parents=True)
-    pending.mkdir(parents=True)
-    (corpus / ".gitkeep").write_text("")
-    seed_repo(repo)
-    return repo
-
-
-def _commit_msg_for(repo: Path, rel_path: str) -> str:
-    return head_message(repo, path=rel_path)
 
 
 def _spawn_curator(**over):

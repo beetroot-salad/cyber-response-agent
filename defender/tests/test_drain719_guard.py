@@ -1,7 +1,6 @@
 """Drain retire set: only the enumerated failure classes bump attempts and retire; systemic faults propagate; stuck rows surface an operator signal."""
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -27,51 +26,6 @@ from defender.tests import _state1135
 #: `retirement_classification_differs_across_the_pitfalls_boundary`, and both halves are
 #: asserted — the author half below, the pitfalls half in
 #: `test_systemic_faults_propagate_without_bumping_attempts`.
-MEMBERS = (author_shared.AuthorError, GitError, ModelRetry)
-NON_MEMBERS = (StageAbort, FatalConfigError, BoxFault, OSError, RuntimeError, LookupError)
-
-
-def _instance(cls: type[BaseException], note: str) -> BaseException:
-    """Build `cls` the way production raises it.
-
-    `GitError`'s constructor is `(args, returncode, stderr)`, not `(message)` — a
-    single-argument call raises `TypeError` in the test's own setup, which silently truncates
-    any loop that builds instances lazily and leaves the assertions after it unexecuted. That
-    is invisible to reading and to a null-stub pass: the test still collects, still fails
-    against a missing target, and looks like every other red. Every caller here therefore goes
-    through this factory, and the callers build their instances UP FRONT so a wrong shape is
-    one loud failure rather than a quietly shortened loop."""
-    if cls is GitError:
-        return GitError(["commit", "-m", note], 1, "fatal: unable to write new index file")
-    return cls(note)
-
-
-def _raising_gate(exc: BaseException):
-    """A gate that fails. The gate runs outside the clauses that name the retire set, so it is
-    the injection point for "raised where nothing is watching for a member"."""
-
-    def gate(batch, cfg):
-        raise exc
-
-    return gate
-
-
-def _wedge_git(repo: Path) -> None:
-    """Occupy git's index lock, so the next real `git add`/`git commit` in `repo` fails with a
-    real `GitError` — the transient git failure D1/P01 is about, induced through git itself
-    rather than imagined."""
-    (repo / ".git" / "index.lock").write_text("held by this test\n")
-
-
-def _unwedge_git(repo: Path) -> None:
-    (repo / ".git" / "index.lock").unlink()
-
-
-def _git_log(repo: Path) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), "log", "--oneline"],
-        capture_output=True, text=True, check=True,
-    ).stdout
 
 
 # Decision 8 — the trigger is an enumerated set, and A12 is reversed

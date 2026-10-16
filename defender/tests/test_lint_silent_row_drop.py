@@ -1,19 +1,7 @@
-"""The lint gate for the silent invlang row drop: lint_silent_row_drop (#876).
-
-The gate says a row may not leave a loop in the invlang row-carrying surface by
-``continue``/``break``/bare ``return`` unless, unconditionally on that same path, a
-``ParseWarning`` was raised or the row landed somewhere. What makes it a construction
-boundary rather than a ban on a spelling is that the two ROLES are derived structurally —
-a PROJECTOR is a class that both holds ``list[ParseWarning]`` state and raises one, a
-TOKENIZER is a function whose return annotation mentions ``Block`` — so these tests carry
-both directions of each role test, not just the positive one.
-
-Driven through the testability seam the shipped gates carry:
-  - ``main(argv, *, scope=None, baseline_path=None) -> exit code``
-  - ``_scan(scope) -> list[Finding]``
-The gate lives at repo-root ``scripts/lint/``, so its path is derived from this file.
-"""
+"""The lint gate for the silent invlang row drop: lint_silent_row_drop (#876)."""
 from __future__ import annotations
+
+import json
 
 from pathlib import Path
 
@@ -69,6 +57,13 @@ def _scope(tmp_path: Path, *methods: str, name: str = "scope") -> Path:
     _pyfile(tree, "_types.py", _TYPES)
     _pyfile(tree, "parser.py", _PROJECTOR_HEAD + "".join(methods))
     return tree
+
+
+def _write_baseline(path: Path, fingerprints: list[str]) -> None:
+    path.write_text(
+        json.dumps({"//": "test", "entries": {fp: "triaged" for fp in fingerprints}}) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _quals(findings) -> set[str]:

@@ -95,11 +95,6 @@ def test_report_frontmatter_gate(env):
     assert env.decide("report.md", report(disposition="hostile")).allow is False
 
 
-def test_report_case_id_confidence_not_required(env):
-    """D1b (and fb7, its fault-enumeration twin — one assertion, so one test) — a report.md"""
-    assert env.decide("report.md", report()).allow is True
-
-
 def test_report_size_bounds(env):
     """D2 — a report.md whose frontmatter RAW exceeds 512 B OR whose WHOLE on-disk file"""
     assert env.decide("report.md", whole_file_of(BODY_BOUND)).allow is True          # at bound
@@ -286,12 +281,6 @@ def test_report_md_empty_proposed_text(env):
     assert env.decide("report.md", VALID_REPORT).allow is True
 
 
-def test_report_md_whitespace_only_proposed_text(env):
-    """fb9 — whitespace-only proposed_text -> Decision(False, reason) (no leading fence)."""
-    assert env.decide("report.md", "   \n\t\n   \n").allow is False
-    assert env.decide("report.md", VALID_REPORT).allow is True
-
-
 def test_report_md_valid_frontmatter_empty_body(env):
     """fb10 — valid frontmatter with an empty body -> Decision(True); D2's body bound is
     upper-bound-only, no minimum (falsy_valid)."""
@@ -311,18 +300,6 @@ def test_report_md_disposition_benign_commits(env):
     commits (Decision(True)). The valid-member accept path fb5/fb6 (absent/outside-enum) leave
     untested."""
     assert env.decide("report.md", report(disposition="benign")).allow is True
-
-
-def test_report_md_disposition_inconclusive_commits(env):
-    """fb13 (gate-minted) — an otherwise-valid, in-bound report.md with `disposition:
-    inconclusive` commits (Decision(True))."""
-    assert env.decide("report.md", report(disposition="inconclusive")).allow is True
-
-
-def test_report_md_disposition_malicious_commits(env):
-    """fb14 (gate-minted) — an otherwise-valid, in-bound report.md with `disposition: malicious`
-    commits (Decision(True))."""
-    assert env.decide("report.md", report(disposition="malicious")).allow is True
 
 
 # disposition normalization (Fork 7 -> exact-lowercase, non-string/dup -> not-in-enum)

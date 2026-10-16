@@ -12,22 +12,6 @@ from defender.learning.core.state import (
 from defender.learning.core import drains  # type: ignore[import-not-found]
 
 
-def _judge_doc(n: int) -> dict:
-    return {
-        "outcome": "survived",
-        "defender_findings": [
-            {
-                "type": "lead-set",
-                "subject_anchor": f"anchor-{i}",
-                "subject_topic": "topic",
-                "finding": "narrative",
-                "citations": [{"source": "investigation", "quote": "..."}],
-            }
-            for i in range(n)
-        ],
-    }
-
-
 # D1 — a channel carries its own lock topology
 
 

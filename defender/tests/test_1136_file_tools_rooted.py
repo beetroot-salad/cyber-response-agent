@@ -150,11 +150,7 @@ def test_lesson_read_refuses_a_hard_link_to_a_host_file(tmp_path):
 def test_a_write_over_a_hard_link_is_a_retry_and_the_host_file_is_unchanged(tool, tmp_path):
     """A writer over a hard link at the name: today the guarded write refuses it by raising an
     `OSError` straight out of the tool. It must reach the model as a retry, and the host file
-    the link shares an inode with must be byte-for-byte unchanged.
-
-    `edit_file`'s `old_string` is text the HOST file holds, so its pre-read is what decides: a
-    `old_string` absent from it would be refused as "not found" on any code and prove nothing.
-    Same address, plain file first: the write lands as today."""
+    the link shares an inode with must be byte-for-byte unchanged."""
     deps, corpus = _curator(tmp_path)
     host = _host_file(tmp_path)
     lesson = corpus / "x.md"

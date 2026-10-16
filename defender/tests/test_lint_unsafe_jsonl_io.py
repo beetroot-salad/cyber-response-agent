@@ -1,21 +1,7 @@
-"""Characterization + intent tests for the lint_unsafe_jsonl_io gate (#602).
-
-Same two-block shape as test_lint_unpinned_text_io.py: the first block pins what
-the detector does (the net under the resolver refactor), the second is the bugs
-the resolver fixed — each written as an `xfail(strict=True)` first, so the fix
-announced itself as an XPASS and the deleted marker is the proof.
-
-The bug here was narrow and total: `_is_json_call` required
-`call.func.value.id == "json"`, i.e. the callee must be SPELLED `json.loads`. An
-alias (`import json as j`) or a from-import (`from json import loads`) makes the
-whole gate blind, and the shape it exists to stop — a hand-rolled per-line
-json.loads reader that crashes on a torn append (#446) — walks straight through.
-
-Driven through the DI seam added in the parent commit:
-  - main(argv=None, *, scope=None, baseline_path=None) -> exit code
-  - _scan(root) -> list[Finding]
-"""
+"""Characterization + intent tests for the lint_unsafe_jsonl_io gate (#602)."""
 from __future__ import annotations
+
+import json
 
 from pathlib import Path
 
@@ -30,6 +16,13 @@ def _pyfile(tree: Path, rel: str, src: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(src, encoding="utf-8")
     return p
+
+
+def _write_baseline(path: Path, fingerprints: list[str]) -> None:
+    path.write_text(
+        json.dumps({"//": "test", "entries": {fp: "" for fp in fingerprints}}) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _flags(tmp_path: Path, src: str) -> bool:

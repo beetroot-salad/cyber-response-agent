@@ -342,10 +342,7 @@ def _guarded(scene: Scene, row: Row, got: tuple, caplog, *, verdict, always: boo
 def test_a_symlink_at_the_entry_is_not_followed(scene: Scene, row: Row, caplog):
     """A symlink at the name, to an outside file holding the control's bytes: the reader gives
     its "not read" answer, the kernel saw no open and no read of the target, none of it reaches
-    the answer or the log, and the target and the link are as they were.
-
-    Catches: any reader or rule still opening the name by a following spelling (`read_text`,
-    `is_file()`, `exists()`), or a handle rooted below the mount."""
+    the answer or the log, and the target and the link are as they were."""
     caplog.set_level(logging.DEBUG)
     row.prepare(scene)
     target = place(scene, row.name, row.text, "link")
@@ -367,10 +364,7 @@ def test_a_hard_link_at_the_entry_is_not_read(scene: Scene, row: Row, caplog):
     """A hard link at the name to an outside file holding the control's bytes (H1). The kernel
     saw no read of the shared inode (by either name); the answer is the "not read" one (`hard`
     where an `entry_kind` gate calls the hard link a file, as it is one: the read then refuses it); no
-    mark leaks; both names are left.
-
-    Catches: a reader that asks `entry_kind` (which answers "file" for a hard link) and
-    then opens the `Path`, instead of reading through the handle, which refuses it."""
+    mark leaks; both names are left."""
     caplog.set_level(logging.DEBUG)
     row.prepare(scene)
     target = place(scene, row.name, row.text, "hardlink")
@@ -395,10 +389,7 @@ def test_a_planted_holding_folder_is_not_followed(scene: Scene, row: Row, site: 
     """The control's bytes at the same name, with one holding folder below the mount moved
     outside the repo and replaced by a symlink to it (`link`) or by a plain file (`file`): the
     reader neither descends the plant nor reaches the moved entry (no open, no read), gives its
-    "not read" answer, leaks no mark, and leaves the plant.
-
-    Catches: a reader rooted at a folder inside the mount (`catalog_dir`, a `bind` of
-    `gather/queries`), which opens that folder by its spelling and so follows the link."""
+    "not read" answer, leaks no mark, and leaves the plant."""
     caplog.set_level(logging.DEBUG)
     row.prepare(scene)
     place(scene, row.name, row.text, "plain")
@@ -508,10 +499,7 @@ def test_anything_at_the_twin_refuses_the_half_promote_and_nothing_is_followed(
         scene: Scene, plant: str):
     """`kind_at(twin) != "absent"` refuses: a live or dangling symlink, a folder, a FIFO or a
     hard link at the twin is a half-promote, the same verdict a plain twin gets; nothing is
-    opened through it and the plant is left.
-
-    Catches: the probe's `exists()`, which answers True for the live link and False for the
-    dangling one (and would block on nothing, but a follower opening the FIFO would)."""
+    opened through it and the plant is left."""
     place(scene, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain")
     at = scene.at(TWIN_NAME)
     target = None
@@ -551,10 +539,7 @@ def test_a_minted_draft_departs_only_when_nothing_stands_at_its_name(scene, stat
     """`_departed_drafts` answers "departed" for a minted draft whose name holds nothing
     (`kind_at == "absent"`), and only then; `_covers_rule` refuses a departure nothing
     attributes. A link at the name (live or dangling) or a hard link is left for the scrub,
-    not counted as a departure.
-
-    Catches: `Path.exists()`, which follows: it calls a dangling link departed (the `absent`
-    row is the positive control: the same identities, truly gone)."""
+    not counted as a departure."""
     minted = {scene.at(MINTED_NAME): MINTED_IDS}
     if state in ("plain", "link", "hardlink"):
         place(scene, MINTED_NAME, marked_template("wazuh.0a1b2c3d4e5f", "draft"), state)
@@ -679,10 +664,7 @@ def test_a_planted_folder_on_the_drafts_path_refuses_the_write_and_the_claim_goe
     by a plain file: no draft is written behind it, nothing outside the repo (or anywhere
     behind the link) changes or is opened, the refusal is logged at ERROR naming the draft and
     its query id, and the plant stays. A draft whose path does not cross the plant still lands,
-    with its bytes (O5.5). With `catalog=None` the writer's own load reads through the same view.
-
-    `site=gather/queries` and `site=gather` with `kind=link` are O3's regression: the old writer
-    rooted at `catalog_dir` and so wrote the drafts into the link's target."""
+    with its bytes (O5.5). With `catalog=None` the writer's own load reads through the same view."""
     moved = plant_folder(bare, site, kind)
     plant_before = plant_state(bare.at(site))
     before = census(bare.tmp)
@@ -719,10 +701,7 @@ def test_an_occupied_draft_name_is_skipped_and_a_non_plain_one_is_refused(
     or a directory there is `kind` "file" / "dir": somebody's draft, skipped in silence, nothing
     opened. A symlink (live or dangling) or a FIFO is "other": it falls through to the write,
     which refuses it (`NotPlainEntry`): logged at ERROR, the target untouched, the plant left.
-    Either way the name is not in `created`, and the other system's draft still lands.
-
-    Catches: `exists()`, which follows and silently skips a live link (no log), and a write that
-    replaces the link or writes through it."""
+    Either way the name is not in `created`, and the other system's draft still lands."""
     w_name, _ = draft_of(WAZUH_LEAD)
     e_name, e_text = draft_of(ELASTIC_LEAD)
     at = bare.at(w_name)
@@ -779,11 +758,7 @@ def test_a_kind_fault_at_a_drafts_holding_folder_is_logged_and_the_mint_goes_on(
     folders with EACCES or EIO (as root, no permission bit can make that fault for real): the
     wazuh draft is not written, the fault is logged at ERROR naming the draft, its query id and
     the errno's words, and the elastic draft, minted after it in the same call, lands with its
-    bytes. `control`: the same trees over the real `os` mint both.
-
-    Catches: an existence test that unwinds the claim on one unreadable folder (today's
-    `draft.exists()`), and one that reads a refused listing as "the draft is there" and skips
-    in silence (the refusal is never logged)."""
+    bytes. `control`: the same trees over the real `os` mint both."""
     repo = bare_skills(tmp_path)
     skills_dir = repo / "defender" / "skills"
     refuser = RefusesFolder(skills_dir / site, "step", err) if err is not None else None
@@ -895,14 +870,7 @@ def test_run_writes_no_draft_outside_skills_through_a_linked_catalog(
     """O3 through `lead_author.run`. With `skills/gather` or `skills/gather/queries` replaced by
     a link to where the real folder now lies: both drafts are refused and logged, nothing outside
     the repo changes or is opened, the catalog reads as empty so no lead resolves, and the run is
-    recorded done with no commit and no agent spawned.
-
-    `site=None` is the control: both drafts land under `skills/` with their bytes, both are
-    handed to the agent, and the commit carries them.
-
-    No kernel watch on the moved folder here: the run's `git status` (its baseline) re-hashes
-    the TRACKED files behind the link, which is git's read (N-a), not the lane's. The
-    writer-level row above watches it with no git in the call."""
+    recorded done with no commit and no agent spawned."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     run_dir = _run_dir()
@@ -939,9 +907,7 @@ def test_run_goes_on_past_a_refused_draft_folder(tmp_path: Path, kind: str, capl
     """O5.5 through `lead_author.run`: `gather/queries/wazuh/_draft` is a plain file, or a link
     to an empty folder outside the repo. The wazuh draft is refused and logged; the elastic claim
     goes on: its draft lands with its bytes and is the one handoff the agent gets, with the plant
-    still in place and nothing outside the repo changed.
-
-    The agent fake fails (rc 1), so the run stops at the spawn (rc 2)."""
+    still in place and nothing outside the repo changed."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     run_dir = _run_dir()
@@ -1007,18 +973,7 @@ def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skill
 ):
     """O3 through `drains.lead_author_drain` with its production `run_lead_author` and
     `run_pitfalls` (neither injected): the batch worktree's `skills/gather/queries` is a link to
-    a folder outside the repo, and the queued run holds one executed lead with a coined id.
-
-    The draft for it is refused and logged, nothing outside the repo changes, and the marker is
-    served: the run's `pitfalls_collected` and `done` (`commit: none`) are written and nothing is
-    dead-lettered; the pitfalls leg runs clean. A default seam that bound no label (`TypeError`)
-    or `author_drain`'s (its trees hold no `skills/`, or fail to open) fails the claim and
-    dead-letters the marker, or fails the curation, which the drain logs as a pitfalls error.
-
-    No positive control through the drain: with the catalog readable the lead would resolve and
-    the production seam would spawn the real agent (`LEAD_AUTHOR_MODEL` is set to a name no
-    provider routes, so a regression that reaches the spawn fails here rather than calling
-    one)."""
+    a folder outside the repo, and the queued run holds one executed lead with a coined id."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     paths = loop_paths(tmp_path)
     outside = tmp_path / "outside"
@@ -1195,11 +1150,7 @@ def test_trees_that_do_not_hold_skills_exactly_are_refused(tmp_path: Path, how: 
     """`build_lead_author_deps` and `run_pitfalls` refuse trees that hold no mount at
     `paths.skills_dir` itself (`LeadAuthorError`): never a handle rooted elsewhere, above or
     below, and never a fallback to the plain path. `run_pitfalls` refuses up front, before it
-    reads its queue, even a queue over the threshold, whose curator (`invoke`) is never called.
-
-    Catches: a handle built at `paths.skills_dir` beside the trees (`hold(paths.skills_dir)`),
-    and a `run_pitfalls` that takes the trees and ignores them until its commit gate, which a
-    below-threshold queue (or one the curator declines) never reaches."""
+    reads its queue, even a queue over the threshold, whose curator (`invoke`) is never called."""
     from defender.learning.core import persist
     from defender.tests._declared869 import Spawn, pitfall_row
 

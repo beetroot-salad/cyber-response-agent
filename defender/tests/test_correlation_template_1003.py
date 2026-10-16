@@ -14,7 +14,6 @@ from defender.tests._dispositions995 import grant_for, load_dispositions, write_
 from defender.tests import _tenants1106 as T1106
 
 DEFENDER = PATHS.defender_dir
-SHIPPED_TEMPLATE = DEFENDER / "skills" / "gather" / "queries" / "elastic" / "correlate-alerts-by-entity.md"
 
 #: The holder's name as the table spells it — a literal, as in `test_correlation_holder_999`.
 HOLDER = "lead-zero-correlation"

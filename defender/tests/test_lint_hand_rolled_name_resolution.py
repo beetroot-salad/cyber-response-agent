@@ -1,18 +1,4 @@
-"""Unit tests for scripts/lint/lint_hand_rolled_name_resolution.py.
-
-The gate exists because ONE mistake — treating a name in source as the thing it refers to —
-got past three rounds of review on #1008 in four different spellings. Its own contract has two
-halves and both are silent if wrong, so both are pinned here rather than left to the baseline:
-
-  * it must FIRE on a module that parses real source and matches names lexically without ever
-    reaching `_astlib` — that is the shipped bug class;
-  * it must STAY QUIET on the three things that are not that bug: a module that goes through
-    the resolver, a module that only parses synthetic source it wrote itself, and a definition
-    matched by name (`FunctionDef.name`), which has no binding to get wrong.
-
-A gate that fires on everything gets suppressed everywhere, and one that fires on nothing
-shows a green empty baseline; the quiet cases are as load-bearing as the loud one.
-"""
+"""Unit tests for scripts/lint/lint_hand_rolled_name_resolution.py."""
 from __future__ import annotations
 
 import ast

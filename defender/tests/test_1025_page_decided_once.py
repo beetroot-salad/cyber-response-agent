@@ -1,17 +1,5 @@
-"""#1025 — the page decides each presentation question ONCE, in the model, and every surface
-reads the answer (PR #1042 review, fourth pass).
-
-The episode model's docstring promised "everything a section renders, already typed" and
-stopped short: it held the raw timing record, a bare cost float and a result-event state
-string, and the three big render functions each finished the interpretation on their own —
-"is there a real wall?", "was anything priced?", "what does this state read as?" — and
-disagreed at the edges. Each test here plants one edge and asserts the surfaces agree.
-
-Alongside: two per-site fallbacks that validated nothing (a token that fell back to the raw
-id, and joined it into a path; a stray `runs/` directory allowed to wear a world's own label
-and ids), a count read off a wider population than the split it heads, and a row type that
-swallowed a misspelled field.
-"""
+"""#1025 — the page decides each presentation question ONCE, in the model, and every surface reads the
+answer (PR #1042 review, fourth pass)."""
 from __future__ import annotations
 
 
@@ -53,10 +41,8 @@ def _every_step_wall() -> str:
 
 
 def test_1025_an_all_inverted_timing_record_is_unmeasured_on_every_surface(tmp_path):
-    """Every row inverted: no trusted pair, so there is no wall. The stages header and the
-    verdict tile BOTH fall back to the lower bound (before: the header did, the tile did not,
-    keyed on the record merely being readable and non-empty), and the table's caption says
-    what is true — the record is there and has no usable span — never "no timing record"."""
+    """Every row inverted: no trusted pair, so there is no wall. The stages header and the verdict
+    tile BOTH fall back to the lower bound (before: the header did, the tile did."""
     ep = E.sample_episode(tmp_path)
     E.write_timing(ep.dir, _inverted_steps())
     page = render(ep)
@@ -74,10 +60,7 @@ def test_1025_an_all_inverted_timing_record_is_unmeasured_on_every_surface(tmp_p
 
 
 def test_1025_an_episode_whose_every_run_cost_nothing_still_owes_its_total(tmp_path):
-    """Every result event prices its run at $0.0000 and no wire log exists: the runs sub-total
-    is rendered (a result event with a cost IS a priced run) and so is the grand total above
-    it — before, the grand total was gated on `total_cost` being truthy, so a reader saw a
-    runs total with no episode total."""
+    """Every result event prices its run at $0.0000 and no wire log exists."""
     ep = E.sample_episode(tmp_path, traces=False)
     for label in E.WORLDS:
         E.write_tool_trace(ep.run(label), [E.result_event(cost=0.0)])
@@ -99,10 +82,7 @@ def test_1025_an_episode_whose_every_run_cost_nothing_still_owes_its_total(tmp_p
     ("none", "no result event"),
 ])
 def test_1025_a_runs_result_state_reads_the_same_sentence_in_both_sections(tmp_path, plant, sentence):
-    """The world section and the stages table show the same trace's state; each state has one
-    sentence. Before, a present-but-unusable result read "no result event" in the world
-    section and "unusable result event" in the stages table, and an absent trace read
-    "no result event" in one and "no cost recorded" in the other."""
+    """The world section and the stages table show the same trace's state."""
     ep = E.sample_episode(tmp_path)
     trace = ep.run(E.GRADED_WORLD) / "tool_trace.jsonl"
     if plant == "unusable":
@@ -131,13 +111,8 @@ def test_1025_a_runs_result_state_reads_the_same_sentence_in_both_sections(tmp_p
 
 
 def test_1025_a_manifest_id_that_names_no_token_reads_no_ledger_outside_the_episode(tmp_path):
-    """`episode_id: ../../x` is an id the token builder refuses. Before, the model fell back
-    to the raw id AS the token and joined it into `served/<token>.<label>.jsonl` — for a stray
-    `runs/stray/` directory, `<episode>/served/../../x.stray.jsonl`, a file OUTSIDE the
-    episode dir, whose malformed-row count the leads block then rendered. Now the manifest
-    reader itself refuses the id (its world labels cannot name a sibling run under it), so the
-    render refuses before any ledger is named: no page is written, and the outside file's
-    contents reach nothing."""
+    """`episode_id: ../../x` is an id the token builder refuses. Before, the model fell back to the
+    raw id AS the token and joined it into `served/<token>.<label>.jsonl` — for."""
     ep = E.sample_episode(tmp_path)
     manifest = E.sample_manifest()
     manifest["episode_id"] = "../../x"
@@ -154,14 +129,7 @@ def test_1025_a_manifest_id_that_names_no_token_reads_no_ledger_outside_the_epis
 
 
 def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path):
-    """`runs/<label>/` beside `runs/<ep>-<label>/`: the stray's roster label would be the
-    world's own, so it was a second roster item under the same `world-`/`leads-` ids,
-    silently overwriting the world's leads block. Now one item per label: every id on the
-    page is unique and the world's own section and leads block render once.
-
-    #1105 PR 2 (declared change 4/J3): the roster is the manifest's, each arm opened by id,
-    so the shadowing `runs/<label>/` is no roster line at all — it is not shown (before, it
-    was named on an off-roster "not sectioned twice" line)."""
+    """`runs/<label>/` beside `runs/<ep>-<label>/`."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / E.GRADED_WORLD).mkdir()
     page = render(ep)
@@ -181,14 +149,8 @@ def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path
 
 
 def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_path):
-    """A bare `runs/<ep>-x` world — no manifest entry, no grade row — is a section with no
-    findings: the walk never opens its draws. Its `dropped_findings: 4` was still summed
-    into tile 3's "dropped" while its two findings were counted nowhere, so the split did
-    not sum to the total it headed. Now the dropped count is read off the same labels the
-    findings are.
-
-    #1105 PR 2 (declared change 4/J3): the bare arm is no manifest arm, so it is no longer a
-    section either; the heading counts the manifest's worlds alone."""
+    """A bare `runs/<ep>-x` world — no manifest entry, no grade row — is a section with no findings:
+    the walk never opens its draws. Its `dropped_findings: 4` was still summed."""
     ep = E.sample_episode(tmp_path)
     E.run_dir(ep.dir, "x")
     E.draw_document(ep.dir, "x", 0, E.draw_doc(
@@ -225,10 +187,7 @@ def test_1025_a_finding_row_refuses_an_unknown_field():
 
 
 def test_1025_an_absent_archived_report_is_decided_after_the_guarded_read(tmp_path):
-    """An absent `report.md` reads as the ABSENT STATE (`ReportRead.absent`; #1049 F-I: the
-    "not found" sentence died with the path it named) — decided from the bound walk's own
-    open, never by handing a path to `read_report`, whose `is_file()` + `read_text` follow a
-    link planted between the two."""
+    """An absent `report.md` reads as the ABSENT STATE (`ReportRead.absent`."""
     family = E.mod("learning.judge.family")
     bound = E.mod("_io").bind(tmp_path)
     got = family.read_archived_report(bound, "report.md")

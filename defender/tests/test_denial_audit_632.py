@@ -61,13 +61,6 @@ def _visible_html(html: str) -> str:
     return _SCRIPT.sub(" ", _COMMENT.sub(" ", found.group(0)))
 
 
-def _denials(run) -> list[dict]:
-    """The judge run dir's policy-denial stream, or [] when it was never written — so an
-    absent stream fails a count assertion on its own message rather than raising."""
-    p = RunPaths(run.lrd).policy_denials
-    return read_jsonl_rows(p) if p.is_file() else []
-
-
 def test_a_denial_appends_a_policy_event_to_the_durable_request_stream(tmp_path: Path):
     """A denial appends its own event type to the durable policy-denial stream at the
     decision point, flushed per record so it survives an abort, and takes its place in that

@@ -1,31 +1,4 @@
-"""Tests for the lint_stale_refs gate (#618).
-
-The gate had no tests, no DI seam, and — for its entire life — no teeth. It diffs
-`origin/main...HEAD` to learn which symbols a PR removed, then greps the post-PR tree
-for surviving references. In CI it reported clean on every PR without checking anything:
-
-    `actions/checkout` was depth-1, so HEAD (refs/pull/N/merge) was a shallow graft with
-    no common ancestor. The gate's only guard was `git rev-parse --verify origin/main`,
-    which PASSED — a `--depth=50` fetch of the base ref had created it. But
-    `origin/main...HEAD` is the THREE-DOT form and needs a MERGE-BASE, which the graft
-    does not have. `git diff` exited 128; the old `_run` swallowed every CalledProcessError
-    into `""`; and `if not diff: return set()` read "git could not answer" as "nothing was
-    removed". Zero findings, exit 0.
-
-So the two load-bearing tests here are the ones that pin the FAILURE modes — a gate that
-cannot run must exit 2, never 0. `test_shallow_graft_*` reproduces the CI shape
-command-for-command and is the regression test for the bug itself; note it needs a
-`file://` URL, because git SILENTLY IGNORES `--depth` for a local-path clone (it warns
-"--depth is ignored in local clones; use file:// instead"). With a plain path the fixture
-would quietly build a full clone, stop reproducing the bug, and still pass — the same class
-of vacuous-green this whole issue is about. `test_shallow_fixture_really_has_no_merge_base`
-probes the fixture itself so that can never rot silently.
-
-Fixtures are real throwaway git repos (the defender/tests/test_git.py philosophy: git is
-local and deterministic, so exercise it for real). The gate is driven only through its DI
-seam — `main(argv, repo_root=…, base_ref=…, baseline_path=…)` — so no monkeypatching of
-module globals is needed, which also keeps the lint_monkeypatch gate quiet.
-"""
+"""lint_stale_refs: stale-reference detection after removals; a gate that cannot run (shallow graft, git failure) must exit 2, never 0."""
 from __future__ import annotations
 
 import json

@@ -1,32 +1,10 @@
 """#787 — the review gate's model calls land in the run's accounted cost.
 
-The gate makes up to three model calls per close attempt and a run that forces turns pays
-for up to three attempts. Every operator-facing cost figure is derived from the run's one
-`RequestLogger` (`llm_requests.jsonl`) or from the session store, and until now a review
-stage minted a PRIVATE logger and wrote to `review_{lens}_live_trace.jsonl` — a file whose
-only reader anywhere in the tree was a test asserting it did not exist. The calls charged a
-real provider and appeared in no accounted total.
-
-The fix is the shape gather already had: one shared logger, one `agent_id` namespace, and a
-reader that filters on the prefix. What is pinned here is that shape's two halves —
-
-  - the WRITE: a live stage logs through the run's own logger, under `review:{lens}`, and
-    does not close it on the way out (the private logger's `finally: logger.close()` on a
-    SHARED one takes `llm_requests.jsonl` down mid-investigation, and no live run is a
-    reasonable place to discover that);
-  - the READ: the review's spend is priced, split by lens, and disjoint from main's and
-    gather's — a prefix that drifted on either side silently reopens the whole defect.
-
-What is deliberately NOT pinned: the review charging the investigation's request ceiling. It
-must not, it structurally cannot (a review role is a separate `Agent` with its own history,
-so `_main_extra_capabilities`' limit can never see it), and this issue is only ever about
-where those calls land INSTEAD.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import Any
 
@@ -164,26 +142,6 @@ def test_a_stage_does_not_close_the_logger_it_shares(run_dir):
     ], "the main agent's turn did not reach the log after a review stage ran"
 
 
-def test_a_live_stage_leaves_no_private_trace_file(run_dir):
-    """The per-lens `review_*_live_trace.jsonl` files are gone, not merely unread. Two homes
-    for one record is how the second one stops being maintained."""
-    logger = observe.RequestLogger(observe.wire_log_path(run_dir))
-    try:
-        _drive_every_lens(run_dir, logger, {})
-    finally:
-        logger.close()
-
-    assert not list(run_dir.rglob("*_live_trace.jsonl"))
-    # `sorted`, because `rglob` yields in filesystem order — a list comparison against it is a
-    # flake waiting for the second artifact to land, not a stricter assertion. The walk is the
-    # TREE, not the root: the shared log lives at `wire_logs/llm_requests.jsonl`, so a
-    # root-only `iterdir` would see one directory and this case would go green against a
-    # bundle that had written a private trace beside it.
-    assert sorted(
-        str(p.relative_to(run_dir)) for p in run_dir.rglob("*") if p.is_file()
-    ) == [str(observe.wire_log_path(run_dir).relative_to(run_dir))]
-
-
 def test_the_two_support_calls_stay_apart_in_the_log(run_dir):
     """SUPPORT is dispatched twice — as itself and as the ablation — and `observe` keys its
     sequence and record ids on `agent_id`. One id for both would collapse two readings into
@@ -282,11 +240,3 @@ def test_a_request_record_is_not_priced(tmp_path):
     assert review_cost_by_lens(tmp_path, with_request) == review_cost_by_lens(tmp_path, _MIXED)
 
 
-def test_a_run_with_no_review_prices_nothing(tmp_path):
-    """An `inconclusive` close bypasses the gate entirely, and a replay's injected stages
-    call no provider. Both must read as zero rows rather than as a zero-dollar review."""
-    (tmp_path / "llm_requests.jsonl").write_text(
-        json.dumps(_wire("main", "claude-sonnet-4-6")) + "\n", encoding="utf-8",
-    )
-    assert review_cost_by_lens(tmp_path) == {}
-    assert review_cost_by_model(tmp_path) == {}

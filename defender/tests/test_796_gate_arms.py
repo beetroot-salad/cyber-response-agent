@@ -1,8 +1,5 @@
 """#796 — how the composer's finding plus host state becomes one gate outcome.
 
-The reviewer never picks the outcome. Whether a gap becomes `challenged` or
-`forced-inconclusive` turns on the turn count, the raised-ask state and the cap, none of
-which a review role is shown — so these are the arms that live entirely on the host side.
 """
 
 from __future__ import annotations

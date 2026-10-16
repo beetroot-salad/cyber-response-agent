@@ -1,21 +1,5 @@
-"""#1025 — the stages section: the stage table, the two clocks, costs from traces and result
-events, and the transcript blocks.
-
-O4 as resolved (§7 Q9, J13a–c, J15, J17): one row per `Step` in `STEPS` order with `runs`
-expanded per run dir; the wall from `timing.json` (the launcher's clock) and, without it, the
-labelled lower bound "model calls + longest world"; cost from questioner / judge traces' response
-rows through the pricing table and from each run's result event, every number saying what it
-covers — an unpriced row reads "unpriced" and never $0.0000, a stage sum missing a call reads
-"partial — N of M calls priced", a torn tail is dropped and counted, the result event is read lstat-screened and type-tolerant — a
-link or non-regular file reads "no result event (refused)", only the LAST row is a result event,
-a non-numeric / non-finite / negative cost reads "unusable result event". Transcript blocks are
-one per trace, family first then each roster world's draws in numeric order, the framed prompt as
-the request (the request row's user-prompt part for the questioner seats, instructions collapsed),
-one entry per response row, one control set per stream or none.
-
-Every cost on the expected side is the fixture's declared figure (`E.SAMPLE`): kimi-k3's
-$3/M in and $15/M out over round token counts. RED AGAINST HEAD: the page module does not exist.
-"""
+"""#1025 — the stages section: the stage table, the two clocks, costs from traces and result events,
+and the transcript blocks."""
 from __future__ import annotations
 
 import json
@@ -90,9 +74,7 @@ def test_1025_the_stage_table_has_one_row_per_step_runs_expanded_per_run_dir_wal
         tmp_path):
     """Rows in `STEPS` order; `runs` expanded into `a`, `no_remote_session`,
     `prior_fake_key_precedent` sub-rows each with its result-event cost ($0.4000 / $0.2500 /
-    $0.3500) and duration (10m00s / 3m00s / 5m00s); `preflight` / `verify` read "no model
-    calls"; the total row reads $3.5500 and names gather subagents as excluded.
-    """
+    $0.3500)."""
     page = render(E.sample_episode(tmp_path))
     timing = page.text_of("stage-timing")
     assert _ordered(timing, *ST.EXPECTED_STEPS), timing
@@ -108,13 +90,8 @@ def test_1025_the_stage_table_has_one_row_per_step_runs_expanded_per_run_dir_wal
 
 def test_1025_without_timing_json_the_axis_is_model_time_with_a_labelled_lower_bound_and_with_it_the_launchers_wall_per_step(
         tmp_path):
-    """Sample (no `timing.json`): the wall column is empty with a one-line reason naming the
-    absent record, the header reads "≈ 16m00s lower bound on wall: model calls + longest
-    world", and the graph axis is labelled model-call time; the same copy with a
-    `StageClock`-shaped record of every step renders each step's wall, the header as
-    first-start-to-last-end (9m00s), and the changed caption; a three-step record renders
-    three walls and two "not on the record" rows.
-    """
+    """Sample (no `timing.json`): the wall column is empty with a one-line reason naming the absent
+    record, the header reads "≈ 16m00s lower bound on wall: model calls +."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     stages = page.text_of("sec-stages")
@@ -145,11 +122,8 @@ def test_1025_without_timing_json_the_axis_is_model_time_with_a_labelled_lower_b
 
 def test_1025_stage_costs_sum_response_row_usage_and_each_runs_result_event_and_a_run_with_no_trace_shows_no_cost_not_zero(
         tmp_path):
-    """Sample questioner cost $1.0500 over 3 traces / 2m00s, judge $1.5000 over 3 traces /
-    4m00s, worlds $1.0000; a launcher-produced episode (no `tool_trace.jsonl`, no `_trace.jsonl`)
-    renders "no cost recorded" per run rather than $0.0000; the render does not open
-    `runs/*/wire_logs/llm_requests.jsonl` (a FIFO planted there is never read).
-    """
+    """Sample questioner cost $1.0500 over 3 traces / 2m00s, judge $1.5000 over 3 traces / 4m00s,
+    worlds $1.0000."""
     ep = E.sample_episode(tmp_path)
     fifo = ep.run(E.GRADED_WORLD) / "wire_logs" / "llm_requests.jsonl"
     fifo.parent.mkdir()
@@ -177,13 +151,8 @@ def test_1025_stage_costs_sum_response_row_usage_and_each_runs_result_event_and_
 
 def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_first_with_the_framed_prompt_and_every_response_row(
         tmp_path):
-    """Sample: `tx-questioner_trace`, `tx-questioner_b_trace`, `tx-questioner_c_trace` under
-    the questioner stage; `tx-judge_family_0_trace` first then the two world draws under the
-    judge stage, each with the framed `prompt` as the request, one rendered entry per
-    `kind: response` row carrying its model, usage and duration, and the framed `failure` when
-    set; a launcher-produced episode with only `_framed` files still renders each call's prompt
-    and reply.
-    """
+    """Sample: `tx-questioner_trace`, `tx-questioner_b_trace`, `tx-questioner_c_trace` under the
+    questioner stage; `tx-judge_family_0_trace` first then the two world draws."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     for stem in ("questioner_trace", "questioner_b_trace", "questioner_c_trace"):
@@ -226,10 +195,8 @@ def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_fi
 
 
 def test_1025_what_the_header_wall_covers(tmp_path):
-    """With `timing.json` present the header wall is labelled as the launcher's wall from the
-    first step's `started_at` to the last step's `ended_at` (9m00s) — the label says it
-    excludes the prime and includes the gaps between steps.
-    """
+    """With `timing.json` present the header wall is labelled as the launcher's wall from the first
+    step's `started_at` to the last step's `ended_at` (9m00s) ."""
     ep = E.sample_episode(tmp_path, timing=True)
     page = render(ep)
     text = page.one("header").text() + " " + page.text_of("sec-stages")
@@ -240,11 +207,8 @@ def test_1025_what_the_header_wall_covers(tmp_path):
 
 
 def test_1025_the_runs_row_has_two_clocks(tmp_path):
-    """The `runs` row shows the launcher's RUNS-step wall (1m00s from `timing.json`) labelled
-    as the launcher's; each per-run sub-row shows its own result-event `duration_ms` labelled
-    as the run's wall (10m00s / 3m00s / 5m00s); the two labels differ and neither number is
-    summed into the other.
-    """
+    """The `runs` row shows the launcher's RUNS-step wall (1m00s from `timing.json`) labelled as the
+    launcher's."""
     page = render(E.sample_episode(tmp_path, timing=True))
     runs = page.text_of("stage-runs")
     assert "1m00s" in runs, runs
@@ -264,9 +228,7 @@ def test_1025_the_runs_row_has_two_clocks(tmp_path):
 
 def test_1025_a_trace_with_a_request_row_and_no_response_row(tmp_path):
     """A trace with a request row and no response row renders the request with "no response
-    recorded"; the call adds nothing to the stage cost or the model-time axis and is not shown
-    as $0.0000; the stage sum reads "partial — 3 of 4 calls priced".
-    """
+    recorded"."""
     ep = E.sample_episode(tmp_path)
     E.write_trace(ep.dir, "questioner:d", response=False, prompt="the unanswered prompt")
     page = render(ep)
@@ -280,10 +242,8 @@ def test_1025_a_trace_with_a_request_row_and_no_response_row(tmp_path):
 
 
 def test_1025_trace_present_but_framed_absent(tmp_path):
-    """A judge trace without its `_framed` twin renders its block's request from the plain
-    trace's request row — `message.instructions` plus the user-prompt part (c8/F13) — through
-    the untrusted escape; the block renders rather than showing nothing.
-    """
+    """A judge trace without its `_framed` twin renders its block's request from the plain trace's
+    request row ."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "wire_logs" / f"judge_{E.GRADED_WORLD}_0_framed_trace.jsonl").unlink()
     E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:0", prompt="PLAIN-PROMPT <b>x</b>",
@@ -314,10 +274,7 @@ def test_1025_a_framed_trace_row_carries_a_failure_field_instead_of_a_reply(tmp_
 
 def test_1025_trace_prompt_or_reply_contains_a_literal_pre_or_script_close_tag(tmp_path):
     """Every prompt and reply renders through `pre_text_untrusted`, so a literal `</pre>` or
-    `</script>` appears as text (`&lt;/pre&gt;`) and closes nothing: the page's `<script` and
-    `</script>` counts stay balanced, as do `<pre` and `</pre>`. Positive control: the escaped
-    text is visible in the block.
-    """
+    `</script>` appears as text (`&lt;/pre&gt;`) and closes nothing."""
     ep = E.sample_episode(tmp_path)
     E.write_trace(ep.dir, "questioner:b", prompt="before </pre> after", reply="x </script><script>alert(1)</script>")
     page = render(ep)
@@ -337,10 +294,8 @@ def test_1025_trace_prompt_or_reply_contains_a_literal_pre_or_script_close_tag(t
 
 
 def test_1025_a_trace_whose_last_line_is_torn(tmp_path):
-    """A trace whose last line — the response row — is torn: the tolerant reader drops and
-    counts it, the block shows "1 unreadable rows" and "no response recorded", the call's cost
-    vanishes from the sum and the stage sum says so — "partial — 2 of 3 calls priced" (J13b).
-    """
+    """A trace whose last line — the response row — is torn: the tolerant reader drops and counts
+    it, the block shows "1 unreadable rows" and "no response recorded", the call's."""
     ep = E.sample_episode(tmp_path)
     trace = ep.dir / "wire_logs" / "questioner_c_trace.jsonl"
     lines = trace.read_text(encoding="utf-8").splitlines()
@@ -356,13 +311,7 @@ def test_1025_a_trace_whose_last_line_is_torn(tmp_path):
 
 def test_1025_a_hostile_wire_logs_trace_stem(tmp_path):
     """A `wire_logs/*_trace.jsonl` stem built to break out of its `id="tx-…"` attribute never
-    becomes an attribute at all: the stem is grammar-gated through `_safe_id` like every other
-    filename-derived id on the page (`world-`/`leads-`/`f-`), so a stem outside the run-id
-    alphabet renders as an "unnameable entry" line naming the stem as text, with no `tx-` id
-    and no stream — and no element on the page carries an `onmouseover` attribute (J5,
-    adversary finding 2; review of PR #1042). Positive control: a well-formed stem keeps its
-    stream and its id.
-    """
+    becomes an attribute at all."""
     ep = E.sample_episode(tmp_path)
     stem = 'questioner_hostile" onmouseover=alert(1) x="'
     E.write_trace(ep.dir, stem, reply="THE HOSTILE STREAM'S REPLY")
@@ -377,15 +326,8 @@ def test_1025_a_hostile_wire_logs_trace_stem(tmp_path):
 
 
 def test_1025_a_result_event_that_is_forged_or_misplaced(tmp_path):
-    """A result event with a string, `None`, NaN or negative `total_cost_usd` reads "unusable
-    result event" with no dollar figure — never coerced, never a raise; only the LAST row is a
-    result event, so an earlier `type: result` row followed by another row is not one and the run
-    reads "no result event" (J17). `None` is its own case, not just a variant of the string arm:
-    `isinstance(None, (int, float))` is `False` for the same reason the string arm is, but a
-    caller that gated on `cost is not None` first (a plausible near-miss) would let this one
-    through to a bare arithmetic op on `None` — the spec adversary's own probe caught exactly
-    this shape (J17 finding, PR #1042).
-    """
+    """A result event with a string, `None`, NaN or negative `total_cost_usd` reads "unusable result
+    event" with no dollar figure ."""
     ep = E.sample_episode(tmp_path)
     for forged in ("12.5", None, math.nan, -3.0):
         E.write_tool_trace(ep.run(E.GRADED_WORLD), [E.result_event(cost=forged)])
@@ -404,10 +346,7 @@ def test_1025_a_result_event_that_is_forged_or_misplaced(tmp_path):
 
 
 def test_1025_a_symlinked_tool_trace_in_a_run_dir(tmp_path):
-    """A `tool_trace.jsonl` that is a symlink is refused on the lstat screen: the run's cost row
-    reads "no result event (refused)" and the link's target is never read — its cost appears
-    nowhere (J17, F18).
-    """
+    """A `tool_trace.jsonl` that is a symlink is refused on the lstat screen."""
     ep = E.sample_episode(tmp_path)
     outside = tmp_path / "outside-trace.jsonl"
     outside.write_text(json.dumps(E.result_event(cost=8.88)) + "\n", encoding="utf-8")
@@ -425,10 +364,7 @@ def test_1025_a_symlinked_tool_trace_in_a_run_dir(tmp_path):
 
 
 def test_1025_a_usage_block_with_a_negative_or_overflowing_count_is_unpriced(tmp_path):
-    """A wire-log `usage` block is box-writable: token counts of `-50000000` and `1e999` priced
-    straight into tile 4 and the stages total as `$-146.7500` / `$inf` while the chip beside
-    the row already said "unpriced". `_priced` now answers `None` for a cost that is not a
-    finite non-negative number — the same gate `_result_event` puts on `total_cost_usd`."""
+    """A wire-log `usage` block is box-writable."""
     ep = E.sample_episode(tmp_path)
     rows = E.trace_rows("questioner:neg")
     rows[1]["usage"]["input_tokens"] = -50_000_000

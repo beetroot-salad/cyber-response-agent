@@ -1,13 +1,4 @@
-"""Tests for the two-table read/join surface (`learning/lead_repository.py`).
-
-Exercises the readers, the join, the actor-view integrity boundary, the
-render helpers, the narration cross-check, and missing/malformed-artifact
-tolerance. Fixtures write the two *live* tables directly:
-
-  gather_raw/{lead_id}.lead.json   — leads table (goal, what_to_summarize)
-  executed_queries.jsonl           — queries table (FK lead_id, by-ref payload)
-  gather_raw/{lead_id}/{seq}.json   — payloads
-"""
+"""Tests for the two-table read/join surface (`learning/lead_repository.py`)."""
 from __future__ import annotations
 
 import json

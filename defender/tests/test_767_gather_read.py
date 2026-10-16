@@ -1,28 +1,4 @@
-"""#767 — what a gather lead's CAPTURE holds of a ticket reply (since #1221: the store's answer).
-
-Three demands of `spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`, named by their
-`discharged_by`. They need the whole pipe: what the capture persists is a statement about
-everything between `handler(args)` and `_record`, and nothing short of driving the real query
-tool can observe it. #1221 removed D4's release screen from that span, so the capture, the
-archive surface and the model's turn now all hold the reply as the store answered it — an open
-case's comments included — and a case re-opened between two reads changes neither read.
-
-Sited in `tests/` rather than in `tests/e2e/` and carrying `pytestmark = pytest.mark.e2e`, the
-way `tests/test_denial_gather_632.py` already does: the marker is what CI selects on, and the
-spec-graph checkers scan the suite directory the graph names without descending into it.
-
-Built on the machinery that already exists — `tests/_verb_authorization_632.run_gather` drives
-a REAL run whose main agent dispatches one gather lead against an INJECTED verb registry, with
-the query tool, the grant decision, the capture capability, the payload view and the two tables
-all production. A new scenario is a verb table and two `Turn`s, not fresh plumbing.
-
-THE MAPPING IS THE SHIPPED ONE HERE, deliberately: a driven run reads the committed playground
-tenant's settings (#1106) for its mapping and its grants alike, so repointing it at a fixture
-tenant would change the run rather than the mapping. The agent identity is therefore READ OFF
-the shipped file (`shipped_comment_author`), which also makes these tests a statement about the
-file an operator edits (O5). A closed case's status is the store's own `closed`
-(`CLOSED_STATUS`): since #1221's amendment the mapping names no released status at all.
-"""
+"""#767 — what a gather lead's capture holds of a ticket reply: the store's answer, whole, through the real query tool."""
 from __future__ import annotations
 
 import copy

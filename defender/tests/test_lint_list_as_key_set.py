@@ -1,20 +1,4 @@
-"""Tests for the lint_list_as_key_set gate (#956).
-
-The gate's whole value is the line it draws between two loops that look identical:
-
-    for x in seq: table[x] += n     # a FIX-UP over a table already keyed by seq — the bug
-    for x in seq: tally[x] += 1     # a COUNT whose keys seq discovers — the correct idiom
-
-A rule that cannot tell them apart is unarmable: measured over the tree, the plain
-"augmented assign into a dict keyed on the loop variable" rule fires six times and every
-one of the six is correct code. So the first block below pins the separation itself, and
-the second pins the reach the module docstring claims — because a gate that quietly stops
-finding things reads exactly like a clean tree.
-
-The gate is driven through its DI seams:
-  - main(argv=None, *, scope=None, baseline_path=None) -> exit code
-  - _scan(root) -> list[Finding]
-"""
+"""Tests for the lint_list_as_key_set gate (#956)."""
 from __future__ import annotations
 
 from pathlib import Path

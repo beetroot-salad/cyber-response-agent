@@ -1,14 +1,4 @@
-"""#1007 — the `subject` partition, the second queue channel, and who owns a row's identity.
-
-O1/M6 splits findings by `subject` into two channels; O8/M10 keeps the DEFENDER vocabulary
-pinned; A3 settles that the PASS owns a row's identity and the model owns only its content.
-
-#1234 CHANGED TWO THINGS THIS FILE ONCE PINNED. A finding's subject is now the reply list it is
-filed under (`investigator_findings` -> defender, `world_findings` -> world), not a `subject`
-key the model writes; and the world vocabulary is CLOSED (M4: `unreachable`, `incoherent`,
-`mislabelled`), where #1007's G-3 had kept it open. The per-channel asymmetry is kept: each
-channel's appender admits its own vocabulary and refuses the other's.
-"""
+"""#1007 — the `subject` partition, the second queue channel, and who owns a row's identity."""
 from __future__ import annotations
 
 import json
@@ -54,16 +44,7 @@ def world_reply(**kw) -> str:
 
 
 def test_world_row_refused_at_the_defender_appender(tmp_path):
-    """A `subject: world` row may not reach the DEFENDER findings channel.
-
-    Observably true: handing `append_rows` a world-subject row raises this design's refusal and
-    leaves `_pending/findings.jsonl` untouched; the same row handed to the questioner appender
-    lands. The positive control is what makes the refusal a fact about routing rather than
-    about an appender that refuses everything.
-
-    What failure looks like: world findings on the defender queue, where the lessons gate reads
-    them and the defender corpus grows advice about worlds it cannot act on.
-    """
+    """A `subject: world` row may not reach the DEFENDER findings channel."""
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
@@ -76,19 +57,7 @@ def test_world_row_refused_at_the_defender_appender(tmp_path):
 
 
 def test_each_channel_gates_a_row_type_against_its_own_vocabulary(tmp_path):
-    """Each channel's appender checks a row's `type` against ITS OWN vocabulary: the
-    questioner channel admits the world-finding buckets, the defender channel the queueable
-    defender types, and neither admits the other's (#1234 M4 closed the world side; #1007 R2's
-    per-channel asymmetry is kept).
-
-    Observably true: a world row typed `incoherent` is appended and stored verbatim, while the
-    same string on a defender row is refused; a world row typed with a defender type, or with
-    a string no vocabulary holds, is refused.
-
-    What failure looks like: one shared validator, so either every world finding is refused as
-    an unqueueable defender type, or a defender type rides onto the questioner channel and the
-    questioner corpus learns from advice about an investigation.
-    """
+    """Each channel's appender checks a row's `type` against ITS OWN vocabulary."""
     enqueue = W.mod("learning.judge.enqueue")
     cfg = W.mod("learning.core.config")
     paths = W.loop_paths(tmp_path)
@@ -109,16 +78,7 @@ def test_each_channel_gates_a_row_type_against_its_own_vocabulary(tmp_path):
 
 
 def test_lessons_gate_refuses_direction_world_loudly(tmp_path):
-    """The defender curator's own gate refuses a `direction: world` row it should never see.
-
-    Observably true: `_gate_findings` handed a world-direction row raises rather than routing
-    it — the second screen behind the appender, and the one that would otherwise turn a
-    mis-routed row into an authored defender lesson. Loudly, because a silent hold would leave
-    the row queued forever with nothing saying why.
-
-    What failure looks like: the gate falls through to the direction branch and holds the row
-    as `retired_direction(...)` — indistinguishable from an ordinary un-authorable finding.
-    """
+    """The defender curator's own gate refuses a `direction: world` row it should never see."""
     author = W.mod("learning.author.lessons.run")
     paths = W.loop_paths(tmp_path)
     cfg = author.build_author_config(paths, trees=author_trees(paths), state=LearningState.open(paths))
@@ -140,17 +100,8 @@ def test_lessons_gate_refuses_direction_world_loudly(tmp_path):
 
 def test_the_questioner_channel_declares_its_own_append_lock_and_shares_the_drain_lock(
         tmp_path):
-    """The questioner channel gets its OWN append lock and consumed file, and SHARES the drain
-    lock with the findings channel.
-
-    Observably true: `QUESTIONER_FINDINGS`'s `queue`, `consumed` and `append_lock` are distinct
-    from the findings channel's, and its drain role is the findings channel's, so its lock file
-    is the byte-identical path. Sharing the drain lock is what keeps two curators from holding
-    one worktree at once; a per-channel drain lock would give that up for nothing.
-
-    What failure looks like: a second channel whose drain lock is genuinely separate. Two
-    curators then enter one worktree concurrently and the batch's commit races itself.
-    """
+    """The questioner channel gets its OWN append lock and consumed file, and SHARES the drain lock
+    with the findings channel."""
     paths = W.loop_paths(tmp_path)
     root, findings, questioner = paths.state_root, FINDINGS, QUESTIONER_FINDINGS
 
@@ -166,18 +117,8 @@ def test_the_questioner_channel_declares_its_own_append_lock_and_shares_the_drai
 
 
 def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
-    """A questioner-channel row is a full `FindingRow` head plus `world`, `systems`,
-    `provenance` and `subject` — not a reduced shape of its own (#1224: `systems` replaced
-    `pattern` and `holding_system`; #1234: the three defender-only fields stay off it).
-
-    Observably true: the row that lands carries every key of the head a defender row carries
-    (so any reader of a finding row can read it) with `run_id` the episode id, `finding_id` the
-    idempotency key and `direction: world`, plus the four world-lane fields.
-
-    What failure looks like: a bespoke five-key row. Every shared reader — the drain's
-    idempotency, the curator's provenance list, the malformed-line counter — then needs a
-    second code path, and the ones that do not get it read the row as malformed.
-    """
+    """A questioner-channel row is a full `FindingRow` head plus `world`, `systems`, `provenance`
+    and `subject` ."""
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
@@ -194,14 +135,7 @@ def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
 
 
 def test_two_appends_of_one_finding_id_land_once(tmp_path):
-    """The questioner channel is idempotent on `finding_id`, exactly as the defender one is.
-
-    Observably true: appending the same row twice leaves one row on the queue. The channel
-    declares `id_key="finding_id"`, and a re-graded episode must not double-author a lesson.
-
-    What failure looks like: a plain append. A re-grade of one episode then produces a second
-    identical lesson, and the corpus grows one copy per retry.
-    """
+    """The questioner channel is idempotent on `finding_id`, exactly as the defender one is."""
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
@@ -219,16 +153,7 @@ def test_two_appends_of_one_finding_id_land_once(tmp_path):
 
 
 def test_a_non_string_world_bucket_is_refused(tmp_path):
-    """A world bucket must be a STRING of the vocabulary — never a list, number or mapping.
-
-    Observably true: `bucket: ["incoherent"]` (and the other non-strings) on a world finding is
-    refused at `validate_reply`. The value becomes a queue row's `type` and a lesson's
-    frontmatter key; an unhashable value there raises `TypeError` out of a membership test
-    whose whole contract is to answer with this design's refusal.
-
-    What failure looks like: the membership test meets a list-valued bucket and raises the
-    wrong class, taking a whole batch down.
-    """
+    """A world bucket must be a STRING of the vocabulary — never a list, number or mapping."""
     run = W.mod("learning.judge.run")
 
     run.validate_reply(world_reply(world=[S.wf("incoherent")]))      # the control
@@ -238,17 +163,8 @@ def test_a_non_string_world_bucket_is_refused(tmp_path):
 
 
 def test_an_empty_whitespace_or_unlisted_world_bucket_is_refused_never_normalised(tmp_path):
-    """An empty, whitespace-only or unlisted world bucket is REFUSED — the vocabulary is
-    closed (#1234 M4 replaced #1007's open one), and nothing is trimmed or coerced into it.
-
-    Observably true: `""`, `"   "`, `"\t\n"` and a string no list holds are each refused at
-    `validate_reply`, while every one of the three world-finding buckets is admitted and kept
-    exactly as written.
-
-    What failure looks like: the validator normalises (`"  incoherent "` becomes `incoherent`)
-    or admits a drifting string, and the questioner queue carries a type its routing and its
-    curator have no rule for.
-    """
+    """An empty, whitespace-only or unlisted world bucket is REFUSED — the vocabulary is closed
+    (#1234 M4 replaced #1007's open one), and nothing is trimmed or coerced into it."""
     run = W.mod("learning.judge.run")
 
     for bucket in sorted(run.WORLD_FINDING_BUCKETS):
@@ -261,17 +177,8 @@ def test_an_empty_whitespace_or_unlisted_world_bucket_is_refused_never_normalise
 
 def test_a_world_finding_cannot_borrow_a_defender_bucket_and_the_list_decides_the_channel(
         tmp_path):
-    """A world finding may not spell its bucket like a defender one; the LIST a finding is
-    filed under — never the string — decides which channel its row is built for.
-
-    Observably true: a world finding bucketed `lead-set` is refused at `validate_reply`, and
-    the questioner appender refuses a `lead-set` world row; the same `lead-set` filed as an
-    investigator finding validates, and a defender row of that type lands on the findings
-    channel.
-
-    What failure looks like: the bucket string is used to infer the subject, and the moment a
-    model spells a world finding `lead-quality` the row is authored as a defender lesson.
-    """
+    """A world finding may not spell its bucket like a defender one; the LIST a finding is filed
+    under — never the string — decides which channel its row is built for."""
     run = W.mod("learning.judge.run")
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
@@ -295,16 +202,7 @@ def test_a_world_finding_cannot_borrow_a_defender_bucket_and_the_list_decides_th
 
 
 def test_a_defender_queue_row_carries_its_subject_key(tmp_path):
-    """A defender row carries `subject: defender` EXPLICITLY, rather than by absence.
-
-    Observably true: the row that lands on `_pending/findings.jsonl` has the key with that
-    value. Once two channels exist, "no subject key" and "subject: defender" are two different
-    facts, and a reader that infers the first from the second cannot tell a pre-change row from
-    a mis-routed one.
-
-    What failure looks like: the defender lane is left untouched "because nothing changed", and
-    every consumer downstream has to guess.
-    """
+    """A defender row carries `subject: defender` EXPLICITLY, rather than by absence."""
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
@@ -323,18 +221,8 @@ def test_a_defender_queue_row_carries_its_subject_key(tmp_path):
 
 
 def test_a_defender_subject_row_cannot_reach_the_questioner_curator(tmp_path):
-    """The partition holds in BOTH directions: a defender row may not reach the questioner
-    channel either.
-
-    Observably true: `append_world_rows` refuses a `subject: defender` row and the questioner
-    channel stays empty; the questioner curator, driven over a channel seeded with such a row,
-    authors nothing from it. The security dive states both directions and only one of them had
-    a demand — the reverse leak is the one that puts defender advice into the corpus the
-    QUESTIONER reads back at call 1, one hop from authoring the next family.
-
-    What failure looks like: the guard is written as "world rows go here", with nothing saying
-    what may not.
-    """
+    """The partition holds in BOTH directions: a defender row may not reach the questioner channel
+    either."""
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
@@ -346,17 +234,7 @@ def test_a_defender_subject_row_cannot_reach_the_questioner_curator(tmp_path):
 
 def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
         tmp_path, monkeypatch):
-    """`world` is stamped from the draw's own world directory; a model-supplied `world` is
-    ignored.
-
-    Observably true: b's design finding claiming `world: c`, and c's claiming `world: b`, land
-    on the questioner queue stamped `b` and `c` respectively, each id naming its own world,
-    because those are the worlds the draws were about. Identity belongs to the pass; the model
-    owns content only.
-
-    What failure looks like: a model relabels its own finding onto a sibling, and a lesson is
-    authored about a world that never had the property described.
-    """
+    """`world` is stamped from the draw's own world directory; a model-supplied `world` is ignored."""
     built = W.contrast_family(tmp_path, monkeypatch)
     judge = S.judge({
         "b": S.world_reply(S.NO_BUCKET, [], world=[S.wf(world="c")]),
@@ -375,15 +253,7 @@ def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
 
 
 def test_every_family_level_finding_carries_a_null_world(tmp_path, monkeypatch):
-    """A family-level finding is about the FAMILY, so its `world` is null.
-
-    Observably true: a design finding from the family call (a plan pointer at the family-level
-    part of the manifest) lands with `world: None` and `source_run_dir` naming the episode dir
-    rather than a world's archive.
-
-    What failure looks like: the family finding is stamped onto whichever world happened to be
-    drawn last, and a family-level observation is authored as a lesson about one world.
-    """
+    """A family-level finding is about the FAMILY, so its `world` is null."""
     built = W.contrast_family(tmp_path, monkeypatch)
     judge = S.judge({S.FAMILY: S.family_reply(world=[S.wf(evidence=[S.plan_ptr()])])})
 
@@ -399,17 +269,7 @@ def test_every_family_level_finding_carries_a_null_world(tmp_path, monkeypatch):
 
 def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
         tmp_path, monkeypatch):
-    """A family finding is keyed on `(episode, "family", draw, index)`.
-
-    Observably true: the `finding_id` of a family-level row is exactly
-    `<episode_id>/family/<draw>/<index>` — a coordinate the pass composes — and two findings of
-    one draw get distinct indices. `family` is a reserved world label, so this coordinate can
-    never collide with a per-world one.
-
-    What failure looks like: the id is minted from model-supplied content, and two runs of the
-    same episode produce two ids for one finding — defeating the idempotency the whole queue
-    keys on.
-    """
+    """A family finding is keyed on `(episode, "family", draw, index)`."""
     built = W.contrast_family(tmp_path, monkeypatch)
     judge = S.judge({S.FAMILY: S.family_reply(world=[
         S.wf("unreachable", evidence=[S.plan_ptr()]),
@@ -429,17 +289,8 @@ def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
 
 
 def test_a_world_row_missing_systems_or_subject_is_refused_at_the_appender(tmp_path):
-    """`systems` and `subject` are REQUIRED at the questioner appender (#1224: `systems`
-    replaced `pattern` and `holding_system`).
-
-    Observably true: a world row missing either is refused and nothing lands; a
-    complete row lands. The appender is the LAST screen — M7's curator gate is idempotency-only
-    — so a row that gets past here reaches the corpus unchecked.
-
-    What failure looks like: the appender trusts the builder, a hand-built or replayed row
-    arrives without `systems`, and the questioner's own selector at call 1 can never match it
-    to an episode.
-    """
+    """`systems` and `subject` are REQUIRED at the questioner appender (#1224: `systems` replaced
+    `pattern` and `holding_system`)."""
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
@@ -455,19 +306,7 @@ def test_a_world_row_missing_systems_or_subject_is_refused_at_the_appender(tmp_p
 
 def test_a_not_measured_world_queues_no_defender_row_and_still_queues_its_world_findings(
         tmp_path, monkeypatch):
-    """The world lane does NOT share the defender lane's refusal: a world the judge files
-    `unreachable` is not measured (#1234 I4), so it queues no defender row — and its design
-    world finding still reaches the questioner (I5).
-
-    Observably true: world b's reply carries an investigator finding and an `unreachable` world
-    finding citing the plan; the defender queue holds no row from b, while the questioner queue
-    holds exactly the `unreachable` one. (#1007 pinned this over the retired `discard` word;
-    #1234's not-measured rule is the per-world rule that replaced it.)
-
-    What failure looks like: one early return above both appends. The worlds that produce the
-    most interesting questioner findings — the ones the defender lane declines to grade — are
-    exactly the ones silently dropped.
-    """
+    """The world lane does NOT share the defender lane's refusal."""
     built = W.contrast_family(tmp_path, monkeypatch)
     judge = S.judge({"b": S.world_reply("lead-quality", ["idp"], investigator=[S.inv()],
                                         world=[S.wf("unreachable")])})
@@ -482,16 +321,7 @@ def test_a_not_measured_world_queues_no_defender_row_and_still_queues_its_world_
 
 
 def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkeypatch):
-    """A world that cannot be graded at all enqueues no findings of EITHER subject.
-
-    Observably true: a world whose archive carries no `report.md` fails the usability read
-    (#1234 A3) and is ungradable, and neither channel receives a row for it — while a gradable
-    sibling on the SAME pass enqueues on both. The control is what makes the emptiness a fact
-    about the ungradable world rather than about a queue nothing ever reaches.
-
-    What failure looks like: the world lane runs anyway over an archive that is not there, and
-    the questioner corpus learns that a world it cannot read is badly authored.
-    """
+    """A world that cannot be graded at all enqueues no findings of EITHER subject."""
     built = W.contrast_family(tmp_path, monkeypatch, S.triad(c={"reached": None}))
     reply = S.world_reply("lead-quality", ["idp"], investigator=[S.inv()],
                           world=[S.wf("mislabelled")])
@@ -513,18 +343,8 @@ def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkey
 
 def test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_own_curator(
         tmp_path):
-    """`finding_id` now feeds TWO channels from ONE id space; consumption on one channel must
-    not suppress the other.
-
-    Observably true: with a finding id already recorded as consumed on the DEFENDER channel,
-    a questioner row carrying that same id is still drained to the questioner curator. The
-    demand is on the READ side — every reader that keys on `finding_id` now joins across a
-    space it did not before, and a lookup that misses silently falls back rather than failing.
-
-    What failure looks like: one shared consumed-id set. A world finding whose id collides with
-    an already-authored defender one is dropped forever, with nothing anywhere recording that a
-    row was skipped.
-    """
+    """`finding_id` now feeds TWO channels from ONE id space; consumption on one channel must not
+    suppress the other."""
     drains = W.mod("learning.core.drains")
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
@@ -549,15 +369,7 @@ def test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_ow
 
 
 def test_two_episodes_appending_at_once_lose_no_questioner_row(tmp_path):
-    """Two episodes grading into one questioner channel at once lose no row and tear no line.
-
-    Observably true: two threads each appending a batch under a genuine interleaving leave
-    every row present and every line parseable as JSON. The channel is `serialized-append`, and
-    its append lock is what serialises it — the drain reads this file whole.
-
-    What failure looks like: a plain `open(..., "a")` per row. One episode's write lands inside
-    another's line, and both rows become one unreadable line the drain counts as malformed.
-    """
+    """Two episodes grading into one questioner channel at once lose no row and tear no line."""
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
     batches = [[world_row(finding_id=f"ep-{n}/b/0/{i}", run_id=f"ep-{n}")
@@ -585,16 +397,7 @@ def test_two_episodes_appending_at_once_lose_no_questioner_row(tmp_path):
 
 def test_a_malformed_line_on_either_channel_is_skipped_and_counted_never_silently_absent(
         tmp_path):
-    """A malformed line on EITHER channel is skipped and COUNTED — the same reading on both.
-
-    Observably true: a queue file and a served ledger each carrying one unparseable line report
-    a non-zero malformed count alongside their good rows. Parity across the two sinks is the
-    property: a reader that counts on one and silently drops on the other makes a partial
-    measurement look complete on exactly one of them.
-
-    What failure looks like: the new channel is read with a bare `json.loads` in a `try`, the
-    row vanishes, and a lesson that was enqueued is never authored with nothing saying so.
-    """
+    """A malformed line on EITHER channel is skipped and COUNTED — the same reading on both."""
     io_mod = W.mod("_io")
     paths = W.loop_paths(tmp_path)
     (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)

@@ -1,10 +1,4 @@
-"""Lessons-frontend api layer (serialize.build_view) contract guarantees.
-
-The view contract is what the self-contained HTML renders from, so these
-tests pin the shape the template depends on rather than the exact lesson
-counts (which grow as the loop authors). Counts are checked against the
-live on-disk corpora so the serializer must enumerate exactly those files.
-"""
+"""Lessons-frontend api layer (serialize.build_view) contract guarantees."""
 from __future__ import annotations
 
 from pathlib import Path

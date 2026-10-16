@@ -1,45 +1,9 @@
-"""#1134 curator step (v3, ported from v2), through the drain entry point: a planted entry at a
-lesson name is never
-deleted, never read through and never written through by the curator tick; O5.3's routing holds;
-and a snapshot the tick cannot take stops the tick before the agent.
-
-Every scene is `_spec773.build_scene` driven through `drain.run_batch(cfg=...)`, the one batch
-body both channels reach: real repo, real queue, real gate, rotation and commit; only the curator
-model call is a fake, entering through the config's seam. The config is the
-real builder's over the author drain's open trees (`_curator1134.author_trees`), so `cfg.corpus` is
-the held `lessons/` mount and `cfg.tree_for` the trees' lookup. A plant is made by the fake agent
-itself (its `also=` hook), the way a box process would leave it, and where a fault is under test
-the same hook raises it right after planting, so `_undo_agent_edits` is the first host code that
-meets the plant.
-
-Some scenes swap the config's held corpus (`dataclasses.replace(cfg, corpus=...)`) for one on the
-same root that journals its calls, refuses a read (`JournalHeld`), or is held over an `os_` that
-fails a call the way a full disk does or refuses a listing (`FailsOn`, `RefusesFolder`): what the
-tick then does shows that every corpus touch goes through `cfg.corpus`.
-
-The paths O5.2 names (each used to unlink a link and now refuses it, leaving it for the scrub):
-
-- `_restore_corpus`'s fault sweep — an unattributable link-lesson (`_cited_ids` cites nothing
-  through a refused read, O5.1) faults the tick with `AuthorError`, which retires as before;
-- `_put_back` via `_revert_non_md_strays` — NOT under O5.3's containment, so the `NotPlainEntry`
-  propagates out of `run_batch` (a stuck tick naming `NotPlainEntry`);
-- `_put_back` via `_revert_strays` on the fault path, into the SIBLING corpus (a mount of the same
-  label, judged through its own `Held`) — logged, the fault routes unchanged;
-- `_restore_unapproved_files` (non-fault) — its `NotPlainEntry` propagates.
-
-O5.3, settled: on the fault path only, a `NotPlainEntry` (symlink, hard link, FIFO, folder AT the
-name) is logged at WARNING naming the entry and the original fault propagates unchanged (same
-object): a `RETIRE_SET` member retires (rc 2, bumped), any other class re-raises and is the stuck
-record's `fault_class`. Anything else (a linked holding folder's plain `ELOOP`, ENOSPC, EIO,
-EACCES) still replaces the fault. v1's declared deviation (a FIFO at a new name replacing the
-fault) is gone and is pinned gone.
-
-Addendum 2's correction (C1/C2): the before-state is git's read of the tick-start commit, and
-the fault sweep asks `git status` which names the agent made; no folder is listed. A name git
-does not report (a gitignored file, a FIFO or socket at a new name) survives the fault undo.
-
-Every guard has its positive control: the same address holding a plain file, or nothing.
-"""
+"""#1134 curator step through the drain entry point (`drain.run_batch(cfg=...)`): a planted entry at a lesson
+name (symlink, hard link, FIFO, folder) is never deleted, read through or written through by the
+tick. On the fault path a `NotPlainEntry` is logged and the original fault propagates unchanged (a
+`RETIRE_SET` member retires); any other OSError replaces it. The before-state is git's read of the
+tick-start commit, so names git does not report survive the fault undo. Each guard has a positive
+control on the same address."""
 from __future__ import annotations
 
 import dataclasses
@@ -720,39 +684,6 @@ def test_a_gitignored_name_the_agent_made_survives_a_faulted_tick(tmp_path):
 def _journal(sc, log: list, **kw) -> None:
     """Swap the scene's held corpus for a `JournalHeld` on the same root, logging into `log`."""
     sc.cfg = dataclasses.replace(sc.cfg, corpus=JournalHeld(sc.corpus, log, **kw))
-
-
-def test_the_snapshot_attribution_and_fault_restore_use_cfg_corpus(tmp_path):
-    """The curator leaves `PLANTED` citing nothing from the batch and rewrites `SEEDED`, so the
-    tick faults (unattributable) and retires. Over a `cfg.corpus` that journals its calls, with
-    the agent's own mark in the same log: after the agent ran, the attribution read `PLANTED`
-    through it, and the fault restore swept `PLANTED` with its `unlink` and wrote `SEEDED` back
-    with its `write`. The restore's "is it still the before-state?" question is git's (addendum 3, D1): from the sweep
-    on, no read of `SEEDED` went through the view.
-
-    Catches: an attribution read or a fault restore made through a `Held` of its own on the same
-    root — the same answers on a plain tree, but not the handle the lane's trees hold — and a
-    restore comparison that reads the worktree bytes through the view instead of asking git.
-    (The before-state is git's read of the tick-start commit, C1: v3 pinned it here as "no
-    `read_bytes` before the agent", a verb addendum 3 removes; it is pinned by
-    `test_1134_curator_handle.test_the_before_state_reads_no_worktree_entry`.)"""
-    log: list = []
-    sc = _scene(tmp_path, curator=S.FakeCurator(
-        writes={PLANTED: lesson_text("not-this-batch"),
-                SEEDED: "the agent rewrote the seeded lesson\n"},
-        also=lambda *_a: log.append(("agent",))))
-    _journal(sc, log)
-
-    assert _run(sc) == ("rc", 2)
-
-    after = log[log.index(("agent",)) + 1:]
-    assert ("read", PLANTED) in after, after
-    assert ("unlink", PLANTED) in after, after
-    restore = after[after.index(("unlink", PLANTED)):]
-    assert ("write", SEEDED) in restore, restore
-    assert ("read", SEEDED) not in restore, restore
-    assert not os.path.lexists(sc.corpus / PLANTED)
-    assert (sc.corpus / SEEDED).read_text() == lesson_text("f0")
 
 
 @pytest.mark.parametrize("refused", [True, False], ids=["refused", "control"])

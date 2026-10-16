@@ -1,24 +1,4 @@
-"""#1007 — M4: the questioner's own samples, the per-world judge prompt, and the evidence scope.
-
-`samples.yaml` moves the real example answers the questioner was shown into the episode archive
-so they survive a vanished source run, and the per-world judge is shown that record. #1224 keyed
-it per served system (`{system: {verbs: {verb: [answer text]}}}`, `cli.system_samples`) where it
-was keyed per staged pattern, and pre-flight's outcome record replaced the replay review's
-reachability block in the prompt. #1234 kept the per-world sample rule (O16: a world finding
-citing `samples.yaml` anywhere but a served system's own section of real answers is set aside,
-ledger lane `unqueueable`) and replaced S7's per-subject pointer allowlist with one typed
-resolver (A1), pinned by `judge_contrast_1234/test_1234_pointer_resolver.py`.
-
-TWO RECORDED DECISIONS SHAPE WHAT IS AND IS NOT ASSERTED HERE:
-
-* **H2 — wrapper yes, filter no.** The samples section and pre-flight's record carry the same
-  run-salted untrusted frame the existing capture sections carry. `redaction.redact_model_
-  visible` is deliberately NOT applied (accepted gap G-1): the frame stops the text being read as
-  instruction; it does not remove anything from it.
-* **H3 / RS-1 — O5 holds WITHIN ONE ATTEMPT.** A second `Step.QUESTIONER` write overwrites
-  `samples.yaml`, so the byte-identity obligation is scoped to a single attempt, and the
-  overwrite (the second write wins) is pinned by its own test.
-"""
+"""#1007 — M4: the questioner's own samples, the per-world judge prompt, and the evidence scope."""
 from __future__ import annotations
 
 from defender._episode_handle import Episode
@@ -80,17 +60,8 @@ def assert_set_aside_for_its_sample(built, index: int, what: str) -> None:
 
 
 def test_the_launcher_writes_samples_yaml_at_step_2(tmp_path, monkeypatch):
-    """The launcher writes `samples.yaml` at `Step.QUESTIONER`, holding exactly what the
-    questioner was handed.
-
-    Observably true: the questioner step's writer, handed a per-system samples document, leaves
-    `<episode>/samples.yaml` on disk carrying that document. It lives in the EPISODE archive,
-    not in the source run, so it survives a source run that is later pruned — which is the whole
-    reason O5's claim is checkable at grading time at all.
-
-    What failure looks like: the samples stay in the source run (or in memory), and the judge
-    at grading time has nothing to compare a shape-invention claim against.
-    """
+    """The launcher writes `samples.yaml` at `Step.QUESTIONER`, holding exactly what the questioner
+    was handed."""
     cli = W.mod("learning.branch.cli")
     _base, src, root = W.configured_layout(tmp_path, monkeypatch)
     ep = W.episode(tmp_path, root=root)
@@ -109,17 +80,7 @@ def test_the_launcher_writes_samples_yaml_at_step_2(tmp_path, monkeypatch):
 def test_a_missing_sample_sets_sample_unavailable_and_refuses_shape_invention(
         tmp_path, monkeypatch):
     """No sample for a served system means the judge cannot ground a claim about that system's
-    answer shapes in one.
-
-    Observably true: with `samples.yaml` holding no section for the system a world finding
-    cites, the finding is set aside — it reaches no questioner row, and its ledger lane is
-    `unqueueable` naming the samples record. The refusal is anchored on the EVIDENCE (A1(b)),
-    not on a bucket literal — see
-    `test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket`.
-
-    What failure looks like: the judge grades shape invention against a sample nobody has, and
-    the questioner corpus learns that authors invent shapes whenever the sampler was empty.
-    """
+    answer shapes in one."""
     built, _judge = graded(tmp_path, monkeypatch, samples=samples_of(OTHER),
                            b_reply=reply_with(sample_finding()))
 
@@ -128,15 +89,7 @@ def test_a_missing_sample_sets_sample_unavailable_and_refuses_shape_invention(
 
 
 def test_a_present_sample_admits_a_shape_invention_finding(tmp_path, monkeypatch):
-    """The positive control: WITH a sample, the same finding stands.
-
-    Observably true: an episode identical to the one above except that `samples.yaml` carries
-    the cited system's section keeps the finding — it reaches the questioner queue. Without
-    this, the refusal above would read as correct on a pass that emits no findings at all.
-
-    What failure looks like: the refusal is written too wide and every world finding citing a
-    sample is dropped, so the mechanism reads as working while producing nothing.
-    """
+    """The positive control: WITH a sample, the same finding stands."""
     _built, _judge = graded(tmp_path, monkeypatch, b_reply=reply_with(sample_finding()))
 
     assert queued_types() == ["incoherent"], (
@@ -145,17 +98,8 @@ def test_a_present_sample_admits_a_shape_invention_finding(tmp_path, monkeypatch
 
 def test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_pattern(
         tmp_path, monkeypatch):
-    """A corrupt, absent or null-valued samples file is no sample for EVERY system — never a
-    partial read and never a refusal that ends the pass.
-
-    Observably true: three shapes — no file, unparseable YAML, and a file whose system maps to
-    null — each grade to a completed `judge.yaml` with the sample-citing finding set aside,
-    while a finding citing something else stands (the control). The episode dir is a tree a box
-    can write, so all three are shapes to meet rather than impossibilities.
-
-    What failure looks like: `yaml.safe_load` raises out of the grading pass, and one damaged
-    file costs every world of the episode its grade after every model call has been paid for.
-    """
+    """A corrupt, absent or null-valued samples file is no sample for EVERY system — never a partial
+    read and never a refusal that ends the pass."""
     for label, prepare in (
             ("absent", lambda ep: (ep / W.SAMPLES_NAME).unlink()),
             ("corrupt", lambda ep: (ep / W.SAMPLES_NAME).write_text(
@@ -176,16 +120,7 @@ def test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_patt
 
 def test_a_case_differing_system_misses_the_sample_and_refuses_the_finding(
         tmp_path, monkeypatch):
-    """A system is matched EXACTLY. `IDP` does not find the samples stored under `idp`.
-
-    Observably true: a finding citing a case-differing spelling of the sampled system is set
-    aside, while the same finding citing the exact spelling stands (the control). System
-    names are not case-folded anywhere else in this system (N03), and a fuzzy match here would
-    hand the judge's claim evidence from a section the finding never named.
-
-    What failure looks like: a `casefold()` at the lookup, and the shape-invention claim is made
-    against evidence from somewhere else entirely.
-    """
+    """A system is matched EXACTLY. `IDP` does not find the samples stored under `idp`."""
     built, _judge = graded(tmp_path, monkeypatch, b_reply=reply_with(
         sample_finding("mislabelled", SYSTEM.upper()), sample_finding("incoherent", SYSTEM)))
 
@@ -197,18 +132,7 @@ def test_a_case_differing_system_misses_the_sample_and_refuses_the_finding(
 
 def test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket(
         tmp_path, monkeypatch):
-    """The sample-dependent refusal binds to the EVIDENCE, not to a bucket.
-
-    Observably true: when the samples record marks a system `unavailable`, ANY world finding
-    citing `samples.yaml#<system>` is set aside, whichever of the world-finding buckets it
-    files under; a finding for that world citing something ELSE stands, which is the control.
-
-    This is A1(b): a refusal keyed on one bucket would be evadable by filing the same claim
-    under another, so the refusal is anchored where the bucket cannot reach it.
-
-    What failure looks like: the refusal reads `if finding.bucket == "incoherent"`, and a model
-    that files the same claim as `mislabelled` walks straight past it.
-    """
+    """The sample-dependent refusal binds to the EVIDENCE, not to a bucket."""
     built, _judge = graded(
         tmp_path, monkeypatch,
         samples={SYSTEM: {"unavailable": "the capture could not be read"}},
@@ -225,18 +149,7 @@ def test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket(
 def test_a_two_system_family_names_each_systems_sample_availability_independently(
         tmp_path, monkeypatch):
     """A family serving TWO systems is graded — and rendered — per system, never reduced to one
-    (O5's own falsifier).
-
-    Observably true: with samples captured for one served system and the other marked
-    unavailable, the per-world prompt carries the real answer for the system that WAS sampled
-    and the unavailable reason for the one that was not; and a finding citing the AVAILABLE
-    system survives while one citing the UNAVAILABLE system is set aside — in the SAME grading
-    pass, over the SAME world.
-
-    What failure looks like: a single-value reduction (the first system alone) makes the record
-    read as sampled because SOME system had a sample, while the judge is rendered nothing for the
-    system it was never shown.
-    """
+    (O5's own falsifier)."""
     answer = '{"marker": "the-sampled-systems-answer"}'
     built, judge = graded(
         tmp_path, monkeypatch,
@@ -264,20 +177,7 @@ def test_a_two_system_family_names_each_systems_sample_availability_independentl
 def test_the_judges_sample_is_byte_identical_to_the_questioners_within_one_attempt(
         tmp_path, monkeypatch):
     """WITHIN ONE ATTEMPT, the judge is shown the same real answers per served system that the
-    questioner was shown.
-
-    Observably true: every answer text stored under a system's verbs in `samples.yaml` appears
-    in the per-world prompt byte for byte. That is what makes a claim about an invented shape
-    decidable: the judge and the author saw the same bytes.
-
-    SCOPED, and the scope is the point (RS-1): a second write replaces the record, so the judge
-    may be shown a later attempt's samples — accepted gap G-2, pinned by
-    `test_a_second_attempts_step_2_overwrites_the_first_attempts_samples`.
-
-    What failure looks like: the judge is shown a re-derived or re-formatted sample. Any claim
-    the judge makes about a shape the author invented is then made against a document the
-    author never saw.
-    """
+    questioner was shown."""
     built, judge = graded(tmp_path, monkeypatch, samples=samples_of(
         SYSTEM, '{"user": {"name": "alice"}, "event": "logon"}', "a second answer"))
     stored = W.read_yaml(built.ep / W.SAMPLES_NAME)[SYSTEM]["verbs"]
@@ -295,20 +195,7 @@ def test_the_judges_sample_is_byte_identical_to_the_questioners_within_one_attem
 def test_every_attacker_influenced_section_of_the_judge_prompt_carries_the_run_salted_frame(
         tmp_path, monkeypatch):
     """The samples section and pre-flight's record carry the SAME run-salted untrusted frame the
-    capture sections already carry — parity per cell, at this sink.
-
-    Observably true: a sample answer's own text and pre-flight's recorded reason each appear
-    INSIDE a closed `<run-{salt}-untrusted>` frame and nowhere outside one — the same two-sided
-    assertion the existing capture sections are held to. Both are attacker-influenced by
-    definition: the sample is an answer out of the monitored estate and pre-flight's record is
-    derived from live reads of it.
-
-    THIS IS THE WRAPPER ONLY. `redaction.redact_model_visible` is NOT applied here, by human
-    decision, and this test deliberately does not imply otherwise (accepted gap G-1).
-
-    What failure looks like: the new sections are spliced in as host text, and an answer out of
-    the estate is presented to the judge as part of its own instructions.
-    """
+    capture sections already carry — parity per cell, at this sink."""
     marker_fault = "a-preflight-reason-marker"
     _built, judge = graded(tmp_path, monkeypatch, outcome_reason=marker_fault,
                            samples=samples_of(SYSTEM, '{"host": "a-sample-marker-host"}'))
@@ -326,21 +213,7 @@ def test_every_attacker_influenced_section_of_the_judge_prompt_carries_the_run_s
 
 def test_a_second_attempts_step_2_overwrites_the_first_attempts_samples(
         tmp_path, monkeypatch):
-    """THE ACCEPTED BEHAVIOUR, PINNED: a second `Step.QUESTIONER` write's samples WIN.
-
-    Observably true: an episode carrying a first write's `samples.yaml` has it replaced
-    wholesale by a second — no merge, no refusal, no second file.
-
-    This test exists BECAUSE the obligation above it is scoped. O5's byte-identity holds within
-    one attempt only, and nothing compares across attempts (accepted gap G-2). A byte-identity
-    test that simply never exercised a second write would pass while the obligation was false —
-    so the gap is COVERED here rather than merely uncovered. (#1224: a launch never adopts an
-    existing episode directory any more — N17 — so the re-entered launch this once also pinned
-    is gone; the writer's overwrite is what remains.)
-
-    What failure looks like: an implementer merges the two writes' samples, and the judge is
-    shown a record no single questioner call was ever handed.
-    """
+    """THE ACCEPTED BEHAVIOUR, PINNED: a second `Step.QUESTIONER` write's samples WIN."""
     cli = W.mod("learning.branch.cli")
     _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
     ep = W.episode(tmp_path, root=root)

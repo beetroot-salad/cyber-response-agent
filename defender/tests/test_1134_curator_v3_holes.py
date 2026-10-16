@@ -1,27 +1,5 @@
-"""#1134 v3 curator step: the scoped adversary's holes, closed (tests only).
-
-Each row is the discriminating test for one exploit the adversary greened against the
-tests-only commit `078be401` (patches in the session scratchpad, `s5v3-adv-patches/`):
-
-- A1: an empty before-state (`{}`) is still a before-state: both restores remove the agent's
-  file over it (the exploit read `not snapshot` as "no snapshot").
-- A2 / D677: a tracked lesson whose name git would quote (non-ASCII, a quote, a backslash, a
-  tab) or that is not UTF-8 is in the before-state by its own name, and the settle restore puts
-  it back (the exploits parsed `ls-tree` without `-z`, or decoded names strictly).
-- A3 / D1090: the fault sweep lists no folder by any route (an audit hook sees no `os.scandir`
-  / `os.listdir` / `glob` while it runs) and meets a link to an outside folder at a new name
-  (git reports it; its unlink is refused and logged) — the exploit swept a plain `os.walk`.
-- A4: on the settle, a created name below a linked holding folder propagates the core's plain
-  `ELOOP` (the exploit skipped any name whose folder listing was refused).
-- A5: outside the lane's mounts `_put_back` plain-unlinks only a file (a dangling link or a
-  FIFO there is left).
-- A8: the settle restore's folder test is the held listing's: a link to an outside folder at a
-  created name is the leaf refusal, never `IsADirectoryError` through a stat of the link.
-
-A7 (an `os` lookup by `getattr` in `_git.py`), A9 (the rc in the git-failure warnings) and
-D1090's non-`*.log` ignored name are closed in `test_1134_curator_handle.py` /
-`test_1134_curator_drain.py` beside the rows they tighten.
-"""
+"""#1134 curator step: adversary regressions (empty before-state still restores, odd lesson names, fault sweep
+lists no folder, linked folders on the settle, put-back outside the mounts)."""
 from __future__ import annotations
 
 import errno

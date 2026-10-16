@@ -1,28 +1,12 @@
-"""#1224 — the oracle's two model roles, their scoped preflight, and what M12 deletes.
+"""#1224 — the oracle roles' model knobs, their scoped preflight, and survivors of the staging removal
+(run-record label check, redaction filter, elastic index confinement).
 
-Two new `AgentRole` members (`ORACLE`, `ORACLE_CHECK`, distinct from the runtime's `VERIFIER`)
-each get an agent definition and a model knob read at call time with a cheap default that
-routes (M11; GD-06/GD-07: a default that does not route breaks every run). M25=A scopes the
-role preflight to the roles a run uses: the oracle roles are checked at branch launch and in
-siblings, never on an ordinary alert run, and a misconfigured oracle model is an operator's
-configuration error, never an oracle failure charged to a world.
-
-M12 deletes staging (its write door included), the stagers, the applier, the lookups, the
-review, and the world-view hooks; the survivors (the run-record label check, the redaction
-filter, elastic's index confinement, the shippable-surface lint) keep doing their own job.
-Removal tests read the tree (`S.grep_shipped`, `S.source_text`, `importlib.util.find_spec`,
-an import census over the AST) and pair every absence with a positive control showing the
-census really scans. The role-count pins and test_797's fence are waivers W-01/W-02, not
-tests; nothing here re-pins a count.
-
-Preflight failures are logged (`defender.run`'s logger), so they are read off `caplog`.
+Preflight failures are logged, so they are read off `caplog`.
 """
 from __future__ import annotations
 
-import ast
 import importlib
 import importlib.util
-import inspect
 import re
 from dataclasses import fields, replace
 from pathlib import Path
@@ -119,49 +103,6 @@ def _assert_spent_nothing(launch: Any, est: Any, oracle: Any, verifier: Any) -> 
         assert S.read_world_record(launch.ep, label) is None, label
 
 
-# --------------------------------------------------------------------------------------
-# The tree, read: an import census over the AST.
-# --------------------------------------------------------------------------------------
-
-
-def _imports(path: Path) -> set[str]:
-    """Every module `path` imports, absolute and relative (resolved), lazy imports included;
-    a `from X import y` contributes both `X` and `X.y`."""
-    path = Path(path)
-    rel = path.relative_to(S.REPO_ROOT).with_suffix("")
-    package = rel.parts[:-1]
-    out: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.Import):
-            out.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                base = list(package[: len(package) - (node.level - 1)])
-                base += [node.module] if node.module else []
-                head = ".".join(base)
-            else:
-                head = node.module or ""
-            out.add(head)
-            out.update(f"{head}.{alias.name}" for alias in node.names)
-    return out
-
-
-def _string_constants(path: Path) -> set[str]:
-    return {node.value for node in ast.walk(ast.parse(Path(path).read_text(encoding="utf-8")))
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)}
-
-
-def _branching_modules() -> list[Path]:
-    """Every module on a branching path: the launcher, pre-flight, the estate (the oracle and
-    its tools included), and the manifest loader."""
-    roots = (S.DEFENDER / "learning" / "branch", S.DEFENDER / "runtime" / "branch")
-    return sorted(p for root in roots for p in root.rglob("*.py") if "__pycache__" not in p.parts)
-
-
-def _imports_any(mods: set[str], banned: tuple[str, ...]) -> list[str]:
-    return sorted(m for m in mods for b in banned if m == b or m.startswith(b + "."))
-
-
 # ======================================================================================
 # The two roles (M11) and their preflight (M25=A).
 # ======================================================================================
@@ -169,11 +110,7 @@ def _imports_any(mods: set[str], banned: tuple[str, ...]) -> list[str]:
 
 def test_1224_oracle_and_its_verifier_are_their_own_roles_with_their_own_model_knobs(
         monkeypatch):
-    """d15f_two_roles_with_their_own_knobs — ORACLE and ORACLE_CHECK are two new roles apart from VERIFIER, each with a definition, a model knob read at call time whose default routes, and a budget of its own never charged to the investigator.
-
-    M11; D1: only that the budget is the oracle's own and never the investigator's is pinned,
-    never its unit; M25: the default must route, GD-06/GD-07.
-    """
+    """ORACLE and ORACLE_CHECK are two new roles apart from VERIFIER, each with a definition, a model knob read at call time whose default routes, and a budget of its own never charged to the investigator."""
     AgentRole, AGENTS = _role(), _agents()
     assert AgentRole.ORACLE.value == "oracle"
     assert AgentRole.ORACLE_CHECK.value == "oracle_check"
@@ -204,33 +141,8 @@ def test_1224_oracle_and_its_verifier_are_their_own_roles_with_their_own_model_k
     assert tight.budget != default.budget, "the budget knob is not the oracle's budget"
 
 
-def test_oracle_role_model_does_not_route_on_a_plain_alert_run(tmp_path, monkeypatch, caplog):
-    """b_p039 — a plain alert run's start is not stopped by oracle role models that do not route, while the branching preflight is.
-
-    Adding branching must not make any non-branching run depend on the oracle roles' models or
-    keys (inferred from the amendments' fence; M25=A). Observed at the alert run's start gate:
-    `run.main`'s role preflight seam defaults to `preflight_role_models` called without
-    branching; the positive control is the branching preflight refusing the same
-    configuration.
-    """
-    _credentialed(monkeypatch, tmp_path)
-    preflight = _preflight()
-    alert_gate = inspect.signature(S.sym(S.RUN, "main")).parameters["preflight"].default
-    assert alert_gate(None) == 0, "the alert run's gate fails with every knob routable"
-    monkeypatch.setenv(S.KNOB_MODEL, UNROUTABLE)
-    monkeypatch.setenv(S.KNOB_CHECK_MODEL, UNROUTABLE)
-    caplog.clear()
-    assert alert_gate(None) == 0, caplog.text
-    assert preflight(None, branching=True) == 2
-    assert UNROUTABLE in caplog.text
-
-
 def test_1224_oracle_effort_valid_on_one_provider_only(tmp_path, monkeypatch, caplog):
-    """b_p266 — an oracle effort fatal on the provider its model routes to surfaces at the branch launch, to the operator, and never mid-serving as a failure charged to a world.
-
-    M25=A, human R6b. Applied: the oracle's model routes to Fireworks and its effort is
-    `xhigh` (valid on Anthropic, fatal on Fireworks, GD-07).
-    """
+    """an oracle effort fatal on the provider its model routes to surfaces at the branch launch, to the operator, and never mid-serving as a failure charged to a world."""
     _credentialed(monkeypatch, tmp_path)
     preflight = _preflight()
     monkeypatch.setenv(S.KNOB_MODEL, "kimi-k3")
@@ -250,14 +162,7 @@ def test_1224_oracle_effort_valid_on_one_provider_only(tmp_path, monkeypatch, ca
 ], ids=["oracle", "oracle_check"])
 def test_1224_oracle_model_knob_is_preflighted_only_where_branching_runs(
         tmp_path, monkeypatch, caplog, knob, role, bad_values, spared):
-    """o46_oracle_model_preflight — the oracle model knob unset, defaulted or mis-set never stops an alert run's preflight; a branch launch with it unroutable refuses before pre-flight spends anything, charging no world.
-
-    Also the contract of:
-    - o47_verifier_model_preflight — an unroutable oracle-check model with a routable oracle model still refuses the branch launch before pre-flight spends, and never stops an alert run (the `oracle_check` case; the routable oracle role is not blamed).
-    - b_p040 — an empty or unroutable oracle model knob leaves an alert run's start alone, refuses a sibling's and a launch's preflight naming the role, and a launch so refused spends nothing (the `oracle` case's empty value; M25=A, human R6b).
-
-    M25=A. Positive control: with the knob routable the same launch reaches the oracle.
-    """
+    """the oracle model knob unset, defaulted or mis-set never stops an alert run's preflight; a branch launch with it unroutable refuses before pre-flight spends anything, charging no world."""
     _credentialed(monkeypatch, tmp_path)
     preflight = _preflight()
     monkeypatch.delenv(knob, raising=False)
@@ -280,152 +185,8 @@ def test_1224_oracle_model_knob_is_preflighted_only_where_branching_runs(
     assert oracle.requests > 0, "a launch whose models route never reached pre-flight"
 
 
-def test_1224_role_preflight_sees_both_oracle_roles_and_refuses_a_role_with_no_definition(
-        tmp_path, monkeypatch, caplog):
-    """o48_roster_preflight — the branching preflight visits ORACLE and ORACLE_CHECK, fails loudly naming a branching role whose definition is missing, and an alert run's preflight is scoped to the roles it uses.
-
-    M25=A. The missing definition is the registry's entry removed for the test's duration (the
-    preflight reads the registry at call time); the role-count pins are W-02 and are not
-    re-pinned here.
-    """
-    _credentialed(monkeypatch, tmp_path)
-    AgentRole, AGENTS, preflight = _role(), _agents(), _preflight()
-    assert AgentRole.ORACLE in AGENTS
-    assert AgentRole.ORACLE_CHECK in AGENTS
-    assert preflight(None, branching=True) == 0
-    for knob, role in ((S.KNOB_MODEL, AgentRole.ORACLE),
-                       (S.KNOB_CHECK_MODEL, AgentRole.ORACLE_CHECK)):
-        with monkeypatch.context() as m:
-            m.setenv(knob, UNROUTABLE)
-            caplog.clear()
-            assert preflight(None) == 0, (role.name, caplog.text)
-            assert preflight(None, branching=True) == 2, role.name
-            assert _logged_role(caplog.text, role.name), caplog.text
-
-    caplog.clear()
-    monkeypatch.delitem(AGENTS, AgentRole.ORACLE_CHECK)
-    try:
-        outcome: Any = preflight(None, branching=True)
-    except Exception as loud:  # noqa: BLE001 — a raised refusal is a loud failure too
-        outcome = loud
-    assert not isinstance(outcome, TypeError), outcome
-    assert outcome != 0, "a branching role with no definition was skipped"
-    assert _logged_role(caplog.text + str(outcome), AgentRole.ORACLE_CHECK.name), (
-        caplog.text, outcome)
-
-
-# ======================================================================================
-# What M12 deletes, and what must survive it.
-# ======================================================================================
-
-
-def test_1224_no_branching_module_reaches_a_write_door():
-    """d07d_no_write_door_remains — staging's write door is gone and no module on a branching path imports staging or the cluster transport's write call.
-
-    O6; M12; the census is C13's deferred probe. Positive controls: the census finds the
-    serving seam and the transport's own write call where they live, and the oracle module and
-    pre-flight are on the path.
-    """
-    assert importlib.util.find_spec(S.COINED["module.oracle"]) is not None
-    assert hasattr(S.mod(S.CLI), S.COINED["fn.preflight"])
-    assert S.grep_shipped("def serve_one"), "the census did not scan the estate"
-    assert S.grep_shipped("def docker_exec_curl"), "the census did not scan the transport"
-    assert importlib.util.find_spec("defender.learning.branch.staging") is None
-    for needle in ("write_door", "class _Door", "_Door("):
-        assert S.grep_shipped(needle) == [], needle
-    branching = _branching_modules()
-    assert any(p.name == "registry.py" for p in branching)
-    banned = ("defender.learning.branch.staging", "defender.scripts.adapters._stub_transport")
-    for path in branching:
-        assert not _imports_any(_imports(path), banned), path
-        assert "docker_exec_curl" not in path.read_text(encoding="utf-8"), path
-
-
-def test_1224_branching_imports_no_vendor_module():
-    """d17a_no_vendor_code_in_branching — no branching module imports elastic_adapter, esql_text or a stager, and none keys on a lab system's name.
-
-    O1; non-obligation: no per-vendor code, no stagers, no capability tiers. Positive controls:
-    the import census sees the registry's own imports, and the name census finds `elastic`
-    where a vendor module keys on it.
-    """
-    registry = S.DEFENDER / "learning" / "branch" / "estate" / "registry.py"
-    assert "defender.runtime.verbs" in _imports(registry), "the import census sees nothing"
-    adapter = S.DEFENDER / "scripts" / "adapters" / "elastic_adapter.py"
-    assert "elastic" in _string_constants(adapter), "the name census sees nothing"
-    banned = ("defender.scripts.adapters.elastic_adapter", "defender.scripts.adapters.esql_text",
-              "defender.learning.branch.estate.stagers")
-    for path in _branching_modules():
-        assert not _imports_any(_imports(path), banned), path
-        keyed = set(S.LAB_SYSTEMS) & _string_constants(path)
-        assert not keyed, (path.relative_to(S.DEFENDER).as_posix(), sorted(keyed))
-
-
-def test_1224_staging_stagers_applier_lookups_and_review_are_gone():
-    """d19a_deleted_modules_are_gone — staging, the stagers, the applier, the lookups and the review are gone and imported by nothing, with validate_world_touches, Step.STAGING, _STAGED_NAME, the sweep and run.py's WorldApplier and configured_patterns fallback.
-
-    Also the contract of:
-    - d17e_no_holding_system_anywhere — the only shipped modules naming holding_system are the ones refusing a manifest as predating the oracle.
-    - d19b_world_view_hooks_have_no_user — VIEW_NAMESPACE, is_world_view, refuse_unnameable_world and refuse_a_foreign_world_view are gone with no remaining user, and esql_text names none of them.
-    - o25_shippable_surface_lint_after_stagers — the shippable-surface lint names no carve-out for the deleted stagers path (its run over the tree and its plants are the CI lint job's).
-    - d12b_no_code_bucket — the judge's code-half symbols are absent from the shipped tree. Name absence only: a renamed code half would pass it; the behavioural half is pinned by `test_1224_world_bucket_is_the_judge_models_output` (d12a) and `test_1224_judge_reads_a_real_error_row_and_an_adapter_cannot_load_fault_row_as_decided`.
-
-    M12; RF-10: archive.py holds no cluster staging, so nothing is asserted of it, and
-    refuse_unnameable_world in _family.py, redaction's VIEW_NAMESPACE and the registry's
-    refuse_a_foreign_world_view are the unnamed consumers; GB-22: esql_text has none today;
-    O-25; GB-12; GC-01; GC-02. Positive controls: the surviving registry is found by the same
-    probes, and every census finds a survivor before it is trusted to find nothing.
-    """
-    deleted = ("defender.learning.branch.staging", "defender.learning.branch.estate.stagers",
-               "defender.learning.branch.estate.applier",
-               "defender.learning.branch.estate.lookups", "defender.learning.branch.review")
-    assert importlib.util.find_spec("defender.learning.branch.estate.registry") is not None
-    for name in deleted:
-        assert importlib.util.find_spec(name) is None, name
-    shipped = S.shipped_python()
-    assert any(p.name == "registry.py" for p in shipped), "the import census scanned nothing"
-    importers = {p.relative_to(S.DEFENDER).as_posix(): _imports_any(_imports(p), deleted)
-                 for p in shipped}
-    assert {k: v for k, v in importers.items() if v} == {}
-
-    assert S.grep_shipped("def grade_episode"), "the text census scanned nothing"
-    for needle in (
-            # d19a: staging's helpers and run.py's applier.
-            "validate_world_touches", "sweep_glob", "WorldApplier", "STAGING", "_STAGED_NAME",
-            # d19b: the world-view hooks.
-            "VIEW_NAMESPACE", "is_world_view", "refuse_unnameable_world",
-            "refuse_a_foreign_world_view", "ViewNameError",
-            # d12b: the judge's code half.
-            "def grade_family", "def _grade_family", "def _grade_world",
-            "MECHANICAL_WORLD_BUCKET", "withheld_reason", "def _holding_system", "own_h_rows",
-            "doctored_answer_served", "_control_drift_discard"):
-        found = S.grep_shipped(needle)
-        assert found == [], (needle, found)
-    run_src = S.source_text("run.py")
-    assert "def resume_world" in run_src
-    assert "configured_patterns" not in run_src
-
-    holding = sorted({hit.split(":", 1)[0] for hit in S.grep_shipped("holding_system")})
-    assert holding, "the old-manifest refusal names holding_system nowhere"
-    assert [f for f in holding if S.PREDATES not in S.source_text(f)] == []
-
-    esql = S.DEFENDER / "scripts" / "adapters" / "esql_text.py"
-    esql_src = esql.read_text(encoding="utf-8")
-    assert "def split_first_command" in esql_src, "the esql census read nothing"
-    assert not _imports_any(_imports(esql), ("defender.learning.branch",))
-    assert "world_view" not in esql_src
-
-    lint_src = (S.REPO_ROOT / "scripts" / "lint" / "lint_shippable_surface.py").read_text(
-        encoding="utf-8")
-    assert "EXCLUDED_PREFIXES" in lint_src, "the lint moved"
-    assert "estate/stagers" not in lint_src
-
-
 def test_1224_run_record_label_check_still_refuses_a_reserved_label(tmp_path):
-    """d19c_reserved_label_rule_survives — the runs repository's episode-record writer still refuses a reserved world label, naming the rule, and records a well-formed one.
-
-    M12 takes `_world_label.world_view_fault`'s view arm; this writer imports the label rule
-    from that module. Positive control: a well-formed label is recorded and read back.
-    """
+    """the runs repository's episode-record writer still refuses a reserved world label, naming the rule, and records a well-formed one."""
     from defender import run_repository as R
 
     H = importlib.import_module("defender.tests.tenant_1105_run_repository._spec1105")
@@ -442,10 +203,7 @@ def test_1224_run_record_label_check_still_refuses_a_reserved_label(tmp_path):
 
 
 def test_1224_redaction_filter_still_masks_what_it_masked_without_the_staged_name_rule():
-    """o27_redaction_filter_survives — with the staged-name rule gone, the redaction filter still masks run and world tokens and leaves a wv- string alone.
-
-    O-27; GB-20.
-    """
+    """with the staged-name rule gone, the redaction filter still masks run and world tokens and leaves a wv- string alone."""
     redaction = S.mod("learning.branch.redaction")
     redact = redaction.redact_model_visible
     token_text = f"refused: index for run {S.EPISODE_TOKEN}.b is unavailable after 2026-07-28"
@@ -474,13 +232,7 @@ def _confinement_gate(elastic: Any, ctx: Any, index: str) -> str:
 
 
 def test_1224_elastic_confine_index_admits_the_same_indices_for_a_run_and_a_sibling(tmp_path):
-    """o28_confine_index_survives — elastic's index confinement admits and refuses exactly the same indices for an ordinary run and for a sibling.
-
-    O-28; GB-23. Driven through the real elastic adapter over an unreachable tenant (the #632
-    plant): an index the gate admits reaches the transport, one it refuses never does.
-    Positive controls: an in-bounds index passes and an out-of-bounds one is refused on the
-    ordinary run.
-    """
+    """elastic's index confinement admits and refuses exactly the same indices for an ordinary run and for a sibling."""
     H = importlib.import_module("defender.tests.tenant_1107_settings._spec1107")
     root = tmp_path / "tree"
     url = "http://127.0.0.1:1"

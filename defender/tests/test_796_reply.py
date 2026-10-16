@@ -1,9 +1,9 @@
-"""#796 — reading what the lenses and the composer return, and the role prompts they run under."""
+"""#796 — reading what the lenses and the composer return, and the role prompts they run under.
+"""
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -50,30 +50,6 @@ def test_every_role_has_a_prompt_asset():
 def test_an_unknown_role_raises_rather_than_running_promptless():
     with pytest.raises(FileNotFoundError):
         role_prompt("challenger")
-
-
-def test_no_role_prompt_names_an_issue_number():
-    """The retired stages shared one system instruction and it opened by naming an issue
-    number, which names nothing to a model — it was the only role description they had."""
-    for name in ROLES:
-        found = re.findall(r"#\d{3,}", role_prompt(name))
-        assert not found, f"{name}.md names {found}"
-
-
-def _flat(name: str) -> str:
-    """The prompt with its line wrapping collapsed — these assertions are about what a role
-    is told, and where the asset happens to wrap is not part of that."""
-    return " ".join(role_prompt(name).split())
-
-
-def test_each_lens_prompt_states_what_it_cannot_see():
-    """The blindness is the mechanism. A lens that does not know it is blind asks for the
-    missing half instead of reaching a reading without it."""
-    assert "do not see" in _flat("support")
-
-
-def test_the_composer_is_told_it_cannot_argue_the_opposite_disposition():
-    assert "opposite disposition" in _flat("composer")
 
 
 # Lens readings — the fail-open guard

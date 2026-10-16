@@ -1,11 +1,4 @@
 """#773 — the three attacker-influenced inputs: AUTHOR_RESULT, the queue row, the bytes.
-
-The project's danger lens is adversarial input: alert data is attacker-influenced by
-definition, and malicious input is well-formed on purpose. Everything in this module is a
-value someone else chose — a model's self-report, a producer's queue row, a model's
-frontmatter — driven through the real primitive that reads it.
-
-RED AGAINST HEAD BY CONSTRUCTION, for the same reason as the rest of the suite.
 """
 from __future__ import annotations
 

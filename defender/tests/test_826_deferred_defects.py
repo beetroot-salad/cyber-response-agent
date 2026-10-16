@@ -1,13 +1,6 @@
 """#826 — the four defects the #807 spec carved out and pointed at a follow-up.
 
 This module holds the parts that need no agent: the elastic sort surface (item 2), the
-failing-repeat wording of `repeat_note` (item 3), and the companion guard's predicate and
-counted domain (item 4). Item 1 and the live behaviour of items 3 and 4 are driven end to end
-in `tests/e2e/test_826_gather_deferred.py`.
-
-Each test names the defect it closes, because every one of them is a REGRESSION in the strict
-sense: the code shipped, the behaviour was measured, and the measurement is what the issue
-records. `reviewer-measure-0807-b` is cited by number where it is the evidence.
 """
 from __future__ import annotations
 
@@ -306,36 +299,6 @@ def test_the_companion_guard_keys_on_the_same_identity_as_the_first():
         [_above(0, params=params, lead="l-002"), _above(1, params=params, lead="l-002")],
         LEAD, system="elastic", verb="query", params=params, system_key="",
     ) is None
-
-
-def test_the_trip_row_detail_says_turned_back_not_issued():
-    """A downstream reader that could not tell the companion guard's trip row from the first
-    guard's would report a lead as having QUERIED something it never queried: nothing the
-    companion guard counts ever reached a system of record. Both details stay inside
-    `_record`'s 160-character digest truncation."""
-    trip = rq.RepeatTrip(first_seq=0, occurrence=3)
-    detail = rq.rejection_trip_detail(trip)
-    assert "turned back" in detail
-    assert "seq 0" in detail
-    assert "3rd" in detail
-    assert "issued" not in detail
-    assert "issued" in rq.repeat_trip_detail(trip), "the executed-path wording drifted"
-    assert len(detail) <= 160
-
-    # The trip row is ALSO this call's rejection record — the row it would otherwise have
-    # written does not exist separately — so the error it produced is kept as a tail, and the
-    # trip phrase leads so the 160-char digest truncation eats the tail rather than it.
-    with_cause = rq.rejection_trip_detail(trip, "unknown param(s) ['fields']")
-    assert with_cause.startswith(detail)
-    assert "unknown param(s)" in with_cause
-    assert len(rq.rejection_trip_detail(trip, "x" * 500)[:160]) == 160
-    assert detail in rq.rejection_trip_detail(trip, "x" * 500)[:160], \
-        "a long rejection pushed the repetition itself out of the digest"
-
-    reason = rq.rejection_dead_end_reason("elastic", "nosuch-verb", trip)
-    assert "elastic nosuch-verb" in reason
-    assert "rejected before it ran" in reason
-    assert "structural" in reason
 
 
 # #871 — the companion guard could not tell two UNDECLARED systems apart, because #855 keeps

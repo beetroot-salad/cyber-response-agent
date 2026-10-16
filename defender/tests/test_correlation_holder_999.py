@@ -21,7 +21,6 @@ from defender.tests._dispositions995 import (
 from defender.runtime.verbs import read_roster
 from defender.tests import _tenants1106 as T1106
 
-DEFENDER = PATHS.defender_dir
 ADAPTERS = PATHS.adapters_dir
 #: The committed tenant's settings folder, where the shipped table lives since #1106.
 SETTINGS = T1106.FIXTURE_SETTINGS

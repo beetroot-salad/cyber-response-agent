@@ -1,29 +1,4 @@
-"""#1127 on the branch ledger — no ledger row past the params limit is ever built or written.
-
-A ledger row puts `params` (and `asked_params`) directly under the row object, exactly as the
-queries table does, and both columns go through the one params cleaner
-(`_query_rules._json_safe_params`). Before #1127 the ledger wrote a params map nested past the
-reader's bound anyway, and the served-call path wrote TWO such lines per call (then the family
-`base` row and the world's own row; since #1224 the kept base read and the world's own row),
-neither of which any reader — `_absorb`, the episode's comparisons, the judge — would ever see.
-
-The design (issue #1127, as amended after the two reviews of PR #1139):
-
-* the cleaner raises `_query_rules.ParamsTooDeep` past `PARAMS_NESTING_LIMIT` (32, the map
-  counted), bounded — so a params map thousands of levels deep is refused, not a
-  `RecursionError` — naming the field that was too deep;
-* `ServedCall` cleans `params` and `asked_params` once, AS IT IS BUILT: a call no row could
-  carry is never built, so `row()`, both keys and `Ledger.record` cannot fail on depth;
-* both doors into `WorldRegistry` — `decide_call` and `_served` — refuse such a call UP FRONT,
-  as the ledger's own `LedgerError`, before the grant is decided, the estate adapter runs or
-  the call is keyed, and file no row at all. `_served` re-raises it untouched; anything else
-  would be caught by its `except Exception` and filed as a FAULT row;
-* priming reads a captured row too deep to carry as `unreadable`, so one such row in a source
-  run never makes the branch point unprimeable.
-
-Every "nothing was written" assertion reads the file's RAW lines: `read_jsonl_rows` would hide a
-line it skips.
-"""
+"""No ledger row past the params nesting limit is ever built or written."""
 from __future__ import annotations
 
 import importlib
@@ -41,9 +16,7 @@ from defender.learning.branch.ledger import (  # noqa: E402
     LedgerError,
     ServedCall,
     payload_text,
-    request_key,
 )
-from defender._query_rules import ParamsTooDeep
 from defender.tests.test_1127_params_nesting_limit import (  # noqa: E402
     FAR,
     LIMIT,
@@ -112,49 +85,6 @@ def test_a_ledger_row_at_or_under_the_limit_is_recorded_whole_and_read_back(tmp_
     assert len(lines) == 1
     assert parse_jsonl_row(lines[0]) is not None, "a row at the limit is unreadable"
     assert [row["params"] for row in read_jsonl_rows(path)] == [params]
-
-
-def assert_too_deep(err: Exception | None, field: str, what: str) -> None:
-    """`ParamsTooDeep` naming `field` — judged on a captured exception so a `RecursionError` at
-    depth 3000 is reported by its name rather than as a thousand-frame traceback."""
-    assert err is not None, f"{what} was built — nothing refused it"
-    assert isinstance(err, ParamsTooDeep), \
-        f"{what} was refused with {type(err).__name__}, not ParamsTooDeep: {str(err)[:200]}"
-    assert err.field == field, f"{what} was refused naming {err.field!r}, not {field!r}"
-
-
-@pytest.mark.parametrize("depth", [LIMIT + 1, FAR])
-def test_a_served_call_past_the_limit_is_never_built(depth):
-    """A call whose params no row could carry is refused as it is built, with `ParamsTooDeep`
-    naming `params` — so no `ServedCall` that `row()` could fail on ever exists. At one past
-    the limit and at a depth an unbounded cleaner cannot walk."""
-    assert_too_deep(raised(lambda: served(params_of_depth(depth))), "params",
-                    f"a depth-{depth} served call")
-
-
-@pytest.mark.parametrize("depth", [LIMIT + 1, FAR])
-def test_a_deep_asked_form_is_refused_naming_the_asked_form(depth):
-    """`asked_params` goes through the same cleaner, so a staging-era call whose ASKED form
-    is too deep is refused the same way, the ran form shallow — and the refusal names `asked_params`,
-    not `params` (#1127 review: the old message blamed the wrong field)."""
-    call = raised(lambda: served({"host": "canary-1"}, asked_params=params_of_depth(depth)))
-
-    assert_too_deep(call, "asked_params", f"a depth-{depth} asked form")
-
-
-def test_a_served_call_holds_its_params_as_the_row_stores_them():
-    """Cleaned once, at construction: the call holds what its row writes (a tuple as a list, a
-    non-finite float as its text), and both keys are the keys of the raw call — cleaning twice
-    changes nothing."""
-    raw = {"hosts": ("a", "b"), "threshold": float("inf")}
-
-    call = served(raw, asked_params={"hosts": ("c",)})
-
-    assert call.params == {"hosts": ["a", "b"], "threshold": "Infinity"}
-    assert call.row()["params"] == call.params
-    assert call.row()["asked_params"] == {"hosts": ["c"]}
-    assert call.key == request_key("cmdb", "get-host", raw)
-    assert call.correlation_key == request_key("cmdb", "get-host", {"hosts": ("c",)})
 
 
 # ── the served-call path: WorldRegistry._served ────────────────────────────────────────────

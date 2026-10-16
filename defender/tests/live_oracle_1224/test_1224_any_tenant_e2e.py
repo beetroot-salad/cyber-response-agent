@@ -1,20 +1,4 @@
-"""#1224 O1 — any tenant can branch: every layer, end to end, over a tenant that is not the lab.
-
-One scenario shape drives every layer the obligation names over the fixture tenant's own
-systems (`edr`, `idp`, `siem-x`, served by stub adapters), or over a variant of it: the launcher
-accepts the tenant and records its served systems, the question-writer authors world facts
-against them, pre-flight calibrates through each fact world's oracle, a sibling's call on a
-tenant system is served a verified world change, the judge grades the world, and a lesson keyed
-by the systems the judge named is selected for a later episode of the same tenant.
-
-Observed failing (O1): a branch over such a tenant is refused by some layer, or serves no world
-change. Each test asserts every stage it reaches, so the first layer that still assumes a lab
-system, a vendor or a response shape is the one that goes red.
-
-The model seams are doubles entering through the coined injection points (the question-writer,
-the oracle and verifier, the judge); the tenant's systems are real adapter modules planted on
-disk. Nothing here uses `monkeypatch.setattr`.
-"""
+"""Any tenant can branch: launch, question-writer, pre-flight, a served world change and the judge, end to end over a non-lab tenant."""
 from __future__ import annotations
 
 import json

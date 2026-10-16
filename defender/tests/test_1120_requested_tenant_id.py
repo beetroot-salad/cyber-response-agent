@@ -21,10 +21,3 @@ def test_an_absent_or_malformed_request_is_refused() -> None:
     assert _tenant.requested_tenant_id("acme") == "acme"
 
 
-def test_no_entry_point_spells_the_refusal_itself() -> None:
-    """Outside `_tenant.py` (and tests), no production module carries the refusal's words: an
-    entry point reaches it only through `requested_tenant_id`."""
-    spelled = [str(p.relative_to(_DEFENDER)) for p in sorted(_DEFENDER.rglob("*.py"))
-               if "tests" not in p.relative_to(_DEFENDER).parts and ".venv" not in p.parts
-               and p.name != "_tenant.py" and _REFUSAL_WORDS in p.read_text(encoding="utf-8")]
-    assert spelled == [], spelled

@@ -22,26 +22,6 @@ from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 
-class _ToolRecorder:
-    """Minimal stand-in for a pydantic-ai Agent: `register_tools` only uses `.tool`
-    as a decorator, so this records the registered tool names without constructing
-    an `AnthropicModel` (which needs an API key)."""
-
-    def __init__(self):
-        self.names: list = []
-        self.sequential: dict[str, bool] = {}
-
-    def tool(self, fn=None, **kwargs):
-        """Both decorator spellings. `register_tools` registers its shared-artifact writers as
-        `@agent.tool(sequential=True)`, so a recorder that accepts only the bare positional form
-        raises `TypeError` on the very branch this test is here to enumerate."""
-        if fn is None:
-            return lambda f: self.tool(f, **kwargs)
-        self.names.append(fn.__name__)
-        self.sequential[fn.__name__] = bool(kwargs.get("sequential", False))
-        return fn
-
-
 def _deps() -> tools.AgentDeps:
     return tools.AgentDeps(
         run_dir=Path("/tmp/x"), defender_dir=_DEFENDER, run_id="r",

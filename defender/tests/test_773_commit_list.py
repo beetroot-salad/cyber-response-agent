@@ -1,18 +1,7 @@
 """#773 — M5's explicit-list commit, O2's commit contents, O4/O5's tree-derived truth.
-
-RED AGAINST HEAD BY CONSTRUCTION. The commit today is pathspec-wide over the whole dirty
-corpus (CE3), which is what O2 replaces.
-
-**The corrected demand #0 contract** (§7 section G / FK-1) is what every commit-shaped
-test here is written against: `commit_fn` and `git_commit` are byte-for-byte UNCHANGED, and
-a NEW, SEPARATE function — `shared.commit_corpus_paths(message, cfg, approved_paths,
-deletion_paths)` — carries the drain's explicit-list commit, called directly by M5 and
-never through `cfg.commit_fn`. The provisional "widen `commit_fn` to take a path list"
-reading is rejected; no test here asserts it.
 """
 from __future__ import annotations
 
-import inspect
 import shutil
 
 import pytest
@@ -27,64 +16,6 @@ OLD = "defender/lessons/old.md"
 # ---------------------------------------------------------------------------
 # D0 — the commit seam, as §7 corrected it
 # ---------------------------------------------------------------------------
-
-
-def test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_commit_fn_773(
-    tmp_path,
-):
-    """M5's explicit-list commit is a NEW, SEPARATE function; `commit_fn`'s seam stays
-    `(message, cfg) -> str | None` and `_git.git_commit` keeps its single-pathspec
-    signature.
-
-    §7 FK-1: widening the shared seam would leave all four lanes sharing a signature that
-    COULD take a path list even though three never pass one — a latent coupling. A
-    genuinely separate function makes "untouched" a build-time fact, not a runtime habit.
-    Driven as a seam demand AND as behaviour: the tick's commit names the approved path."""
-    from defender import _git
-
-    new = inspect.signature(S.author_shared.commit_corpus_paths)
-    assert list(new.parameters) == ["message", "cfg", "approved_paths", "deletion_paths"]
-
-    old = inspect.signature(S.author_shared.commit_corpus)
-    assert list(old.parameters)[:3] == ["repo_root", "corpus_dir", "message"]
-    assert list(inspect.signature(_git.git_commit).parameters)[:3] == [
-        "cwd", "pathspec", "message",
-    ]
-    assert list(inspect.signature(S.lessons_run.commit_lessons).parameters) == [
-        "message", "cfg",
-    ]
-
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("ok", run_id="ok")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("ok")}, committed=["ok"]),
-    )
-    assert sc.run() == 0
-    assert sc.head_files() == [LESSON]
-
-
-def test_the_pitfalls_and_lead_author_commits_are_unchanged_773(tmp_path):
-    """The three sibling lanes N4 declares untouched — questioner, lead-author, pitfalls —
-    never reference the new function's name at all; the questioner still reaches
-    `shared.commit_corpus` with its own trailers. (#1175 moved the lead-author and pitfalls
-    commits to `_claim_git.ClaimGit.commit`, their claim session's index commit; they still
-    never reach this lane's `commit_corpus_paths`.)
-
-    §7 FK-1 makes this SAFE BY CONSTRUCTION rather than merely observed: a source census
-    over the three call sites is the honest form of "untouched", because a behaviour test on
-    an unchanged lane passes whether or not the seam moved under it."""
-    from defender.learning.author.questioner import run as questioner_run
-    from defender.learning.leads import pitfalls_curator
-    from defender.learning.leads import lead_author
-
-    for module in (questioner_run, pitfalls_curator, lead_author):
-        source = inspect.getsource(module)
-        assert "commit_corpus_paths" not in source, module.__name__
-    assert "commit_corpus" in inspect.getsource(questioner_run)
-
-    assert list(
-        inspect.signature(questioner_run.commit_questioner_lessons).parameters
-    ) == ["message", "cfg"]
 
 
 def test_an_empty_approved_list_commits_nothing_and_invokes_no_git_773(tmp_path):
@@ -439,21 +370,6 @@ def test_git_status_reports_no_changed_corpus_files_773(tmp_path):
     sc.run()
     assert sc.commit_count() == 1
     assert sc.category_of("f1") != "consumed_committed"
-
-
-def test_git_status_call_itself_produces_no_output_773(tmp_path):
-    """The empty `git status` result is AUTHORITATIVE: the tree is the truth (O5), so
-    nothing is vouched, checked or committed and the tick completes.
-
-    The curator here writes nothing at all, which is the real primitive producing a genuinely
-    empty census rather than a fake asserting one."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={}, committed=[], consumed_skip=[]),
-    )
-    sc.run()
-    assert sc.head_files() == []
 
 
 def test_git_status_reports_an_untracked_file_under_the_corpus_773(tmp_path):

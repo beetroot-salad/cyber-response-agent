@@ -11,7 +11,6 @@ from defender.runtime.agent_definition import RunScope, bind  # noqa: E402
 from defender.learning.author.curator_engine import CORPUS_AUTHOR_DEF  # noqa: E402
 
 from _curator_691_harness import (  # noqa: E402
-    bash_decision,
     confine,
     corpus,
     curator_deps,
@@ -26,11 +25,6 @@ from _curator_691_harness import (  # noqa: E402
 def _reads(deps, path: str) -> bool:
     """Whether the lesson-read lane (``decide_read`` — roots + shapes) admits ``path``."""
     return read_decision(deps, path).allow
-
-
-def _cats(deps, path: str) -> bool:
-    """Whether the bash ``cat`` lane admits ``path`` (its grant scope, own-corpus only)."""
-    return bash_decision(deps, f"cat {path}").allow
 
 
 # O6 / R4 — the read confine

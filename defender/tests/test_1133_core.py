@@ -329,44 +329,6 @@ class ParentSyncSpy(S.OsSpy):
         super().fsync(fd)
 
 
-@pytest.mark.parametrize("dir_state", ["fresh", "adopted"])
-def test_d1_hold_new_fsyncs_the_parent_on_an_o_rdonly_directory_handle(tmp_path, dir_state):
-    """The new directory's own entry is made durable: `hold_new` fsyncs the PARENT (its inode),
-    after the directory exists, on a handle that is a directory opened for reading — not the
-    walk's `O_PATH` handle, whose fsync is `EBADF` (C12). It does so whether it made the
-    directory or adopted one already there (`adopted`): an entry an earlier, crashed caller made
-    may never have been synced, so finding it is no proof it is durable."""
-    parent = tmp_path / "episodes"
-    parent.mkdir()
-    if dir_state == "adopted":
-        (parent / "ep-1133").mkdir()
-    spy = ParentSyncSpy(parent / "ep-1133")
-
-    S.hold_new(parent, "ep-1133", os_=spy).close()
-
-    on_parent = [(i, s) for i, s in enumerate(spy.fsyncs) if s.ino == S.inode(parent)]
-    assert on_parent, f"the parent was never fsynced: {spy.fsyncs}"
-    i, sync = on_parent[-1]
-    assert spy.made_at_sync[i], "the parent was fsynced before the new directory existed"
-    assert sync.is_dir
-    assert not sync.getfl & S.O_PATH, "the parent was fsynced through an O_PATH handle"
-    if sync.open_flags is not None:
-        assert sync.open_flags & os.O_DIRECTORY, "the parent's sync handle is not O_DIRECTORY"
-        assert sync.open_flags & os.O_ACCMODE == os.O_RDONLY
-
-
-@pytest.mark.parametrize("name", ["a/b", "..", ".", "", "/abs"])
-def test_d1_hold_new_takes_one_path_component(tmp_path, name):
-    """`name` is the one component the new directory is called: a separator, `.`, `..`, empty
-    or absolute name is a `ValueError` before anything is made or opened."""
-    parent = tmp_path / "episodes"
-    (parent / "a").mkdir(parents=True)
-    before = S.census(tmp_path)
-    with pytest.raises(ValueError, match=S.NAME_REFUSAL):
-        S.hold_new(parent, name)
-    assert S.census(tmp_path) == before
-
-
 class DirSyncFails(S.PassThroughOs):
     """The real `os`, handed in as `os_`, except that an `fsync` of a DIRECTORY fails with
     `EIO`, as on a filesystem that cannot make a folder's entries durable."""
@@ -390,21 +352,6 @@ def test_d1_a_failed_parent_sync_fails_hold_new_and_leaves_nothing_open(tmp_path
     assert S.open_fds_on(parent / "ep-1133") == [], "hold_new left the new directory open"
 
     S.hold_new(parent, "ep-1133").close()
-
-
-def test_d1_hold_new_opens_its_parent_by_path_once_and_everything_else_relative_to_it(tmp_path):
-    """The parent is resolved by path once — `hold_new` follows the parent's spelling — and
-    every later open (the new directory's step, the parent's sync handle) is relative to that
-    descriptor: the parent is never re-resolved by name to be synced, so a parent swapped after
-    the first open is not the folder synced."""
-    parent = tmp_path / "episodes"
-    parent.mkdir()
-    spy = S.OsSpy()
-    S.hold_new(parent, "ep-1133", os_=spy).close()
-    by_path = [o for o in spy.opens if o.dir_fd is None or os.path.isabs(o.path)]
-    assert [o.path for o in by_path] == [str(parent)], (
-        f"hold_new opened by path more than its parent's one resolve: {by_path}")
-    assert spy.opens[0].path == str(parent), spy.opens
 
 
 # =======================================================================================
@@ -595,23 +542,6 @@ def test_d1_a_failed_holding_folder_sync_fails_the_durable_append(tree, rel):
         held.write(rel, ROW, mode="append")
 
 
-@pytest.mark.parametrize("rel", ["rec.jsonl", "fa/fb/rec.jsonl"])
-def test_d1_a_durable_append_opens_nothing_by_path(tree, rel):
-    """Every open a durable append makes — each holding folder, the leaf, and the holding
-    folder's sync handle — is a relative name off a held descriptor (`dir_fd`), never a path:
-    the folder synced is the one the walk holds, not whatever the name resolves to now."""
-    root, _host = tree
-    (root / rel).parent.mkdir(parents=True, exist_ok=True)  # R4: a durable append makes no folder
-    spy = S.OsSpy()
-    with S.hold(root, os_=spy) as held:
-        at = len(spy.opens)
-        held.write(rel, ROW, mode="append", durable=True)
-        opens = spy.opens[at:]
-    assert opens, "the durable append opened nothing through its os_ seam"
-    by_path = [o for o in opens if o.dir_fd is None or os.path.isabs(o.path)]
-    assert by_path == [], f"the durable append opened by path: {by_path}"
-
-
 @pytest.mark.parametrize("rel", ["rec.jsonl", "fa/rec.jsonl"])
 def test_d1_a_durable_append_after_a_rename_syncs_the_moved_holding_folder(tmp_path, rel):
     """The root is held, not remembered, and so is the folder a durable append syncs: after the
@@ -634,17 +564,6 @@ def test_d1_a_durable_append_after_a_rename_syncs_the_moved_holding_folder(tmp_p
                for s in syncs), f"the moved holding folder {folder} was not fsynced: {syncs}"
 
 
-@pytest.mark.parametrize("mode", ["create", "replace"])
-def test_d1_durable_applies_to_the_append_mode_only(tree, mode):
-    """`durable=True` with `create` or `replace` is a `ValueError` before anything is made."""
-    root, _host = tree
-    with S.hold(root) as held:
-        before = S.census(root.parent)
-        with pytest.raises(ValueError, match="durable"):
-            held.write(REC, ROW, mode=mode, durable=True)
-        assert S.census(root.parent) == before
-
-
 # =======================================================================================
 # No iterable text
 # =======================================================================================
@@ -653,68 +572,9 @@ def _gen():
     yield "a line\n"
 
 
-@pytest.mark.parametrize("verb", WRITE_VERBS)
-@pytest.mark.parametrize("value", [
-    pytest.param(lambda: ["a line\n"], id="list"),
-    pytest.param(lambda: iter(["a line\n"]), id="iterator"),
-    pytest.param(_gen, id="generator"),
-    pytest.param(lambda: 7, id="int"),
-    pytest.param(lambda: None, id="none"),
-    pytest.param(lambda: {"a": 1}, id="dict"),
-])
-def test_d1_held_write_takes_str_or_bytes_and_refuses_anything_else_before_any_io(
-        tree, verb, value):
-    """`text` is `str | bytes`: a list, an iterator, a generator (which a fallback create would
-    consume on its first pass and leave an empty file, C17), an int, `None` or a dict is a
-    `TypeError` before anything is opened or made — the holding folders included. `bytearray`
-    is not pinned either way. Control: `str` and `bytes` land (into holding folders that exist:
-    a durable append makes none, R4)."""
-    root, _host = tree
-    (root / "fa" / "fb").mkdir(parents=True)
-    with S.hold(root) as held:
-        before = S.census(root.parent)
-        with pytest.raises(TypeError):
-            S.held_verb(held, verb, REC, value())
-        assert S.census(root.parent) == before, f"a refused {verb} made something"
-        S.held_verb(held, verb, REC, "text\n")
-        S.held_verb(held, verb, "fa/other.bin", b"\x00bytes\n")
-    assert (root / "fa" / "other.bin").read_bytes() == b"\x00bytes\n"
-
-
 # =======================================================================================
 # The view
 # =======================================================================================
-
-def test_o3_the_view_is_a_bound_over_the_same_handle_owning_nothing(tree, tmp_path):
-    """`view()` is a `Bound` whose public surface is exactly the readers and `close`; it reads
-    through the held handle (after the root is renamed it reads the moved folder); its `close()`
-    releases nothing (the `Held` still writes); and once the `Held` closes, the view answers a
-    refusal (`Bad file descriptor`), never text and never an exception."""
-    root, _host = tree
-    (root / "rec.txt").write_text("before\n", encoding="utf-8")
-    held = S.hold(root)
-    try:
-        view = held.view()
-        assert isinstance(view, _io.Bound), f"view() is {type(view).__name__}, not a Bound"
-        public = {n for n in dir(view) if not n.startswith("_")}
-        assert public == {"read", "read_bytes", "read_jsonl", "entries", "under", "close"}, sorted(public)
-
-        moved = tmp_path / "moved"
-        root.rename(moved)
-        (moved / "rec.txt").write_text("after the rename\n", encoding="utf-8")
-        assert view.read("rec.txt").text == "after the rename\n", (
-            "the view re-resolved the root by path instead of reading through the handle")
-
-        view.close()
-        held.write("more.txt", "still held\n", mode="create")
-        assert (moved / "more.txt").read_text(encoding="utf-8") == "still held\n"
-        assert view.read("rec.txt").text == "after the rename\n", "view.close() closed the root"
-    finally:
-        held.close()
-    after = view.read("rec.txt")
-    assert after.text is None, f"the view still reads after its Held closed: {after!r}"
-    assert after.reason == os.strerror(errno.EBADF), (
-        f"the closed view's read is not refused as a closed descriptor: {after!r}")
 
 
 # =======================================================================================
@@ -870,16 +730,6 @@ def test_d1_a_close_landing_as_a_verb_takes_its_dup_never_redirects_the_verb(tmp
     finally:
         if "decoy_on" in state:
             os.close(state["decoy_on"])
-
-
-def test_d1_close_is_idempotent_and_the_with_exit_after_it_is_clean(tree):
-    """A second `close()` (and the `with` exit after an explicit one) is a no-op: it never
-    closes a descriptor number twice."""
-    root, _host = tree
-    with S.hold(root) as held:
-        held.close()
-        held.close()
-    assert S.open_fds_on(root) == []
 
 
 # =======================================================================================

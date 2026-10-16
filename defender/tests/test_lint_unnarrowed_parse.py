@@ -1,19 +1,4 @@
-"""The lint gate for the un-narrowed parse seam: lint_unnarrowed_parse (#878).
-
-Same shape as test_lint_unsafe_jsonl_io.py / test_lint_hand_rolled_frontmatter.py — the gate
-is a standalone program under repo-root ``scripts/lint/``, so it is reached by path (never by
-import) and driven through its testability seam:
-
-  - ``main(argv, *, scope=..., baseline_path=...) -> int``
-  - ``_scan(scope) -> list[Finding]``
-
-What is pinned here is the CONSTRUCTION BOUNDARY, not a list of spellings: the same violation
-written through an alias, a from-import or the repo's own ``_yaml`` wrapper is one case, and
-the near-miss that hands the parse straight to a validator is the cure the gate must leave
-alone. The two motivating shapes of #878 — ``read_json_locked``'s ``-> dict`` over
-``json.loads``, and a bare ``datetime.fromisoformat`` — each get a test that fires, and each
-gets a paired control that does not.
-"""
+"""The lint gate for the un-narrowed parse seam: lint_unnarrowed_parse (#878)."""
 from __future__ import annotations
 
 from pathlib import Path

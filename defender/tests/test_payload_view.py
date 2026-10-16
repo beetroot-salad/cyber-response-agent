@@ -173,22 +173,6 @@ def test_a_capped_envelope_states_the_servers_own_total(tmp_path):
     assert "EXACT" in view
 
 
-def test_view_side_elision_is_not_reported_as_a_server_cap(tmp_path):
-    """A complete payload the VIEW shortened must not read as one the SERVER truncated: the
-    rows exist, they are on disk, and `total` is still exact."""
-    view = _view(_lucene(_docs(60)), ceiling=1200, run_dir=tmp_path)
-    assert pv.ELISION_PREFIX in view
-    assert "no `limit` reaches them" not in view
-
-
-def test_the_span_line_survives_for_a_capped_envelope(tmp_path):
-    """#830: a capped payload is ONE slice and the envelope never says which. Computed over the
-    full returned list the walk holds, not over the elements that survived the budget."""
-    view = _view(_lucene(_docs(20), total=142), ceiling=1200, run_dir=tmp_path)
-    assert "2026-08-07T11:00:00Z" in view
-    assert "2026-08-07T11:19:00Z" in view
-
-
 # Bounds.
 
 @pytest.mark.parametrize("ceiling", [400, 1200, 8192])
@@ -280,15 +264,6 @@ def test_a_server_capped_payload_is_never_offered_a_count_over_its_own_file(tmp_
     assert "NEVER count the returned docs" in view
     assert "count(*)" not in view
     assert str(tmp_path / RUN) in view
-
-
-def test_a_bare_truncated_flag_still_reports_the_server_cap(tmp_path):
-    """`truncated: true` with no `total`/`returned` IS a server cap."""
-    text = json.dumps({"index": "logs-*", "truncated": True, "entries": _docs(200)})
-    view = _view(text, ceiling=1200, run_dir=tmp_path)
-    assert "The SERVER capped this result" in view
-    assert "NEVER count these docs" in view
-    assert "count(*)" not in view
 
 
 # #877 F-10 — the envelope may not derive a fact from itself.

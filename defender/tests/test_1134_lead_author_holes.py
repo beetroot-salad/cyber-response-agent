@@ -236,10 +236,7 @@ def test_an_entry_swapped_for_a_link_after_kind_answered_is_not_followed(
 ):
     """The entry is a plain file when `entry_kind` answers and a symlink to an outside
     file when it is read: the reader gives its "refused" answer (not the plain one, not the
-    target's), the kernel saw no open and no read of the target, and the link is left.
-
-    Catches: `entry_kind(view, name).kind == "file"` followed by `(root / name).read_text()`
-    (or `read_text_soft`), which opens by a following spelling the name the listing vouched for."""
+    target's), the kernel saw no open and no read of the target, and the link is left."""
     race.prepare(scene)
     place(scene, race.name, race.plain, "plain")
     target = write(scene.outside / "race-target", race.target)
@@ -277,13 +274,7 @@ def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, cap
     """H2, through `lead_author.run(label=, deps=)`: an executed lead whose `query_id` only a
     template behind a link at `skills/gather` or `skills/gather/queries` answers. The run's
     catalog loads read nothing behind the link, so the lead resolves to no template, no handoff
-    is built from the outside template, and the agent is never spawned.
-
-    `site=None` is the control: the same template in the plain catalog resolves the lead, and
-    the agent is handed it, rendered (the fake fails, rc 1, so the run stops at the spawn, rc 2).
-
-    Catches: `_run_locked` (or the handoff) loading the catalog as `load_catalog(skills_dir /
-    "gather/queries")` or `bind(catalog_dir)`."""
+    is built from the outside template, and the agent is never spawned."""
     repo = _worktree(tmp_path)
     run_dir = _run_dir()
     lead = _lead("wazuh.probe", system="wazuh", verb="noverb", params={"index": "idx-7"})
@@ -318,13 +309,7 @@ def test_the_writer_loads_no_catalog_through_a_linked_folder(tmp_path: Path, sit
     """H6, `synthesize_drafts(catalog=None)`: the catalog behind a link at `skills/gather` or
     `skills/gather/queries` holds a template answering the wazuh lead. The writer's own load
     reads nothing behind the link, so the wazuh lead is still a draft candidate: its write is
-    refused and logged, like the elastic one, and nothing outside the repo changes.
-
-    `site=None` is the control: the answering template, read, suppresses the wazuh draft, and
-    only the elastic one is written.
-
-    Catches: the writer's fallback loading through a `Path` (`load_catalog(skills_dir /
-    CATALOG_FOLDER)`), which reads the outside catalog and so drops the wazuh draft silently."""
+    refused and logged, like the elastic one, and nothing outside the repo changes."""
     with scene_over(tmp_path, bare_skills(tmp_path)) as s:
         answering = "gather/queries/wazuh/hunt-creds.md"
         write(s.at(answering), query_template(WAZUH_LEAD.query_id, "established"))
@@ -510,11 +495,7 @@ def test_a_planted_folder_gives_one_verdict_whatever_it_points_at(
     for all four links (whatever they point at), each of the five is the no-follow gate's,
     nothing behind the plant is opened or read, and the plant is left. (The plain file may
     differ from the links in the refusal's wording only: the SKILL.md gate's read says `Not a
-    directory` there.)
-
-    Catches: `os.path.lexists(repo_root / path)` / `(repo_root / path).is_file()`, which do not
-    follow a link at the leaf but do follow every folder above it, so the verdict tracks the
-    target: "present" for (a), "departed" / "no twin" / "no SKILL.md" for (b) and (c)."""
+    directory` there.)"""
     verdicts: dict[str, str] = {}
     for plant in PLANTS:
         with scene_over(tmp_path / plant, seed_skills_repo(tmp_path / plant / "repo")) as s:
@@ -688,11 +669,7 @@ FOLLOWS = [
 def test_every_check_reads_through_the_tree_for_it_is_handed(scene: Scene, follow: Follow):
     """The lane's tree and a copy of it that differs at one entry: through the lane's
     `tree_for` the check gives the lane's answer; through a spy `tree_for` that places every
-    `skills/` path in the copy's held mount it gives the copy's, and it asked that spy.
-
-    Catches: a check that takes `tree_for` and discards it for a lookup it builds itself (a
-    fresh `open_drain_trees(LoopPaths(repo_root=...), ...)`), or that probes the plain
-    `repo_root / path` beside it."""
+    `skills/` path in the copy's held mount it gives the copy's, and it asked that spy."""
     follow.seed(scene)
     # Inside the repo, as every mount is: the refusals spell their paths repo-relative.
     copy = scene.repo / "defender" / "skills-copy"

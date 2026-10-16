@@ -1,17 +1,4 @@
-"""#631 — the seams the enforced posture hangs on: the posture bit, the limits
-passthrough, the tier table, the flag, the retry ceiling, the two pool roots, and the
-CI wiring.
-
-Every fake here enters through an INJECTION SEAM — `make_model` on
-`build_agent_core`, the `limits` kwarg, `monkeypatch.setenv` on the real environment
-the real `env_bool` reads. Nothing is monkeypatched onto a module.
-
-RED AGAINST HEAD IS THE EXPECTED STATE. At `483b5809` `_make_hooks(logger, agent_id)`
-takes no posture bit (SC13), `run_investigation` exposes no limits seam (SC12),
-`AgentDefinition` carries no budget bit (SC8 records the three that DO exist as the
-precedent), `DEFENDER_BUDGET_ENFORCE` does not exist, and CI's unit-test step has no
-`env:` block at all (SC26).
-"""
+"""#631 — the seams the enforced posture hangs on: the posture bit, the limits passthrough, the tier table, the flag, the retry ceiling, the two pool roots, and the CI wiring."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_fixture_run_1165
@@ -29,7 +16,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-import yaml  # noqa: E402
 from pydantic_ai import Agent  # noqa: E402
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: E402
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
@@ -58,11 +44,8 @@ CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 FLAG = "DEFENDER_BUDGET_ENFORCE"
 
 
-
 class ScriptedModel:
-    """Emits one scripted turn per model request; past the script, text (which ends
-    the loop). The same shape `tests/e2e/_replay_harness.ReplayFn` uses — a VALUE
-    handed to `build_agent_core`'s `make_model` seam, never a patched symbol."""
+    """Emits one scripted turn per model request; past the script, text (which ends the loop). The same shape..."""
 
     __name__ = "Scripted"
 
@@ -88,8 +71,7 @@ def _run_dir(tmp_path: Path, name: str = "run") -> Path:
 
 
 def _state(run_dir: Path, run_id: str = "r"):
-    """The run's state, as `run_investigation` starts it (#1235 round 2): the budget a driven
-    agent counts against is this object, carried on its deps, and nothing keyed by the folder."""
+    """The run's state, as `run_investigation` starts it (#1235 round 2): the budget a driven agent counts..."""
     from defender.runtime.run_state import RunState
 
     return RunState(run_dir, run_id)
@@ -105,11 +87,7 @@ def _seed_calls(state, n: int) -> None:
 
 def drive_agent(defn, run_dir: Path, turns, *, limits, state, enforce: bool | None = None,
                 agent_id: str = "main", request_limit: int = 40):
-    """Build ONE agent through the real `build_agent_core` and drive it — the real
-    hooks, the real tools, the real gate — against an injected `FunctionModel`.
-
-    `state` is the run's `RunState` its deps carry (#1235 round 2), the one the budget hooks
-    count against."""
+    """Build ONE agent through the real `build_agent_core` and drive it — the real hooks, the real tools, the..."""
     model = ScriptedModel(turns)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     from dataclasses import replace as _replace
@@ -127,9 +105,6 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, state, enforce: bool | No
     from defender import run_common
     from defender.runtime import box as box_mod
     box = box_mod.unboxed_executor(env=run_common.run_env(DEFENDER, run_dir))
-    # effective_tools_for (#632, §7 R7): a bare bind() of a role whose static tools/verb_grant
-    # disagree (the judge — see agent_definition.effective_tools_for) would raise; this probe
-    # is about the budget/accounting hooks, not the verb grant.
     bindable = _replace(defn, tools=effective_tools_for(defn))
     deps = _replace(bind(bindable, run_dir, defender_dir=DEFENDER, box=box), run_state=state)
     import asyncio
@@ -145,24 +120,8 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, state, enforce: bool | No
         logger.close()
 
 
-
 def test_budget_kill_is_not_control_flow(tmp_path):
-    """The budget kill type is absent from query_tool.CONTROL_FLOW_EXCEPTIONS and
-    passes through BOTH of that tuple's except sites, and is not absorbed by
-    _run_gather's widened handler, so it propagates to the driver instead of being
-    recorded as a query fault or converted into a measurement string.
-
-    X10 (read, re-verified) is why both sites are bound rather than one: there are TWO
-    `except CONTROL_FLOW_EXCEPTIONS:` consumers, query_tool.py:242 (the reject path)
-    and :319 (the execute path). Membership is what both read, so a demand binding one
-    would leave the other unmodelled. RF4: RunAborted is NOT reusable — its
-    __init__(total_failures, systems) builds a connectivity-flavoured message — and
-    adding the budget's own type to this tuple by reflex would convert the kill into a
-    recorded query fault.
-
-    The positive control is test_budget_kill_writes_partial_trace (e2e): the kill DOES
-    propagate to run_investigation's catch, which writes the partial trace — so this
-    negative cannot pass by the exception never being raised."""
+    """The budget kill type is absent from query_tool.CONTROL_FLOW_EXCEPTIONS and passes through BOTH of that..."""
     assert BudgetKill not in CONTROL_FLOW_EXCEPTIONS
     assert not any(issubclass(BudgetKill, t) for t in CONTROL_FLOW_EXCEPTIONS)
 
@@ -230,11 +189,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
 
 
 def _drive_gather_query(run_dir: Path, registry, state):
-    """Drive ONE real `query` call on a real GATHER agent against an injected verb
-    registry — the seam `run_investigation(verbs=…)` already exposes (#611).
-
-    The query tool's guards read the run's `RunState` its deps carry (#1235 round 2); this
-    folder never goes through the driver, so the caller hands the state in."""
+    """Drive ONE real `query` call on a real GATHER agent against an injected verb registry — the seam..."""
     import asyncio
     from dataclasses import replace
 
@@ -263,22 +218,8 @@ def _drive_gather_query(run_dir: Path, registry, state):
         logger.close()
 
 
-
-
-
 def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_path):
-    """_make_hooks takes the budget-posture bit as a REQUIRED keyword parameter —
-    constructing it without one raises rather than defaulting — and every call site
-    supplies it, including experiments/gather-verifiable-code-289/run_arms.py, which
-    builds its Agent by hand with no AgentDefinition.
-
-    SC3 (executed): `_make_hooks` has THREE call sites, and the third is invisible
-    three ways — the resolver's searchPath excludes experiments/, CI collects only
-    tests/ and learning/, and no import edge reaches it from defender/. SC26 confirms
-    CI never collects it. So this test EXERCISES that site's argument list against the
-    real signature rather than relying on collection: a required argument fails loudly
-    at the one site that would otherwise run unenforced, while an optional one
-    reproduces the fail-open M2 exists to prevent."""
+    """_make_hooks takes the budget-posture bit as a REQUIRED keyword parameter — constructing it without one..."""
     sig = inspect.signature(driver._make_hooks)
     posture = sig.parameters["enforce"]
     assert posture.kind is inspect.Parameter.KEYWORD_ONLY
@@ -308,14 +249,8 @@ def test_make_hooks_requires_the_posture_bit_and_every_caller_supplies_it(tmp_pa
     assert "limits" in core_sig.parameters
 
 
-
-
-
 def test_limits_threaded_from_boundary(tmp_path):
-    """The driver resolves DEFAULT_LIMITS ONCE at the boundary and threads it inward
-    through check_budgets' existing `limits` parameter, so a test can inject low
-    limits without any operator-facing configuration existing — and the injected cap,
-    not the module default, is what fires."""
+    """The driver resolves DEFAULT_LIMITS ONCE at the boundary and threads it inward through check_budgets'..."""
     for fn, param in ((driver.run_investigation, "limits"),
                       (driver.build_agent_core, "limits"),
                       (driver._make_hooks, "limits")):
@@ -340,15 +275,7 @@ def test_limits_threaded_from_boundary(tmp_path):
 
 
 def test_the_hook_counts_on_the_state_the_deps_carry_and_on_nothing_else(tmp_path):
-    """#1235 round 2: the budget hook counts each executed call on the `RunState` the deps
-    carry and on nothing keyed by the folder. Two runs on ONE folder, each with its own fresh
-    state, each count exactly their own call: the first run's count does not carry into the
-    second's, and the second run's call does not land in the first's. Under the enforcing
-    posture, so the short-circuit reads the carried state too: at a cap of 1 the second run's
-    call is not refused on a count it never made.
-
-    Positive control on the same folder and state: a further call on the FIRST state, already
-    at its cap, is refused and leaves that count where it was."""
+    """#1235 round 2: the budget hook counts each executed call on the `RunState` the deps carry and on nothing..."""
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1, "wall_clock_timeout": 3600,
               "grace_seconds": 600}
     run_dir = _run_dir(tmp_path, "one-folder")
@@ -372,21 +299,7 @@ def test_the_hook_counts_on_the_state_the_deps_carry_and_on_nothing_else(tmp_pat
 
 
 def test_caps_are_not_operator_configurable(tmp_path, monkeypatch):
-    """No environment variable and no config file changes any cap, and no
-    per-signature default layers one — DEFAULT_LIMITS stays inline and single-default,
-    because the flag governs POSTURE rather than tuning.
-
-    PB5 (executed) confirmed both declared vias dead by execution rather than by
-    reading: the dict is unchanged after an env sweep and a module reload, and the
-    module contains none of the four read primitives. The positive control is
-    test_limits_threaded_from_boundary — the `api` via IS reachable and an injected
-    cap demonstrably fires — so this negative cannot pass by the caps being unreadable
-    from everywhere.
-
-    The env/config sweep runs in a CHILD PROCESS (blind reader R19): reloading
-    budget_enforcer in-process rebinds BudgetKill / DEFAULT_LIMITS to new objects, which
-    the sibling tests hold by identity (`BudgetKill not in CONTROL_FLOW_EXCEPTIONS`,
-    `pytest.raises(BudgetKill)`) — a latent cross-test failure under any reordering."""
+    """No environment variable and no config file changes any cap, and no per-signature default layers one —..."""
     before = dict(DEFAULT_LIMITS)
 
     probe = (
@@ -411,18 +324,8 @@ def test_caps_are_not_operator_configurable(tmp_path, monkeypatch):
         assert primitive not in src, f"budget_enforcer reads {primitive}"
 
 
-
 def test_unknown_tool_tiers_as_core(tmp_path):
-    """A tool absent from the tail table tiers as core — the restrictive arm — so
-    adding a tool to either ToolSet raises no KeyError anywhere on the enforcement
-    path and inherits the tight cap by default.
-
-    SCOPE NOTE, and no doc or demand may cite this one as covering the other: P7
-    (executed) showed totality protects a REGISTERED tool the tail table forgot. It
-    does NOT cover an undeclared/undispatched ToolSet bit —
-    `ExtendedToolSet(read=True, undispatched=True)` registers exactly ['read_file'],
-    so the bit produces no tool name and never reaches the tier function at all. The
-    safety there is INERTNESS, not the fail-closed default."""
+    """A tool absent from the tail table tiers as core — the restrictive arm — so adding a tool to either ToolSet..."""
     assert tier("a_tool_that_does_not_exist", AgentRole.MAIN) == "core"
     assert tier("", AgentRole.GATHER) == "core"
     assert tier("read_file", AgentRole.GATHER) == "core"
@@ -431,31 +334,13 @@ def test_unknown_tool_tiers_as_core(tmp_path):
 
 
 def test_tier_table_over_the_real_census(tmp_path):
-    """The tail tier is exactly MAIN's read_file and append_block; every GATHER tool is
-    core including read_file, and `gather` itself is core — so parallel subagents cannot
-    drain the ten-call window MAIN needs for its report.
-
-    The enumeration picks the subjects; the assertion is WIRED, not structural: with
-    the pool tripped, MAIN's append_block (tail) still executes and lands its bytes
-    while MAIN's bash (core) is refused in the same run. SAME FACT SEEN TWICE — the
-    tail window granted to fund the report is granted over the record that BOUNDS the
-    window, which is why test_model_cannot_author_its_own_budget_state exists;
-    demoting MAIN's writer out of the tail breaks O2 and is the WRONG repair.
-
-    #810 moved the SUBJECT, not the property. `write_file`/`edit_file` left MAIN when its
-    write grant became `append=True`, so `append_block` inherits the obligation whole: it
-    is the only way MAIN records a finding, and a budget-refusable transcript would mean a
-    run that hits the cap can no longer write down what it already knows."""
+    """The tail tier is exactly MAIN's read_file and append_block; every GATHER tool is core including read_file,..."""
     main_names = _registered_names(MAIN_DEF)
     gather_names = _registered_names(T1106.fixture_gather_def())
     assert {"read_file", "append_block", "fix_row", "bash", "gather"} <= main_names
     assert not {"write_file", "edit_file"} & main_names, "the general write lane left MAIN"
     assert {"read_file", "bash", "template_search", "query"} <= gather_names
 
-    # #836 moved the SUBJECT again, the same way #810 did: while a row is flagged BOTH the
-    # append and the close are refused, so a `fix_row` left at core tier would be permanently
-    # withdrawn at the cap with nothing left that can reopen either. It is METERED, not
-    # exempt — `BUDGET_EXEMPT_TOOLS` still holds only the close.
     assert {n for n in main_names if tier(n, AgentRole.MAIN) == "tail"} == \
         {"read_file", "append_block", "fix_row"}
     assert all(tier(n, AgentRole.GATHER) == "core" for n in gather_names)
@@ -465,9 +350,6 @@ def test_tier_table_over_the_real_census(tmp_path):
     state = _state(run_dir)
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
     _seed_calls(state, 1)
-    # #774/R1: report.md left the tail entirely (it left MAIN's write allow-list, full stop —
-    # the close tool is its only writer now); investigation.md is the tail-tier artifact still
-    # standing, and it makes the identical point (a tail-tier write survives a tripped pool).
     inv = run_dir / "investigation.md"
     script = [[("bash", {"command": "echo hi"})],
               [("append_block", {"text": "+ tail-tier append\n"})]]
@@ -479,9 +361,7 @@ def test_tier_table_over_the_real_census(tmp_path):
 
 
 def test_same_tool_name_on_two_agents(tmp_path):
-    """A tool name that is tail on MAIN is core on GATHER, simultaneously and in the
-    same run: `read_file` is tail for MAIN and core for GATHER, so the tier table is
-    keyed on the (tool_name, agent) PAIR rather than on the tool name alone."""
+    """A tool name that is tail on MAIN is core on GATHER, simultaneously and in the same run: `read_file` is..."""
     assert tier("read_file", AgentRole.MAIN) == "tail"
     assert tier("read_file", AgentRole.GATHER) == "core"
 
@@ -511,9 +391,7 @@ def test_same_tool_name_on_two_agents(tmp_path):
 
 
 def _registered_names(defn) -> set[str]:
-    """The REGISTERED tool-name census, read off a real Agent — the same route SC5
-    used, so the tier table is checked against what the framework actually dispatches
-    rather than against a hand-kept list."""
+    """The REGISTERED tool-name census, read off a real Agent — the same route SC5 used, so the tier table is..."""
     logger = observe.RequestLogger(Path(os.devnull))
     agent = driver.build_agent_core(
         defn, deps_type=defn.deps_cls, instructions="probe", logger=logger,
@@ -529,11 +407,8 @@ def _registered_names(defn) -> set[str]:
     return set(agent._function_toolset.tools)
 
 
-
 def test_gather_keeps_its_request_limit(tmp_path):
-    """GATHER_REQUEST_LIMIT stays 40, the bound a multi-dimension lead needs, and it
-    is still the ceiling a dispatch actually runs into: a subagent that never stops
-    aborts at its own request limit rather than at anything this design adds."""
+    """GATHER_REQUEST_LIMIT stays 40, the bound a multi-dimension lead needs, and it is still the ceiling a..."""
     assert driver.GATHER_REQUEST_LIMIT == 40
 
     from pydantic_ai.exceptions import UsageLimitExceeded
@@ -546,11 +421,8 @@ def test_gather_keeps_its_request_limit(tmp_path):
                     request_limit=driver.GATHER_REQUEST_LIMIT, state=_state(run_dir))
 
 
-
 def test_enforce_flag_defaults_off(monkeypatch):
-    """DEFENDER_BUDGET_ENFORCE is read through env_bool and defaults to False when
-    UNSET, so interactive development ships unenforced — and the empty string reads
-    as an explicit False rather than diverging from unset."""
+    """DEFENDER_BUDGET_ENFORCE is read through env_bool and defaults to False when UNSET, so interactive..."""
     monkeypatch.delenv(FLAG, raising=False)
     assert driver.enforcement_enabled() is False
     monkeypatch.setenv(FLAG, "")
@@ -563,69 +435,16 @@ def test_enforce_flag_defaults_off(monkeypatch):
 
 
 def test_enforce_flag_unrecognized_token(monkeypatch):
-    """An unrecognized token for DEFENDER_BUDGET_ENFORCE raises FatalConfigError at
-    startup rather than being silently coerced to False — a typo that silently ships
-    an unenforced run is the fail-open this closed token set exists to prevent."""
+    """An unrecognized token for DEFENDER_BUDGET_ENFORCE raises FatalConfigError at startup rather than being..."""
     monkeypatch.setenv(FLAG, "maybe")
     with pytest.raises(FatalConfigError):
         driver.enforcement_enabled()
 
 
-
-
-def test_ci_runs_the_suite_with_enforcement_on(monkeypatch):
-    """CI runs the collected suite with DEFENDER_BUDGET_ENFORCE on: the unit-test job
-    carries the env block, so every test in tests/ and learning/ executes under the
-    enforcing posture rather than the default-off one.
-
-    D11 was REVERSED in §7 round 5. Its round-3 waiver rested on C6 — "real runs land
-    at 10-26 tool calls against a cap of 200, so the flag alone executes the deny
-    branch never" — and C6 IS REFUTED: two full-loop captures committed to THIS tree,
-    experiments/actor-basin-276/fixtures/{falco-net-tool-live,sshd-gabe-live}/
-    budget.json, sit at 191 and 182 tool_calls (95.5% and 91.0% of the cap) with
-    subagent_spawns: 7 each. Real runs range at least 10-191 and the 75% warning line
-    fires in production today. The hermetic e2e is KEPT alongside this: it covers the
-    deny branch deterministically, CI covers it realistically."""
-    wf = yaml.safe_load(CI_WORKFLOW.read_text())
-    steps = [s for job in wf["jobs"].values() for s in job.get("steps", [])]
-    unit = [s for s in steps if "pytest tests/" in str(s.get("run", ""))]
-    assert unit, "the unit-test step moved — re-scope this demand"
-    for step in unit:
-        value = (step.get("env") or {}).get(FLAG)
-        assert value is not None, f"{step.get('name')!r} carries no {FLAG} env block"
-        # monkeypatch, not a bare os.environ[FLAG] = ...  /  os.environ.pop(FLAG, None):
-        # the bare form's `finally` unconditionally DELETES the var rather than restoring
-        # whatever it was before this test ran — under the real posture this suite itself
-        # runs under (DEFENDER_BUDGET_ENFORCE=1, set at the job level), that permanently
-        # erases it for every test that happens to collect after this one in the same
-        # process, silently disabling enforcement suite-wide from this point on.
-        monkeypatch.setenv(FLAG, str(value))
-        assert driver.enforcement_enabled() is True
-
-
-
 def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
     tmp_path, monkeypatch, d9_tenant, data_root,
 ):
-    """The learning state root and the runs base cannot resolve to the same
-    directory: pairing the two onto one path is REFUSED rather than quietly
-    letting unenforced learning agents spend the enforced pool.
-
-    Q1's probe dissolved D3 — learning stages bind under the learning state root,
-    MAIN/GATHER bind the runs base, overlap False for all five — but the
-    disjointness is EMERGENT FROM TWO ENV-VAR DEFAULTS, and the probe collided them
-    deliberately: one operator pairing yields `SAME DIR? True`, at which point
-    unenforced learning agents spend the enforced pool. Asserted, not assumed.
-
-    #1078 (settled s102, design correction R-A2(b)): the runs base is now
-    `runs_base_for(T)` under `DEFENDER_DATA_ROOT` (the D9 tenant fixture), and the
-    refusal is widened to "equal, or either contains the other" against the data root
-    (O13) — so a learning state root AT the tenant's runs base, or an alias of it, is
-    refused, and a disjoint one leaves the runs base where the tenant says.
-
-    #1120: `runs_base_for` takes an accepted `Tenant`, so the refusal is met where the data
-    root is resolved (`resolve_data_root`, J24 — every entry point resolves it before a
-    tenant is accepted under it), and the runs base is the one accepted under that root."""
+    """The learning state root and the runs base cannot resolve to the same directory: pairing the two onto one..."""
     from defender import _tenant
 
     def runs_base() -> Path:
@@ -648,30 +467,8 @@ def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
     assert runs_base() == data_root.resolve() / d9_tenant / "runs"
 
 
-
 def test_every_agent_construction_pins_retries_explicitly(tmp_path):
-    """Every Agent construction site passes `retries` explicitly: the framework
-    default is None, which resolves to an EFFECTIVE CEILING OF 1, so a site that omits
-    the kwarg silently lands on the value that aborts the run on the second
-    consecutive denial.
-
-    PB4 (executed) killed W1 with this: omitting the kwarg and passing 1 abort at the
-    same denial with the same message ("Tool 'work' exceeded max retries count of
-    1"), so the unsafe value is reached by OMISSION, not by SELECTION — "nothing
-    selects 1" is true and irrelevant.
-
-    WHY retries is LOAD-BEARING on THIS change and not scope creep (VR2): the budget
-    refusal returns a ToolReturnPart, so a SCHEMA-VALID re-issue of a stopped tool
-    accumulates zero retries (test_repeated_reissue_accumulates_no_retries). But P3
-    (executed) showed pydantic-ai validates args BEFORE the execute-family hooks, so a
-    model spamming a stopped tool with SCHEMA-INVALID args never reaches the seam and
-    climbs the retry ceiling — that is the path where the ceiling saves the run
-    (bounding the spam at the request limit, which run_investigation catches). The
-    blind reader's "zero retries" observation is true only for the schema-valid path.
-
-    The enumeration picks the subjects; the wired half drives the real construction
-    site and observes that two consecutive denials do NOT abort the run, which they
-    would at the framework default of None."""
+    """Every Agent construction site passes `retries` explicitly: the framework default is None, which resolves..."""
     sites = []
     for src in (DEFENDER / "runtime" / "driver" / "__init__.py",
                 REPO_ROOT / "experiments" / "gather-verifiable-code-289" / "run_arms.py"):
@@ -697,11 +494,6 @@ def test_every_agent_construction_pins_retries_explicitly(tmp_path):
                                 enforce=False, state=_state(run_dir))
     assert model.calls >= 3, "the loop did not reach its stopping turn — a denial aborted it"
     assert result.output is not None, "two consecutive denials aborted — retries was not pinned"
-
-
-
-
-
 
 
 def _markers(root: Path) -> set[str]:

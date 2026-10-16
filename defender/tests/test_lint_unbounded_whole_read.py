@@ -1,23 +1,4 @@
-"""Spec for the lint_unbounded_whole_read gate (#1188 M4, as amended by design amendment 2).
-
-A whole-file read by path in ``defender/`` production code must not land silently. The gate
-flags any use of an attribute named ``read_text`` / ``read_bytes``, called or not, matched by
-name whatever the receiver: ``p.read_text()``, the class-qualified ``Path.read_text(p)`` (and
-``pathlib.Path.read_bytes(p)``, an aliased ``P.read_text(p)``), and a method reference handed on
-(``map(Path.read_text, ps)``, ``partial(Path.read_bytes, p)``, ``r = p.read_text``). Outside the
-root ``_io.py`` and outside tests. The remedy is ``_io.read_text_utf8`` / ``read_bytes_capped``;
-``getattr(p, "read_text")`` is not matched (recorded non-obligation).
-
-The rare exception is the house convention: ``# lint-whole-read: ok — <reason>`` on the read's
-line span, with a reason (not just dashes). The baseline ships EMPTY. ``_io``'s own readers need no marker and
-no checking: their cap only lowers (#1188 D1, pinned in ``test_1174_bounded_read.py``).
-
-Fingerprint: ``<rel>:<func>:<kind>``; ``<func>`` is the innermost enclosing ``def`` (``<module>``
-at top level). The gate is driven through its seams:
-  - ``_scan(root, *, honor_markers=True) -> list[Finding]`` — fingerprints relative to ``root``;
-    ``honor_markers=False`` reports marked reads too (the real-tree census uses it);
-  - ``main(argv=None, *, scope=None, baseline_path=None) -> int`` — 0 clean, 1 new finding, 2 blind.
-"""
+"""Spec for the lint_unbounded_whole_read gate (#1188 M4, as amended by design amendment 2)."""
 from __future__ import annotations
 
 import ast

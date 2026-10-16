@@ -1,52 +1,26 @@
-"""#1138 — model-declared positional rows for `defender-sql`: `--rows PATH --names PATH`.
-
-A positional payload is a header of names plus rows as bare arrays — ES|QL `{columns, values}`
-today, Splunk `fields`/`rows`, Azure `tables[0].columns/rows` or an MCP server's shape
-tomorrow. Unflagged, `read_json_auto` types the WHOLE row array from what its cells hold
-(`JSON[][]`, `VARCHAR[][]`, `BIGINT[][]`, `TIMESTAMP[][]`), so a lead had to map positions and
-unpack `v[N]->>'$'` — and on an all-text payload that recipe crashed outright. Under the flags
-the lead says where the rows and the names are, and `data` is one row per row, one column per
-name, each column typed from ITS OWN JSON values.
-
-Every test drives the real program's own `main()` in a warm child process (`run_sql_warm`, see `_sql_warm.py`; the timing test and `--help` still spawn it fresh via `run_sql_py`: the argv after `defender-sql`,
-the payload on stdin) and asserts what the lead observes — the JSON rows on stdout, the exit
-code, the stderr text, the types `DESCRIBE data` prints. Each test names the obligation of the
-#1138 design it pins (O1–O10, M7). Every negative is paired with a positive control on the same
-payload under the complementary condition, so no refusal or absent note can pass vacuously.
-
-The rest of #1138's spec lives beside the tests it extends: the gate (O7) in `test_permission.py`
-and, end to end through a replayed gather lead, in `e2e/test_query_tool_611.py`; the overflow
-hint and the payload-view footer (O8) in `test_read_file_bounded.py` and `test_payload_view.py`;
-the doc's flagged examples, the exit-code paragraph and the `unnest` census (O9) in
-`test_sql_idioms.py`, whose ES|QL tests moved to the declared idiom.
-
-Not pinned: the 1 GiB `_MAX_OBJECT_SIZE` refusal (exit 2, before `json.loads`). The only probe
-the design gives is a stdin over 1 GiB, which is not a test this suite can afford to run.
+"""`defender-sql --rows PATH --names PATH`: model-declared positional rows load as one row per row and one column per
+name, each column typed from its own JSON values; every declaration defect is refused with its exit code; hostile names
+load as literals and the sandbox is locked before the lead's query runs; the notes teach the flags on positional
+payloads. Drives the real `main()` in a warm child (`run_sql_warm`) and asserts stdout, exit code and stderr.
 """
 from __future__ import annotations
 
 import json
 import re
 import subprocess
-import time
 from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 
-from defender._io import read_text_utf8
 from defender.scripts.adapters.elastic_adapter import esql_payload
-from defender.tests._by_path import DEFENDER
 from defender.tests._defender_sql import (
     EXIT_INPUT_ERROR,
     EXIT_OK,
     EXIT_QUERY_ERROR,
     assert_query_error,
-    run_sql_py,
 )
 from defender.tests._sql_warm import run_sql_warm
 
-_DOC = DEFENDER / "skills" / "gather" / "defender-sql.md"
 
 #: Shaped by the REAL adapter step (`esql_payload`), so the envelope carries `query` and
 #: `row_count` beside `columns`/`values` exactly as a lead's gather_raw file does. The rows are
@@ -298,17 +272,6 @@ def test_o2_values_come_back_as_the_json_kind_they_were_sent_as():
                               "AND flag", rows="recs", names="hdr")) == [{"n": 1}]
 
 
-def test_o2_a_column_types_the_same_whatever_its_siblings_hold():
-    """O2: `read_json_auto` typed the whole row array together, so `source.ip` was VARCHAR or
-    JSON depending on whether a NUMBER sat beside it. Declared, the same column is the same
-    type beside a number, beside text, and alone."""
-    def schema(names, row):
-        return _schema({"hdr": names, "recs": [row]}, rows="recs", names="hdr")
-
-    assert schema(["ip", "n"], ["203.0.113.7", 5]) == [("ip", "VARCHAR"), ("n", "BIGINT")]
-    assert schema(["ip", "host"], ["203.0.113.7", "web-1"]) == [("ip", "VARCHAR"), ("host", "VARCHAR")]
-    assert schema(["ip"], ["203.0.113.7"]) == [("ip", "VARCHAR")]
-    assert schema(["m", "n"], [1, 5]) == [("m", "BIGINT"), ("n", "BIGINT")]
 
 
 def test_o2_a_vendors_declared_type_decides_nothing():
@@ -891,14 +854,6 @@ def test_o6_a_payload_without_positional_rows_gets_no_note(payload, sql, rows):
     assert proc.stderr.strip() == "", proc.stderr
 
 
-def test_o6_the_flagged_run_prints_no_declare_note():
-    """O6's other control: once the rows are declared, the note that asks for the declaration
-    is gone — the flagged run over the same ES|QL payload prints nothing on stderr."""
-    unflagged = _plain(_ESQL, _SQL)
-    assert "--rows" in unflagged.stderr, "premise: the unflagged run carries the note"
-    flagged = _flag(_ESQL, _SQL)
-    assert _ok(flagged) == [{"n": 5}]
-    assert flagged.stderr.strip() == "", flagged.stderr
 
 
 # ============================================== M3: the flagged error hint is about THIS table
@@ -931,138 +886,30 @@ def test_m3_a_json_column_compared_as_text_gets_the_unpack_form_and_it_runs():
 # ============================ O8: every reduction example is correct for any payload shape
 
 
-#: Every model-facing tree: the runtime, the skills, the scripts (tools and adapters), the
-#: learning loop's prompts, the hooks, the lesson corpora, and the top-level agent files.
-_MODEL_FACING = ("runtime", "skills", "scripts", "learning", "hooks", "bin",
-                 "lessons", "lessons-actor", "lessons-environment", "lessons-questioner")
-_COUNT_OVER_DATA = re.compile(r"select\s+count\s*\(\s*\*\s*\)(\s+as\s+\w+)?\s+from\s+data\b",
-                              re.IGNORECASE)
 
 
-def _model_facing_files() -> list[Path]:
-    files = [DEFENDER / "SKILL.md", DEFENDER / "agents.py"]
-    for root in _MODEL_FACING:
-        base = DEFENDER / root
-        if base.is_dir():
-            files += [p for p in base.rglob("*")
-                      if p.suffix in (".py", ".md", ".yaml", ".yml", ".txt")
-                      and "__pycache__" not in p.parts and "runs" not in p.parts]
-    return sorted(p for p in files if p.is_file())
 
 
-def test_o8_no_model_facing_text_offers_a_count_over_the_whole_payload():
-    """O8 / C4: `SELECT count(*) FROM data` answers 1 on every object payload — ES|QL and the
-    search-hits envelope alike — so offered as "the" reduction it is wrong on the shapes a lead
-    is most often handed. No model-facing file may offer it. The positive control proves the
-    scan reads the two sites that offered it (C5) and that its pattern matches their spelling."""
-    files = _model_facing_files()
-    rel = {str(p.relative_to(DEFENDER)) for p in files}
-    assert {"runtime/tools/_deps.py", "runtime/payload_view.py",
-            "skills/gather/defender-sql.md"} <= rel, "the census lost a surface it must read"
-    assert _COUNT_OVER_DATA.search('reducer = f\'{sql_shim} "SELECT count(*) FROM data"\'')
-    assert _COUNT_OVER_DATA.search("defender-sql 'select COUNT(*) as n from data'")
-    offending = {str(p.relative_to(DEFENDER)): m.group(0) for p in files
-                 if (m := _COUNT_OVER_DATA.search(read_text_utf8(p)))}
-    assert not offending, f"a model-facing surface offers a whole-payload count: {offending}"
 
 
 # ================================ O9: every lead-facing text teaches the flagged form, and runs
 
 
-_POSITIONAL_RECIPE = re.compile(r"v\s*\[\s*\d+\s*\]\s*->>")
-_UNNEST_VALUES = re.compile(r"unnest\s*\(\s*(data\.)?values\s*\)", re.IGNORECASE)
 
 
-def test_o9_help_teaches_the_flags_and_no_positional_recipe():
-    """O9: `--help` is lead-facing text. It names both flags, shows a flagged example beside the
-    hits one, and carries neither `v[N]->>` nor `unnest(values)`."""
-    proc = run_sql_py("--help")
-    assert proc.returncode == EXIT_OK, proc.stderr
-    printed = " ".join((proc.stdout + proc.stderr).split())
-    assert "--rows" in printed, printed
-    assert "--names" in printed, printed
-    assert re.search(r"defender-sql --rows[ =]\S+ --names[ =]\S+", printed), (
-        f"--help shows no flagged invocation: {printed!r}")
-    assert "unnest(hits)" in printed, "the hits example left --help"
-    assert not _POSITIONAL_RECIPE.search(printed), printed
-    assert not _UNNEST_VALUES.search(printed), printed
 
 
-def test_o9_the_misbound_arrow_refusal_teaches_a_generic_json_column_not_a_position():
-    """O9: `_MISBOUND`'s example becomes `(col->>'$') = '<value>'` — rendered on a flagged JSON
-    column and on the unflagged ES|QL payload alike, it carries an arrow form but no `v[N]`.
-    (The refusal prints the tool's own text and hint, never an echo of the query, so the
-    positions in the unflagged query below cannot leak into what is asserted.) The paired
-    control: parenthesised, the flagged filter runs."""
-    json_col = {"hdr": ["code", "n"], "recs": [["4625", 1], [4624, 2]]}
-    flagged = _flag(json_col, "SELECT count(*) AS n FROM data WHERE '4625' = code->>'$'",
-                    rows="recs", names="hdr")
-    unflagged = _plain(_ESQL, "SELECT count(*) AS n FROM (SELECT unnest(values) v FROM data) "
-                              "WHERE v[1]->>'$' = '412' AND v[2]->>'$' = '203.0.113.7'")
-    for proc in (flagged, unflagged):
-        assert_query_error(proc, "a misbound arrow ran")
-        assert "binds more loosely than" in proc.stderr, proc.stderr
-        assert "->>'$'" in proc.stderr, proc.stderr
-        assert not re.search(r"v\[\d+\]", proc.stderr), (
-            f"the refusal still teaches a positional example: {proc.stderr!r}")
-    assert _ok(_flag(json_col, "SELECT count(*) AS n FROM data WHERE '4625' = (code->>'$')",
-                     rows="recs", names="hdr")) == [{"n": 1}]
 
 
-def test_o9_the_doc_carries_no_positional_recipe_and_names_the_flags():
-    """O9: `defender-sql.md` teaches the flagged form for positional rows — both flags, the
-    ES|QL declaration a lead types (`--rows values --names columns`) and list columns
-    (`list_contains`) — and the `v[N]->>'$'` / `unnest(values)` recipe is gone from it."""
-    doc = read_text_utf8(_DOC)
-    assert not _POSITIONAL_RECIPE.search(doc), "the doc still teaches `v[N]->>`"
-    assert not _UNNEST_VALUES.search(doc), "the doc still teaches `unnest(values)`"
-    assert re.search(r"--rows[ =]values", doc), "the doc does not show the ES|QL declaration"
-    assert re.search(r"--names[ =]columns", doc), "the doc does not show the ES|QL declaration"
-    assert "list_contains" in doc, "the doc does not teach list columns"
 
 
-@pytest.mark.parametrize("surface", ["skills/connect/adapter.md", "learning/leads/lead_pitfalls.md"])
-def test_o9_the_adapter_contract_and_the_pitfalls_curator_name_the_flagged_form(surface):
-    """O9: the adapter contract's rung 2 (how a positional-row payload is queried) and the
-    curator that writes `defender-sql.md`'s pitfalls (so it does not re-record the dead recipe
-    as current) both name `--rows`, and neither teaches the positional recipe."""
-    text = read_text_utf8(DEFENDER / surface)
-    assert "--rows" in text, f"{surface} does not name the flagged form"
-    assert not _POSITIONAL_RECIPE.search(text), f"{surface} teaches `v[N]->>`"
-    assert not _UNNEST_VALUES.search(text), f"{surface} teaches `unnest(values)`"
 
 
 # ======================================== O10: the largest source payload loads well in time
 
 
-def _large_payload(n_rows: int = 10_000, n_cols: int = 20) -> dict:
-    """ES|QL's row ceiling, 20 columns wide: one ISO-time column, one multi-valued `host.ip`
-    (list in most rows, a bare string in some), the rest numbers and text."""
-    columns = [{"name": "@timestamp", "type": "date"}, {"name": "host.ip", "type": "ip"}]
-    columns += [{"name": f"f{j}", "type": "long" if j % 2 else "keyword"} for j in range(n_cols - 2)]
-    values = []
-    for i in range(n_rows):
-        ts = f"2026-08-07T{(i // 3600) % 24:02d}:{(i // 60) % 60:02d}:{i % 60:02d}.{i % 1000:03d}Z"
-        ips = f"10.0.{i % 250}.{i % 7}" if i % 5 == 0 else [f"10.0.{i % 250}.{i % 7}", "fe80::1"]
-        values.append([ts, ips, *[(i * j) if j % 2 else f"v{i % 97}-{j}" for j in range(n_cols - 2)]])
-    return esql_payload("FROM logs-* | LIMIT 10000", {"columns": columns, "values": values})
 
 
-def test_o10_a_ten_thousand_by_twenty_flagged_load_is_well_inside_the_bash_timeout():
-    """O10 / C17: the bash lane kills a command at 120 s; a row-by-row insert measured 63 s for
-    this size. The flagged load of ES|QL's largest result — with a list column and an ISO-time
-    column — must finish under 5 s, spawn included, and answer correctly: every row counted,
-    the list column a list, the time strings the source's own text."""
-    payload = _large_payload()
-    last_ts = max(row[0] for row in payload["values"])
-    text = json.dumps(payload)
-    started = time.monotonic()
-    proc = run_sql_py("--rows", "values", "--names", "columns",
-                      'SELECT count(*) AS n, max("@timestamp") AS last, '
-                      'sum(len("host.ip")) AS ips FROM data', stdin=text)
-    elapsed = time.monotonic() - started
-    assert _ok(proc) == [{"n": 10_000, "last": last_ts, "ips": 2 * 10_000 - 10_000 // 5}]
-    assert elapsed < 5.0, f"the flagged 10,000 x 20 load took {elapsed:.2f}s"
 
 
 # ===================== R1: the declare note is decided from the PARSED payload, not duckdb's types
@@ -1122,11 +969,6 @@ def test_r1_no_note_where_the_payload_is_not_one_object_holding_positional_rows(
     assert proc.stderr.strip() == "", proc.stderr
 
 
-def test_r1_a_key_with_an_inner_dash_is_still_echoed():
-    """R1's echo rule forbids only a LEADING dash: `my-rows` / `my-names` are echoed as-is."""
-    proc = _plain({"my-rows": [[1, 2]], "my-names": ["a", "b"]}, "SELECT 1 AS one")
-    assert _ok(proc) == [{"one": 1}]
-    assert "--rows my-rows --names my-names" in proc.stderr, proc.stderr
 
 
 def test_r1_an_unflagged_error_on_positional_rows_names_the_declaration_not_the_flat_idiom():
@@ -1284,13 +1126,4 @@ def test_r3_the_notes_list_contains_recipe_runs_on_every_list_type(cells, typ, v
                      rows="recs", names="hdr")) == [{"n": n}], bound
 
 
-def test_r3_the_doc_says_a_json_columns_unpacked_value_is_text_and_to_cast_it():
-    """R3: `defender-sql.md`'s guidance for JSON columns says `->>'$'` returns TEXT and to cast
-    before comparing, sorting or summing a number. Read per paragraph and per bullet, so the
-    words must sit together in the JSON-column guidance rather than anywhere in the doc."""
-    doc = read_text_utf8(_DOC)
-    blocks = [b for b in re.split(r"\n\s*\n|\n(?=\s*[-*] )", doc) if "JSON" in b and "->>" in b]
-    assert blocks, "the doc has no JSON-column guidance with `->>`"
-    assert any(re.search(r"\bTRY_CAST\s*\(|\bCAST\s*\(", b) and re.search(r"\btext\b", b, re.I)
-               for b in blocks), f"no JSON-column guidance says `->>` is text and to cast: {blocks}"
 

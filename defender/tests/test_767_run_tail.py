@@ -1,18 +1,4 @@
-"""#767 — the investigation tail: when the run records, and when it does not.
-
-Every test is one demand of `spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`,
-named by that demand's `discharged_by`. The entry point driven is the REAL one — `run.py`'s
-`main` — through the `ticket_writer=` injection seam `tests/_spec791.py` already established
-(#791 R22, g10). Everything between the seams is production: the flag parse, the resume
-refusal, the ordering against the curation marker, the queue itself.
-
-§7 R11/FK09 SCOPES O4's WITNESS and both tests below read from it: the obligation is "a run
-under the flag, store reachable, COMPLETING ITS LIFECYCLE, ending with no agent comment on its
-ticket". No record-on-crash mechanism is built — that would need a `finally`/atexit hook
-around the whole lifecycle that no D-row contemplates, plus new ordering risk against N1 — and
-a run that dies before the post-step is an examined no (FK34: a killed run leaves an open,
-uncommented ticket and nothing reconciles it).
-"""
+"""#767 — the investigation tail: when the run records its ticket comment, and when it does not (real `run.main`)."""
 from __future__ import annotations
 
 import pytest

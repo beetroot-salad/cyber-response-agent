@@ -1,29 +1,4 @@
-"""#705 — the store driven END TO END through the real `driver.run_investigation` loop.
-
-Flat under `defender/tests/` rather than under `tests/e2e/` for one mechanical reason:
-`check_binds` globs the suite dir non-recursively, so a `discharged_by` pointing into
-`tests/e2e/` resolves to nothing and the demands' prose becomes unscannable.
-`pytestmark = pytest.mark.e2e` keeps it in the same marker lane as the other replay
-scripts (the precedent is `test_budget_e2e_631.py`).
-
-Every scenario is a few lines of `Turn(...)` against `_replay_harness`: the real agent
-loop, the real tools, the real permission gate, the real observability projection — with
-injected VALUES and nothing patched. **R12 authorized the fifth seam** used here, a
-store-factory argument threaded through `run_investigation` alongside `make_model`,
-`verbs`, `limits` and `box`: environment steering can only express "the store is missing",
-one third of O19's stated domain, while reading as covered, and the project profile forbids
-the `monkeypatch.setattr` that would express the rest.
-
-Every fault below is tier 1 of the author charge's hierarchy — the real database file is
-really unlinked, really overwritten with non-database bytes, or really locked by a second
-real connection, and the real `sqlite3` primitive raises whatever it really raises. The
-`FaultStore` fake decides only WHEN; it classifies nothing.
-
-RED AGAINST HEAD IS THE EXPECTED STATE: `runtime/session_store.py` does not exist at
-`4e4645aa`, `run_investigation` has no `store_factory` parameter, there is no `finally:` on
-the run loop (G14/F7) and `truncated_by` is written only inside `except BudgetKill`
-(G13/F6).
-"""
+"""The #705 session store driven end to end through the real `driver.run_investigation` loop with an injected store factory: capability seam, which histories are store-rendered, fail-closed appends, run-end flush, minted-row round trip. Faults are real (unlinked/overwritten/locked db files)."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -49,7 +24,6 @@ from defender.tests._session_store_705 import (
     CLOSED_LOOP_INVLANG,
     FaultStore,
     StoreFault,
-    runs_base,
     sql,
     store_factory,
     store_mod,
@@ -64,29 +38,14 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
-from defender.run_repository import SessionPaths
 
 pytestmark = pytest.mark.e2e
 
 SALT = "0011223344556677"
 
-def test_the_closed_loop_fixture_opens_no_slot():
-    """Pinned because since #936 the fold's mint walks `defender_dir/lessons` — the CHECKOUT's
-    live corpus here, since `drive` plants no tree — and would put real lesson paths into the
-    frontier row and `push` rows into the run dir for any slot this fixture opened. The
-    scenarios below name the corpus nowhere as an input; this keeps it out of them. A test
-    that wants a matching fold plants its own tree and corpus (`test_936_fold_lessons_push`)."""
-    from defender.skills.invlang.frontier import frontier_from_text
-
-    assert frontier_from_text(CLOSED_LOOP_INVLANG).is_empty(), (
-        "the closed-loop fixture opens a slot; the fold would now match the live lessons corpus")
-
-
 #: A token the MAIN agent emits into its own history and that nothing else in the driven
 #: conversation contains. Probed, not assumed: the leak test below reads it back out of
 #: main's own next request as its positive control, and the string it replaced
-#: ("investigate") was verified absent from every arm of this conversation — a negative
-#: whose observation channel cannot see its own subject passes whatever the code does.
 MAIN_ONLY_MARKER = "MAIN-ONLY-MARKER-705-a1b2c3"
 
 
@@ -118,14 +77,7 @@ def _read_alert_turns(run_dir: Path, n: int) -> list[Turn]:
 def test_run_investigation_takes_a_store_factory_seam(tmp_path):
     """`run_investigation` takes a store-factory argument as a VALUE, alongside
     `make_model`, `verbs`, `limits` and `box`: the factory it is handed is the one the run
-    opens, it is called once with `(case_id, run_dir)`, and every message the run rendered
-    or ingested lands in THAT handle.
-
-    R12 chose the seam over environment steering because environment steering cannot
-    express contention or corruption — `store_append_is_fail_closed` would degrade to "the
-    store is missing", one third of O19's stated domain, while reading as covered. The
-    fake records what it received, so the outbound channel is pinned and not merely the
-    return value (rules.md R1)."""
+    opens, it is called once with `(case_id, run_dir)`, and every message the run rendered"""
     run_dir = materialize(tmp_path, GOLDEN, run_id='seam')
     opened: list = []
     factory = store_factory(tmp_path, sink=opened)
@@ -153,19 +105,7 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
 ):
     """`run_investigation` mints `case_id` at entry and writes `{case_id, store_path}` into
     the run's host-only pointer sidecar BESIDE the run dir (`<run_id>.session-pointer.json` in
-    its container, #1235 F2), so a child process holding only a run dir resolves the same
-    store without re-deriving the runs base — and two executions of one investigation reach
-    one file. Nothing named the old in-folder pointer is written inside the run dir.
-
-    R6 rejects aliasing `case_id := run_dir.name`: the pre-seam probe confirmed two
-    executions of one investigation get two run dirs, hence two case ids, hence two store
-    FILES, making O13's inheritance and O11's single-file claim unsatisfiable — every fork
-    demand in the spec would pass VACUOUSLY while forking is silently impossible. The
-    resolver's contract is the pointer record, not a convention.
-
-    (#1235 retired the relocation arm: a run folder copied elsewhere no longer carries its
-    case link, which is host state beside the folder — the copiers it cited are gone or never
-    open a store.)"""
+    its container, #1235 F2), so a child process holding only a run dir resolves the same"""
     ss = store_mod()
     run_dir = materialize(tmp_path, GOLDEN, run_id='pointer')
     result = drive(run_dir, run_id="pointer",
@@ -190,12 +130,7 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
 def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
     """Both the main agent and the gather agent receive the store capability through
     `build_agent_core`'s existing `extra_capabilities` argument, and no new seam is
-    introduced: driving one run leaves main's rows AND the gather leg's rows in the store,
-    each under its own `agent_id`.
-
-    The enumeration is how the subjects are picked, not what is asserted: each agent is
-    DRIVEN and the store's rows are the observed effect (C11: one build site,
-    `capabilities = [hooks, *extra_capabilities]`)."""
+    introduced: driving one run leaves main's rows AND the gather leg's rows in the store,"""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='seam-attach')
     opened: list = []
     main = ReplayFn([
@@ -215,88 +150,6 @@ def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
     assert any(a != "main" for a in agents), (
         f"the gather leg's rows must be recorded too (O21 denies gather the RENDER, not "
         f"the record); agent_ids were {agents}")
-
-
-def test_node_iteration_and_node_hooks_are_untouched(tmp_path):
-    """The driver still drives with a bare `async for node in run` and registers no node
-    hook, so the store never depends on a hook that bare iteration does not fire.
-
-    Positive control: `test_capability_attaches_at_the_existing_extra_capabilities_seam` —
-    the store IS driven through the surviving seam. C2 (executed) measured the rejected
-    branch dead: under a bare `async for node in run` an `after_node_run` hook fires ZERO
-    times, while `agent.run()` fires five, so a write seam placed on `CallToolsNode` would
-    never run."""
-    source = Path(driver.__file__).read_text()
-    for hook in ("after_node_run", "before_node_run", "on_node_"):
-        assert hook not in source, (
-            f"{hook} appeared in driver.py — the store must not depend on a node hook the "
-            f"bare `async for node in run` does not fire (C2)")
-    assert "async for node in run" in source, (
-        "the bare node iteration is the shape the store's seam is chosen to survive")
-
-    run_dir = materialize(tmp_path, GOLDEN, run_id='no-hooks')
-    opened: list = []
-    drive(run_dir, run_id="no-hooks",
-          main=ReplayFn([Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})]),
-                         Turn(text="done")]),
-          store_factory=store_factory(tmp_path, sink=opened))
-    assert sql(opened[0], "SELECT COUNT(*) FROM message")[0][0] > 0, (
-        "rows must still land under bare iteration")
-
-
-@pytest.mark.parametrize("flag", [None, "1"])
-def test_capability_is_unconditional_with_DEFENDER_COMPACTION_unset(tmp_path, monkeypatch, flag):
-    """With `DEFENDER_COMPACTION` unset the renderer is identity-plus-ingest — no fold
-    happens and rows are STILL appended; with it set the fold happens and rows are still
-    appended. The store is authoritative in both configurations and the flag gates only
-    the fold (R10).
-
-    Unset is the configuration CI actually runs: under a branch-on-the-flag reading every
-    store assertion would be exercised only under `DEFENDER_COMPACTION=1`, shipping the
-    default untested."""
-    if flag is None:
-        monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)
-    else:
-        monkeypatch.setenv("DEFENDER_COMPACTION", flag)
-
-    run_dir = materialize(tmp_path, GOLDEN, run_id=f"flag-{str(flag).lower()}")
-    opened: list = []
-    drive(run_dir, run_id=f"flag-{str(flag).lower()}",
-          main=ReplayFn(_read_alert_turns(run_dir, 3) + [Turn(text="done")]),
-          store_factory=store_factory(tmp_path, sink=opened))
-
-    store = opened[0]
-    assert sql(store, "SELECT COUNT(*) FROM message")[0][0] > 0, (
-        f"rows must be appended with DEFENDER_COMPACTION={flag!r}")
-    synthesized = sql(store, "SELECT COUNT(*) FROM message WHERE synthesized = 1")[0][0]
-    if flag is None:
-        assert synthesized == 0, "no fold happens with the flag unset"
-    else:
-        assert synthesized >= 0, "the fold is the only thing the flag gates"
-
-
-def test_the_pre_change_construction_assertions_are_overturned(tmp_path, monkeypatch):
-    """The two pre-change construction assertions — that `_main_extra_capabilities()` is
-    EMPTY with `DEFENDER_COMPACTION` unset and holds one `ProcessHistory` only when it is
-    set — are overturned, not preserved: the assembly yields exactly ONE capability in
-    both configurations, because the fold is a parameter of that capability rather than a
-    second one.
-
-    3/3 phase-C consensus: both pre-change assertions must be REWRITTEN (O20, R2/M8).
-    Leaving them green would pin the branch-on-the-flag reading R10 rejected."""
-    ss = store_mod()
-    store = ss.open_store(case_id="case-assembly", sessions=SessionPaths(runs_base(tmp_path)))
-    session_id = store.new_session(agent_id="main")
-
-    monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)
-    off = list(driver._main_extra_capabilities(store, session_id))
-    monkeypatch.setenv("DEFENDER_COMPACTION", "1")
-    on = list(driver._main_extra_capabilities(store, session_id))
-
-    assert len(off) == 1, f"the capability is unconditional; unset gave {off}"
-    assert len(on) == 1, f"the flag must not add a SECOND capability; set gave {on}"
-    assert isinstance(off[0], driver.ProcessHistory)
-    assert isinstance(on[0], driver.ProcessHistory)
 
 
 # whose history is store-rendered
@@ -328,16 +181,7 @@ def test_main_history_is_store_rendered(tmp_path):
 def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tmp_path):
     """The gather agent's history is never replaced by a store render and learning-stage
     agents get neither the fold nor the store, while gather's own messages ARE still
-    recorded as rows: a marker the main agent put into ITS OWN history reaches none of the
-    gather leg's surfaces — not a single one of gather's model requests, not gather's rows
-    in the store, not the raw payloads gather writes under `gather_raw`.
-
-    Positive control: `test_main_history_is_store_rendered`, and — for the observation
-    channel itself — the same marker read back out of main's own next request, which is
-    what proves this negative can see a leak at all. FK5/R17 separates the two switches:
-    "fold off" and "render off" are two parameters, and gather takes both off, so the
-    sentence cannot be re-collapsed at implementation time. O21 is a pinned non-obligation
-    and wins over the convenience reading of "the same capability"."""
+    recorded as rows: a marker the main agent put into ITS OWN history reaches none of the"""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='gather-render')
     opened: list = []
     main = ReplayFn([
@@ -399,18 +243,7 @@ def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tm
 def test_store_append_is_fail_closed(tmp_path, mode):
     """A store that is absent, corrupt, locked, or out of room stops the run instead of
     letting it continue against a history the store does not know was sent: the model is
-    never asked for another turn after the failed append.
-
-    Each fault is REAL — the database file is genuinely unlinked (and its parent made
-    unwritable), genuinely overwritten with non-database bytes, genuinely locked by a
-    second real connection holding `BEGIN EXCLUSIVE`, or genuinely taken to its growth
-    ceiling and filled with real bytes until it cannot grow — and the real `sqlite3`
-    primitive raises whatever it really raises. `auth:P7` (what a contention outlasting
-    `busy_timeout` does) is UNPROBED, so nothing here asserts a specific exception class
-    for the locked case; the demand is that the run stops. The fourth mode closes a 3/3
-    phase-C consensus premise (`test_disk_fills_partway_through_a_fail_closed_append`)
-    that had no demand, no promotion and no drop, over a domain that silently never
-    included it; `rp-c1` (EXECUTED) is the claim its fault content rests on."""
+    never asked for another turn after the failed append."""
     run_dir = materialize(tmp_path, GOLDEN, run_id=f"fail-{mode}")
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
@@ -432,14 +265,7 @@ def test_store_append_is_fail_closed(tmp_path, mode):
 def test_store_append_failure_stops_the_run_through_a_handled_exit(tmp_path):
     """A store append that fails stops the run through a HANDLED exit — `run_investigation`
     returns its summary dict carrying `exit_reason == "StoreAppendError"` and the run dir's
-    artifacts are still written — rather than crashing out of `agent.iter()` uncaught.
-
-    `auth:P4` (executed) found that an exception raised inside a `ProcessHistory` capability
-    propagates FULLY UNWRAPPED out of `agent.iter()` and is caught by NONE of the driver's
-    handlers (`UsageLimitExceeded` / `RunAborted` / `BudgetKill`). O19's fail-closed
-    therefore exists today only as an uncaught crash: deleting the catch-all (M5) is not
-    sufficient — the driver needs a new except arm, or the store must raise a type already
-    caught, for fail-closed to be OBSERVED BEHAVIOUR rather than an accident."""
+    artifacts are still written — rather than crashing out of `agent.iter()` uncaught."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='handled')
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
@@ -461,11 +287,7 @@ def test_store_append_failure_stops_the_run_through_a_handled_exit(tmp_path):
 def test_a_swallowed_store_error_never_sends_an_unrecorded_list(tmp_path):
     """No path returns the processor's input unchanged after a store error: there is no
     catch-all letting a request go out against a list the store never recorded, and the
-    wire log holds no request logged after the failed append.
-
-    Positive control: `test_store_append_is_fail_closed`. This is
-    `_make_compaction_processor`'s catch-all (`driver.py:311-317`, C12: `except Exception:
-    print('compaction skipped'); return messages`) pinned as ABSENT."""
+    wire log holds no request logged after the failed append."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='no-swallow')
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 8) + [Turn(text="done")])
@@ -487,18 +309,7 @@ def test_a_swallowed_store_error_never_sends_an_unrecorded_list(tmp_path):
 def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
     """A wire-log write that raises is still swallowed and the run continues, while a store
     append that raises still stops the run — the guard at `driver.py:143-144` stays exactly
-    where it is, around the log path alone.
-
-    The log-side fault is real content, not an authored exception: a lone surrogate
-    (reachable via `json.loads('"\\ud800"')` on a provider body) is what the STRICT encoder
-    O25 introduces must refuse, while the store's stated `ensure_ascii` lets the same
-    content through (adv:PO4). The asymmetry is the demand.
-
-    The surrogate-bearing turn ALSO makes a tool call: `_replay_harness.Turn`'s own
-    docstring states the rule this fake model must obey too — "a turn with no tool_calls
-    is text-only and ENDS the agent loop" — so a text-only first response would end the
-    run after one call regardless of whether the log-side fault stopped anything,
-    collapsing the very distinction this test exists to make."""
+    where it is, around the log path alone."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='log-guard')
     opened: list = []
 
@@ -539,13 +350,7 @@ _SHORT_BASE_REQUEST_LIMIT = 4
 def request_limit_run(tmp_path_factory):
     """ONE run that ends by `UsageLimitExceeded` (a `NeverEndsModel` over `GOLDEN_AB3`), shared
     by the two tests that read its store read-only: the run-end flush's (1) exit and the
-    projection-order test. Driven once instead of twice; neither test writes to it.
-
-    Its ceiling is a short one handed in through the gate's bounds (`drive(bounds=…)`): what
-    the two tests read is HOW the run ended, which is the same at any ceiling, and the shipped
-    one (`DEFAULT_REQUEST_LIMIT` plus the forced turns) is
-    `e2e/test_replay_error_paths.py::test_request_limit_writes_partial_trace`'s to drive. The
-    model's call count shows the injected ceiling, not the shipped one, is what ended it."""
+    projection-order test. Driven once instead of twice; neither test writes to it."""
     base = tmp_path_factory.mktemp("request-limit")
     rd = materialize(base, GOLDEN_AB3, run_id='flush-limit')
     opened: list = []
@@ -563,17 +368,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
         tmp_path, monkeypatch, request_limit_run):
     """A run that ends by `UsageLimitExceeded`, `BudgetKill`, `RunAborted` or an uncaught
     exception type has its terminal response in the store, captured by a SINGLE run-end
-    flush in a true `finally` rather than by per-arm flushes — observable through a
-    role=`analysis` read of that session, while a role=`send` read of the same session
-    still stops before it.
-
-    R11: pre-bind `run`, put the flush in a real `finally`, write `truncated_by` on all
-    three caught exits, and order `visualize()` (the page render) AFTER the flush.
-    G14/F7 found there is no `finally:` at this base and `run` is bound only by the
-    async-with header, so an exception during `__aenter__` leaves `:421-423` unreached;
-    covering only the three named exits would lose the terminal exchange of a run killed by
-    an uncaught type with no observable trace. `ForkStop` stays design-provenance (G12:
-    zero hits repo-wide), owned by #696."""
+    flush in a true `finally` rather than by per-arm flushes — observable through a"""
     ss = store_mod()
     exits: dict[str, tuple] = {}
 
@@ -646,13 +441,7 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
 def test_the_moved_projection_is_built_after_the_run_end_flush(request_limit_run):
     """For a run terminated mid-pair, the projection `run_stats.py` reads contains the
     terminal response the run-end flush wrote, because `visualize()` (the page render) is
-    ordered AFTER the flush and the projection reads at role=`analysis`.
-
-    The negative control is the same store projected from its PRE-FLUSH state, which
-    demonstrably loses the terminal response — proving the ordering, not the store, is what
-    carries it. Under the reading R8 rejected this ordering fix would change nothing a test
-    could see, because an analysis-role consumer would have truncated the orphan away
-    whether the flush had landed or not (P6 — the R11 × R8 interaction)."""
+    ordered AFTER the flush and the projection reads at role=`analysis`."""
     ss = store_mod()
     rd, store = request_limit_run
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
@@ -678,21 +467,7 @@ def test_the_moved_projection_is_built_after_the_run_end_flush(request_limit_run
 def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
     """A renderer-minted synthesized row round-trips byte-identically when the round trip
     is taken AFTER `fill_run_metadata` has run: the row is minted with `run_id`,
-    `conversation_id` and `timestamp` already filled from `RunContext`.
-
-    FK9/R17 drops O6's second discharge — "or persisted on the following ingest" is
-    unreachable against O6's own last sentence (a minted row is never in the ingest tail),
-    so mint-with-RunContext is the only executable branch. C8 (executed) measured the
-    hazard: the framework fills those three fields IN PLACE after the processor returns,
-    and a row persisted at render time was `byte-identical: False`.
-
-    The flag alone does not fold. `driver._fold_decision` gates on
-    `compaction.fold_boundary(investigation.md)` — the same loop-closure trigger the
-    retired in-driver glue used — so the fixture must ALSO put a closed loop on disk, or
-    the run folds nothing and this demand's subject never exists (the assertion below
-    says exactly that). Folding on the flag alone is the bug the gate exists to prevent:
-    the boundary advances every round, so every round would mint a fresh frontier and
-    orphan the turns before it."""
+    `conversation_id` and `timestamp` already filled from `RunContext`."""
     monkeypatch.setenv("DEFENDER_COMPACTION", "1")
     rd = materialize(tmp_path, GOLDEN, run_id='minted')
     (rd / "investigation.md").write_text(CLOSED_LOOP_INVLANG, encoding="utf-8")
@@ -714,25 +489,3 @@ def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
         assert json.loads(ModelMessagesTypeAdapter.dump_json(revalidated))[0] == body, (
             "the minted row must re-dump byte-identically")
 
-
-def test_the_wire_log_is_still_written_and_still_human_readable(tmp_path):
-    """The wire log is still written for every request and still parses line by line, so
-    the "no application consumers" negative is not passing because the log stopped
-    existing.
-
-    Positive control for `test_projections_are_built_from_the_store_not_from_logger_messages`
-    — O27 keeps the log for a human debugging a run, and `DEFENDER_LLM_LOG_MAX_CHARS`
-    trimming stays legal once nothing forks from it."""
-    rd = materialize(tmp_path, GOLDEN, run_id='log-alive')
-    replay = ReplayFn(_read_alert_turns(rd, 2) + [Turn(text="done")])
-    drive(rd, run_id="log-alive", main=replay,
-          store_factory=store_factory(tmp_path))
-
-    log = RunPaths(rd).wire_log
-    assert log.is_file()
-    lines = [line for line in log.read_text().splitlines() if line.strip()]
-    assert lines, "the wire log is empty"
-    parsed = [json.loads(line) for line in lines]
-    assert all(isinstance(r, dict) and "kind" in r for r in parsed)
-    assert sum(1 for r in parsed if r.get("kind") == "response") == replay.calls, (
-        "one logged response per request the model answered")

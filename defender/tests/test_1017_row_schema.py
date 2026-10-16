@@ -1,34 +1,4 @@
-"""#1017 — the queries row's ONE schema, and the read surface that projects all of it.
-
-Three symptoms with one root: the row's column set was spelled by hand at the writer
-(`record_query.append_query_row`), at the second writer (gone with #1222), at the
-read surface (`lead_repository.QueryRow`) and in the judge's raw dump — so a column added at the
-writer reached a reader only when someone remembered each list. `system_key` (#871) reached none
-of them, and it is half the rejection guard's identity.
-
-What is pinned here, at the unit level (the driven-run half lives in
-`tests/e2e/test_1017_query_row_surface.py`, which imports this module's fixtures):
-
-* **D1 / O6** — `record_query.QUERY_ROW_COLUMNS`, a tuple in writer order, is THE declaration
-  of the row's fourteen columns.
-* **D2 / O1** — `QueryRow`'s field set is that tuple with `payload_path` read as `raw_ref`; the
-  two new columns coerce with `as_str` — `_trip`'s own coercion of `system_key` — so a
-  pre-#871 table replays through the surface exactly as it ran; keyword-built fixtures keep
-  working.
-* **D2 / O2** — `QueryRow.record()` is the row AS READ, not a re-projection of the typed fields.
-  C16 is the reason: the surface DERIVES `error_class` from `exit_code` when the key is absent,
-  the guard's domain predicate reads it verbatim, and a re-projection would replay a trip the
-  run never took.
-* **S2** — the model-facing renders that reach the rows (`actor_view`, `render_joined_yaml`,
-  and since #1032 the questioner's NAMED projection `questioner_leads`) carry neither new
-  column, and each carries exactly its key sets — the questioner's the ones
-  `QUESTIONER_LEAD_KEYS` / `QUESTIONER_QUERY_KEYS` spell below (#1032 O1). The rest of #1032's
-  obligations live in `tests/test_1032_questioner_leads.py`, which imports this module's
-  fixtures.
-* **D3** — the surface refuses a link at a lead file's name and at the table's name, and
-  tolerates a lead file nested past the parser's limit, the way the judge's own readers did
-  before the reads moved here.
-"""
+"""#1017 — the queries row's ONE schema, and the read surface that projects all of it."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
@@ -101,12 +71,7 @@ def _row(seq: int, **overrides) -> dict:
 
 
 def _searchable_row(seq: int, **overrides) -> dict:
-    """`_row` with a DISTINCTIVE value in the two columns `_row` leaves generic: `raw_command`
-    (`elastic query '...'`) and `payload_path` (`gather_raw/l-001/0.json`) are satisfiable by
-    coincidence as negatives, so a render that leaked either would pass a check for the
-    fixture's default bytes. The path marker sits in the LEAD-ID segment, the one part of a
-    payload path `_layout.contained_payload`'s shape admits free text in, so the marker
-    survives into `raw_ref` — the column a model-facing leak of the path would carry."""
+    """`_row` with a DISTINCTIVE value in the two columns `_row` leaves generic."""
     marked = {
         "raw_command": f"RAWCMD_MARKER_{seq}",
         "payload_path": f"gather_raw/l-PAYLOADPATHMARKER{seq}/{seq}.json",
@@ -162,12 +127,7 @@ def _lead_file(run_dir: Path, goal: str = "a goal", *, lead_id: str = LEAD,
 
 def test_the_surface_projects_every_declared_column_with_payload_path_as_raw_ref():
     """D2/O1 — `QueryRow`'s field set is `QUERY_ROW_COLUMNS` with the ONE recorded derivation:
-    `payload_path` is read as the containment-checked `raw_ref`. Bound to the writer's own
-    declaration rather than to a second list here, so a fifteenth column reaches this test the
-    day the writer declares it.
-
-    Observed failing by: a column present in a written row and absent from `QueryRow` — today
-    `system_key` and `payload_sha256`, the two the issue names."""
+    `payload_path` is read as the containment-checked `raw_ref`. Bound to the."""
     # The PUBLIC fields: D2 also keeps the parsed record on the row for `record()`, and a
     # retained record is not a projection of a column — however the implementer stores it, an
     # underscore-prefixed slot is the one shape that says so.
@@ -195,19 +155,8 @@ def test_the_surface_projects_every_declared_column_with_payload_path_as_raw_ref
 
 
 def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
-    """D2/O2 — `QueryRow.record()` returns the parsed JSON record retained on the row: dict
-    equality with the raw line, key for key and value for value, on a row carrying every column,
-    on a row LACKING the two new columns (no `""` is invented into the record), and on a row
-    whose `error_class` key is absent (no derived class is written back into it).
-
-    A replay built from the surface hands the guard exactly what its live table hands it: since
-    #1235 that is the run's `RunState` (`state.lead_rows`), which holds a table's rows read from
-    these very lines only when branch seeding inherits them (`_inherit_evidence`, round 2) — so
-    `record()` must equal the rows seeding put on a sibling's state too. A re-projection of the typed fields would coerce `None` to `""`, derive `error_class`,
-    and turn `raw_ref` back into a string — each a byte the guard did not see.
-
-    Observed failing by: `record()` missing, or any key of the returned dict differing from
-    the line on disk or from the row seeding put on the sibling's state."""
+    """D2/O2 — `QueryRow.record()` returns the parsed JSON record retained on the row: dict equality
+    with the raw line, key for key and value for value, on a row carrying every."""
     full = _row(0, system_key=KEY_MARKER)
     pre_871 = _row(1)
     for key in ("system_key", "payload_sha256"):
@@ -243,20 +192,7 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
 
 def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path):
     """D2/O2, C16 executed — two exit-64 `∅.above-repeat-guard` rows written WITHOUT an
-    `error_class` key (a table from before the column existed). The guard's domain predicate
-    reads `error_class` verbatim, so live it counted NEITHER and `rejection_trip` over the raw
-    dicts answers `None`. The surface DERIVES `agent-fixable` for both — right for a reader,
-    wrong as a replay input — so a replay over a re-projection of the typed fields trips at the
-    third call where the run ran on.
-
-    Both halves are asserted on one table: the typed `error_class` IS the derived value (the
-    positive control — the surface still derives), and `rejection_trip` over `record()`s is
-    `None`, byte-for-byte what the live guard answers over its own table — the run's state
-    (#1235), here a branch sibling's, whose rows seeding inherited from this file and which are
-    asserted here to equal the file's rows byte for byte.
-
-    Observed failing by: `record()` returning the typed fields re-projected, on which the
-    predicate trips."""
+    `error_class` key (a table from before the column existed). The guard's domain predicate."""
     call = {"system": "", "verb": "query", "params": {"native_query": "FROM logs"}}
     old = [
         _row(seq, query_id=ABOVE_GUARD_QUERY_ID, exit_code=64, payload_status="error",
@@ -298,34 +234,8 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
 
 
 def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
-    """S2, and #1032 O1 — every model-facing render of the rows ENUMERATES its fields:
-    `actor_view` / `render_actor_view_yaml`, `render_joined_yaml`, and (since #1032 M1) the
-    questioner's `lead_repository.questioner_leads`, driven through the shipped path
-    `branch/cli._joined_leads` → `questioner_leads` → `_prompt.titled_section`. Each is
-    checked for the two #1017
-    MARKER VALUES and KEY NAMES beside the positive control on the same string (the row's
-    `query_id` and its `params` marker DO appear, so an empty render cannot satisfy the
-    negatives). The questioner's render, the one that used to stringify each
-    `JoinedLead.__dict__` whole (`QueryRow.__repr__` through `json.dumps(default=str)`), is
-    held to more — in two forms, because the two catch different failures:
-
-    * KEY-SET EQUALITY on every lead dict and every query dict it returns, against
-      `QUESTIONER_LEAD_KEYS` / `QUESTIONER_QUERY_KEYS`: a census of the output, which no marker
-      check is. A column added to `QueryRow` tomorrow, or `orphan` / `sentinels` carried along,
-      fails here without anyone planting a marker for it. The same census is taken of the
-      other two renders, so the `QueryRow` comment's claim — a column is model-facing only
-      where a render names it — is pinned for every render it names.
-    * MARKER ABSENCE on the rendered section text, with markers in `raw_command` and
-      `payload_path` planted by `_searchable_row` (the fixture's defaults are not distinctive —
-      M4's own note), plus the key names the old dump carried (`raw_ref`, `raw_command`,
-      `payload_path`, `sentinels`, `orphan`). Never the literal `∅`: `json.dumps` escapes it
-      (O3's cold-review finding).
-
-    Observed failing by: `questioner_leads` missing from `lead_repository`; a lead or query dict
-    with a key outside its set; or any planted value / old key name in the section text —
-    today's `__dict__` dump carries `raw_command`, `raw_ref` (the marker'd path), `sentinels`
-    and `orphan`, so the marker half is red on today's code even with the two `repr=False`
-    fields still hidden."""
+    """S2, and #1032 O1 — every model-facing render of the rows ENUMERATES its fields: `actor_view`
+    / `render_actor_view_yaml`, `render_joined_yaml`, and (since #1032 M1) the."""
     from defender.learning._prompt import titled_section
     from defender.learning.branch.questioner import UNTRUSTED_TAG
     from defender.learning.branch.cli import _joined_leads
@@ -404,13 +314,8 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
 
 
 def test_the_surface_refuses_a_link_at_a_lead_files_name(tmp_path):
-    """D3 — the judge's per-lead goal used to be read behind its own `artifact_file` gate; with
-    the read moved to the surface (`load_leads`), the surface keeps that posture: a SYMLINK at
-    `gather_raw/<lead>.lead.json` pointing at a real lead file elsewhere yields no lead, while
-    the same file copied in as a regular file (the positive control) yields its goal. The
-    directory gate alone would admit the link's target as this run's own lead.
-
-    Observed failing by: the linked run reporting the planted goal."""
+    """D3 — the judge's per-lead goal used to be read behind its own `artifact_file` gate; with the
+    read moved to the surface (`load_leads`), the surface keeps that posture: a."""
     elsewhere = tmp_path / "elsewhere" / "planted.lead.json"
     elsewhere.parent.mkdir()
     elsewhere.write_text(
@@ -440,12 +345,7 @@ def test_the_surface_refuses_a_link_at_a_lead_files_name(tmp_path):
 
 def test_the_surface_tolerates_a_lead_file_nested_past_the_parsers_limit(tmp_path):
     """D3 — the judge read the lead file through `render.json_mapping`, whose tolerance names
-    `RecursionError` beside the decode errors; the surface's `load_leads` keeps that class. A
-    `.lead.json` of 200,000 nested lists is a `RuntimeError` out of `json.loads`, which no
-    reader of `joined()` catches — one such planted file would otherwise end the judge pass
-    for every world of the episode. It reads as no lead, beside a healthy one that still joins.
-
-    Observed failing by: `load_leads` raising `RecursionError`."""
+    `RecursionError` beside the decode errors; the surface's `load_leads` keeps that."""
     gather = RunPaths(tmp_path).gather_raw
     gather.mkdir(parents=True)
     (gather / "l-999.lead.json").write_text("[" * 200_000 + "]" * 200_000, encoding="utf-8")
@@ -457,14 +357,8 @@ def test_the_surface_tolerates_a_lead_file_nested_past_the_parsers_limit(tmp_pat
 
 
 def test_the_surface_refuses_a_link_at_the_tables_name_and_reads_an_absent_table_as_none(tmp_path):
-    """D3 — the table's `lstat` gate is the surface's own, not the judge's private check ahead
-    of it (which threw the lead files' goals away with the rows): a SYMLINK at
-    `executed_queries.jsonl` reads as no rows and ONE unreadable record — the count a table the
-    reader could not open already reports, and what the capture priming counts — while an
-    ABSENT table (the ordinary "no query landed" shape) reads as no rows and nothing
-    unreadable, and the lead files join either way.
-
-    Observed failing by: the linked run's rows, or an absent table counted as unreadable."""
+    """D3 — the table's `lstat` gate is the surface's own, not the judge's private check ahead of it
+    (which threw the lead files' goals away with the rows): a SYMLINK at."""
     elsewhere = tmp_path / "elsewhere"
     _table(elsewhere, [_row(0, params={"native_query": "LINKED"})])
 

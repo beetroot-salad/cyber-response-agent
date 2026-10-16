@@ -996,11 +996,7 @@ def test_finding_5_a_real_permission_bit_refuses_that_folder_in_both_helpers(tmp
     lists one folder; nothing is claimed about what `list_tree` never listed). C (below P) with
     no access: only C is refused, its siblings listed. Each row is also exactly what that
     folder's own `entries()` answers. Neither helper changes a mode or makes anything. Control:
-    P readable and searchable (0o500), everything is listed.
-
-    The mode is set through a no-follow descriptor while the tree is still this process's own
-    (before `hand_over`), and put back by `owned_tree` through `fwalk`'s descriptors: as root,
-    nothing in a tree `NOBODY` owns is changed by path (#1140 review finding 10)."""
+    P readable and searchable (0o500), everything is listed."""
     folder, mode = PERMISSION_CASES[case]
     with owned_tree(tmp_path) as root:
         for rel in PERMISSION_FILES:
@@ -1131,11 +1127,7 @@ def test_d2_a_folder_removed_during_its_own_listing_is_absent_to_entries(scratch
     reopen, between the reopen and the scan, or after the scan handed back its first entry.
     The kernel lets the reopen of the dead folder succeed and the C library ends its listing
     early (or hands back what it had buffered); `view.under("sub").entries()` still answers
-    ABSENT (`absent`, no reason, no entries), never present-and-empty, never the stale names.
-
-    Controls on the same view: before the removal `sub` lists its two entries; through the
-    same seam, the sibling `peer` (never removed) lists its file and the live EMPTY folder
-    `empty` is present with `{}`, never absent."""
+    ABSENT (`absent`, no reason, no entries), never present-and-empty, never the stale names."""
     base = base_of(how, scratch)
     _d2_tree(base)
     with view_of(how, scratch, RealOs()) as view:

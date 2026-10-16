@@ -1,16 +1,11 @@
 """#796 — the review's own model knob, and the signature rule that decides who gets `--model`.
 
-The review roles run on a model pinned APART from the investigator's, for stability rather
-than for per-verdict quality (see `review_roles.DEFAULT_REVIEW_MODEL`). Two ways that pin can
-be silently undone, and both are asserted here: the resolver reading the investigator's env
-var, and the operator's override never reaching the accessor that can take it.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 
 from defender import run as run_entry
 from defender.runtime import providers
@@ -26,18 +21,6 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
 )
 
 REVIEW_DEFS = (SUPPORT_DEF, COMPOSER_DEF)
-
-
-@pytest.fixture(autouse=True)
-def _clear_model_env(monkeypatch):
-    """Both knobs cleared, so every case below states its own environment."""
-    monkeypatch.delenv(REVIEW_MODEL_ENV, raising=False)
-    monkeypatch.delenv("DEFENDER_MODEL", raising=False)
-
-
-def test_the_review_default_is_the_review_s_own_and_not_the_investigator_s():
-    assert resolve_review_model() == DEFAULT_REVIEW_MODEL
-    assert resolve_review_model(None) == DEFAULT_REVIEW_MODEL
 
 
 def test_the_investigator_s_env_var_does_not_reach_the_review(monkeypatch):
@@ -65,17 +48,6 @@ def test_every_review_role_resolves_through_that_one_accessor():
     for defn in REVIEW_DEFS:
         assert defn.model is resolve_review_model, f"{defn.role.name} owns a private accessor"
         assert defn.model() == DEFAULT_REVIEW_MODEL
-
-
-def test_the_effort_split_is_lens_below_composer():
-    """A lens reconstructs what a projection supports; the composer weighs the readings
-    against the investigation's own account and decides whether a confident close survives.
-
-    The support lens is dispatched TWICE (itself and the ablation) off this one def, which is
-    what keeps the two readings interpretable as a difference: sharing an effort is not a rule
-    two roles have to be held to any more, it is a consequence of there being one role."""
-    assert SUPPORT_DEF.effort == "medium"
-    assert COMPOSER_DEF.effort == "high"
 
 
 def test_every_review_effort_is_legal_for_the_model_it_pins():

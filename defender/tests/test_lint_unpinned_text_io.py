@@ -1,25 +1,7 @@
-"""Tests for the lint_unpinned_text_io gate (#594/#602).
-
-The first block characterizes the detector — the net under a gate that had no
-tests at all. The second block is the bugs the resolver fixed; each was an
-``xfail(strict=True)`` when it was written, so the fix announced itself as an
-XPASS and the deleted marker is the proof.
-
-Every one of those bugs came from ONE mistake. The old ``_open_mode`` read
-``call.args[0]`` as the mode of any ``<x>.open(...)`` — right for
-``Path.open(mode)``, wrong for every module-level opener, which is path-FIRST
-(``codecs.open(file, mode)``, ``io.open(file, mode)``, ``gzip.open(file, mode)``).
-So the gate read the FILE PATH as the mode string, and every verdict on that
-family turned on whether the path was a literal containing the letter ``b``:
-``codecs.open("f.bin", "rb")`` scanned clean because of the ``b`` in ``"f.bin"``.
-The mode's slot and default are properties of the CALLEE — which is why resolving
-the callee is what makes this gate correct, not merely alias-proof.
-
-The gate is driven through its DI seam:
-  - main(argv=None, *, scope=None, baseline_path=None) -> exit code
-  - _scan(root) -> list[Finding]
-"""
+"""Tests for the lint_unpinned_text_io gate (#594/#602)."""
 from __future__ import annotations
+
+import json
 
 from pathlib import Path
 
@@ -34,6 +16,13 @@ def _pyfile(tree: Path, rel: str, src: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(src, encoding="utf-8")
     return p
+
+
+def _write_baseline(path: Path, fingerprints: list[str]) -> None:
+    path.write_text(
+        json.dumps({"//": "test", "entries": {fp: "" for fp in fingerprints}}) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _kinds(tree: Path) -> set[str]:

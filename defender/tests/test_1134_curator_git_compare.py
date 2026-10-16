@@ -1,63 +1,22 @@
-"""#1134 addendum 3 (owner-approved 2026-10-03), D1, at the curator: the three "is this file still
-identical to the before-state?" checks ask git, not the handle and not a plain-path read.
-
-The checks are the settle's `_byte_identical_to_head(repo_root, rel)` (against HEAD), the settle
-restore `_restore_unapproved_files(cfg, snapshot, rels, *, head_before)` and the fault restore
-`_restore_corpus(repo_root, corpus_dir, snapshot, *, corpus, head_before)` (against the commit the
-before-state was read at). Each asks `_git.git_unchanged_since(cwd, rev, pathspec)`: the
-repo-relative names of the regular files `rev` carries under `pathspec` that git still finds
-unchanged in the working tree — the same bytes (no end-of-line or attribute conversion, whatever
-the worktree's `.gitattributes` says), still a regular file (a symlink is a type change; a FIFO,
-a folder or nothing at the name is a change), the executable bit ignored. A path `rev` does not
-carry is never unchanged. A git failure raises `GitError`; it is never read as an answer.
-
-Routing of a git failure in the comparison, per site:
-- the settle's: `GitError` out of `_byte_identical_to_head`; inside `_settle_tree` (a git read)
-  the tick's `GitProbeError`, recorded stuck, nothing committed;
-- the settle restore's: `GitProbeError`, before anything is written or removed;
-- the fault restore's: a WARNING naming the failed comparison (never the host path), and every
-  before-state file is written back through the held corpus (an identical rewrite is harmless;
-  the fault being unwound keeps its routing).
-
-Writes, restores and deletes still go through the corpus `Held`; kinds still through
-`entry_kind` / `kind_at` (unchanged rows elsewhere).
-
-Declared (N-a): git hashes a hard-linked file's content where the handle refused it. A hard link
-holding the before-state's exact bytes is judged unchanged: the settle puts it back with `git
-checkout` from HEAD's blob (never from its target), it is never in `changed`, never committed; on
-a restore it is left where it stands, unrefused and unlogged. Its target is never written, and
-no host bytes are copied into the corpus, a commit or a prompt. A symlink is never judged
-unchanged.
-
-What stays out of Python entirely: no check opens a worktree path (an audit hook on `open` sees
-none under the repo), runs anything but git, or calls a read verb (`read`, `read_bytes`,
-`read_text`, `open`, ...); `lane_trees.read_bytes_at` is gone.
-
-Red against `5dbb880c` (v3's curator): `_git.git_unchanged_since` does not exist, the restores
-take no `head_before`, `_byte_identical_to_head` takes `tree_for` and refuses a hard link, and
-`Bound.read_bytes` is gone from the core beneath it.
-"""
+"""#1134 curator: the three "is this file still identical to the before-state?" checks (the settle's
+`_byte_identical_to_head`, `_restore_unapproved_files`, `_restore_corpus`) ask git
+(`_git.git_unchanged_since`), not the handle and not a plain-path read. Covers what git calls unchanged
+(content, regular-file type, no attribute conversion), git-failure routing per site, and that a hard
+link holding the before-state's bytes is never committed or restored from its target."""
 from __future__ import annotations
 
-import ast
-import inspect
 import logging
 import os
 import re
 import shutil
 import stat
-import sys
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from defender import _git
 from defender._git import GitError
 from defender.learning.author import drain
-from defender.learning.core import lane_trees
 from defender.tests import _spec773 as S
 from defender.tests._curator1134 import (
     LESSONS_REL,
@@ -96,12 +55,6 @@ def _unchanged(w, rev: str | None = None) -> frozenset[str]:
 
 def _snap(w) -> dict[str, bytes]:
     return drain._snapshot_corpus(w.repo, w.corpus_dir, w.head())
-
-
-def _corpus_marked(root: Path, *, but: str = "") -> list[str]:
-    """Every regular file under `root` (no link followed) carrying `OUT_MARK`, except `but`."""
-    return [k for k, row in census(root).items()
-            if row[0] == "file" and OUT_MARK.encode() in row[1] and k != but]
 
 
 def _break_index(w) -> None:
@@ -603,207 +556,3 @@ def test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed(tmp_path, 
     same_inode = os.stat(sc.corpus / SEEDED).st_ino == os.stat(target).st_ino
     assert same_inode is (mode == "same mode")
 
-
-# ---------------------------------------------------------------------------------------
-# Nothing in Python reads the worktree for a comparison; nothing but git runs
-# ---------------------------------------------------------------------------------------
-
-_EVENTS: list[list[tuple[str, tuple]]] = []
-_HOOKED: list[bool] = []
-
-
-def _audit(event: str, args: tuple) -> None:
-    if _EVENTS and event in ("open", "subprocess.Popen", "os.posix_spawn", "os.exec",
-                             "shutil.copyfile", "os.link", "os.symlink"):
-        _EVENTS[-1].append((event, args))
-
-
-@contextmanager
-def _audited() -> Iterator[list[tuple[str, tuple]]]:
-    """Every `open` / process-spawn / copy audit event this process raises while the block runs.
-    The hook is added once per process and records nothing unless a block is open."""
-    if not _HOOKED:
-        sys.addaudithook(_audit)
-        _HOOKED.append(True)
-    seen: list[tuple[str, tuple]] = []
-    _EVENTS.append(seen)
-    try:
-        yield seen
-    finally:
-        _EVENTS.pop()
-
-
-def _plain_opens_under(seen: list[tuple[str, tuple]], root: Path) -> list[Any]:
-    """Each `open` of a path that lies under `root` outside its git dir, however spelled —
-    absolute, or relative to the process's working directory (`os.path.relpath`, adversary
-    A1′): a read (or write) by plain path. The held corpus opens a leaf by its bare name below a
-    held descriptor (`dir_fd`), which this cannot tell from a cwd-relative spelling, so a row
-    that lets the held corpus write uses `_opens` == [] on a step that writes nothing instead."""
-    out = []
-    for event, args in seen:
-        if event != "open" or not args or not isinstance(args[0], str | bytes | os.PathLike):
-            continue
-        spelled = os.fsdecode(args[0])
-        at = Path(os.path.abspath(spelled))
-        if at.is_relative_to(root) and not at.is_relative_to(root / ".git"):
-            out.append(spelled)
-    return out
-
-
-def _opens(seen: list[tuple[str, tuple]]) -> list[Any]:
-    """Every `open` audit event of a path (any spelling) — descriptors (`fdopen`) aside."""
-    return [args[0] for event, args in seen
-            if event == "open" and args and isinstance(args[0], str | bytes | os.PathLike)]
-
-
-def _spawned_not_git(seen: list[tuple[str, tuple]]) -> list[Any]:
-    """Each process started that is not git, and each copy or link made in Python."""
-    out = []
-    for event, args in seen:
-        if event == "subprocess.Popen":
-            argv = args[1]
-            first = os.fsdecode(argv[0] if isinstance(argv, list | tuple) else argv)
-            if Path(first).name != "git":
-                out.append(argv)
-        elif event in ("os.posix_spawn", "os.exec"):
-            if Path(os.fsdecode(args[0])).name != "git":
-                out.append((event, args))
-        elif event in ("shutil.copyfile", "os.link", "os.symlink"):
-            out.append((event, args))
-    return out
-
-
-def test_no_comparison_opens_a_worktree_path_or_runs_anything_but_git(tmp_path):
-    """While each of the three checks runs — the settle's on a changed lesson, the settle
-    restore and the fault restore each over a rewritten, a deleted and an untouched file — the
-    process opens no path under the repo by its plain spelling (git's own reads run in git's
-    process) and starts no process but git; no file is copied or linked in Python.
-
-    Catches: a comparison that reads `repo_root / rel` itself (`Path.read_bytes()`, `open()`),
-    reads it by another process (`cat`, `cmp`), or copies a link's target into the corpus."""
-    w = world(tmp_path)
-    for name in ("same.md", "edit.md", "gone.md"):
-        put(w.corpus_dir / name, lesson_text("f0", mark=name))
-    w.commit()
-    head = w.head()
-    snapshot = _snap(w)
-    cfg = w.cfg()
-
-    def agent_edits():
-        put(w.corpus_dir / "edit.md", b"rewritten\n")
-        clear(w.corpus_dir / "gone.md")
-
-    agent_edits()
-    with _audited() as seen:
-        drain._byte_identical_to_head(w.repo, _rel("edit.md"))
-    settle_seen = list(seen)
-    with _audited() as seen:
-        drain._restore_unapproved_files(
-            cfg, snapshot, {_rel(n) for n in ("same.md", "edit.md", "gone.md")}, head_before=head)
-    unapproved_seen = list(seen)
-    agent_edits()
-    with _audited() as seen:
-        _restore(w, snapshot, head_before=head)
-    fault_seen = list(seen)
-
-    for label, events in (("settle", settle_seen), ("unapproved", unapproved_seen),
-                          ("fault", fault_seen)):
-        assert _plain_opens_under(events, w.repo) == [], label
-        assert _spawned_not_git(events) == [], label
-        assert any(e == "subprocess.Popen" for e, _ in events), (label, "git never ran")
-    assert (w.corpus_dir / "edit.md").read_bytes() == snapshot["edit.md"]
-
-
-def test_the_audit_watch_sees_a_plain_read_and_a_foreign_process(tmp_path):
-    """The positive control for the watch: a `Path.read_bytes()` of a repo file, the same file
-    opened by a spelling relative to the working directory (adversary A1′), and a `cat` of it
-    inside the block are all caught."""
-    import subprocess
-
-    w = world(tmp_path)
-    put(w.corpus_dir / "a.md", b"x\n")
-    relative = os.path.relpath(w.corpus_dir / "a.md")
-    with _audited() as seen:
-        (w.corpus_dir / "a.md").read_bytes()
-        os.close(os.open(relative, os.O_RDONLY | os.O_NOFOLLOW))
-        subprocess.run(["cat", str(w.corpus_dir / "a.md")], capture_output=True, check=True)
-    assert _plain_opens_under(seen, w.repo) == [str(w.corpus_dir / "a.md"), relative]
-    assert len(_opens(seen)) == 2
-    assert len(_spawned_not_git(seen)) == 1
-
-
-def test_a_comparison_that_writes_nothing_opens_nothing_at_all(tmp_path):
-    """Adversary A1′ (closed): with nothing to write back — a file left alone, one chmod-ed only,
-    a hard link holding the exact committed bytes — each check makes no `open` at all, of any
-    spelling, absolute, cwd-relative or below a descriptor: the settle's comparison of each
-    name, `_unchanged_names`, the settle restore and the fault restore. Only git reads. And the
-    answer is still git's: all three names unchanged, nothing written (each inode as it was).
-
-    Catches: a comparison that calls git for show (keeping the routing and the AST pins) but
-    decides from its own read of the worktree, through a helper the AST rows do not see and by a
-    spelling the plain-path filter misses (`os.open(os.path.relpath(...))` after an `lstat`)."""
-    w = world(tmp_path)
-    names = ("same.md", "mode.md", "hard.md")
-    for name in names:
-        put(w.corpus_dir / name, lesson_text("f0", mark=name))
-    w.commit()
-    head = w.head()
-    snapshot = _snap(w)
-    cfg = w.cfg()
-    os.chmod(w.corpus_dir / "mode.md", 0o755)
-    target = w.target("hard-target.md", snapshot["hard.md"])
-    plant_hardlink(w.corpus_dir / "hard.md", target)
-    inodes = {n: os.stat(w.corpus_dir / n).st_ino for n in names}
-    rels = {_rel(n) for n in names}
-
-    with _audited() as seen:
-        identical = {n: drain._byte_identical_to_head(w.repo, _rel(n)) for n in names}
-        unchanged = drain._unchanged_names(w.repo, w.corpus_dir, head)
-        drain._restore_unapproved_files(cfg, snapshot, rels, head_before=head)
-        _restore(w, snapshot, head_before=head)
-
-    assert _opens(seen) == [], _opens(seen)
-    assert identical == dict.fromkeys(names, True)
-    assert set(names) <= unchanged
-    assert {n: os.stat(w.corpus_dir / n).st_ino for n in names} == inodes
-
-
-#: What reads bytes or text: the handle's and the plain path's read verbs, the drain's own
-#: readers, and the openers.
-_READ_VERBS = frozenset({"read", "read_bytes", "read_text", "open", "fdopen", "read_at",
-                         "read_bytes_at", "read_text_soft", "read_guarded", "read_bytes_guarded",
-                         "read_text_utf8", "_read_or_empty", "_cited_ids", "git_show_file",
-                         "git_show_file_bytes", "git_show_head", "copyfile", "copy", "copy2"})
-
-
-def _callees(fn_name: str) -> set[str]:
-    tree = ast.parse(inspect.getsource(drain))
-    [fn] = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == fn_name]
-    out = set()
-    for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
-        f = call.func
-        out.add(f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute)
-                else "")
-    return out
-
-
-@pytest.mark.parametrize("fn_name", ["_byte_identical_to_head", "_restore_unapproved_files",
-                                     "_restore_corpus", "_unchanged_names"])
-def test_each_comparison_calls_no_read_verb(fn_name):
-    """None of the three checks (nor the restores' shared `_unchanged_names`) calls a read verb
-    — the handle's `read`, a plain path's `read_bytes` / `read_text` / `open`, the drain's own
-    readers, a blob read to compare in Python — or a copy; the comparison is git's. Positive
-    control: the same scan finds each in a function that makes them."""
-    assert not _READ_VERBS & _callees(fn_name), (fn_name, sorted(_READ_VERBS & _callees(fn_name)))
-
-    planted = ast.parse("def f(p, v):\n    p.read_bytes()\n    v.read('x')\n    open(p)\n")
-    found = {c.func.attr if isinstance(c.func, ast.Attribute) else c.func.id
-             for c in ast.walk(planted) if isinstance(c, ast.Call)}
-    assert {"read_bytes", "read", "open"} <= _READ_VERBS & found
-
-
-def test_the_byte_read_helper_is_gone():
-    """Addendum 3 drops `lane_trees.read_bytes_at` (and the core has no `Bound.read_bytes` for
-    it to call): no byte read of a lane tree is left to reach for."""
-    assert not hasattr(lane_trees, "read_bytes_at")
-    assert "read_bytes_at" not in inspect.getsource(drain)

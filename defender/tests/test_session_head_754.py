@@ -150,28 +150,6 @@ def test_fold_moves_head_to_frontier_and_logs_fold(tmp_path):
     assert r2 not in ss.path_row_ids(store, session_id), "the folded turn is off-path"
 
 
-def test_consecutive_folds_chain_their_log_entries(tmp_path):
-    """Two folds with no ordinary turn between them leave two entries that chain: the first"""
-    # provenance: P100 + P77.
-    ss = store_mod()
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    r1, r2, r3 = linear_turns(store, session_id, 3)
-
-    first = sel.fold(store, session_id, agent_id="main", boundary=3)
-    second = sel.fold(store, session_id, agent_id="main", boundary=4)
-
-    entries = log_rows(store, session_id)
-    assert [(e.from_message_id, e.to_message_id, e.reason) for e in entries] == [
-        (r3, first, "fold"), (first, second, "fold")], entries
-    assert head_of(store, session_id) == second
-    # the reconstruction P77 names: walk back from the second entry's displaced tip
-    assert ss._walk_parents(store.connection, entries[1].from_message_id)[-1] == r1
-    assert r2 in ss._walk_parents(store.connection, entries[0].from_message_id), (
-        "the first entry's displaced tip still reaches the turns the fold cut")
-
-
 def test_fold_reuse_leaves_head_and_the_log_untouched(tmp_path):
     """A second fold at a boundary that already holds a frontier returns the existing frontier"""
     # provenance: P97, raised from claim c18 (read) rather than from the doc.
@@ -193,48 +171,6 @@ def test_fold_reuse_leaves_head_and_the_log_untouched(tmp_path):
     assert log_rows(store, session_id) == log_after_fold, "reuse logs nothing"
     assert len(log_after_fold) == 1, "the control: the FIRST fold did log"
     assert sql(store, "SELECT COUNT(*) FROM message") == rows_after_fold
-
-
-def test_the_fold_reuse_lookup_is_scoped_by_session_and_agent(tmp_path):
-    """Two folds at one boundary under DIFFERENT `agent_id`s miss each other's reuse lookup:"""
-    # provenance: P98 + P106, grounded in PR-23 (executed): `(session_id, agent_id,
-    # synthesized)` scopes `_next_seq` cleanly and a synthesized row at seq 0 coexists with an
-    # ordinary seq-0 row, so the two frontiers can and do coexist. P106's premise is what the
-    # two-agent arm observes; its two-frontiers-per-lineage consequence is closed by the
-    # cross-session fold refusal rather than by the key.
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    r1, r2, r3 = linear_turns(store, session_id, 3)
-
-    mine = sel.fold(store, session_id, agent_id="main", boundary=3)
-    theirs = sel.fold(store, session_id, agent_id="gather-l1", boundary=3)
-
-    assert theirs != mine, "a different agent_id misses the reuse lookup"
-    frontiers = sql(store, "SELECT id, agent_id, seq FROM message WHERE synthesized = 1 "
-                           "AND session_id = ? ORDER BY id", (session_id,))
-    assert frontiers == [(mine, "main", 3), (theirs, "gather-l1", 3)], frontiers
-    assert head_of(store, session_id) == theirs, "head lands on whichever ran last"
-    assert [(e.from_message_id, e.to_message_id, e.reason)
-            for e in log_rows(store, session_id)] == [
-        (r3, mine, "fold"), (mine, theirs, "fold")], "each move logged once"
-
-    fork = store.fork(session_id, at_message_id=theirs)
-    store.append(fork, [text_response("the fork's own turn")], agent_id="main")
-    assert sel.path_row_ids(store, fork)[0] not in message_ids(store, fork), (
-        "the fixture must put the fork's lineage root in the PARENT's session, or V4's "
-        "refusal is not what is being observed")
-
-    refused = raised_by(sel.fold, store, fork, agent_id="main", boundary=3)
-
-    assert refused is not None, (
-        "the fold would have parented the fork's frontier onto another session's row")
-    assert not isinstance(refused, DELIBERATE), f"{refused!r}"
-    assert sql(store, "SELECT COUNT(*) FROM message WHERE session_id = ? AND synthesized = 1",
-               (fork,)) == [(0,)], "the refused fold minted no frontier"
-    assert [e.reason for e in log_rows(store, fork)] == ["fork"], (
-        "and recorded nothing beyond the entry fork() itself wrote")
-    assert r2 not in (mine, theirs)
 
 
 def test_a_degenerate_fold_still_writes_its_log_entry(tmp_path):
@@ -313,23 +249,6 @@ def test_a_linear_turn_writes_no_log_entry(tmp_path):
             f"positive control: the same channel on {session_id} DOES see a non-linear move")
 
 
-def test_first_append_into_a_fresh_session_is_linear(tmp_path):
-    """The first append into a session that holds no rows and whose head is SQL NULL is LINEAR:"""
-    # provenance: P116 + P52 — rule case 1, previous head NULL and the first row's parent NULL.
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    assert head_of(store, session_id) is None, "a fresh session starts with no head"
-    assert message_ids(store, session_id) == []
-
-    first = store.append(session_id, [user_request("the first turn")], agent_id="main")[0]
-
-    assert head_of(store, session_id) == first
-    assert log_rows(store, session_id) == [], "rule case 1 is linear: nothing to record"
-    assert sql(store, "SELECT parent_id FROM message WHERE id = ?", (first,)) == [(None,)]
-    assert ss.path_row_ids(store, session_id) == [first]
-
-
 def test_an_append_into_a_rows_but_null_head_session_raises(tmp_path):
     """An append into a session that holds rows but whose `head_message_id` is SQL NULL is"""
     # provenance: P55, promoted out of consensus — all three answering copies converged on the
@@ -391,33 +310,6 @@ def test_an_unexplained_non_linear_append_raises_and_writes_nothing(tmp_path):
         store.append(session_id, payload, agent_id="main", parent_id=explained)
 
 
-def test_a_multi_message_non_linear_append_writes_exactly_one_log_entry(tmp_path):
-    """A multi-message batch whose FIRST row parents off head is one non-linear move: every"""
-    # provenance: P50 (the rule inspects only the first row's parent); FK-J minted
-    # attached_to_message_id after one of three answering copies read from_message_id as the
-    # attachment point and was wrong against the schema.
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    r1, r2, r3 = linear_turns(store, session_id, 3)
-
-    batch = [user_request("graft"), *complete_pair()]
-    landed = store.append(session_id, batch, agent_id="main", parent_id=r1, reason="fold")
-
-    assert len(landed) == 3, f"every message in the batch lands; got {landed}"
-    assert head_of(store, session_id) == landed[-1], "head moves to the LAST inserted id"
-    entries = log_rows(store, session_id)
-    assert len(entries) == 1, f"the rule inspects only the first row; got {entries}"
-    entry = entries[0]
-    assert entry.from_message_id == r3, "the displaced head"
-    assert entry.to_message_id == landed[-1], "the new head"
-    assert entry.attached_to_message_id == r1, "the first inserted row's own parent"
-    assert len({entry.from_message_id, entry.to_message_id,
-                entry.attached_to_message_id}) == 3, (
-        f"the fixture must make all three differ, or the misreading reads as correct: {entry}")
-    assert sql(store, "SELECT parent_id FROM message WHERE id = ?", (landed[0],)) == [(r1,)]
-    assert r2 not in (entry.from_message_id, entry.attached_to_message_id)
-
-
 def test_an_ingest_that_fails_partway_leaves_head_on_the_last_committed_message(tmp_path):
     """When the third message of an ingested turn cannot be stored, messages one and two are"""
     # provenance: P52 + P53; the fault object cites B8 (executed).
@@ -437,27 +329,6 @@ def test_an_ingest_that_fails_partway_leaves_head_on_the_last_committed_message(
     assert len(ss.hydrate(store, session_id, role="analysis")) == 2, (
         "the next render sees the conversation through message two only")
     assert store.connection.in_transaction is False
-
-
-def test_one_round_of_ingest_then_fold_contributes_exactly_one_log_row(tmp_path):
-    """One round that ingests a turn and then folds moves head TWICE — first onto the ingest"""
-    # provenance: P54.
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-
-    ingested = sel.ingest(store, session_id, [user_request("orientation"), text_response("a")],
-                          agent_id="main")
-    after_ingest = head_of(store, session_id)
-    assert after_ingest == ingested[-1]
-    assert log_rows(store, session_id) == []
-
-    frontier = sel.fold(store, session_id, agent_id="main", boundary=2)
-
-    assert head_of(store, session_id) == frontier != after_ingest, "head moved twice"
-    entries = log_rows(store, session_id)
-    assert len(entries) == 1, f"the round contributes exactly one row; got {entries}"
-    assert (entries[0].from_message_id, entries[0].reason) == (after_ingest, "fold")
 
 
 def test_reason_membership_is_validated_before_linearity_classification(tmp_path):

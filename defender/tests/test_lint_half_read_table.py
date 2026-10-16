@@ -1,20 +1,4 @@
-"""The lint gate for the half-read policy table: lint_half_read_table (#879).
-
-The gate AST-scans defender/ for a boundary that branches on ONE key of another module's
-keyed gate table, spelled as a string literal, leaving that table's other keys with no reader
-there — then runs the shared _baseline.gate ratchet.
-
-Driven through the testability seam the shipped gates carry, never against the real tree
-except in the one `gate`-marked regression:
-  - main(argv, *, scope=..., baseline_path=...) -> exit code
-  - _scan(scope) -> list[Finding]
-
-The fixtures below are deliberately a matched PAIR at every turn: each "this fires" test has
-a near-miss twin that must stay clean, because a detector keyed on a construction boundary is
-only worth having if the boundary is where it says it is. The blind spots the module docstring
-names (a consumer that enumerates EVERY key; a value-collision on a short generic key) are
-pinned here too — a documented hole that nothing pins is a hole that quietly closes or widens.
-"""
+"""The lint gate for the half-read policy table: lint_half_read_table (#879)."""
 from __future__ import annotations
 
 from pathlib import Path

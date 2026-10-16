@@ -49,12 +49,7 @@ def test_a_traversal_system_cannot_execute_an_out_of_tree_module(tmp_path):
 
 
 def test_a_broken_adapter_module_does_not_kill_the_catalog(tmp_path):
-    """A `*_adapter.py` that will not import costs its OWN system, not the run.
-
-    Reading the roster IMPORTS each adapter (the filename glob never did), so an adapter with a
-    syntax error — a newly onboarded system, say — would otherwise raise straight out of
-    `descriptor_catalog`, killing prompt construction for EVERY system and with it the whole run.
-    The healthy systems must still be advertised."""
+    """A `*_adapter.py` that will not import costs its OWN system, not the run."""
     from defender.hooks.inject_system_skill_description import descriptor_catalog
 
     adapters = tmp_path / "adapters"

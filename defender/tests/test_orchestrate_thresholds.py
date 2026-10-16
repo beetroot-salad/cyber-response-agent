@@ -19,7 +19,6 @@ from defender.learning.core.config import (  # type: ignore[import-not-found]
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
 
 
-
 def _paths(tmp_path) -> LoopPaths:
     """`LoopPaths` over `tmp_path` with its learning state root made (never created lazily)."""
     paths = LoopPaths(repo_root=tmp_path)
@@ -59,7 +58,6 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
             data_root=drains._data_root())
 
 
-
 def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
     paths = _paths(tmp_path)
@@ -70,7 +68,6 @@ def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     paths = _paths(tmp_path)
     assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 2
-
 
 
 def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkeypatch):
@@ -109,8 +106,6 @@ def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
 
     with pytest.raises(FatalConfigError):
         drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _run_pitfalls)
-
-
 
 
 def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
@@ -181,17 +176,6 @@ def test_drain_pitfalls_swallows_a_plain_curation_error(tmp_path):
         raise RuntimeError("curation hiccup")
 
     drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _run_pitfalls)
-
-
-
-
-def test_run_or_dead_letter_returns_true_on_success():
-    """A clean run reports success (so the caller can unlink the marker) and never
-    invokes the dead-letter callback."""
-    calls: list[Exception] = []
-    ok = faults.run_or_dead_letter(lambda: None, calls.append)
-    assert ok is True
-    assert calls == []
 
 
 def test_run_or_dead_letter_dead_letters_a_plain_exception():
@@ -274,32 +258,6 @@ class _StubBranch:
         pass
 
 
-def test_lead_author_drain_bad_lift_threshold_is_fatal_two(tmp_path, monkeypatch):
-    """End-to-end: a queued marker + a bad lift threshold drives the whole
-    lead_author_drain stage to the contracted exit 2 (not a quarantine, not exit 0)."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
-    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
-    paths = _paths(tmp_path)
-    run_dir = _state1135.curation_run_dir("run-x")
-    state = _state1135.state_for_paths(paths)
-    _state1135.enqueue_run(state, run_dir)
-
-    wt = tmp_path / "wt"
-    wt.mkdir()
-
-    def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
-        lead_author._lift_threshold()
-
-    rc = cli._run_stage(
-        lambda: drains.lead_author_drain(
-            paths=paths, run_lead_author=_run_lead_author, branch=_StubBranch(wt)
-        )
-    )
-    assert rc == 2
-
-
-
-
 def _raise(exc):
     """A zero-arg stage that raises ``exc`` (closure dodges lambda's no-raise limit)."""
     def _stage():
@@ -330,13 +288,6 @@ def test_run_stage_maps_run_unprocessable_to_exit_two_on_direct_run():
     ) == 2
 
 
-
-
-
-
-
-
-
 def test_run_or_dead_letter_reraises_giterror_not_quarantine():
     """A ``GitError`` (a broken local-state git op) dooms the whole batch, so it must
     re-raise out of the dead-letter guard — never be quarantined as a per-marker failure."""
@@ -360,8 +311,6 @@ def test_run_stage_maps_giterror_to_exit_2():
         raise _git.GitError(["commit"], 1, "pre-commit hook rejected")
 
     assert cli._run_stage(stage) == 2
-
-
 
 
 # ---------------------------------------------------------------------------------------

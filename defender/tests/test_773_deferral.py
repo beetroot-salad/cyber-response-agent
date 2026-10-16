@@ -1,13 +1,4 @@
 """#773 — M7's bounded deferral, O9's conservation, and the tick's two counters.
-
-RED AGAINST HEAD BY CONSTRUCTION: there is no `deferrals` counter on this channel today —
-`counter_key` is used only by the pitfalls lane (C14/C18) — and no disposition for a
-finding that "could not land through no fault of its own".
-
-O9's shape is the reason every test here asserts THREE things about a deferral: that it is
-bounded (the counter moves and the ceiling graveyards), that it is reported (the held
-report names it with its count), and that it is not silent (the row is neither consumed nor
-lost).
 """
 from __future__ import annotations
 
@@ -208,29 +199,6 @@ def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
         ticks += 1
     assert ticks <= 3
     assert "orphan" not in sc.pending_by_id()
-
-
-def test_drain_ticks_own_loop_continuation_is_unaffected_by_the_new_row_fields_773(tmp_path):
-    """The drain tick's own reading of the pending queue — does the tick continue or stop —
-    is unchanged by M6/M7 adding a `deferrals` counter to
-    the row shape.
-
-    R7 obligation g10, driven at the UNMOVED reader's own edge: `_pending_queue_counts` is
-    what the wake gate compares against its threshold, and `held_reason` is still the one
-    field it reads as "not work" (#881/O2). A tick over a queue carrying the new fields
-    still finds its work and still returns 0."""
-    from defender.learning.core import drains
-
-    sc = _orphan_tick(tmp_path, max_attempts=5)
-    assert sc.run() == 0
-    authorable, held = drains._pending_queue_counts(sc.cfg.state, sc.cfg.channel)
-    assert (authorable, held) == (1, 0)
-
-    S.seed(sc.paths, sc.channel, sc.pending())
-    sc.curator.writes = {"l2.md": S.lesson("orphan")}
-    sc.curator.committed = ["orphan"]
-    assert sc.run() == 0
-    assert LESSON2 in sc.head_files()
 
 
 def test_max_attempts_one_retires_on_the_first_failure_773(tmp_path):

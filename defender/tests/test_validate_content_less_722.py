@@ -105,13 +105,7 @@ def _report(tmp_path: Path, disposition: str) -> Path:
 def test_a_report_disposition_is_matched_on_what_it_renders_as(tmp_path, tag, written):
     """report.md's disposition is the headline the loop reads to pick a direction. The
     normalized keyword comes back, so no caller downstream ever sees the invisible
-    characters the model wrote around it.
-
-    #923 (§7 round 4) narrows this to the CLEAN spelling — the zero-width/BOM spellings that
-    used to belong here now belong in the rejected set below: on READ there is no author left
-    to ask, so a value that only becomes a member after something strips it is answered
-    exactly as a value that was never a member. `strip_zero_width` no longer runs in
-    `_vocab.normalized_disposition` at all."""
+    characters the model wrote around it."""
     assert loop.normalize_disposition(_report(tmp_path, written)) == "benign"
 
 
@@ -148,19 +142,7 @@ def test_strip_zero_width_keeps_the_whitespace_callers_split_on():
 
 def test_as_str_answers_on_the_type_and_not_on_emptiness():
     """`as_str` is the coercion #871 gave a shared home, and what it must do is turn a
-    NON-STRING into `""` — not merely turn `None` into one.
-
-    The distinction is the whole helper. `value if value is not None else ""` passes every
-    caller's happy path and every arm that drives a missing value, because each caller then
-    re-checks the type on its own account: `names_something_readable` has its own
-    `isinstance`, and `_trip` compares whatever it is against itself. What it does NOT survive
-    is a non-string reaching a spelling that has no such check — `query_tool` coarsens `verb`
-    through here before `_request_key` serializes it, so a non-string verb would key as
-    ITSELF and two calls that named no readable verb at all would stop being one group, which
-    is the #871 defect in the other coordinate of the same pair.
-
-    Pinned at the helper rather than through a caller for exactly that reason: the callers
-    each have a second net, so the contract is only observable here."""
+    NON-STRING into `""` — not merely turn `None` into one."""
     assert as_str("elastic") == "elastic"
     assert as_str("") == ""
     for not_a_string in (None, 12345, True, ["a"], {"n": 1}, 1.5, b"bytes"):

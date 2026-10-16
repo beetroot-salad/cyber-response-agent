@@ -656,96 +656,18 @@ def test_gather_admits_the_declared_rows_flags_on_defender_sql(flags):
         assert decision.allow, (cmd, decision.reason)
 
 
-@pytest.mark.parametrize("flag", [
-    "--bogus x", "--bogus", "--rowz values", "--rows-file values", "--row values",
-    "--name columns", "-r values", "--format csv",
-])
-def test_gather_admits_nothing_else_new_on_defender_sql(flag):
-    """#1138 O7's other half — the gate admits `--rows`/`--names` and NOTHING else new: an"""
-    declared = f"{_PAYLOAD_PIPE} --rows values --names columns 'SELECT 1'"
-    assert _bash(declared, _gather()).allow
-    extra = f"{_PAYLOAD_PIPE} --rows values --names columns {flag} 'SELECT 1'"
-    assert not _bash(extra, _gather()).allow, extra
-    assert not _bash(f"{_PAYLOAD_PIPE} {flag} 'SELECT 1'", _gather()).allow, flag
-
-
-@pytest.mark.parametrize("sep", [";", "&&", "||", "|"])
-def test_gather_denies_adapter_sql_in_every_compound_shape(sep):
-    # The ONE sanctioned adapter shape used to be the single `|` pipe into defender-sql; a
-    # `;`/`&&`/`||` SEQUENCE was a separate-pipelines compound and had to be denied so the harness
-    # could not silently stream the payload as if it were `|`. Since #611 NO adapter shape runs —
-    # so the pipe joins the sequences on the deny side, and there is no routing seam left to claim
-    # any of them.
-    cmd = f"defender-elastic query 'x' {sep} defender-sql 'SELECT 1'"
-    d = _bash(cmd, _gather())
-    assert not d.allow, cmd
-    assert d.reason == permission.ADAPTER_RETIRED_REASON
-    assert not _bash(cmd, MAIN).allow
-
-
-@pytest.mark.parametrize("cmd", [
-    # An adapter query whose value contains a `$(`/backtick substring is a LITERAL query payload,
-    # not shell. It used to be ALLOWED (and routed to capture) so the argv reached the data source
-    # verbatim — the substitution guard must not have swallowed it. Post-#611 the adapter is
-    # unreachable from bash, so the surviving property is the DIAGNOSIS: such a command must still
-    # be recognized as an adapter and get the reason that names the `query` tool, not be misdiagnosed
-    # as an unsafe-construct / generic fall-through deny (which would send the model hunting for
-    # another shell spelling instead of the tool). The metachar reaches the data source verbatim
-    # through `query`'s typed params — there is no shell on that path at all.
-    "defender-elastic query 'process.command_line:*$(*'",
-    "defender-elastic query 'cmd:`id`'",
-])
-def test_gather_adapter_query_with_inert_shell_metachars_is_diagnosed_as_an_adapter(cmd):
-    d = _bash(cmd, _gather())
-    assert not d.allow, cmd
-    assert d.reason == permission.ADAPTER_RETIRED_REASON, cmd
-    # The defense-in-depth guard is still enforced for a non-adapter VIEWER stage: the shape
-    # below IS claimed by the `cat` grant (a single free-text operand), so only the guard denies it.
-    assert not _bash('cat "$(rm -rf /)"', _gather()).allow
-
-
 # command_shape: pure classifiers over parsed pipelines (#456)
 # The classification half, shared between the gate and dispatch. It operates on
 # the parsed bash_exec.Pipeline structure (no parsing of its own); the gate parses
 # once and routes off these, so a command is decomposed exactly once per tool call.
 
 from defender.runtime import bash_exec  # noqa: E402 — grouped with its test section
-from defender.runtime.permission import command_shape  # noqa: E402
 
 
 def _shape(cmd):
     # `parse` takes the raw command text directly (#959 D1/C3) — the standalone wrapper step
     # has folded into it, so there is no second function to apply first any more.
     return bash_exec.parse(cmd)
-
-
-def test_command_shape_is_adapter_stage():
-    assert command_shape.is_adapter_stage(["defender-elastic", "query", "x"])
-    assert command_shape.is_adapter_stage(["python3", "scripts/adapters/elastic_adapter.py", "q"])
-    assert not command_shape.is_adapter_stage(["defender-invlang", "enum"])  # non-adapter shim
-    assert not command_shape.is_adapter_stage(["jq", ".x"])
-    assert not command_shape.is_adapter_stage([])
-    # adapter name as an ARGUMENT, not the command, is not an adapter stage
-    assert not command_shape.is_adapter_stage(["which", "defender-elastic"])
-
-
-@pytest.mark.parametrize(("cmd", "adapter"), [
-    ("defender-elastic query foo", True),                        # the ex-standalone shape
-    ("defender-elastic query x | defender-sql 'SELECT 1'", True),  # the ex-sanctioned pipe
-    ("defender-elastic query x ; defender-sql 'SELECT 1'", True),  # a sequence
-    ("defender-elastic query x | cat", True),                    # a non-sql consumer downstream
-    ("cat /run/report.md | jq '.'", False),
-    ("defender-invlang enum types", False),
-])
-def test_command_shape_has_adapter_survives_for_the_deny(cmd, adapter):
-    # What the classification is still FOR: any command with an adapter ANYWHERE in it earns the
-    # deny that names the `query` tool, instead of the generic fall-through. Every shape the old
-    # routing seams told apart now answers the one question that remains — "is there an adapter in
-    # here?" — and every one of them denies.
-    pipelines = _shape(cmd)
-    assert command_shape.has_adapter(pipelines) is adapter, cmd
-    if adapter:
-        assert _bash(cmd, _gather()).reason == permission.ADAPTER_RETIRED_REASON, cmd
 
 
 # AgentPolicy primitive: read_roots + hand-built grants

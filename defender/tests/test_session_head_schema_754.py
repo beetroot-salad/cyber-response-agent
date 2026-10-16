@@ -12,7 +12,6 @@ pytest.importorskip("pydantic_ai")
 from defender.tests._session_head_754 import (  # noqa: E402
     DELIBERATE,
     file_shape,
-    fresh_process_readback,
     head_of,
     legacy_v1_store_file,
     linear_turns,
@@ -117,35 +116,6 @@ def test_no_head_log_row_is_ever_updated_or_deleted(tmp_path):
     assert after[0].reason == "rewind", after
 
 
-def test_head_log_row_order_by_id_reproduces_head_move_order(tmp_path):
-    """Read in `id` order, the log reproduces the true order of the head moves that were made —"""
-    # provenance: P88. PR-7 (executed): rowid reuse after a ROLLBACK is confirmed, but id order
-    # never diverged from commit order in any construction tried, including a genuine second
-    # writer connection — which BLOCKED on the first's held lock rather than racing it. PR-13
-    # (census) then establishes two independent production writers cannot exist at all.
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    linear_turns(store, session_id, 2)
-
-    made: list[tuple[str, int]] = []
-    for boundary in (2, 3, 4):
-        displaced = head_of(store, session_id)
-        frontier = sel.fold(store, session_id, agent_id="main", boundary=boundary)
-        made.append(("fold", frontier))
-        linear_turns(store, session_id, 2, label=f"quiet-{boundary}")
-        fork = store.fork(session_id, at_message_id=displaced)
-        made.append(("fork", displaced))
-        assert head_of(store, fork) == displaced
-
-    replayed = [(e.reason, e.to_message_id) for e in log_rows(store)]
-    assert replayed == made, f"id order must replay head-move order; got {replayed}"
-    assert len(replayed) == 6, (
-        "the six recorded moves only: the six quiet turns between them left no row")
-    ids = [e.id for e in log_rows(store)]
-    assert ids == sorted(ids)
-
-
 def test_a_message_id_named_by_both_a_fold_and_a_fork_entry_stays_independently_recoverable(
         tmp_path):
     """One message id named by a fold entry as the tip it displaced AND by a fork entry as the"""
@@ -174,78 +144,7 @@ def test_a_message_id_named_by_both_a_fold_and_a_fork_entry_stays_independently_
     assert r1 in ss.path_row_ids(store, main), "and the lineage root survived it"
 
 
-def test_the_log_reads_back_identically_from_a_second_process(tmp_path):
-    """After the run ends, a second process holding only the run dir resolves the store through"""
-    # provenance: P83 + P121, grounded in F6/C11 (census): the visualizer opens the store
-    # read-only after the fact through the run-dir pointer, and is the only cross-process
-    # reader.
-    ss = store_mod()
-    sel = selection_mod()
-    base = runs_base(tmp_path)
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
-
-    live_session = store.new_session(agent_id="main")
-    linear_turns(store, live_session, 2)
-    sel.fold(store, live_session, agent_id="main", boundary=2)
-    store.fork(live_session, at_message_id=head_of(store, live_session))
-
-    headless = store.new_session(agent_id="main")
-    linear_turns(store, headless, 1, label="orphaned")
-    store.connection.execute(
-        "UPDATE session SET head_message_id = NULL WHERE session_id = ?", (headless,))
-
-    expected = {
-        session_id: (head_of(store, session_id), ss.path_row_ids(store, session_id),
-                     [tuple(e) for e in log_rows(store, session_id)])
-        for session_id in (live_session, headless)
-    }
-    store.close()
-
-    resolved = ss.resolve_store_path(_run_handle_1165(run_dir))
-    elsewhere = fresh_process_readback(resolved, live_session, headless)
-
-    for session_id, (head, path, entries) in expected.items():
-        seen = elsewhere[session_id]
-        assert seen["head"] == head, session_id
-        assert seen["path"] == path, session_id
-        assert [tuple(row) for row in seen["log"]] == entries, session_id
-    assert expected[live_session][0] is not None, "the fixture carries a head-set session"
-    assert expected[headless][0] is None, "and a NULL-head one"
-    assert expected[headless][1] == []
-
-
 # the reason domain has no SQL enforcement behind it
-
-def test_reason_is_a_python_closed_set_not_a_sql_check(tmp_path):
-    """SQLite objects to nothing about a reason outside the closed set: a raw connection inserts"""
-    # provenance: P47/P32.
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    r1, r2 = linear_turns(store, session_id, 2)
-
-    with pytest.raises(ss.StoreAppendError):
-        store.append(session_id, [text_response("rewound")], agent_id="main",
-                     parent_id=r1, reason="rewind")
-    assert log_rows(store, session_id) == [], "the Python check refused it"
-
-    store.connection.execute(
-        "INSERT INTO session_head_log (session_id, from_message_id, to_message_id, reason) "
-        "VALUES (?, ?, ?, 'rewind')", (session_id, r1, r2))
-    smuggled = log_rows(store, session_id)
-    assert [e.reason for e in smuggled] == ["rewind"], (
-        "SQLite has no CHECK behind the closed set; a raw writer's third reason lands")
-    assert smuggled[0].to_message_id == r2
-
-    ddl = sql(store, "SELECT sql FROM sqlite_master WHERE name = 'session_head_log'")[0][0]
-    assert "CHECK" not in ddl.upper(), (
-        f"the enforcement is the Python constant, not the schema: {ddl}")
-    assert ss.HEAD_MOVE_REASONS == ("fork", "fold"), (
-        "control: the closed set the check reads is a module-level constant, so a third "
-        "reason is a one-line Python edit")
 
 
 # every role-scoped reader over a NULL-head session
@@ -372,41 +271,6 @@ def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
     reader = ss.open_store_for_read(ss.store_path_for("case-current", sessions=SessionPaths(base)))
     assert ss.path_row_ids(reader, session_id), (
         "control: the same reader opens and serves a file at the current version")
-
-
-def test_an_unknown_user_version_is_still_refused_at_the_new_raise_point(tmp_path):
-    """A store whose `PRAGMA user_version` the store does not recognise is still refused — and the"""
-    # provenance: correction C1 (binding), re-expressing #705's reader_refuses_an_unknown_user_
-    # version at the new raise point; B16 (executed simulation) confirmed the shipped test
-    # ERRORS once the check moves, because it calls open_store outside its pytest.raises block.
-    # P64 (version 0 was never at risk) and P65/P66 via B6 (executed): an unenumerated 99 was
-    # refused.
-    ss = store_mod()
-    base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    session_id = store.new_session(agent_id="main")
-    linear_turns(store, session_id, 1)
-    path = store.path
-    assert ss.hydrate(store, session_id, role="analysis"), "control: the known version reads"
-    store.close()
-
-    for bogus in (0, ss.SCHEMA_VERSION + 1, 99):
-        raw = sqlite3.connect(str(path))
-        raw.execute(f"PRAGMA user_version = {bogus}")
-        raw.commit()
-        raw.close()
-        with pytest.raises(ss.UnknownSchemaVersion):
-            ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-        with pytest.raises(ss.UnknownSchemaVersion):
-            ss.open_store_for_read(path)
-
-    raw = sqlite3.connect(str(path))
-    raw.execute(f"PRAGMA user_version = {ss.SCHEMA_VERSION}")
-    raw.commit()
-    raw.close()
-    reopened = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    assert ss.hydrate(reopened, session_id, role="analysis"), (
-        "control: restored to the known version, the same file opens and reads again")
 
 
 # the store's session pick

@@ -1,19 +1,4 @@
-"""The gate that keeps every writer of the two model-authored artifacts meeting their schema:
-lint_ungated_artifact_write (#961, #964).
-
-`_artifact_schema` owns what a well-formed `investigation.md` / `report.md` IS, and the
-permission gate applies it to every write a MODEL makes. That made "a committed investigation
-parses" true of the verbs the agent writes through — and quietly false of two writers nobody
-had censused, and then of a third this gate found on its first run.
-
-A lint whose baseline ships empty is indistinguishable from a lint that scans nothing, so
-every arm is exercised against a synthetic tree here, and each violation is paired with the
-clean spelling of the same write. The blind spots the gate's own docstring admits are pinned
-too — a gate whose limits are only claimed in prose drifts into being trusted for them.
-
-Driven through the gate's testability seam — `main(argv, *, scope, baseline_path)` and
-`_scan(root)` — so nothing is hardcoded to a checkout path.
-"""
+"""lint_ungated_artifact_write: writers of model-authored artifacts must meet their schema."""
 
 from __future__ import annotations
 

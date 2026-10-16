@@ -60,12 +60,7 @@ def _declared(payload: str, query: str, declaration: tuple[str, ...] = _ESQL_DEC
 
 
 def _hint(proc: subprocess.CompletedProcess) -> str:
-    """What the TOOL added to a query error, and nothing duckdb said.
-
-    stderr carries duckdb's own message and its `LINE 1:` echo of the query before the
-    tool's `hint:` — so a negative assertion ("the other fixture's columns are not named")
-    made against the whole of stderr is really made against the query text and duckdb's
-    prose, and reddens on a reword that has nothing to do with the hint."""
+    """What the TOOL added to a query error, and nothing duckdb said."""
     _, marker, hint = proc.stderr.partition("hint:")
     assert marker, f"no hint on stderr: {proc.stderr!r}"
     return hint
@@ -129,12 +124,7 @@ def test_hits_envelope_truncation_columns_are_readable():
 def test_esql_shape_on_the_real_tracked_payload(esql):
     """`{columns, values, row_count}` — driven off the checked-in payload a lead was really
     handed, not a hand-written imitation. Bound to the adapter by
-    `test_the_adapter_emits_the_shape_this_fixture_has`, which is what makes "a change to the
-    ES|QL adapter's output shape breaks this" true rather than hopeful.
-
-    Declared (#1138 O1), the rows ARE the table: one row per row, one column per name, in the
-    names' order. Unflagged the payload is one object and so one row (#1138 O6: unchanged) —
-    the envelope's own `row_count` is still readable that way."""
+    `test_the_adapter_emits_the_shape_this_fixture_has`, which is what makes "a change to the"""
     assert set(json.loads(esql)) >= {"columns", "row_count", "values"}, "the real fixture changed shape"
     assert _declared(esql, "SELECT count(*) AS n FROM data") == [{"n": 3}]
     assert [(r["column_name"], r["column_type"]) for r in _declared(esql, "DESCRIBE data")] == [
@@ -145,9 +135,7 @@ def test_esql_shape_on_the_real_tracked_payload(esql):
 def test_esql_rows_are_queried_by_name_once_declared(esql):
     """The trap the positional recipe lived in: `unnest(values)` yields a POSITIONAL `JSON[]`,
     so the struct spelling `v."source.ip"` is a Binder Error — still, unflagged — and the only
-    way through was `v[N]->>'$'` plus a cast, because `->>'$'` is TEXT and `'412' < '9'` is true
-    lexically. Declared, the column is addressed by its name and `failed` is a number the
-    payload sent as a number: no position, no arrow, no cast (#1138 O1)."""
+    way through was `v[N]->>'$'` plus a cast, because `->>'$'` is TEXT and `'412' < '9'` is true"""
     struct_idiom = _sql(
         esql,
         'SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v."source.ip" = \'x\'',
@@ -281,14 +269,7 @@ def test_query_error_on_hits_shape_hint_points_at_the_struct():
 
 def test_the_hits_hint_column_list_is_derived_from_each_payloads_own_keys():
     """The hits hint is checked above against ONE envelope, whose keys are the canonical
-    `index, total, returned, truncated, hits` — so a hint that hardcoded that list would pass.
-
-    This envelope carries `hits` under a different set of siblings (no `index`, no `total`, no
-    `truncated`, plus keys the canonical one never has). The column list is the part of the
-    hint that must be read off the payload in hand, and it has to name THESE keys, in the
-    payload's own order, with none of the canonical ones invented alongside them. The `hits`
-    branch is still the branch that is taken — the copyable form is the same — which is what
-    separates "derived the columns" from "took a different branch"."""
+    `index, total, returned, truncated, hits` — so a hint that hardcoded that list would pass."""
     payload = json.dumps({
         "query": "user:alice", "hits": [{"user": "alice", "src": "10.0.0.1"}],
         "returned": 1, "note": "partial",
@@ -353,10 +334,7 @@ def test_the_hits_hint_form_runs_with_its_placeholders_filled():
 
 def test_each_error_class_gets_only_the_clause_that_answers_it():
     """duckdb self-answers most of what lands here (`Candidate Entries: "user"`, `Did you
-    mean`), and a paragraph appended to every failure buries the one sentence that applies.
-    So the shape skeleton is unconditional — it is what stops the NEXT query failing — while
-    the prose clause is keyed to what duckdb actually said. An unrelated error gets the
-    skeleton and nothing else: no lateral-join lecture, no quoting rule, no DESCRIBE."""
+    mean`), and a paragraph appended to every failure buries the one sentence that applies."""
     lateral = _hint(_sql(_TS_HITS, 'SELECT h."@timestamp" FROM data, unnest(hits) AS h'))
     assert "binds `h` to the TABLE" in lateral
     assert "column is called `unnest`" in lateral
@@ -381,14 +359,7 @@ def test_each_error_class_gets_only_the_clause_that_answers_it():
 def test_the_clause_is_keyed_off_duckdbs_message_not_off_the_querys_own_text():
     """The four probes above are separable by their own SQL text just as cleanly as by what
     duckdb said, so a dispatch that pattern-matched the QUERY — `", unnest("` means lateral,
-    `".@"` means quoting — would pass the whole of it and then go silent on the next lead who
-    spelled the same mistake differently.
-
-    So: the same two error CLASSES, respelled. A different lateral alias (`ev`, not `h`), and
-    a different `@`-field under a different subquery alias (`rec.@version`, not `h.@timestamp`,
-    on a field this payload does not even carry). Each must get the SAME clause as its sibling
-    above — which only a dispatch reading duckdb's message can do, because the query text it
-    would have keyed on is gone."""
+    `".@"` means quoting — would pass the whole of it and then go silent on the next lead who"""
     # These two probes assert duckdb's OWN wording on purpose: `_error_note` in `sql.py` keys
     # the extra clause off these strings, case-folded, so a duckdb release that rewords them
     # is a tool regression (the clause silently stops appearing), and this is where it
@@ -488,16 +459,7 @@ def test_non_truncated_payload_emits_no_note():
 
 def test_the_note_keys_on_truncated_not_on_returned_being_short_of_total():
     """The two payloads above have `truncated` and `returned < total` moving together, so a
-    note keyed on the ARITHMETIC would pass both. These two pull the signals apart.
-
-    `truncated` is the source's own statement that it stopped early; `returned < total` is an
-    inference that is wrong in both directions. A page-sized source can set `truncated` on a
-    page that happens to be the whole match set (dedup, a post-filter, a `total` that is an
-    estimate) — the caller still must not read a miss as an absence. And `total` is routinely
-    a match count from a different scope than `hits` (a count over the index vs. the rows this
-    query returned), so `returned < total` on an untruncated payload is normal and a note there
-    would cry wolf on every well-formed result.
-    """
+    note keyed on the ARITHMETIC would pass both. These two pull the signals apart."""
     flagged_but_complete = _sql(
         '{"total":1,"returned":1,"truncated":true,"hits":[{"user":"a"}]}',
         "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'mallory'",
@@ -526,9 +488,7 @@ def test_the_note_keys_on_truncated_not_on_returned_being_short_of_total():
 def test_empty_payload_is_an_error_not_an_empty_result(payload):
     """An empty payload file is common (41 of the 640 files in the corpus survey were
     zero bytes), and `jq` exited 0 printing nothing on one — which reads downstream as "the
-    entity is absent". This exits 2 and says so, and prints NO rows on stdout, so an empty
-    result set can never be confused with a missing observation. The zero-byte file and the
-    whitespace-only file are different inputs on stdin; both must take this branch."""
+    entity is absent". This exits 2 and says so, and prints NO rows on stdout, so an empty"""
     proc = _sql(payload, "SELECT count(*) FROM data")
     assert proc.returncode == EXIT_INPUT_ERROR
     assert proc.stdout == ""
@@ -555,24 +515,7 @@ def test_a_real_payload_on_the_same_query_is_not_an_input_error():
 
 
 def test_the_adapter_emits_the_shape_this_fixture_has(esql):
-    """The guard that stops the ES|QL tests above from testing a file instead of the code.
-
-    A checked-in fixture asserts nothing about production: the adapter once learned to re-zip
-    `values` into per-row dicts while the fixture went on saying positional, and every
-    assertion against the file kept passing against a shape production had stopped emitting —
-    which is how `sql.py`'s ES|QL hint and `defender-sql.md` came to teach a recipe that
-    raises a Binder Error. So bind to the ADAPTER. `esql_payload` is the pure shaping step —
-    no HTTP, no transport seam, nothing to monkeypatch — and re-introducing the zip inside it
-    turns this red.
-
-    The wire response is rebuilt FROM THE FIXTURE's own `columns` and `values`, so the
-    adapter is driven at the fixture's real size — three rows — rather than at a hand-written
-    two. A re-zip that only trips above a row count (a `len(values) > 2` fast path, a
-    batch-size branch) is invisible to a two-row probe, and two rows is also the one width at
-    which a transposed zip is hard to tell from an untransposed one. Feeding the fixture's own
-    input makes the binding bidirectional: the fixture is what the adapter is asked to
-    produce, and the adapter is what the fixture is checked against.
-    """
+    """The guard that stops the ES|QL tests above from testing a file instead of the code."""
     fixture = json.loads(esql)
     assert len(fixture["values"]) == 3, "the fixture changed size — this test is no longer at its size"
     raw = {"columns": fixture["columns"], "values": fixture["values"]}
@@ -629,9 +572,7 @@ def test_a_declared_filter_survives_a_second_condition(esql):
 def test_a_misbound_arrow_is_refused_with_its_cause_and_a_fix_that_names_no_position(esql):
     """duckdb would name only the symptom (`Failed to cast value to numerical`). The tool refuses
     first and names the cause and the fix — whose example is now a generic JSON column,
-    `(col->>'$')`, not a `v[N]` position (#1138 O9) — and, the payload being positional rows,
-    the declaration that makes the arrow unnecessary (O6). The same query parenthesised runs
-    and selects: `_arrow_refusal` is #1132's backstop and stays."""
+    `(col->>'$')`, not a `v[N]` position (#1138 O9) — and, the payload being positional rows,"""
     unwrapped = "v[1]->>'$' = '412' AND v[2]->>'$' = '203.0.113.7'"
     proc = _sql(esql, f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE {unwrapped}")
     assert_query_error(proc, "the unparenthesised AND was not refused")

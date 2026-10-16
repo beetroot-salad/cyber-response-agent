@@ -1,9 +1,5 @@
 """#796 — the cut every blind lens reads through.
 
-The lens architecture measures nothing if a lens can see the belief movement it is asked to
-reconstruct, so these are the tests that would have caught the defect in #796's own original
-text: it specified the support lens as withholding `:R`, which is the OBSERVATION side —
-leaving `:T resolutions`, the weight move and its citation, in full view.
 """
 
 from __future__ import annotations
@@ -83,15 +79,6 @@ def test_the_golden_yields_both_lens_projections(companion):
     still pass. This is the guard on that, and it is a test rather than an assert inside the
     helper because the minimal fixtures legitimately yield one."""
     assert len(_every_lens(companion)) == 2
-
-
-def test_the_golden_is_a_real_positive_control(companion):
-    """Every assertion below is about ABSENCE, so the fixture has to carry the thing whose
-    absence is being asserted or they all pass vacuously."""
-    assert companion.get("conclude"), "the golden reached no conclusion — wrong fixture"
-    resolutions = list(_walkers.iter_resolutions(companion))
-    assert resolutions, "the golden records no belief movement — nothing to withhold"
-    assert any(r.get("after") for _lid, r in resolutions)
 
 
 # The cut

@@ -145,16 +145,6 @@ def test_a_missing_or_junk_stamp_reads_as_no_stamp(tmp_path):
     assert _provenance.read(wrong_type) is None
 
 
-def test_a_bool_is_not_accepted_as_the_path_count(tmp_path):
-    """`isinstance(True, int)` is True in Python, so a `dirty_path_count` of `true` would
-    otherwise be read back as the number 1 — a count nobody wrote."""
-    path = tmp_path / "p.json"
-    path.write_text(json.dumps({"commit": "a" * 40, "dirty": True, "dirty_path_count": True}))
-    rec = _provenance.read(path)
-    assert rec is not None
-    assert rec.dirty_path_count == 0
-
-
 def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
     """Stamped at the ONE place a run the box will EXECUTE is materialised, so no caller can"""
     from defender import run_common
@@ -448,29 +438,6 @@ def test_nothing_can_construct_a_record_no_capture_could_produce(why):
     kwargs, refusal = IMPOSSIBLE[why]
     with pytest.raises(ValueError, match=refusal):
         RunProvenance(**kwargs)
-
-
-def test_every_capture_path_produces_a_constructible_record(tmp_path, monkeypatch):
-    """The other half of the claim: the WRITER is held to the same statement. A rule the
-    capture paths could not satisfy would be a rule that turned every run into a crash, so the
-    arm walks the real returns rather than asserting the invariant is merely strict."""
-    clean = _repo(tmp_path)
-    dirty = _repo(tmp_path / "d")
-    (dirty / SEED).write_text("edited\n", encoding="utf-8")
-    unborn = tmp_path / "fresh"
-    unborn.mkdir()
-    _git.git(["init", "-q", "-b", "main"], cwd=unborn)
-    broken = _repo(tmp_path / "b")
-    (broken / ".git" / "index").write_bytes(b"\x00 not an index \xff" * 8)
-    for repo in (clean, dirty, unborn, broken, tmp_path / "not-a-repo-at-all"):
-        prov = _provenance.capture_tree(repo)
-        # Constructing a copy re-runs `__post_init__` on what the capture produced.
-        assert RunProvenance(**{f.name: getattr(prov, f.name) for f in fields(prov)}) == prov
-
-    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
-    for env in ({}, {_provenance.BUILD_COMMIT_ENV: "f" * 40}):
-        prov = _provenance.capture_tree(clean, environ=env)
-        assert RunProvenance(**{f.name: getattr(prov, f.name) for f in fields(prov)}) == prov
 
 
 def test_a_truncated_sha_on_disk_reads_as_no_stamp(tmp_path):

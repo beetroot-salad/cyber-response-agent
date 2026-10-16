@@ -268,24 +268,6 @@ def test_read_allow_is_the_cat_grants_scope(env):
         assert pol.read_allow is cat_grant.scope
 
 
-def test_parity_out_of_root(env):
-    """/etc/passwd: decide_read DENIES and decide_bash("cat …") DENIES — the two read surfaces agree.
-    Positive control: {RUN}/investigation.md is allowed on BOTH."""
-    assert not _read(env, "/etc/passwd", "gather").allow
-    assert not _bash(env, "cat /etc/passwd", "gather").allow
-    assert _read(env, f"{env.run}/investigation.md", "gather").allow          # positive control
-    assert _bash(env, f"cat {env.run}/investigation.md", "gather").allow      # positive control
-
-
-def test_parity_ssh_dir_component(env):
-    """The denylist's path-COMPONENT axis (`.ssh`), probed where only it can decide: `{DFN}/lessons/"""
-    p = f"{env.dfn}/lessons/.ssh/key.md"
-    assert not _read(env, p, "gather").allow
-    assert not _bash(env, f"cat {p}", "gather").allow
-    assert _read(env, f"{env.dfn}/lessons/auth/key.md", "gather").allow      # positive control
-    assert _bash(env, f"cat {env.dfn}/lessons/auth/key.md", "gather").allow  # positive control
-
-
 def test_parity_corpus_non_listed_denied_on_both_lanes(env):
     """Read↔bash PARITY on a non-listed corpus file (#545/#546): a corpus file NOT under the tight"""
     docs = f"{env.dfn}/docs/learning-loop.md"

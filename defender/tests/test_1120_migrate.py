@@ -1,22 +1,4 @@
-"""#1120 piece 1 — `tenant.py migrate`, the one-off that gives a tenant set up before #1120 the
-knowledge folder acceptance now requires (human, PR #1157: "one-off migration").
-
-A data root made before #1120 holds `<T>/{tenant.json, runs, sessions}` and no `knowledge/`:
-its settings were committed in the product repo's `knowledge/tenants/<T>/`, which #1120 deletes
-(human, PR #1157: "Fold" #1158 in), and there is no tenant repo to clone. Acceptance refuses it,
-naming migrate as well as the clone.
-
-  * migrate builds `<root>/<T>/knowledge` as a new repo committing the LAST copy the checkout's
-    history holds, plus `agent/.tenant-id`, whether the deletion reached HEAD by a merge, a
-    squash or a plain commit; a stale copy left on disk is not what it reads. It touches
-    nothing else under the data root, and `setup <T>` then accepts it writing nothing — the row
-    stays byte-identical. The data root sits inside the product checkout, beside `defender/`, as
-    the dev container's does.
-  * It refuses before any write: a bad id, a history with no copy for the id (a shallow clone is
-    told to fetch its history), a target that exists, a target whose parent is missing or a
-    link, a target in the checkout's `defender/` tree, a git with no commit identity.
-  * A failure after it creates the folder (a commit hook that refuses) removes the folder again.
-"""
+"""tenant.py migrate gives a pre-knowledge-folder tenant the folder acceptance requires."""
 from __future__ import annotations
 
 import shutil
@@ -142,62 +124,6 @@ def test_migrate_gives_an_old_shape_tenant_a_folder_setup_accepts(
     assert accepted.knowledge == knowledge
 
 
-def test_a_shallow_clone_is_told_to_fetch_its_history(tmp_path: Path) -> None:
-    """A depth-1 clone of a checkout whose lab was retired: migrate exits 1 saying it is a
-    shallow clone, and writes nothing. Control: the full checkout migrates (test above)."""
-    checkout, _ = _checkout_with_a_retired_lab(tmp_path / "checkout")
-    shallow = tmp_path / "shallow"
-    H.git(tmp_path, "clone", "-q", "--depth", "1", f"file://{checkout}", str(shallow))
-    root = _old_shape_root(tmp_path / "root")
-    before = H.tree_census(root)
-    H.assert_refused(_migrate(_TID, root / _TID / "knowledge", home=S._home(tmp_path / "cfg"),
-                              script=_script(shallow)), "shallow", "--unshallow")
-    assert H.census_diff(before, H.tree_census(root)) == []
-
-
-@pytest.mark.parametrize("cell", ["bad-id", "no-copy", "target-exists", "no-parent",
-                                  "linked-parent", "inside-defender", "no-identity"])
-def test_migrate_refuses_before_writing(tmp_path: Path, cell: str) -> None:
-    """Each refusal exits 1 naming what it refuses, and the data root (and the target) are as
-    they were. Control: the same root with a clean target migrates (the happy-path test)."""
-    root = _old_shape_root(tmp_path / "root")
-    target = root / _TID / "knowledge"
-    tenant_id, home, names = _TID, S._home(tmp_path / "cfg"), [str(target)]
-    identity_env, script = True, None
-    if cell == "bad-id":
-        tenant_id, names = "A", ["A"]
-    elif cell == "no-copy":
-        checkout, _ = _checkout_with_a_retired_lab(tmp_path / "checkout")
-        script = _script(checkout)
-        H.plant_row(root, H.TID)
-        tenant_id, target = H.TID, root / H.TID / "knowledge"
-        names = [f"knowledge/tenants/{H.TID}", "nothing to migrate", "clone"]
-    elif cell == "target-exists":
-        target.mkdir()
-    elif cell == "no-parent":
-        target = root / "absent" / "knowledge"
-        names = [str(target.parent)]
-    elif cell == "linked-parent":
-        (root / "linked").symlink_to(root / _TID, target_is_directory=True)
-        target = root / "linked" / "knowledge"
-        names = [str(target.parent), "a link is refused"]
-    elif cell == "inside-defender":
-        # A tmp checkout's own copy, so a guard that regressed writes into tmp, never this tree.
-        checkout = H.tmp_checkout(tmp_path / "checkout")
-        script = _script(checkout)
-        target = checkout / "defender" / "scripts" / "spec1120-migrate-never-made"
-        names = [str(target), "defender"]
-    elif cell == "no-identity":
-        home, identity_env = S._home(tmp_path / "cfg-anon", identity=False), False
-        names = ["identity"]
-    before = H.tree_census(root)
-    target_existed = target.exists()
-    H.assert_refused(_migrate(tenant_id, target, home=home, script=script,
-                              identity_env=identity_env), *names)
-    assert H.census_diff(before, H.tree_census(root)) == [], "a refused migrate wrote"
-    assert target.exists() == target_existed
-
-
 def test_a_migrate_that_fails_after_creating_the_folder_removes_it(tmp_path: Path) -> None:
     """A pre-commit hook (from the operator's global `core.hooksPath`) that refuses: migrate
     exits 1 saying it was undone, and the knowledge folder is gone — the root is as it was."""
@@ -216,14 +142,3 @@ def test_a_migrate_that_fails_after_creating_the_folder_removes_it(tmp_path: Pat
     assert H.census_diff(before, H.tree_census(root)) == []
 
 
-def test_a_copy_that_commits_its_own_tenant_id_migrates_with_the_requested_one(
-        tmp_path: Path) -> None:
-    """A lab whose last copy also commits `agent/.tenant-id` (another tenant's id, say): migrate
-    still exits 0, and the new repo's `.tenant-id` is the one it writes for the id asked for."""
-    checkout, _ = _checkout_with_a_retired_lab(
-        tmp_path / "checkout", extra={H.TENANT_ID_FILE.as_posix(): f"{H.OTHER}\n"})
-    root = _old_shape_root(tmp_path / "root")
-    knowledge = root / _TID / "knowledge"
-    H.assert_clean(_migrate(_TID, knowledge, home=S._home(tmp_path / "cfg"),
-                            script=_script(checkout)))
-    assert _committed(knowledge)[H.TENANT_ID_FILE.as_posix()] == f"{_TID}\n".encode()

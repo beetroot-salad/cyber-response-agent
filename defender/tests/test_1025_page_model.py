@@ -1,14 +1,4 @@
-"""#1025 — the episode page reads the directory ONCE into a typed model and renders from it.
-
-What the split buys, pinned behavior by behavior: a stray scalar where a record's writer produces
-a list or a mapping degrades THAT slot and never the render (d01: only `family.yaml` refuses the
-whole page); the findings walk runs once, so the tiles, the cards' footers and the findings
-section cannot disagree about a count or a group number; the page's disposition rule reads an
-absent `subject` exactly as `enqueue_report` does; the stage clock's whole-second stamps make a zero-length step a
-real step; and the CLI's diagnostics come off the model's refusal slots, never a scan of the
-rendered bytes. Each of these was a finding of the PR #1042 review, verified by probe against
-the section-reads-its-own-records shape this model replaced.
-"""
+"""#1025 — the episode page reads the directory ONCE into a typed model and renders from it."""
 from __future__ import annotations
 
 import json
@@ -75,10 +65,8 @@ def _card_link(card: E.Node) -> tuple[str, str]:
 
 
 def test_1025_a_scalar_worlds_field_in_the_manifest_is_refused_by_the_loader_gate(tmp_path):
-    """`family.yaml` with `worlds: 5` is a manifest the runtime loader refuses (the page reads
-    the manifest through the loader's own gate, `family.read_manifest`), so it is the one record
-    that refuses the whole page (d01): `render_episode` raises the reader's `JudgeRefused`
-    naming the field, and no page is written."""
+    """`family.yaml` with `worlds: 5` is a manifest the runtime loader refuses (the page reads the
+    manifest through the loader's own gate, `family.read_manifest`), so it is the."""
     ep = E.sample_episode(tmp_path)
     manifest = E.sample_manifest()
     manifest["worlds"] = 5
@@ -154,11 +142,8 @@ def test_1025_a_scalar_list_field_in_the_outcome_or_the_provenance_record_degrad
 
 
 def test_1025_a_finding_with_no_subject_key_is_the_defenders_as_the_enqueue_read_it(tmp_path):
-    """A draw finding that carries no `subject` at all (the pre-#1007 shape the live archive
-    holds) sits in the "defender: enqueued" group and counts among tile 3's defender rows —
-    `enqueue_report` defaults an absent subject to the defender and queued it, and the page's
-    disposition mirrors the enqueue's reading rather than calling the absence a subject that
-    names neither channel."""
+    """A draw finding that carries no `subject` at all (the pre-#1007 shape the live archive holds)
+    sits in the "defender."""
     ep = E.sample_episode(tmp_path)
     findings = E._world_findings_rows()
     findings[0].pop("subject")
@@ -171,11 +156,8 @@ def test_1025_a_finding_with_no_subject_key_is_the_defenders_as_the_enqueue_read
 
 
 def test_1025_the_card_footer_counts_and_links_the_same_defender_rows(tmp_path):
-    """A graded world whose FIRST finding row is addressed to the world author still has its
-    card footer "4 findings · enqueued" link the group its defender rows sit in — the count
-    and the anchor are one list of rows, never the first row of any subject. (#1234 files a
-    draw's investigator findings before its world findings, A13, so the world-author row
-    comes first by sitting alone in the earlier draw.)"""
+    """A graded world whose FIRST finding row is addressed to the world author still has its card
+    footer "4 findings · enqueued" link the group its defender rows sit in ."""
     ep = E.sample_episode(tmp_path)
     findings = E._world_findings_rows()
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings[4:]))
@@ -195,10 +177,7 @@ def test_1025_the_card_footer_counts_and_links_the_same_defender_rows(tmp_path):
 
 
 def test_1025_a_world_not_measured_card_does_not_say_enqueued(tmp_path):
-    """#1234 retired the `discard` family word and its `never_eligible` lane; the lane that now
-    keeps a judged world's defender rows off the queue is the world gate's (`not_measured`,
-    A7). The card's footer must not call rows the ledger kept off the queue "enqueued", and
-    it links the group those rows sit in."""
+    """#1234 retired the `discard` family word and its `never_eligible` lane."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"][1].update(measured=False, not_measured_reason="a draw files unreachable")
@@ -274,11 +253,7 @@ def _outside_world(tmp_path, ep) -> tuple[Path, str]:
 
 
 def test_1025_a_manifest_label_off_the_directory_grammar_reads_nothing_from_disk(tmp_path):
-    """A manifest world whose label carries `..` names a directory OUTSIDE the episode; the
-    manifest reader (the runtime loader's own gate, `family.read_manifest`) refuses the label
-    before anything is joined into a path, so the page refuses as a whole (d01) — the refusal
-    names the world-token alphabet, and neither the planted draw finding nor the planted alert
-    reaches it or any page."""
+    """A manifest world whose label carries `..` names a directory OUTSIDE the episode."""
     ep = E.sample_episode(tmp_path)
     _outside, label = _outside_world(tmp_path, ep)
     manifest = E.sample_manifest()

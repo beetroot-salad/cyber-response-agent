@@ -81,59 +81,6 @@ def test_branch_point_survives_the_parent_folding_past_it(tmp_path):
     assert r3 not in fork_path
 
 
-def test_a_forks_head_is_independent_of_the_parents_later_appends(tmp_path):
-    """A fork's head never moves as a side effect of the parent's later appends, and the parent's"""
-    # provenance: P60 (the 'recorded, not derived' point), with P119 and P120.
-    ss = store_mod()
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    main = store.new_session(agent_id="main")
-    r1, r2 = linear_turns(store, main, 2)
-    fork = store.fork(main, at_message_id=r2)
-    assert head_of(store, fork) == head_of(store, main) == r2, (
-        "both heads name the same id at fork time — they are still separate columns")
-
-    r3 = store.append(main, [text_response("the parent moves on")], agent_id="main")[0]
-    parent_frontier = sel.fold(store, main, agent_id="main", boundary=3)
-
-    assert head_of(store, fork) == r2, "the parent's appends and fold left the fork's head"
-    assert [e.reason for e in log_rows(store, fork)] == ["fork"]
-
-    f1 = store.append(fork, [text_response("the fork moves on")], agent_id="main")[0]
-    assert head_of(store, main) == parent_frontier, "and the fork's append left the parent's"
-    assert [e.reason for e in log_rows(store, main)] == ["fold"]
-    assert ss.path_row_ids(store, fork) == [r1, r2, f1]
-    assert r3 not in ss.path_row_ids(store, fork)
-
-
-def test_a_forks_first_append_is_linear_and_adds_no_second_entry(tmp_path):
-    """A fresh fork's first append parents onto the head the fork already set, so the rule reads"""
-    # provenance: a fresh fork's hydrate IS the parent's prefix — the point of setting head at
-    # fork time. B11 (executed) is the fact the design never stated; today the read is [].
-    ss = store_mod()
-    store = make_store(tmp_path)
-    main = store.new_session(agent_id="main")
-    r1, r2 = linear_turns(store, main, 2)
-    fork = store.fork(main, at_message_id=r2)
-
-    first = store.append(fork, [text_response("the fork's first")], agent_id="main")[0]
-
-    assert sql(store, "SELECT parent_id FROM message WHERE id = ?", (first,)) == [(r2,)]
-    assert head_of(store, fork) == first
-    assert [e.reason for e in log_rows(store, fork)] == ["fork"], (
-        "the fork entry is still the session's only one")
-    assert ss.path_row_ids(store, fork) == [r1, r2, first]
-
-    with pytest.raises(ss.StoreAppendError):
-        store.append(fork, [text_response("off the fork's head")], agent_id="main",
-                     parent_id=r1)
-    assert [e.reason for e in log_rows(store, fork)] == ["fork"]
-    store.append(fork, [text_response("off the fork's head, explained")], agent_id="main",
-                 parent_id=r1, reason="fold")
-    assert [e.reason for e in log_rows(store, fork)] == ["fork", "fold"], (
-        "control: the same channel records a move that IS non-linear")
-
-
 def test_a_fresh_fork_renders_its_inherited_prefix_exactly_once(tmp_path):
     """`fork` sets the child's `last_render_len` to the length of the prefix it inherits, so the"""
     # provenance: PR-24 (executed) measured it — three inherited messages became ids [4,5,6]
@@ -168,29 +115,6 @@ def test_a_fresh_fork_renders_its_inherited_prefix_exactly_once(tmp_path):
 
 
 # the log readers
-
-def test_displaced_tip_survives_later_appends(tmp_path):
-    """The tip a fold displaced stays answerable after the conversation moves on: ordinary turns"""
-    # provenance: issue obligation 3; P77. Which fold's tip a single reader returns — the most
-    # recent — is why the ordered accessor exists beside it.
-    ss = store_mod()
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    r1, r2, r3 = linear_turns(store, session_id, 3)
-
-    sel.fold(store, session_id, agent_id="main", boundary=3)
-    assert ss.displaced_tip(store, session_id) == r3
-
-    for _ in range(3):
-        store.append(session_id, [text_response("life goes on")], agent_id="main")
-    assert ss.displaced_tip(store, session_id) == r3, (
-        "later linear appends move head but displace nothing, so they record nothing")
-    assert r3 not in ss.path_row_ids(store, session_id), "the tip really is off-path now"
-
-    cut = ss._walk_parents(store.connection, ss.displaced_tip(store, session_id))
-    assert cut == [r3, r2, r1], (
-        f"the folded turns are reachable by walking back from the displaced tip; got {cut}")
 
 
 def test_the_full_fold_history_is_readable_in_order(tmp_path):

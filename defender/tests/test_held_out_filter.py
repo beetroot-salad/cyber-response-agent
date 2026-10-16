@@ -1,16 +1,4 @@
-"""Contamination boundary — a held-out eval run must never feed the learning corpora.
-
-The gate used to live in the persist stage: `run.py` copied `ground_truth.yaml` into the
-run dir and the orchestrator suppressed queue appends when it declared `held_out`. That put
-an answer key inside the agent's readable workspace to carry a fact the learning loop
-needed one bit of.
-
-The boundary is now the ENQUEUE step, and it is a path check
-(`run_common.is_held_out_fixture`): a held-out fixture run is never handed to the learn
-worker at all, so there is nothing downstream to suppress and no label anywhere near a
-run dir. The eval path passes `--no-learn`; this is the fail-closed net for when someone
-forgets, or runs a held-out alert by hand.
-"""
+"""Contamination boundary: a held-out fixture run is never enqueued to the learn worker (path check `run_common.is_held_out_fixture`), including via symlinks."""
 from __future__ import annotations
 
 import json
@@ -81,11 +69,7 @@ def run_dir(tmp_path: Path) -> Path:
 
 
 def _complete_run_dir(tmp_path: Path, disposition: str) -> Path:
-    """A run dir with the inputs persist_run copies.
-
-    The lead/query tables (gather_raw/ + executed_queries.jsonl) are the
-    learning-loop inputs; persist copies them when present.
-    """
+    """A run dir with the inputs persist_run copies."""
     run_dir = tmp_path / "case"
     run_dir.mkdir()
     (run_dir / "alert.json").write_text(json.dumps({"rule": {"id": "5710"}}))
@@ -131,15 +115,7 @@ def test_symlink_cannot_walk_out_of_the_held_out_set(tmp_path: Path) -> None:
 
 
 def test_net_is_narrow(tmp_path: Path) -> None:
-    """Control: the refusal is scoped to the held-out set. An ordinary alert — including
-    one under `fixtures/` but outside `held-out/` — is not refused, so the net cannot
-    quietly starve the learning loop.
-
-    Asserted on the predicate rather than by driving `enqueue_learning` to its enqueue
-    branch: that branch writes through the import-time `DEFAULT_PATHS`, which has no
-    injection seam, and faking it would mean a `monkeypatch.setattr` site this project
-    ratchets against.
-    """
+    """Control: the refusal is scoped to the held-out set."""
     assert run_common.is_held_out_fixture(tmp_path / "alert.json") is False
     ordinary = (run_common.DEFENDER_DIR / "fixtures"
                 / "v2-sshd-success-after-failures" / "alert.json")

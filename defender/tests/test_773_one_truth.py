@@ -1,14 +1,4 @@
 """#773 — the drain computes everything from ONE truth, the settled corpus tree.
-
-Regression coverage for the review of PR #1064, whose findings all shared a shape: the
-drain kept a second truth alive beside the tree — a pass-1 verdict that outlived the bytes
-it judged, the curator's own account of what it committed, a copy of the first spawn's
-cleanup that the second spawn was held to differently. (#1166 deleted the verdict and the
-second spawn; what is left here is the tree's side of each probe.) Each test here is one of those
-probes, replayed against the rewrite that removed the second truth.
-
-NOT part of the locked #773 spec suite (`test_773_*.py` committed by write-tests) — these
-live beside it and drive the same scene substrate.
 """
 from __future__ import annotations
 

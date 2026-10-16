@@ -260,18 +260,7 @@ def test_each_members_writable_trees_are_its_mount_points_in_order(
         tmp_path: Path, label: DrainLabel, on_disk: str):
     """`label.writable_trees(paths)` (the owner of `drain_writable_trees`, #1179 M1') is the member's
     mount points, a tuple in the contract's order, under the `LoopPaths` it is handed, whatever
-    else the checkout holds.
-
-    True: under the leaf, the author member gives `(lessons_dir, lessons_questioner_dir)` and
-    the lead member `(skills_dir,)`, equal to the literal spellings `wt / "defender/..."` (a
-    tuple: a list never equals one). The main checkout's `paths` gives the same shape under its
-    own root, so the list follows `repo_root`. `absent`: neither root is made on disk.
-    `built_with_decoys`: both roots carry every tree plus `lessons-actor/`,
-    `lessons-environment/` and `skills-old/`, and the list is unchanged.
-
-    Catches: a missing tree, an extra one (the catalog, or the whole `defender/`), a swapped
-    order, a list, a list built from a fixed root rather than the paths handed in, a list that
-    makes its folders, and one that globs the checkout for more corpora (round 2's H5)."""
+    else the checkout holds."""
     lf = _leaf(tmp_path)
     if on_disk == "built_with_decoys":
         lf.build()
@@ -293,15 +282,7 @@ def test_each_members_writable_trees_are_its_mount_points_in_order(
 
 def test_the_mount_lists_are_pairwise_disjoint(tmp_path: Path):
     """No mount lies inside another, within a label or across labels, and no tree is listed
-    twice (`DrainTrees.open` refuses a nested or duplicate pair, so one would fail every batch).
-
-    True: over the union of both known labels' lists (three trees), no tree is a
-    path-component descendant of a different one, and the union has three distinct members.
-    The positive control shows the check is not vacuous: the catalog does lie inside
-    `skills_dir`, and the check sees that.
-
-    Catches: a list that grows a nested mount (the catalog beside `skills/`, or `defender/`
-    beside a corpus)."""
+    twice (`DrainTrees.open` refuses a nested or duplicate pair, so one would fail every batch)."""
     w = _leaf(tmp_path).wt_paths
     trees = [t for label in KNOWN for t in label.writable_trees(w)]
 
@@ -322,18 +303,7 @@ def test_the_mount_lists_are_pairwise_disjoint(tmp_path: Path):
 def test_the_drain_box_mounts_exactly_the_labels_list(tmp_path: Path, label: DrainLabel):
     """The real `_drain_box_request` mounts exactly the leaf's `label.writable_trees(wt_paths)`
     read-write, each at its own path, plus `wt` read-only, and nothing else. (A non-member
-    raises: `test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held`.)
-
-    True, for both members:
-    - the rw mounts, in order, are `(m, m)` for each `m` of the literal list under `wt`, which
-      is `label.writable_trees(wt_paths)`;
-    - the only read-only mount is `wt` at `wt`, and there is no other mount;
-    - the workdir is still `wt` and the name still carries the batch id (unchanged);
-    - the leaf is not made on disk.
-
-    Catches: the box mounting the main checkout's trees rather than the leaf's, a duplicate or
-    extra mount, a mount whose target differs from its source, and the lost ro mount of the
-    leaf."""
+    raises: `test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held`.)"""
     lf = _leaf(tmp_path)
 
     request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
@@ -354,16 +324,7 @@ def test_a_leaf_that_is_a_git_checkout_is_still_mounted_read_only(
         tmp_path: Path, label: DrainLabel, dot_git: str):
     """A real drain leaf is a git worktree (`.git` is a file naming the main repository's
     worktree dir), or a clone (`.git` a folder). Either way the box mounts the leaf read-only,
-    its own trees read-write, and nothing else (round 2's H6).
-
-    True, over a leaf that carries every tree, the decoys and the `.git` entry: the ro mounts
-    are exactly `[(wt, wt)]`, the rw mounts are exactly the label's literal list, and there is
-    no other mount. The control: the `.git` entry is there, of the kind the row names. The same
-    request over a leaf without one is `test_the_drain_box_mounts_exactly_the_labels_list`.
-
-    Catches: a box that grants the leaf write access when it holds a git index, which lets the
-    box stage and rewrite everything in the working copy, and one that adds the git folder as a
-    mount of its own."""
+    its own trees read-write, and nothing else (round 2's H6)."""
     lf = _leaf(tmp_path)
     lf.build()
     git = lf.wt / ".git"
@@ -391,26 +352,7 @@ def test_a_leaf_that_is_a_git_checkout_is_still_mounted_read_only(
 def test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds_and_a_swap_moves_none(
         tmp_path: Path, label: str, swap: str):
     """For a known label, the box's rw mounts equal `open_drain_trees(wt_paths, label).mounts`,
-    and each of them is held, by behaviour.
-
-    True, over a leaf that carries all three trees and the decoys:
-    - `open_drain_trees` gives the real `DrainTrees`, whose `.mounts` is the box's rw source list
-      in order (the literal list);
-    - while it is open, this process holds one descriptor per rw mount and none on anything else
-      in the tmp dir (the other label's tree and the decoys are in the leaf and are not held);
-    - for each rw mount `m`, a write through `trees.mount(m)` lands at `m / name`, byte-exact;
-    - the other label's trees and the decoys are no mount point (`mount` is `ValueError`,
-      `tree_for` `None`);
-    - then every `m` is renamed away and a fresh empty folder, or a link to an outside folder
-      holding a decoy at the name, is put at its path. A `replace` write through the same handle
-      lands in the renamed folder, beside the first write. The swapped-in folder and the decoy
-      are untouched, and the held descriptors now name the renamed folders;
-    - closing the trees releases every root.
-
-    Catches: `open_drain_trees` holding a different list than the box mounts (a missing, extra,
-    globbed or reordered tree), a holder that writes by path instead of through the descriptor
-    it took at open (it follows the swap, into the fresh folder or through the link), a holder
-    that also holds the other label's tree, and one that never releases its roots."""
+    and each of them is held, by behaviour."""
     lf = _leaf(tmp_path)
     lf.build()
     outside = tmp_path / "outside"
@@ -468,18 +410,7 @@ def test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held(
     """O1': only a member names a lane. A non-member (the members' values and names as strings,
     a look-alike enum's member, an object carrying a member's value, a near miss) raises at
     `_drain_box_request` and at `open_drain_trees`, over a leaf that is not even on disk, and
-    nothing is held or made.
-
-    True: both raise `AttributeError` (a non-member has no `writable_trees`); no descriptor is
-    held under the tmp dir; `wt` stays absent. The positive control at the same address: each
-    member over that absent leaf builds its box request and reaches for the leaf in the holder
-    (`FileNotFoundError`, nothing left held), and once the leaf is built it opens and holds its
-    literal list.
-
-    Catches: a box or a holder with a label table of its own (a string, a name or a `.value`
-    matched, a near miss normalised, a `:<batch>` suffix stripped: round 2's H7), one that
-    coerces a string into a member, and one that answers a non-member with an empty list
-    instead of refusing it."""
+    nothing is held or made."""
     lf = _leaf(tmp_path)
 
     assert_raises_non_member(
@@ -505,14 +436,7 @@ def test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held(
 
 def test_a_tree_missing_from_the_leaf_is_refused_never_skipped(tmp_path: Path):
     """A listed tree that is not on disk fails the open as itself, and leaves nothing held: the
-    holder never answers a shorter list than the box mounts.
-
-    True: with `lessons/` built and `lessons-questioner/` missing, `open_drain_trees(...,
-    author_drain)` raises `FileNotFoundError` and no descriptor is left under the tmp dir. The
-    control: once the questioner corpus is built, the same call holds both trees.
-
-    Catches: a holder that filters its list by existence (its mounts then differ from the
-    box's), and one that holds each tree itself and leaks the first when the second fails."""
+    holder never answers a shorter list than the box mounts."""
     lf = _leaf(tmp_path)
     lf.build("defender/lessons")
 
@@ -533,21 +457,7 @@ def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
         tmp_path: Path, label: DrainLabel):
     """`_drain_box_request` and `open_drain_trees` both take their list from
     `label.writable_trees` over the `LoopPaths` they are handed, asked of the leaf, never from a
-    table of their own (v1's E1).
-
-    True: given `relocated_paths`, whose trees are `defender/relocated-<root name>-<tree>`:
-    - the box mounts exactly the member's relocated trees rw under `wt`, in the member's order,
-      and ro is still `wt` alone;
-    - `open_drain_trees(paths.with_repo_root(wt), label)` holds exactly the same list in the same
-      order: one descriptor per tree, and a write through each `mount(m)` lands at `m / name`;
-    - each side read the member's tree attributes, and only ever of `wt`.
-
-    The leaf also carries the shipped trees, the decoys, and the relocated trees the main
-    checkout's paths name.
-
-    Catches: a box or a holder that keeps its own list beside the member's (it mounts the
-    shipped `defender/lessons` rather than the relocated tree), and a box that asks the main
-    checkout's paths and rebases the list onto the leaf (R3: it mounts `relocated-main-...`)."""
+    table of their own (v1's E1)."""
     asked: list[tuple[Path, str]] = []
     paths = relocated_paths(asked)(repo_root=tmp_path / MAIN,
                                    state_dir=tmp_path / "learning-state")
@@ -599,25 +509,7 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, label: str, at_cwd: str, how: str):
     """`DefenderPaths` and `with_repo_root` keep a relative `repo_root` as given, so its list
     and the box's rw mounts are relative, and `open_drain_trees` refuses it with `ValueError`
-    before it opens anything. It never falls back to the cwd.
-
-    True, with the cwd at the tmp dir and a `repo_root` of `Path("relative-wt")`, built directly
-    or through the main checkout's `with_repo_root`:
-    - the root and the list keep the literal relative spelling `relative-wt/defender/...`;
-    - `_drain_box_request(Path("relative-wt"), ...)` mounts that relative list rw as spelled,
-      and `relative-wt` ro (nothing absolutized on the way to the box);
-    - the open is `ValueError` and no descriptor is left under the tmp dir;
-    - `the_trees`: the trees exist under the cwd, so a holder joining the cwd would have opened
-      them. The control: the same label over the absolute `tmp/relative-wt` opens and holds
-      them;
-    - `a_file_at_each_tree`: a plain file sits at each relative spelling, so any attempt to open
-      one (relative, or joined to the cwd) is `NotADirectoryError`, never `ValueError`. The
-      control: the same label over the absolute root is exactly that `NotADirectoryError`. So
-      the refusal came before any open.
-
-    Catches: a holder that absolutizes the root or the mounts (`Path.absolute()`, `resolve()`,
-    `os.path.abspath`), a `with_repo_root` that does (round 2's H4: the box and the holder then
-    agree on a cwd-joined leaf), and a holder that opens a mount before judging the list."""
+    before it opens anything. It never falls back to the cwd."""
     rel_root = Path("relative-wt")
     abs_root = tmp_path / rel_root
     for rel in EXPECTED_MOUNTS[label]:
@@ -780,31 +672,7 @@ def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_th
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, prefix: str):
     """Driven through the real `drains.author_drain`: the box request the lane composes mounts
     the leaf's two lesson corpora rw and the leaf ro, nothing else, all absolute, and the trees
-    its work step can hold over the `LoopPaths` the lane hands it are exactly those mounts.
-
-    True: one `BoxRequest` reaches `start_box=`. Over the shipped `LoopPaths`, its rw mounts
-    are `(leaf/defender/lessons, leaf/defender/lessons-questioner)` in order, each at its own
-    path; its ro mount is the leaf alone. The leaf's decoys are not mounted. The work step
-    (`trigger_author=`, called for both curators) is handed `paths.with_repo_root(wt)`, of
-    `paths`' own type, with `wt` the request's ro mount. Inside it, with the box up and the leaf
-    live, `open_drain_trees(that paths, author_drain)` holds exactly the rw mounts, by
-    descriptor, and a write through each lands in it. Over `relocated_paths` the same holds for
-    its relocated trees (`relocated-<leaf>-lessons`, `...-lessons-questioner`), read of the leaf
-    for `author_drain`: the box and the work step both follow the `paths` the lane was handed.
-    All of it holds with the branch's prefix the lead lane's (`lead-author/`).
-
-    Why the open is captured inside the work step rather than after the drive: that is where
-    A3 puts the drain's trees, the box is up, and the leaf is guaranteed live there (the real
-    lane removes the worktree at cleanup). Why not `test_922_spine.drive_author_drain`: its
-    branch hands back `paths.repo_root` as the leaf, so a lane that built the box from the main
-    checkout would pass. This drive uses `_box665`'s recorder and branch, with a leaf apart from
-    `paths.repo_root` that carries the trees a checkout does.
-
-    Catches: the lane passing another label (the lead's, or a string the list does not know),
-    a batch that picks the box's label from the branch prefix (round 2's r6), a lane that builds
-    the box from `paths` rather than the leaf, a lane that hands the box or the work step a
-    `LoopPaths` of its own making (it drops the injected list), and a lane whose box and work
-    step disagree about the trees."""
+    its work step can hold over the `LoopPaths` the lane hands it are exactly those mounts."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     d = start_drive(tmp_path, AUTHOR, kind, prefix)
     put_plain(d.paths.state_root / FINDINGS.queue, b'{"finding_id": "f-1"}\n')
@@ -825,24 +693,7 @@ def test_the_lead_lane_mounts_its_leafs_skills_and_its_work_step_holds_it(
     """Driven through the real `drains.lead_author_drain` with one queued case: the box request
     the lane composes mounts the leaf's `skills/` rw and the leaf ro, nothing else, all
     absolute, and the trees its work step can hold over the `LoopPaths` the lane hands it are
-    exactly that mount.
-
-    True: one `BoxRequest` reaches `start_box=`. Over the shipped `LoopPaths`, its rw mount is
-    `leaf/defender/skills` at its own path; its ro mount is the leaf alone. The work step
-    (`run_lead_author=`, the claim's serve) is handed `paths.with_repo_root(wt)`, of `paths`'
-    own type, and inside it `open_drain_trees(that paths, lead_author_drain)` holds exactly
-    `skills/`, by descriptor, and a write through it lands there. Over `relocated_paths` the same
-    holds for its relocated tree (`relocated-<leaf>-skills`), read of the leaf for
-    `lead_author_drain`. All of it holds with the branch's prefix the author lane's
-    (`lessons/`). The queue is the real one (`_state1135.enqueue_case`, what
-    `test_queue_drains_852._queued_run` wraps), so the lane's own wake gate opens. That
-    module's `_drain` is not reused: it fixes `start_box=` and `branch=`, and this drive must
-    record the request and keep the leaf apart from `paths.repo_root`.
-
-    Catches: the lane passing the author label (it would mount the corpora), a batch that picks
-    the box's label from the branch prefix (round 2's r6), a lane that builds the box from
-    `paths` rather than the leaf, a lane that hands the box or the work step a `LoopPaths` of
-    its own making, and a box and work step that disagree."""
+    exactly that mount."""
     d = start_drive(tmp_path, LEAD, kind, prefix)
     run_dir = curation_run_dir("run-1")
     with state_for_paths(d.paths) as state:

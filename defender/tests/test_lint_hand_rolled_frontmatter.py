@@ -1,20 +1,4 @@
-"""The lint gate that keeps the fold from regressing: lint_hand_rolled_frontmatter
-(spec_graph_591 d0_lint_gate + d_lint_*).
-
-The gate (fork L1: pytest coverage, departing from the no-lint-tests house
-convention) AST-scans defender/ for NEW hand-rolled fence-parse call sites and
-runs the shared _baseline.gate ratchet. These tests are RED against HEAD: the
-module does not exist yet (each test fails loading it — "missing module"), and
-the real-tree-clean run additionally depends on the five sites having landed.
-
-The gate is driven through its TESTABILITY SEAM, which the spec defines and the
-implementation must conform to:
-  - main(argv=None, *, scope=None, baseline_path=None): keyword overrides default
-    to the module constants;
-  - _scan(root) -> list[Finding]: per-file findings under ``root``.
-The gate lives at repo-root scripts/lint/ (not under defender/), so its path is
-derived from this file, never hardcoded to /workspace.
-"""
+"""lint_hand_rolled_frontmatter: flags hand-rolled frontmatter parsing outside the canonical parser."""
 from __future__ import annotations
 
 from pathlib import Path

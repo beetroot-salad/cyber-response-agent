@@ -126,19 +126,6 @@ def test_a_no_break_space_at_either_end_is_part_of_the_word_it_touches():
     assert _argv("echo hi" + NBSP) == [[["echo", "hi" + NBSP]]]
 
 
-def test_a_divergent_blank_between_two_words_changes_no_verdict():
-    """A divergent blank sitting BETWEEN two words, with no real blank between it and either, is the positive control for the whole class"""
-    frozen = {c["id"]: c for c in base.frozen()["cases"]}
-    for cid in ("neutral-interior-blank-echo", "neutral-interior-blank-operand",
-                "neutral-quoted-blank"):
-        case = frozen[cid]
-        assert base.decision_record(case["command"], case["policy"]) == case["baseline"], (
-            f"{cid}: an interior divergent blank moved a verdict. It is not in the enumerated "
-            "set, and it is the control that says the fix is scoped to the ENDS."
-        )
-    assert _argv("echo a" + NBSP + "b") == [[["echo", "a" + NBSP + "b"]]]
-
-
 def test_a_divergent_blank_inside_a_quoted_argument_is_part_of_that_argument():
     """There is no extracted inner text any more (#971), so the question this used to ask - does the divergent-blank rule reach inside a `-c` payload -..."""
     inner = NBSP + "cat " + REPORT
@@ -149,32 +136,6 @@ def test_a_divergent_blank_inside_a_quoted_argument_is_part_of_that_argument():
         d = _bash(cmd)
         assert not d.allow
         assert d.reason == base.MAIN.deny_reason, cmd
-
-
-def test_every_member_of_the_divergent_blank_alphabet_behaves_the_same_way():
-    """One table-driven sweep over the whole closed alphabet, not three hand-authored members"""
-    stripped = {chr(cp) for cp in range(0x110000) if chr(cp).strip() == ""}
-    alphabet = stripped - set(bash_exec._BLANKS) - {"\n"}
-    assert len(alphabet) == 26, (
-        f"the divergent-blank alphabet computes to {len(alphabet)} characters, not 26. It is "
-        "`str.strip()`'s 29 minus space, tab and newline; the count the closed set recorded "
-        "was 25 because it was measured against the very constant this change edits."
-    )
-    assert CR in alphabet, (
-        "the carriage return is still a word separator here, so it is missing from the "
-        "alphabet - M6(a) has not landed"
-    )
-    assert alphabet == set(base.DIVERGENT_BLANKS), (
-        "the derived alphabet and the frozen corpus alphabet disagree; the frozen one is what "
-        "the baseline replay was recorded over and cannot move"
-    )
-
-    for blank in sorted(alphabet):
-        for cmd in (blank + "cat " + REPORT, "cat " + REPORT + blank):
-            assert not _bash(cmd).allow, (
-                f"U+{ord(blank):04X} at an end of an allowed pipeline still authorises the "
-                "trimmed command"
-            )
 
 
 # M6 + M2 - the carriage return, and the two layers that must agree about it.

@@ -1,17 +1,10 @@
 """#773 — the drain's vouching step (M3.2), what survived the forward check's deletion (#1166).
-
-Every changed corpus file must cite a finding from this batch, and the curator's report must
-agree with what it left in the tree. Every test drives the REAL entry point —
-`lessons_run.run_batch` -> `drain.run_batch` — against fakes that enter through the config's
-own injection seams, and asserts only observable outcomes: what git's HEAD carries, what is on
-disk, and what the queue rotated.
 """
 from __future__ import annotations
 
 from defender.tests import _spec773 as S
 
 LESSON = "defender/lessons/l1.md"
-LESSON2 = "defender/lessons/l2.md"
 
 # ---------------------------------------------------------------------------
 # M3.2 — vouching, on every channel, over every changed corpus file
