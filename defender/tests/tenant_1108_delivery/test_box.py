@@ -64,7 +64,8 @@ class _Boundary:
         self.under = {Path(folder): reply for folder, reply in (under or {}).items()}
         #: A staged copy's root: reads of an entry directly in it (not `agent`) are its token
         #: reads; `root_reads` records the host's bytes at that path as each is asked for, and
-        #: `root_reply`, when set, answers them instead of the daemon.
+        #: `root_reply`, when set, answers them instead of the daemon: a `(rc, output)` reply,
+        #: or a function of the host's bytes there (`None` if unreadable) returning one.
         self.root = None if root is None else Path(root)
         self.root_reply = root_reply
         self.root_reads: list[tuple[str, bytes | None]] = []
@@ -78,6 +79,8 @@ class _Boundary:
             except OSError:
                 held = None
             self.root_reads.append((operand, held))
+            if callable(self.root_reply):
+                return self.root_reply(held)
             if self.root_reply is not None:
                 return self.root_reply
         if operand in self.replies:
@@ -623,10 +626,21 @@ def test_oracle_runner_is_a_code_mount_holding_only_runner_files_and_starts_sand
         shutil.rmtree(runner, ignore_errors=True)
 
 
+def _token_then(more):
+    return lambda held: (0, (held or b"").decode() + more)
+
+
+def _token_half(held):
+    text = (held or b"").decode()
+    return 0, text[:len(text) // 2]
+
+
 #: How a staged copy's token read-back can go wrong: another copy's token, nothing to read
-#: (an empty or stale folder with no token), or an empty answer.
+#: (an empty or stale folder with no token), an empty answer, or an answer that only begins
+#: with the planted token or is only its beginning (the read-back is exact equality).
 _TOKEN_FAULTS = {"another-copy": (0, "a token another copy holds\n"), "unreadable": (1, ""),
-                 "empty": (0, "")}
+                 "empty": (0, ""), "token-then-more": _token_then("and another copy's\n"),
+                 "token-half": _token_half}
 
 
 @pytest.mark.parametrize("fault", [None, *sorted(_TOKEN_FAULTS)])
@@ -656,7 +670,8 @@ def test_a_staged_copy_starts_only_on_the_token_the_host_planted_for_this_start(
 
 def test_a_staged_token_is_fresh_for_every_start(tmp_path, start):
     """O-A: each start plants new bytes, so a box answering with an earlier start's token (a
-    stale bind) refuses, while a plain restart of the same copy starts (control)."""
+    stale bind) refuses, while a plain restart of the same copy starts (control). The root
+    keeps `agent/` and at most the current start's token: an earlier start's token is gone."""
     root = _copy(tmp_path / "copy")
     request = _request("defender-fresh-1108", root, box.Mount(source=root, target=root, kind="staged"))
     tokens = []
@@ -664,8 +679,10 @@ def test_a_staged_token_is_fresh_for_every_start(tmp_path, start):
         boundary = _Boundary(tmp_path / attempt, [root / "agent"], root=root)
         executor = start(request, boundary)
         assert executor.sandboxed
-        [(_operand, held)] = boundary.root_reads
+        [(operand, held)] = boundary.root_reads
         tokens.append(held)
+        left = {p.name: p.read_bytes() for p in root.iterdir() if p.name != "agent"}
+        assert left in ({}, {Path(operand).name: held}), f"the root kept more than this start's token: {left}"
         box.stop_box(executor)
     assert all(tokens), "each start plants non-empty token bytes"
     assert tokens[0] != tokens[1], "the token must be fresh per start"

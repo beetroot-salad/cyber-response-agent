@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -22,19 +24,26 @@ from ._support import (
     DEFENDER,
     LANES,
     ForgeHTTP,
+    LockAudit,
     LockHolder,
     advance_remote,
     bounded,
     build_tenant,
     delivery,
     files_under,
+    fresh_process_env,
     git,
+    git_subcommand,
     index_entry,
     lock_probe,
     merge_on_remote,
+    merged_agent_lesson,
     push_to_remote,
     target,
 )
+
+#: A lesson path the lock cases write and revert.
+_LESSON = "agent/lessons/cut.md"
 
 
 def _current(tenant):
@@ -52,6 +61,17 @@ def _exports(tenant):
                   if p.name == "current" or (p.is_dir() and not p.is_symlink()))
 
 
+def _timed(attempt):
+    started = time.monotonic()
+    result = bounded(attempt, seconds=10)
+    return time.monotonic() - started, result
+
+
+def _stats(root):
+    return {p: (st.st_ino, st.st_mtime_ns) for p in sorted(Path(root).rglob("*"))
+            for st in [os.lstat(p)]}
+
+
 def _knowledge_files(checkout):
     return {rel: data for rel, data in files_under(checkout).items()
             if rel.split("/", 1)[0] in {"agent", "settings"}}
@@ -62,7 +82,8 @@ def test_publish_writes_the_commits_blobs_and_points_current_at_them(repo, tmp_p
     `agent/` and `settings/` blobs, byte for byte, and `current` naming it. Written from git
     objects: `export-ignore` and `export-subst` (which `git archive` applies) and checkout's
     line-ending conversion (which a copy of the clone's files carries) leave the bytes alone.
-    Publishing again at the same commit changes nothing and leaves no other folder."""
+    Publishing again at the same commit changes nothing (no file of the export is rewritten
+    in place under a reader: every inode and mtime stays) and leaves no other folder."""
     tenant = repo[0]
     planted = {}
 
@@ -88,9 +109,11 @@ def test_publish_writes_the_commits_blobs_and_points_current_at_them(repo, tmp_p
     assert (tenant.agent / "lessons/merged.md").read_bytes() == b"human-reviewed merge\r\n"
     assert _current(tenant) == (commit, export.path)
 
+    stats = _stats(export.path)
     again = d.publish()
     assert (again.commit, again.path) == (commit, export.path)
     assert files_under(export.path) == planted
+    assert _stats(export.path) == stats, "a re-publish rewrote the export in place"
     assert _exports(tenant) == sorted([commit, "current"])
 
 
@@ -245,26 +268,31 @@ def test_publish_requires_the_tenant_id_to_name_this_tenant_through_its_parser(
 
 def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tmp_path):
     """Flow 6 / O-F: while another process holds the tenant's lock, publish and start_batch
-    refuse at once with `LockBusy` (a `DeliveryRefused`) naming the holder's pid; nothing is
+    refuse at once with `LockBusy` (a `DeliveryRefused`) naming the holder's pid, taking no
+    more than a second longer than the same publish with the lock free (a non-blocking try,
+    not a wait for the holder); nothing is
     fast-forwarded, published or cut meanwhile. Another tenant's publish is unaffected (one
     lock per tenant, under its own folder, not under `forge/`). Released, the lock is taken
     again (control)."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     first = d.publish()
+    # The same fetch-then-lock path with the lock free, timed: the busy refusal may cost no
+    # more than that plus a margin far below any wait for the holder.
+    baseline = min(_timed(d.publish)[0] for _ in range(2))
     head = git(tenant.knowledge, "rev-parse", "HEAD")
     newer = advance_remote(repo, tmp_path)
     red_tenant, red_remote, _ = build_tenant(tmp_path, "red", root=tenant.data_root)
     mod = target()
     with LockHolder(tenant, tmp_path / "holder") as holder:
         for attempt in (d.publish, lambda: d.start_batch("busy", lanes=LANES)):
-            started = time.monotonic()
-            _, error, hung = bounded(attempt, seconds=10)
+            elapsed, (_, error, hung) = _timed(attempt)
             assert not hung, "a second taker waited on the lock instead of failing fast"
             assert isinstance(error, mod.LockBusy), error
             assert isinstance(error, mod.DeliveryRefused)
             assert str(holder.pid) in str(error), "the refusal must name the holder"
-            assert time.monotonic() - started < 5, "a second taker must fail fast, not wait"
+            assert elapsed < baseline + 1.0, \
+                f"a second taker waited ({elapsed:.2f} s against {baseline:.2f} s with the lock free)"
         assert git(tenant.knowledge, "rev-parse", "HEAD") == head
         assert _current(tenant) == (first.commit, first.path)
         assert _exports(tenant) == sorted([first.commit, "current"])
@@ -281,8 +309,9 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
 
 def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tmp_path):
     """Flow 6: the lock is held for fast-forward, export and worktree creation only. Probed
-    from another process at each moment the host waits on something else, on every route: a
-    batch (its fetch and push on a real smart-HTTP remote, its PR request, the box's create
+    from another process at each moment the host waits on something else, on every route:
+    `open()`'s protection read, a publish's fetch, a batch (its fetch and push on a real
+    smart-HTTP remote, its PR request, the box's create
     and its window), the retained branch's delivery (its PR request and any git it runs) and,
     once a human has merged that PR, the revert of its lesson (its push, its PR request and
     any fetch). The probe's own positive control sees a held lock as busy."""
@@ -291,17 +320,26 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
 
     tenant = http_repo[0]
     server = http_repo[3]
-    probes, phase = {}, ["batch"]
+    probes, phase = {}, ["open"]
     server.on_service = lambda service: probes.setdefault((phase[0], service), lock_probe(tenant))
 
     def on_request(request):
         if request.url.path.endswith("/pulls"):
             probes.setdefault((phase[0], f"pr-{request.method.lower()}"), lock_probe(tenant))
+        if request.url.path.endswith("/branches/main"):
+            probes.setdefault((phase[0], "protection"), lock_probe(tenant))
     http = ForgeHTTP(on_request=on_request)
     with LockHolder(tenant, tmp_path / "holder"):
         assert "busy" in lock_probe(tenant), "the probe must see a held lock"
     d = delivery(http_repo, http)
     advance_remote(http_repo, tmp_path)
+    phase[0] = "publish"
+    server.rearm()
+    d.publish()
+    push_to_remote(http_repo, tmp_path, lambda checkout: (checkout / "agent/lessons/later.md").write_text(
+        "a later human merge\n", encoding="utf-8"))
+    phase[0] = "batch"
+    server.rearm()
     batch = d.start_batch("io", lanes=LANES)
     probes["batch", "after-start-batch"] = lock_probe(tenant)
 
@@ -334,8 +372,206 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
     server.rearm()
     assert d.revert("agent/lessons/io.md", "io").endswith("/pulls/7")
 
-    required = {("batch", "git-upload-pack"), ("batch", "git-receive-pack"), ("batch", "pr-post"),
+    required = {("open", "protection"), ("publish", "git-upload-pack"),
+                ("batch", "git-upload-pack"), ("batch", "git-receive-pack"), ("batch", "pr-post"),
                 ("batch", "after-start-batch"), ("batch", "box-create"), ("batch", "box-window"),
                 ("deliver", "pr-post"), ("revert", "git-receive-pack"), ("revert", "pr-post")}
     assert required <= set(probes), sorted(required - set(probes))
     assert all(result.get("free") for result in probes.values()), probes
+
+
+def _under(root, path):
+    """`path`'s parts below `root` (an absolute path, `str` or `bytes`), or `None` outside it."""
+    try:
+        full = os.path.abspath(os.fsdecode(path))
+    except TypeError:
+        return None
+    # Resolve the folder, never the entry itself: `current` may be a link.
+    full = os.path.join(os.path.realpath(os.path.dirname(full)), os.path.basename(full))
+    rel = os.path.relpath(full, root)
+    return None if rel == os.pardir or rel.startswith(os.pardir + os.sep) else Path(rel).parts
+
+
+def _writes(flags):
+    return flags is not None and bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC))
+
+
+def test_the_export_and_current_are_written_under_the_tenant_lock(repo, tmp_path):
+    """Flow 1 / O-F: the export's folder and files and the `current` pointer are written while
+    this process holds the tenant lock, so a publisher that fetched an older commit can never
+    point `current` back at it after another published a newer one. Probed from another
+    process (`LockAudit`) before the first write of an export file (a file in a folder under
+    `exports/`), before every rename or link into `exports/`, and before every write of
+    `current`; the probe's positive control comes first. Every probe sees the lock busy, and
+    `current` was among them."""
+    tenant = repo[0]
+    d = delivery(repo, ForgeHTTP())
+    d.publish()
+    exports = os.path.realpath(tenant.dir / "exports")
+    seen = set()
+
+    def pick(event, args):
+        if event == "open" and _writes(args[2]):
+            parts = _under(exports, args[0])
+        elif event in {"os.rename", "os.link", "os.symlink"}:
+            parts = _under(exports, args[1])
+        else:
+            return None
+        if not parts or parts[0] == os.curdir:
+            return None
+        if parts == ("current",):
+            return "current"
+        if len(parts) == 1:
+            return None if event == "open" else f"{event}:{parts[0]}"
+        if "export-file" in seen:
+            return None
+        seen.add("export-file")
+        return "export-file"
+    audit = LockAudit(tenant, pick)
+    control = Path(exports) / "p3-control"
+    control.mkdir()
+    with LockHolder(tenant, tmp_path / "holder"), audit:
+        (control / "held").write_bytes(b"")
+    seen.clear()
+    with audit:
+        (control / "free").write_bytes(b"")
+    shutil.rmtree(control)
+    assert [next(iter(verdict)) for _, verdict in audit.probes] == ["busy", "free"], \
+        f"the probe must fire on a write under exports/ and tell held from free: {audit.probes}"
+    seen.clear()
+    audit.probes.clear()
+    advance_remote(repo, tmp_path)
+    with audit:
+        export = d.publish()
+    assert export.commit == git(tenant.knowledge, "rev-parse", "HEAD")
+    labels = [label for label, _ in audit.probes]
+    assert "current" in labels, f"no write of `current` was seen: {labels}"
+    assert all("busy" in verdict for _, verdict in audit.probes), audit.probes
+
+
+_INTERRUPTED_PUBLISH = """
+import json, os, resource, signal, sys
+from pathlib import Path
+from defender.tests import _tenants1106 as tenants
+from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, target
+root, tenant_id, marker, exports, limit = (Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4],
+                                           int(sys.argv[5]))
+mod = target()
+tenant = tenants.accept(root, tenant_id)
+d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client)
+clone = str(tenant.knowledge)
+signal.signal(signal.SIGXFSZ, signal.SIG_DFL)  # a write past the limit kills, as a power cut would
+
+def mentions_exports(value):
+    return isinstance(value, (str, bytes, os.PathLike)) and exports in os.fsdecode(value)
+
+def cut_off(event, args):
+    # The moment the export's marker file is opened for writing outside the clone, or a
+    # program is started on the exports folder, every later file write is capped at `limit`
+    # bytes: the marker (larger) is cut off part-written and this process dies of SIGXFSZ.
+    if event == "open" and args[2] is not None and args[2] & (os.O_WRONLY | os.O_RDWR | os.O_CREAT):
+        path = os.path.abspath(os.fsdecode(args[0]))
+        armed = os.path.basename(path) == marker and not path.startswith(clone + os.sep)
+    elif event == "subprocess.Popen":
+        argv = [args[1]] if isinstance(args[1], (str, bytes)) else list(args[1])
+        armed = any(map(mentions_exports, [*argv, args[2], *(args[3] or {}).values()]))
+    else:
+        return
+    if armed:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (limit, resource.getrlimit(resource.RLIMIT_FSIZE)[1]))
+sys.addaudithook(cut_off)
+try:
+    print(json.dumps({"published": d.publish().commit}))
+except mod.DeliveryRefused as refused:
+    print(json.dumps({"refused": str(refused)}))
+"""
+
+
+def test_a_publish_cut_off_mid_export_leaves_no_partial_export(repo, tmp_path):
+    """Flow 1 / O-B: an export is written to a temporary folder and renamed into place, so a
+    publish cut off mid-export (in another process: from the moment it opens the new
+    commit's marker file outside the clone, or starts a program on `exports/`, writes are
+    capped below the marker's size, so the marker is left part-written and the process dies
+    of SIGXFSZ, or its program does and it refuses) leaves no `exports/<commit>` and
+    `current` on the earlier export. The next publish, finding whatever was left, publishes
+    the commit whole and exact: nothing part-written is reused, no stale lock is in the
+    way."""
+    tenant = repo[0]
+    d = delivery(repo, ForgeHTTP())
+    first = d.publish()
+    marker = "p3-interrupted-here.md"
+    planted = {}
+
+    def edit(checkout):
+        (checkout / "agent/lessons" / marker).write_bytes(b"the export is cut off in here\n" * 8192)
+        (checkout / "agent/lessons/after.md").write_bytes(b"written after the marker, or before\n")
+        planted.update(_knowledge_files(checkout))
+    newer = push_to_remote(repo, tmp_path, edit)
+    exports = tenant.dir / "exports"
+    proc = subprocess.run([sys.executable, "-c", _INTERRUPTED_PUBLISH, str(tenant.data_root),
+                           str(tenant.id), marker, str(exports), str(64 * 1024)],
+                          capture_output=True, text=True, timeout=300, check=False,
+                          env=fresh_process_env(tenant, tmp_path / "cut"))
+    assert proc.returncode == -signal.SIGXFSZ or '"refused"' in proc.stdout, \
+        f"the publish was never cut off mid-export: {proc.returncode} {proc.stdout} {proc.stderr}"
+    assert not os.path.lexists(exports / newer), "a cut-off publish left a partial export"
+    assert _current(tenant) == (first.commit, first.path)
+    export = d.publish()
+    assert (export.commit, export.path) == (newer, exports / newer)
+    assert files_under(export.path) == planted
+    assert _current(tenant) == (newer, export.path)
+
+
+def test_worktrees_are_cut_only_under_the_tenant_lock(repo, tmp_path):
+    """Flow 6 / O-F: a batch's worktree, and any worktree a revert cuts, is created while this
+    process holds the tenant lock. Probed from another process (`LockAudit`) before every
+    `git worktree add` this process spawns, on a batch finished and merged and on the revert
+    of its lesson; the probe's positive control comes first. Every probe sees the lock busy,
+    and the batch's was among them. Then, with the lock held by another process, a revert
+    either refuses with `LockBusy` naming the holder, pushing nothing and cutting nothing, or
+    goes ahead without cutting a worktree."""
+    tenant = repo[0]
+    phase = ["control"]
+
+    def pick(event, args):
+        if event == "subprocess.Popen":
+            sub, argv = git_subcommand(args[1])
+            if sub == "worktree" and "add" in argv:
+                return phase[0]
+        return None
+    audit = LockAudit(tenant, pick)
+    control = ["git", "-C", str(tenant.knowledge), "worktree", "add", "--p3-no-such-option"]
+    with LockHolder(tenant, tmp_path / "holder"), audit:
+        subprocess.run(control, capture_output=True, check=False)
+    with audit:
+        subprocess.run(control, capture_output=True, check=False)
+    assert [next(iter(verdict)) for _, verdict in audit.probes] == ["busy", "free"], audit.probes
+    audit.probes.clear()
+
+    with audit:
+        phase[0] = "batch"
+        merged_agent_lesson(repo, tmp_path, "cut", _LESSON, b"a lesson the batch cut\n")
+        phase[0] = "revert"
+        http = ForgeHTTP()
+        assert delivery(repo, http).revert(_LESSON, "cut").endswith("/pulls/7")
+    assert "batch" in [label for label, _ in audit.probes], audit.probes
+    assert all("busy" in verdict for _, verdict in audit.probes), audit.probes
+
+    audit.probes.clear()
+    merged_agent_lesson(repo, tmp_path, "again", _LESSON, b"a lesson to revert under a held lock\n")
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    worktrees = git(tenant.knowledge, "worktree", "list", "--porcelain")
+    branches = git(repo[1], "for-each-ref", "--format=%(refname) %(objectname)")
+    phase[0] = "held"
+    with LockHolder(tenant, tmp_path / "holder-2") as holder, audit:
+        _, error, hung = bounded(lambda: d.revert(_LESSON, "again"), seconds=60)
+    assert not hung
+    if error is None:
+        assert audit.probes == [], "a revert cut a worktree while another process held the lock"
+        return
+    assert isinstance(error, target().LockBusy), error
+    assert str(holder.pid) in str(error), "the refusal must name the holder"
+    assert git(tenant.knowledge, "worktree", "list", "--porcelain") == worktrees
+    assert git(repo[1], "for-each-ref", "--format=%(refname) %(objectname)") == branches
+    assert http.creates == []
