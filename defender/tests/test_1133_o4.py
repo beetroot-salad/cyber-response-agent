@@ -18,11 +18,14 @@ every negative has a positive control on the same address.
   construction, before anything is written — every id the owner's minting check refuses (a
   newline, a NUL, an over-long name among them), not only the ones a hand-rolled check sees;
   since rev 3 the WHOLE token must be case-stable (a dot-less `Control`, an upper-case head).
-- O4.5 the priming claim, through `cli._prime_once` (`prepare_episode`'s priming step) over the
-  episode the walk created, `runs.create_episode()` (#1187 declared change 3, review-3 F31(f):
-  the guards' stated destination; `prepare_episode`'s `Episode.create` is gone); the `prime=`
-  seam is handed `(source_run_dir, episode)`, the view's own held episode. A launch never
-  adopts a taken directory.
+- O4.5 the priming claim, through the launcher's entry `cli.prepare_episode(runs, source, *,
+  prime=) -> EpisodeRuns` (#1187 declared change 3, review-4 F37: it claims with
+  `runs.create_episode()` — the id argument, `data_root=` and the `-r<n>` loop go — primes once,
+  and hands the view back held, closing it on any error after the claim); the `prime=` seam
+  is handed `(source_run_dir, episode)`, the view's own held episode. A launch never adopts a
+  taken directory, so the guards over a claim that is ALREADY THERE (planted beforehand) drive
+  the claim body `cli._prime_once` on the walk's fresh episode, a contract seam kept at its
+  base signature (interface sheet).
 - O4.6 / S1 the judge's draw removal: a non-plain draw (the core's leaf refusal, rev 3's
   `NotPlainEntry`) is refused, logged and left, and the pass goes on; any OTHER `OSError` from
   the removal (EACCES, EPERM, EROFS, and equally EIO or ENOTDIR, injected through the
@@ -292,9 +295,10 @@ class Primed:
     def __call__(self, source_run_dir: Path, episode: Any) -> Any:
         claim = Path(episode.dir) / "served" / ".priming"
         st = os.lstat(claim)
+        folder = os.lstat(episode.dir)
         self.seen = {"source": Path(source_run_dir), "episode": episode,
                      "mode": stat.S_IMODE(st.st_mode), "regular": stat.S_ISREG(st.st_mode),
-                     "nlink": st.st_nlink}
+                     "nlink": st.st_nlink, "inode": (folder.st_dev, folder.st_ino)}
         if self.act is not None:
             self.act(claim)
         return T.mod("learning.branch.capture").PrimeReport(primed=1)
@@ -302,36 +306,64 @@ class Primed:
 
 def _prime_setup(tmp_path: Path) -> tuple[Any, Path, Any]:
     """`(cli, the source run dir, T's runs repository)` — the O4.5 claim guards' STATED
-    DESTINATION (review-3 F30(a) / F31(f)). #1187 declared change 3: the launcher no longer
-    creates its episode (`prepare_episode`'s `Episode.create` and its `-r<n>` loop go); the walk
-    does, `runs.create_episode()`, a fresh UUID under `<T>/episodes/` held by the view. The
-    claim these guards pin is taken by `cli._prime_once` — `prepare_episode`'s priming step,
-    whatever its new signature — over THAT view's held episode, so each guard is driven
-    through `with runs.create_episode() as view: cli._prime_once(view.episode, ...)`: the
-    claim's mode and single link, its release, the primer handed the walk's own held episode,
-    a refused release never masking the primer's error, and no descriptor left once the view
-    closes."""
+    DESTINATION (review-3 F30(a) / F31(f), review-4 F37). #1187 declared change 3: the
+    launcher's entry is `cli.prepare_episode(runs, source, *, prime=) -> EpisodeRuns`
+    (interface sheet): it claims a fresh UUID under `<T>/episodes/` with `runs.create_episode()`,
+    copies the source's input in, primes once under the claim, and returns the view held —
+    closing it, and re-raising the same exception, on any error after the claim. The guards
+    whose scene a launch can produce go through it (the claim's mode and single link, its
+    release, the primer handed the view's own held episode, a refused release never masking
+    the primer's error, the launcher's close on that error); the guards over a claim planted
+    BEFORE priming — a state a launch, which always claims a fresh episode, cannot reach — drive
+    the claim body `cli._prime_once` over `runs.create_episode()`'s held episode."""
     cli = T.mod("learning.branch.cli")
     _base, src = T.runs_base(tmp_path)
     return cli, src, T.current_tenant().runs_repository()
 
 
+def _fds_on_episode(primed: Primed) -> list[int]:
+    """This process's open descriptors on the episode dir the primer was handed, matched by the
+    inode recorded while it ran — so the check holds whether or not the dir is still at its
+    name afterwards (whether a failed launch leaves its folder is not pinned here)."""
+    out = []
+    for name in os.listdir("/proc/self/fd"):
+        try:
+            st = os.stat(f"/proc/self/fd/{name}")
+        except OSError:
+            continue
+        if (st.st_dev, st.st_ino) == primed.seen["inode"]:
+            out.append(int(name))
+    return sorted(out)
+
+
+def _source(src: Path) -> Any:
+    """The source run the launcher primes from, as the launcher holds it (a `Run`)."""
+    from defender.run_repository import Run
+
+    return Run.at(src)
+
+
 def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released(
         tmp_path, roots):
-    """The priming step over the walk's fresh episode (`_prime_setup`: #1187 declared change 3)
-    claims with `priming_lock.create("")` — a plain, single-linked regular file of mode 0644
-    while the primer runs — hands the primer the source run and THE SAME held `Episode` the
-    view holds, and releases the claim; the view holds the episode dir until its `with` ends.
-    (The name is kept for the spec graph's history; `prepare_episode`'s own return moves with
-    its new signature, the claim it runs does not.)"""
+    """`prepare_episode(runs, source, prime=)` (`_prime_setup`: #1187 declared change 3,
+    review-4 F37) claims a fresh UUID episode under `<T>/episodes/` and hands back its view
+    HELD; its priming claims with `priming_lock.create("")` — a plain, single-linked regular
+    file of mode 0644 while the primer runs — hands the primer the source run and THE SAME held
+    `Episode` the returned view holds, and releases the claim; the view holds the episode dir
+    until its `with` ends (the positive control for the close-on-error tests below)."""
+    import uuid
+
     cli, src, runs = _prime_setup(tmp_path)
     prime = Primed()
-    with umask(0o022), runs.create_episode() as view:
+    with umask(0o022), cli.prepare_episode(runs, _source(src), prime=prime) as view:
         episode = view.episode
         ep = Path(episode.dir)
-        cli._prime_once(episode, view.episode_id, src, prime)
         assert isinstance(episode, S.Episode()), f"the view holds {episode!r}"
         assert ep.name == view.episode_id
+        assert str(uuid.UUID(view.episode_id)) == view.episode_id, (
+            f"the launcher claimed {view.episode_id!r}, not a fresh UUID (declared change 3)")
+        assert ep.parent == Path(T.current_tenant().episodes), (
+            f"the launcher claimed {ep}, not an episode under <T>/episodes/")
         assert prime.seen["episode"] is episode, "the primer was handed another episode"
         assert prime.seen["source"] == src
         assert prime.seen["regular"]
@@ -347,10 +379,11 @@ def test_o4_5_an_occupied_or_aliased_claim_is_the_same_ledger_error_and_primes_n
         tmp_path, roots, kind):
     """An occupied claim (a plain file: another launcher) and an alias at the claim are the one
     `LedgerError` naming another launcher; the primer never runs and the claim is left exactly
-    as it was. Driven through `_prime_once` on the walk's held episode (`_prime_setup`), the
-    claim planted in it: a launch never adopts an existing directory (#1187 declared change 3:
-    `create_episode()` mints a fresh UUID), so only the claim stands between two primers of
-    one episode."""
+    as it was. Driven through the claim body `_prime_once` (a contract seam, interface sheet,
+    review-4 F37) on the walk's held episode (`_prime_setup`), the claim planted in it BEFORE
+    priming: a launch never adopts an existing directory (#1187 declared change 3:
+    `create_episode()` mints a fresh UUID), so `prepare_episode` cannot reach this scene, and
+    only the claim stands between two primers of one episode."""
     cli, src, runs = _prime_setup(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
@@ -424,38 +457,71 @@ def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_excepti
         tmp_path, roots, caplog, kind):
     """The claim's `delete()` in the priming step's `finally` suppresses EVERY refusal it can
     raise: the primer swaps the claim for a plant and fails; the refusal is logged, the
-    primer's own exception propagates, the plant is left as planted, and the walk's view
-    (`_prime_setup`) closes its episode as the exception leaves it."""
+    primer's own exception propagates out of `prepare_episode` (the same object, unwrapped),
+    the plant is left as planted, and the launcher closes the episode it claimed as the
+    exception leaves it (review-4 F37: the launcher's close-on-error, not a `with` of the
+    test's; the held-view control is
+    `test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released`)."""
     cli, src, runs = _prime_setup(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
     still_planted: dict[str, Any] = {}
-    held: dict[str, Path] = {}
+    own = PrimerFailed("the primer failed")
 
     def swap_then_fail(claim: Path) -> None:
         still_planted["check"] = _swap_claim(kind, claim, host)
-        raise PrimerFailed("the primer failed")
+        raise own
 
-    def launch() -> None:
-        with runs.create_episode() as view:
-            held["ep"] = Path(view.episode.dir)
-            cli._prime_once(view.episode, view.episode_id, src, Primed(swap_then_fail))
-
+    primer = Primed(swap_then_fail)
     caplog.set_level(logging.WARNING)
     with pytest.raises(PrimerFailed) as failed:
-        launch()
+        cli.prepare_episode(runs, _source(src), prime=primer)
     assert still_planted["check"](), f"the {kind} plant was changed by the claim's release"
     assert S.warned(caplog, ".priming"), "the refused release was not logged"
-    assert failed.value is not None
-    assert S.open_fds_on(held["ep"]) == [], "the view left its episode open on the primer's error"
+    assert failed.value is own, f"the primer's error was replaced: {failed.value!r}"
+    assert _fds_on_episode(primer) == [], (
+        "the launcher left its claimed episode open on the primer's error")
+
+
+def test_o4_5_the_launcher_closes_the_episode_it_claimed_when_its_primer_fails(tmp_path, roots):
+    """The launcher's close-on-error (`cli.py:229-232` at base; review-4 F37): when the primer
+    raises, `prepare_episode` closes the view it claimed — no descriptor of this process is left
+    on the episode dir — releases the priming claim, and the primer's OWN exception propagates,
+    the same object, not wrapped or replaced.
+
+    Positive control on the same observation channel: with a primer that succeeds, the view it
+    hands back holds the episode dir (`open_fds_on` sees it) until the caller's `with` closes it.
+    A launcher that leaves the claim open on the error is seen by the same check."""
+    cli, src, runs = _prime_setup(tmp_path)
+
+    ok = Primed()
+    with cli.prepare_episode(runs, _source(src), prime=ok) as view:
+        held = Path(view.episode.dir)
+        assert _fds_on_episode(ok), "control: the observation sees no descriptor on a held view"
+    assert _fds_on_episode(ok) == [], "control: closing the view left a descriptor open"
+
+    own = PrimerFailed("the primer failed")
+
+    def fail(_claim: Path) -> None:
+        raise own
+
+    failing = Primed(fail)
+    with pytest.raises(PrimerFailed) as failed:
+        cli.prepare_episode(runs, _source(src), prime=failing)
+    assert failed.value is own, f"the primer's error was replaced: {failed.value!r}"
+    ep = Path(failing.seen["episode"].dir)
+    assert ep != held, "the second launch did not claim an episode of its own"
+    assert not os.path.lexists(ep / "served" / ".priming"), "the priming claim was not released"
+    assert _fds_on_episode(failing) == [], (
+        "the launcher left the episode it claimed open when its primer failed")
 
 
 def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
         tmp_path, roots, caplog):
     """The primer swaps the claim for a symlink to a host file and succeeds: the release in
     `finally` refuses the link (marked) and leaves it for the reap scan; the refusal is logged
-    and suppressed, so priming still completes over the walk's episode (`_prime_setup`). The
-    link's target is untouched."""
+    and suppressed, so `prepare_episode` still completes and hands back the episode it claimed
+    (`_prime_setup`). The link's target is untouched."""
     cli, src, runs = _prime_setup(tmp_path)
     target = tmp_path / "host-claim-target"
     target.write_bytes(S.HOST_BYTES)
@@ -465,9 +531,8 @@ def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
         claim.symlink_to(target)
 
     caplog.set_level(logging.WARNING)
-    with runs.create_episode() as view:
+    with cli.prepare_episode(runs, _source(src), prime=Primed(swap)) as view:
         ep = Path(view.episode.dir)
-        cli._prime_once(view.episode, view.episode_id, src, Primed(swap))
     claim = ep / "served" / ".priming"
     assert claim.is_symlink(), "the link planted at the claim was removed"
     assert os.readlink(claim) == str(target), "the link planted at the claim was repointed"

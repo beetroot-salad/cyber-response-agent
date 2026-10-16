@@ -38,7 +38,6 @@ from pathlib import Path
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender.tests import _triplet_947 as T
 from defender.tests import _world_1007 as W
 from defender.tests.live_oracle_1224 import _spec1224 as S
@@ -112,7 +111,9 @@ def test_the_launcher_answers_to_no_operator_named_episode_token(tmp_path):
         f"the launcher accepted --episode-token {OPERATOR_NAMED!r} and exited "
         f"{refused_rc!r} — the operator door onto the episode's namespace is still open")
     assert refused_spawn.launches == [], "the refused launch started a sibling anyway"
-    root = Path(EH.episodes_root(W.current_tenant().data_root))
+    # #1187 (O9, review-4 F42): the episodes root is the tenant's own `<T>/episodes/`; the
+    # configured `episodes_root` resolver is retired.
+    root = Path(W.current_tenant().episodes)
     if root.is_dir():
         assert OPERATOR_NAMED not in written_bytes(root), (
             "the operator's token was written under the episodes root")

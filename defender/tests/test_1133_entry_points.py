@@ -12,7 +12,8 @@ a positive control on the same address.
 The writers take the `Episode` now (D3'): `start_family(episode, ...)`,
 `verify_family(episode, arms, ...)`, `archive_episode(episode, run_dirs)`,
 `prime_base(source_run_dir, episode)`; the manifest reader
-takes a view (rev 3, R1): `load_family(view)`; `prepare_episode(...)` returns the `Episode`. The doors
+takes a view (rev 3, R1): `load_family(view, expected_episode_id=)`;
+`prepare_episode(runs, source)` returns the held `EpisodeRuns` (#1187). The doors
 take ids since #1105 PR 2 (declared change 4): `cli.main` (`--tenant T <source_run_id>`) and
 `grade_episode(runs, episode_id, ...)`, the episode opened by id through the tenant's runs
 repository (`runs.episode_files`) under the configured episodes root.
@@ -54,6 +55,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import errno
+import functools
 import json
 import logging
 import os
@@ -697,8 +699,10 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
     first holds the claim and its primer waits until the second has finished (the primer writes
     no base, so nothing but the claim stands between them): the second is the "another launcher
     is priming" `LedgerError` and its primer never runs. The first then completes and releases
-    the claim. (`prepare_episode` itself never reaches a taken directory since #1224: a launch
-    mints a fresh `-r<n>` episode, so the claim is driven through `_prime_once` directly.)
+    the claim. (`prepare_episode` itself never reaches a taken directory: since #1187 it claims
+    a fresh UUID episode with `runs.create_episode()`, so the claim is driven through its body
+    `_prime_once` directly — a contract seam kept at its base signature, interface sheet,
+    review-4 F37.)
 
     Control on the same address: once released, the next primer runs, handed its episode."""
     cli = branch_cli()
@@ -827,7 +831,9 @@ def test_h5_the_manifest_reader_refuses_a_link_at_family_yaml_without_reading_it
     ep = T.episode(tmp_path, doc=doc)
     manifest = ep / "family.yaml"
     good = manifest.read_bytes()
-    call = fam.load_family
+    # #1187 R5 (review-4 F36): the expected id is a required keyword, the episode's own folder
+    # name, so a refusal below is the link's, never a missing argument's.
+    call = functools.partial(fam.load_family, expected_episode_id=ep.name)
 
     host = tmp_path / "host"
     host.mkdir()

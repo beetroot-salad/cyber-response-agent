@@ -735,8 +735,10 @@ def test_1234_fact_entity_that_matches_every_lead(tmp_path: Path, case: str) -> 
     built = _family(tmp_path, [ctl, wb, wc])
     if touching is None:
         family_error = S.sym(S.FAMILY_LOADER, "FamilyError")
+        # #1187 R5 (review-4 F36): the expected id is a required keyword — the episode's own
+        # folder name — so the refusal is the entity's, never a missing argument's.
         with S.mod("_io").bind(built.ep) as view, pytest.raises(family_error):
-            S.sym(S.FAMILY_LOADER, "load_family")(view)
+            S.sym(S.FAMILY_LOADER, "load_family")(view, expected_episode_id=Path(built.ep).name)
         judge = S.judge()
         S.grade_refused(built, judge)
         assert judge.calls == 0, "a refused manifest still reached the model"

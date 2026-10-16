@@ -831,8 +831,10 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
         # PR 2's `container_required`): the view refuses unless the roster names the world.
         view = tenant.runs_repository().episode(episode.dir.name, held=episode,
                                                 roster_label="b")
+        # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
+        # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
         run_dir = run_common.materialize_run(
-            RunPaths(src).alert, world.run_id, tenant=tenant, world=world,
+            RunPaths(src).alert, T.roster_arm_id(episode_dir, "b"), tenant=tenant, world=world,
             episode_runs=view).run_dir
     assert run_dir.parent == episode_dir / "runs", "precondition: the fork path, not a fresh run"
     doc = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))

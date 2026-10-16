@@ -276,19 +276,22 @@ def _union_shown(tmp_path: Path, source_alert: bytes, runs_base: Path, tag: str)
     return "\n".join(judge.prompts)
 
 
-def _launch(planted: S.Planted, source_run_dir: Path, label: str) -> tuple[Path | None, str | None]:
-    """The branch launcher's `prepare_episode` over `source_run_dir` (priming stubbed through its
-    `prime=` seam), for the episode `label` names (#1187: the id is its uuid4, `fixture_uuid`).
-    Returns (episode dir, None) or (None, the refusal's text)."""
+def _launch(planted: S.Planted, source_run_dir: Path) -> tuple[Path | None, str | None]:
+    """The branch launcher's `prepare_episode(runs, source, *, prime=)` over `source_run_dir`
+    (priming stubbed through its `prime=` seam), in the tenant's runs repository (#1187
+    declared change 3, review-4 F37: the episode is a fresh UUID `runs.create_episode()`
+    claims — no id argument, no `data_root=`). Returns (episode dir, None) or (None, the
+    refusal's text)."""
     cli = S.mod("learning.branch.cli")
     capture = S.mod("learning.branch.capture")
     try:
-        held = cli.prepare_episode(fixture_uuid(label), Run.at(Path(source_run_dir)), data_root=planted.accept().data_root,
+        held = cli.prepare_episode(planted.accept().runs_repository(),
+                                   Run.at(Path(source_run_dir)),
                                    prime=lambda _src, _ep: capture.PrimeReport(primed=1))
     except SystemExit as refused:
         return None, str(refused.code if refused.code is not None else refused)
-    with held as episode:
-        return Path(episode.dir), None
+    with held as view:
+        return Path(view.episode.dir), None
 
 
 def _corpus_signatures(runs_base: Path) -> tuple[dict[str, str | None], Any]:
@@ -867,7 +870,7 @@ def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
     assert len(set(keys.values())) == 1, (
         f"the curation key follows the operator's input file, not the recorded digest: {keys}")
 
-    episode, refusal = _launch(planted, planted.runs / fixture_uuid("dig-removed"), "dig-launch")
+    episode, refusal = _launch(planted, planted.runs / fixture_uuid("dig-removed"))
     assert refusal is None, f"the launch was refused: {refusal}"
     assert episode is not None
     assert S.episode_alert_file(episode).read_bytes() == ordinary
@@ -876,7 +879,7 @@ def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
 
     rewritten = planted.runs / fixture_uuid("dig-untouched")
     _host_rewrite(S.alert_file(rewritten), S.alert_bytes(_alert(id="R-9999")))
-    episode, refusal = _launch(planted, rewritten, "dig-mismatch")
+    episode, refusal = _launch(planted, rewritten)
     assert episode is None, "a launch copied an alert whose bytes no longer match the record"
     assert refusal, "the launch stopped without naming why"
 
@@ -990,12 +993,12 @@ def test_p142_record_present_but_alert_file_gone_or_rewritten_(tmp_path):
         assert run_id not in shown, f"the judge's union did not list {run_id} by its recorded digest"
 
     for run_id in (fixture_uuid("p142-rewritten"), fixture_uuid("p142-gone")):
-        episode, refusal = _launch(planted, planted.runs / run_id, f"{run_id}-ep")
+        episode, refusal = _launch(planted, planted.runs / run_id)
         assert episode is None, (
             f"a launch from {run_id} went ahead although its alert no longer matches its record")
         assert refusal is not None
         assert run_id in refusal, f"the launch refusal does not name the run: {refusal!r}"
-    episode, refusal = _launch(planted, planted.runs / fixture_uuid("p142-intact"), "p142-intact-ep")
+    episode, refusal = _launch(planted, planted.runs / fixture_uuid("p142-intact"))
     assert refusal is None, f"the intact run's launch was refused: {refusal}"
     assert episode is not None
     assert S.episode_alert_file(episode).read_bytes() == source

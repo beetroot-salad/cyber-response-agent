@@ -71,8 +71,11 @@ def _arm(alert: Path, world, ep: Path):
     makes before the first sibling (#1187 R2) — here `_triplet_947.episode_view` stands in."""
     tenant = T1106.accept(current_data_root(), T_ID)
     with Episode.open(ep) as episode:
-        return _materialize(alert, world.run_id, world=world,
-                            episode_runs=T.episode_view(episode, tenant=tenant))
+        view = T.episode_view(episode, tenant=tenant)
+        # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
+        # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
+        return _materialize(alert, T.roster_arm_id(ep, world.label), world=world,
+                            episode_runs=view)
 
 
 def _stamp(run_dir: Path) -> dict:

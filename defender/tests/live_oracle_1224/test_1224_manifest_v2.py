@@ -57,9 +57,11 @@ def _episode(where: Path, doc: dict | None = None, *, text: str | None = None) -
 
 
 def _load(ep: Path) -> Any:
-    """The runtime loader over the episode's manifest on disk (`load_family` through a view)."""
+    """The runtime loader over the episode's manifest on disk (`load_family` through a view),
+    handed the episode's own folder name as the expected id (#1187 R5: a required keyword, the
+    one the episode handle supplies; review-4 F36)."""
     with _episode_cls().open(Path(ep)) as handle:
-        return S.sym(S.FAMILY, "load_family")(handle.view())
+        return S.sym(S.FAMILY, "load_family")(handle.view(), expected_episode_id=Path(ep).name)
 
 
 def _no_tenant() -> Any:

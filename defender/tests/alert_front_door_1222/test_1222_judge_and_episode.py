@@ -282,15 +282,16 @@ def _source(tmp_path: Path, raw: bytes, *, record: bool = True, digest: str | No
     return planted, base, src
 
 
-def _launch(planted: S.Planted, src: Path, episode_id: str = T.EPISODE_ID) -> Path:
-    """`prepare_episode` over `src` (the real primer), then the launcher's RUNS step for the
-    manifest's worlds (#1187 R2: `view.start_runs` makes `runs/` and writes the arm roster — it
-    replaces `create_container`), the episode handle released."""
+def _launch(planted: S.Planted, src: Path) -> Path:
+    """`prepare_episode(runs, source)` over `src` (the real primer) in the tenant's runs
+    repository — #1187 declared change 3, review-4 F37: the episode is a fresh UUID
+    `runs.create_episode()` claims, handed back as its held view — then the launcher's RUNS
+    step for the manifest's worlds (#1187 R2: `view.start_runs` makes `runs/` and writes the
+    arm roster — it replaces `create_container`), the view released."""
     cli = S.mod(CLI)
-    with cli.prepare_episode(episode_id, Run.at(src), data_root=planted.accept().data_root) as episode:
-        with planted.accept().runs_repository().episode(episode.dir.name, held=episode) as view:
-            view.start_runs(list(T.WORLDS))
-        return Path(episode.dir)
+    with cli.prepare_episode(planted.accept().runs_repository(), Run.at(src)) as view:
+        view.start_runs(list(T.WORLDS))
+        return Path(view.episode.dir)
 
 
 def _refused_launch(planted: S.Planted, src: Path) -> str:
@@ -436,7 +437,7 @@ def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
     assert S.episode_record_file(ep).read_bytes() == record_bytes, (
         "the episode's record is not the source's")
 
-    T.write_family(ep, T.family_doc(source_run_dir=str(src)))
+    T.write_family(ep, T.family_doc(source_run_dir=str(src), episode_id=ep.name))
     S.alert_file(src).write_bytes(_alert("a1-rewritten"))
     sib = _resume_sibling(ep)
     assert S.alert_file(sib).read_bytes() == raw, (
@@ -978,7 +979,7 @@ def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
     planted, _base, src = _source(tmp_path, raw, signature="SIG-p062", alert_mapping=mapping,
                                   case_mapping=case_mapping)
     ep = _launch(planted, src)
-    T.write_family(ep, T.family_doc(source_run_dir=str(src)))
+    T.write_family(ep, T.family_doc(source_run_dir=str(src), episode_id=ep.name))
     S.remap(planted, {**mapping, "signature": "user.login"})
 
     sib = _resume_sibling(ep)

@@ -1216,7 +1216,14 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
     base recording, every world archived under `worlds/<X>/` (the #921 archive builder), the
     world ledgers with the query-table rows they answered (`write_call_table`), each planted
     world's oracle store directory, and pre-flight's outcome record (`outcome=None` writes
-    none)."""
+    none).
+
+    #1187 R2 (review-4 F38): an episode whose worlds are archived reached RUNS, so it carries
+    `runs/` and the arm roster naming every manifest world (the fixture's explicit RUNS step,
+    `_triplet_947.plant_roster`, taken last). Without it the page renders the episode with no
+    world sections (design Flow 4: manifest present, roster absent = never reached RUNS), a
+    state this fixture's archived worlds contradict. No roster is planted when no world is
+    archived (`labels=()`)."""
     ep = episode_v2(tmp_path, doc=doc, root=root, base_rows=[
         captured("idp", "query", query_params("user:alice"),
                  {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]})])
@@ -1240,6 +1247,8 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
                             for system in manifest.get("served_systems") or []})
     if outcome is not None:
         outcome_record(ep, outcome)
+    if labels:
+        T.plant_roster(ep)
     return ep
 
 

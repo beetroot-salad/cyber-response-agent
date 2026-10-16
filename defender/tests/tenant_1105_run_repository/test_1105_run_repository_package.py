@@ -800,10 +800,16 @@ def test_1105_tree_read_lint_lists_the_new_submodules_and_not_the_moved_ones(tmp
     the dead runtime/branch.py entry is recorded, not pruned, 20-demands F-9), and it names neither
     run_repository/_layout.py nor run_repository/_handle.py; the tree-read lint reports no plain
     listing call (RG-06-a). Positive control: a link-following is_dir() in a listed submodule is
-    reported."""
+    reported.
+
+    #1187 declared change 13 (R6, review-4 F40): `_record.py` is optional
+    (`PACKAGE_FILES_OPTIONAL`) — D-del deletes the `_episodes` record code it holds — so it is
+    required in the list only while it exists; once it is gone, the existence check below
+    requires its entry to go too."""
     lint_tree_read_follows_link = load_lint_gate("lint_tree_read_follows_link")
     listed = set(lint_tree_read_follows_link.LINT_TREE_READER_MODULES)
-    new = {"run_repository/_lookup.py", "run_repository/_record.py", "run_repository/_id.py"}
+    new = {"run_repository/_lookup.py", "run_repository/_id.py",
+           *(f"run_repository/{n}" for n in PACKAGE_FILES_OPTIONAL if (H.PACKAGE / n).is_file())}
     assert new <= listed, f"the tree-read lint does not list {sorted(new - listed)}"
     nowhere = sorted(rel for rel in listed
                      if rel.startswith("run_repository/") and not (H.DEFENDER / rel).is_file())

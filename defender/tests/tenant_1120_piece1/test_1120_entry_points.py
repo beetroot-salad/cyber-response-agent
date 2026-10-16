@@ -112,12 +112,12 @@ def _knowledge_link(base: Path, root: Path, tenant_id: str = H.TID, *, row: bool
     H.knowledge_dir(root, tenant_id).symlink_to(real, target_is_directory=True)
 
 
-def _source_under(root: Path, record_tenant: str, *, runs_tenant: str = H.TID) -> Path:
-    """A finished, branchable source run at `<root>/<runs_tenant>/runs/<id>` whose runs-base
-    record names `record_tenant` (written raw — an off-grammar id is a real corrupt record)."""
+def _source_under(root: Path, *, runs_tenant: str = H.TID) -> Path:
+    """A finished, branchable source run at `<root>/<runs_tenant>/runs/<id>`. #1187 R1
+    (review-4 F42): no runs-base record — every caller named the run's own tenant, and the
+    run's tenant is where it sits."""
     base = H.tenant_folder(root, runs_tenant) / "runs"
     base.mkdir(parents=True, exist_ok=True)
-    S1077.plant_tenant_record(base, tenant_id=record_tenant)
     return P.source_run(base)
 
 
@@ -186,7 +186,7 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
     assert run_tenant.correlation.template_id == H.FIXTURE_CORRELATION_TEMPLATE
 
     # The sibling: the same accepted Tenant, and no turn-0 dispatch.
-    src = _source_under(data_root, H.TID)
+    src = _source_under(data_root)
     # #1187 (Layout A): the episode is `<root>/<T>/episodes/<uuid>`, as RUNS leaves it. (The
     # retired variable, set below to that same folder, is read by nothing after #1187, O9.)
     manifest = P.family_for(src)
@@ -247,20 +247,20 @@ def _build_cell(entry: str, cell: str, base: Path, monkeypatch) -> _Cell:  # noq
         if launcher:
             # #1105 PR 2: the launcher's id comes from the request (`--tenant`), refused by
             # the one grammar, TenantId, before the source is read.
-            src = _source_under(root, H.TID)
+            src = _source_under(root)
             return _Cell(root, "A", str(H.refusal(_tenant, _tenant.TenantId, "A")), source=src)
         return _Cell(root, "A", _owner(root, "A"))
     if cell == "no-row":
         H.place_knowledge(root)
         cell_ = _Cell(root, H.TID, _owner(root))
         if launcher:
-            cell_.source = _source_under(root, H.TID)
+            cell_.source = _source_under(root)
         return cell_
     if cell == "knowledge-link":
         _knowledge_link(base, root)
         cell_ = _Cell(root, H.TID, _owner(root))
         if launcher:
-            cell_.source = _source_under(root, H.TID)
+            cell_.source = _source_under(root)
         return cell_
     if cell == "learning-state-overlap":
         H.adopted(root)
@@ -271,7 +271,7 @@ def _build_cell(entry: str, cell: str, base: Path, monkeypatch) -> _Cell:  # noq
         monkeypatch.delenv(H.LEARNING_STATE_ENV)
         cell_ = _Cell(root, H.TID, expected, env=env)
         if launcher:
-            cell_.source = _source_under(root, H.TID)
+            cell_.source = _source_under(root)
         return cell_
     assert cell == "mounted-tree", cell
     if entry == "policy_cli.main":
@@ -491,7 +491,7 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
     assert str(data_root) not in " ".join(child_argv)
 
     # The child re-accepts: its tenant lost a required settings file since the launch.
-    src = _source_under(data_root, H.TID)
+    src = _source_under(data_root)
     # #1187 (Layout A): the episode is `<root>/<T>/episodes/<uuid>`, as RUNS leaves it. (The
     # retired variable, set below to that same folder, is read by nothing after #1187, O9.)
     manifest = P.family_for(src)

@@ -62,12 +62,14 @@ Address grammar: an address is an attribute path on an ``Episode``. A bare name 
 
 Entry points, with the signatures the suite calls (D3', rev 3):
 
-* ``cli.prepare_episode(episode_id, source_run_dir, *, data_root, prime=)`` -> the ``Episode``
-  (closed by ``prepare_episode`` itself on its own exception; since #1224 it always creates a
-  fresh directory); ``prime(source_run_dir, episode)``; its default primer is ``prime_base``
-  with ``allow_empty=True`` (R3); ``cli._prime_once(episode, episode_id, source_run_dir,
-  prime)`` (the claim, driven directly for R2's folder row and for an occupied claim:
-  ``prepare_episode`` has no ``io=`` seam and never adopts a taken directory);
+* ``cli.prepare_episode(runs, source, *, prime=)`` -> the ``EpisodeRuns`` view, held (#1187
+  declared change 3, review-4 F37: it claims a fresh UUID episode with ``runs.create_episode()``
+  and closes that view itself on any exception after the claim, re-raising it unchanged);
+  ``prime(source_run_dir, episode)``; its default primer is ``prime_base`` with
+  ``allow_empty=True`` (R3); ``cli._prime_once(episode, episode_id, source_run_dir, prime)``
+  (the claim body, a contract seam: driven directly for R2's folder row, for an occupied
+  claim and for two primers on one episode — ``prepare_episode`` has no ``io=`` seam and never
+  adopts a taken directory);
 * ``cli.start_family(episode, labels, *, spawn=, tenant_id=)`` (the container made first,
   ``tenant.runs_repository().episode(ep, held=episode).create_container()``);
   ``cli.verify_family(episode, arms, *, source=)`` (``arms`` each label's arm opened by id
@@ -78,7 +80,8 @@ Entry points, with the signatures the suite calls (D3', rev 3):
   non-case-stable id, the WHOLE token judged); ``_episode_paths.check_minted_token(token)``;
 * ``_family.load_family(view, ...)`` -- ``view`` a ``Bound`` (``episode.view()`` or a
   reader's own ``bind``);
-* ``episode.delta_o(episode_dir, *, invoke=)``;
+* ``episode.delta_o(view, *, invoke=)`` / ``episode.verdicts(view)`` (the episode's walked
+  view, never a path: review-3 F32);
 * ``run._resume_target(ns, *, episode, tenant)`` (``--episode`` with no held episode is
   ``SystemExit``); ``run.py``'s sibling door is ``--tenant T --episode <episode_id> --world L``
   since #1105 PR 2 (``--resume`` is gone);

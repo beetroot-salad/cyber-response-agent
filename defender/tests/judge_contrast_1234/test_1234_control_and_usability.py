@@ -756,7 +756,9 @@ def test_1234_door_refusal_precedes_the_control_check_and_writes_nothing(tmp_pat
 
     #1187 declared changes 6 and 8 (R1, S-iso): the door judges no container record, so an
     episode whose `runs/` holds no `_tenant.json`, or a stray one naming this tenant or another,
-    is admitted and stamped like one with no `runs/` at all. The door's refusal kept here is
+    is admitted and stamped. (The "no `runs/` at all" case went with review-4 F38: an archived
+    family reached RUNS, so `S.family` gives it `runs/` and its arm roster; an archive with no
+    roster is a state the design says cannot exist.) The door's refusal kept here is
     a link at the episode's own folder, which the door's walk never follows: the link points at
     a real episode carrying the same damaged control, so following it would stamp that episode;
     the refusal names the episode and writes nothing there. (A link at `<ep>/runs` is no
@@ -789,8 +791,7 @@ def test_1234_door_refusal_precedes_the_control_check_and_writes_nothing(tmp_pat
 
     admitted = {"recordless-container": lambda ep: (ep / "runs").mkdir(exist_ok=True),
                 "own-tenants-stray-record": lambda ep: _stray_record(ep, T.current_tenant().id),
-                "another-tenants-stray-record": lambda ep: _stray_record(ep, "othertenant"),
-                "no-container": lambda ep: None}
+                "another-tenants-stray-record": lambda ep: _stray_record(ep, "othertenant")}
     for name, plant in admitted.items():
         built = _build(tmp_path, name, _triad_ctl(**pre_change))
         plant(built.ep)

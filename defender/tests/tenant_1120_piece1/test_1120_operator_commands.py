@@ -307,10 +307,11 @@ class _SpawnRecorder:
 
 
 def _launcher_source(root: Path) -> Path:
-    """A finished, branchable source run at `<root>/acme/runs/<id>`, its runs-base record
-    naming acme (pass-A's source-run builder, at a tenant location)."""
+    """A finished, branchable source run at `<root>/acme/runs/<id>` (pass-A's source-run
+    builder, at a tenant location). #1187 R1 (review-4 F42): no runs-base record — the run's
+    tenant is where it sits."""
     base = root / H.TID / "runs"
-    H78.plant_record(base, H.TID)
+    base.mkdir(parents=True, exist_ok=True)
     return H78.source_run(base)
 
 

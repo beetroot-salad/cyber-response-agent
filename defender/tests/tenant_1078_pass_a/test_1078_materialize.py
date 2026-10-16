@@ -308,6 +308,9 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
     disjoint learning root."""
     src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
     alert = RunPaths(src).alert
+    # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
+    # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
+    arm_id = H.T.roster_arm_id(ep, "b")
     argv = H.sibling_argv(ep / "family.yaml", "b", "--tenant", T_ID)
     with Episode.open(ep) as episode:
         # #1187 (O4b): the sibling's form names its roster label (`roster_label=`, replacing
@@ -321,16 +324,16 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
             assert refused is not None, "the sibling's entry accepted a widened learning root"
             H.assert_verbatim(H.refusal_text(refused), widened,
                               entry="the sibling's entry (run.py --episode)")
-            text = _refused(lambda: _materialize(alert, world.run_id, T_ID, world=world,
+            text = _refused(lambda: _materialize(alert, arm_id, T_ID, world=world,
                                                  episode_runs=view))
             H.assert_verbatim(text, widened, entry="the sibling's materialize_run")
-            assert not (ep / "runs" / world.run_id).exists()
+            assert not (ep / "runs" / arm_id).exists()
         monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR",
                            str(tmp_path.parent / "elsewhere-learning"))
         rc, refused = H.drive_main(argv, H.Recorder(tmp_path / "sib-ok"))
         assert refused is None, H.refusal_text(refused)
         assert rc == 0, rc
-        assert Path(_materialize(alert, world.run_id, T_ID, world=world,
+        assert Path(_materialize(alert, arm_id, T_ID, world=world,
                                  episode_runs=view)).is_dir()
 
 

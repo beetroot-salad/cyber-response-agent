@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 import pytest
 
@@ -292,6 +293,16 @@ def test_run_at_refuses_a_nonexistent_path_and_a_file(base, tmp_path: Path):
     assert S.Run().at(empty) is not None
 
 
+def _rule_refusal(rule: Any, text: str) -> BaseException | None:
+    """What the one run-id rule (`rule`, `RunId.parse`) raises for `text`, or `None` when it
+    admits it — the reference the handle's own refusal is compared against."""
+    try:
+        rule(text)
+    except Exception as refused:  # noqa: BLE001 — the rule's refusal is the value compared
+        return refused
+    return None
+
+
 def test_run_id_admission_is_todays_validator_by_reference_not_a_second_one(base):
     """Run-id admission at the surviving public constructor reaches the one run-id rule by
     reference and restates none on the handle: an id the rule refuses is refused here, by name,
@@ -300,15 +311,26 @@ def test_run_id_admission_is_todays_validator_by_reference_not_a_second_one(base
     #1187 declared change 1: the rule is canonical lowercase UUID text only, and its refusal's
     wording is the implementation's — so what is pinned is what any wording carries: the
     refused id, repr-quoted, on one line. Case stability survives as part of the rule (an
-    uppercase UUID is refused) where the broad run-id alphabet alone would admit it."""
+    uppercase UUID is refused) where the broad run-id alphabet alone would admit it.
+
+    BY REFERENCE (review-4 F39): the handle's refusal IS the rule's — the same class and the
+    same text `RunId.parse` raises for the same input — so a handle that restates its own UUID
+    check, in any words or class, fails here. No wording is coined: both sides are whatever the
+    one rule says."""
     from defender._run_id import is_valid_run_id
+    from defender.run_repository import RunId, RunRefused
     _with_record(base)
     bad = ("", "-leading-dash", "has space", "héllo", "a/b", "..")
     for run_id in bad:
         assert not is_valid_run_id(run_id), f"{run_id!r} is the validator's own refusal"
-        with pytest.raises(Exception) as excinfo:  # noqa: PT011
+        rule = _rule_refusal(RunId.parse, run_id)
+        assert isinstance(rule, RunRefused), f"fixture: the rule admits {run_id!r} ({rule!r})"
+        with pytest.raises(RunRefused) as excinfo:
             S.Run().under(base, run_id, tenant_id=S.DEFAULT_TENANT_ID)
         said = str(excinfo.value)
+        assert (type(excinfo.value), said) == (type(rule), str(rule)), (
+            f"the handle's refusal of {run_id!r} is not the run-id rule's own: the handle said "
+            f"{excinfo.value!r}, RunId.parse says {rule!r}")
         assert repr(run_id) in said, (
             f"the handle's refusal does not name the id it refused, {run_id!r}: {said!r}")
         assert "\n" not in said, f"the refusal of {run_id!r} is not one line: {said!r}"
@@ -319,9 +341,14 @@ def test_run_id_admission_is_todays_validator_by_reference_not_a_second_one(base
     upper = S.RUN_ID.upper()
     assert is_valid_run_id(upper), (
         "fixture: the broad alphabet admits upper case, so the refusal below is the run-id rule's")
-    with pytest.raises(Exception) as excinfo:  # noqa: PT011
+    rule = _rule_refusal(RunId.parse, upper)
+    assert isinstance(rule, RunRefused), f"fixture: the rule admits {upper!r} ({rule!r})"
+    with pytest.raises(RunRefused) as excinfo:
         S.Run().under(base, upper, tenant_id=S.DEFAULT_TENANT_ID)
     said = str(excinfo.value)
+    assert (type(excinfo.value), said) == (type(rule), str(rule)), (
+        f"the handle's refusal of {upper!r} is not the run-id rule's own: the handle said "
+        f"{excinfo.value!r}, RunId.parse says {rule!r}")
     assert repr(upper) in said, (
         f"an uppercase uuid was refused without naming it: {said!r}")
     assert "\n" not in said, f"the refusal of {upper!r} is not one line: {said!r}"
@@ -337,7 +364,9 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
     #1187 declared change 1: every run id is a canonical lowercase uuid4 text, so the existing
     run is a uuid and its case variants are upper- or mixed-case spellings of it; the refusal's
     wording is the implementation's, so what is pinned is that it names the variant,
-    repr-quoted, on one line."""
+    repr-quoted, on one line — and (review-4 F39) that it is the run-id rule's own refusal,
+    the class and text `RunId.parse` raises for the same variant, not a second check."""
+    from defender.run_repository import RunId, RunRefused
     _with_record(base)
     one, two = fixture_uuid("handle-case-one"), fixture_uuid("handle-case-two")
     S.seed_run_tree(S.make_run_dir(base, one))
@@ -346,9 +375,14 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
 
     for variant in (one.upper(), mixed):
         assert variant != one, "fixture: the variant must differ from the id only by case"
-        with pytest.raises(Exception) as excinfo:  # noqa: PT011
+        rule = _rule_refusal(RunId.parse, variant)
+        assert isinstance(rule, RunRefused), f"fixture: the rule admits {variant!r} ({rule!r})"
+        with pytest.raises(RunRefused) as excinfo:
             S.Run().under(base, variant, tenant_id=S.DEFAULT_TENANT_ID)
         said = str(excinfo.value)
+        assert (type(excinfo.value), said) == (type(rule), str(rule)), (
+            f"the handle's refusal of {variant!r} is not the run-id rule's own: the handle said "
+            f"{excinfo.value!r}, RunId.parse says {rule!r}")
         assert repr(variant) in said, (
             f"{variant!r} was not refused by name: {said!r}. On a case-insensitive filesystem — "
             "macOS, which this repo supports, and where the default runs base lives under a "
@@ -358,8 +392,9 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
         assert "\n" not in said, f"the refusal of {variant!r} is not one line: {said!r}"
     # The refusal is the ID's, not the collision's: it holds with no existing directory too,
     # so the handle never has to look at the filesystem to know the id is unusable.
-    with pytest.raises(Exception) as excinfo:  # noqa: PT011
+    with pytest.raises(RunRefused) as excinfo:
         S.Run().under(base, two.upper(), tenant_id=S.DEFAULT_TENANT_ID)
+    assert str(excinfo.value) == str(_rule_refusal(RunId.parse, two.upper()))
     assert repr(two.upper()) in str(excinfo.value)
     # And nothing was touched on the way to the refusal.
     assert S.Run().at(base / one).record.commit == "c0ffee", (

@@ -69,8 +69,10 @@ def _sibling_run(tmp_path: Path, root: Path) -> tuple[Path, Path]:
         # PR 2's `container_required`).
         view = tenant.runs_repository().episode(episode.dir.name, held=episode,
                                                 roster_label="b")
+        # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
+        # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
         run_dir = H.run_common().materialize_run(
-            RunPaths(src).alert, world.run_id, tenant=tenant, world=world,
+            RunPaths(src).alert, T.roster_arm_id(episode_dir, "b"), tenant=tenant, world=world,
             episode_runs=view).run_dir
     return Path(run_dir), episode_dir
 
@@ -365,21 +367,33 @@ def test_n9_directory_tools_survive(tmp_path, monkeypatch, capsys):
     assert "--tenant" in capsys.readouterr().err
     assert not (ep / "learning.html").exists(), "visualize_episode rendered with no --tenant"
 
-    # held_out's positional runs dir — scores the fixture's run found IN that dir
+    # held_out's positional runs dir — scores the fixture's run found IN that dir. #1187
+    # declared change 14 (review-4 F42): scoring takes `--index F` and opens the UUID run an
+    # index row names under that dir (never a folder named after the slug); F sits outside
+    # the runs dir and the fixtures. The verdict line shows the run was read, not skipped.
     fixtures = tmp_path / "held-out"
     (fixtures / "m01-case").mkdir(parents=True)
     (fixtures / "m01-case" / "alert.json").write_text("{}", encoding="utf-8")
     (fixtures / "m01-case" / "ground_truth.yaml").write_text(
         "held_out: true\ndisposition: benign\n", encoding="utf-8")
-    (runs / "m01-case").mkdir()
-    plant_alert(runs / "m01-case")
-    (runs / "m01-case" / "report.md").write_text(
+    scored = runs / fixture_uuid("n9-m01-case")
+    scored.mkdir()
+    plant_alert(scored)
+    (scored / "report.md").write_text(
         "---\ndisposition: benign\nconfidence: high\n---\n", encoding="utf-8")
+    index = tmp_path / "ops" / "held-out-index.jsonl"
+    index.parent.mkdir(parents=True)
+    index.write_text(json.dumps({"slug": "m01-case", "run_id": scored.name}) + "\n",
+                     encoding="utf-8")
+    capsys.readouterr()
     try:
-        status = H.mod("evals.held_out").main([str(runs), "--fixtures-dir", str(fixtures)])
+        status = H.mod("evals.held_out").main(
+            [str(runs), "--index", str(index), "--fixtures-dir", str(fixtures)])
     except SystemExit as refused:
         status = refused.code
+    out = capsys.readouterr().out
     assert status == 0, "held_out's positional runs dir did not score the run it was given"
+    assert "predicted='benign'" in out, f"held_out scored no run from the dir it was given:\n{out}"
 
     # trace_lesson — the J8 edge: `--runs-dir` is gone and no --tenant is a usage error
     lessons = tmp_path / "lessons"

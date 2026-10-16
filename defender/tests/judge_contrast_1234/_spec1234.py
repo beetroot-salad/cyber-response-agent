@@ -943,8 +943,12 @@ def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PL
            base_story: str | None = None, manifest_over: Mapping[str, Any] | None = None,
            base_rows: list[dict] | None = None, outcome_reason: str | None = None) -> Built:
     """A hand-built, archived, ACCEPTED v2 family (`triad()` by default) — the judge's and the
-    page's whole input. No `runs/` container is written, so the door admits it (AP-10,
-    45-dispositions-drift's door fixture obligation). `samples=AUTO` gives every served system
+    page's whole input. #1187 R2 (review-4 F38): a family with an archived world reached RUNS,
+    so its episode carries `runs/` and the arm roster naming every manifest world (the
+    fixture's explicit RUNS step, `_triplet_947.plant_roster`, taken last; no arm folder is
+    made). Without it the page renders no world sections (design Flow 4: manifest present,
+    roster absent = never reached RUNS). The door judges no container record (#1187 R1), so it
+    admits the recordless `runs/` (AP-10, 45-dispositions-drift's door fixture obligation). `samples=AUTO` gives every served system
     one section of real answers; `None` writes no samples record. `outcome=None` writes no
     pre-flight record; `family_stamp=False` leaves the family not comparable; `outcome_reason`
     is pre-flight's `reason` text. `served/base.jsonl` (the family capture ledger) is written
@@ -976,6 +980,8 @@ def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PL
         extra = {} if outcome_reason is None else {"reason": outcome_reason}
         S24.outcome_record(ep, outcome, unservable=unservable, not_replayable=not_replayable,
                            drift=drift, family_stamp=family_stamp, **extra)
+    if any(w.archived for w in worlds):
+        T.plant_roster(ep)
     return Built(ep=ep, token=token, worlds={w.label: w for w in worlds},
                  inherited=list(inherited))
 

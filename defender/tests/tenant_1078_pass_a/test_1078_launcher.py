@@ -181,8 +181,10 @@ def _materialize_sibling(root: Path, episodes: Path | None = None,
         world = H.run_py().resume_world(
             episode, label, tenant=lambda: H.T1106.run_tenant(accepted))
         view = T.episode_view(episode, tenant=accepted)
+        # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
+        # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
         run_dir = H.run_common().materialize_run(
-            RunPaths(src).alert, world.run_id, tenant=accepted, world=world,
+            RunPaths(src).alert, T.roster_arm_id(ep, label), tenant=accepted, world=world,
             episode_runs=view).run_dir
     return ep, Path(run_dir), world
 

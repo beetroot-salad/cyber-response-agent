@@ -26,8 +26,12 @@ import pytest
 
 from defender.tests import _spec791
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
-from defender._episode_handle import Episode  # noqa: E402
 from defender.run_repository import RunId, RunRefused
+from defender.tests._fixture_uuid import fixture_uuid
+
+#: The pinned `--run-id` these scenarios hand `run.py`: a UUID (#1187 declared change 1, review-4
+#: F42), so a refusal below is the tenant's or the layout's, never the id's shape.
+CASE_X = fixture_uuid("case-x")
 
 #: `_Investigate`'s parameters at base ed5386bc (run.py:230-233), plus the `tenant` #1106 added
 #: (the run's resolved `RunTenant` — its settings and grants, which the query tool needs) — D3:
@@ -126,10 +130,10 @@ def test_o1_run_id_resume_without_tenant_refused(tmp_path, data_root, capsys):
     Even with a setup-only run dir already under T's runs base for that id: the operator must
     name the tenant to resume it (O6), and nothing is a default."""
     H.make_tenant(data_root, H.VALID_ID)
-    (H.runs_dir(data_root, H.VALID_ID) / "case-x").mkdir(parents=True)
+    (H.runs_dir(data_root, H.VALID_ID) / CASE_X).mkdir(parents=True)
     alert = H.plant_alert(tmp_path / "in")
     before = H.census(data_root)
-    said = _refused([str(alert), "--run-id", "case-x"], H.Recorder(tmp_path / "run"), capsys)
+    said = _refused([str(alert), "--run-id", CASE_X], H.Recorder(tmp_path / "run"), capsys)
     assert "--tenant" in said, f"the refusal does not name the missing --tenant: {said!r}"
     assert H.census(data_root) == before
 
@@ -298,15 +302,16 @@ def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root, monkey
     handling is unchanged from today (the sibling takes its id from the manifest)."""
     src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     H.plant_row(data_root, "victim")
-    world_run_id = H.run_py().resume_world(
-        Episode.open(manifest.parent), "a",
-        tenant=lambda: H.T1106.run_tenant(H.accept(data_root, "acme"))).run_id
-    got = _accepted(H.sibling_argv(manifest, "a", "--run-id", "case-x", "--tenant", "acme"),
+    # #1187 R2 (review-4 F42): the sibling's id is the one its episode's arm ROSTER holds for its
+    # label (`view.arm_id(label)`), never the world's composed `run_id` nor `--run-id`.
+    roster_id = H.T.roster_arm_id(manifest.parent, "a")
+    assert roster_id != CASE_X, "fixture: --run-id must differ from the roster's id"
+    got = _accepted(H.sibling_argv(manifest, "a", "--run-id", CASE_X, "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
     assert got["tenant"].id == "acme"
-    assert got["run_id"] == world_run_id, (
-        f"the resume path took --run-id over the manifest's sibling id: {got['run_id']!r}")
-    _refused(H.sibling_argv(manifest, "a", "--run-id", "case-x", "--tenant", "victim"),
+    assert str(got["run_id"]) == roster_id, (
+        f"the resume path took {got['run_id']!r}, not the roster's arm id {roster_id!r}")
+    _refused(H.sibling_argv(manifest, "a", "--run-id", CASE_X, "--tenant", "victim"),
              H.Recorder(tmp_path / "sib2"))
 
 
@@ -402,12 +407,12 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     old, new = tmp_path / "old-root", tmp_path / "new-root"
     H.set_data_root(monkeypatch, old)
     src, manifest = _sibling(tmp_path, old, "acme", monkeypatch=monkeypatch)
-    (H.runs_dir(old, "acme") / "case-x").mkdir()
+    (H.runs_dir(old, "acme") / CASE_X).mkdir()
     old_census = H.census(old)
     H.set_data_root(monkeypatch, new)
 
     alert = H.plant_alert(tmp_path / "in")
-    argv = [str(alert), "--run-id", "case-x", "--tenant", "acme"]
+    argv = [str(alert), "--run-id", CASE_X, "--tenant", "acme"]
     _refused(argv, H.Recorder(tmp_path / "run"))
 
     H.place_knowledge(new, "acme")  # #1120 DC2: the operator's clone, before setup
@@ -432,10 +437,10 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
 def test_unknown_tenant_with_a_pinned_run_id(tmp_path, data_root):
     """`--run-id X --tenant acme` with no row, but a hand-made <root>/acme/runs/X/: refused by
     O2 before materialize; nothing under acme/ is read, written or changed."""
-    (H.runs_dir(data_root, "acme") / "case-x").mkdir(parents=True)
-    (H.runs_dir(data_root, "acme") / "case-x" / "alert.json").write_text("{}", encoding="utf-8")
+    (H.runs_dir(data_root, "acme") / CASE_X).mkdir(parents=True)
+    (H.runs_dir(data_root, "acme") / CASE_X / "alert.json").write_text("{}", encoding="utf-8")
     before = H.census(data_root / "acme")
-    said = _refused([str(H.plant_alert(tmp_path / "in")), "--run-id", "case-x",
+    said = _refused([str(H.plant_alert(tmp_path / "in")), "--run-id", CASE_X,
                      "--tenant", "acme"], H.Recorder(tmp_path / "run"))
     H.assert_verbatim(said, H.owner_refusal(H.require_tenant, H.resolve_data_root(), "acme"),
                       entry="run.py main")

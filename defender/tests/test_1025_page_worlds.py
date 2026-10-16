@@ -672,12 +672,16 @@ def test_1025_a_declared_world_with_no_run_directory(tmp_path):
     """A manifest world that never started (no run dir, no row) still gets a section through
     the union rule, with its run-dir-derived parts marked "run directory absent", no card, and
     the nav following the sections (J8).
+
+    #1187 R2 (review-4 F38): the never-started world is in the manifest when RUNS writes the
+    roster, so the roster names it — an arm id with no folder, the design's "not started" —
+    rather than a roster missing its label, which the page shows as a refused roster read.
     """
-    ep = E.sample_episode(tmp_path)
-    manifest = E.sample_manifest()
-    manifest["worlds"].append(T.world_doc("never_started", role="D", axis="never ran",
-                                          disposition_declared="benign"))
-    T.write_family(ep.dir, manifest)
+    ep = E.sample_episode(tmp_path, extra_worlds=(
+        T.world_doc("never_started", role="D", axis="never ran", disposition_declared="benign"),))
+    assert "never_started" in T.read_roster(ep.dir), "fixture: the roster names every world"
+    assert not (ep.dir / "runs" / T.read_roster(ep.dir)["never_started"]).exists(), (
+        "fixture: the never-started world has no arm folder")
     page = render(ep)
     assert "run directory absent" in _world(page, "never_started")
     assert not [c for c in page.elements(cls="vd-cause") if "never_started" in c.text()]

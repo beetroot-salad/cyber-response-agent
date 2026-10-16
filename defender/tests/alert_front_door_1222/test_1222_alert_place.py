@@ -813,14 +813,15 @@ def _case_launcher(tmp_path: Path) -> None:
     d = _finished_run(tmp_path / "ok")
     assert d.tenant is not None
     accepted = d.tenant.accept()
-    # #1187: an episode id is a uuid (declared change 3).
-    from defender.tests._fixture_uuid import fixture_uuid
-
-    prepare(fixture_uuid("s08-ok"), Run.at(d.run_dir), data_root=accepted.data_root).close()
+    # #1187 declared change 3 (review-4 F37): the launcher's entry is
+    # `prepare_episode(runs, source, *, prime=)` — it claims a fresh UUID episode with
+    # `runs.create_episode()` and hands back the held view; no id argument, no `data_root=`.
+    runs = accepted.runs_repository()
+    prepare(runs, Run.at(d.run_dir)).close()
     bad = _finished_run(tmp_path / "bad")
     _replace_alert(bad.folder)
     with pytest.raises(Exception) as refused:  # noqa: PT011 — the refusal's class is the implementer's; its text is asserted
-        prepare(fixture_uuid("s08-bad"), Run.at(bad.run_dir), data_root=accepted.data_root).close()
+        prepare(runs, Run.at(bad.run_dir)).close()
     _assert_names_the_run_and_carries_no_byte(
         _refusal_text(refused.value, None), bad.folder, "the launcher")
     # #1187 (Layout A, O9): every episode is under its tenant's `<data root>/<T>/episodes/`; the

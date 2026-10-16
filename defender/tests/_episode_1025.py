@@ -723,12 +723,17 @@ class Episode:
 
 def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = True,  # noqa: PLR0913, C901 — one switch per record so a scenario about a record's absence names exactly that record
                    family_draw: bool = True, traces: bool = True, runs: bool = True,
-                   timing: bool = False, stamp: bool = True, samples: bool = True) -> Episode:
+                   timing: bool = False, stamp: bool = True, samples: bool = True,
+                   extra_worlds: tuple[dict[str, Any], ...] = ()) -> Episode:
     """The fresh-authkeys-SHAPED episode, suite-built (F27), every record through its writer.
 
     Switches turn a record off for the scenarios about its absence; `timing=True` adds the
-    every-step `timing.json` a post-prep launch leaves (the archives predate it, c25)."""
+    every-step `timing.json` a post-prep launch leaves (the archives predate it, c25).
+    `extra_worlds` are further manifest worlds that NEVER STARTED: in the manifest before the
+    RUNS step, so the arm roster names them (#1187 R2: one entry per manifest world), with no
+    archive, no ledger and no arm folder — the design's never-started world (review-4 F38)."""
     manifest = sample_manifest()
+    manifest["worlds"].extend(dict(w) for w in extra_worlds)
     ep = J.accepted_episode(
         tmp_path, root=root, worlds=manifest["worlds"], labels=WORLDS, family_stamp=False,
         dispositions={CONTROL: "malicious", PASSTHROUGH_WORLD: "benign", GRADED_WORLD: "malicious"},

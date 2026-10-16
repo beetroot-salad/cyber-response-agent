@@ -86,13 +86,17 @@ def test_a_linked_outcome_record_holding_accepted_is_refused_by_both_readers(tmp
     host = tmp_path / "host"
     host.mkdir()
     record = ep / LAYOUT.outcome
+    # Both halves read through the episode's WALKED view (review-3 F32 / review-4 F36: the
+    # readers take the view and no `Path`), opened OUTSIDE `pytest.raises`, so a view that
+    # cannot be opened fails as itself instead of satisfying the refusal below.
+    read = getattr(episode, reader)
     # Control: the plain accepted record passes the gate.
-    getattr(episode, reader)(ep)
+    J.through_view(ep, read)
     record.rename(host / "outcome.yaml")
     record.symlink_to(host / "outcome.yaml")
     # A followed link would read `accepted` and pass; the gate refuses it instead.
-    with pytest.raises(episode.EpisodeError):
-        getattr(episode, reader)(ep)
+    with J.walked_view(ep) as view, pytest.raises(episode.EpisodeError):
+        read(view)
 
 
 # ---------------------------------------------------------------------------------------

@@ -64,7 +64,6 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender import _io
 from defender._episode_paths import LAYOUT
 from defender.tests import _judge_921 as J
@@ -956,11 +955,14 @@ def test_r3_zero_rows_are_refused_by_default_and_primed_empty_with_allow_empty(t
         (LAYOUT.served_base, "create", "")], writes
 
 
-def _launcher(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
+def _launcher(tmp_path: Path) -> tuple[Any, Path, Any]:
+    """`(cli, the source run dir, T's runs repository)` — the launcher's entry
+    `cli.prepare_episode(runs, source, *, prime=)` (#1187 declared change 3, review-4 F37: the
+    episode is claimed by `runs.create_episode()`, a fresh UUID under `<T>/episodes/`; the
+    retired `episode_dir` resolver names nothing)."""
     cli = mod("learning.branch.cli")
     _base, src = T.runs_base(tmp_path)
-    tenant = T.current_tenant()
-    return cli, src, tenant, EH.episode_dir(tenant.data_root, T.EPISODE_ID)
+    return cli, src, T.current_tenant().runs_repository()
 
 
 def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
@@ -968,12 +970,16 @@ def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
     """The launcher's default primer is `prime_base(..., allow_empty=True)`: a source whose
     capture yields no row gets an EMPTY base (a plain file), with a warning that every key
     reaches the live estate; there is no message-matched downgrade left to create it a second
-    time (`_is_empty_capture` is removed)."""
-    cli, src, tenant, ep = _launcher(tmp_path)
+    time (`_is_empty_capture` is removed). Through `prepare_episode(runs, source)` with no
+    `prime=` (review-4 F37), the episode it claimed is under `<T>/episodes/`."""
+    cli, src, runs = _launcher(tmp_path)
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     caplog.set_level(logging.WARNING)
-    with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root) as episode:
-        assert Path(episode.dir) == ep
+    with cli.prepare_episode(runs, Run.at(src)) as view:
+        ep = Path(view.episode.dir)
+        assert ep.name == view.episode_id
+    assert ep.parent == Path(T.current_tenant().episodes), (
+        f"the launcher claimed {ep}, not an episode under <T>/episodes/")
     base = ep / LAYOUT.served_base
     assert base.read_bytes() == b""
     assert stat.S_ISREG(os.lstat(base).st_mode)

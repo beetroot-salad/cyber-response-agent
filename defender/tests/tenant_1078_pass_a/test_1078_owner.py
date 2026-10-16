@@ -98,9 +98,9 @@ def test_o3_valid_id_round_trip(tmp_path, monkeypatch, tenant_id):
     assert H.require_tenant(root, tenant_id).tenant_id == tenant_id
     assert H.TenantPaths(root, tenant_id).runs == root / tenant_id / "runs"
     base = H.runs_dir(root, tenant_id)
-    H.plant_record(base, tenant_id)
+    # #1187 R1 (review-4 F42): no container record — the run's tenant is where it sits.
     run_dir = base / RUN_ID
-    run_dir.mkdir()
+    run_dir.mkdir(parents=True)
     assert _opened_tenant(root, tenant_id, RUN_ID) == tenant_id
 
 
@@ -484,8 +484,8 @@ def _d0_return_values(root: Path) -> None:
         assert value.is_absolute()
         assert paths.dir in value.parents, f"TenantPaths.{name} is not under .dir"
     base = H.runs_dir(root, "playground")
-    H.plant_record(base, "playground")
-    (base / RUN_ID).mkdir()
+    # #1187 R1 (review-4 F42): no container record — the run's tenant is where it sits.
+    (base / RUN_ID).mkdir(parents=True)
     derived = _opened_tenant(root, "playground", RUN_ID)
     assert derived == "playground"
     assert isinstance(derived, H.tenant().TenantId)  # a str subtype: the id, parsed

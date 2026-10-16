@@ -315,17 +315,30 @@ def _header_markers() -> list[str]:
 
 
 def _rewrite_manifest(ep: Path, edit: Callable[[dict], None]) -> None:
+    """Edit the archived family's manifest. When the edit renames a world, the arm roster is
+    re-planted from the edited manifest (#1187 R2, review-4 F38): a launch writes its roster
+    from the manifest it wrote, so a roster still naming the old label would make the episode
+    refuse for a roster/manifest mismatch — a second cause in front of the one the scenario
+    is about. (`S.family` makes no arm folders, so nothing is orphaned.)"""
     manifest = ep / "family.yaml"
     doc = _yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    before = [w.get("world_id") for w in doc.get("worlds") or []]
     edit(doc)
     manifest.write_text(_yaml.safe_dump(doc), encoding="utf-8")
+    roster = ep / S.T.ROSTER_NAME
+    if roster.is_file() and [w.get("world_id") for w in doc.get("worlds") or []] != before:
+        roster.unlink()
+        S.T.plant_roster(ep)
 
 
 def _load_refusal(ep: Path) -> BaseException | None:
-    """`load_family` over the episode's manifest: the `FamilyError` it raised, or `None`."""
+    """`load_family` over the episode's manifest: the `FamilyError` it raised, or `None`. The
+    expected id is the episode's own folder name (#1187 R5: a required keyword; review-4 F36),
+    so a refusal here is the manifest's, never a missing argument's."""
+    load = S.sym(S.FAMILY_LOADER, "load_family")
     with S.mod("_io").bind(ep) as bound:
         return _raised(S.sym(S.FAMILY_LOADER, "FamilyError"),
-                       S.sym(S.FAMILY_LOADER, "load_family"), bound)
+                       lambda: load(bound, expected_episode_id=Path(ep).name))
 
 
 # --------------------------------------------------------------------------------------

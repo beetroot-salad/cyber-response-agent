@@ -1480,8 +1480,11 @@ def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
             'outcome: accepted\nreason: "the launcher was killed mid-wri', encoding="utf-8")
 
     error = S.sym(S.EPISODE, "EpisodeError")
-    with pytest.raises(error) as refused:
-        S.sym(S.EPISODE, "verdicts")(ep)
+    # review-3 F32 / review-4 F36: the reader takes the episode's WALKED view and no `Path`;
+    # the view is opened outside `pytest.raises`, so a view that cannot be opened fails as
+    # itself rather than satisfying the refusal.
+    with J.walked_view(ep) as view, pytest.raises(error) as refused:
+        S.sym(S.EPISODE, "verdicts")(view)
     assert S.OUTCOME_NAME in str(refused.value)
 
     judge = S.FakeJudge(default="unused")
