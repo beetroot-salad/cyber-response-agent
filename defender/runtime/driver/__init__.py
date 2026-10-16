@@ -283,7 +283,7 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
         # Two failures end the run by name. Concurrent leads may deliver either inside an
         # exception group; a group that carries neither propagates as itself.
         failed = _carried(e, run_end.CallRecordWriteFailed)
-        down = _carried(e, providers.ProviderDown)
+        down = _carried_alone(e, providers.ProviderDown)
         if failed is not None:
             # A call record the run could not write (A12, #1234), stamped with the record that
             # failed.
@@ -326,6 +326,23 @@ def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
 
 
 _E = TypeVar("_E", bound=BaseException)
+
+
+def _carried_alone(exc: BaseException, kind: type[_E]) -> _E | None:
+    """The `kind` that `exc` is, or that an exception group carries as its ONLY kind of
+    leaf. A group that also carries another failure (an interrupt, a kill) is not that
+    `kind`'s to end the run with: it propagates, as before."""
+    found = _carried(exc, kind)
+    if found is None:
+        return None
+    leaves = [exc]
+    while leaves:
+        leaf = leaves.pop()
+        if isinstance(leaf, BaseExceptionGroup):
+            leaves.extend(leaf.exceptions)
+        elif not isinstance(leaf, kind):
+            return None
+    return found
 
 
 def _carried(exc: BaseException, kind: type[_E]) -> _E | None:
@@ -512,7 +529,7 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         return None, stop(session_store.TRUNCATED_BY_STORE, "StoreAppendError")
     except BaseException as e:
         # A provider that stayed down (#1243) may arrive inside an exception group.
-        down = _carried(e, providers.ProviderDown)
+        down = _carried_alone(e, providers.ProviderDown)
         if down is not None:
             _logger.error(f"{down}; stopping before the agent starts")
             return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")

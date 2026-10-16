@@ -259,6 +259,16 @@ async def _run_lenses(
     return [r for r in settled if isinstance(r, StageOutcome)]
 
 
+def _mark_round_for_provider_down(deps: Any, round_no: int, down: ProviderDown) -> None:
+    """Mark the round's traces incomplete before the run ends on `down`. The marker is
+    best-effort here: a trace file that cannot be written must not replace the `ProviderDown`
+    that ends the run (exit 4, no verdict) with an `OSError`."""
+    try:
+        _mark_traces_incomplete(deps, round_no, str(down))
+    except OSError as exc:
+        _logger.warning(f"the review round's incomplete marker could not be written ({exc!r})")
+
+
 async def _run_composer(
     deps: Any, round_no: int, stages: Any, bounds: Bounds, render: Callable[[str], str],
 ) -> StageOutcome:
@@ -267,7 +277,7 @@ async def _run_composer(
     try:
         return await _dispatch("composer", stages, render, bounds)
     except ProviderDown as down:
-        _mark_traces_incomplete(deps, round_no, str(down))
+        _mark_round_for_provider_down(deps, round_no, down)
         raise
 
 
@@ -280,7 +290,7 @@ def _end_run_if_provider_down(
     marked incomplete first."""
     for result in settled:
         if isinstance(result, ProviderDown):
-            _mark_traces_incomplete(deps, round_no, str(result))
+            _mark_round_for_provider_down(deps, round_no, result)
             raise result
 
 
