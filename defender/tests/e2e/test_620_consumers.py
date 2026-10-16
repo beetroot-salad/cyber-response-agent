@@ -1029,6 +1029,51 @@ def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label
     )
 
 
+#: Every top-level definition of the adapter's settings check: a `def` block (up to the next
+#: top-level line) or a module-level assignment — so an arm that removes it removes it for a
+#: reader that imports the module and for one that reads its AST alike.
+_CHECK_SETTINGS_DEF = re.compile(r"(?ms)^def check_settings\(.*?(?=^\S|\Z)|^check_settings\s*[:=][^\n]*\n")
+_STUB_CHECK = "\n\ndef check_settings(tenant):\n    return None\n"
+
+
+def _with_settings_check(source: str, arm: str) -> str:
+    """The copied cmdb adapter as each arm needs it: `declared` keeps the adapter's own check
+    (appending a stub that answers "usable" only when it declares none), `none` removes every
+    definition, `not-callable` binds the name to a string instead."""
+    declared = _CHECK_SETTINGS_DEF.search(source) is not None
+    if arm == "declared":
+        return source if declared else source + _STUB_CHECK
+    stripped = _CHECK_SETTINGS_DEF.sub("", source)
+    assert _CHECK_SETTINGS_DEF.search(stripped) is None, "a check_settings definition survived"
+    if arm == "none":
+        return stripped
+    assert arm == "not-callable", arm
+    return stripped + '\n\ncheck_settings = "FD1256 a settings check that is not a function"\n'
+
+
+@pytest.mark.parametrize("arm", ["none", "not-callable"])
+def test_validate_scaffold_fails_an_adapter_without_a_callable_settings_check(tmp_path, arm):
+    """#1256 r4 "one maker for a down cause": the one function that judges an adapter is the start check's, the call-time escape's and the connect scaffold validator's, so the validator FAILS an adapter that declares no `check_settings` (K1: each adapter declares one) — and one whose `check_settings` is not callable — with a row naming `check_settings`. Discriminating control: the SAME tree whose adapter declares a callable check passes, so the FAIL is the check's absence, not an incidental scaffold defect. Red at base, whose validator never looks for the check."""
+    def tree(name: str, which: str) -> Path:
+        root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
+        adapter = root / "scripts" / "adapters" / "cmdb_adapter.py"
+        adapter.write_text(_with_settings_check(adapter.read_text(encoding="utf-8"), which),
+                           encoding="utf-8")
+        return root
+
+    good = _run_validate_scaffold("cmdb", defender_dir=tree(f"declared-{arm}", "declared"))
+    assert good.returncode == 0, (
+        "the control tree (its adapter declares a callable check_settings) did not pass — the "
+        f"FAIL below cannot be attributed to the check\nstdout:\n{good.stdout}\n{good.stderr}")
+    bad = _run_validate_scaffold("cmdb", defender_dir=tree(arm, arm))
+    assert bad.returncode != 0, (
+        f"validate_scaffold passed an adapter whose check_settings is {arm!r} (#1256 r4: the "
+        f"validator judges an adapter as run start does)\nstdout:\n{bad.stdout}")
+    assert "check_settings" in bad.stdout, (
+        f"validate_scaffold FAILED for some other reason than the missing check (expected a row "
+        f"naming check_settings)\nstdout:\n{bad.stdout}")
+
+
 def test_validate_scaffold_enforces_placeholder_invariant(tmp_path):
     """validate_scaffold_enforces_placeholder_invariant — validate_scaffold FAILS a template whose
     ${placeholder} is neither a declared param of the template's verb nor a marked body

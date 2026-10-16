@@ -1,0 +1,201 @@
+"""#1256 r4 — "one maker for a down cause": a single function judges an adapter and produces its
+path-hidden reason, used by the start check, the call-time escape path (O-5b) and the connect
+scaffold validator (whose arm is `e2e/test_620_consumers.py`'s).
+
+What a run shows of it here:
+
+* An escaped call-time `ConfigFault` whose text names the adapters roster the run reads — a
+  roster OUTSIDE the defender tree, reached through a link (#1172 moves the adapters to the lab
+  tenant's repository) — reaches the model with that path hidden in both spellings, as a
+  start-time reason naming the same roster is (A6's rule, here over a roster no defender-tree
+  redaction covers).
+* Hiding a path respects path boundaries: a fault text naming a path that merely SHARES A PREFIX
+  with the data root, the tenant's folder or its settings folder (`<root>base/…`, `<root>2/…`)
+  shows that path whole, or hides it whole — never with the shared prefix rewritten and the rest
+  left dangling (`<data root>base/…`). Read as: every occurrence of the path's tail keeps the
+  path's own last directory name and the separator before it (`/<name><tail>`), which an intact
+  path and a hidden ANCESTOR both keep and a prefix rewrite loses.
+
+Both drive the real driver through `_replay_harness.drive`; the model-visible text is every
+request the doubles received after the escaping call.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from defender.runtime.verbs import read_roster
+from defender.tests import _tenants1106 as T6
+from defender.tests.e2e import _lead_zero_808 as LZ
+from defender.tests.e2e import _replay_harness as RH
+from defender.tests.tenant_1107_settings import _spec1107 as S7
+
+#: What the escaped call-time fault carries, so its reaching the model is observable.
+CALL_MARK = "FD1256-ONE-MAKER-CALL"
+#: What the broken adapter's start-time check carries.
+START_MARK = "FD1256-ONE-MAKER-START"
+
+_LEAD = ("gather", {"lead_id": "l-001", "system": "cmdb", "goal": "who is web-1",
+                    "what_to_summarize": ["web-1's owner"]})
+
+
+def _get_host(host: str) -> tuple[str, dict]:
+    return ("query", {"system": "cmdb", "verb": "get-host", "params": {"host": host}})
+
+
+def _doubles() -> tuple[RH.ReplayFn, RH.ReplayFn]:
+    """MAIN dispatches one cmdb lead; the lead asks cmdb twice (the escape, then a call to a
+    system down since), then summarises."""
+    main = RH.ReplayFn([RH.Turn(tool_calls=[_LEAD]), RH.Turn(text="Investigation complete.")])
+    gather = RH.ReplayFn([RH.Turn(tool_calls=[_get_host("web-1")]),
+                          RH.Turn(tool_calls=[_get_host("web-2")]),
+                          RH.Turn(text="Summary: asked cmdb who web-1 is.")])
+    return main, gather
+
+
+def _after_escape(main: RH.ReplayFn, gather: RH.ReplayFn) -> str:
+    """Everything the models were handed after the escaping call: every later gather request,
+    and every MAIN request after its dispatch."""
+    return "\n".join([*gather.seen[1:], *main.seen[1:]])
+
+
+# =================================================================================================
+# A roster outside the defender tree: its path is hidden at call time as at start
+# =================================================================================================
+
+def _roster_adapters(given: Path, resolved: Path) -> dict[str, str]:
+    """cmdb, usable at start, whose `get-host` raises a ConfigFault naming its own file in the
+    roster (both spellings); elastic, whose check raises a non-ConfigFault naming its own file
+    (Down(AdapterBroken) at start, O-5a)."""
+    spelled = f"{given}/{{name}} ({resolved}/{{name}})"
+    cmdb = f'''\
+"""#1256 planted: a cmdb adapter in a roster outside the defender tree."""
+from defender.scripts.adapters.faults import ConfigFault
+
+
+def check_settings(*_a, **_k):
+    return None
+
+
+def get_host(ctx, *, host: str) -> dict:
+    raise ConfigFault("{CALL_MARK}: cannot read {spelled.format(name="cmdb_adapter.py")} - "
+                      "this tenant's settings do not configure this system")
+
+
+def list_hosts(ctx, *, role=None, criticality=None, owner=None) -> dict:
+    return {{"hosts": [], "planted": True}}
+
+
+def health_check(ctx) -> dict:
+    return {{"ok": True, "planted": True}}
+
+
+VERBS = {{"get-host": get_host, "list-hosts": list_hosts, "health-check": health_check}}
+'''
+    elastic = f'''\
+"""#1256 planted: an elastic adapter in a roster outside the defender tree, broken at start."""
+
+
+def check_settings(*_a, **_k):
+    raise RuntimeError("{START_MARK}: cannot load {spelled.format(name="elastic_adapter.py")}")
+
+
+def _search(ctx, *, native_query: str, start=None, end=None, limit: int = 20, index=None,
+            sort: str = "desc") -> dict:
+    return {{"hits": [], "planted": True}}
+
+
+def esql(ctx, *, query: str) -> dict:
+    return {{"values": [], "planted": True}}
+
+
+def health_check(ctx) -> dict:
+    return {{"ok": True, "planted": True}}
+
+
+VERBS = {{"health-check": health_check, "query": _search, "alerts": _search, "esql": esql}}
+'''
+    return {"cmdb": cmdb, "elastic": elastic}
+
+
+def test_an_escaped_fault_naming_an_out_of_tree_roster_reaches_the_model_with_that_path_hidden(
+        tmp_path: Path) -> None:
+    """r4 "one maker": the run reads its adapters from a roster outside the defender tree, reached through a link. cmdb passes its start check; its `get-host` then raises a ConfigFault whose text names its own file in that roster, as linked and as resolved (O-5b). That reason reaches the gather model (the refusal of a system down since carries it) with neither spelling of the roster — as the start-time reason of elastic, whose check crashes naming its own file in the same roster, reaches MAIN's opening message and gather's index beside elastic with neither. Red at base, which hides only the settings folder."""
+    real = tmp_path / "lab-checkout" / "adapters"
+    real.mkdir(parents=True)
+    link = tmp_path / "lab-roster"
+    link.symlink_to(real.parent, target_is_directory=True)
+    given, resolved = link / "adapters", real.resolve()
+    spellings = sorted({str(given), str(resolved)})
+    assert len(spellings) == 2, f"premise: the roster's two spellings coincide: {spellings}"
+    for system, source in _roster_adapters(given, resolved).items():
+        (real / f"{system}_adapter.py").write_text(source, encoding="utf-8")
+    root = tmp_path / "data"
+    S7.plant(root, marker="om1256", table=T6.TABLE_A)
+    run_dir = LZ.materialize_alert(tmp_path / "replay", LZ.alert_doc(ancestors=[]))
+    main, gather = _doubles()
+
+    RH.drive(run_dir, run_id="om1256", main=main, gather=gather, roster=read_roster(given),
+             tenant=S7.tenant_folder_of(root))
+
+    after = _after_escape(main, gather)
+    assert CALL_MARK in after, (
+        f"premise: the escaped fault's reason never reached the gather model (gather was asked "
+        f"{len(gather.seen)} times):\n{after[-2000:]}")
+    leaked = [s for s in spellings if s in after]
+    assert not leaked, (
+        f"an escaped call-time fault reached the model naming the adapters roster {leaked} — the "
+        f"one maker hides it, as it does a start-time reason (r4, A6)")
+    for where, text in (("MAIN's opening message", main.seen[0]),
+                        ("gather's system index", gather.seen[0])):
+        shown = [ln for ln in text.splitlines() if "elastic" in ln and START_MARK in ln]
+        assert shown, (
+            f"{where} does not show elastic down with its start-time reason ({START_MARK}) on "
+            f"its line (O-5a, flow step 4)")
+        leaked = [s for s in spellings if s in text]
+        assert not leaked, f"{where} names the adapters roster {leaked} (A6)"
+
+
+# =================================================================================================
+# Hiding a path respects path boundaries
+# =================================================================================================
+
+def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """r4 "one maker", the boundary half: an escaped call-time ConfigFault (O-5b) names three paths that SHARE A PREFIX with a path a reason hides — the data root's sibling `<root>base/…`, the tenant folder's `<tenant>base/…`, the settings folder's `<settings>2/…` — none of them inside the folder whose name it extends. Each reaches the model whole, or hidden whole (with its ancestors, up to a separator), never with the shared prefix rewritten and its rest left dangling (`<data root>base/…`, `the tenant's settings2/…`). Red at base, whose settings redaction rewrites `<settings>2/…` into `the tenant's settings2/…` (a #1107 CX5 replace that is not boundary-aware, reached by the escaped fault's reason)."""
+    shim = S7.DockerShim(tmp_path / "docker")
+    monkeypatch.setenv("PATH", shim.path_value())
+    root = tmp_path / "tenants-bnd1256"
+    S7.plant(root, marker="bnd1256")
+    tenant = S7.tenant_folder_of(root)
+    settings = Path(tenant.settings)
+    siblings: dict[str, tuple[Path, str]] = {
+        "the data root's": (root, "base/fd1256-root.conf"),
+        "the tenant folder's": (root / S7.PLAYGROUND_ID, "base/fd1256-tenant.conf"),
+        "the settings folder's": (settings, "2/fd1256-settings.txt"),
+    }
+    paths = [f"{prefix}{tail}" for prefix, tail in siblings.values()]
+
+    def get_host(ctx: Any, *, host: str = "web-1") -> dict:
+        raise S7.config_fault()(
+            f"{CALL_MARK}: cannot read {', '.join(paths)} - this tenant's settings do not "
+            f"configure this system")
+
+    run_dir = LZ.materialize_alert(tmp_path / "replay", LZ.alert_doc(ancestors=[]))
+    main, gather = _doubles()
+    RH.drive(run_dir, run_id="bnd1256", main=main, gather=gather, tenant=tenant,
+             verbs=RH.FakeVerbs({"cmdb": {"get-host": get_host}}))
+
+    after = _after_escape(main, gather)
+    assert CALL_MARK in after, (
+        f"premise: the escaped fault's reason never reached the gather model:\n{after[-2000:]}")
+    for whose, (prefix, tail) in siblings.items():
+        bounded = f"/{prefix.name}{tail}"
+        assert after.count(tail) == after.count(bounded), (
+            f"a path sharing {whose} prefix reached the model partly rewritten — its tail "
+            f"{tail!r} no longer follows its own directory name {prefix.name!r} (r4: the one "
+            f"maker hides whole paths): "
+            f"{[ln for ln in after.splitlines() if tail in ln][:3]}")
+    assert shim.calls() == [], shim.calls()
