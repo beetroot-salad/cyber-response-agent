@@ -21,6 +21,7 @@ author it hands it to); slice authors ask for changes rather than edit it.
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import uuid
@@ -326,6 +327,62 @@ def identities(root: Path, names: Iterable[str] | None = None) -> dict[str, tupl
                 continue
             st = os.lstat(path)
             out[rel.as_posix()] = (st.st_dev, st.st_ino)
+    return out
+
+
+# ------------------------------------------------------------------------------------------
+# The censuses' local-value resolution (adversary F1, F2: a census matching a spelling is
+# defeated by binding the value to another name first — `ep = episode_id; f"{ep}-{label}"`)
+# ------------------------------------------------------------------------------------------
+
+def bound_values(scope: ast.AST) -> dict[str, list[ast.expr]]:
+    """`{name: [values]}`: every value `scope`'s OWN statements bind a plain name to — `x = v`
+    (each name of `a = b = v`), `x: T = v`, `(x := v)` — nested functions, lambdas and classes
+    excluded (their names are theirs). Unpacking and loop targets are not traced."""
+    out: dict[str, list[ast.expr]] = {}
+
+    def walk(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                                  ast.ClassDef)):
+                continue
+            if isinstance(child, ast.Assign):
+                for target in child.targets:
+                    if isinstance(target, ast.Name):
+                        out.setdefault(target.id, []).append(child.value)
+            elif (isinstance(child, ast.AnnAssign) and child.value is not None
+                  and isinstance(child.target, ast.Name)) or isinstance(child, ast.NamedExpr):
+                out.setdefault(child.target.id, []).append(child.value)
+            walk(child)
+
+    walk(scope)
+    return out
+
+
+def spells(node: ast.AST, needle: str, values: Mapping[str, list[ast.expr]],
+           _seen: frozenset[str] = frozenset()) -> bool:
+    """Does `node`'s source spell `needle`, directly or through a name a plain assignment in
+    the same scope bound to something that does (transitively: `a = episode_id; b = a`)?"""
+    if needle in ast.unparse(node):
+        return True
+    names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} - _seen
+    return any(spells(value, needle, values, _seen | {name})
+               for name in sorted(names) for value in values.get(name, ()))
+
+
+def scoped_nodes(tree: ast.AST) -> list[tuple[ast.AST, dict[str, list[ast.expr]]]]:
+    """Every node of `tree` with the `bound_values` of the scope it sits in (the module, or
+    its innermost enclosing function or lambda)."""
+    out: list[tuple[ast.AST, dict[str, list[ast.expr]]]] = []
+
+    def walk(node: ast.AST, values: dict[str, list[ast.expr]]) -> None:
+        for child in ast.iter_child_nodes(node):
+            out.append((child, values))
+            inner = (bound_values(child) if isinstance(
+                child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) else values)
+            walk(child, inner)
+
+    walk(tree, bound_values(tree))
     return out
 
 
