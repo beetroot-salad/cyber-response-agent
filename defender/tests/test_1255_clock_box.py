@@ -26,30 +26,53 @@ a run through the dossier's composition — for a natural run and for an arm of 
     of the clock target and of a file under it, and no such call reaches the box. Positive
     control, same agents and box: the run's alert at its model path reads back, and its `cat`
     reaches the box.
-  * K3: the preload is configured for every run — on the create command (`LD_PRELOAD`) or in the
-    box image recipe — and every preload/clock variable on the create command is the same for
-    an arm as for a natural run (same shape).
+  * K1 (content): the clock mount's SOURCE — a host file, so it is observable with no box —
+    holds the run clock's reading once the run has started and its box has run a command: for
+    a natural run, its clock source's reading; for an arm, the source's reading at the branch
+    point (rev 5 C4), never the arm's own clock source's. An empty file nothing writes, or one
+    holding the wall time or a zero offset, is a mount with no clock in it.
+  * K3: the preload is configured for every run — on the create command (`LD_PRELOAD`) or by an
+    INSTRUCTION of the box image recipe (an `ENV LD_PRELOAD=…`, or an instruction naming
+    `/etc/ld.so.preload`), read the way BuildKit reads the recipe: a comment configures
+    nothing — and an arm's box carries the same time configuration as a natural run's (same
+    preload, same preload/clock variables, the clock mount at the same target), with a preload
+    present on both sides so the comparison is never of two empty sets.
+
+What K3 accepts is deliberately only "a preload is configured", never how the library gets into
+the box: the design says "a time-faking library preloaded in the box image for every run,
+reading the run clock from a small read-only file in its own mount", and the owner has not
+decided how the image obtains it (OPEN: `test_1092_dockerfile` today pins the recipe word for
+word — six instructions, no `ENV`, one `COPY` of the two lock files, the box extra exactly
+`duckdb` and `pytz` — which leaves no recipe route for a preload at all; that conflict is the
+owner's to settle, not this file's).
 
 The live half (`live` marker, skipped in CI and here) is K4: inside a real box, the six SQL
 spellings U3 found and python's own clock read the run clock, not the wall clock — for a
 natural run, and for an arm, whose in-box time is the source's reading at the branch point plus
 the arm's own seconds (rev 5 C4), never its own clock source's.
 
-What the clock FILE holds is not checked statically: the design fixes neither its format (an
-offset — "a natural run reads an offset of zero" — or an absolute time, and in what spelling)
-nor when the host rewrites it (the run clock pauses for oracle turns, so its content moves
-during the run, after the box is created). A static assertion on its content would fix one of
-those for the implementation, so that the arm's file reflects `R` is asserted live only, by
-what the box's clocks read (K4).
+What the clock FILE holds is checked statically WITHOUT fixing its format or its rewrite
+schedule, neither of which the design fixes (an offset — "a natural run reads an offset of zero"
+— or an absolute time, in what spelling; and when the host rewrites it, since the run clock
+pauses for oracle turns). K1 (content) reads the file at a point where the run clock has not
+moved since the run started — after the box's first command, so a host that writes it per
+command is read after a write — and accepts any common spelling that DECODES to the run clock's
+reading there: an ISO-8601 time, epoch seconds or milliseconds, or a signed offset in
+seconds (or `s`/`m`/`h`/`d` units) from the wall clock — the offset the box's own wall clock
+needs to read the run clock, which is what K4 then asserts live. Contract-repair finding F-K1:
+an empty file mounted at `/clock` and a preload named only in a Dockerfile comment passed every
+static check here.
 
 Slice B owns every other assertion about the box's mounts and environment; nothing here names
 a model path.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import functools
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -188,6 +211,148 @@ def test_k1_an_arms_box_carries_its_clock_mount_at_the_natural_runs_target(natur
         f"the arm's clock mount source {source} exposes one of its trees")
 
 
+#: Any ISO-8601-like time in the clock file (`T` or space, optional fraction and zone; a
+#: libfaketime-style `@` before it is just a neighbour).
+_ISO_IN_FILE = re.compile(
+    r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})?")
+#: Any number in the clock file, with an optional sign and unit (`+139000000`, `-3.5d`, `1.9e9`
+#: spelled out) — read as epoch seconds or milliseconds, or as an offset from the wall clock.
+_NUMBER_IN_FILE = re.compile(r"(?<![\w.])([+-]?)(\d+(?:\.\d+)?)([smhd]?)(?![\w.])")
+_UNIT_SECONDS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+#: How far a decoded reading may sit from the run clock's: the file is read a moment after it
+#: was written, and an offset is applied to the wall clock at the READ.
+_FILE_SLACK = dt.timedelta(minutes=2)
+
+
+def _clock_file_readings(text: str, wall: dt.datetime) -> list[tuple[str, dt.datetime]]:
+    """Every instant the clock file's text can be read as, with how: an absolute time in it,
+    a number as epoch seconds or milliseconds, or a signed number of seconds (or `s`/`m`/`h`/`d`)
+    as an offset from `wall`. The test's own decoding of the spellings the design leaves open;
+    nothing about production's format is assumed beyond "an offset or an absolute time"."""
+    out: list[tuple[str, dt.datetime]] = []
+    for m in _ISO_IN_FILE.finditer(text):
+        zone = m.group(4) or "Z"
+        if zone != "Z" and ":" not in zone:
+            zone = f"{zone[:3]}:{zone[3:]}"
+        moment = C.instant(f"{m.group(1)}T{m.group(2)}{m.group(3) or ''}{zone}")
+        if moment is not None:
+            out.append(("an absolute time", moment))
+    for m in _NUMBER_IN_FILE.finditer(text):
+        sign, digits, unit = m.groups()
+        value = float(digits) * _UNIT_SECONDS[unit] * (-1 if sign == "-" else 1)
+        if not sign and not unit:
+            for scale, how in ((1, "epoch seconds"), (1000, "epoch milliseconds")):
+                with contextlib.suppress(OverflowError, OSError, ValueError):
+                    out.append((how, dt.datetime.fromtimestamp(value / scale, dt.UTC)))
+        with contextlib.suppress(OverflowError):
+            out.append(("an offset from the wall clock", wall + dt.timedelta(seconds=value)))
+    return out
+
+
+def _clock_file_probe(docker: RecordingDocker, seen: dict[str, Any]) -> Any:
+    """A MAIN turn (a callable over the request text) that, while the run is live and after its
+    box has run the previous turn's command, reads the clock mount's SOURCE on the host — the
+    one read-only bind outside the model roots (K1's rule), a file or a folder of files — and
+    the wall clock at that read, into `seen`, then ends the run."""
+
+    def probe(_text: str) -> Any:
+        mounts = [m for m in docker.mounts()
+                  if m["readonly"] and not V.under_model_root(m["target"])]
+        seen["mounts"] = mounts
+        seen["wall"] = dt.datetime.now(dt.UTC)
+        if len(mounts) == 1:
+            source = Path(mounts[0]["source"])
+            files = [source] if source.is_file() else sorted(
+                p for p in source.rglob("*") if p.is_file()) if source.is_dir() else []
+            seen["files"] = [str(p) for p in files]
+            seen["text"] = "\n".join(p.read_text(encoding="utf-8", errors="replace")
+                                     for p in files)
+        return C.DONE
+
+    return probe
+
+
+def _clock_file_after_a_command(argv: list[str], clock: C.FakeClock,
+                                ) -> tuple[dict[str, Any], C.Launched, RecordingDocker]:
+    """`run.main(argv)` through the dossier's composition over the recording docker, its MAIN a
+    two-step script that takes no run-clock time: a `cat` of the run's alert at its model path
+    (a command that reaches the box — K2's positive control), then `_clock_file_probe`."""
+    docker = RecordingDocker()
+    seen: dict[str, Any] = {}
+    out = C.run_main(argv, clock=clock,
+                     main=C.script(clock, (0, C.bash(f"cat {V.MODEL_ALERT}")),
+                                   (0, _clock_file_probe(docker, seen))),
+                     start_box=functools.partial(box_mod.start_box, docker=docker,
+                                                 spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS)))
+    return seen, out, docker
+
+
+def _assert_clock_file_reads(seen: dict[str, Any], out: C.Launched, reading: dt.datetime,
+                             not_reading: dt.datetime | None = None) -> None:
+    """The clock file `seen` read decodes to `reading` (within `_FILE_SLACK`), and — when given —
+    to nothing near `not_reading` (the arm's own clock source)."""
+    assert "mounts" in seen, (
+        f"the run never reached the probe turn: exit={out.exit} refusal={out.refusal} "
+        f"summary={str(out.summary)[:300]}")
+    assert len(seen["mounts"]) == 1, f"no single clock mount to read (K1): {seen['mounts']}"
+    text = seen.get("text", "")
+    assert text.strip(), (
+        f"the clock mount's source holds nothing once the run is live and its box has run a "
+        f"command ({seen.get('files')}): nothing writes the run clock into it")
+    readings = _clock_file_readings(text, seen["wall"])
+    near = [(how, m) for how, m in readings if abs(m - reading) <= _FILE_SLACK]
+    assert near, (
+        f"the clock file does not hold the run clock's reading {reading.isoformat()} in any "
+        f"spelling (absolute time, epoch, or offset from the wall clock): {text[:200]!r} reads "
+        f"as {[(how, m.isoformat()) for how, m in readings][:8]}")
+    if not_reading is not None:
+        wrong = [(how, m) for how, m in readings if abs(m - not_reading) <= _FILE_SLACK]
+        assert not wrong, (
+            f"the arm's clock file holds its own clock source's reading "
+            f"{not_reading.isoformat()}: {text[:200]!r}")
+
+
+def test_k1_a_natural_runs_clock_file_holds_the_run_clocks_reading(tmp_path, monkeypatch):
+    """Into the box, every run (F-K1): the clock mount is a CLOCK — once a natural run is live
+    and its box has run a command, the mount's source file, read on the host, holds the run
+    clock's reading: its clock source's `START` (2031, years from the wall clock), as an
+    absolute time or as the offset the box's wall clock needs (see the module docstring for
+    the spellings accepted). An empty file nothing writes fails; so does the wall time, or an
+    offset of zero from it.
+
+    Positive control: K1's mount rule finds exactly one clock mount on this run's create
+    command (the source read is that mount's). Today: no clock mount exists."""
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
+    base, seed = T.runs_base(tmp_path)
+    tenant_id = T.mod("_tenant").read_tenant(base).tenant_id
+
+    seen, out, _docker = _clock_file_after_a_command(
+        C.natural_argv(RunPaths(seed).alert, tenant_id), C.FakeClock(START))
+
+    _assert_clock_file_reads(seen, out, START)
+
+
+def test_k1_an_arms_clock_file_holds_its_run_clocks_reading_not_its_sources(tmp_path,
+                                                                           monkeypatch):
+    """Into the box, an ARM (F-K1, rev 5 C4): the arm's clock mount source holds the ARM's run
+    clock — the source's reading at the branch point (`R = START+610`), the arm having taken no
+    seconds of its own — never its own clock source's reading (`ARM_START`, 2040) and not the
+    wall clock. This is K4's arm demand made observable without a box: K4 then asserts live
+    that the box's clocks read what this file says."""
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    tenant_id, source = C.record_source(tmp_path)
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
+    branch = C.branch_response(source, tool="read_file", arg_suffix=f"/{L2}.md")
+    ep = C.control_episode(tmp_path, source, branch)
+
+    seen, out, _docker = _clock_file_after_a_command(
+        C.arm_argv(tenant_id, ep.name, "a"), C.FakeClock(C.ARM_START))
+
+    _assert_clock_file_reads(seen, out, C.BRANCH_READING, not_reading=C.ARM_START)
+
+
 def _role(name: str) -> tuple[Any, str]:
     """The role's definition as a run binds it, and its agent id."""
     from defender.runtime.driver import MAIN_DEF
@@ -286,34 +451,100 @@ def test_k2_the_gate_refuses_main_and_gather_a_read_of_the_clock_mount(natural, 
         f"{[c['command'] for c in box.calls]}")
 
 
+def _env_assignments(rest: str) -> dict[str, str]:
+    """An `ENV` instruction's assignments: `ENV K=V [K2=V2 …]` or the legacy `ENV K V…`."""
+    words = shlex.split(rest)
+    if words and "=" in words[0]:
+        return dict(w.split("=", 1) for w in words if "=" in w)
+    return {words[0]: rest.split(None, 1)[1].strip() if len(words) > 1 else ""} if words else {}
+
+
+def _recipe_preload(instructions: list[str]) -> list[str]:
+    """The box image recipe's INSTRUCTIONS that configure a preload: an `ENV` setting
+    `LD_PRELOAD` to a non-empty value, or any other instruction naming `/etc/ld.so.preload`
+    (the loader's own preload list). Read off the instructions BuildKit runs — continuations
+    joined, whole comment lines dropped — never the file's text, so a comment that names a
+    preload configures none (F-K1). How the preloaded library itself gets into the image is not
+    asked (see the module docstring)."""
+    found: list[str] = []
+    for ins in instructions:
+        keyword, _, rest = ins.partition(" ")
+        if keyword.upper() == "ENV":
+            if _env_assignments(rest).get("LD_PRELOAD", "").strip().strip("'\""):
+                found.append(ins)
+        elif "/etc/ld.so.preload" in rest:
+            found.append(ins)
+    return found
+
+
+def _box_recipe_preload() -> list[str]:
+    from defender.tests.test_1092_dockerfile import _instructions
+
+    return _recipe_preload(_instructions(C.DEFENDER / "box.Dockerfile"))
+
+
+def test_k3_the_recipe_reader_sees_instructions_not_comments(tmp_path):
+    """The reader K3 decides by: a preload named only in a comment is no preload; an `ENV`
+    instruction (either form) and a `RUN` writing the loader's preload list each are; an empty
+    `LD_PRELOAD` is not. Over planted recipes, so it holds whatever the shipped recipe says.
+    Green today: it is the instrument's own discrimination check."""
+    from defender.tests.test_1092_dockerfile import _instructions
+
+    assert _recipe_preload(["FROM python:3.11-slim", "RUN true"]) == []
+    assert _recipe_preload(["ENV LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1"])
+    assert _recipe_preload(["ENV LD_PRELOAD /usr/lib/x.so"])
+    assert _recipe_preload(["ENV A=1 LD_PRELOAD=/x.so"])
+    assert _recipe_preload(["RUN echo /usr/lib/x.so > /etc/ld.so.preload"])
+    assert _recipe_preload(["ENV LD_PRELOAD=''"]) == []
+    recipe = tmp_path / "Dockerfile"
+    recipe.write_text("FROM x\n# ENV LD_PRELOAD=/x.so: a time-faking library reading /clock\n"
+                      "#   /etc/ld.so.preload\nRUN true\n", encoding="utf-8")
+    assert _recipe_preload(_instructions(recipe)) == [], (
+        "a preload named only in comments read as configured")
+    recipe.write_text("FROM x\nENV LD_PRELOAD=/x.so\nRUN true\n", encoding="utf-8")
+    assert _recipe_preload(_instructions(recipe)) == ["ENV LD_PRELOAD=/x.so"]
+
+
 def test_k3_the_box_is_preloaded_for_every_run(natural):
     """Into the box: the time-faking preload is configured for every run — on the create
-    command (`LD_PRELOAD`) or in the box image's recipe (`box.Dockerfile`: `LD_PRELOAD` or
-    `/etc/ld.so.preload`). Positive control: the create command carries an environment."""
+    command (`LD_PRELOAD`, non-empty) or by an instruction of the box image's recipe
+    (`box.Dockerfile`, `_recipe_preload`). Positive control: the create command carries an
+    environment."""
     env = natural.docker.env()
     assert env, "the create command carries no environment to inspect"
-    recipe = (C.DEFENDER / "box.Dockerfile").read_text(encoding="utf-8")
-    in_image = "LD_PRELOAD" in recipe or "ld.so.preload" in recipe
-    assert in_image or "LD_PRELOAD" in env, (
-        "no time-faking preload is configured for the box: neither the create command nor the "
-        "image recipe sets one")
+    in_image = _box_recipe_preload()
+    assert in_image or env.get("LD_PRELOAD", "").strip(), (
+        "no time-faking preload is configured for the box: neither the create command nor any "
+        "instruction of the image recipe sets one (a comment configures nothing)")
+
+
+def _time_configuration(cap: Captured) -> dict[str, Any]:
+    """A run's box time configuration as its create command and image carry it: the preload
+    (the create command's `LD_PRELOAD`, else the recipe's preload instructions), every
+    preload/clock variable of the create environment, and the clock mount's target."""
+    env = cap.docker.env()
+    return {"preload": env.get("LD_PRELOAD", "").strip() or tuple(_box_recipe_preload()),
+            "variables": {k: v for k, v in env.items() if _PRELOAD_KEY.search(k)},
+            "clock mounts": sorted((m["target"], m["readonly"]) for m in cap.clock_mounts())}
 
 
 def test_k3_an_arms_preload_and_clock_variables_are_the_natural_runs(natural, arm):
-    """Into the box, same shape: every preload or clock variable the create command carries is
-    identical for an arm and a natural run — an arm differs only in what its clock FILE says.
-    Positive control: both create commands carry an environment.
+    """Into the box, same shape: an arm's box carries the same time configuration as a natural
+    run's — the same preload, every preload or clock variable of the create command equal, the
+    clock mount at the same target — and an arm differs only in what its clock FILE says.
 
-    Its only teeth: IF an implementation configures the preload or the clock through the create
-    command's environment, an arm's values equal a natural run's. With the preload baked into
-    the image and the clock path fixed, no such variable exists and this holds trivially;
-    `test_k3_the_box_is_preloaded_for_every_run` is the check that the preload exists at all."""
+    Not vacuous (F-K1): both sides must HAVE a preload configured before they are compared, so
+    two boxes with no preload and no clock variables at all do not pass as "the same". Positive
+    control: both create commands carry an environment."""
     env_n, env_a = natural.docker.env(), arm.docker.env()
     assert env_n and env_a, "a create command carries no environment to compare"
-    clock_vars = {k for k in (*env_n, *env_a) if _PRELOAD_KEY.search(k)}
-    assert {k: env_n.get(k) for k in clock_vars} == {k: env_a.get(k) for k in clock_vars}, (
-        f"an arm's box is configured differently from a natural run's: "
-        f"{ {k: (env_n.get(k), env_a.get(k)) for k in clock_vars} }")
+    config = {"natural": _time_configuration(natural), "arm": _time_configuration(arm)}
+    for side, conf in config.items():
+        assert conf["preload"], (
+            f"the {side} run's box has no time-faking preload configured — there is no time "
+            f"configuration to compare: {conf}")
+    assert config["natural"] == config["arm"], (
+        f"an arm's box is configured differently from a natural run's: {config}")
 
 
 # ---------------------------------------------------------------------------------------

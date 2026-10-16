@@ -27,6 +27,13 @@ from defender.run_repository import RunPaths
 from defender.tests import _triplet_947 as T
 
 LEARNING_LOOP_PAGE = "skills/handbook/content/learning-loop.md"
+#: The branching page by more than one spelling of its path (contract-repair finding F-P3a):
+#: P3 takes the PAGE out of read scope, not one string — a gate that refuses an operand by its
+#: unresolved spelling passed a probe that asked only by the canonical one. Each `..` climb
+#: below names the same file under the checkout.
+PAGE_SPELLINGS = (LEARNING_LOOP_PAGE,
+                  "skills/handbook/content/../content/learning-loop.md",
+                  "skills/handbook/../handbook/content/learning-loop.md")
 #: A neighbouring handbook page in the same folder: the positive control for the refusal —
 #: the read scope must lose ONE page, not the handbook.
 CONTROL_PAGE = "skills/handbook/content/runtime-loop.md"
@@ -86,12 +93,12 @@ class _Lifecycle:
         return {"output": "done", "requests": 1, "truncated_by": None}
 
 
-def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path]:
+def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
     """`run.main --tenant T --episode <id> --world <world>` over the fixture episode, lifecycle
-    recorded. Returns `(arm run folder, episode dir)`."""
+    recorded. Returns `(arm run folder, episode dir, the source's runs base)`."""
     from defender import _tenant
 
-    _base, src = T.runs_base(tmp_path)
+    base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
                    root=tmp_path / "episodes-root")
     (ep / "runs").mkdir(exist_ok=True)
@@ -102,7 +109,7 @@ def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path]:
         lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
         preflight=lambda *_a, **_k: 0)
     assert rc == 0 and lifecycle.run_dir is not None, f"the arm never reached its lifecycle (rc={rc})"
-    return lifecycle.run_dir, ep
+    return lifecycle.run_dir, ep, base
 
 
 @pytest.mark.usefixtures("_tmp_roots")
@@ -113,10 +120,28 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
     file in the folder carries that token. The control world (`a`) and a counterfactual one
     (`b`) alike.
 
+    The stamp's world id is the design's too ("`provenance.json` (world id, parent run, fork
+    turn) moves out of the run folder"): an arm's stamp, where it keeps one, carries no world
+    id, or the one a NATURAL run of its tenant is stamped with (the tenant's base world) — the
+    natural shape. A world id that merely avoids spelling the episode token (contract-repair
+    finding F-P3b: the lineage base64-encoded into `world_id`) is neither.
+
+    And "no file carries the token" is held under ENCODING, not just as a substring: each of
+    the arm's lineage identities (world token, episode token, episode id) is also looked for as
+    a derived form and inside every base64/hex run of every file, decoded
+    (`_1255_identity.encoded_hits`; positive control: it finds the world token in an encoded
+    lineage record).
+
     The lineage is not lost, it is host-side: the episode's own record still names the source
     run and the branch point (the positive control — the facts exist, just not in the box)."""
-    arm, ep = _launch_arm(tmp_path, world)
+    import base64
+    import json
+
+    from defender.tests import _1255_identity as IDN
+
+    arm, ep, base = _launch_arm(tmp_path, world)
     token = T.world_token(world)
+    natural_world = T.mod("_tenant").read_tenant(base).base_world_id
 
     stamp = _provenance.read(RunPaths(arm).provenance)
     if stamp is not None:
@@ -126,9 +151,18 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
             f"the arm's stamp names its fork turn {stamp.fork_turn!r} inside the box")
         assert T.EPISODE_TOKEN not in str(getattr(stamp, "world_id", None) or ""), (
             f"the arm's stamp names its episode's world {stamp.world_id!r} inside the box")
-    carriers = sorted(str(p.relative_to(arm)) for p in arm.rglob("*")
-                      if p.is_file() and token.encode() in p.read_bytes())
-    assert carriers == [], f"the arm's run folder carries its world token in {carriers}"
+        assert getattr(stamp, "world_id", None) in (None, natural_world), (
+            f"the arm's stamp carries a world id {stamp.world_id!r} that is neither absent nor "
+            f"a natural run's ({natural_world!r}) — the world id moves out of the run folder")
+    lineage = {"world token": token, "episode token": T.EPISODE_TOKEN, "episode id": ep.name}
+    planted = base64.b64encode(json.dumps([token, T.SOURCE_RUN_ID]).encode()).decode("ascii")
+    assert IDN.encoded_hits(f"w-{planted}", lineage), (
+        "positive control: the encoded scan does not find a base64-encoded lineage record")
+    files = [(str(p.relative_to(arm)), p.read_bytes()) for p in sorted(arm.rglob("*"))
+             if p.is_file()]
+    assert files, "fixture: the arm's run folder holds no file to scan"
+    carriers = IDN.files_carrying(files, lineage)
+    assert carriers == {}, f"the arm's run folder carries its lineage in {carriers}"
 
     record = (ep / "family.yaml").read_text(encoding="utf-8")
     assert T.SOURCE_RUN_ID in record and str(T.BRANCH_MESSAGE_ID) in record, (
@@ -157,9 +191,10 @@ def _checkout_as_shown(first_request: str) -> str:
 
 
 class _PageReader:
-    """A scripted model that reads the branching page, then the control page, then stops — by
-    the checkout path the model is shown (`shown()`: the request text that shows it; by default
-    this model's own first request). Keeps every request so each answer can be inspected."""
+    """A scripted model that reads the branching page by each of `PAGE_SPELLINGS`, then the
+    control page, then stops — by the checkout path the model is shown (`shown()`: the request
+    text that shows it; by default this model's own first request). Keeps every request so each
+    answer can be inspected."""
 
     __name__ = "PageReader"
 
@@ -169,6 +204,7 @@ class _PageReader:
         self.calls = 0
         self.seen: list[str] = []
         self.requests: list[list[Any]] = []
+        self.pages = [*PAGE_SPELLINGS, CONTROL_PAGE]
 
     def __call__(self, messages, info):
         from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
@@ -178,10 +214,10 @@ class _PageReader:
         self.requests.append(list(messages))
         self.seen.append(messages_text(messages))
         self.calls += 1
-        if self.calls > 2:
+        if self.calls > len(self.pages):
             return ModelResponse(parts=[TextPart(content="Read what I could.")])
         checkout = _checkout_as_shown(self._shown() if self._shown is not None else self.seen[0])
-        path = f"{checkout}/{LEARNING_LOOP_PAGE if self.calls == 1 else CONTROL_PAGE}"
+        path = f"{checkout}/{self.pages[self.calls - 1]}"
         args = {"path": path} if self.tool == "read_file" else {"command": f"cat {path}"}
         return ModelResponse(parts=[ToolCallPart(tool_name=self.tool, args=args)])
 
@@ -207,23 +243,29 @@ def _first_line(page: str) -> str:
 
 
 def _assert_page_refused(reader: _PageReader, who: str) -> None:
-    assert reader.calls >= 3, f"{who} never got its answers"
-    assert not _refused(reader.answer(2)) and _first_line(CONTROL_PAGE) in _content(reader.answer(2)), (
-        f"{who} could not read the neighbouring handbook page either — the probe is not reaching "
-        f"the gate: {_content(reader.answer(2))[:200]!r}")
-    assert _first_line(LEARNING_LOOP_PAGE) not in _content(reader.answer(1)), (
-        f"{who} read the page that explains branching: {_content(reader.answer(1))[:200]!r}")
-    assert _refused(reader.answer(1)) or "denied" in _content(reader.answer(1)).lower(), (
-        f"{who}'s read of the page that explains branching was not refused: "
-        f"{_content(reader.answer(1))[:200]!r}")
+    control = len(PAGE_SPELLINGS) + 1
+    assert reader.calls >= control + 1, f"{who} never got its answers"
+    unreachable = (f"{who} could not read the neighbouring handbook page either — the probe is "
+                   f"not reaching the gate: {_content(reader.answer(control))[:200]!r}")
+    assert not _refused(reader.answer(control)), unreachable
+    assert _first_line(CONTROL_PAGE) in _content(reader.answer(control)), unreachable
+    for n, spelling in enumerate(PAGE_SPELLINGS, start=1):
+        answer = reader.answer(n)
+        assert _first_line(LEARNING_LOOP_PAGE) not in _content(answer), (
+            f"{who} read the page that explains branching as {spelling!r}: "
+            f"{_content(answer)[:200]!r}")
+        assert _refused(answer) or "denied" in _content(answer).lower(), (
+            f"{who}'s read of the page that explains branching as {spelling!r} was not refused: "
+            f"{_content(answer)[:200]!r}")
 
 
 @pytest.mark.e2e
 @pytest.mark.parametrize("tool", ["read_file", "bash"])
 def test_p3_main_cannot_read_the_page_that_explains_branching(tmp_path, tool):
     """P3 (G11 reversed): MAIN's request to read `learning-loop.md` — by `read_file`, or by the
-    granted `cat` — is refused by the gate; the same request for a neighbouring handbook page
-    is answered with its content (the positive control: the refusal is about the page)."""
+    granted `cat`, and by each of `PAGE_SPELLINGS` (the canonical path and two `..` climbs that
+    name the same file) — is refused by the gate; the same request for a neighbouring handbook
+    page is answered with its content (the positive control: the refusal is about the page)."""
     pytest.importorskip("pydantic_ai")
     from defender.tests import _1255_snapshot as S
 
@@ -235,9 +277,10 @@ def test_p3_main_cannot_read_the_page_that_explains_branching(tmp_path, tool):
 
 @pytest.mark.e2e
 def test_p3_a_gather_lead_cannot_read_the_page_that_explains_branching(tmp_path):
-    """P3: the gather role is an investigator too — a lead's `read_file` of `learning-loop.md`
-    is refused, while the neighbouring page reads (positive control). The lead reads by the
-    checkout path MAIN's opening shows (a lead's own prompt names none)."""
+    """P3: the gather role is an investigator too — a lead's `read_file` of `learning-loop.md`,
+    by each of `PAGE_SPELLINGS`, is refused, while the neighbouring page reads (positive
+    control). The lead reads by the checkout path MAIN's opening shows (a lead's own prompt
+    names none)."""
     pytest.importorskip("pydantic_ai")
     from defender.tests import _1255_snapshot as S
 
