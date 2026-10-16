@@ -52,7 +52,7 @@ from ._spec import (
     store_factory_for,
 )
 from . import _snapshot
-from ._snapshot import ForkSnapshot, SnapshotWriter
+from ._snapshot import ForkSnapshot, SnapshotWriter, snapshot_at
 from ._frontier import (
     _DISPATCH_TOOL,
     carried_retries,
@@ -159,8 +159,7 @@ def validate(store: Any, spec: BranchSpec, *, source_run: Run,
             "the framework's per-tool retry counts cannot be seeded into an arm, so it would "
             "take that step differently. Branch at a response no tool carries a retry into")
 
-    request = sum(isinstance(m, ModelResponse) for m in upto)
-    snapshot = _snapshot.load(store, session, request)
+    snapshot = _snapshot.load(store, session, _snapshot.request_count(upto))
     if snapshot is None:
         raise BranchError(
             f"{run_dir} recorded no fork snapshot for message {spec.branch_message_id} — a run "
@@ -243,24 +242,23 @@ def attach_case_pointer(
 
 def open_main_session(
     store: Any, spec: BranchSpec | None, run_state: RunState, *, run: Run, source_run: Run | None = None,
-) -> tuple[str, list | None, _snapshot.ForkSnapshot | None]:
-    """MAIN's session for this run, the history it starts from, and the fork snapshot it was
-    restored from.
+) -> tuple[str, list | None]:
+    """MAIN's session for this run and the history it starts from.
 
-    The one place the fresh/resumed choice is made. A fresh run gets a new session, `None` and
-    `None`. A resume is validated (every refusal before the fork), forks at the branch point,
-    and returns the prefix through the branch response via `hydrate(role="send")` — the list
+    The one place the fresh/resumed choice is made. A fresh run gets a new session and `None`.
+    A resume is validated (every refusal before the fork), forks at the branch point, and
+    returns the prefix through the branch response via `hydrate(role="send")` — the list
     `fork` charged the child for — so the framework runs that response's calls first. The
     run folder is restored to what the source held at the branch point
-    (`ForkSnapshot.restore_files`), and the snapshot is returned for the driver, which starts
-    the run's counters, review gate, caps and request count from it.
+    (`ForkSnapshot.restore_files`); the driver starts the run's counters, review gate, caps
+    and request count from the same snapshot (`snapshot_at`).
 
     Other faults (e.g. a pydantic `ValidationError` on a payload from another framework
     version, or the private `framework_view` import disappearing) are converted to
     `BranchError` so the driver's store-setup handler catches them.
     """
     if spec is None:
-        return store.new_session(agent_id="main"), None, None
+        return store.new_session(agent_id="main"), None
     try:
         # Every refusal before the fork: `store.fork` commits, and each retried refusal after
         # it would leave another orphan session in the source database.
@@ -289,7 +287,7 @@ def open_main_session(
         raise BranchError(
             f"the resume of {spec.source_run_dir} at message {spec.branch_message_id} could "
             f"not be opened: {type(e).__name__}: {e}") from e
-    return session_id, visible, snapshot
+    return session_id, visible
 
 
 #: Re-exports; each name's home is the module it is imported from.
@@ -351,6 +349,7 @@ __all__ = [
     "session_for_run",
     "session_store",
     "source_session",
+    "snapshot_at",
     "sqlite3",
     "stamp_dead_fork",
     "store_factory_for",

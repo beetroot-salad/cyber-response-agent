@@ -527,10 +527,26 @@ async def _drive_releasing_log(logger: Any, *args: Any, **kwargs: Any) -> Any:
         raise
 
 
+def _branch_snapshot(store: Any, resume: Any, source_run: Run | None) -> branch.ForkSnapshot | None:
+    """The fork snapshot a resumed run continues from (`None` for a fresh run): the one
+    `open_main_session` validated and restored the run folder from."""
+    if resume is None:
+        return None
+    if source_run is None:
+        raise TypeError("a resumed run requires its source Run (`open_main_session` refuses one "
+                        "without it before this is asked)")
+    snapshot = branch.snapshot_at(store, resume, source_run=source_run)
+    if snapshot is None:
+        raise branch.BranchError(
+            f"the fork snapshot of message {resume.branch_message_id} vanished after the arm "
+            "was restored from it")
+    return snapshot
+
+
 def _resume_from(
     snapshot: branch.ForkSnapshot | None, state: RunState, limits: dict,
     bounds: challenge_gate.Bounds,
-) -> tuple[dict, challenge_gate.Bounds, RunUsage | None]:
+) -> tuple[branch.ForkSnapshot | None, dict, challenge_gate.Bounds, RunUsage | None]:
     """The caps a run runs under and the usage it starts from: its own and none for a fresh
     run. An arm continues its source (#1255 P2, D2): its counters resume from the branch
     point's snapshot (recorded into `state` here), its request count enters the framework as
@@ -538,11 +554,11 @@ def _resume_from(
     configuration's (rev 5 C3). The review stage timeout is a real-time safety bound, not a cap
     the model can feel, so it stays the arm's own."""
     if snapshot is None:
-        return limits, bounds, None
+        return None, limits, bounds, None
     state.restore_fork_counters(snapshot.counters)
     resumed = replace(bounds, base_request_limit=snapshot.base_request_limit,
                       extra_turns=snapshot.extra_turns)
-    return snapshot.limits, resumed, RunUsage(requests=snapshot.request)
+    return snapshot, snapshot.limits, resumed, RunUsage(requests=snapshot.request)
 
 
 def _snapshot_writer(  # noqa: PLR0913 — the run's identity plus the caps its snapshots record
@@ -645,7 +661,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         # A resume joins the source run's case, so the case pointer comes from the store, not
         # the uuid minted above (they match on a fresh run). `run_dir` is passed because a
         # resumed MAIN inherits the investigation document as well as the message history.
-        session_id, resume_history, snapshot = branch.open_main_session(
+        session_id, resume_history = branch.open_main_session(
             store, resume, state, run=run, source_run=source_run)
         # Written after the session opens, so a refused branch leaves no pointer naming the
         # source run's store. Rebound so `_run_summary` names the case this run joined.
@@ -701,7 +717,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         orient_shim=orient_shim, tenant_agent=tenant.agent,
     )
 
-    limits, gate_bounds, usage = _resume_from(snapshot, state, limits, gate_bounds)
+    snapshot, limits, gate_bounds, usage = _resume_from(
+        _branch_snapshot(store, resume, source_run), state, limits, gate_bounds)
 
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,

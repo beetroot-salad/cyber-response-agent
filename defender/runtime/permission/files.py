@@ -162,6 +162,8 @@ def decide_read(
         return Decision(False, WIRE_LOG_DENY_REASON)
     if names_run_provenance(rp, rd):
         return Decision(False, PROVENANCE_DENY_REASON)
+    if names_branching_page(rp):
+        return Decision(False, BRANCHING_PAGE_DENY_REASON)
     # The case's answer key (investigation.md, report.md, ...) can be staged into a confined
     # agent's own run dir, and a rerun over the same run id finds it already there. Denied only
     # under `read_confine` because the unconfined judge grades exactly these files. Keyed on the
@@ -227,6 +229,25 @@ def names_run_provenance(p: Path, run_dir: Path) -> bool:
         return p == RunPaths(run_dir).provenance.resolve()
     except RESOLVE_ERRORS:
         return False
+
+
+#: The corpus page explaining how the learning loop forks a finished run into sibling worlds
+#: (#1255 P3): how an arm differs from a natural run is exactly what an investigator must not be
+#: able to read, so it leaves every read scope — at resolve time, like the provenance stamp,
+#: rather than as a carve-out compiled into a shape (#575 h3). Its components under the checkout.
+BRANCHING_PAGE = ("skills", "handbook", "content", "learning-loop.md")
+
+BRANCHING_PAGE_DENY_REASON = (
+    "Blocked: that handbook page documents the offline learning loop's own machinery, not "
+    "anything about investigating a case. It is readable by no agent. Work from the artifacts "
+    "your own role is given."
+)
+
+
+def names_branching_page(p: Path) -> bool:
+    """Whether resolved `p` is the branching page (`BRANCHING_PAGE`), wherever the checkout
+    sits. Shared with the bash operand lane so both read surfaces refuse it."""
+    return p.parts[-len(BRANCHING_PAGE):] == BRANCHING_PAGE
 
 
 def names_wire_log_dir(p: Path) -> bool:

@@ -17,13 +17,10 @@ from defender._io import (
 )
 from defender.run_repository import RecordHandle, Run, RUN_LAYOUT, RunPaths, artifact_dir
 
-from pydantic_ai.messages import ModelResponse
-
-from .. import session_store
 from ..run_state import RunState
 from . import _snapshot
 from ._spec import BranchError, BranchSpec
-from ._frontier import _lead_dirs, source_session
+from ._frontier import _lead_dirs
 
 
 #: Derived from `_lead_dirs()` so the census, the copy and the seeded-dir refusal cannot name
@@ -81,15 +78,7 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_state: RunState,
 
     if source_run is None:
         raise BranchError("a resumed run requires its source Run")
-    session = source_session(store, spec, source_run=source_run)
-    path = session_store.path_row_ids(store, session)
-    if spec.branch_message_id not in path:
-        raise BranchError(
-            f"message {spec.branch_message_id} is not on the source run's MAIN path")
-    upto = session_store.hydrate(store, session, role="analysis")[
-        : path.index(spec.branch_message_id) + 1]
-    request = sum(isinstance(m, ModelResponse) for m in upto)
-    snapshot = _snapshot.load(store, session, request)
+    snapshot = _snapshot.snapshot_at(store, spec, source_run=source_run)
     if snapshot is None:
         raise BranchError(
             f"{spec.source_run_dir} recorded no fork snapshot for message "

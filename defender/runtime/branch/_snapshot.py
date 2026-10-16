@@ -32,14 +32,18 @@ import json
 import logging
 import sqlite3
 from collections.abc import Callable, Iterator
+from functools import partial
 from typing import Any
 
 from defender._io import parse_jsonl_row
 from defender.run_repository import RecordHandle, Run
 
+from pydantic_ai.messages import ModelResponse
+
+from .. import session_store
 from ..run_state import RunState
-from ._frontier import lead_records
-from ._spec import BranchError
+from ._frontier import lead_records, source_session
+from ._spec import BranchError, BranchSpec
 
 _logger = logging.getLogger(__name__)
 
@@ -260,7 +264,7 @@ class ForkSnapshot:
         for name, record in _APPEND_ONLY.items():
             if (_bytes_of(record(run)) or b"") != prefixes[name]:
                 raise BranchError(
-                    f"the arm's {record(run).path.name} does not hold the {len(prefixes[name])} byte(s) the "
+                    f"the arm's {name} does not hold the {len(prefixes[name])} byte(s) the "
                     "source held at the branch point after it was restored — a row that does "
                     "not survive being re-recorded is not one the arm can be handed")
         for entry in self.body["write_once"]:
@@ -277,23 +281,21 @@ class ForkSnapshot:
         out = {}
         for name, record in _APPEND_ONLY.items():
             recorded = self.body["append_only"][name]
-            handle = record(source_run)
-            data = self._read(handle, handle.path.name) or b""
+            data = self._read(partial(record, source_run), name) or b""
             length = int(recorded["length"])
             prefix = data[:length]
             if len(data) < length or _sha(prefix) != recorded["sha256"]:
                 raise BranchError(
-                    f"the source's {handle.path.name} no longer opens on the {length} byte(s) "
-                    "it held at "
-                    f"the branch point (it holds {len(data)}) — the arm cannot be restored to "
-                    "what the source held there")
+                    f"the source's {name} no longer opens on the {length} byte(s) it held at the "
+                    f"branch point (it holds {len(data)}) — the arm cannot be restored to what "
+                    "the source held there")
             out[name] = prefix
         return out
 
     def _write_once_bytes(self, source_run: Run, entry: dict) -> bytes:
-        handle = _WRITE_ONCE[entry["kind"]](source_run, *entry["args"])
-        what = f"{entry['kind']} {handle.path.relative_to(source_run.run_dir)}"
-        data = self._read(handle, what)
+        kind, args = entry["kind"], entry["args"]
+        what = f"{kind} {'/'.join(str(a) for a in args)}"
+        data = self._read(partial(_WRITE_ONCE[kind], source_run, *args), what)
         if data is None or _sha(data) != entry["sha256"]:
             raise BranchError(
                 f"the source's {what} is not the one it held at the branch point "
@@ -302,11 +304,18 @@ class ForkSnapshot:
         return data
 
     @staticmethod
-    def _read(record: RecordHandle, what: str) -> bytes | None:
+    def _read(record: Callable[[], RecordHandle], what: str) -> bytes | None:
+        """The bytes of the record `record()` names; a record the layout refuses to name or
+        the reader refuses to follow (a planted link) is a `BranchError` naming it."""
         try:
-            return _bytes_of(record)
+            handle = record()
+            named = f"{what} (`{handle.path.name}`)"
         except OSError as error:
-            raise BranchError(f"the source's {what} could not be read: {error}") from error
+            raise BranchError(f"the source's {what} could not be named: {error}") from error
+        try:
+            return _bytes_of(handle)
+        except OSError as error:
+            raise BranchError(f"the source's {named} could not be read: {error}") from error
 
 
 def _rows_of(data: bytes) -> list[dict]:
@@ -318,6 +327,24 @@ def _rows_of(data: bytes) -> list[dict]:
         if row is not None:
             rows.append(row)
     return rows
+
+
+def request_count(prefix: list) -> int:
+    """MAIN's request count once the last response of `prefix` (a session's path through a
+    response) arrived: one request per response on the path — the snapshot's key."""
+    return sum(isinstance(m, ModelResponse) for m in prefix)
+
+
+def snapshot_at(store: Any, spec: BranchSpec, *, source_run: Run) -> ForkSnapshot | None:
+    """The fork snapshot the source recorded for `spec`'s branch point, or `None` when it
+    recorded none (or the branch point is not on its MAIN path). Reads only; `validate` is
+    what judges the branch point."""
+    session = source_session(store, spec, source_run=source_run)
+    path = session_store.path_row_ids(store, session)
+    if spec.branch_message_id not in path:
+        return None
+    prefix = session_store.hydrate(store, session, role="analysis")
+    return load(store, session, request_count(prefix[: path.index(spec.branch_message_id) + 1]))
 
 
 def load(store: Any, session_id: str, request: int) -> ForkSnapshot | None:
