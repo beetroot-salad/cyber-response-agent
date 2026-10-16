@@ -48,17 +48,6 @@ def curator_scene(tmp_path: Path, *, extra_corpora: Sequence[str] = ()) -> Simpl
     )
 
 
-def source_bundle(
-    scene, run_id: str, *, transcript: str | None = None, disposition: str = "malicious"
-) -> Path:
-    """One source run bundle under `scene.runs` — the transcript + its disposition."""
-    d = scene.runs / run_id
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "investigation.md").write_text(transcript or f"TRANSCRIPT-for-{run_id}\n")
-    (d / "source_refs.yaml").write_text(f"normalized_disposition: {disposition}\n")
-    return d
-
-
 def curator_deps(scene, *, corpus: Path | None = None, box=None) -> CuratorDeps:
     """`CuratorDeps` over the scene, through the real `for_run` entry point.
 

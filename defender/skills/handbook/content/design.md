@@ -31,9 +31,8 @@ The defender is really two loops stacked:
 2. **Learning loop** — the offline, self-improving loop, and the headlining
    experiment. It forks a finished investigation at a chosen turn and re-runs
    it against a family of worlds that each differ by one authored fact, judges
-   which of those differences the defender's verdict actually tracked,
-   forward-checks the lessons it distills, and folds the confirmed ones into a
-   `lessons/` corpus that feeds back into the runtime loop at PLAN time. It is
+   which of those differences the defender's verdict actually tracked, and
+   folds the lessons it distills into a `lessons/` corpus that feeds back into the runtime loop at PLAN time. It is
    **operator-initiated** — a finished run is a starting point someone names
    later, never something a run feeds automatically. A run's one automatic
    post-step is the gather-catalog curation enqueue, which `--no-learn` skips.
@@ -93,7 +92,7 @@ discipline, not enforced transitions.
   + author CLI), `gather` (the subagent's own contract + query templates), and
   one per-system reference for each system this deployment declares.
 - **`learning/`** — the offline loop: `branch/` (the episode), `judge/`,
-  `author/` (the two curators and the forward-check), `leads/` (the
+  `author/` (the two curators), `leads/` (the
   lead-author), `core/` (queues and drains), with `loop.py` as the drains'
   entry point and a role prompt beside each stage's driver.
 - **`lessons/`** — checked-in pitfall lessons, authored by the loop, read

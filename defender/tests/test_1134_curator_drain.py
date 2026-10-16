@@ -4,8 +4,8 @@ deleted, never read through and never written through by the curator tick; O5.3'
 and a snapshot the tick cannot take stops the tick before the agent.
 
 Every scene is `_spec773.build_scene` driven through `drain.run_batch(cfg=...)`, the one batch
-body both channels reach: real repo, real queue, real gate, rotation and commit; only the curator,
-repair and verifier model calls are fakes, entering through the config's seams. The config is the
+body both channels reach: real repo, real queue, real gate, rotation and commit; only the curator
+model call is a fake, entering through the config's seam. The config is the
 real builder's over the author drain's open trees (`_curator1134.author_trees`), so `cfg.corpus` is
 the held `lessons/` mount and `cfg.tree_for` the trees' lookup. A plant is made by the fake agent
 itself (its `also=` hook), the way a box process would leave it, and where a fault is under test
@@ -165,7 +165,6 @@ def test_a_link_lesson_citing_the_batch_is_unattributable_and_left_for_the_scrub
     assert warnings_naming(caplog, PLANTED), caplog.text
     assert seen == [], f"the link's target was opened or read: {seen}"
     assert census(target.parent) == before
-    assert all(OUT_MARK not in c.lesson_text for c in sc.verifier.calls)
 
 
 def test_control_the_same_bytes_as_a_plain_lesson_are_attributed_and_committed(tmp_path):
@@ -301,60 +300,6 @@ def test_a_stray_in_the_sibling_corpus_goes_through_the_sibling_mount(tmp_path, 
 # ---------------------------------------------------------------------------------------
 # O5.2 at _restore_unapproved_files (non-fault; the refusal propagates)
 # ---------------------------------------------------------------------------------------
-
-
-def test_a_link_left_by_the_repair_at_an_unapproved_name_is_refused_and_propagates(tmp_path):
-    """The curator writes `PLANTED` citing `f1`; the verifier calls it BAD; the repair spawn
-    replaces it with a symlink to an outside lesson citing `f1`. Pass 2 reads the name through
-    the held corpus: refused, so `""` (O5.1), so the file is unapproved and `f1` terminal. The
-    restore of unapproved files refuses to unlink the link and the `NotPlainEntry` propagates out
-    of `run_batch`: a stuck record naming it, nothing committed, the link left, and the target's
-    bytes never handed to the verifier.
-
-    Catches: today's pass-2 read through the link (the verifier sees the outside text) and
-    `_restore_unapproved_files`' `unlink()`, which removes the link and returns rc 0."""
-    target = _outside(tmp_path)
-    holder: dict = {}
-
-    def relink(pairs, batch_id, cfg):
-        holder["at"] = cfg.corpus_dir / PLANTED
-        plant_link(holder["at"], target)
-
-    sc = _scene(tmp_path,
-                curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}),
-                verifier=S.FakeVerifier(verdicts={PLANTED: "BAD"}),
-                repair=S.FakeRepair(also=relink))
-    before = census(target.parent)
-
-    with kernel_watch(opens=[target]) as events:
-        result, got = _run(sc)
-        seen = events()
-
-    assert sc.repair.spawned == 1
-    assert result == "raised", got
-    assert leaf_refusal(got), repr(got)
-    assert _stuck_classes(sc) == ["NotPlainEntry"]
-    assert sc.head_files() == []
-    assert is_link_to(holder["at"], target)
-    assert seen == []
-    assert census(target.parent) == before
-    assert all(OUT_MARK not in c.lesson_text for c in sc.verifier.calls)
-
-
-def test_control_a_plain_file_left_by_the_repair_at_an_unapproved_name_is_removed(tmp_path):
-    """The positive control at the same name: the repair leaves the outside lesson's bytes as a
-    plain file; pass 2 still judges it BAD, `f1` is terminal, and the restore removes the file.
-    The tick completes (rc 0) and commits nothing."""
-    body = lesson_text("f1", mark=OUT_MARK)
-    sc = _scene(tmp_path,
-                curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}),
-                verifier=S.FakeVerifier(verdicts={PLANTED: "BAD"}),
-                repair=S.FakeRepair(writes={PLANTED: body}))
-
-    assert _run(sc) == ("rc", 0)
-    assert not os.path.lexists(sc.corpus / PLANTED)
-    assert sc.head_files() == []
-    assert sc.category_of("f1") == "consumed_forward_bad"
 
 
 # ---------------------------------------------------------------------------------------
@@ -827,7 +772,6 @@ def test_attribution_asks_cfg_corpus_and_a_refused_read_cites_nothing(tmp_path, 
     if refused:
         assert got == ("rc", 2), got
         assert sc.pending_by_id()["f1"].get("attempts") == 1
-        assert sc.verifier.calls == []
         assert sc.head_files() == []
     else:
         assert got == ("rc", 0), got
@@ -836,21 +780,3 @@ def test_attribution_asks_cfg_corpus_and_a_refused_read_cites_nothing(tmp_path, 
 
 #: What the scene's `cfg.corpus` appends to `PLANTED`'s text: the plain file never holds it.
 AS_THE_VIEW_READS_IT = "\n<!-- as cfg.corpus reads it -->\n"
-
-
-def test_the_verifier_judges_the_text_cfg_corpus_reads(tmp_path):
-    """The judge reads each changed file through `cfg.corpus.view()`: over a view whose text read
-    of `PLANTED` carries a line the plain file lacks, every verifier call for `PLANTED` sees that
-    line; the commit, which is git's, holds the file's own bytes.
-
-    Catches: a judge reading through a handle of its own."""
-    body = lesson_text("f1")
-    sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: body}))
-    _journal(sc, [], extra={PLANTED: AS_THE_VIEW_READS_IT})
-
-    assert _run(sc) == ("rc", 0)
-
-    texts = sc.verifier.texts_for(PLANTED)
-    assert texts, sc.verifier.calls
-    assert all(AS_THE_VIEW_READS_IT.strip() in t for t in texts), texts
-    assert sc.head_text(f"defender/lessons/{PLANTED}") == body

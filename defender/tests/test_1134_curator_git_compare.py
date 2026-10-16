@@ -597,7 +597,6 @@ def test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed(tmp_path, 
     assert _run(sc) == ("rc", 0)
     assert sc.head_files() == [f"defender/lessons/{PLANTED}"]
     assert sc.head_text(f"defender/lessons/{SEEDED}") == lesson_text("f0")
-    assert not [c for c in sc.verifier.calls if Path(c.lesson_path).name == SEEDED]
     target = holder["target"]
     assert target.read_text() == lesson_text("f0")
     assert (sc.corpus / SEEDED).read_text() == lesson_text("f0")

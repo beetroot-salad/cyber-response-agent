@@ -383,8 +383,7 @@ def _drain(tmp_path: Path, curator: _Curator, *, extra_rows: Iterable[dict] = ()
     extra = list(extra_rows)
     if extra:
         D.seed(paths, FINDINGS, D.pending(paths, FINDINGS) + extra)
-    cfg = D.cfg_for(paths, "findings", invoke_agent=curator,
-                    source_key=lambda *_a, **_k: None)
+    cfg = D.cfg_for(paths, "findings", invoke_agent=curator)
     rc = S.sym("learning.author.drain", "run_batch")(cfg=cfg)
     assert rc == 0, f"the drain tick failed (rc={rc})"
     return paths

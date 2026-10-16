@@ -156,8 +156,7 @@ def test_every_stage_abort_except_clause_in_learning_also_names_fatal_config():
     the contracted exit 2 (the #438 class of bug). Such a clause fails here.
 
     The existing sites are covered without overlap: the literal ``except (StageAbort,
-    FatalConfigError)`` clauses (cli._run_stage, _pydantic_stage.run_stage,
-    verify_forward/tool.py) are checked here; faults.run_or_dead_letter's ``except
+    FatalConfigError)`` clauses (cli._run_stage, _pydantic_stage.run_stage) are checked here; faults.run_or_dead_letter's ``except
     reraise:`` indirection (reraise = (*SYSTEMIC_FAULTS, *propagate)) is opaque to the
     AST and is pinned behaviorally by test_run_or_dead_letter_reraises_systemic_faults.
     A future maintainer who genuinely wants a StageAbort-only catch (not a known need)
@@ -510,8 +509,8 @@ def test_run_stage_maps_giterror_to_exit_2():
 # and counting it wakes the drain forever for a batch it will hold again.
 #
 # The trigger is not hypothetical: a pre-cutover adversarial/benign row left in a deployed
-# queue reads `disposition=None` forever now that `source_refs.yaml`'s writer is gone, so it is
-# held on every tick and pins the gate open behind it.
+# queue is held on every tick (as a retired direction since #1166), and pins the gate open
+# behind it.
 
 
 def _seed_queue(paths: LoopPaths, lines: list[str]) -> None:

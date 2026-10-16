@@ -6,9 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import Held
-from defender.learning.author import shared as _shared
-from defender.learning.author.verify_forward.checks import ForwardCheck
-from defender.learning.core.config import source_first_party_key
 from defender.learning.core.lane_trees import TreeFor
 from defender.learning.core.state import Channel, LearningState
 
@@ -48,12 +45,11 @@ class CorpusAuthorConfig:
     fields after the base's defaulted ones."""
 
     repo_root: Path
-    runs_dir: Path
     #: The learning state handle, opened by the entry point on the entry's own paths: the
     #: channel's queue, ledgers, locks and reports are all reached through it.
     state: LearningState
-    #: The corpus folder's spelling: git pathspecs, the readers' `where=`, the forward check's
-    #: and the curator engine's path checks. Never opened: every host read, write, delete and
+    #: The corpus folder's spelling: git pathspecs, the readers' `where=` and the curator
+    #: engine's path checks. Never opened: every host read, write, delete and
     #: listing of the corpus goes through `corpus` (#1134).
     corpus_dir: Path
     #: The corpus mount, held by the lane's open trees (`shared.lane_corpus`): writes through it,
@@ -90,18 +86,3 @@ class CorpusAuthorConfig:
     #: channel's held report).
     post_rotate: Callable[..., None] | None = None
     box: Any = None
-    #: The drain-run forward check. `None` makes every pair EXEMPT without a verifier call, so
-    #: nothing is BAD and the repair spawn never fires; vouching, the explicit-list commit and
-    #: tree-derived fates still run.
-    forward_check: ForwardCheck | None = None
-    #: A row this channel's check doesn't cover — EXEMPT by row kind, never by absence from an
-    #: id set. Consulted before any verifier call.
-    exempt: Callable[[dict], bool] = lambda row: False
-    #: The repair spawn's prompt. `None` means the shipped default; a configured but
-    #: unreadable path is fatal config.
-    repair_prompt: Path | None = None
-    #: The repair spawn's injection seam, like `invoke_agent`: `(pairs, batch_id, cfg) ->
-    #: dict`. The drain ignores its return value and re-reads the tree.
-    invoke_repair: Callable[..., dict] = _shared.invoke_repair
-    #: Resolves the verifier key in the drain's preflight, only when `forward_check` is set.
-    source_key: Callable[..., object] = source_first_party_key

@@ -210,8 +210,8 @@ def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
     pydantic-free is this pin and its twin in test_1077_name_owners.py (R4-7's two child pins)
     plus the production modules that import the layout with the stdlib alone: five at import
     (A80-7: `_episode_paths`, `hooks.budget_enforcer`, `hooks.record_lead`,
-    `runtime.circuit_breaker`, `runtime.scrub`) and `learning.author.verify_forward.forward`'s
-    `load_run_context`, which loads it at call time once PR 1 moves that import inside it (FR-1).
+    `runtime.circuit_breaker`, `runtime.scrub`). (A sixth, the forward check's run-context
+    loader, which loaded it at call time (FR-1), was deleted with the check in #1166.)
 
     The `defender.runtime.box` package itself is NOT held to this any more: #1092 (O2/M7)
     retired the stdlib-only rule for the package door — `BoxSpec` is a `@model` dataclass and

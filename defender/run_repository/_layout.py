@@ -160,10 +160,6 @@ class RunLayout:
         return PurePosixPath(EXECUTED_QUERIES)
 
     @property
-    def source_refs(self) -> PurePosixPath:
-        return PurePosixPath(SOURCE_REFS)
-
-    @property
     def gather_raw(self) -> PurePosixPath:
         return PurePosixPath(RAW_MARKER)
 
@@ -235,13 +231,6 @@ class RunLayout:
         seq = _check_index(seq, what="seq")
         return self.ticket_reads / f"{seq}{PAYLOAD_SUFFIX}"
 
-    def forward_check_trace(self, prefix: str, stem: str, n: int) -> PurePosixPath:
-        """`wire_logs/<prefix>.<stem>.<n>.trace.jsonl`."""
-        prefix = _check_component(prefix, what="prefix")
-        stem = _check_component(stem, what="stem")
-        n = _check_index(n, what="n")
-        return self.wire_log_dir / f"{prefix}.{stem}.{n}{TRACE_SUFFIX}"
-
     def review_trace(self, role: str) -> PurePosixPath:
         """`wire_logs/review_<role>_trace.jsonl`."""
         role = _check_component(role, what="role")
@@ -291,12 +280,6 @@ class WireLogNames:
         """An unframed stage-seam trace — the half the page reads rows from."""
         return name.endswith(AGENT_TRACE_SUFFIX)
 
-    def forward_check(self, prefix: str, stem: str, n: int) -> str:
-        """`<prefix>.<stem>.<n>.trace.jsonl` — the forward-check verifier's own family."""
-        return f"{_check_component(prefix, what='prefix')}." \
-               f"{_check_component(stem, what='stem')}." \
-               f"{_check_index(n, what='n')}{TRACE_SUFFIX}"
-
     def curator_batch(self, batch_id: str, pid: int) -> str:
         """`<batch_id>.<pid>.trace.jsonl` — one curator spawn's own family."""
         return f"{batch_id}.{_check_index(pid, what='pid')}{TRACE_SUFFIX}"
@@ -315,7 +298,7 @@ WIRE_LOG_NAMES = WireLogNames()
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
 
-    17 accessors (a census test checks this count against the set it pins).
+    16 accessors (a census test checks this count against the set it pins).
 
     Accessors resolve relative to ``run_dir``, except the four sidecars, `sessions_dir` and
     `session_db`, which take the runs base explicitly.
@@ -355,12 +338,6 @@ class RunPaths:
     @property
     def executed_queries(self) -> Path:
         return self.run_dir / RUN_LAYOUT.executed_queries
-
-    @property
-    def source_refs(self) -> Path:
-        """No production writer; the accessor exists because the case-answer-key deny keys on
-        this name."""
-        return self.run_dir / RUN_LAYOUT.source_refs
 
     @property
     def gather_raw(self) -> Path:
@@ -404,12 +381,6 @@ class RunPaths:
     @property
     def wire_log(self) -> Path:
         return self.run_dir / RUN_LAYOUT.wire_log
-
-    def forward_check_trace(self, prefix: str, stem: str, n: int) -> Path:
-        """`wire_logs/<prefix>.<stem>.<n>.trace.jsonl` — the learning forward-check verifier's
-        trace, written into the CITED run's own dir while reading it as evidence."""
-        target = self.run_dir / RUN_LAYOUT.forward_check_trace(prefix, stem, n)
-        return _confine(target, self.run_dir, what="forward_check_trace")
 
     def review_trace(self, role: str) -> Path:
         """`wire_logs/review_<role>_trace.jsonl` — one review stage's raw wrapped reply."""

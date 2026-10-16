@@ -362,41 +362,6 @@ def test_a_writer_that_runs_outside_the_driver_process(tmp_path: Path):
     assert from_bash.read_text(encoding="utf-8") == "written by the model's shell\n"
 
 
-def test_learning_run_dir_copy_gains_a_trace_file_after_its_own_lifecycle_appeared_done(
-        tmp_path: Path):
-    """The forward-check verifier writing a wire trace into a learning run dir it is READING as
-    evidence is existing, ongoing production behaviour that this issue explicitly leaves
-    unowned, unchanged and unrestricted.
-
-    THIS IS THE C16 REFUTATION AS A TEST: "nothing writes under `LoopPaths.runs_dir` any more"
-    is FALSE, and a demand or test asserting the opposite is refused by the Resolution.
-    """
-    observe = S.mod("runtime.observe")
-    learning_run = tmp_path / "state" / "runs" / "source-42"
-    S.seed_run_tree(learning_run)
-    (learning_run / "report.md").write_text("disposition: benign\n", encoding="utf-8")
-    before = S.snapshot(learning_run)
-
-    # The verifier composes its trace name exactly as `checks.py:72` does, and `stage_trace_path`
-    # creates the holding directory under the root it is handed.
-    trace = observe.stage_trace_path(
-        learning_run, f"{S.PREFIX}.{S.STEM}.{S.CHECK_INDEX}.trace.jsonl")
-    trace.write_text('{"event_type": "message"}\n', encoding="utf-8")
-
-    assert trace.is_relative_to(learning_run), (
-        "the forward-check verifier writes into the CITED RUN's dir, in production, while "
-        "reading that run as evidence (flagged fact F1, claim S7)")
-    gained = set(S.snapshot(learning_run)) - set(before)
-    assert gained, "the fixture did not actually write into the learning run dir"
-    # The handle neither owns it nor objects to it.
-    handle = S.Run().at(learning_run)
-    assert handle.run_dir == learning_run
-    assert handle.runs_base is None
-    assert handle.record.tenant_id is None, (
-        "receiver kind (5) stays out of D1-D7's scope: no accessor covers it and nothing here "
-        "restricts it")
-
-
 def test_a_fork_or_archive_of_a_still_running_source_is_supported(tmp_path: Path):
     """Declaring a fork from, or archiving a world of, a run that has not yet reached run-end is
     a supported operation, not a refusal."""

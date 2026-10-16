@@ -20,8 +20,10 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 
 from . import circuit_breaker
 from . import system_status
+from .exception_groups import carried_unless_overridden
 from .run_state import run_state_of
 from . import permission
+from . import providers
 from . import run_end
 from . import session_store
 from . import tools
@@ -458,7 +460,7 @@ def _compose(
     return ending.terminator, f"{ending.notice}\n\n{body}"
 
 
-async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gather run can end
+async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except arm per way a gather run can end
     deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
     *, catalog: SystemIndex | None, pre_claimed: bool = False,
@@ -607,6 +609,14 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
     except circuit_breaker.RunAborted:
         # Run-level abort: passes through; the driver stamps the main session likewise.
         stamp(session_store.TRUNCATED_BY_ABORTED)
+        raise
+    except (providers.ProviderDown, BaseExceptionGroup) as ended:
+        # The provider stayed down (#1243), bare or inside an exception group: ends the run,
+        # this lead stamped so its session doesn't read as finished. Any other group
+        # propagates as it did.
+        if carried_unless_overridden(
+                ended, providers.ProviderDown, (BudgetKill, circuit_breaker.RunAborted)):
+            stamp(session_store.TRUNCATED_BY_PROVIDER_DOWN)
         raise
     except run_end.CallRecordWriteFailed as failed:
         # A call record could not be written (A12): the run ends, this lead with it, stamped

@@ -57,8 +57,7 @@ def _concrete(template: str, acc: S.Accessor) -> str:
     """The TSV's path template with this suite's own component values substituted in."""
     subs = {
         "<lead>": S.LEAD_ID, "<seq>": str(S.SEQ), "<turn>": str(S.TURN), "<role>": S.ROLE,
-        "<label>": S.LABEL, "<prefix>": S.PREFIX, "<stem>": S.STEM,
-        "<n>": str(S.CHECK_INDEX) if acc.kind == "forward_check_trace" else "1",
+        "<label>": S.LABEL, "<n>": "1",
         "<stage>": S.STAGE, "<token>": S.WORLD_TOKEN, "<episode_id>": S.EPISODE_ID,
     }
     out = template.split(",")[0].strip()
@@ -133,15 +132,16 @@ def test_episode_paths_resolves_every_name_d1_enumerates(episode_dir):
 
 
 def test_the_two_retired_names_still_resolve_on_the_owner(run_dir):
-    """`source_refs` and `ticket_read(seq)` still resolve on the owner, because the answer-key
-    set and the payload-cap shape key on those names."""
-    from defender.run_repository import CASE_ANSWER_KEY_NAMES
+    """`ticket_read(seq)` still resolves on the owner, and `source_refs.yaml` stays in the
+    answer-key set, because the payload-cap shape and the answer-key deny key on those names.
+    (#1166 deleted the `source_refs` accessor with its last reader; old run folders still hold
+    the file, so the deny keeps its name through the owner's constant.)"""
+    from defender.run_repository import CASE_ANSWER_KEY_NAMES, SOURCE_REFS
     owner = S.RunPaths(run_dir)
-    assert owner.source_refs == run_dir / "source_refs.yaml"
     assert owner.ticket_read(S.SEQ) == run_dir / "ticket_reads" / f"{S.SEQ}.json"
-    assert owner.source_refs.name in CASE_ANSWER_KEY_NAMES, (
-        "the answer-key set keys on this name, which is why a kind with no writer at all "
-        "(claim R9: source_refs.yaml has readers only) still gets an accessor")
+    assert SOURCE_REFS == "source_refs.yaml"
+    assert SOURCE_REFS in CASE_ANSWER_KEY_NAMES, (
+        "the answer-key deny must keep refusing source_refs.yaml: old run folders hold it")
     from defender.runtime import permission
     assert permission.is_captured_payload(owner.ticket_read(S.SEQ)), (
         "the payload read cap keys on the ticket_reads name — D1's stated reason for keeping it")
@@ -149,11 +149,8 @@ def test_the_two_retired_names_still_resolve_on_the_owner(run_dir):
 
 def test_a_sub_collection_member_for_a_kind_nothing_writes(run_dir):
     """A kind with no writer still gets an accessor, for D1's stated reason: the gate's
-    answer-key set and payload-cap shape key on `source_refs` and `ticket_reads`."""
+    payload-cap shape keys on `ticket_reads`."""
     owner = S.RunPaths(run_dir)
-    assert owner.source_refs.is_relative_to(run_dir), (
-        "the accessor exists whether or not anything writes the kind (claim R9 says there is "
-        "no writer in the repo)")
     assert owner.ticket_read(0).is_relative_to(run_dir)
 
 
@@ -179,12 +176,10 @@ def test_a_composed_name_part_that_two_accessors_share(run_dir):
     trace_const = [k for k, v in vars(owner_mod).items()
                    if k.isupper() and v == ".trace.jsonl"]
     assert len(trace_const) == 1, (
-        f"`.trace.jsonl` is shared by forward_check_trace and stage_trace and must be ONE "
+        f"`.trace.jsonl` is shared by the curator batch trace and stage_trace and must be ONE "
         f"reused constant; the owner spells it under {trace_const}")
     name = trace_const[0]
-    owner = S.RunPaths(run_dir)
-    assert str(owner.forward_check_trace(S.PREFIX, S.STEM, S.CHECK_INDEX)).endswith(
-        getattr(owner_mod, name))
+    assert owner_mod.WIRE_LOG_NAMES.curator_batch("b1", 1).endswith(getattr(owner_mod, name))
     assert str(S.episode_paths().EpisodePaths(run_dir).stage_trace(S.STAGE)).endswith(
         getattr(owner_mod, name)), "the second accessor re-spells the shared part"
 
@@ -307,7 +302,7 @@ def test_every_composed_accessor_shape_checks_then_confines_against_its_own_root
             # ONE slot at a time, the numbered ones included: a `turn`/`seq`/`n` slot handed
             # `'../x'` formats straight into the name unless the shape rule refuses a
             # non-integer there, and probing every slot at once lets the FIRST slot's refusal
-            # hide an unchecked later one (`forward_check_trace(prefix, stem, n)`).
+            # hide an unchecked later one (`payload(lead, seq)`).
             for slot in range(len(acc.args)):
                 args = tuple(hostile if i == slot else a for i, a in enumerate(acc.args))
                 with pytest.raises(Exception) as excinfo:  # noqa: PT011
@@ -665,15 +660,14 @@ def test_a_public_name_function_that_other_modules_import_today(run_dir):
 
 def test_one_writer_seam_asked_to_name_a_file_under_three_different_roots(
         run_dir, episode_dir, tmp_path: Path):
-    """`observe.stage_trace_path` is one writer seam applied to three roots — the run dir, the
-    episode dir and the learning run dir — and D1 places its accessor on the owner of the first
-    two only: the third keeps today's shared function, unowned by this issue."""
+    """`observe.stage_trace_path` is one writer seam applied to the episode dir and the learning
+    run dir — and D1 places its accessor on the episode dir's owner only: the learning run dir
+    keeps today's shared function, unowned by this issue. (A third root, the run dir, lost its
+    accessor with the forward-check verifier, #1166.)"""
     observe = S.mod("runtime.observe")
     learning_run = tmp_path / "state" / "runs" / "source-42"
     learning_run.mkdir(parents=True)
 
-    assert S.RunPaths(run_dir).forward_check_trace(S.PREFIX, S.STEM, S.CHECK_INDEX) == (
-        run_dir / "wire_logs" / f"{S.PREFIX}.{S.STEM}.{S.CHECK_INDEX}.trace.jsonl")
     assert S.EpisodePaths(episode_dir).stage_trace(S.STAGE) == (
         episode_dir / "wire_logs" / f"{S.STAGE}.trace.jsonl")
     # The third root keeps today's shared function — this issue leaves it unowned (C16 refuted).

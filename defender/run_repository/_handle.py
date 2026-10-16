@@ -43,9 +43,9 @@ GROUPS = ("tables", "facts", "documents", "observability", "session")
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
     "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
-    "documents": ("investigation", "report", "gather_summaries", "lead_author", "source_refs"),
+    "documents": ("investigation", "report", "gather_summaries", "lead_author"),
     "observability": (
-        "wire_log", "review_trace", "forward_check_trace", "tool_trace", "review_record",
+        "wire_log", "review_trace", "tool_trace", "review_record",
         "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer"),
     "session": ("session_db",),
 }
@@ -56,9 +56,8 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "scrub_verdict": "scrub_verdict",
     "investigation": "investigation", "report": "report",
     "gather_summaries": "gather_summary", "lead_author": "lead_author",
-    "source_refs": "source_refs",
     "wire_log": "wire_log", "review_trace": "review_trace",
-    "forward_check_trace": "forward_check_trace", "tool_trace": "tool_trace",
+    "tool_trace": "tool_trace",
     "review_record": "review_record", "lessons_loaded": "lessons_loaded",
     "ticket_write": "ticket_write", "runtime_html": "runtime_html",
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
@@ -73,8 +72,8 @@ MEMBER_VERB: dict[str, str | None] = {
     "ticket_reads": "write",
     "alert": "write", "alert_record": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
     "investigation": "write", "report": "write", "gather_summaries": "write",
-    "lead_author": None, "source_refs": "write",
-    "wire_log": "append", "review_trace": "append", "forward_check_trace": "append",
+    "lead_author": None,
+    "wire_log": "append", "review_trace": "append",
     "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
     "ticket_write": "write",
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
@@ -111,7 +110,7 @@ _SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name,
 #: a callable taking the same positional args and returning the `RecordHandle`.
 _COMPOSING_MEMBERS = frozenset({
     "leads", "payloads", "ticket_reads", "gather_summaries", "review_trace",
-    "review_record", "forward_check_trace", "session_db",
+    "review_record", "session_db",
 })
 
 

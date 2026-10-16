@@ -167,7 +167,10 @@ def test_build_pairs_model_with_settings(monkeypatch):
     monkeypatch.delenv("DEFENDER_MAIN_REASONING_EFFORT", raising=False)
     built = providers.build_for_effort("glm-5.3", providers.effort_for_role("glm-5.3", AgentRole.MAIN))
     assert isinstance(built, BuiltModel)
-    assert isinstance(built.model, OpenAIChatModel)
+    # #1243 P1: the shared builder hands every caller its model WRAPPED in the provider retrier
+    # (a wrapper model); the provider's own model is the one it wraps.
+    assert isinstance(getattr(built.model, "wrapped", None), OpenAIChatModel), (
+        f"build_for_effort handed out {built.model!r}, not the retrier over the Fireworks model")
     assert built.settings == {"extra_body": {"reasoning_effort": "low"}}
 
 

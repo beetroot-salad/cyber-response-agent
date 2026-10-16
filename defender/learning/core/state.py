@@ -109,10 +109,6 @@ _PENDING = "_pending"
 _PENDING_LEADS = "_pending_leads"
 _PENDING_PITFALLS = "_pending_pitfalls"
 
-#: The gap ledger: the forward check's BAD verdicts, one record per tick that gave up on a pair.
-GAP_LEDGER_NAME = "findings.forward_bad.jsonl"
-
-
 @dataclass(frozen=True)
 class LockRole:
     """One of the locks the host takes below the root: its file's name and its poll interval
@@ -690,10 +686,6 @@ class LearningState:
         raised above `run_batch` runs outside it, under the author-drain lock alone."""
         channel = self._channel(channel)
         self._append_rows(channel.stuck, [record])
-
-    def gap_record(self, record: dict) -> None:
-        """Append one record to the gap ledger (`_pending/findings.forward_bad.jsonl`)."""
-        self._append_rows(f"{_PENDING}/{GAP_LEDGER_NAME}", [record])
 
     def disposition_report(self, channel: Channel, text: str) -> None:
         """Append one line to the channel's disposition report (the lessons channel's held report,
