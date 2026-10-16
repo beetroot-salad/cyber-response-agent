@@ -1,237 +1,33 @@
 # defender/
 
-**Status: experimental. PoC stage, learning-loop first.**
+Experimental alert-triage product: an in-process PydanticAI investigation runtime plus an offline learning loop. Product agent prompts under `skills/` are distinct from Claude Code skills. The lab environment is maintained separately under `playground-v2/` and `infra/`.
 
-`defender/` is the alert-triage agent: a runtime loop that investigates one alert end-to-end (`run.py`, driven by the in-process PydanticAI driver — not a Claude Code plugin), plus an offline **learning loop** under `defender/learning/` where most iteration happens. It runs against the `playground-v2/` environment; per-system knowledge lives under `defender/skills/`. Investigations record reasoning in the invlang on-disk format (`++/+/-/--` vocabulary; `skills/invlang/`).
+## Design and authority
 
-**`defender/SKILL.md` is the runtime spec.** Design rationale lives in `defender/docs/` — start with `learning-loop.md` before changing the loop shape, the questioner/judge/curator prompts, or the lessons mechanism. When a doc and the code disagree, **the code wins**.
+- `SKILL.md` defines runtime-agent behavior. Code and executed probes establish current behavior; the current approved design establishes intended behavior. Report disagreements rather than silently letting implementation override intent.
+- Read `docs/principles.md` at the repository root for design work. Issue decisions may explicitly add to or override those principles.
+- Read `defender/docs/learning-loop.md` before changing loop shape, questioner/judge/curator prompts, or lessons.
 
-## Vocabulary — what the shorthand refers to
+## Shared conventions
 
-| Term | Meaning / home |
+- Product code is tenant-neutral: no assumptions about a tenant's systems. System-specific behavior belongs with its adapter; shared product modules do not import adapters for data. Elastic is an explicit vendor-specific product integration.
+- Use existing seams: `_git` for git, `_io` for bounded UTF-8 reads and JSONL, `_frontmatter` for frontmatter, and guarded I/O for model-writable trees. Consult the relevant checker or `docs/development-lints.md` before implementing a competing helper.
+- Diagnostics use `_log` and `logging.getLogger(__name__)`; command results remain stdout, refusals remain visible stderr or API errors. Entrypoints configure logging. Detailed rules are in `docs/runtime-development.md`.
+- Runs live under `$DEFENDER_DATA_ROOT/<tenant>/runs/`, outside tracked source; no default data root or tenant. Devcontainer bind-mount details and existing CLI procedures are in `docs/development-operations.md`.
+- Tests live in `tests/`, including runtime unit tests and hermetic e2e replay. Run affected files and relevant replay locally, not the full suite; every pytest invocation here uses `flock /tmp/defender-pytest.lock`. In worktrees, verify imports and set `PYTHONPATH=<worktree-root>`.
+- `.github/workflows/ci.yml` at the repository root defines current CI gates; `.claude/spec-flow.json` records the project profile. Fix new lint findings; never hide them by updating a baseline. Regenerate baselines only for pre-existing findings moved/refingerprinted by an unrelated change, and explain why.
+
+## Find the relevant context
+
+| Work | Start here |
 |---|---|
-| **the runtime** / **the driver** / **the main loop** | `runtime/driver/` — the main-agent loop (ORIENT → PLAN → GATHER → ANALYZE → REPORT), tools in `runtime/tools.py` |
-| **the gate** / **permissions** | `runtime/permission/` — the single in-process deny-by-default gate (bash + file reads/writes). Design notes: `docs/runtime-gates.md`. Audit CLI: `scripts/policy_cli.py` (`defender-policy show\|explain`, operator-only) |
-| **the review gate** / **the reviewer** | `runtime/challenge_gate.py` (harness + routing) + `runtime/review/` (projections, role prompts, reply contract), dispatched from `runtime/close_tool.py`. **Not a loop phase** — a write-time gate every close but the host's own `unresolved` passes before it commits (#992): a confident close against its conclusion, `inconclusive` against its ceiling claim. Two blind lenses (`support`, `ablation`) + a `composer`, roster in `REVIEW_ROLES`. Fails closed |
-| **gather** | the per-lead data-access subagent — `skills/gather/` (prompt + query templates), dispatched from `runtime/tools.py`, calls the typed `query` tool (`runtime/query_tool.py`) |
-| **the branch** / **the episode** | `learning/branch/` — forks a finished run at a chosen message and runs a family of sibling worlds from it; `cli.py` is the composition root, `estate/` is what a sibling's queries are answered from |
-| **the questioner** | `learning/branch/questioner/` — a deny-all role that authors the family manifest: sibling worlds differing by one deliberate fact. Runs no tools; its whole input is inlined by the host |
-| **the judge** | `learning/judge/` — grades an archived episode (`gradable\|discard\|corpus-contradiction`) and enqueues its findings. Holds its own deny-all role since #1008 — one such role per package, so the branch package's comparator stays under the questioner's |
-| **the curators** / **authors** | `learning/author/` — fold queued findings into lessons. TWO of them since #1007, one per queue channel and one per corpus: `author/lessons/` folds DEFENDER findings (`direction: family` rows only) into `defender/lessons/`; `author/questioner/` folds WORLD findings — observations about the instrument, not the investigation — into `defender/lessons-questioner/` behind an idempotency-only gate. No check re-runs a lesson before it commits (the same-case forward check was deleted in #1166; #397). Both run in one drain tick, one commit, one PR |
-| **the lead-author** | `learning/leads/` — offline curation of the gather query catalog + system skills |
-| **lessons** | `defender/lessons/` — authored by the loop, retrieved by three pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, the `append_block`/`fix_row` block keyed on the invlang frontier (`runtime/lessons_engine/lessons_frontier.py`, #919), and the same frontier block on the compaction fold's row (`runtime/lessons_push.py`, #936). Grep, no index |
-| **the agents / registry** | `defender/agents.py` — role → `AgentDefinition` (each brings its own grants + deps); `runtime/agent_definition.py` is the seam |
-| **the frontend** / **the visualizations** | rendered HTML, not a web app: `scripts/visualize/` emits `runtime.html` (the run's one page — alert, report card, phases, metrics, review gate, leads and transcript) per run and `learning.html` (the branch episode's one page — verdict, worlds, findings, stages and leads, rendered from the episode dir alone after `judge.yaml`); `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
-| **evals** | `defender/evals/` — measurement layer (scores, not CI): `held_out.py` is the north-star metric (the frozen-actor replay and the judge A/B are retired); see `evals/README.md` |
+| Runtime, permissions, close-time review | `runtime/`; its scoped instructions and `docs/runtime-development.md` |
+| Branch replay, questioner, judge, curators | `learning/`; its scoped instructions and `docs/learning-development.md` |
+| Platform API and tenant registration | `api/`; its scoped instructions |
+| Tests and fixtures | `tests/`; its scoped instructions |
+| Gather prompts and per-system knowledge | `skills/gather/`, `skills/<system>/` |
+| Evals | `evals/README.md` |
+| Detailed vocabulary, layout, change locations | `docs/development-map.md` |
+| Lint seams and suppressions | Relevant `scripts/lint/lint_*.py` at the repo root; `docs/development-lints.md` as needed |
 
-## Layout (one line each)
-
-```
-defender/
-  SKILL.md          # runtime agent spec (the loop's system prompt)
-  run.py            # entrypoint: investigate one alert; post-steps render HTML + enqueue catalog curation
-  agents.py         # agent registry
-  run_common.py     # shared run-dir + post-step helpers
-  runtime/          # in-process PydanticAI engine: driver, tools, permission/, providers/, bash_exec, observe, orient, compaction
-                    #   branch.py — the turn-N resume (#920): which message may be branched from, and where the fork lands
-                    #   close_tool.py + challenge_gate.py + review/ — the write-time review gate on every confident close
-  hooks/            # gate LOGIC imported as libraries (lead claim, descriptors, budget, lesson-load) — no longer Claude Code hooks
-  skills/           # invlang, gather, handbook, advisory + per-system references (elastic/ identity/ cmdb/ ticket/ change-mgmt/ threat-intel/ host-state/)
-  scripts/          # adapters/, gather_tools/ (record_query, the defender-sql wrapper), visualize/, lessons/ (the defender-lessons wrapper), case_history/, policy_cli.py, workspace_map.py
-  learning/         # offline loop: loop.py (the two authoring stages), lead_repository.py (THE read/join surface),
-                    #   _prompt.py + _pydantic_stage.py (the shared stage-assembly pair, used by every engine),
-                    #   branch/, judge/, author/, core/, leads/, ops/, frontend/
-                    #   branch/ forks a finished run at turn N and runs a family of worlds from it:
-                    #   ledger.py records every response the estate served with the decision behind it;
-                    #   estate/ is what a sibling world queries through. judge/ grades the archived episode.
-                    #   The four-stage actor/oracle/judge pipeline that used to live here was deleted (#922)
-  api/              # the platform HTTP API (#1131) — a STUB: routes + wire models + ports. The data rules are the
-                    #   store's (#1082), stated on the ports; `fakes.py` enforces none of them. Never imports
-                    #   runtime/ or learning/. `api/serve.py` runs it locally over the fakes (`--extra api`)
-  evals/            # metrics + harness-on-the-harness (scenarios/)
-  lessons/          # checked-in lesson corpus (the defender's; read at PLAN time)
-  lessons-questioner/ # the questioner's own corpus — lessons about authoring worlds, never read by the runtime agent
-  fixtures/         # alert.json (+ optional gather_raw payloads) used as runtime inputs
-  run-transcripts/  # curated transcripts of past real-alert runs
-  tests/            # THE test tree — every collected suite lives here, none in the source dirs (#720).
-                    #   *.py       learning-loop invariants
-                    #   e2e/       hermetic replay (test_replay_*, run with -m e2e)
-                    #   learning/  the loop orchestrator (test_loop.py)
-                    #   evals/     the measurement tooling's unit tests
-  docs/             # design docs (learning-loop.md, runtime-gates.md, system-skill-shape.md, ...)
-```
-
-The runtime agent has no unit tests — it's evaluated by running real alerts through `run.py` and reviewing the run dir, plus the e2e replay suite.
-
-## Running it
-
-```bash
-cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'   # bootstrap (entrypoints re-exec into .venv themselves)
-export DEFENDER_DATA_ROOT=/path/outside/the/checkout   # every run names its tenant; there is no default (#1078)
-git clone <tenant repo> "$DEFENDER_DATA_ROOT/playground/knowledge"   # the tenant's settings + agent knowledge, on the host
-python3 defender/scripts/tenant.py migrate playground "$DEFENDER_DATA_ROOT/playground/knowledge"   # one-off, INSTEAD of the clone, for a data root made before #1120 (no knowledge/ yet); then setup
-python3 defender/scripts/tenant.py setup playground    # once, after the clone exits 0, before the first run
-python3 defender/run.py <alert.json> --tenant playground   # one investigation → run dir under $DEFENDER_DATA_ROOT/playground/runs/; --no-learn skips curation enqueue
-python3 defender/learning/branch/cli.py --tenant playground <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
-python3 defender/learning/loop.py --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
-python3 defender/api/serve.py --tenant <id>           # the stub platform API on 127.0.0.1:8000, seeded for the named tenant(s) (needs the `api` extra: `uv sync --extra dev --extra runtime --extra api`, as CI does — a bare `uv sync --extra api` uninstalls the others); tokens `<id>-analyst`
-```
-
-Run `tenant.py setup` once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
-default data root), after the clone into `<root>/<id>/knowledge` has exited 0 (clone with a
-credential helper or an ssh agent, never a credential in the URL; setup adopts the folder and
-copies nothing), and no run, fork or drain in flight on any checkout of the host, as the same
-user that runs defender; a destination already occupied makes setup refuse, naming it in the
-message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
-setup run as root — that adoption case only.)
-
-**Running the suite as root fails one test that is not broken:**
-`tests/test_921_launcher_frame.py::test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts`.
-It simulates a failing write by chmod'ing a directory to `r-x`, and root ignores permission
-bits — so the write lands and the test asserts "the failed write landed anyway". CI runs
-non-root and it passes there. (The four accounting-failure tests that failed the same way
-retired with #1235.) Confirm against CI before chasing them; don't "fix" the tests.
-
-## Run dir + the two tables
-
-Each run writes to `<T>/runs/{run_id}/` (`run_dir.parent`, under the tenant's data root): `alert.json` (read-only input), `provenance.json` (the commit the run was made against and whether that tree was dirty — the only file here that is a fact ABOUT the run rather than content it produced, stamped by the host at run-dir creation before any agent exists; see `_provenance.py` for what a sha does and does not pin, and note it is deliberately absent from the model-facing workspace map), `investigation.md` (invlang work log), `report.md` (YAML frontmatter — `disposition: benign|false-positive|inconclusive|malicious|unresolved` — is the headline the learning loop parses; the same frontmatter also carries the review gate's `outcome`/`cause`/`failure_kind`, which today only the visualizer reads), `review_record.{turn}.json` + `review_{role}_trace.jsonl` (the review gate, one record per close *attempt*), `wire_logs/llm_requests.jsonl` + `tool_trace.jsonl` (observability — `wire_logs/llm_requests.jsonl` is the run's ONE wire log: the main agent, every gather subagent as `gather:{lead_id}`, and every review stage as `review:{lens}` write through the same `RequestLogger`, which is what makes all three priceable; it sits under `wire_logs/` rather than at the run root because MAIN's and GATHER's run-dir read shape `under(run, SEG)` is ONE segment, so the subdirectory is what keeps a log holding gather's raw payloads and MAIN's transcript unreadable by both of them — `_layout.WIRE_LOG_DIR`, which also records why that argument covers those two roles and no others), `runtime.html`, and the **two append-only tables**, written live during the run:
-
-| Table | Where | Key |
-|---|---|---|
-| **leads** | `gather_raw/{lead_id}.lead.json` (written via `claim_lead` — id reuse raises) | `lead_id` (the `:L` invlang row id) |
-| **queries** | `executed_queries.jsonl` (captured in-process by the `query` tool); raw payloads by-ref at `gather_raw/{lead_id}/{seq}.json` | `(lead_id, seq)`, FK `lead_id` |
-
-The single read/join surface is `learning/lead_repository.py` (`joined` / `actor_view`) — consumers never re-parse the artifacts. `query_id` is `{system}.{kebab-name}`, matching a template under `skills/gather/queries/` when one fit (`ad-hoc` = one-off probe); `params` are bound values. A `∅.`-prefixed `query_id` is a **sentinel**: a writer-only record of something that never reached a system (a refused repeat, a failed reducer shim), which `joined` splits onto `JoinedLead.sentinels` so that `JoinedLead.queries` means only what the defender ran — `.rows` is the remerge, for the readers that mean the table (#841). Schema may still break during the PoC phase.
-
-## Learning loop (the headlining experiment)
-
-Off-process and operator-initiated. A finished run is not fed anywhere automatically; it is a
-**starting point** someone picks up later by naming it.
-
-`learning/branch/cli.py` forks that run at a chosen message — keeping what the defender had
-observed, discarding what it had concluded — and the **questioner** authors a family of sibling
-worlds that differ by one deliberate fact. Each world's corpus is staged into its own namespace,
-and that staged estate is what the siblings' queries are answered from. Every world is replayed
-against the capture first: one that contradicts it, or whose declared difference no query could
-reach, ends the whole episode before any sibling runs. The accepted worlds then run as their own
-`run.py --tenant <T> --episode <episode_id> --world <label>` processes, and the **judge** grades the archived episode and appends its
-findings to `_pending/findings.jsonl`.
-
-That queue is the joint the cutover swung on — and since #1007 it is TWO queues, partitioned by
-what a finding is ABOUT. A finding about the defender's conduct lands on `_pending/findings.jsonl`
-and accumulates until the **lessons curator** folds it into `defender/lessons/`; nothing re-checks a
-lesson before it commits (#1166 deleted the same-case forward check; #397). A finding about the WORLD — an invented field shape, a story the overlay never backed, a
-family that failed to discriminate — lands on `_pending/questioner_findings.jsonl` and is folded by
-the **questioner curator** into `defender/lessons-questioner/`, which the questioner reads back when
-it authors the next family. Both curators run inside one drain tick.
-Each worker commits from its own git worktree off `origin/main`, one PR per batch — the loop is
-the sole committer, and spawned agents run no git. Lessons feed back into the runtime three times: at
-PLAN time via `defender-lessons`, on every write that moves the investigation's open set via
-`runtime/lessons_engine/lessons_frontier.py`, and on the compaction fold's frontier row, which carries
-the block the whole document matches at the fold — derived fresh, not a re-show of what the
-folded-away turns carried (`runtime/lessons_push.py`).
-
-**What this replaced (#922).** Until the cutover the loop authored its own material: an actor
-invented a story about the alert, an oracle invented the telemetry that story would have
-produced, and a judge graded the defender against both — so everything it learned from was
-imagined. The disposition selected which direction(s) ran, and two further corpora
-(`lessons-actor/`, `lessons-environment/`) carried the actor-side observations. All of it is
-deleted: the pipeline, the direction routing, the three extra queues and their curators, and the
-`actor`/`oracle`/`judge` roles. `judge` came back in #1008 bound to the family judge, which
-until then ran on the questioner's definition. `git show e9e11a48` is the deletion itself.
-
-## Where to make changes
-
-| To change... | Edit... |
-|---|---|
-| Runtime loop shape, phase discipline, gather dispatch ergonomics | `defender/SKILL.md` |
-| Per-system reference (what data a system holds, sample queries) | `defender/skills/{system}/SKILL.md` |
-| Gather subagent behavior, query templates, raw payload contract | `defender/skills/gather/` |
-| How the two tables are read/joined | `defender/learning/lead_repository.py` |
-| Questioner prompts + driver | `defender/learning/branch/questioner/` (`role.md`, `family.md`, `world.md` + `__init__.py`) |
-| Judge prompt + driver | `defender/learning/judge/` (`role.md` + `run.py`) |
-| Curator prompts + drivers | `defender/learning/author/<curator>/` |
-| Lessons corpus | `defender/lessons/*.md` (hand-edits fine if they match the schema) |
-| Eval metrics / scenarios | `defender/evals/` |
-| Permission gate / grants | `runtime/permission/` + each agent's `bash_shapes` in `defender/agents.py`; secrets denylist in `runtime/bash_policy.json` |
-
-## Conventions
-
-- Runs live outside the repo, under `$DEFENDER_DATA_ROOT/<tenant>/runs/` (`<T>/runs`), so transcripts stay out of git. There is no default data root (#1078) — every run and every `tenant.py setup` names one.
-- **Status and diagnostics go through logging, not `print`** (`_log.py`): `logging.getLogger(__name__)` everywhere — a program's own module included, since `configure` names `__main__` as the module it is — with the level chosen at each call. Every program's `__main__` block calls `configure_from_env()` first, or says why not with `# lint-log-setup: ok — <reason>` (a model tool whose stderr the model reads); `scripts/lint/lint_log_setup.py` gates it. Output is JSON on the error stream by default (`DEFENDER_LOG_FORMAT=text` for people, `DEFENDER_LOG_LEVEL`). A refusal, or a checker's findings, is not a diagnostic: it is a value the code returns, and a command-line front end prints it as plain text on stderr, the exit code carrying the verdict (`sys.exit("…")` is the one-line form) — never on stdout, and never through logging, where a log level could hide it; a service front end answers the same value with an error response (#1083). Argparse usage errors and a crash's traceback stay plain text too; a run's own crash is logged inside its context by `_log.run_context`, which `run.main` uses. `_log.log_context(run_id=..., tenant_id=...)` stamps a run onto every line inside it; a thread-pool worker starts without it, so bind inside the worker or submit through `contextvars.copy_context().run`. The handler writes to whatever `sys.stderr` is at that moment and the test session configures logging once (`tests/conftest.py`), so `capsys` sees log lines as a terminal would. `print` stays for a command's own output (stdout: results a caller consumes) and for text a model reads back as a tool result. Logs go to stderr until #1114.
-- **Product code assumes no tenant's systems.** The product serves many tenants: when a job starts it fetches and sets up that tenant's systems, but it assumes no particular one (no "SIEM", no "EDR"). The adapters under `scripts/adapters/` are the playground lab's code, not archetypes other tenants reuse; they still sit in the product tree only until #1172 moves them to the lab tenant's repo. So a system's rules (its hosts, programs, endpoints) live with that system's adapter, never in shared product modules, and product code never imports an adapter to read its data. Elastic is the stated exception: a vendor-specific product integration (#1121). Settled in #1215.
-- **In the devcontainer, set `DEFENDER_DATA_ROOT=/workspace/.defender-data`** (gitignored) — a data root outside the container's own tree that is not on any path this container shares with the docker daemon leaves the box unable to resolve its bind source, and `start_box` fails with a C46/DooD `BoxFault`.
-
-## Lint gates
-
-Every gate below lives at `scripts/lint/lint_*.py` (repo root) and **blocks CI**. Almost all scope to `defender/` alone — the text-I/O gate also covers `spec-flow/scripts/`, and the stale-reference scan works off the PR's whole diff. Run one directly: `defender/.venv/bin/python scripts/lint/<lint>.py`.
-
-They are **ratcheted**, not absolute: each carries a checked-in `<lint>_baseline.json` (`scripts/lint/_baseline.py`) recording today's findings, so a gate fails only on a fingerprint that is not already in its baseline. That makes the baselines part of the contract, and there are two different reasons to touch one — keep them apart:
-
-- A **pre-existing** finding moved or got refingerprinted by an unrelated refactor → regenerate with the lint's `--update-baseline` and say so in the PR.
-- A **new** finding your change introduced → fix it, or suppress the one line with the gate's own comment and a reason. Baselining it is how a gate stops meaning anything; don't.
-
-Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. The reason is not decoration — for several of these the reason is the only thing a later reader has to judge whether the exemption still holds.
-
-### One seam already exists — hand-rolling it is the failure
-
-| The gate wants | Instead of hand-rolling | Suppress with |
-|---|---|---|
-| Any `git` argv through the `defender._git` facade | your own `subprocess` + rc check + porcelain parsing | `# lint-git: ok` |
-| Per-line JSONL through `_io.read_jsonl_rows` / `_io.append_jsonl` | your own append-mode handle or line loop (a torn last line crashes the drain) | `# lint-jsonl-io: ok` |
-| Markdown frontmatter through `_frontmatter.split_frontmatter` / `parse_frontmatter` / `parse_frontmatter_or_none` | your own fence arithmetic | `# lint-frontmatter: ok` |
-| Writes into a box-writable tree (a run dir, the drain worktree) through the alias-refusing `_io.write_guarded` / `guarded_mkdir` / `open_guarded` | a plain write — the model may have planted a symlink there | `# lint-unguarded-tree-write: ok` |
-| Reads out of that same tree through `run_repository._layout.artifact_file` / `artifact_dir`, which `lstat` | a plain stat/read/copy, which follows the link the write side refuses | `# lint-tree-read-follows-link: ok` |
-| Prompt sections already `defender._untrusted.wrap`-ed when they reach `stage_user_message` | interpolating a section into the prompt yourself | `# lint-stage-frame: ok` |
-| `encoding="utf-8"` pinned on every text read and write | bare `read_text()` / `open(p)` / `write_text(s)`, which use the ambient locale | `# lint-text-io: ok` |
-| Whole-file reads through `defender._io`: `read_text_utf8` for `read_text(encoding="utf-8")`, `read_bytes_capped` for `read_bytes()` (same semantics), capped at `READ_LIMIT`, which a caller can only lower | a bare `read_text()` / `read_bytes()` (or a reference to one), which sizes its buffer from the file | `# lint-whole-read: ok` |
-| Lesson text through `_corpus.Lesson.line` / `.lines` / `.match_text`, and inside a `_untrusted` frame when it reaches a model (#1206). The gate matches names (`.fm`, a `lesson…`'s `.raw` / `.body`, a `hit…`'s `.frontmatter`), so a lesson file parsed directly is not seen | reading the raw text and printing it — a line break or terminal control in a value forges rows | `# lint-lesson-text: ok` |
-| An optional input resolved once at the boundary (see below) | re-coalescing the default in the body | `# lint-default: ok` |
-
-### Test discipline
-
-| The gate wants | Why | Suppress with |
-|---|---|---|
-| Collaborators injected through the config/deps seams, not `monkeypatch.setattr` | attribute-patching couples the test to import scope; the seams exist for this | `# lint-monkeypatch: ok` |
-| A test's expected value computed some way *other* than the git query the code under test runs | an oracle that re-runs production's own command cannot disagree with it — every input the primitive is wrong on is invisible by construction | `# lint-oracle: ok` |
-
-### Shape gates — each is a bug class that already shipped once
-
-| The gate wants | Suppress with |
-|---|---|
-| Membership in someone else's closed vocabulary answered by *that module's* normalizer, not re-derived locally (#785: one parser, six interpreters, three of which disagreed) | `# lint-vocabulary: ok` |
-| No branching on ONE literal key of someone else's keyed gate table — the table's other keys then have no reader at that boundary (#879) | `# lint-half-table: ok` |
-| A function that DECLARES a shape not returning raw `json.loads` / `safe_load` output — `Any` satisfies every annotation, so mypy stays green over the lie | `# lint-parse: ok` |
-| In the invlang tokenizer and projector, no row leaving a loop without either a `ParseWarning` or a landing (#876) | `# lint-row-drop: ok` |
-| `registry.verbs(system)[verb]` inside the fault seam — the production registry lazily imports the adapter there, so a broken adapter unwinds the stage with no row (#672/#678) | `# lint-verb-dispatch: ok` |
-| `dataclasses.fields()`, never `__dataclass_fields__` — the raw mapping also holds `ClassVar`/`InitVar` pseudo-fields, so splatting it raises (#965) | `# lint-dataclass-fields: ok` |
-| One home for a helper, not the same `def` in two or more modules (jscpd's token-clone gate is structurally blind to 1–5 line copies) | `# lint-dup: ok` |
-| A render list and a key set spelled as two values (see below) | `# lint-keyset: ok` |
-| A value's SOLE PRODUCER declared as `@owns <field>` in its docstring, and only one function claiming it — the two-derivations-of-one-quantity class jscpd cannot see (#923) | `# lint-owns: ok` |
-| An AST check over shipped source resolving a name through `scripts/lint/_astlib.py`, not by matching the spelling — an alias, the attribute form or a local shadow each read right and mean something else | `# lint-ast-resolve: ok` |
-| A mixed collection classified exhaustively, with the residue reported (see below) | `# lint-selection: ok` |
-| Every writer of `investigation.md` / `report.md` to meet their schema (see below) | `# lint-artifact-gate: ok` |
-
-### Hygiene
-
-| The gate wants | Suppress with |
-|---|---|
-| No vendor- or environment-specific tokens outside the carved-out systems-skill dirs — `defender/` ships vendor-neutral | `# lint-shippable: ok` |
-| No hardcoded `/workspace` or `/tmp/defender` paths in shipping code; no bare `python3 x.py` in a hook `command:` (it gets system python); a hook matcher naming *both* `Task` and `Agent`, since production dispatches as both | `# lint-hygiene: ok` |
-| No reference left behind to a symbol or file the PR's own diff removed — the missed-callsite-after-rename class. Diffs against `$STALE_REF_BASE` (default `origin/main`) | `# lint-stale-ref: ok` |
-| Every program (`__main__` block) calls `_log.configure_from_env()` first — without it INFO lines vanish and nothing is JSON | `# lint-log-setup: ok` |
-| No newly-introduced dead code (wraps vulture) | baseline only |
-| Committed spec graphs passing the spec-flow checkers (`lint`/`gate`/`binds`/`claims`) — they used to run only at authoring time, so graphs merged carrying their findings | baseline only |
-
-CI also runs a jscpd Python-duplication gate at a `--threshold 3` ratchet over today's ~1.4%, which blocks a PR that meaningfully grows copy-pasted Python.
-
-### Four that get a paragraph, because the fix is not obvious from the failure
-
-- **Anchor a default in one place.** Resolve an optional input once at the boundary, thread it inward non-`Optional`; don't re-coalesce in the body (`x = x if x is not None else DEFAULT`). Prefer `is not None` over `or`.
-- **A render list is not a key set.** A sequence that records *what happened in what order* and a key set that names *the distinct things* are different values — spelling them with one name hides the confusion at every call site. Where both are wanted, derive them separately at the one place the list is built (`dict.fromkeys(...)` keeps the order) and give the deduped one its own name. Walking the raw list to patch a table already keyed by it patches one bucket per appearance (#956).
-- **Read invlang fences through one helper.** `skills/invlang/parser.scan_fences` is the only thing that decides which bytes of an `investigation.md` are invlang content; it hands back what the fences ORPHAN (`orphaned_headers`) alongside what they hold, so a reader cannot take the content and drop the complement without saying so. Three readers used to derive that split independently and all three dropped it in silence — content outside a fence never reaches the tokenizer, so it cannot even raise a `ParseWarning`, and a run's whole PLAN section parsed to an empty companion that every hypothesis-side rule then passed vacuously (#932). The same rule applies one level down: selecting from a mixed cell with `[t for t in xs if SOME_ID_RE.fullmatch(t)]` drops whatever matches neither namespace, which is how a qualified `h-001.ac1` in a `:L findings` `tests` cell reached no rule at all — classify exhaustively and report the residue. The suppression must state where the complement goes.
-- **Every writer of the two model-authored artifacts meets their schema.** `_artifact_schema.py` owns what a well-formed `investigation.md` / `report.md` IS, and `permission.decide_write` applies it to every write a MODEL makes — which is what made "a committed investigation parses" true, and true only of the verbs the agent writes through. Three writers sat outside that set: the harness seeding lead-0's declaring row before MAIN's first turn (#964), the turn-N branch seeding a sibling's whole document from a fence-boundary prefix (a valid source does not guarantee a valid prefix — the reference rules are order-independent), and `close_investigation`, the one verb that PUBLISHES, which validated the report it wrote and never the companion it published (#961). The general shape is worth recognising on sight: **an invariant enforced at a gate, and then believed of the artifact** — a gate can only promise something about the paths that run through it. The gate asks co-occurrence, not dataflow: it cannot tell whether the validated text is the written text, cannot see a write split across two functions, and cannot see the consumer half of #961 at all — those are `tests/test_ungated_artifact_write_961_964.py`'s. Suppress by naming which gate covers that write instead.
-
-## Out of scope here
-
-The environment itself — the `playground-v2/` stack, its detection rules, and host baselines. Defender consumes it through `defender/skills/`; it does not provision it.
+Load only the references relevant to the task. Historical explanations live in `docs/archive/`.

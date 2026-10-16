@@ -2,7 +2,8 @@
 name: write-tests
 description: "Turn a candidate design into a committed executable contract before implementation. Write tests to expose design holes, independently review their fidelity and discrimination, and iterate through patches or dissolving design amendments. Use after discuss-issue, or to repair a contract exposed by implementation or adversarial review."
 argument-hint: "[design doc path or issue #; optionally contract repair findings]"
-effort: high
+model: opus
+effort: medium
 ---
 
 # Write tests
@@ -21,7 +22,7 @@ Read **references/contract.md** for the compact coverage record, checkpoints, an
 
 ## 2. Author the contract
 
-Use **references/authoring.md** as the author charge. One author can handle a small suite; the orchestrator may author or integrate, but cannot also supply its independent review. Give authors the design revision, applicable decisions/properties, grounding evidence, project test conventions, worktree, and owned files. Select model and effort explicitly for the judgment required; use cheaper work for deterministic checks rather than maximum effort everywhere.
+Use **references/authoring.md** as the author charge. One author can handle a small suite; the orchestrator may author or integrate, but cannot also supply its independent review. Give authors the design revision, applicable decisions/properties, grounding evidence, project test conventions, worktree, and owned files. Use **Opus at medium effort** for the test author, including delegated author slices and contract repairs. Set model and effort explicitly when dispatching general-purpose workers; do not inherit orchestration settings. Run deterministic checks directly.
 
 Start from the important observable promises and representative flows. Write executable tests using existing machinery, then expand where concrete construction reveals missing behavior, interactions, or weak observations. Maintain a compact **contract map** linking design obligations, scenarios/surfaces, and test assertions. Test names/docstrings state the promised outcome and the design obligation they enforce. A mapping or a probe is not itself coverage.
 
@@ -31,9 +32,9 @@ Scale by **interpretive uncertainty, behavioral coupling, and consequence of fai
 
 ## 3. Independently review the contract
 
-Dispatch a fresh intent reviewer using **references/review.md**. It receives the design, decisions, grounding evidence, tests, and contract map, but not the author's discussion or defence. It independently derives what must hold before comparing coverage. It checks both **design fidelity** (the right behavior is specified) and **discrimination** (the assertions could detect violations). This review is mandatory even for a small contract; it is independent of the later adversarial implementer.
+Dispatch a fresh **Opus reviewer at high effort**, plus **two or three independent Sonnet reviewers at high effort with distinct lenses**, using **references/review.md**. Set each reviewer's model and effort explicitly. Each reviewer receives the design, decisions, grounding evidence, tests, and contract map, but not the author's discussion or defence. Each independently derives what must hold before comparing coverage and checks both **design fidelity** (the right behavior is specified) and **discrimination** (the assertions could detect violations). This review is mandatory even for a small contract; it is independent of the later adversarial implementer.
 
-Start with one reviewer. Add a lensed design reading only for a named risk or unresolved interaction; its output must identify a concrete gap or design tension, not an unbounded list of hypotheticals. A tests-only blind reader is optional when the inferred contract is itself in doubt. Have someone reconcile its output against the actual design; unread review output adds no protection.
+The Opus reviewer owns the whole-contract reading. Start with two Sonnet lenses selected for the actual design, such as lifecycle/recovery, boundary and input behavior, compatibility, or cross-surface interactions; add a third for a distinct consequential risk. Give each lens a focused question and the relevant design, evidence and tests, without the author's defence or other reviewers' findings. Each returns concrete gaps or design tensions, not an unbounded list of hypotheticals. Consolidate all reviewer findings before patching; unread review output adds no protection. A tests-only blind reader is optional when the inferred contract is itself in doubt.
 
 Run relevant deterministic checks directly; they need no dedicated agent. Use the project's targeted test command, collection and applicable lint/type checks. For supported Python suites, `spec-graph calls <suite-dir> [--target <module>]` and `spec-graph nullstub <suite-dir> --python <project-interpreter>` can expose missing calls and vacuity directly from the suite; these commands do not create or require a separate spec artifact. Read the results, not just exit codes: expected red, test breakage, and demand-specific assertion failure are different evidence. Detailed triage is in **references/review.md**. Record unavailable checks and their consequences.
 
@@ -54,7 +55,7 @@ On amendment, update the current design and decision record through discuss-issu
 
 ## 5. Iterate to readiness, not a round count
 
-Set a review budget proportional to the named risks and any user limit. Start with authorship and one independent review. Stop and report the blocker if two repair rounds make no material progress; do not silently extend a user budget. Repeat for material findings and consequential revisions; additional lenses or full passes need a specific remaining risk. Repeated findings of the same class are a signal to revisit the model or test approach. Minor locally determined corrections need targeted rechecks, not another whole pipeline.
+Set a review budget proportional to the named risks and any user limit. Start with authorship and the Opus plus two or three lensed Sonnet review panel. Stop and report the blocker if two repair rounds make no material progress; do not silently extend a user budget. Repeat for material findings and consequential revisions; additional lenses or full passes need a specific remaining risk. Repeated findings of the same class are a signal to revisit the model or test approach. Minor locally determined corrections need targeted rechecks, not another whole pipeline.
 
 Readiness requires:
 
