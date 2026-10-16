@@ -242,9 +242,9 @@ def test_publish_accepts_an_executable_blob(repo, tmp_path):
 def test_publish_requires_the_tenant_id_to_name_this_tenant_through_its_parser(
         repo, tmp_path, marker, accepted):
     """Identity is checked once, at publish, through `_tenant`'s sole tenant-id parser,
-    `parse_tenant_id_bytes` (an id plus at most one LF or CRLF). A CRLF or missing final newline is the
-    same tenant; another tenant, another case, a blank line, a leading space or no marker at
-    all publishes nothing."""
+    `parse_tenant_id_bytes` (an id plus at most one LF or CRLF). A CRLF or missing final
+    newline is the same tenant; another tenant, another case, a blank line, a leading space
+    or no marker at all publishes nothing."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     first = d.publish()
@@ -632,7 +632,10 @@ def watch(event, args):
         if moment == "current":
             state["done"] = True
     except Exception as crash:
-        probes.append(["crash", {"crashed": repr(crash)}])
+        try:
+            record("crash", {"crashed": repr(crash)})
+        except Exception:
+            probes.append(["crash", {"crashed": repr(crash)}])
     finally:
         state["inside"] = False
 sys.addaudithook(watch)
@@ -655,9 +658,10 @@ def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_pa
     `current`, every file it writes outside the clone and every program it starts is probed
     from a third process (at most 60 moments, and always the write of `current`; the probe's
     positive control, run from the publisher's own environment, comes first): each sees the
-    lock busy, and the write of `current` was among them. At the first of those moments it is paused; meanwhile the remote moves to a newer
-    commit and a second publisher refuses at once with `LockBusy`. The first resumes and
-    publishes the older commit whole; a later publish then publishes the newer one. So
+    lock busy, and the write of `current` was among them. At the first of those moments it
+    is paused; meanwhile the remote moves to a newer commit and a second publisher refuses
+    at once with `LockBusy`. The first resumes and publishes the older commit whole; a
+    later publish then publishes the newer one. So
     `current` never moves back from a newer commit to an older one: an export body written
     with the lock released (the second publisher getting in between) fails here."""
     tenant = repo[0]
@@ -691,7 +695,7 @@ def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_pa
             time.sleep(0.02)
         assert ready.exists(), ("the first publisher never reached its export: probes "
                                 f"{trace.read_text(encoding='utf-8') if trace.exists() else '[]'}, "
-                                f"stderr {err_path.read_bytes()!r}")
+                                f"stdout {out_path.read_bytes()!r}, stderr {err_path.read_bytes()!r}")
         newer = advance_remote(repo, tmp_path)
         _, error, hung = bounded(d.publish, seconds=30)
     finally:
