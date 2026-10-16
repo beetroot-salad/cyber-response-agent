@@ -67,13 +67,7 @@ def test_placeholder_is_a_declared_param_or_marked_body_substitution(tmp_path):
 
 
 def test_lead_neighbors_scores_the_new_param_only_fence():
-    """demand: lead_neighbors_scores_the_new_param_only_fence.
-
-    A param-only template's new structured ## Query fence produces a non-degenerate token
-    variant in ``lead_neighbors._query_variants``, and the scorer still discriminates
-    same-measurement siblings. ``PLUMBING_TOKENS`` drops ``start``/``end``/``limit``, which are
-    real params of elastic.query/alerts — the migration must not silently collapse that signal.
-    """
+    """demand."""
     fence_a = "```query\nverb: get-host\nparams:\n  host: web-1\n```"
     fence_b = "```query\nverb: list-hosts\nparams:\n  role: bastion\n```"
 
@@ -101,13 +95,7 @@ def _load_example(name: str):
 
 
 def test_connect_examples_compile_against_the_live_tree():
-    """demand: connect_examples_compile_against_the_live_tree.
-
-    ``connect/examples/`` modules import/compile against the current tree and instantiate the
-    LIVE shape (a ``VERBS`` mapping, ``VerbContext``, ``faults.py``, a health-check that RETURNS
-    a dict) — not ``AdapterArgumentParser`` / ``build_parser`` / ``main()`` / ``die()`` /  # lint-stale-ref: ok — asserts the retired shim name is absent from connect/
-    ``EXIT_*`` / a bash shim, none of which any shipped adapter imports.
-    """
+    """demand."""
     for py in sorted(_EXAMPLES.glob("*.py")):
         py_compile.compile(str(py), doraise=True)
 

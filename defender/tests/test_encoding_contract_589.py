@@ -52,12 +52,8 @@ def _case(runs: Path, case_id: str, *, summary: str = "plain summary",
 
 
 def test_an_undecodable_investigation_is_skipped_not_raised(tmp_path):
-    """demand (#589) — `load_corpus` must warn-SKIP a file it cannot decode, exactly as it skips
-    one it cannot parse. No locale games: this is the locale-INDEPENDENT half, and on `main` it
-    raises `UnicodeDecodeError` straight out of the walk on a plain UTF-8 dev box.
-
-    `loaded == 1` is the assertion that matters — it is what separates "skipped the bad file" from
-    "the walk died", and a fix that swallowed the whole scan would satisfy a bare `not raises`."""
+    """demand (#589) — `load_corpus` must warn-SKIP a file it cannot decode, exactly as it skips one
+    it cannot parse."""
     runs = tmp_path / "runs"
     _case(runs, "good")
     _case(runs, "corrupt", investigation=b"```invlang\nprologue:\n  summary: \xff\xfe truncated\n")
@@ -74,14 +70,7 @@ def test_an_undecodable_investigation_is_skipped_not_raised(tmp_path):
 
 def test_an_undecodable_alert_json_degrades_the_signature_it_does_not_sink_the_case(tmp_path):
     """demand (#589) — the same escape lives a second time in the same file, in
-    `_read_signature_id`, and the issue does not mention it. Its guard was
-    `except (OSError, json.JSONDecodeError)` — and `JSONDecodeError` is a *sibling* of
-    `UnicodeDecodeError` under `ValueError`, not its superclass, so it does not hold one either.
-
-    Since #1222 an undecodable alert never gets a run record (admission refuses it), so the
-    reachable form of this is a recorded run whose alert yields no signature. A signature that
-    is absent costs the case its cross-case join key; it must not cost the corpus the whole
-    case, and it must not kill the shim."""
+    `_read_signature_id`, and the issue does not mention it."""
     runs = tmp_path / "runs"
     _case(runs, "badalert", alert={"alert_id": "no-signature-here"})
 
@@ -100,13 +89,7 @@ def _c_locale_python(script: str) -> subprocess.CompletedProcess:
 
 def test_the_read_pin_keeps_a_valid_utf8_case_under_a_c_locale(tmp_path):
     """demand (#589, the latent half) — a *valid* UTF-8 companion must load where the ambient
-    encoding is ascii. Unpinned, `read_text()` raises `UnicodeDecodeError` on the em-dash, the new
-    guard warn-skips it, and the case vanishes from the corpus: silent data loss wearing a
-    malformed-file costume, invisible on a UTF-8 dev machine.
-
-    The ascii control case is what distinguishes "the em-dash case was dropped" from "the walk
-    died"; `enc=` is asserted because without it the C locale may not have taken and the test
-    proves nothing."""
+    encoding is ascii."""
     runs = tmp_path / "runs"
     _case(runs, "emdash", summary="auth-log leads expose logins — not post-auth behavior")
     _case(runs, "ascii")
@@ -127,14 +110,8 @@ def test_the_read_pin_keeps_a_valid_utf8_case_under_a_c_locale(tmp_path):
 
 
 def test_the_real_invlang_shim_prints_corpus_text_under_a_c_locale(tmp_path):
-    """demand (#589 / the #586 finding, one skill over) — end-to-end through the REAL
-    `defender-invlang` shim, the command the defender runs at PLAN. Pinning the read without
-    pinning stdout only moves the ascii crash from `read_text` to `print`.
-
-    Driven through a RENDERER subcommand on purpose: the `--json` paths are already ascii-safe via
-    `json.dump`'s `ensure_ascii=True`, so a JSON subcommand would pass unpinned and prove nothing.
-    Asserted on the em-dash reaching stdout, not merely on exit 0 — a CLI that "handled" the error
-    by dropping the case would satisfy the exit code."""
+    """demand (#589 / the #586 finding, one skill over) — end-to-end through the REAL `defender-
+    invlang` shim, the command the defender runs at PLAN."""
     runs = tmp_path / "runs"
     _case(runs, "emdash", summary="auth-log leads expose logins — not post-auth behavior")
 
@@ -175,16 +152,7 @@ def _curator_deps(tmp_path: Path):
 
 def test_a_lesson_the_runtime_wrote_survives_the_walk_that_reads_it_back(tmp_path):
     """demand (#588) — the read pin and the WRITE pin are ONE contract, and only a round trip under
-    a hostile locale catches the gap between them. An ambient-locale write beside a utf-8-pinned
-    read does not crash, it LOSES: a lesson containing `café` is written as latin-1 bytes,
-    committed to the corpus, and then warn-skipped as "malformed" by every walk that reads it back
-    — including the actor's retrieval mid-run.
-
-    Driven through the REAL `write_file` tool (gate included) and read back through the real corpus
-    walk, in a C-locale subprocess. Both halves are load-bearing: in-process on a UTF-8 dev box an
-    unpinned write emits the same bytes as a pinned one, so the test would be vacuous — which is
-    exactly the blind spot that let #588 stand. The non-ASCII char is spelled as an escape because
-    under `LC_ALL=C` the interpreter cannot decode a `-c` command line carrying a raw `é`."""
+    a hostile locale catches the gap between them."""
     proc = _c_locale_python(
         f"import sys; sys.path.insert(0, {str(WORKSPACE_ROOT)!r})\n"
         "import locale\n"
@@ -210,8 +178,7 @@ def test_a_lesson_the_runtime_wrote_survives_the_walk_that_reads_it_back(tmp_pat
 def test_an_undecodable_file_is_a_model_retry_not_a_stage_kill(tmp_path):
     """demand (#588) — pinning the runtime's read is necessary but not sufficient: on a genuinely
     undecodable file `read_text(encoding="utf-8")` still raises `UnicodeDecodeError`, and no gate
-    converts a `ValueError`, so it escapes the tool and takes the whole stage down. The agent can
-    act on "that file isn't text"; the run cannot act on a traceback. Locale-independent."""
+    converts a `ValueError`, so it escapes the tool and takes the whole stage down."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime import tools
@@ -226,9 +193,8 @@ def test_an_undecodable_file_is_a_model_retry_not_a_stage_kill(tmp_path):
 @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses the mode bits this drives")
 def test_an_unreadable_file_is_a_model_retry_too_not_a_stage_kill(tmp_path):
     """`read_text_utf8` is documented to raise TEXT_READ_ERRORS — BOTH halves. The decode half is
-    converted to a ModelRetry; the `OSError` half escaped, on the same argument that condemned the
-    decode half. `is_file()` is not a read-permission check (the gate is a policy gate, not a
-    filesystem one) and it races the read besides."""
+    converted to a ModelRetry; the `OSError` half escaped, on the same argument that condemned
+    the decode half."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime import tools
@@ -244,13 +210,9 @@ def test_an_unreadable_file_is_a_model_retry_too_not_a_stage_kill(tmp_path):
 
 def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
     """`reconfigure(encoding=…)` with no `errors=` silently RESETS the handler to `strict`, and the
-    defaults it clobbers are load-bearing: stderr is `backslashreplace` so an error path can never
-    itself raise, stdout is `surrogateescape` so a non-UTF-8 filename — what `Path.glob` hands back
-    as lone surrogates — prints instead of exploding.
-
-    The failure it buys is exquisite: `iter_lessons` warn-skips a bad lesson, then dies with a
-    `UnicodeEncodeError` printing the path it just skipped. A pin that hardens the read by breaking
-    the skip message is not hardening. Driven in a subprocess because stdio is process-wide."""
+    defaults it clobbers are load-bearing: stderr is `backslashreplace` so an error path can
+    never itself raise, stdout is `surrogateescape` so a non-UTF-8 filename — what `Path.glob`
+    hands back as lone surrogates — prints instead of exploding."""
     proc = _c_locale_python(
         f"import sys; sys.path.insert(0, {str(WORKSPACE_ROOT)!r})\n"
         "from defender._io import use_utf8_stdio\n"
@@ -272,19 +234,7 @@ def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
 
 
 def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
-    """The gather ingestion boundary, re-pointed at the TRANSPORT (#611). The capture subprocess
-    that used to own the lossy decode (`record_query.capture`) is gone — a data source is reached
-    through the `query` tool, and each transport runs its OWN subprocess (`_stub_transport`), whose
-    stdout is vendor telemetry: indexed log lines, process cmdlines, filenames — the likeliest
-    non-UTF-8 byte in the whole system.
-
-    A `subprocess.run(..., text=True, encoding="utf-8")` decodes STRICTLY, so one such byte raises
-    `UnicodeDecodeError` inside `run()`. It is a `ValueError`: it would sail past the transport's
-    `TransportFault`/`TimeoutExpired` guards, out of the verb, and kill the run — the same escape
-    as #589, one layer over. Every transport subprocess must decode LOSSILY (the structural pin is
-    `test_query_tool_611.py::test_every_transport_decodes_lossily`); here we drive the REAL
-    `docker_exec_raw` transport against a fake `docker` that emits a raw 0xe9 byte and confirm one
-    bad byte costs one character, not the run. One pipe up from where record_query used to."""
+    """The gather ingestion boundary, re-pointed at the TRANSPORT (#611)."""
     from defender.scripts.adapters import _stub_transport as transport
     from defender.runtime.verbs import VerbContext
     from defender.tests.tenant_1107_settings import _spec1107 as S

@@ -32,9 +32,8 @@ def _reads(deps, path: str) -> bool:
 
 def test_a_read_inside_the_spawns_tree_but_outside_every_lesson_corpus(tmp_path):
     """NEGATIVE + control: a read of ``defender/docs/*.md`` and ``defender/SKILL.md`` — inside the
-    worktree but outside every lesson corpus — DENYs under the confine; the spawn's OWN run-dir file
-    stays ALLOW (the run dir is a read root independent of the confine). RED today: docs/SKILL are
-    admitted through the wide ``defender_dir`` base the confine has not yet replaced."""
+    worktree but outside every lesson corpus — DENYs under the confine; the spawn's OWN run-dir
+    file stays ALLOW (the run dir is a read root independent of the confine)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     (rd / "note.md").write_text("x\n", encoding="utf-8")
     deps = curator_deps(wt, rd, "lessons")
@@ -65,10 +64,8 @@ def _bind_no_tree(wt, rd, defender_dir):
 
 
 def test_binding_the_curator_without_an_explicit_tree_raises(tmp_path):
-    """The main-checkout-authoring state is UNBUILDABLE: binding the curator with no explicit
-    NON-PATHS ``defender_dir`` raises, naming the tree requirement. Positive control: the stable
-    ``for_run`` drain path (an explicit worktree tree) authors an in-corpus lesson. RED today: the
-    seam raises the incidental ``bindable=False`` message, not the demanded tree refusal."""
+    """The main-checkout-authoring state is UNBUILDABLE: binding the curator with no explicit NON-
+    PATHS ``defender_dir`` raises, naming the tree requirement."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     with pytest.raises(ValueError, match=_EXPLICIT_TREE):
         _bind_no_tree(wt, rd, None)

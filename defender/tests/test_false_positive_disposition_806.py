@@ -30,11 +30,7 @@ _LEADS = (
 
 
 def _outcome(lead_id: str, vertex: str) -> str:
-    """A lead COMMITS by filing what it observed — the same shape a real run writes.
-
-    The identity is EDGED to the alerted host (`v-001`, `_PROLOGUE`'s only vertex), not just
-    declared: #993 refuses a lead-declared vertex no `:E` row ever names, and a bare identity
-    row with no edge is exactly the shape that rule exists to catch."""
+    """A lead COMMITS by filing what it observed — the same shape a real run writes."""
     return (
         "```invlang\n"
         f":V {lead_id}.observations.vertices [id|type|class|ident|attrs?]\n"
@@ -187,13 +183,8 @@ _UNPAID = _doc(
 
 
 def test_the_reader_is_the_gate_table_and_not_one_keyword():
-    """#879: the close's reader dispatches on the same `_DISPOSITION_GATES` the write gate
-    does, so EVERY priced keyword is COLLECTED here and the unpriced ones cost nothing.
-
-    The iteration buys generic collection, not a generic fixture — `_UNPAID` is hand-built to
-    owe both prices we have, and a third gate pricing something it happens to satisfy would
-    need a row added to it. What must NOT be needed is a third branch at the close, which is
-    the property `benign` lacked while the close read one row by literal."""
+    """#879: the close's reader dispatches on the same `_DISPOSITION_GATES` the write gate does, so
+    EVERY priced keyword is COLLECTED here and the unpriced ones cost nothing."""
     from defender.skills.invlang.validate import (
         _DISPOSITION_GATES,
         disposition_entry_price,
@@ -253,10 +244,7 @@ _BYPASS = (
 
 
 def test_the_close_cannot_be_reached_around_the_write_gate(tmp_path):
-    """THE bypass. `report.md` is written from the close's ARGUMENT, and nothing else on that
-    path reads the companion — so concluding under a cheaper keyword (or none) and passing
-    `false-positive` to `close_investigation` would buy the exit for free, in the artifact the
-    learning loop, the evals and the ticket lane actually read."""
+    """THE bypass."""
     from pydantic_ai.exceptions import ModelRetry
 
     with pytest.raises(ModelRetry) as e:
@@ -275,18 +263,7 @@ def test_a_companion_that_paid_the_price_closes(tmp_path):
 
 
 def test_benigns_price_is_collected_at_the_close_too(tmp_path):
-    """#879, the mirror of the bypass above. `benign` was priced at the `investigation.md`
-    write and collected NOWHERE at the close, so the same one-move exit was open in the other
-    direction: conclude `inconclusive` — legitimately unpriced, so the write gate passes it —
-    over a log whose slots are still `??`, then pass `benign` to `close_investigation`.
-
-    Worse than the FP bypass in one respect: the `??` slots stay on disk, so only `report.md`
-    disagrees with them, and `report.md` is what the learning loop reads — the direction router
-    picks the FN-hunt leg alone for `benign` where the honest `inconclusive` picks both, and
-    the case enters the corpus resolved.
-
-    The surviving review gate is not a second collection point: it is a model judgment over
-    projections, so it can uphold a close this table would refuse."""
+    """#879, the mirror of the bypass above."""
     from pydantic_ai.exceptions import ModelRetry
 
     with pytest.raises(ModelRetry) as e:
@@ -340,12 +317,7 @@ _PAID_BENIGN = (
 
 
 def test_a_companion_that_paid_benigns_price_closes(tmp_path):
-    """Benign's positive control. `benign` refuses CONTRADICTIONS — open slots, unfulfilled
-    authorization contracts — so a log that settled both owes nothing, and the disposition the
-    runtime reaches for most has to still be reachable. Asserted on the commit, because a
-    price that denied everything would pass the two tests above just as well.
-
-    Both halves of the gate are exercised, not just the slot half: see `_PAID_BENIGN`."""
+    """Benign's positive control."""
     from defender.skills.invlang.validate import (
         _check_benign_authz,
         disposition_entry_price,
@@ -372,19 +344,7 @@ def test_a_companion_that_paid_benigns_price_closes(tmp_path):
     ("The class is ??/??/?? but no `:V` block was ever written.\n", "unresolved slots in PROSE"),
 ])
 def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, shape):
-    """#879's second half. `benign`'s other two checks refuse CONTRADICTIONS — an open slot, an
-    unfulfilled contract — which is vacuous over a document that has neither because it has
-    NOTHING: no vertex to hold a slot, no hypothesis to carry a contract. So collecting the
-    price at the close still left the one-move exit open in a weaker form, and the weaker form
-    is the cheaper one to reach — a run that writes no work log at all.
-
-    The last fixture is the one that shows the clause is structural rather than textual: `??`
-    appears in the document, and it is still not an open SLOT, because nothing parsed it into a
-    vertex. A gate that grepped for the marker would pass this and refuse nothing real.
-
-    Driven through the real close, and asserted on `report.md` staying absent — this is the
-    artifact the learning loop reads, and the review gate downstream is a model judgment, not a
-    second structural collection point."""
+    """#879's second half."""
     from pydantic_ai.exceptions import ModelRetry
 
     import asyncio
@@ -414,22 +374,7 @@ def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, sh
 
 
 def test_a_companion_that_cannot_be_read_never_commits_the_models_verdict(tmp_path):
-    """A gate that cannot look must not report clean (#618/#621/#652).
-
-    Once every close reads this file, an I/O fault reaches a gate none of them used to — and
-    swallowing it to `""` would not mean "nothing was written", it would mean "this gate did
-    not run". That waives `benign`'s whole price, because that price refuses CONTRADICTIONS
-    and an empty read carries none; `false-positive`'s would still be refused, so the two
-    priced keywords would disagree about what a fault means. The close therefore decides an
-    unreadable companion ONCE, ahead of every gate, and the same way for every keyword: the
-    model's verdict is overruled to the host's `unresolved` as a review that cannot run, the
-    record naming the fault. Induced through the real primitive — `investigation.md` as a
-    DIRECTORY, so the guarded read refuses it regardless of the uid running the suite (a chmod
-    would not: CI is non-root, this container is not).
-
-    Both priced keywords are driven, and the commit is asserted to be the FAULT's rather than
-    either keyword's — a test that only checked "a report was written" would pass against
-    fail-open code for `false-positive`."""
+    """A gate that cannot look must not report clean (#618/#621/#652)."""
     import asyncio
 
     from defender._io import ALIAS_READ_REFUSAL
@@ -466,9 +411,7 @@ def test_a_companion_that_cannot_be_read_never_commits_the_models_verdict(tmp_pa
 
 def test_an_absent_companion_is_not_a_fault(tmp_path):
     """The control that bounds the test above: NEVER WRITTEN and COULD NOT LOOK are different
-    answers, and only the second is a fault. An unwritten log still owes `false-positive`'s
-    whole price — it states no defect — and is refused on THAT, with the price's own words
-    rather than the fault's."""
+    answers, and only the second is a fault."""
     from pydantic_ai.exceptions import ModelRetry
 
     run_dir = tmp_path / "run"
@@ -513,15 +456,7 @@ def test_an_unfulfilled_authz_contract_blocks_the_benign_close(tmp_path):
 
 
 def test_a_vertex_from_an_earlier_prologue_block_is_still_the_alerted_entity():
-    """The prologue clause reads a PROJECTION, so it inherits whatever that projection drops.
-
-    Append-only forbids rewriting the loop-1 block, so a run that learns of a second alerted
-    entity has exactly one way to record it: a second `:V prologue.vertices`. That block used to
-    REPLACE the first, which made this gate deny an `entity_check` against the host the alert
-    actually named — the model told to check the alerted entity, denied for having checked it,
-    with no edit available that complies. #817 made the block accumulate; this pins the gate's
-    dependence on that, which is not visible from either change alone.
-    """
+    """The prologue clause reads a PROJECTION, so it inherits whatever that projection drops."""
     two_blocks = _PROLOGUE + (
         "```invlang\n"
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"

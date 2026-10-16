@@ -3,14 +3,10 @@ entry points share `_tenant.requested_tenant_id` instead of each spelling "`--te
 required" (six copies had drifted apart in wording)."""
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
 from defender import _tenant
-
-_DEFENDER = Path(__file__).resolve().parents[1]
-_REFUSAL_WORDS = "--tenant is required: "
 
 
 def test_an_absent_or_malformed_request_is_refused() -> None:

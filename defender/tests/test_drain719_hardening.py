@@ -12,12 +12,7 @@ from defender._git import GitError  # type: ignore[import-not-found]
 
 
 def _break_index(repo: Path) -> None:
-    """Make `git status` fail for real while `git rev-parse HEAD` keeps working.
-
-    An occupied `index.lock` is the wrong instrument: `git status` succeeds under one (it
-    simply declines to write the refreshed index), so it fails the COMMIT and not the
-    read-only probes. Replacing the index with a directory fails exactly the probes and
-    leaves the ref layer intact, which is the split under test."""
+    """Make `git status` fail for real while `git rev-parse HEAD` keeps working."""
     (repo / ".git" / "index").unlink()
     (repo / ".git" / "index").mkdir()
 
@@ -31,23 +26,8 @@ def _repair_index(repo: Path) -> None:
 
 
 def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: Path):
-    """`GitError` is a member of the retire set for one reason — decision 1 path 3, the
-    commit-time failure. But the drain also READS repo state after the agent returns, and
-    those reads shell out to `git status` too. On a busy repo an index-lock collision there
-    raised `GitError` from a step that had nothing to say about the batch, and the batch
-    paid for it: three such collisions over a queue's life and `max_attempts=3` deleted
-    correct, fully authored work into the graveyard.
-
-    The agent SUCCEEDS here and breaks git afterwards, so the fault is unambiguously in the
-    post-agent probe rather than in the work. What must follow is the non-member
-    disposition: nothing bumped, nothing retired, the row still queued, and a stuck record
-    naming the class — stuck and loud, which is what every other non-member gets.
-
-    Discriminating in both directions. Before the fix the row bumped and (at this ceiling)
-    retired, so the attempt assertion fails; an implementation that swallowed the probe
-    failure instead would author nothing and write no stuck record, so the signal assertion
-    fails. The tail then shows the channel is not wedged: with git repaired the same rows
-    author normally, which also proves the corpus was restored rather than left dirty."""
+    """`GitError` is a member of the retire set for one reason — decision 1 path 3, the commit-time
+    failure."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -87,26 +67,7 @@ def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: 
 
 def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_path: Path):
     """The retire seam runs INSIDE the repo lock, which globally serialises all four corpus
-    channels. Acquiring the append lock there with an unbounded blocking wait re-introduces
-    exactly the stall the drain's own deadline-bounded read was added to prevent: one
-    channel's wedged appender holds the repo lock, and therefore every sibling channel's
-    tick, with no bound at all.
-
-    Driven through `run_batch` rather than at the seam, because the wiring is the thing that
-    was wrong — the seam took no deadline to pass. The batch faults with a `RETIRE_SET`
-    member (a member, so the tick retires) and an appender takes the channel's append lock
-    in the same breath, so the retire meets a held lock. The tick must give up at the
-    configured wait and surface as stuck; it must not bump, because a busy lock is not the
-    batch's fault.
-
-    #773 M5 moves the findings channel's own commit off `cfg.commit_fn` entirely (it calls
-    `shared.commit_corpus_paths` directly — FK-1 keeps `commit_fn` unreferenced by this lane
-    by construction), so the fault is raised from the curator spawn itself instead of from a
-    `commit_fn` override that this lane no longer calls; `retire()`'s own lock-wait behavior
-    is exactly the same regardless of which RETIRE_SET-member call site raised it.
-
-    `finished_within` rather than a bare call: the pre-fix behaviour is a HANG, and a
-    regression that hangs should fail this test rather than stall the suite."""
+    channels."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -145,19 +106,8 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
 
 
 def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tmp_path: Path):
-    """The guard that refuses to commit when the agent touched anything outside the corpus
-    compares against a baseline recomputed at the top of every tick. So a stray that
-    SURVIVED a faulted tick was, on the next one, indistinguishable from pre-existing dirt
-    the drain did not cause: the guard fired once and was then disarmed for the life of the
-    worktree, with the stray silently permitted into every batch after it.
-
-    The corpus restore was never the whole cleanup — reverting only inside the corpus leaves
-    precisely the file the guard exists to catch. The commit is pathspec-limited to the
-    corpus and can never have captured a stray, so undoing it costs nothing and is
-    unconditional.
-
-    The second tick is the discriminating half. Before the fix it AUTHORED, because the
-    stray had become baseline; the row rotated out and the guard never spoke again."""
+    """The guard that refuses to commit when the agent touched anything outside the corpus compares
+    against a baseline recomputed at the top of every tick."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]

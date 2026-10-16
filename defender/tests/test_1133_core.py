@@ -316,19 +316,6 @@ def test_d1_hold_new_holds_the_descriptor_it_made_not_the_name(tmp_path, when):
     assert list(host.iterdir()) == [], "the write followed the swapped name"
 
 
-class ParentSyncSpy(S.OsSpy):
-    """An `OsSpy` that also notes, at each fsync, whether the new directory already exists."""
-
-    def __init__(self, made: Path) -> None:
-        super().__init__()
-        self.made = made
-        self.made_at_sync: list[bool] = []
-
-    def fsync(self, fd: int) -> None:
-        self.made_at_sync.append(os.path.isdir(self.made))
-        super().fsync(fd)
-
-
 class DirSyncFails(S.PassThroughOs):
     """The real `os`, handed in as `os_`, except that an `fsync` of a DIRECTORY fails with
     `EIO`, as on a filesystem that cannot make a folder's entries durable."""
@@ -567,9 +554,6 @@ def test_d1_a_durable_append_after_a_rename_syncs_the_moved_holding_folder(tmp_p
 # =======================================================================================
 # No iterable text
 # =======================================================================================
-
-def _gen():
-    yield "a line\n"
 
 
 # =======================================================================================

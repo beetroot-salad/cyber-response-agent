@@ -25,10 +25,8 @@ from defender.learning.core import drains  # type: ignore[import-not-found]
 
 
 def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
-    """O7 is the oracle O1 and O2 were standing in for and could not provide: an
-    implementation that simply deleted the lock from the rotation passes both of those and
-    fails this. With the append lock held from another actor, the rotation does not proceed;
-    when the lock is released it completes."""
+    """O7 is the oracle O1 and O2 were standing in for and could not provide: an implementation that
+    simply deleted the lock from the rotation passes both of those and fails this."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -70,14 +68,9 @@ def test_retire_blocks_while_append_lock_held(tmp_path: Path):
 
 
 def test_every_channels_read_batch_happens_under_the_append_lock(tmp_path: Path):
-    """C1/P15, fork 3: the folded read takes the append lock on EVERY channel, so "every touch
-    of a pending file happens under `append_lock`" becomes one stateable property rather than
-    two divergent lock disciplines. Today `curator.read_batch` is a bare unlocked read and
-    `lessons.read_batch` wraps its read in the append lock (C25); folding to either shape
-    without deciding regresses one of them.
-
-    Parity across all four drained channels: with the append lock held, no channel's tick
-    reaches its agent call."""
+    """C1/P15, fork 3: the folded read takes the append lock on EVERY channel, so "every touch of a
+    pending file happens under `append_lock`" becomes one stateable property rather than two
+    divergent lock disciplines."""
     paths = h.make_paths(tmp_path)
     for name in h.AUTHOR_CHANNELS:
         ch = h.channel_of(name)
@@ -94,20 +87,7 @@ def test_every_channels_read_batch_happens_under_the_append_lock(tmp_path: Path)
 def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_through_run_batch(
     tmp_path: Path,
 ):
-    """Design hole 2's SOLE discharge, REPLACED at §7 round 2 (F2). The previous version
-    compared `persist._flock` and `shared.acquire_flock` against each other in isolation — two
-    primitives this design does not modify — so it was green against unmodified base code and
-    would have held for every possible implementation of the drain, including one that took no
-    append lock at all. A parity demand discharged by an oracle that cannot fail is not
-    discharged.
-
-    Rewritten to drive the DRAIN's own acquisition through `run_batch`, against a real appender
-    holding the lock with the blocking primitive appends actually use. If the folded drain
-    forgets the append lock, or trades the non-blocking discipline for one that ignores a
-    blocking holder, the agent gets called and this fails.
-
-    The control is the same config with nothing held: it authors normally, so the exclusion
-    assertion is not passing merely because the tick never worked."""
+    """Design hole 2's SOLE discharge, REPLACED at §7 round 2 (F2)."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -132,16 +112,8 @@ def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_th
 
 
 def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(tmp_path: Path):
-    """Design hole 1, the WEAKEST-SUPPORTED resolution in the set — an analogy, not a probe, a
-    claim or a design sentence — and flagged for override. Applied as resolved: the drain's wait
-    on the append lock inherits the repo lock's configured wait deadline.
-
-    REWRITTEN at §7 round 2 (F3). The previous version asserted only an upper bound, so an
-    implementation with NO deadline at all passed it, and the override invitation was hollow:
-    nothing in the suite moved either way. The observation is now bound to the CONFIGURED value
-    — the same contention is driven at two different deadlines and each give-up must track its
-    own — which fails for a drain that never waits, one that waits forever, and one that waits a
-    hard-coded constant."""
+    """Design hole 1, the WEAKEST-SUPPORTED resolution in the set — an analogy, not a probe, a claim
+    or a design sentence — and flagged for override."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -170,13 +142,8 @@ def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(t
 
 
 def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path):
-    """C4 (P66 + P12): the acquisition order is pinned by construction in one place rather
-    than trusted from an actor census, and enumerated by a test rather than read off the code.
-
-    The declared order is drain lock, then repo lock, then append lock. Driven, not merely
-    read: with the drain lock held, the tick must skip WITHOUT ever having taken the repo
-    lock — observed by another actor acquiring the repo lock while the contended tick runs —
-    which is what an order that took the repo lock first would fail."""
+    """C4 (P66 + P12): the acquisition order is pinned by construction in one place rather than
+    trusted from an actor census, and enumerated by a test rather than read off the code."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -192,13 +159,8 @@ def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path
 
 
 def test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick(tmp_path: Path):
-    """C8/P51: a direct module invocation bypasses the outer `.author-drain.lock` gate, so the
-    per-channel drain lock is what stops it — and it SKIPS rather than waiting. That is the
-    property that makes the shared `<pending>.tmp` name safe: two ticks never rewrite one
-    pending file at once, so the tmp path cannot be contended.
-
-    Observed at the queue: the second invocation authors nothing, rewrites nothing, and leaves
-    no `.tmp` artifact behind."""
+    """C8/P51: a direct module invocation bypasses the outer `.author-drain.lock` gate, so the per-
+    channel drain lock is what stops it — and it SKIPS rather than waiting."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -218,10 +180,7 @@ def test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick(tmp_path: P
 
 
 def test_second_author_drain_invocation_returns_without_blocking(tmp_path: Path):
-    """P61: the fold does not touch `author_drain`'s OUTER gate. A second `author_drain()`
-    invocation still returns immediately at `.author-drain.lock` rather than descending and
-    blocking on some per-channel drain lock, so the one-drainer-per-role property is unchanged
-    by the split below it. Parity-with-today, stated as such."""
+    """P61: the fold does not touch `author_drain`'s OUTER gate."""
     paths = h.make_paths(tmp_path)
     triggered: list[str] = []
 

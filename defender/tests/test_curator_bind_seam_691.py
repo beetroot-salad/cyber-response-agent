@@ -27,9 +27,7 @@ from _curator_691_harness import (  # noqa: E402
 
 def test_bind_returns_a_corpus_scoped_curator_deps(tmp_path):
     """Binding the curator BY NAME against its worktree returns a CuratorDeps whose compiled write
-    scope roots at ``<worktree>/defender/<corpus>``, NOT at run_dir — the whole point of #0. The
-    run_dir .md write DENY is the discriminator: a bind whose write_allow rooted at run_dir would
-    admit it (this fails if the write scope roots at run_dir)."""
+    scope roots at ``<worktree>/defender/<corpus>``, NOT at run_dir — the whole point of #0."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = bind_curator(wt, rd, "lessons")
     write_file(deps, rel("lessons", "m.md"))                       # own corpus → lands
@@ -58,8 +56,7 @@ def test_a_bound_deps_is_copied_with_one_field_replaced(tmp_path):
 def test_importing_runtime_does_not_import_the_learning_stages():
     """M4: the tool-config slot is a RUNTIME-side Protocol with an inert default, so importing the
     runtime deps module must not drag in the learning stages (runtime/ never imports learning/ to
-    look a deps subtype up). A fresh interpreter importing ``defender.runtime.tools`` pulls in no
-    ``defender.learning.author`` module."""
+    look a deps subtype up)."""
     code = (
         "import defender.runtime.tools, sys; "
         "leaked = [m for m in sys.modules if m.startswith('defender.learning.author')]; "

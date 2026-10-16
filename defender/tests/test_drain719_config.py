@@ -34,13 +34,7 @@ def _pitfalls_rows(n: int) -> list[dict]:
 def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Path):
     """P16: every path this change ADDS — the append-role lock, the drain-role lock and the
     graveyard — resolves under `state_root`, never under the disposable worktree repo root,
-    because two drains in two worktrees must share one lock and one queue.
-
-    Scope note, so this consensus is not over-read: it holds for the NEW paths. The CORPUS is
-    repo-rooted and stays that way, which is asserted here rather than left implied.
-
-    Driven as well as computed: a real tick with the state root relocated must actually create
-    those files there and leave the worktree clean of them."""
+    because two drains in two worktrees must share one lock and one queue."""
     state = tmp_path / "elsewhere"
     paths = h.make_paths(tmp_path, state_dir=state)
     assert paths.state_root == state
@@ -72,14 +66,9 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
 
 
 def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path):
-    """P03/F5: `assert_clean_corpus_dir` and `verify_agent_state` treat any untracked path
-    that is not `<corpus>/*.md` as stray, so a new lock or graveyard file placed outside the
-    ignored prefix aborts EVERY subsequent batch on that channel. The new paths therefore land
-    under the already-ignored pending prefix.
-
-    The paired control is what makes this discriminating rather than vacuous: a file written
-    one directory up, outside that prefix, DOES abort the tick — so the observation channel
-    can see the difference the demand is about."""
+    """P03/F5: `assert_clean_corpus_dir` and `verify_agent_state` treat any untracked path that is
+    not `<corpus>/*.md` as stray, so a new lock or graveyard file placed outside the ignored
+    prefix aborts EVERY subsequent batch on that channel."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
 
@@ -121,13 +110,7 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
 
 
 def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_path: Path):
-    """B3/B4: a malformed ceiling is a loop-level value error, not a queue-level one. Because
-    B5 binds the ceiling at CONFIG BUILD, `env_int`'s `FatalConfigError` is raised before any
-    row is read — outside the widened guard, where it stays systemic and cannot be swallowed
-    into another attempt against a row that did nothing wrong.
-
-    In-range values, including the falsy 0, stay queue-level and are exercised by their own
-    demands."""
+    """B3/B4: a malformed ceiling is a loop-level value error, not a queue-level one."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -152,14 +135,8 @@ def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_p
 
 
 def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
-    """B5, which is load-bearing for B4, B6 and A6: the ceiling is bound once, at config
-    build, rather than re-read inside the failure handler. Two consequences pinned here — the
-    value the batch uses is the one on the config, so the ceiling is testable by CONSTRUCTING
-    a config rather than by mutating the environment; and an environment change made after the
-    config exists cannot move the ceiling mid-batch.
-
-    Driven: the environment is lowered to 1 from inside the agent call itself, and the row
-    still bumps to 1 under the ceiling of 3 the config was built with instead of retiring."""
+    """B5, which is load-bearing for B4, B6 and A6: the ceiling is bound once, at config build,
+    rather than re-read inside the failure handler."""
     import os
 
     paths = h.make_paths(tmp_path)
@@ -187,20 +164,7 @@ def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
 def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
     tmp_path: Path, monkeypatch
 ):
-    """Decision 1 path 1, which flipped demand #0. Today `run_pitfalls` signals an authoring
-    failure by RETURNING a nonzero code that `_drain_pitfalls` never inspects, so the retire
-    callback is not reached at all: C23 drove four consecutive ticks and saw `attempts` stay
-    unset on every row, no graveyard, no consumed file — the dominant pitfalls failure is
-    discarded silently.
-
-    The discriminating oracle: the agent exits nonzero and raises NOTHING. The rc is converted
-    into a fault, the row's attempts bump, and the batch retires at the ceiling like any other
-    channel's.
-
-    Under decision 8 the conversion is only half the wiring: the class it raises must be a
-    MEMBER of the enumerated retire set, or the converted fault falls through uncaught and the
-    channel is exactly as stuck as before — a conversion that changes nothing observable. So the
-    raised class is asserted to be a member before the retirement is observed."""
+    """Decision 1 path 1, which flipped demand #0."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "2")
     paths = h.make_paths(tmp_path)
@@ -232,13 +196,8 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
 
 
 def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
-    """O8 on the channel that has no retirement mechanism at all today (C22) — no attempt
-    counter, no graveyard, a callback that only logs. Under D9 it routes through the same
-    retire path as every other file-queue at the same default ceiling of 3, which is this
-    change's one deliberate behavior change.
-
-    Three faulted ticks: the batch survives the first two carrying its count, and leaves on
-    the third carrying its reason."""
+    """O8 on the channel that has no retirement mechanism at all today (C22) — no attempt counter,
+    no graveyard, a callback that only logs."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = h.make_paths(tmp_path)
     h.seed(paths, PITFALLS, _pitfalls_rows(2))
@@ -273,10 +232,7 @@ def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
 
 
 def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Path, monkeypatch):
-    """A15/P75: "the batch" on pitfalls is `batch_ids`, the set fixed at the drain's own read.
-    The chosen retire site fires after the inner call stack has unwound, which widens the gap
-    between the read and the removal — so a row that arrived inside that gap is outside the
-    batch and must survive, count untouched."""
+    """A15/P75: "the batch" on pitfalls is `batch_ids`, the set fixed at the drain's own read."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "1")
     paths = h.make_paths(tmp_path)
@@ -304,14 +260,8 @@ def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Pat
 
 
 def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
-    """P56, which the flip makes load-bearing: pre-flip this consensus described an
-    unreachable branch, because the dominant pitfalls failure never reached the retire path at
-    all. Decision 1 path 1 supplies the trigger, so it becomes a live parity property — the
-    pitfalls removal acquires `.pitfalls.lock` through the same locked rotation the other four
-    channels use, and there is no unlocked pitfalls retire path.
-
-    Pitfalls has ONE lock serving both roles (C24), so this is the same file the appender
-    takes: held from another actor, the retirement does not proceed."""
+    """P56, which the flip makes load-bearing: pre-flip this consensus described an unreachable
+    branch, because the dominant pitfalls failure never reached the retire path at all."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("pitfalls")
     assert (paths.state_root / ch.append_lock).name == ".pitfalls.lock"

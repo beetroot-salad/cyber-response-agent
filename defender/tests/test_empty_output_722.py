@@ -70,14 +70,7 @@ def _prompt(tmp_path: Path) -> Path:
 
 
 def _reader_stage(tmp_path: Path, text: str, tag: str) -> str:
-    """A REAL shipped `require_output=True` stage on a scripted final.
-
-    THE ORACLE WAS THIS WITNESS AND IS DELETED (#922). It was a pure-prediction stage — one
-    model call, no tools, output required — and the questioner is the surviving stage of
-    exactly that shape, so the abort predicate is observed on it instead. The pairing this file
-    is about is unchanged: a stage whose output IS the product (aborts on a content-less final)
-    against a writer stage whose product is on disk (`_lead_author`, `require_output=False`).
-    """
+    """A REAL shipped `require_output=True` stage on a scripted final."""
     lrd = tmp_path / "learning_run"
     lrd.mkdir(exist_ok=True)
     with override_allow_model_requests(False):
@@ -125,11 +118,7 @@ def _lead_author(tmp_path: Path, text: str, tag: str, **over) -> str:
 
 
 def _logged(tmp_path: Path, parts, tag: str) -> list[dict]:
-    """``logger.messages`` after a REAL request/response pair goes through observe.
-
-    The classifier reads the dumped record shape, so build it the only way production
-    does: hand real ModelRequest/ModelResponse objects to ``RequestLogger.log``.
-    """
+    """``logger.messages`` after a REAL request/response pair goes through observe."""
     logger = observe.RequestLogger(tmp_path / f"{tag}.trace.jsonl")
     try:
         logger.log(
@@ -145,20 +134,16 @@ def _logged(tmp_path: Path, parts, tag: str) -> list[dict]:
 
 @pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=[t for t, _ in CONTENT_LESS])
 def test_reader_stage_aborts_on_any_content_less_final(tmp_path, tag, text):
-    """A final the reader would see as nothing — of ANY spelling, on either side of
-    isspace() — is "empty output", so the stage aborts instead of handing the caller a
-    blank verdict. Before #722 the zero-width half of this table (U+200B, U+FEFF,
-    U+00AD, U+2060, NUL, tag characters) was returned as real oracle output."""
+    """A final the reader would see as nothing — of ANY spelling, on either side of isspace() — is
+    "empty output", so the stage aborts instead of handing the caller a blank verdict."""
     with pytest.raises(RunUnprocessable, match="returned empty output"):
         _reader_stage(tmp_path, text, tag)
 
 
 @pytest.mark.parametrize(("tag", "text"), CONTENT, ids=[t for t, _ in CONTENT])
 def test_reader_stage_returns_real_output_verbatim(tmp_path, tag, text):
-    """The controls, and the guard's blast radius: one visible character is content, and
-    the stage's output crosses the guard BYTE-FOR-BYTE. The guard classifies; it never
-    rewrites — a BOM-prefixed or zero-width-joined real verdict is not silently mangled,
-    and NBSP padding does not cost the payload it wraps."""
+    """The controls, and the guard's blast radius: one visible character is content, and the stage's
+    output crosses the guard BYTE-FOR-BYTE."""
     assert _reader_stage(tmp_path, text, tag) == text
 
 
@@ -169,10 +154,8 @@ def test_reader_stage_returns_real_output_verbatim(tmp_path, tag, text):
     [("spaces", "  "), ("nbsp", " "), ("zwsp", "​"), ("nul", "\x00")],
 )
 def test_require_output_false_still_accepts_a_content_less_final(tmp_path, tag, text):
-    """Regression guard on the writer lane (#680): a lead author may end with no prose,
-    and the widened predicate must not start quarantining it. The flag suppresses the
-    guard wholesale, so every spelling comes back verbatim. (A truly-empty "" cannot be
-    tested here — pydantic-ai rejects it before run_stage sees a result.)"""
+    """Regression guard on the writer lane (#680): a lead author may end with no prose, and the
+    widened predicate must not start quarantining it."""
     assert _lead_author(tmp_path, text, tag) == text
 
 
@@ -187,11 +170,10 @@ def test_a_logged_response_of_only_content_less_text_reads_as_empty(tmp_path, ta
 
 
 def test_a_truly_empty_final_reports_empty_output_through_the_fault_path(tmp_path):
-    """End-to-end proof that the classifier is what SELECTS the fault message: pydantic-ai
-    rejects a truly-empty final itself, so run_stage lands in its ``except`` arm — with
-    require_output on, the classifier turns that into "returned empty output"; with it
-    off, the same fault reports the raw transport failure. The abort is not the
-    classifier's to make (both arms raise); only the message is."""
+    """End-to-end proof that the classifier is what SELECTS the fault message: pydantic-ai rejects a
+    truly-empty final itself, so run_stage lands in its ``except`` arm — with require_output on,
+    the classifier turns that into "returned empty output"; with it off, the same fault reports
+    the raw transport failure."""
     with pytest.raises(RunUnprocessable, match="returned empty output"):
         _lead_author(tmp_path, "", "empty-on", require_output=True)
     with pytest.raises(RunUnprocessable, match="failed:"):

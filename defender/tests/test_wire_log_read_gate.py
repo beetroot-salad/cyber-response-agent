@@ -149,13 +149,7 @@ def test_the_subdirectory_is_what_denies(env, which):
 
 
 def _run_dir_section(out: str) -> str:
-    """Just the map's `## Run dir` listing.
-
-    Asserted on rather than the whole document because the rest of the map is generated from
-    the REAL `workspace_map.DEFENDER_DIR` — the skills dirs, the adapter filenames, the query
-    systems — and a bare substring test over that would turn red the day someone adds a skill
-    whose name happens to contain `wire_logs`, for a reason that has nothing to do with the
-    suppression this test is about."""
+    """Just the map's `## Run dir` listing."""
     body = out.split("## Run dir", 1)[1]
     return body.split("\n## ", 1)[0]
 
@@ -176,17 +170,7 @@ def test_the_workspace_map_does_not_name_the_observe_dir(env):
 @pytest.fixture
 def lenv(tmp_path):
     """A learning run dir with a stage trace where `run_stage` puts it, a staged `gather_raw/`
-    tree beside it, and a bound learning role to ask the gate about.
-
-    THE STAGES CHANGED WITH #922, THE PROPERTY DID NOT. It used to build the actor's and the
-    judge's policies and check that neither could read the other's trace; both roles are
-    deleted. The curator is the surviving bindable learning role, and what the demands below
-    still state is the one that matters: a learning role does not read a wire-log trace, and
-    does not read the staged raw payloads beside it — traces carry unredacted exemplars.
-
-    `stage_trace_path` is used rather than a hand-joined path for the reason the production
-    call site uses it: the location is the thing under test, so a test that spelled it itself
-    would keep passing after the writer moved."""
+    tree beside it, and a bound learning role to ask the gate about."""
     lrd = tmp_path / "learning-run"
     (lrd / "gather_raw" / "l-001").mkdir(parents=True)
     (lrd / "gather_raw" / "l-001" / "0.json").write_text('{"user": "root"}\n', encoding="utf-8")
@@ -211,21 +195,6 @@ def lenv(tmp_path):
 
 
 #: TWO LEARNING-LANE DEMANDS LEFT WITH #922, recorded because their absence weakens this file.
-#:
-#: `test_the_bash_lane_denies_a_trace_for_the_judge` measured the `cat` lane at a role whose
-#: scope was `under(run, TREE)` — fullmatching at any depth, so the deny could only be carried
-#: by `files.names_wire_log_dir` itself. No surviving learning role has that shape: the
-#: curator's `cat` is its own corpus, where a subdirectory rule would exclude the file anyway,
-#: which is the vacuity that test existed to avoid.
-#:
-#: `test_the_deny_is_scoped_to_observe_and_nothing_else` was the POSITIVE CONTROL for the
-#: learning half — the judge still read the payloads it graded, the actor still read its own
-#: inputs — and both roles are gone. The curator reads nothing in a learning run dir
-#: (`read_allow == ()`), so there is no surviving learning role the control can be stated on.
-#: The runtime half's own control (`READERS`, below) still fires, so the class is not
-#: uncontrolled; the LEARNING half is, and that is the reduction.
-#:
-#: Restore both when a learning role is next granted a read scope over a run dir.
 LEARNING_READERS = ("curator",)
 
 
@@ -241,13 +210,7 @@ def test_a_learning_stage_trace_lands_under_observe(lenv):
 
 
 def test_a_learning_role_cannot_read_a_stage_trace_or_the_staged_payloads(lenv):
-    """The reported crossing, in the lane it actually lives in.
-
-    The actor must write its story WITHOUT the payloads; `decide_read`'s `gather_raw` branch is
-    what enforces that, and the assertion below it is the positive control proving that branch
-    is still doing its job here. The judge's prompt carries those same payloads UNREDACTED
-    (`compare.unredacted_exemplar`), so its trace at the learning run dir's root was the same
-    bytes by another name — and the actor's `read_allow` is EMPTY, so no shape filter ever ran."""
+    """The reported crossing, in the lane it actually lives in."""
     assert not _read(lenv, lenv.traces["judge_trace.jsonl"], "curator").allow
     assert not _read(lenv, lenv.traces["questioner_trace.jsonl"], "curator").allow
     assert not _read(lenv, lenv.run / "gather_raw" / "l-001" / "0.json", "curator").allow

@@ -20,25 +20,7 @@ from defender.tests import _state1135
 
 
 def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path):
-    """Decision 2: the count is LIFETIME. A row that failed, rode through a tick that
-    succeeded, and failed again carries its whole history — a clean tick confers no
-    exemption, and nothing on the success path clears the field.
-
-    RE-STAGED, because the staging this was first written with is unreachable against the
-    real pre-author gate. It committed the row and requeued it with `hold_committed`, then
-    expected the NEXT tick to author and fault it again — but a row whose id is now in the
-    corpus is exactly what the idempotency gate exists to catch, so that tick consumed it
-    without ever reaching the agent and returned 0. Making it fault again would mean
-    re-authoring work already in the corpus, which is the behaviour decision 9's reconciling
-    tick demands the opposite of.
-
-    So the intervening success is a tick the agent HOLDS the row back from: it succeeds,
-    rotates, and leaves the row queued and still authorable. That is the one shape in which
-    a row can survive a clean tick and fail again. #773 M1 retires the curator's own
-    `held_forward_bad` bucket (the check moved to the drain); the row is held back here the
-    way §773 C3 holds any row the curator mentions in NO bucket at all — untouched, still
-    queued, still authorable next tick — which is the same "clean tick, no reset" shape this
-    test is about."""
+    """Decision 2: the count is LIFETIME."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "run-I/0")])
@@ -102,10 +84,8 @@ def _retires_on_the_first_failure(tmp_path: Path, ceiling: int) -> None:
 
 
 def test_ceiling_of_one_retires_on_the_first_failure(tmp_path: Path):
-    """Fail-fast is the ceiling at 1, not a second mechanism: one failure retires the row
-    into the graveyard with `attempts` 1. Decision 4 rejected the clause's argument that
-    this had no in-suite exercise because its only production caller is out of scope — the
-    retire seam is driven here with no such caller, exactly as C33 drove it."""
+    """Fail-fast is the ceiling at 1, not a second mechanism: one failure retires the row into the
+    graveyard with `attempts` 1."""
     _retires_on_the_first_failure(tmp_path, 1)
 
 
@@ -113,10 +93,7 @@ def test_ceiling_of_one_retires_on_the_first_failure(tmp_path: Path):
 
 
 def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path):
-    """Retirement is scoped to the ids it was handed. Rows outside the batch come through
-    unchanged in EVERY field — no attempts key appears on them, no ordering rewrite, no
-    re-serialisation drift — so an unrelated row cannot be quietly edited by a neighbour's
-    failure."""
+    """Retirement is scoped to the ids it was handed."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     outsiders = [
@@ -136,12 +113,7 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
 def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     tmp_path: Path, monkeypatch
 ):
-    """A11: the retire step's OWN write failing is systemic. It sits outside the widened
-    guard by construction (decision 6), so the fault propagates out of the drain instead of
-    being caught and counted as another attempt against the row it was trying to retire —
-    and the active queue is left byte-identical for the next tick to re-read. Induced:
-    the graveyard append hits ENOSPC (a folder planted at the graveyard's name is now a
-    refusal, not an ordinary failure — #1135 — so the fault is injected at the handle's verb)."""
+    """A11: the retire step's OWN write failing is systemic."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -187,10 +159,8 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
 
 
 def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
-    """P38: `attempts` lives on the queue row, so a second, genuinely separate process picks
-    the count up off disk rather than starting over. Driven as a real subprocess because
-    `DEFAULT_PATHS` is frozen at import (F7) — an in-process environment change would not
-    reach a second actor at all."""
+    """P38: `attempts` lives on the queue row, so a second, genuinely separate process picks the
+    count up off disk rather than starting over."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])

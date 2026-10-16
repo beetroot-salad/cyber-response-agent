@@ -13,11 +13,7 @@ from defender.learning.core.state import FINDINGS
 
 
 def _rows_without_attempts(text: str) -> list[dict]:
-    """The queue's rows with the retirement counter dropped.
-
-    #719: a post-agent abort now BUMPS every row it was authoring (behaviour change 2 of
-    four), so "the queue is intact for retry" is no longer a byte comparison — the rows
-    themselves must be unchanged, and the count must have moved by exactly one."""
+    """The queue's rows with the retirement counter dropped."""
     import json as _json
 
     return [
@@ -57,17 +53,10 @@ def _head_files(tmp_repo) -> list[str]:
 
 
 def test_survival_partial_write_rollback(tmp_repo, helpers):
-    """A mid-batch fault (the in-process ``run_stage`` RunUnprocessable, surfaced through
-    the seam as ``AuthorError``) after the agent wrote some lesson bytes: no partial
-    commit lands, the queue is NOT rotated (findings retryable), and — once the drain's
-    rollback restores the corpus — a re-drain authors the finding EXACTLY once (no silent
-    double-author).
-
-    REVERSED BY #719: the leftover used to be load-bearing here, because the clean-scope
-    gate refused the re-drain until something outside the drain discarded it — which is
-    precisely how a retiring fault wedged its own channel. The drain now restores the
-    corpus itself on a retiring fault, so the retry the attempt bump exists to allow
-    actually happens."""
+    """A mid-batch fault (the in-process ``run_stage`` RunUnprocessable, surfaced through the seam
+    as ``AuthorError``) after the agent wrote some lesson bytes: no partial commit lands, the
+    queue is NOT rotated (findings retryable), and — once the drain's rollback restores the
+    corpus — a re-drain authors the finding EXACTLY once (no silent double-author)."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-P/0", run_id="run-P")
     commits_before = _commit_count(tmp_repo)
@@ -100,10 +89,8 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
 
 
 def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
-    """``verify_agent_state``'s committed⇔corpus-dirty cross-check still holds under the
-    in-process invoke. BOTH inconsistent states abort (rc 2, queue intact):
-    committed=[id] + CLEAN corpus, and committed=[] + DIRTY corpus. Positive control:
-    the CONSISTENT state (committed=[id] + dirty corpus) commits and rotates out."""
+    """``verify_agent_state``'s committed⇔corpus-dirty cross-check still holds under the in-process
+    invoke."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
     pre = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
@@ -144,10 +131,9 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
 
 
 def test_survival_scope_gate_strays(tmp_repo, helpers):
-    """The scope gate catches a NEW file the agent wrote OUTSIDE the corpus (→ AuthorError,
-    rc 2), but a sibling's PRE-EXISTING baseline stray (staged before the agent ran) is
-    NOT blamed on the curator. Positive control: with only the baseline stray, the batch
-    commits the lesson (pathspec-scoped — the stray does not ride into the commit)."""
+    """The scope gate catches a NEW file the agent wrote OUTSIDE the corpus (→ AuthorError, rc 2),
+    but a sibling's PRE-EXISTING baseline stray (staged before the agent ran) is NOT blamed on
+    the curator."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-S/0", run_id="run-S")
     pre = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
@@ -180,10 +166,9 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
 
 
 def test_survival_idempotent_redrain(tmp_repo, helpers):
-    """A re-drain of an already-committed batch does not double-commit or double-append:
-    once the finding is cited in an existing lesson's ``source_finding_ids``, the next
-    tick filters it (consumed_idempotent) and the agent is NEVER re-invoked. Positive
-    control: tick 1 authored + committed the lesson exactly once."""
+    """A re-drain of an already-committed batch does not double-commit or double-append: once the
+    finding is cited in an existing lesson's ``source_finding_ids``, the next tick filters it
+    (consumed_idempotent) and the agent is NEVER re-invoked."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-I/0", run_id="run-I")
     commits_before = _commit_count(tmp_repo)
@@ -210,11 +195,9 @@ def test_survival_idempotent_redrain(tmp_repo, helpers):
 
 
 def test_survival_agent_no_git(tmp_repo, helpers):
-    """The in-process agent runs NO git — the loop remains the SOLE committer. The agent
-    leaves the lesson uncommitted in the working tree and the loop makes exactly ONE new,
-    pathspec-scoped commit. If the agent held a git grant it would produce its own
-    commit, so ``rev-list --count`` advancing by EXACTLY 1 (not ≥2) is the observable that
-    the agent committed nothing."""
+    """The in-process agent runs NO git — the loop remains the SOLE committer. The agent leaves the
+    lesson uncommitted in the working tree and the loop makes exactly ONE new, pathspec-scoped
+    commit."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-G/0", run_id="run-G")
     commits_before = _commit_count(tmp_repo)
@@ -233,8 +216,7 @@ def test_survival_agent_no_git(tmp_repo, helpers):
 def _spawn_curator(**over):
     """Call the assumed ``curator_engine.run_curator_stage`` with hermetic defaults; a test
     overrides per case. Mirrors test_lead_author_engine.py's ``_spawn`` over
-    ``run_author_stage``. The ``run_author`` DI seam captures the trace anchor without
-    running the pydantic-ai graph. Signature per the SEAM INTERFACE CONTRACT (assumed)."""
+    ``run_author_stage``."""
     from defender.learning.author.curator_engine import (
         run_curator_stage,
     )
@@ -261,11 +243,9 @@ def _spawn_curator(**over):
 
 
 def test_trace_per_spawn_distinct(tmp_path: Path):
-    """UNIQUENESS at the composition frame: two curator spawns (C then D) in ONE drain,
-    into ONE learning_run_dir, must get DISTINCT trace paths keyed on (batch_id, pid) — a
-    single-spawn test cannot see the collision. Positive control (truncate-mode): opening
-    a RequestLogger on one path truncates ONLY that path, so two DISTINCT names never
-    clobber each other."""
+    """UNIQUENESS at the composition frame: two curator spawns (C then D) in ONE drain, into ONE
+    learning_run_dir, must get DISTINCT trace paths keyed on (batch_id, pid) — a single-spawn
+    test cannot see the collision."""
     rd = tmp_path / "state" / "_pending"
     rd.mkdir(parents=True)
 

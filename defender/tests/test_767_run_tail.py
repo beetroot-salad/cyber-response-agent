@@ -27,14 +27,7 @@ OPEN_STEP = "open_case_ticket"
 
 
 class Tail(SpecTail):
-    """`_spec791`'s investigation-tail fake, carrying D2's renamed writer method.
-
-    Subclassed rather than edited in place: `_spec791.SpecTail` is #791's, and whether IT has
-    been migrated off `close_case_ticket` is `test_767_record_case_ticket_is_the_writer_seam`'s
-    own assertion (RF2 — a rename is silent at every duck-typed implementor of this seam, and
-    the test that does not carry it keeps passing while the run's ticket step does nothing).
-    `tenant`, `defender_dir` and `env` are what `run.py` hands the leg (#1107); `**kw` is #1047's
-    exit-class pair, which the tail threads through and this suite does not interpret."""
+    """`_spec791`'s investigation-tail fake, carrying D2's renamed writer method."""
 
     def record_case_ticket(self, run, *, tenant, defender_dir, env, **kw) -> None:
         self.ticket_tenants.append(tenant)
@@ -52,28 +45,7 @@ def state(tmp_path, monkeypatch):
 
 def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch):
     """o4_run_under_flag_always_comments — a run under `--update-ticket` whose store is
-    reachable and whose lifecycle COMPLETES ends with an agent comment on its ticket: the
-    entrypoint reaches `record_case_ticket` over the run dir it materialized itself.
-
-    §7 R6/FK32 pinned the INDEPENDENCE of the two post-steps as a specification rather than
-    leaving it the accident of two independently-guarded calls: the record step is attempted
-    whatever the open did. On the PLATFORM the ticket pre-exists (N4) so there is no open at
-    all, and a short-circuit design would make the platform path unreachable — which is why
-    the order here is observed as "open, then record, both reached" rather than as "record
-    reached when open succeeded".
-
-    THE THIRD PART MAKES THE OPEN FAIL, which is what turns that paragraph from a claim into
-    an assertion. `run.py`'s tail seam is a fake writer, so no fault it can inject reaches a
-    store; the independence is therefore driven one level down, at the writer's own
-    `TicketWriterDeps` seam, over a store that answers 409 on the create (FK33's duplicate
-    key, c8) and over one whose transport raises (FK32's unreachable bastion, c14). After
-    each, the comment POST must still fire against the SAME key. Without this part an
-    implementation spelled as "record only if the open succeeded" is green across the whole
-    suite, and the platform path — the doc's own stated motive for keeping the write — is
-    unreachable.
-
-    §7 R11/FK09 scopes the witness: a run that does NOT complete its lifecycle reaches no
-    post-step, and that is an examined no rather than a failure. The second half drives it."""
+    reachable and whose lifecycle COMPLETES ends with an agent comment on its ticket."""
     tail = Tail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "flagged"), tail, "--update-ticket") == 0
     assert RECORD_STEP in tail.names, (
@@ -136,19 +108,7 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
 
 
 def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
-    """n7_writes_only_under_the_flag — `--update-ticket` remains the whole switch. It is
-    declared `store_true` and default OFF, so a run without it reaches NEITHER post-step; and
-    it is refused OUTRIGHT under `--episode` (`--resume` before #1105 PR 2), before anything is
-    spent (g5/r3: run.py carries THREE `if ns.update_ticket:` sites, and this demand's second
-    observable lives at the first of them).
-
-    REJECTED, and deliberately not asserted: making the flag the platform default is a later
-    change (N7).
-
-    The positive control is `test_767_run_under_flag_leaves_an_agent_comment` on the same
-    seam — with the flag, both steps ARE reached — so "no write" here is not "the tail never
-    ran". The inline control is the run's own completion: the lifecycle and the render step
-    are reached either way."""
+    """n7_writes_only_under_the_flag — `--update-ticket` remains the whole switch."""
     assert run_py.parse_args(["/tmp/alert.json", "--tenant", "playground"]).update_ticket is False, (
         "the ticket flag is no longer opt-in"
     )
@@ -184,18 +144,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
 
 def test_767_record_runs_before_the_curation_marker(tmp_path, state):
     """n1_record_precedes_curation_marker — the #791/#947 ordering keeps its position across
-    D2's rename: the case ticket is settled BEFORE the curation request is published, so the
-    record step runs with no marker on the queue and the marker lands after it.
-
-    REJECTED, and recorded rather than carried: the ordering's original rationale — "a drainer
-    must never read this case with its ticket still open" — has NO READER at HEAD (c5: nothing
-    reads a ticket's status, and the resolution lane D5 deletes was the only decoder). The
-    ORDERING is kept; its reason is not. This demand exists so the rename cannot quietly move
-    the call past the marker on the grounds that the reason evaporated.
-
-    Driven through `_spec791`'s own tail recorder, whose every step carries the curation
-    requests visible when it ran — so the ordering is an observation of a real run rather than
-    a reading of `main`'s statement sequence."""
+    D2's rename."""
     tail = Tail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "ordered"), tail, "--update-ticket") == 0
 

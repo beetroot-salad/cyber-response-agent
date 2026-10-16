@@ -47,10 +47,8 @@ def _table(tmp_path: Path, rows: dict) -> Path:
 
 
 def test_the_shipped_correlation_grant_is_the_tables_projection():
-    """The wiring: the correlation grant must be BUILT from the table, not merely agree
-    with it today. Checked against the projection function over the shipped rows, so a
-    leftover literal that happens to match is still caught the first time the table changes.
-    (#1106 M4: the grant is the RUN's — `run_grants(settings)` — not a `_spec` constant.)"""
+    """The wiring: the correlation grant must be BUILT from the table, not merely agree with it
+    today."""
     from defender.runtime.lead_zero._spec import correlation_grant
 
     grants = T1106.run_grants(SETTINGS)
@@ -174,9 +172,8 @@ def test_the_lead_may_not_hold_a_second_query_verb(tmp_path):
 
 def test_a_health_check_on_a_second_system_is_not_a_second_dispatch_target(tmp_path):
     """`health-check` never selects the dispatched system (`correlation_system` filters it out
-    before deriving one), so a row for it elsewhere is not the authoring ambiguity the
-    one-system rule refuses — and refusing it would kill startup over a table whose target is
-    unambiguous. The loader and the projection have to agree about which rows reach a system."""
+    before deriving one), so a row for it elsewhere is not the authoring ambiguity the one-system
+    rule refuses — and refusing it would kill startup over a table whose target is unambiguous."""
     from defender.runtime.lead_zero._spec import correlation_grant, correlation_system
 
     rows = load_dispositions(_table(tmp_path / "ok", {
@@ -204,10 +201,8 @@ def test_a_grant_with_no_query_verb_has_no_dispatch_target():
 
 
 def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
-    """`run_correlation` returns the `withheld` ending before any claim: no `l-00c` row lands
-    in the leads table for a lead that will never run. The dispatch identity is handed in as the
-    run-start check resolves it (#1003): `system=None` is the withheld arm. (The claiming arm is
-    observed end to end by `alert_front_door_1222/test_1222_correlation_endings`.)"""
+    """`run_correlation` returns the `withheld` ending before any claim: no `l-00c` row lands in the
+    leads table for a lead that will never run."""
     import asyncio
 
     from defender.runtime.lead_zero import ENDING_WITHHELD, CorrelationDispatch, run_correlation

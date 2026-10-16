@@ -140,9 +140,7 @@ def test_every_unusable_composer_reply_is_refused(bad, refs):
 
 def test_a_whole_reply_wrapped_in_a_code_fence_is_still_read(refs):
     """The contract asks for one JSON object and nothing else, and a model that packages that
-    object in a ```json fence has met it in content and missed it in packaging. Refusing the
-    fence fails a confident close CLOSED on formatting, on every close, for as long as the
-    model has the habit — and unwrapping it changes nothing that is then validated."""
+    object in a ```json fence has met it in content and missed it in packaging."""
     for fenced in (
         f"```json\n{_reply()}\n```",
         f"```\n{_reply()}\n```",

@@ -37,9 +37,7 @@ LOOKUP_ALICE = {"entity": "alice", "risk": "low", "record_id": "r-0001"}
 
 class ProviderLikeModel:
     """A model double that refuses a conversation as a provider does (HTTP 400, "tool_use ids
-    were found without tool_result blocks"): every tool call of a reply must be answered in the
-    request right after it. Its replies are raw `ModelResponse` parts, so one reply can carry
-    several tool calls — what a real model does and `ScriptedModel` cannot."""
+    were found without tool_result blocks")."""
 
     def __init__(self, *replies: list[tuple[str, dict]],
                  name: str = S.double_model_name("provider-like")) -> None:
@@ -169,10 +167,7 @@ def test_a_hung_verifier_is_cut_off_by_the_turn_deadline(tmp_path):
 
 
 def test_a_call_after_the_world_went_unservable_reports_the_failing_call(tmp_path):
-    """CI race (test_conc_13): a call queued behind the failing one raised unservable for its
-    own call. Both aborts surface together and the first one found writes the world's record,
-    which then named a call the oracle never saw. Every later call raises the world's one
-    failure."""
+    """CI race (test_conc_13)."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "query", BOB, BOB_ROWS)
@@ -418,10 +413,7 @@ def _esql(rows: list[list[Any]]) -> dict:
 
 
 def test_a_forged_row_can_be_added_to_an_esql_answer(tmp_path):
-    """Fourth-round finding 2: an ES|QL answer (`columns` + `values`) could never be changed:
-    `forge` refused a value-array row and check 1 recognised only mapping rows, so every added
-    row was unclaimed. A value array zips with the column names into one row model; a forged
-    ES|QL row is staged, matched, shape-checked and served."""
+    """Fourth-round finding 2."""
     est = S.estate(tmp_path)
     base = est.answer("idp", "query", ALICE, _esql(_ESQL_ROWS))
     row = ["2026-03-01T11:00:00Z", "alice", "e-9f01", "db-1"]
@@ -465,10 +457,7 @@ def test_an_esql_side_query_selects_its_rows_not_its_columns():
 
 
 def test_esql_answers_projecting_other_columns_are_separate_tables_for_check_2():
-    """Fourth-round finding 2, check 2: every ES|QL answer of a system sat at one place
-    (`values`), so the union of all projections ever seen was required of each forged row. An
-    ES|QL table is its column set: an honest row of this projection passes, and a mistyped
-    one still fails (control)."""
+    """Fourth-round finding 2, check 2."""
     other = {"columns": [{"name": "host", "type": "keyword"}, {"name": "risk", "type": "long"}],
              "values": [["web-1", 3]]}
     base = _esql(_ESQL_ROWS)
@@ -583,10 +572,7 @@ def _python_box_factory(tmp_path: Path, *, slow_first: float = 0.0) -> tuple[Any
 
 
 def test_the_python_box_is_stopped_when_the_attempt_that_used_it_ends(tmp_path):
-    """Finding 9: the box outlived its attempt (kept for the sibling), and the reset after a
-    deadline never ran, so the next attempt's python shared the abandoned frame's container and
-    scratch. The box belongs to one attempt: started on its first python call, its container
-    and scratch removed when the attempt ends, whatever the ending."""
+    """Finding 9."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     box, log = _python_box_factory(tmp_path)
@@ -650,10 +636,7 @@ class _GatedLimiter:
 
 
 def test_an_abandoned_attempts_limiter_wait_does_not_touch_the_next_attempts_clock(tmp_path):
-    """Finding 10: one `waiting_since` slot served every thread on the door, so a thread of an
-    abandoned attempt leaving `acquire` cleared the next attempt's wait in progress, and that
-    attempt was cut off for limiter time the deadline excludes. Each attempt keeps its own
-    wait record; a thread of another attempt cannot touch it."""
+    """Finding 10."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "query", BOB, BOB_ROWS)
@@ -686,12 +669,7 @@ def test_an_abandoned_attempts_limiter_wait_does_not_touch_the_next_attempts_clo
 
 
 def test_an_oracle_turn_holds_the_clock_only_while_it_is_open(tmp_path):
-    """Finding 7: a sibling killed mid-turn left `oracle_open_since` in budget.json, and every
-    later read counted `now - opened` as oracle-held, so a resume's elapsed time stood still and
-    the wall-clock limit never tripped. (#1235 round 2: the open turn lives on the run's
-    `RunState`, which no other process can reach, so the dead-writer arm is gone.) A fresh
-    state holds nothing and a closed turn stops holding, so the clock runs; a turn open now
-    pauses it (control)."""
+    """Finding 7."""
     from defender.hooks import budget_enforcer as be
 
     state = S.run_state(tmp_path / "run", "r-1")
@@ -756,10 +734,7 @@ def test_an_unpriced_verifier_is_refused_before_the_oracles_first_request(tmp_pa
 
 
 def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path):
-    """Finding 8: the charge ran inside the provider-failure `try`, so a failed `trace.jsonl`
-    append was reported as a failed model request, the paid response's cost never reached
-    `spent`, and the verifier re-asked (paying again). Only the model call is guarded: the
-    spend is counted whatever the trace write does, and the answer is served."""
+    """Finding 8."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
@@ -792,10 +767,7 @@ def _forge_and_serve(tmp_path: Path, row: Any, *, system: str = "Elastic") -> tu
 
 
 def test_a_forged_row_belongs_to_the_calls_system_not_the_one_the_oracle_typed(tmp_path):
-    """Fifth-round finding 3: check 2 found its real rows under the `system` the oracle typed
-    into `forge`, so a misspelt system ("Elastic" for idp) found none and passed a row of any
-    shape (D2). The host stamps the call's system: the misshapen row fails check 2, and an
-    honest row is frozen under the call's system (control)."""
+    """Fifth-round finding 3."""
     with pytest.raises(oracle_mod.OracleUnservable) as refused:
         _forge_and_serve(tmp_path / "a", {"ts": "2026-07-28T15:20:00Z", "totally": "different"})
     assert "check 2" in refused.value.detail, refused.value.detail
@@ -806,10 +778,7 @@ def test_a_forged_row_belongs_to_the_calls_system_not_the_one_the_oracle_typed(t
 
 
 def test_an_esql_value_array_of_the_wrong_length_is_refused_at_forge(tmp_path):
-    """Fifth-round finding 4: a value array whose length is not the ES|QL answer's column count
-    was staged as a raw list; the diff left it unzipped and check 2 skipped it, so a 3-value
-    row in a 4-column answer was served. `forge` refuses it with a legible reason, nothing is
-    staged, and the submission naming it fails."""
+    """Fifth-round finding 4."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, _esql(_ESQL_ROWS))
     short = ["2026-03-01T11:00:00Z", "alice", "e-9f01"]
@@ -835,10 +804,7 @@ def test_an_esql_value_array_of_the_wrong_length_is_refused_at_forge(tmp_path):
 
 
 def test_a_nested_esql_value_array_that_does_not_zip_fails_check_2():
-    """Fifth-round finding 4, the checks' side: an ES|QL answer nested below the top level
-    gives `forge` no column names, so a short value array reached the checks raw and check 2
-    skipped every non-mapping row. A forged row in an ES|QL table that is not one value per
-    column fails check 2; a full row passes (control)."""
+    """Fifth-round finding 4, the checks' side."""
     base = {"result": _esql(_ESQL_ROWS)}
 
     def forged(row: list[Any]) -> list[str]:
@@ -866,21 +832,14 @@ def _two_fact_checks(claimed_fact: str, *, frozen: bool) -> list[str]:
 
 @pytest.mark.parametrize("frozen", [False, True], ids=["fresh", "frozen"])
 def test_a_forged_row_is_claimed_under_the_fact_it_was_forged_for(frozen):
-    """Fifth-round finding 7: a claim's `added[].fact_id` was compared with the forge record's
-    only for frozen rows, so a row forged this attempt for f1 could be claimed — and shown to
-    the verifier — as backing f2, then frozen under f1. Fresh or frozen, the claimed fact must
-    be the record's; the right fact passes (control)."""
+    """Fifth-round finding 7."""
     wrong = _two_fact_checks("f2", frozen=frozen)
     assert any(f.startswith("check 4") and "'f1', not 'f2'" in f for f in wrong), wrong
     assert _two_fact_checks("f1", frozen=frozen) == []
 
 
 def test_a_star_count_does_not_cover_an_edit_to_a_real_rows_field():
-    """Fifth-round finding 2: a `counts` entry whose base/served matched a changed value
-    claimed it whatever the cell, and was never used up — one "*" entry (1 -> 2) covered the
-    answer's total AND edits of a real row's severity and risk from 1 to 2. Each count entry
-    accounts for one count cell, and a real row's ordinary field is none: the edits fail
-    check 1; the total alone, counted, passes (control)."""
+    """Fifth-round finding 2."""
     base = {"total": 1, "hits": [{"user": "alice", "severity": 1, "risk": 1}]}
     forged_row = {"user": "bob", "severity": 1, "risk": 1}
     record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": forged_row}
@@ -967,10 +926,7 @@ def _serve_colliding(tmp_path: Path, *, answers_unwritable: bool) -> tuple[Any, 
 
 
 def test_an_uncommitted_answer_leaves_no_collision_row(tmp_path):
-    """Fifth-round finding 9, the side effect: a verified submission's frozen-row collisions
-    were written to collisions.jsonl before its commit, so an answer whose commit failed (never
-    served) left collision rows for the judge. They are recorded only once the answer commits
-    (control: a committed one records its collision)."""
+    """Fifth-round finding 9, the side effect."""
     est, reg = _serve_colliding(tmp_path / "failed", answers_unwritable=True)
     with pytest.raises(oracle_mod.OracleUnservable):
         S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
@@ -984,10 +940,7 @@ def test_an_uncommitted_answer_leaves_no_collision_row(tmp_path):
 
 def test_a_failure_closing_the_clock_mark_leaves_no_row_for_the_answer_it_withheld(
         tmp_path, monkeypatch):
-    """Fifth-round finding 6: the ledger row was written inside the turn, so a clock-mark close
-    that raised on the turn's normal exit replaced the answer after the row recorded it as
-    delivered (against N12). The row is written after the turn closes: a close failure leaves
-    no row, and the committed answer is served, with its row, on the next ask."""
+    """Fifth-round finding 6."""
     from defender.learning.branch.estate import registry as registry_mod
 
     real_close = registry_mod.oracle_turn_closed
@@ -1036,10 +989,7 @@ class _LimiterFailsOnce:
 
 
 def test_a_limiter_failing_closed_under_an_oracle_query_is_a_failed_attempt(tmp_path):
-    """Fifth-round finding 10: `serve()` mapped only a spent budget; a `LimiterStateError`
-    raised by the oracle's `run_query` escaped `serve_one` as an ordinary exception, filed as
-    a fault row the investigator read. The oracle's own limiter failing is a failed attempt:
-    the next attempt serves the call."""
+    """Fifth-round finding 10."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
@@ -1107,18 +1057,7 @@ def test_a_trace_append_that_failed_part_way_is_counted_once_on_resume(tmp_path)
 
 
 def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path):
-    """Fifth-round finding 5: `account_call` read budget.json, then wrote it back with
-    an atomic replace under a process-local lock, while the oracle-turn marks are written under the
-    file lock. An `oracle_turn_closed` landing between its read and its write was overwritten:
-    the open mark came back (the investigator's clock paused for good) and the held seconds were
-    lost. (Sixth round: the oracle's clock state left budget.json for host state, so the count
-    and the close no longer share a record; #1235: the count and the clock are the run's one
-    `RunState`, under its one lock.) A close racing a count still credits its seconds and stays
-    closed, the count still lands, and the budget state carries no oracle field either way.
-
-    Raced, round after round: each round's close and count are released together, so both
-    orders land. (The count no longer has a read-to-write step outside the state's lock to
-    stop it at; that seam left with budget.json.)"""
+    """Fifth-round finding 5."""
     from defender.hooks import budget_enforcer as be
 
     def close(gate: threading.Barrier) -> None:
@@ -1159,10 +1098,7 @@ def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path):
 ])
 def test_a_bad_oracle_setting_is_refused_before_the_question_writer(tmp_path, monkeypatch, knob,
                                                                      value, named):
-    """Fifth-round finding 8: the oracle's knobs and both roles' pricing rows were first judged
-    in pre-flight, after the question-writer was paid for, leaving an episode with a family and
-    no outcome. They are judged in `preflight_episode`, the launch's one refusal block, by the
-    rules pre-flight applies: the question-writer is never called."""
+    """Fifth-round finding 8."""
     monkeypatch.setenv(S.T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     monkeypatch.setenv(knob, value)
@@ -1183,15 +1119,7 @@ def test_a_bad_oracle_setting_is_refused_before_the_question_writer(tmp_path, mo
 
 
 def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path, monkeypatch):
-    """Sixth-round finding 1: the oracle box bound the whole repository root read-only, its
-    `.env` (live credentials) included, so one `python` turn fed injected telemetry could read
-    the secrets and hand them to the oracle model. The box now binds a fresh runner folder
-    holding only the modules its transport imports, at the checkout's path, and its scratch
-    folder: no bind source lies under or over the checkout.
-
-    Driven through the production start against a `docker` on PATH that records every argv
-    and refuses the create (no daemon here shares this tree's path). The process PATH carries
-    it, as `_start_oracle_box_recorded` does: the start's docker calls resolve `docker` there."""
+    """Sixth-round finding 1."""
     from defender.runtime.box import _oracle as box_oracle
     from defender.tests.live_oracle_1224 import test_1224_oracle_context_and_box as B
 
@@ -1236,10 +1164,7 @@ def _big_rows(user: str, mark: str, n: int = 300) -> dict:
 
 
 def test_oversized_family_example_answers_are_capped(tmp_path):
-    """Sixth-round finding 9: `_prefix` framed the family's example answers whole, past the cap
-    every other framed value goes through, so one large recorded answer put megabytes into
-    every conversation. The family block now shares one fixed cap, its examples shown as their
-    head, saying so."""
+    """Sixth-round finding 9."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
@@ -1257,12 +1182,7 @@ def test_oversized_family_example_answers_are_capped(tmp_path):
 
 def test_a_conversation_past_the_size_budget_restarts_and_keeps_the_frozen_rows(tmp_path,
                                                                                monkeypatch):
-    """Sixth-round finding 5: the conversation was append-only across calls and restarted only
-    after `restart_after` attempts, never by size, so a few large answers carried it past the
-    model's window and every later request failed at the provider. A call that would take it
-    past the budget now starts from the prefix; the rows frozen so far live in the store and
-    are shown in the fresh prefix, so the later call still serves them. The budget is set
-    small (each answer here is ~40k characters) so the test stays fast."""
+    """Sixth-round finding 5."""
     monkeypatch.setattr(
         # lint-monkeypatch: ok — the size budget is a module constant with no seam; a small one
         # keeps the scenario fast (the full-size one is ~400k characters a request).
@@ -1293,14 +1213,7 @@ def test_a_conversation_past_the_size_budget_restarts_and_keeps_the_frozen_rows(
 
 
 def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_path):
-    """Sixth-round finding 7: the family text put every failed world's `detail` into every
-    judged world's prompt; that detail is the oracle's last refusal, quoting the rows it forged
-    for that world's facts. A failed world now shows its label, reason word and failing call,
-    never its detail.
-
-    #1234: read off the prompts the real pass hands the judge (`render` returns a
-    `JudgeContext`; the prompt is the M3 layout), world c and the family call alike. World c
-    gets an (empty) oracle store: a planted world without one is malformed (A24)."""
+    """Sixth-round finding 7."""
     from defender.tests import _judge_921 as J
 
     ep = S.judged_episode(tmp_path / "judged", labels=("a", "c"))
@@ -1324,10 +1237,7 @@ def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_pa
 
 
 def test_cached_tokens_are_billed_once(tmp_path):
-    """Sixth-round finding 4: `Oracle.charge` passed pydantic-ai's `input_tokens`, which already
-    includes the cache reads and writes, beside the cache counts, so every cached token was
-    billed at the full input rate and again at its cache rate. Usage reaches `usage_cost`
-    through the one rule (`billed_usage`) the wire log's pricing uses."""
+    """Sixth-round finding 4."""
     from defender._pricing import usage_cost
 
     est = S.estate(tmp_path)
@@ -1345,11 +1255,7 @@ def test_cached_tokens_are_billed_once(tmp_path):
 
 
 def test_python_code_the_box_wire_cannot_carry_fails_that_call_only(tmp_path):
-    """Sixth-round finding 6: code holding a NUL (or a lone surrogate) made the box codec raise
-    `ValueError` outside the python tool's handling; the agent run, the attempt and `serve`
-    took it for a fault and the world went unservable. A bad argument to an oracle tool is
-    that call's feedback, answered in the tool wrapper: the oracle is told, no box starts, and
-    the attempt goes on to serve."""
+    """Sixth-round finding 6."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     box, log = _python_box_factory(tmp_path)
@@ -1365,12 +1271,7 @@ def test_python_code_the_box_wire_cannot_carry_fails_that_call_only(tmp_path):
 
 
 def test_a_star_count_cannot_claim_an_ordinary_field_of_a_document():
-    """Sixth-round finding 12: a `*` counts entry claimed any whole number outside a table row,
-    so a single-document answer's ordinary field (`failed_logins` 3 -> 10) passed check 1 on a
-    count claim alone, and the verifier saw a count, not a changed field. A count cell is the
-    answer's own count of its rows (a count-named cell, a total, an aggregation's value, a
-    group-to-count map): the edit needs a claimed change (control), and a named group spelled
-    as the field's key claims it no more than "*" does."""
+    """Sixth-round finding 12."""
     base = {"user": {"name": "alice", "failed_logins": 3}}
     served = {"user": {"name": "alice", "failed_logins": 10}}
     for group in ("*", "failed_logins"):
@@ -1389,14 +1290,7 @@ def test_a_star_count_cannot_claim_an_ordinary_field_of_a_document():
 
 
 def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
-    """Sixth-round finding 13: an exception other than a world's own failure in one world's
-    calibration thread did not set `stop`, so the other worlds went on paying for every call
-    before the launch aborted with no outcome record. Any error in a world's thread stops the
-    rest before their next paid turn; the launch still raises it and writes no outcome.
-
-    World b's oracle store cannot be created (a file squats `oracle/b`): its first call fails
-    at once, while world c's first oracle answer takes 1.5 s (margin for a loaded runner to
-    schedule b's thread), so c has a second paid turn to skip."""
+    """Sixth-round finding 13."""
     from defender.learning.branch import cli
 
     est = S.estate(tmp_path)
@@ -1452,12 +1346,7 @@ def _pb_registry(tmp_path: Path, o: Any, v: Any, *, prebranch: bool, retry_cap: 
 
 
 def test_a_sibling_s_changed_answer_to_a_pre_branch_call_is_refused_and_retried(tmp_path):
-    """Seventh-round finding 5: pre-flight fails a world whose verified answer changes a call
-    the source run made before the branch point (M01=A), but a sibling re-asking that call got
-    a fresh oracle turn (S1) whose verified change was served — contradicting the answer in the
-    transcript it inherited. The turn still runs; a changed submission is refused as a failed
-    attempt before the host checks and the verifier, the oracle is told why, and the retry
-    serves the base unchanged."""
+    """Seventh-round finding 5."""
     o = S.oracle(*_pb_change(), S.submit(_PB_BASE, S.EMPTY_CLAIM))
     v = S.passing_verifier()
     reg, ctx = _pb_registry(tmp_path, o, v, prebranch=True)
@@ -1544,12 +1433,7 @@ def _hits_check(row: dict) -> list[str]:
 
 
 def test_a_forged_row_in_an_answer_mixing_event_and_alert_documents_has_one_real_rows_shape():
-    """Seventh round (re-ruled M14/M12): check 2's reference was the union of every real
-    row's columns at the place, so in an Elastic answer mixing event and alert documents every
-    honest forged row failed — it had to carry the event's `process` AND the alert's
-    `kibana.*` columns. Now a forged row's columns equal those of SOME real row there: an
-    honest event-shaped row passes, the union fails (no real row has it), and a row matching
-    no real row's columns fails naming the closest one's missing column."""
+    """Seventh round (re-ruled M14/M12)."""
     event = {"@timestamp": "2026-03-01T09:30:00Z", "event": {"kind": "event"},
              "host": {"name": "db-1"}, "process": {"name": "kinit"}}
     assert _hits_check(event) == []

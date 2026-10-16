@@ -24,10 +24,7 @@ REVIEW_DEFS = (SUPPORT_DEF, COMPOSER_DEF)
 
 
 def test_the_investigator_s_env_var_does_not_reach_the_review(monkeypatch):
-    """`DEFENDER_MODEL` is the investigator's knob. A review that read it would un-pin its
-    default on every run that set one — including every hermetic replay, which sets it
-    precisely to keep its two fakes distinguishable, so the un-pinning would be invisible
-    exactly where a run is cheapest to get wrong."""
+    """`DEFENDER_MODEL` is the investigator's knob."""
     monkeypatch.setenv("DEFENDER_MODEL", "glm-5.3")
     assert resolve_review_model() == DEFAULT_REVIEW_MODEL
 
@@ -67,11 +64,7 @@ def test_the_override_reaches_an_accessor_that_takes_one():
 
 
 def test_the_override_reaches_a_keyword_only_accessor_by_its_name():
-    """Non-empty arity is the strictly weaker property. `def m(*, explicit=None)` is the
-    natural spelling for an override parameter and REFUSES a positional call, so an arity
-    check hands it one, `preflight_role_models`' broad `except` turns the `TypeError` into
-    "model config raised", and every `--model` run refuses to start — a role that can take the
-    override, reported as a broken model config."""
+    """Non-empty arity is the strictly weaker property."""
     def model(*, explicit: str | None = None) -> str:
         return explicit or "ambient"
 

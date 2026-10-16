@@ -93,18 +93,7 @@ def _row_errors(doc: str) -> list[str]:
 
 @pytest.mark.parametrize("grounding", PAST_CASE_SPELLINGS + OTHER_GROUNDINGS)
 def test_1221_a_benign_close_resting_on_past_cases_alone_is_refused(grounding):
-    """NEGATIVE, with its controls on the same address. A benign document whose authz contract
-    (`ac1` on the live `h-001`) is discharged ONLY by an `authorized` row that cites a past run
-    draws an error diagnostic naming that contract — whatever the row's grounding cell says,
-    `org-authority` and no grounding at all included: citing a run is leaning on it. The string
-    surface the production close reads refuses it too.
-
-    Controls, each the same document with one cell changed:
-      * the row grounded `org-authority` with NO citation validates clean;
-      * the row as example-b ships it (no grounding, no citation cell) validates clean;
-      * the citing row PLUS a second, uncited `authorized` row on `ac1` grounded on an
-        affirmative record validates clean — a past case may still be cited beside real
-        evidence."""
+    """NEGATIVE, with its controls on the same address."""
     cited = _grounded(grounding, cites=PRIOR_RUN)
     uncited_authority = _grounded("org-authority", cites="")
 
@@ -143,12 +132,7 @@ def test_1221_the_rule_keys_on_the_citation_not_on_the_grounding():
     "disposition", [d for d in DISPOSITION_VALUES if d != "benign"],
 )
 def test_1221_the_past_case_rule_is_benign_only(disposition):
-    """The complementary condition: under every disposition but `benign`, a well-formed citation
-    (a valid run id) changes nothing the validator says, whatever the row's grounding (N9: #27
-    covers benign only). Asserted as equality with the same document's uncited `org-authority`
-    row, so a disposition whose own gates already refuse example-b (`false-positive`,
-    `inconclusive`, `unresolved`) still pins that the rule adds nothing there; `malicious`
-    validates clean either way."""
+    """The complementary condition."""
     baseline = _errors(_with_disposition(_grounded("org-authority", cites=""), disposition))
     for grounding in ("past-case", "org-authority"):
         cited = _errors(_with_disposition(_grounded(grounding, cites=PRIOR_RUN), disposition))
@@ -187,15 +171,7 @@ def _row_error_everywhere(doc: str, why: str) -> list[str]:
 def test_1221_an_uncited_past_case_is_an_error(spelling):
     """A row whose grounding folds to `past-case` — in any case, with any run of whitespace,
     underscores or hyphens between the words — but whose `cites_past_case` is empty is an error
-    on that row: a past case names the run it cites. Without this a past case could be written
-    uncited and slip past #27, which keys on the citation.
-
-    A row-structure rule, so it fires under any disposition: found under `malicious`, where #27
-    has nothing to say, and then required under every disposition, `benign` included.
-
-    Controls on the same address, under `malicious`: the same spelling WITH a citation validates
-    clean, and an uncited row grounded `org-authority`, or not grounded at all, is not a past
-    case and validates clean too."""
+    on that row."""
     _row_error_everywhere(_grounded(spelling, cites=""),
                           f"a row grounded {spelling!r} with no cites_past_case")
 
@@ -214,10 +190,7 @@ def test_1221_an_uncited_past_case_is_an_error(spelling):
 
 @pytest.mark.parametrize("cite", NOT_RUN_IDS)
 def test_1221_a_citation_that_is_not_a_run_id_is_an_error(cite):
-    """A non-empty `cites_past_case` must be a run id (`is_valid_run_id`): anything else is an
-    error on that row naming the cell and the value, under any disposition. The positive
-    control is the same row citing a real run id — `PRIOR_RUN`, whose upper-case `T`/`Z` a run
-    id admits — which validates clean under `malicious`."""
+    """A non-empty `cites_past_case` must be a run id (`is_valid_run_id`)."""
     assert not is_valid_run_id(cite), f"fixture bug: {cite!r} is a valid run id"
     assert is_valid_run_id(PRIOR_RUN), f"fixture bug: {PRIOR_RUN!r} is not a valid run id"
 
@@ -310,9 +283,7 @@ def test_1221_the_rule_is_per_contract(grounding):
 
 def test_1221_a_past_case_only_contract_stays_on_the_frontier():
     """The rule lives in the one reading of "discharged", so the retrieval frontier agrees
-    with the gate: a contract resting on citing rows alone is still open there (and keeps
-    drawing retrieval) — grounded `past-case` or `org-authority` alike — while the same
-    contract on an uncited authority is not."""
+    with the gate."""
     for grounding in ("past-case", "org-authority"):
         assert "ac1" in _open_contract_ids(_grounded(grounding, cites=PRIOR_RUN)), (
             f"the frontier dropped a contract resting on a {grounding} row citing "

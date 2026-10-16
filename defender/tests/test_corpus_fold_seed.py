@@ -27,12 +27,7 @@ DEFENDER = REPO_ROOT / "defender"
 
 
 def _sections(manifest: str) -> list[str]:
-    """The manifest's ``## `` sections, whole — header line plus its YAML body, in order.
-
-    The ordering/permutation oracle. ``_headers()`` (from #559) sees only the header lines, so it is
-    blind to a section's body moving, being dropped, or being interleaved — which is exactly what a
-    shuffle applied to the wrong list would do.
-    """
+    """The manifest's ``## `` sections, whole — header line plus its YAML body, in order."""
     out: list[str] = []
     for line in manifest.splitlines(keepends=True):
         if line.startswith("## "):
@@ -43,12 +38,7 @@ def _sections(manifest: str) -> list[str]:
 
 
 def _prompt_manifest(prompt: str) -> str:
-    """The manifest slice inside the curator prompt's invocation-salted context frame.
-
-    ``build_curator_user_prompt`` echoes ``batch_id`` into the prompt text, so two prompts built with
-    different batch_ids ALWAYS differ; comparing whole prompts would pass for the wrong reason. The
-    manifest is the part that must (or must not) move.
-    """
+    """The manifest slice inside the curator prompt's invocation-salted context frame."""
     match = re.search(
         r"<run-(?P<salt>[0-9a-f]+)-curator_context>\n(?P<body>.*?)\n</run-(?P=salt)-curator_context>",
         prompt,
@@ -71,12 +61,7 @@ def _corpus_of(tmp_path: Path, *stems: str) -> Path:
 
 
 def test_d0_byte_shape_two_sections(tmp_path):
-    """demand: d0 — the FULL byte shape, not just the headers. ``yaml.safe_dump`` always ends in a
-    newline and sections are ``"\\n".join``-ed, so two lessons render as
-    ``## a\\n<yaml>\\n\\n## b\\n<yaml>\\n`` — a blank line between sections, exactly one trailing
-    newline, no leading blank. #559's ``_headers()`` reads only ``## `` lines, so a fold that emits
-    ``"\\n\\n".join``, strips safe_dump's newline, or appends a trailing separator is INVISIBLE to
-    every existing manifest test while changing every curator prompt that ships."""
+    """demand: d0 — the FULL byte shape, not just the headers."""
     corpus = _corpus_of(tmp_path, "alpha", "beta")
     manifest = _shared.build_corpus_manifest(corpus)
     assert manifest.startswith("## alpha\n")
@@ -87,21 +72,8 @@ def test_d0_byte_shape_two_sections(tmp_path):
 
 
 def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(tmp_path):
-    """``reexec_into_venv`` finds ``defender/.venv`` from ITS OWN path, so a caller may sit at
-    any depth in the tree. The ``script`` argument names what to re-run — it does not locate
-    the interpreter.
-
-    It used to walk ``Path(script).resolve().parents[3]``, which is ``defender/``'s parent only
-    for a caller exactly three levels down. Both callers (``learning/frontend/build.py`` and
-    ``serialize.py``) happen to sit there, so the lock was invisible — but for a caller one
-    level up it silently pointed at the wrong tree, and for one near the filesystem root it
-    raised ``IndexError`` before it could re-exec anything.
-
-    Driven live, in a child that can afford to be replaced: a caller OUTSIDE the defender tree,
-    at a depth no caller has, run under the base interpreter (not the venv's), calls the guard
-    with its own path. The guard must re-exec it under ``defender/.venv`` — which it can only
-    find from its own location, since nothing at or above the caller holds a ``.venv`` — and
-    the re-run must be the same script with the same arguments."""
+    """``reexec_into_venv`` finds ``defender/.venv`` from ITS OWN path, so a caller may sit at any
+    depth in the tree."""
     venv = importlib.import_module("defender._venv")
     assert venv._DEFENDER_DIR == DEFENDER, (
         "the anchor must be defender/ itself — the interpreter lives at defender/.venv")
@@ -157,18 +129,10 @@ def _guarded_scripts() -> list[Path]:
 
 
 def test_c2c_the_venv_guard_runs_before_any_other_defender_import():
-    """demand: c2, static half, as #1067 reshaped it — in EVERY script that calls ``reexec_into_venv``,
-    no ``defender.*`` module other than the one the guard lives in is imported at module scope
-    before the statement that calls it; and that module itself imports only the stdlib.
-
-    Before #1067 this test asserted that ``_corpus.py`` imported no venv-only module at its top,
-    because the lesson scripts imported ``_lessons_common`` (and so ``_corpus``) BEFORE the guard.
-    Pydantic-backed records made that unholdable for every record module at once, and the two
-    scripts were reordered to import the guard first — the shape ``learning/frontend/build.py``
-    and ``serialize.py`` already had. This pins THAT rule, for all of them, so an import hoisted
-    back above the guard (the pre-#1067 shape of ``lessons_fm.py``/``lessons_frontier.py``) reds
-    here rather than as ``ModuleNotFoundError: pydantic`` on a venv-less box. Reported per file so
-    a violation names the import that moved."""
+    """demand: c2, static half, as #1067 reshaped it — in EVERY script that calls
+    ``reexec_into_venv``, no ``defender.*`` module other than the one the guard lives in is
+    imported at module scope before the statement that calls it; and that module itself imports
+    only the stdlib."""
     venv_tree = ast.parse((DEFENDER / "_venv.py").read_text(encoding="utf-8"))
     non_stdlib = [m for stmt in venv_tree.body for m in _module_imports(stmt)
                   if m.split(".")[0] not in sys.stdlib_module_names]
@@ -196,25 +160,15 @@ def test_c2c_the_venv_guard_runs_before_any_other_defender_import():
 
 
 def test_s0_manifest_takes_the_iterators_path_order(tmp_path):
-    """demand: s0 (fork F1, RESOLVED) — with no seed the manifest follows ``iter_lessons``' full-Path
-    order. This OVERTURNS #559's M9, which asserts stem order.
-
-    The two keys diverge whenever one stem is a proper prefix of another and the longer one's next
-    character sorts below ``.`` (0x2e) — ``-`` (0x2d) is exactly that, and hyphenated stems are the
-    corpus's naming convention, so this is live, not theoretical. M9's own fixture (a-/b-/c-lesson)
-    orders identically under BOTH keys, which is why the divergence shipped unnoticed: the one test
-    guarding it was vacuous. Resolution: take the iterator's order (production always passes a seed, so
-    the sorted order never reaches a curator) rather than re-sorting by stem at the render site."""
+    """demand: s0 (fork F1, RESOLVED) — with no seed the manifest follows ``iter_lessons``' full-
+    Path order. This OVERTURNS #559's M9, which asserts stem order."""
     corpus = _corpus_of(tmp_path, "cover", "cover-prereqs")
     assert _headers(_shared.build_corpus_manifest(corpus)) == ["cover-prereqs", "cover"]
 
 
 def test_s1_seed_none_is_the_default_and_is_the_sorted_order(tmp_path):
-    """demand: s1 — ``seed=None``, and the seed omitted entirely, both yield the deterministic sorted
-    manifest and are byte-identical to each other. This is the pre-#577 default that every existing
-    M1-M10 test calls, and it must not move. ``seed`` is KEYWORD-ONLY, so a positional third argument
-    is a ``TypeError`` — which is what stops a caller from sliding ``corpus_dir_rel`` into the seed
-    slot."""
+    """demand: s1 — ``seed=None``, and the seed omitted entirely, both yield the deterministic
+    sorted manifest and are byte-identical to each other."""
     corpus = _corpus_of(tmp_path, "a-lesson", "b-lesson", "c-lesson")
     bare = _shared.build_corpus_manifest(corpus)
     explicit = _shared.build_corpus_manifest(corpus, seed=None)
@@ -225,15 +179,7 @@ def test_s1_seed_none_is_the_default_and_is_the_sorted_order(tmp_path):
 
 
 def test_s2_same_seed_is_byte_identical_across_processes(tmp_path):
-    """demand: s2 — the same seed yields a byte-identical manifest, and it holds ACROSS PROCESSES.
-
-    This is the stub that discriminates a correct implementation from a plausible-looking broken one.
-    ``random.Random(<str>)`` seeds via sha512 and is independent of ``PYTHONHASHSEED``; an
-    implementation reaching for ``random.Random(hash(seed))`` is seeded by a salted, per-process hash —
-    it would pass an in-process "two calls agree" check and silently produce a DIFFERENT order in every
-    new process, destroying the replay-from-the-recorded-batch_id property that makes the seeded
-    shuffle honest in the first place. Only a fresh interpreter under a different PYTHONHASHSEED can
-    see the difference."""
+    """demand: s2 — the same seed yields a byte-identical manifest, and it holds ACROSS PROCESSES."""
     corpus = _corpus_of(tmp_path, *[f"lesson-{i}" for i in range(8)])
     in_process = _shared.build_corpus_manifest(corpus, seed="a1b2c3d4e5f6")
 
@@ -257,14 +203,8 @@ def test_s2_same_seed_is_byte_identical_across_processes(tmp_path):
 
 
 def test_s3_a_seeded_manifest_is_a_permutation_of_the_sorted_one(tmp_path):
-    """demand: s3 — a seeded manifest is a TRUE PERMUTATION of the unseeded one: the multiset of whole
-    sections (header line + its YAML body) is equal, and the set of headers is equal. Nothing dropped,
-    nothing duplicated, no content drift — only the order moved.
-
-    A shuffle that loses a section still passes a naive "the order differed" assertion, and the cost of
-    losing one is precise: the curator cannot see that lesson, so it authors a duplicate of it. Asserted
-    on whole SECTIONS, not headers, because a shuffle applied to the wrong list (the joined lines, say)
-    would interleave bodies while leaving the header set intact."""
+    """demand: s3 — a seeded manifest is a TRUE PERMUTATION of the unseeded one: the multiset of
+    whole sections (header line + its YAML body) is equal, and the set of headers is equal."""
     corpus = _corpus_of(tmp_path, *[f"lesson-{i}" for i in range(8)])
     sorted_m = _shared.build_corpus_manifest(corpus)
     seeded_m = _shared.build_corpus_manifest(corpus, seed="a1b2c3d4e5f6")
@@ -276,11 +216,7 @@ def test_s3_a_seeded_manifest_is_a_permutation_of_the_sorted_one(tmp_path):
 
 def test_s4_the_shuffle_actually_fires(tmp_path):
     """demand: s4 — a seed that is accepted and then IGNORED is indistinguishable from ``seed=None``
-    on every other assertion in this file. Pin the effect: over a corpus of 8 lessons, at least one
-    seed from a fixed list produces an order that is not the sorted one.
-
-    Stated as a property over a list of seeds rather than a golden permutation for one seed: a golden
-    value would pin CPython's RNG stream (a stdlib implementation detail) instead of the contract."""
+    on every other assertion in this file."""
     corpus = _corpus_of(tmp_path, *[f"lesson-{i}" for i in range(8)])
     sorted_heads = _headers(_shared.build_corpus_manifest(corpus))
     seeded = [_headers(_shared.build_corpus_manifest(corpus, seed=s)) for s in ("b1", "b2", "b3", "b4")]
@@ -289,16 +225,7 @@ def test_s4_the_shuffle_actually_fires(tmp_path):
 
 
 def test_s5_empty_string_seed_is_a_seed_not_a_none(tmp_path):
-    """demand: s5 — ``seed=""`` is FALSY but not ``None``, and it must SHUFFLE.
-
-    An ``if seed:`` guard silently coerces it to the sorted path. That is the precise shape
-    ``defender/CLAUDE.md``'s anchor-a-default convention and the ``lint_unanchored_default`` CI gate
-    exist to forbid, and the falsy-member bug it describes (``x or DEFAULT`` swallowing a valid ``0``)
-    is the same one. A production ``batch_id`` is never ``""`` — the boundary is where the
-    ``or``-vs-``is not None`` bug lives, not where the traffic is.
-
-    Asserted against a reference permutation computed from the real ``random.Random("")``, so the test
-    states what the seed MEANS rather than merely that it differs from sorted."""
+    """demand: s5 — ``seed=""`` is FALSY but not ``None``, and it must SHUFFLE."""
     stems = [f"lesson-{i}" for i in range(8)]
     corpus = _corpus_of(tmp_path, *stems)
     expected = list(_headers(_shared.build_corpus_manifest(corpus)))
@@ -307,14 +234,10 @@ def test_s5_empty_string_seed_is_a_seed_not_a_none(tmp_path):
 
 
 def test_s6_build_curator_user_prompt_seeds_the_manifest_from_batch_id(tmp_path):
-    """demand: s6 (seam) — the wiring, pinned BEHAVIORALLY: the manifest ``build_curator_user_prompt``
-    splices equals ``build_corpus_manifest(corpus_dir, seed=batch_id)``, and a different ``batch_id``
-    over the same corpus reorders the spliced manifest.
-
-    Through the public prompt string, never by patching the callee: ``shared.py`` calls
-    ``build_corpus_manifest`` as a bare module-level name (not an attribute lookup), so a patch would
-    not even bind — and an AST check that the call site passes ``seed=`` would prove the token, not the
-    effect. The rows and the rest of the prompt (P1) must survive unchanged."""
+    """demand: s6 (seam) — the wiring, pinned BEHAVIORALLY: the manifest
+    ``build_curator_user_prompt`` splices equals ``build_corpus_manifest(corpus_dir,
+    seed=batch_id)``, and a different ``batch_id`` over the same corpus reorders the spliced
+    manifest."""
     corpus = _corpus_of(tmp_path, *[f"lesson-{i}" for i in range(8)])
     rows = [{"id": "f/1", "text": "a finding"}]
     kw = dict(corpus=corpus_view(corpus), corpus_dir=corpus, corpus_dir_rel="defender/lessons",
@@ -331,15 +254,7 @@ def test_s6_build_curator_user_prompt_seeds_the_manifest_from_batch_id(tmp_path)
 
 
 def test_s7_forged_section_defenses_survive_the_shuffle(tmp_path):
-    """demand: s7 (negative) — under a seed, the M8/M8b defenses still hold. With BOTH an adversarial
-    frontmatter VALUE (``\\n## forged``) and an adversarial newline-bearing STEM in the corpus, the
-    header count is exactly the number of real lessons and no line is a bare ``---``.
-
-    The shuffle relocates WHERE the section boundary is computed, and that is precisely what M8 rests
-    on. This catches an implementation that shuffles the raw PATHS and then joins un-collapsed stems,
-    and — the nastier one — an implementation that re-splits the JOINED manifest on ``## `` in order to
-    shuffle it, which would treat a FORGED header as a real section boundary and let a crafted value
-    hijack a section outright."""
+    """demand: s7 (negative) — under a seed, the M8/M8b defenses still hold."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     _findings_lesson(corpus, "genuine-a", description="clean")
@@ -356,13 +271,8 @@ def test_s7_forged_section_defenses_survive_the_shuffle(tmp_path):
 
 def test_m8c_a_list_valued_injection_payload_cannot_forge_a_section(tmp_path):
     """demand: m8c (negative) — an injection payload carried inside a LIST-valued frontmatter field
-    cannot forge a section: ``yaml.safe_dump`` quotes AND indents the element, so the payload never
-    reaches column 0.
-
-    #559's M8 pins the SCALAR case only. But the actor-lesson shape's fields are LISTS — ``techniques``,
-    ``applies_to``, ``alert_rule_ids`` — and those values trace back to findings that trace back to
-    alert data, which is attacker-influenced by definition. The realistic carrier was the untested
-    one."""
+    cannot forge a section: ``yaml.safe_dump`` quotes AND indents the element, so the payload
+    never reaches column 0."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     (corpus / "list-payload.md").write_text(
@@ -383,17 +293,7 @@ def test_m8c_a_list_valued_injection_payload_cannot_forge_a_section(tmp_path):
 
 def test_e1_the_author_config_can_pin_the_manifest_seed(tmp_path):
     """demand: e1 (seam, fork F2 RESOLVED) — the author config carries an explicit manifest-seed
-    override. When it is SET, the manifest's order is a function of the override and NOT of
-    ``batch_id``: two prompts built with different batch_ids carry a byte-identical manifest. When it
-    is UNSET, production keeps the ``batch_id`` seed and the two manifests differ.
-
-    Why this exists: ``batch_id`` is a fresh ``uuid.uuid4().hex[:12]`` per drain, and
-    ``evals/harness.py::run_author`` drives the REAL curator in-process against a temp tree. Without an
-    override, the author eval would draw a different manifest order on every run — and the author eval
-    is the instrument you would use to MEASURE the position bias this whole change exists to remove. A
-    fixed override keeps the eval deterministic while still exercising the shuffle path that production
-    takes; ``seed=None`` in the eval would be deterministic too, but then the instrument stops matching
-    the thing it measures."""
+    override."""
     from defender.learning.author.lessons.run import build_author_config, build_user_prompt
     from defender.learning.core.config import LoopPaths
 

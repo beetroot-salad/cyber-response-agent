@@ -32,14 +32,7 @@ def _deps() -> tools.AgentDeps:
 
 def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():
     """Section ORDER is the cache prefix (#835). The descriptor index and the template index vary
-    only with the dispatched system and the tree; the Dispatch YAML varies with every lead. While
-    the Dispatch led, a content-keyed prefix cache missed at `lead_id` and never reached the
-    ~3.9k tokens behind it, so every sibling lead re-paid them in full.
-
-    Pinned as the property, not the byte offsets: two DIFFERENT leads on the same system share a
-    byte-identical prefix up to `## Dispatch`, and that prefix is where the indexes live. The
-    negative half is on the same address — two leads on DIFFERENT systems must not share it, or
-    the assertion would also pass on a prompt that had stopped varying with the system at all."""
+    only with the dispatched system and the tree; the Dispatch YAML varies with every lead."""
     deps = _deps()
     cat = "- `elastic`: desc"
     a = tools._gather_prompt(deps, tools.GatherRequest("l-001", "elastic", "g1", ("d",)), cat)
@@ -61,18 +54,8 @@ def test_835_the_per_lead_dispatch_comes_last_behind_the_two_fixed_indexes():
 
 
 def test_a_malformed_system_is_retried_at_the_seam_not_silently_degraded(tmp_path):
-    """#835 made `system` load-bearing twice: it selects the template index's on-target tier, and
-    it is the prompt-cache lane key the composition root hands the provider. Both fail SILENTLY on
-    a mis-cased or whitespace-bearing name — the catalog collapses to bare ids with every `## Goal`
-    stripped, and the string goes out verbatim as `openai_prompt_cache_key` — where `lead_id`, the
-    key component it replaced, is validated. So the seam holds `system` to the same SHAPE
-    `template_search` already does, and rejects BEFORE `claim_lead` so the correction is a retry
-    of this lead rather than a burnt id.
-
-    SHAPE and not membership in `verb_grant.systems`: the role grant is deliberately decoupled
-    from the per-run registry, and an e2e that injects a registry declaring `ghost` must still
-    dispatch. The positive control is that decoupling — a well-formed name the role grant has
-    never heard of passes."""
+    """#835 made `system` load-bearing twice: it selects the template index's on-target tier, and it
+    is the prompt-cache lane key the composition root hands the provider."""
     import asyncio
 
     from defender.runtime import tools_gather
@@ -138,16 +121,7 @@ def _seam_deps(tmp_path: Path):
 
 
 def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_path):
-    """#855 F-12, the reachable half. `goal` is a bare `str` on the `gather` signature — the
-    tool's JSON schema carries no `minLength`, so `""` validates and reaches this frame — and
-    the only thing with an opinion about it was `claim_lead`, which refused it with the SAME
-    code it returned on success. So "re-run l-003 to confirm; leave the goal blank" bought a
-    second gather session under a claimed id: no leads row, nothing for the reuse gate (the
-    sidecar's own exclusive create) to refuse next time, and a summary written over the honest
-    `gather_summaries/l-003.md` that the compaction driver has main re-read as its own memory.
-
-    Rejected at the seam, ahead of the claim like `system`, so the correction is a retry of
-    THIS lead: the second half asserts the same id is still takeable afterwards."""
+    """#855 F-12, the reachable half."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime import tools_gather
@@ -185,11 +159,7 @@ def test_an_empty_goal_is_retried_at_the_seam_and_leaves_the_id_takeable(tmp_pat
 
 def test_the_second_dispatch_of_one_lead_id_is_always_refused(tmp_path):
     """The gate #855 F-12 defeated, stated as the property it protects: ONE gather session per
-    `lead_id`, whatever happened to the first attempt. Two empty-goal dispatches then a good
-    one then a repeat of the good one — the empty pair claims nothing (so the third is a fresh
-    claim, not a reuse), and the fourth is refused as a reuse. Under the old fail-open the
-    first two RAN, and the fourth ran too, because nothing on disk recorded that the id was
-    ever taken."""
+    `lead_id`, whatever happened to the first attempt."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime import tools_gather
@@ -219,22 +189,7 @@ def test_the_second_dispatch_of_one_lead_id_is_always_refused(tmp_path):
 
 
 def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp_path):
-    """#880 F-19's residue, closed at the seam rather than by two literals agreeing.
-
-    The factory builds this lead's history recorder, and that recorder withholds the doomed
-    round — the continuation pydantic_ai appends BEFORE it checks the limit — by comparing the
-    request count against a ceiling. Which ceiling it compares against used to be the factory's
-    own business: each one read a module constant, `driver._build_gather` reading
-    `GATHER_REQUEST_LIMIT` (40) and `lead_zero.gather_factory` reading
-    `CORRELATION_REQUEST_LIMIT` (8). F-19 was one of those two reading the other's, and the fix
-    that shipped only made the two literals match — a third dispatch, or a per-run raised
-    ceiling of the kind `challenge_gate.raised_request_limit` already computes for MAIN,
-    reproduces it with nothing to catch it.
-
-    `_run_gather` now hands the factory the value it is ABOUT TO ENFORCE through
-    `UsageLimits(request_limit=...)`, so the two cannot be different numbers. Asserted as
-    identity against the argument this call passes, and driven at two different ceilings so a
-    factory that ignored its parameter and returned a constant could not pass both."""
+    """#880 F-19's residue, closed at the seam rather than by two literals agreeing."""
     from defender.runtime import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
@@ -261,16 +216,7 @@ def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp
 
 def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path):
     """#1031 — the descriptor index the dispatch prompt opens with is READ AT RUN START by
-    `run_investigation` and handed down (`catalog=`), not built inside this frame per dispatch.
-    Building it reads the adapters tree, which since #1031 fails loudly for a tree that cannot
-    be read; a fault of that shape belongs before any model call, not mid-run inside a tool
-    the model is waiting on — and `functools.cache` on the builder does not memoise a raise,
-    so every later dispatch would re-raise it.
-
-    Pinned from the prompt the gather agent receives: a sentinel catalog lands in it verbatim,
-    and `None` yields NO "Systems of record" block at all — over `_DEFENDER`, the real tree,
-    whose real catalog is non-empty, so a frame that built its own would render one here and
-    fail the second arm."""
+    `run_investigation` and handed down (`catalog=`), not built inside this frame per dispatch."""
     from defender.runtime import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
@@ -296,12 +242,9 @@ def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path)
 
 
 def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
-    """The other unclaimed outcome (#855 F-12), and the one no argument can reach from the
-    model side: the claim's write FAILED — a full disk, a squatted `gather_raw` component, an
-    id the filesystem will not take. `_run_gather` used to test the claim for the reuse code
-    alone, so every one of those proceeded exactly as if the row had been written. Driven at
-    the claim seam because a caller must not need to know which fault it was: the contract is
-    that only `CLAIMED` dispatches."""
+    """The other unclaimed outcome (#855 F-12), and the one no argument can reach from the model
+    side: the claim's write FAILED — a full disk, a squatted `gather_raw` component, an id the
+    filesystem will not take."""
 
     from defender.hooks.record_lead import NOT_CLAIMED
     from defender.runtime import tools_gather
@@ -326,10 +269,8 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
 
 def test_an_overlong_lead_id_never_reaches_the_claim(tmp_path):
     """A `lead_id` is spent as a FILENAME COMPONENT — `gather_raw/{id}.lead.json` — and the
-    validator that admits it said nothing about length, so a well-shaped 300-character id
-    reached `os.open` and failed ENAMETOOLONG. That was one more route into the fail-open this
-    issue closes; bounding the shared `LEAD_ID_BODY` turns it back here instead, with the
-    correction that names the id."""
+    validator that admits it said nothing about length, so a well-shaped 300-character id reached
+    `os.open` and failed ENAMETOOLONG."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime import tools_gather

@@ -75,14 +75,7 @@ def _list_registry(rec: VerbRecorder, answer: Any) -> ScopedFakeVerbs:
 
 def test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments(tmp_path):
     """A `list-tickets` reply carrying the run's OWN case (its key is the run id) and an OPEN
-    case — one no person has closed — each with a comment, reaches gather whole: the capture
-    equals what the store answered, `total` included, and the model's view carries both keys
-    and both comments. Nothing is removed by identity and nothing is emptied by lifecycle
-    state.
-
-    The second drive is the shape half: a bare array (an undocumented envelope) is served as
-    the store answered it, not refused as a malformed ticket reply — a ticket-specific shape
-    rule was part of the screen, and the query tool has none for any other system."""
+    case — one no person has closed — each with a comment, reaches gather whole."""
     listing = {"total": 2, "source": "ticket-store",
                "tickets": [_ticket(OWN, OWN_NOTE), _ticket(OPEN_KEY, OPEN_NOTE)]}
     rec = VerbRecorder()
@@ -116,13 +109,7 @@ def test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments(tmp_pa
                          ids=["own-case", "another-open-case"])
 def test_1221_get_ticket_on_the_runs_own_key_is_served(tmp_path, key, note):
     """A `get-ticket` on the run's OWN key — and, the sibling surface, on ANOTHER open case's
-    key — reaches the store and its reply (an open case with a comment) reaches gather whole:
-    the verb ran with that key, the capture equals the store's answer, and the comment is in
-    the model's view. No pre-call refusal by key, and no comment withheld because the case is
-    open, whichever case it is.
-
-    The grant is not the subject: the tenant planted here grants `get-ticket` to gather (the
-    committed fixture withholds it), so a refusal could only come from the query tool."""
+    key — reaches the store and its reply (an open case with a comment) reaches gather whole."""
     root = tmp_path / "tenants"
     S.plant(root, marker="t1221", table=GET_TICKET_TABLE)
     case = _ticket(key, note)

@@ -24,10 +24,9 @@ TID = H1105.T_ID
 
 
 def _tenant_runs() -> Path:
-    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105
-    PR 2 (J8, declared change 10): the tracer takes a required `--tenant` and walks that
-    tenant's runs (`--runs-dir` is gone). The data root is conftest's autouse per-test one; the
-    tenant is set up here, on request, so tests that never trace keep a tenant-free root."""
+    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105 PR 2
+    (J8, declared change 10): the tracer takes a required `--tenant` and walks that tenant's runs
+    (`--runs-dir` is gone)."""
     from defender import _tenant
     from defender.tests._data_root_1078 import current_data_root
 
@@ -57,12 +56,8 @@ def _corpus_with_an_em_dash(tmp_path: Path) -> Path:
 
 def test_the_utf8_pin_covers_the_write_not_only_the_read(tmp_path):
     """demand (review) — a corpus CLI must PRINT a non-ASCII lesson under a C locale, not just read
-    one. The read pin alone moves the crash from ``read_text`` to ``print``; it does not remove it.
-
-    Driven in a subprocess because the locale is process-wide, and asserted on the em-dash actually
-    reaching stdout — a test that only checked the exit code would stay green against a CLI that
-    "handled" the error by dropping the lesson, which is the silent data loss the pin exists to
-    prevent."""
+    one. The read pin alone moves the crash from ``read_text`` to ``print``; it does not remove
+    it."""
     corpus = _corpus_with_an_em_dash(tmp_path)
     script = (
         f"import sys; sys.path.insert(0, {str(WORKSPACE_ROOT)!r})\n"
@@ -100,14 +95,7 @@ def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path)
 
 def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsys):
     """demand (review) — ``iter_lessons`` warn-SKIPS an unreadable lesson, so the id pre-flight
-    sitting beside it must not CRASH on one. Its mtime cache signature stat'ed the corpus
-    unguarded, so a dangling symlink — a member of the corpus domain #584's own spec graph says
-    must be warn-skipped — raised ``FileNotFoundError`` out of the curator drain, before the agent
-    ever ran. Exercised on the pre-flight, not on the helper, so it pins the drain's survival.
-
-    Re-pointed by #922 onto the surviving findings pre-flight, the only one left. Its provenance
-    key differs (`source_finding_ids`, from the findings channel's own `id_key`) and it holds no
-    cache; the tolerance demand is the same one."""
+    sitting beside it must not CRASH on one."""
     paths = LoopPaths(repo_root=tmp_path)
     cfg = build_author_config(paths, trees=author_trees(paths), state=open_state(paths))
     d = cfg.corpus_dir
@@ -122,13 +110,8 @@ def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsy
 
 
 def test_the_discovery_rule_has_one_definition(tmp_path):
-    """demand (review) — the pre-flight's signature and the walk must not restate the discovery
-    rule at each other. They now share ``iter_lesson_paths``, so the set of files the signature
-    covers is BY CONSTRUCTION the set the walk yields from.
-
-    The drift this closes is one-directionally dangerous: a signature seeing fewer files than the
-    walk leaves the cache stale on a modified lesson, an already-consumed observation id reads as
-    unconsumed, and the curator authors a duplicate of a lesson it cannot see."""
+    """demand (review) — the pre-flight's signature and the walk must not restate the discovery rule
+    at each other."""
     d = tmp_path / "lessons"
     d.mkdir()
     (d / "b.md").write_text("---\nname: b\n---\nbody\n")
@@ -146,11 +129,11 @@ def test_the_discovery_rule_has_one_definition(tmp_path):
 
 
 def test_on_skip_receives_exactly_the_warn_skipped_paths(tmp_path, capsys):
-    """``on_skip`` is the walk's own report of what it skipped (#590): it must fire for every
-    warn-skipped DISCOVERED lesson (malformed and unreadable alike), in walk order, and never
-    for a well-formed lesson or a file the discovery rule excludes — so a consumer that
-    accounts for skipped lessons (``trace_lesson --all``'s marker rows) needs no second glob
-    to diff against, and nothing to race."""
+    """``on_skip`` is the walk's own report of what it skipped (#590): it must fire for every warn-
+    skipped DISCOVERED lesson (malformed and unreadable alike), in walk order, and never for a
+    well-formed lesson or a file the discovery rule excludes — so a consumer that accounts for
+    skipped lessons (``trace_lesson --all``'s marker rows) needs no second glob to diff against,
+    and nothing to race."""
     d = tmp_path / "lessons"
     d.mkdir()
     (d / "good.md").write_text("---\nname: good\n---\nbody\n")
@@ -168,13 +151,7 @@ def test_on_skip_receives_exactly_the_warn_skipped_paths(tmp_path, capsys):
 
 def test_lesson_raw_is_the_slice_the_parser_consumed(tmp_path):
     """demand (review) — ``Lesson.raw`` comes back FROM the parser that computed the fence offsets,
-    rather than being re-derived by the walk with its own ``text[4:find("\\n---", 4)]``.
-
-    The old duplicate was safe only by borrowing an invariant of another module's internals, and it
-    failed SILENTLY: widen ``parse_frontmatter``'s grammar (a tolerated BOM, a ``...`` close fence)
-    and the walk's ``find`` returns -1, ``raw`` becomes the whole document minus its last character,
-    and ``cmd_grep`` — the frontmatter-ONLY grep — starts matching on body text. Pinned by tying
-    ``raw`` to the parser's own output."""
+    rather than being re-derived by the walk with its own ``text[4:find("\\n---", 4)]``."""
     text = "---\nname: x\ndescription: d\n---\n\nbody --- with a fence-like line\n"
     fm, raw, body = split_frontmatter(text)
 
@@ -190,20 +167,7 @@ def test_lesson_raw_is_the_slice_the_parser_consumed(tmp_path):
 
 def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
     """demand (review) — ``--all`` must window each lesson's case count to loads at/after that
-    lesson's ``created_at`` (its CURRENT incarnation), not report a lifetime total.
-
-    This property was structurally protected on main, where ``--all`` and the single-lesson path
-    shared one ``lesson_meta()`` helper that three tests asserted on. #584 deletes that helper and
-    inlines the extraction TWICE; the single-lesson copy is still pinned, the ``--all`` copy is
-    pinned by nothing — mutating it to ``created_at = None`` leaves the whole suite green. Every
-    ``--all`` test in the #584 spec is vacuous on the window: three use empty runs dirs (0 hits
-    either way) and the fourth's fixture lesson carries no ``created_at`` at all, so the window
-    never engages.
-
-    Driven with a load on BOTH sides of ``created_at``, so an unwindowed count reads 2 and a
-    windowed one reads 1. The failure is silent — exit 0, a plausible number — and the number is
-    the entire product of the CLI: a rewritten lesson would inherit the case count of the lesson it
-    replaced."""
+    lesson's ``created_at`` (its CURRENT incarnation), not report a lifetime total."""
     tl = _load_trace_lesson()
     corpus = tmp_path / "lessons"
     corpus.mkdir()

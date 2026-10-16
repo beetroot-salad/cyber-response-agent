@@ -39,14 +39,8 @@ def _skill(skills_dir: Path, system: str, content: bytes) -> None:
 
 
 def _name_status(scaffold, defroot: Path, system: str) -> str:
-    """The name-check outcome of check_skill: 'PASS', 'FAIL', 'MISSING' or 'UNREADABLE' — or
-    the raised exception propagates (the pre-fold crash on unreadable bytes).
-
-    'UNREADABLE' is its own answer because the rule splits it out from the identity one (#901):
-    a file that cannot be decoded reported as "frontmatter name is not defender-x" sends the
-    reader to a line that may be perfectly correct. It is still a FAIL row in the report — what
-    changed is which sentence it carries, so a helper keyed on the identity sentence alone would
-    read the split as "no row at all"."""
+    """The name-check outcome of check_skill: 'PASS', 'FAIL', 'MISSING' or 'UNREADABLE' — or the
+    raised exception propagates (the pre-fold crash on unreadable bytes)."""
     rep = scaffold.Report()
     scaffold.check_skill(rep, defroot, system)
     for status, msg in rep.rows:
@@ -138,10 +132,8 @@ def test_d0_descriptor_catalog_seam(tmp_path):
 
 
 def test_d0_parse_report(tmp_path):
-    """#785 typed the viewer's read (a `ReportRead`, not a merged frontmatter dict), so the
-    shape assertions here read fields instead of dict equality. The #591 demand is unchanged:
-    every fallback below is a FALLBACK, not a raise, and the grammar deciding them is the one
-    canonical parser."""
+    """#785 typed the viewer's read (a `ReportRead`, not a merged frontmatter dict), so the shape
+    assertions here read fields instead of dict equality."""
     missing = vp.parse_report(tmp_path / "nope")
     assert (missing.disposition, missing.body) == (None, "")
     undecodable = vp.parse_report(
@@ -192,9 +184,9 @@ def test_d0_strip_frontmatter():
 
 def test_d_parity_grammar(tmp_path):
     """Over a shared corpus, predicted_disposition is non-None exactly when
-    parse_frontmatter_or_none yields a mapping whose disposition is a str in the
-    enum — so primary + secondary (which now call this same function) accept and
-    reject identical documents by construction."""
+    parse_frontmatter_or_none yields a mapping whose disposition is a str in the enum — so
+    primary + secondary (which now call this same function) accept and reject identical documents
+    by construction."""
     corpus = {
         "well-formed": b"---\ndisposition: benign\n---\nbody\n",
         "junk-opener": b"---disposition: benign\n...\n---\nbody\n",

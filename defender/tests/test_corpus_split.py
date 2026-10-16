@@ -18,22 +18,7 @@ LESSONS_ACTOR = REPO_ROOT / "defender" / "lessons-actor"
 
 
 def _corpus(d: Path) -> list[tuple[Path, dict]]:
-    """Every non-``_`` lesson in ``d`` as ``(path, frontmatter)``, parsed by the shared walk.
-
-    Folded onto ``iter_lessons`` (#584). This helper used to be a SIXTH hand-rolled copy of the
-    corpus walk — its own ``\\A---\\n`` regex fence-split plus ``yaml.safe_load`` — so the CI gate
-    below had its own private definition of what a lesson IS. The fold is behavior-PRESERVING on
-    accept/red for every case (the CRLF divergence an earlier draft of this docstring claimed does
-    not exist — ``read_text()`` universal-newline-translates, so the old regex matched a CRLF lesson
-    fine); what it buys is that four malformed shapes — invalid YAML, undecodable bytes, a dangling
-    symlink, a directory named ``*.md`` — used to escape as a raw exception and now red as a NAMED
-    assertion listing the offending files.
-
-    Its guarantee is kept VERBATIM and that is the load-bearing part of the fold: ``iter_lessons``
-    warn-SKIPS a malformed lesson where this walk ASSERTED, so the assertion moves here, to the call
-    site. Every non-``_`` ``*.md`` must come back from the iterator — otherwise a malformed lesson
-    would newly slip through this real-corpus CI gate in silence, which is the opposite of what it
-    is for."""
+    """Every non-``_`` lesson in ``d`` as ``(path, frontmatter)``, parsed by the shared walk."""
     lessons = list(iter_lessons(d))
     expected = {p for p in d.glob("*.md") if not p.name.startswith("_")}
     skipped = sorted(p.name for p in expected - {lesson.path for lesson in lessons})

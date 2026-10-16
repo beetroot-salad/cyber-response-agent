@@ -58,15 +58,7 @@ def _stages():
 
 
 def _drive_tool(tmp_path: Path, disposition: str | None = None):
-    """Register the REAL close tool on an agent and run it against a scripted model.
-
-    With `disposition` given, the model's first turn calls the tool with that value and its
-    second turn is text (so a `ModelRetry` has somewhere to land and the run terminates).
-    With no `disposition`, the model never calls the tool — enough to observe the roster.
-
-    Returns `(script, run_dir)`; `script.tool_defs` is the advertised roster and `script.seen`
-    is every string the model was handed, which is where retry feedback shows up.
-    """
+    """Register the REAL close tool on an agent and run it against a scripted model."""
     deps, run_dir = _deps(tmp_path)
     turns = [Turn(text="reading the alert")]
     if disposition is not None:
@@ -94,12 +86,7 @@ def _close_tool_def(script: ToolRoster):
 
 
 def _disposition_property(tool_def) -> dict:
-    """The `disposition` argument's own schema, following a `$ref` if the annotation made one.
-
-    A `StrEnum` annotation would advertise the vocabulary through `$defs`; the `Annotated`
-    alias inlines it. Both are "the model was told the members", so the indirection is resolved
-    here rather than being what the assertion accidentally turns on.
-    """
+    """The `disposition` argument's own schema, following a `$ref` if the annotation made one."""
     schema = tool_def.parameters_json_schema
     prop = schema.get("properties", {}).get("disposition")
     assert prop is not None, (
@@ -115,16 +102,7 @@ def _disposition_property(tool_def) -> dict:
 
 
 def test_the_registered_tool_advertises_the_owners_vocabulary(tmp_path):
-    """O1. The schema the MODEL is offered carries `DISPOSITION_VALUES`, in the owner's order.
-
-    Compared against `_vocab` itself rather than against a literal list re-typed here: a test
-    that spelled the four members would be a fifth copy of the very thing this issue exists to
-    delete, and it would keep passing on the day a fifth member lands and the schema does not
-    follow. With the comparison pointed at the owner, that day fails here.
-
-    Positive control: the owner is non-empty, so an emptied vocabulary cannot make an empty
-    `enum` (or an absent one read as `[]`) satisfy this.
-    """
+    """O1. The schema the MODEL is offered carries `DISPOSITION_VALUES`, in the owner's order."""
     script, _run_dir = _drive_tool(tmp_path)
     prop = _disposition_property(_close_tool_def(script))
 
@@ -144,13 +122,7 @@ def test_the_registered_tool_advertises_the_owners_vocabulary(tmp_path):
 
 @pytest.mark.parametrize("disposition", NEAR_MISSES)
 def test_the_sync_host_entry_refuses_every_near_miss(tmp_path, disposition):
-    """O2, the lane with no tool-argument validation anywhere in front of it.
-
-    `close_investigation()` is reached directly by hosts and tests; nothing about the model's
-    tool schema is between a caller and this function, which is exactly why the refusal has to
-    live in the body. Each near miss is a distinct way off the enum — case, trailing space, an
-    invisible character, a superstring, nothing at all.
-    """
+    """O2, the lane with no tool-argument validation anywhere in front of it."""
     deps, run_dir = _deps(tmp_path)
 
     with pytest.raises(ModelRetry) as excinfo:
@@ -164,14 +136,7 @@ def test_the_sync_host_entry_refuses_every_near_miss(tmp_path, disposition):
 
 @pytest.mark.parametrize("disposition", [["benign"], {"disposition": "benign"}, 1, None])
 def test_the_sync_host_entry_denies_a_non_string_rather_than_crashing(tmp_path, disposition):
-    """O2's unhashable arm, and the one near miss the string list above cannot express.
-
-    `DISPOSITION_ENUM` is a frozenset, so a bare `value in DISPOSITION_ENUM` raises `TypeError`
-    on an unhashable value instead of denying — the crash `_vocab.normalized_disposition`
-    documents and `_artifact_schema` guards with an `isinstance` test one layer later. The tool
-    lane cannot deliver one (pydantic validates the argument as `str`), so this lane is the only
-    place the guard can be observed, and it is the lane with nothing in front of it.
-    """
+    """O2's unhashable arm, and the one near miss the string list above cannot express."""
     deps, run_dir = _deps(tmp_path)
 
     with pytest.raises(ModelRetry) as excinfo:
@@ -182,11 +147,7 @@ def test_the_sync_host_entry_denies_a_non_string_rather_than_crashing(tmp_path, 
 
 
 def test_the_tool_lane_refuses_a_value_outside_the_vocabulary(tmp_path):
-    """O2, the model-facing lane, driven end to end through the registered tool.
-
-    The refusal has to come back as retry FEEDBACK — a value the model can act on — rather
-    than as an exception out of the run, and nothing may reach `report.md` on the way.
-    """
+    """O2, the model-facing lane, driven end to end through the registered tool."""
     script, run_dir = _drive_tool(tmp_path, disposition="totally-benign")
 
     seen = "\n".join(script.seen)
@@ -199,15 +160,7 @@ def test_the_tool_lane_refuses_a_value_outside_the_vocabulary(tmp_path):
 
 
 def test_a_member_of_the_vocabulary_commits_through_the_tool_lane(tmp_path):
-    """O2's positive control on the MODEL-FACING lane, and it has to be on this lane.
-
-    The sync entry's control says the CLOSE works; it says nothing about the registration.
-    Every "nothing reached report.md" above would hold just as well if the registered tool
-    could not commit at all — `stages`/`bounds` threaded wrong through the closure, or a
-    close whose write never happens — and each of those passes the refusals while breaking
-    the only lane a real run uses. `inconclusive` bypasses the review gate, so this arm
-    needs no live stage to say the lane can still write.
-    """
+    """O2's positive control on the MODEL-FACING lane, and it has to be on this lane."""
     script, run_dir = _drive_tool(tmp_path, disposition="inconclusive")
 
     seen = "\n".join(script.seen)
@@ -225,15 +178,7 @@ def test_a_member_of_the_vocabulary_commits_through_the_tool_lane(tmp_path):
 
 
 def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_path):
-    """O3 (#722). `beni<U+200B>gn` comes back repr-escaped, on both lanes.
-
-    This is the reason the write gates stay exact instead of normalizing: the author is still
-    on the other end of the call, and retry text that echoed the value RAW would read as
-    "disposition must be exactly one of [...] (got 'benign')" — a message that tells the model
-    its correct-looking answer was wrong for no visible reason, which is a loop it cannot exit.
-    `!r` renders the character as `\\u200b`; the assertions below are that both halves hold —
-    the escaped form present, the raw one absent.
-    """
+    """O3 (#722). `beni<U+200B>gn` comes back repr-escaped, on both lanes."""
     deps, run_dir = _deps(tmp_path)
 
     with pytest.raises(ModelRetry) as excinfo:

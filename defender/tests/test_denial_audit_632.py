@@ -46,15 +46,8 @@ _DOC = re.compile(r"<html\b.*?</html\s*>", re.S | re.I)
 
 
 def _visible_html(html: str) -> str:
-    """The part of a rendered page an analyst can actually see: inside the document element,
-    with comments and script bodies removed.
-
-    Written as a filter rather than as a substring assertion because the two are not the same
-    claim. `"esql" in html` is satisfied by a denial rendered as a comment, or appended after
-    `</html>`, or parked in a script's data — all of which leave the analyst's page blank of
-    the thing this demand exists to put on it, and all of which a file-level grep calls a
-    pass. A page with no document element at all is treated as invisible, because a renderer
-    that stopped emitting one is exactly the regression this would otherwise hide."""
+    """The part of a rendered page an analyst can actually see: inside the document element, with
+    comments and script bodies removed."""
     found = _DOC.search(html)
     if found is None:
         return ""
@@ -62,11 +55,9 @@ def _visible_html(html: str) -> str:
 
 
 def test_a_denial_appends_a_policy_event_to_the_durable_request_stream(tmp_path: Path):
-    """A denial appends its own event type to the durable policy-denial stream at the
-    decision point, flushed per record so it survives an abort, and takes its place in that
-    stream's own append ordering as its own event rather than being folded into the
-    conversation records. `tool_trace.jsonl` cannot serve: it is rebuilt from the message
-    store at end of run, so an abort erases it."""
+    """A denial appends its own event type to the durable policy-denial stream at the decision
+    point, flushed per record so it survives an abort, and takes its place in that stream's own
+    append ordering as its own event rather than being folded into the conversation records."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_gather_registry(rec),
                    turns=[q(*DENIED_PAIR), q(*GRANTED_PAIR), q(*DENIED_PAIR), DONE], run_id="d6")
@@ -82,22 +73,8 @@ def test_a_denial_appends_a_policy_event_to_the_durable_request_stream(tmp_path:
 def test_the_denial_record_carries_a_timestamp_and_a_seq_and_does_not_swallow_a_failed_write(
     tmp_path: Path,
 ):
-    """The denial record carries a timestamp and a sequence, and a failed write is NOT
-    silently swallowed — it propagates, after the refusal has already taken effect (§7 R2).
-
-    This deliberately does not inherit the precedent it sits beside: `log_budget_refusal`
-    wraps its write in a blanket suppressor and emits neither timestamp nor sequence
-    (c12/g8), so its record can vanish while the refusal still happens. The differential
-    below is the assertion — the same failure that the budget refusal swallows must reach
-    the caller from the denial writer. A record that can vanish while the refusal still
-    takes effect is the precedent this design named and rejected.
-
-    Driven at the shared writer rather than once per site, on §7 R1's explicit rider: the
-    not-best-effort guarantee is a property of the RECORD, not of the file, and both sites
-    construct the same writer class (g8), so one drive of that class covers both. Recorded
-    here rather than left silent, because the sibling demands at this boundary are the ones
-    that had to be driven per-site — a judge-side assertion written against the runtime's
-    names passes vacuously, and d7/d4/d32 each drive the judge leg for exactly that reason."""
+    """The denial record carries a timestamp and a sequence, and a failed write is NOT silently
+    swallowed — it propagates, after the refusal has already taken effect (§7 R2)."""
     path = RunPaths(tmp_path).policy_denials
     logger = observe.RequestLogger(path)
     written = logger.log_policy_denial(
@@ -119,31 +96,9 @@ def test_the_denial_record_carries_a_timestamp_and_a_seq_and_does_not_swallow_a_
 
 
 def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_path: Path):
-    """The denial record carries a BOUNDED PROJECTION — role, system, verb, call id and a
-    truncated or hashed parameter digest — normalized before writing, never the raw
-    parameter blob (§7 R12).
-
-    The blob is model-controlled, unbounded and never validated, because parameter
-    validation never runs for a denied verb. There is no shared serialization safety net
-    (g24, executed): a non-serializable value raises uncaught on one route and is swallowed
-    to zero bytes on the other. Combined with the decision that a failed audit write is
-    loud, a caller who can make the record unserializable is a caller who can turn every
-    denial into an infrastructure fault. The record's purpose is the policy fact, not the
-    payload.
-
-    THE DIGEST IS OVER THE PARAMETER VALUES, not over the parameter names. A digest of the
-    sorted key set makes two denials that differ only in what was asked for byte-identical in
-    the audit stream — the analyst can see that gather was refused `esql` a hundred times and
-    never that ninety-nine of them probed one index and one probed another, which is the only
-    reason the column exists. It also kills the non-finite guard below by making it dead code:
-    if no value is ever serialized, no value can ever arrive as a bare `NaN`. The three
-    drives below are the discrimination: same keys and different values must differ, same
-    values must agree, and the hostile blob must still normalize.
-
-    The projection also carries a load this demand did not originally have. Once the grant
-    check runs AHEAD of the traversal screen, normalization is the only thing standing
-    between a hostile model-authored call id and the durable record — the job R23's ordering
-    used to do. That half is asserted at the runtime drive that produces it."""
+    """The denial record carries a BOUNDED PROJECTION — role, system, verb, call id and a truncated
+    or hashed parameter digest — normalized before writing, never the raw parameter blob (§7
+    R12)."""
     class Unserializable:
         pass
 
@@ -201,24 +156,8 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
 
 
 def test_a_denial_is_visible_in_the_rendered_run_html(tmp_path: Path):
-    """A denial appears in the rendered run HTML, where an analyst opens it — its OWN
-    CONTENT, the system and the verb it refused, not merely a page that built without
-    error.
-
-    The probe drove the real renderer with an unrecognized record kind and with a lone
-    budget-refusal stream: both rendered fine, and the record appeared nowhere, because
-    every consumer filters on a closed set of record kinds (g9/g23). So a denial can be
-    durably on disk and absent from the analyst's page with every test green — teaching a
-    consumer to stop filtering it is the actual work this demand names.
-
-    THE CONTENT MUST BE IN THE DOCUMENT THE BROWSER RENDERS, which is a stricter and more
-    honest reading of "where an analyst opens it" than a substring of the file. A plain
-    substring assertion is satisfied by a denial emitted as an HTML COMMENT, or appended
-    outside the document element: every string is present, the file parses, and the analyst
-    sees a page with no denial on it — a page that is, from the reader's side,
-    indistinguishable from the silent drop the probe already found. The comparison below
-    strips comments and everything outside the document element first, so what is asserted is
-    what renders."""
+    """A denial appears in the rendered run HTML, where an analyst opens it — its OWN CONTENT, the
+    system and the verb it refused, not merely a page that built without error."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_gather_registry(rec), turns=[q(*DENIED_PAIR), DONE],
                    run_id="d9")

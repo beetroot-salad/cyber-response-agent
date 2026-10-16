@@ -27,13 +27,8 @@ def _append_gather_call(store, session_id: str, args, *, tool_call_id: str,
 
 
 def test_gather_boundary_extracts_lead_id_across_all_three_args_shapes(tmp_path):
-    """The view returns the `lead_id` for dict-shaped args and for JSON-string args, and
-    NULL for a malformed args string, in ONE query over a table holding all three.
-
-    A single `json_extract(p.value,'$.args.lead_id')` returns NULL on the production
-    (Fireworks-served GLM) JSON-string shape — the guarded double extraction is what makes
-    all three work, and the three shapes must be in one query or the guard's ordering is
-    untested (C17)."""
+    """The view returns the `lead_id` for dict-shaped args and for JSON-string args, and NULL for a
+    malformed args string, in ONE query over a table holding all three."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
 
@@ -51,13 +46,9 @@ def test_gather_boundary_extracts_lead_id_across_all_three_args_shapes(tmp_path)
 
 
 def test_a_malformed_args_row_nulls_itself_without_aborting_the_query(tmp_path):
-    """A malformed args string of arbitrary GARBAGE TEXT nulls its own row only; the
-    well-formed rows in the same query still return their `lead_id`, and SQLite raises no
-    `malformed JSON` error.
-
-    Positive control: `test_gather_boundary_extracts_lead_id_across_all_three_args_shapes`.
-    SCOPE, per adv:PO2: this holds for garbage text and is REFUTED for over-depth nesting,
-    which is `test_over_depth_args_does_not_abort_the_whole_gather_boundary_query`."""
+    """A malformed args string of arbitrary GARBAGE TEXT nulls its own row only; the well-formed
+    rows in the same query still return their `lead_id`, and SQLite raises no `malformed JSON`
+    error."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
 
@@ -76,15 +67,11 @@ def test_a_malformed_args_row_nulls_itself_without_aborting_the_query(tmp_path):
 
 
 def test_args_shapes_outside_the_enumerated_three_null_without_aborting(tmp_path):
-    """Every `args` shape outside O12's enumerated three resolves without aborting the
-    query: an array, a bare scalar, JSON null and an absent key all yield a clean NULL;
-    a duplicate `lead_id` key resolves to the FIRST occurrence; an object- or
-    array-valued `lead_id` returns that substructure's compact JSON serialization AS
-    TEXT; and a double-encoded args string fails safe to NULL.
-
-    Probed, not assumed — `dep:PO5`, `PR5` and `adv:PO3` (all executed) established each
-    of these against SQLite 3.46.1, and this demand extends the domain past the three the
-    design enumerated (FK16/R17)."""
+    """Every `args` shape outside O12's enumerated three resolves without aborting the query: an
+    array, a bare scalar, JSON null and an absent key all yield a clean NULL; a duplicate
+    `lead_id` key resolves to the FIRST occurrence; an object- or array-valued `lead_id` returns
+    that substructure's compact JSON serialization AS TEXT; and a double-encoded args string
+    fails safe to NULL."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
 
@@ -119,15 +106,8 @@ def test_args_shapes_outside_the_enumerated_three_null_without_aborting(tmp_path
 
 
 def test_over_depth_args_does_not_abort_the_whole_gather_boundary_query(tmp_path):
-    """One `args` value nested past SQLite's JSON parser depth ceiling nulls its own row
-    and every other row in the same query still returns its `lead_id` — the whole view
-    does not abort.
-
-    adv:PO2 (executed) REFUTES the design's own guard claim: at depth 1000+ the guarded
-    double `json_extract` raises `OperationalError: malformed JSON` out of the ENTIRE
-    query — 1 poison row among 99 healthy lost all 100, not one. A single crafted tool
-    argument is therefore a denial of service on the whole boundary. RED against HEAD is
-    this demand's expected state: the design owes a depth guard it does not state."""
+    """One `args` value nested past SQLite's JSON parser depth ceiling nulls its own row and every
+    other row in the same query still returns its `lead_id` — the whole view does not abort."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
 
@@ -153,12 +133,9 @@ def test_over_depth_args_does_not_abort_the_whole_gather_boundary_query(tmp_path
 
 
 def test_gather_boundary_stays_narrowed_to_kind_response(tmp_path):
-    """The view scans only `kind='response'` rows, so request payloads carrying the
-    resolved `instructions` blob are never walked — the predicate C16 measured at
-    21.6 ms → 0.4 ms over 2200 messages, asserted as a contract rather than as a timing.
-
-    The discriminating fixture is a REQUEST row whose payload contains a `lead_id`-shaped
-    value: an unnarrowed view would surface it."""
+    """The view scans only `kind='response'` rows, so request payloads carrying the resolved
+    `instructions` blob are never walked — the predicate C16 measured at 21.6 ms → 0.4 ms over
+    2200 messages, asserted as a contract rather than as a timing."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
 
@@ -179,19 +156,9 @@ def test_gather_boundary_stays_narrowed_to_kind_response(tmp_path):
 
 
 def test_gather_boundary_is_scoped_to_one_session(tmp_path):
-    """The boundary carries the scoping predicate ITSELF: a per-case file holding a
-    second execution and a fork never serves one session another's leads, and the
-    caller's `WHERE session_id = ?` chooses a session rather than repairing the view.
-
-    FK16's second half, closed by #753. The discriminating half is the row an
-    unscoped read must NOT be able to reach: `l-second` belongs to a session that is
-    not on `first`'s path or `fork`'s, so a view that returned every response row in
-    the file — the shape #744 shipped — would serve it to both. The fork DOES see the
-    prefix it inherited (`l-first`): those turns are on its conversation, its
-    defender genuinely holds them, and #696 has to be able to fork at one of them.
-
-    The `session_id` column therefore names the session whose path the row is on, not
-    the session that owns the row, so a shared prefix row appears once per descendant."""
+    """The boundary carries the scoping predicate ITSELF: a per-case file holding a second execution
+    and a fork never serves one session another's leads, and the caller's `WHERE session_id = ?`
+    chooses a session rather than repairing the view."""
     store = make_store(tmp_path)
     first = store.new_session(agent_id="main")
     first_row = _append_gather_call(store, first, {"lead_id": "l-first"}, tool_call_id="a")
@@ -218,19 +185,7 @@ def test_gather_boundary_is_scoped_to_one_session(tmp_path):
 
 
 def test_gather_boundary_drops_the_leads_a_fold_displaced(tmp_path):
-    """A session that has folded stops serving the leads on the turns the fold cut.
-
-    This is the half of #753 that only exists once compaction is on, and the half a
-    session predicate alone cannot reach: the displaced rows still carry the folding
-    session's `session_id`, so `WHERE session_id = ?` returns them. They are simply no
-    longer reachable from the session's head — the fold reparents its frontier onto the
-    lineage root — and a #696 boundary picker that saw them would fork the source
-    defender from a state it no longer occupies.
-
-    The positive control is the lead on the ROOT turn, which the fold reparents its
-    frontier onto rather than displacing: the post-fold read must still serve `l-root`.
-    Without a lead surviving the fold, "the displaced lead is gone" would be satisfied
-    just as well by a view that returned nothing at all for a folded session."""
+    """A session that has folded stops serving the leads on the turns the fold cut."""
     ss, selection = store_mod(), selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -274,16 +229,9 @@ def test_gather_boundary_drops_the_leads_a_fold_displaced(tmp_path):
 
 
 def test_a_cyclic_parent_chain_ends_the_boundarys_walk_instead_of_hanging(tmp_path):
-    """A `parent_id` chain that loops — reachable only by direct file damage, since the
-    foreign key keeps a phantom id out of every write the store's own API can make —
-    terminates the view's recursive walk and returns each row in the ring once.
-
-    #753 put a recursion where the view previously had none, so a corrupted file gained a
-    way to hang a reader. `UNION` is the guard: the repeated triple is discarded. The
-    contract is deliberately WEAKER than the Python walk's on the same shape — the view
-    degrades, `path_row_ids` raises — because a danger lens that never returns is worse
-    than one that over-reports, while the reader that projects the conversation into a
-    prompt must refuse outright."""
+    """A `parent_id` chain that loops — reachable only by direct file damage, since the foreign key
+    keeps a phantom id out of every write the store's own API can make — terminates the view's
+    recursive walk and returns each row in the ring once."""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -305,13 +253,9 @@ def test_a_cyclic_parent_chain_ends_the_boundarys_walk_instead_of_hanging(tmp_pa
 
 
 def test_a_thinking_part_shaped_like_a_sql_fragment_round_trips_inert(tmp_path):
-    """Model-authored content shaped like a SQL fragment is stored and returned as inert
-    text: the reader never concatenates payload content into a query, so a
-    `'; DROP TABLE message; --` ThinkingPart survives the round trip AND leaves the
-    schema intact.
-
-    Positive control: an ordinary lead still extracts through the same view in the same
-    call, so the negative is not passing because the query stopped working."""
+    """Model-authored content shaped like a SQL fragment is stored and returned as inert text: the
+    reader never concatenates payload content into a query, so a `'; DROP TABLE message; --`
+    ThinkingPart survives the round trip AND leaves the schema intact."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     hostile = "'; DROP TABLE message; --"

@@ -71,9 +71,7 @@ def test_the_names_that_resolve_to_the_tree_itself(tmp_path):
 def test_the_standing_prohibition_on_a_whole_tree_authoring_scope(tmp_path):
     """A committed demand (curator-glm-port.yaml:112, g23) already forbids a whole-``defender_dir``
     write_allow; this change is the FIRST able to produce that shape FROM A NAME (via M1's corpus
-    carrier). M7-as-corrected must keep it unreachable: ``""`` / ``"."`` are rejected at bind, and no
-    accepted name roots the write scope at ``defender_dir`` — a shipped bind ADMITS an in-corpus
-    ``.md`` write but DENIES a top-of-tree ``defender/<x>.md`` write (the scope is a strict subdir)."""
+    carrier)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     _assert_bind_rejects_name(wt, rd, "")
     _assert_bind_rejects_name(wt, rd, ".")

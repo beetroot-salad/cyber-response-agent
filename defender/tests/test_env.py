@@ -111,14 +111,9 @@ def test_env_choice_a_choice_is_read_stripped_and_lowercased_with_no_notice(
 
 @pytest.mark.parametrize("raw", ["staging", "development", "prod", " Yaml ", "²", "dev production"])
 def test_env_choice_anything_else_is_the_default_with_a_notice_naming_it(monkeypatch, caplog, raw):
-    """Anything else answers the DEFAULT — never a raise, never a guess at the nearest choice —
-    WITH a notice for the caller to log, naming the variable, the raw value as it was set
-    (its repr, so stray whitespace is visible), every choice, and the default it fell back to.
-    `env_choice` does not log the notice itself: its callers log it (`_env.deployment` as an
-    ERROR, `_log.configure_from_env` straight to its handler), once.
-
-    The default is shown to be named, not merely present among the choices: the same bad
-    value under two different defaults gives two different notices."""
+    """Anything else answers the DEFAULT — never a raise, never a guess at the nearest choice — WITH
+    a notice for the caller to log, naming the variable, the raw value as it was set (its repr,
+    so stray whitespace is visible), every choice, and the default it fell back to."""
     monkeypatch.setenv(_NAME, raw)
     caplog.set_level(logging.DEBUG)
 
@@ -139,22 +134,14 @@ def test_env_choice_anything_else_is_the_default_with_a_notice_naming_it(monkeyp
 
 
 def test_parse_iso_utc_accepts_the_trailing_z():
-    """`Z` is the form these readers meet on the wire — a store row or a seeded ticket
-    written by something that is not `now_iso`. Every caller had been rewriting it by hand
-    before calling `fromisoformat`, and that rewrite is the reason the reader existed three
-    times over."""
+    """`Z` is the form these readers meet on the wire — a store row or a seeded ticket written by
+    something that is not `now_iso`."""
     assert _clock.parse_iso_utc("2026-01-01T12:00:00Z") == _clock.parse_iso_utc(
         "2026-01-01T12:00:00+00:00")
 
 
 def test_parse_iso_utc_reads_a_naive_value_as_utc_rather_than_rejecting_it():
-    """The judge's recency screen rested on this. The retired closed-ticket tool asked
-    "is every word of this record provably older than the case?", and the stores mint
-    `datetime.now(utc)` — but a hand-written seed file may omit the offset. Treating that as
-    unparseable would drop legitimate precedent over a formatting detail.
-
-    A naive value in some other zone IS misread; the error is bounded by that zone's offset,
-    which cannot approach the gap between seeded precedent and a live case."""
+    """The judge's recency screen rested on this."""
     naive = _clock.parse_iso_utc("2026-01-01T12:00:00")
     assert naive is not None
     assert naive.tzinfo is not None
@@ -163,9 +150,7 @@ def test_parse_iso_utc_reads_a_naive_value_as_utc_rather_than_rejecting_it():
 
 def test_parse_iso_utc_returns_aware_always_so_a_mixed_batch_sorts():
     """Aware-always is not tidiness — comparing a naive datetime with an aware one raises
-    `TypeError`, and `visualize_data._tile_phase_boundaries` sorts whatever it parsed. A
-    reader that passed naive values through would crash the phase tiling on one
-    offset-less row rather than skipping it."""
+    `TypeError`, and `visualize_data._tile_phase_boundaries` sorts whatever it parsed."""
     raw = ("2026-01-01T12:00:00", "2026-01-01T09:00:00Z", "2026-01-01T15:00:00+02:00")
     batch = [_clock.parse_iso_utc(s) for s in raw]
     assert all(dt is not None for dt in batch)
@@ -178,9 +163,6 @@ def test_parse_iso_utc_returns_aware_always_so_a_mixed_batch_sorts():
 
 
 def test_parse_iso_utc_returns_none_for_anything_that_is_not_a_timestamp():
-    """Never raises — every caller treats `None` as "no usable instant" and carries on.
-    A non-`str` is the case worth naming: `visualize_data`'s copy caught `TypeError` and
-    `ValueError` but reached `.replace` on the raw value first, so an integer timestamp
-    raised `AttributeError` straight through the guard."""
+    """Never raises — every caller treats `None` as "no usable instant" and carries on."""
     for raw in (None, 17, b"2026-01-01T12:00:00Z", "", "not a date", {"t": 1}):
         assert _clock.parse_iso_utc(raw) is None, raw

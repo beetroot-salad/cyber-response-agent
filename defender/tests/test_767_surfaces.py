@@ -62,20 +62,7 @@ def _shipped_hits(pattern: str) -> dict[str, list[int]]:
 
 
 def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
-    """o6_no_model_write_reach — NEGATIVE. No model role can reach a ticket write, on any of
-    the three surfaces a role's reach is actually made of: the grant table, the adapter's
-    confinement allowlist, and the model's real bash program set.
-
-    D8 RE-POINTS THE THIRD (c2/g9): the program set is `permission/policies/_common.py`'s
-    `reader_grants` — `cat` plus the stdin viewers plus the non-adapter shims plus the inert
-    pair — and NOT `runtime/bash_policy.json`, which carries only `version` and `read_deny`
-    and whose own `_README` says the program set is not a JSON list. A test pinned on that
-    file would be vacuous.
-
-    Each surface is DRIVEN rather than enumerated: the grant table is projected onto the role
-    through its real projection, the allowlist is exercised by the real `guard_outbound` over
-    real write URLs, and the program set is built by its real producer. Its positive control
-    is `o6_read_verb_still_granted` — the read verb the same three surfaces DO admit."""
+    """o6_no_model_write_reach — NEGATIVE."""
     rows = _shipped_rows()
     for role in sorted(verb_dispositions.KNOWN_ROLES):
         grant = verb_dispositions.grant_for(role, rows)
@@ -117,13 +104,7 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
 
 def test_767_list_tickets_still_granted_to_gather():
     """o6_read_verb_still_granted — the POSITIVE CONTROL for every reach negative in this
-    file: `ticket.list-tickets` IS granted to gather, and its GET reaches the store through
-    the adapter's own confined door. Without it, "no model role reaches a ticket write"
-    passes just as well over a role that reaches nothing at all.
-
-    The ungranted ticket verbs stay in the table as rows granted to NOBODY with a reason —
-    that is this file's way of spelling an examined no, and it is why a future re-grant is a
-    decision rather than a restoration."""
+    file."""
     rows = _shipped_rows()
     by_pair = {d.pair: d for d in rows}
     gather = verb_dispositions.grant_for("gather", rows)
@@ -139,16 +120,7 @@ def test_767_list_tickets_still_granted_to_gather():
 
 
 def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
-    """d6_transitions_route_not_confined — NEGATIVE. `POST /tickets/{key}/transitions` is the
-    PERSON's route — closing a case is the release act — and it is not on the adapter's
-    confinement allowlist, which is GET-only: a model driving the adapter's door cannot move a
-    case along its lifecycle, and so cannot release its own or any other case's comments.
-
-    RF4 bounds this: the allowlist is the MODEL's door. On the playground nothing
-    authenticates the route at all (N6), which the clause
-    `n6_approve_action_is_unattributable_on_the_playground` records rather than tests.
-
-    Its positive control is `o6_read_verb_still_granted`."""
+    """d6_transitions_route_not_confined — NEGATIVE."""
     allowlist = confinement.READ_ENDPOINT_ALLOWLIST["ticket"]
     assert all(method == "GET" for _, method in allowlist), (
         f"the ticket allowlist is no longer GET-only: {allowlist}"
@@ -174,18 +146,7 @@ def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
 
 def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
     """d_adapter_http_confinement_capture_positive_control — PARITY, and the baseline the two
-    vias this design adds are a parity demand AGAINST. `adapter-http` is the ESTABLISHED via
-    on the store, and it carries BOTH constraints: `confine_read_endpoint` and
-    `guard_outbound`'s capture record. No demand pinned that baseline before the gate leaf
-    minted this one, so `host-curl` and `operator-labels` had nothing to be compared with.
-
-    Cites g2 (guard_outbound's two callers, both adapter transports — and `guard_outbound` IS
-    the capture recorder, which is why a door that skips it records nothing anywhere) and
-    g3/c2 (the allowlist's ticket entry, GET-only, with no `case-history` key at all).
-
-    Driven through the real seam with a real capture object, so the recorded request is an
-    observation rather than a reading: the sanctioned GET is confined AND captured; the POST
-    is refused, and refused BEFORE it is captured."""
+    vias this design adds are a parity demand AGAINST."""
     capture = confinement.TransportCapture()
     ctx = type("Ctx", (), {"capture": capture})()
 
@@ -212,14 +173,7 @@ def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
 
 
 def test_767_query_tool_is_only_ticket_reader(tmp_path):
-    """s3p_single_model_facing_reader — NEGATIVE, the path census: after D5 the query tool is
-    the only code that hands ticket-store content to a model (c13, S3′), and since #1221 it
-    hands it over as the store answered it — no shipped module calls a ticket screen at all
-    (#1221 S2: no product path removes or alters content in a reply by system, verb or
-    content; the generic size view is not keyed on either).
-
-    Its positive control is `o2_released_serves_whole`: the one reader in the census DOES hand
-    ticket content to a model, the own case and an open case's comments included."""
+    """s3p_single_model_facing_reader — NEGATIVE, the path census."""
     consumers = _shipped_hits(r"(?<!def )\bscreen_(?:list|get|release_list|release_get)\s*\(")
     assert consumers == {}, (
         f"a shipped module still screens ticket replies: {consumers} — #1221 removed both "

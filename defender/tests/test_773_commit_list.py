@@ -19,14 +19,7 @@ OLD = "defender/lessons/old.md"
 
 
 def test_an_empty_approved_list_commits_nothing_and_invokes_no_git_773(tmp_path):
-    """An empty approved list returns `None` WITHOUT calling git: no new commit object
-    exists and HEAD has not moved.
-
-    C15 is why this is a demand and not a nicety: `git add --` with an empty pathspec stages
-    nothing but `git commit -F - --` then commits the WHOLE INDEX, so an unguarded empty
-    list sweeps in any unrelated staged file. The probe observed a stray `stray.txt`
-    reaching HEAD that way. (Since #1166 the list is empty only when the curator changed
-    nothing in the corpus.)"""
+    """An empty approved list returns `None` WITHOUT calling git."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -40,11 +33,7 @@ def test_an_empty_approved_list_commits_nothing_and_invokes_no_git_773(tmp_path)
 
 
 def test_approved_list_and_deletions_list_are_both_empty_773(tmp_path):
-    """The one empty case: BOTH lists empty returns `None` without calling git. A tick that
-    changed nothing in the corpus makes no commit at all.
-
-    Positive control on the same address: one approved path and no deletions DOES commit, so
-    the empty branch is the guard firing and not the commit path being broken."""
+    """The one empty case."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -65,11 +54,7 @@ def test_approved_list_and_deletions_list_are_both_empty_773(tmp_path):
 
 
 def test_an_empty_approved_list_still_lets_the_rest_of_the_tick_complete_773(tmp_path):
-    """M5's empty-list branch is a BRANCH in the key flow, not an early exit: the tick
-    continues through recompute, deferral bump and rotation.
-
-    Observable: with nothing committed, the skipped finding still rotates as `consumed_skip`
-    and the report line is still written."""
+    """M5's empty-list branch is a BRANCH in the key flow, not an early exit."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -90,10 +75,7 @@ def test_the_commit_names_the_approved_files_and_the_curator_deletions_and_nothi
     tmp_path,
 ):
     """The corpus commit names exactly the approved files plus curator deletions under the
-    corpus, by explicit path list — nothing no finding vouches for.
-
-    Asked of `git show --name-only HEAD`, the operator's own instrument, not of the drain's
-    record of what it meant to commit."""
+    corpus, by explicit path list — nothing no finding vouches for."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("ok", run_id="ok")],
@@ -110,14 +92,7 @@ def test_the_commit_names_the_approved_files_and_the_curator_deletions_and_nothi
 
 
 def test_a_dirty_file_outside_the_corpus_never_enters_the_commit_773(tmp_path):
-    """A NEGATIVE demand: nothing outside the corpus reaches the commit, on any surface —
-    not the path list, not the pathspec, not by riding an index the empty-list branch would
-    otherwise sweep in.
-
-    A dirty file outside the corpus is a stray `verify_agent_state` already refuses, so the
-    reachable shape is a file dirty at BASELINE — pre-existing dirt the drain did not cause
-    and must not commit. Positive control on the same address: the corpus file beside it
-    does commit, so the absence is not an empty commit."""
+    """A NEGATIVE demand."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -132,11 +107,7 @@ def test_a_dirty_file_outside_the_corpus_never_enters_the_commit_773(tmp_path):
 
 def test_a_curator_deletion_under_the_corpus_is_named_in_the_commit_list_773(tmp_path):
     """A lesson the curator deleted under the corpus is NAMED in the commit's explicit path
-    list, so the removal actually lands in HEAD.
-
-    `_changed_corpus_records` drops every `D` row (C17), so the deletion list has a source
-    other than that census — the outcome is pinned here; the collector is the
-    implementation's to supply (RF-2)."""
+    list, so the removal actually lands in HEAD."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -151,9 +122,7 @@ def test_a_curator_deletion_under_the_corpus_is_named_in_the_commit_list_773(tmp
 def test_git_status_reports_a_deleted_corpus_file_773(tmp_path):
     """M5 puts curator deletions under the corpus into the commit's explicit path list even
     though `_changed_corpus_records` drops `D` rows (C17), and the deletion is not vouched
-    for by anything — there is no file left to attribute (N6).
-
-    Positive control: the deletion-only tick still produces a commit."""
+    for by anything — there is no file left to attribute (N6)."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -168,11 +137,7 @@ def test_git_status_reports_a_deleted_corpus_file_773(tmp_path):
 
 def test_deletions_list_names_a_path_git_status_never_reported_deleted_773(tmp_path):
     """Every path in the commit list — approved or deleted — traces to a `git status` record
-    under the corpus (O5/G1). A path that does not is a violation, not a case to handle.
-
-    Driven as a census over the tick: the commit's path set is a subset of the paths git
-    itself reported dirty under the corpus, computed from the scene's own record of what the
-    curator touched rather than by re-running production's own `git status` call."""
+    under the corpus (O5/G1)."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -192,11 +157,7 @@ def test_the_commit_list_is_built_in_repo_relative_paths_773(tmp_path):
     """The explicit commit list is built in REPO-relative paths — the representation
     `_changed_corpus_records`, `_vouched_for`, `_cited_ids_at_head` and `_revert_strays`
     already use consistently — so a lesson in a corpus SUBDIRECTORY commits at the path git
-    knows it by.
-
-    §7's path-space convention (RF-3's other half): `_snapshot_corpus`/`_restore_corpus`
-    keep their own internally-consistent corpus-relative pair, unchanged. A nested lesson is
-    the shape where the two spellings differ by more than a prefix."""
+    knows it by."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -215,10 +176,7 @@ def test_a_reported_committed_finding_no_approved_file_cites_is_deferred_not_con
     tmp_path,
 ):
     """A finding the curator reports `committed` that no approved file cites is DEFERRED
-    (M7), never consumed as committed.
-
-    O4 stated as its own outcome: "consumed only when an approved file cites it". The
-    failing-by column names this exact tick — B reported committed, no file cites B."""
+    (M7), never consumed as committed."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("a", run_id="a"), S.finding_row("b", run_id="b")],
@@ -232,11 +190,7 @@ def test_a_reported_committed_finding_no_approved_file_cites_is_deferred_not_con
 
 def test_disk_runs_out_of_space_partway_through_gits_own_commit_write_773(tmp_path):
     """If the commit object does not land, HEAD does not advance, so M5's tree-derived
-    recompute yields an EMPTY `committed` set and no row rotates as `consumed_committed`.
-
-    Consumption is keyed on the commit's own success, never on the curator's report. The
-    fault is induced at the real primitive: the repo's git directory is taken away before
-    the commit, so git genuinely cannot write an object."""
+    recompute yields an EMPTY `committed` set and no row rotates as `consumed_committed`."""
     def hide_the_git_dir(rows, batch_id, cfg):
         shutil.move(str(cfg.repo_root / ".git"), str(cfg.repo_root / ".git-gone"))
 
@@ -255,18 +209,7 @@ def test_disk_runs_out_of_space_partway_through_gits_own_commit_write_773(tmp_pa
 def test_the_commit_step_reads_author_result_only_for_skip_reasons_and_commit_message_773(
     tmp_path,
 ):
-    """A NEGATIVE demand: the commit step reads AUTHOR_RESULT for exactly two things — the
-    `consumed_skip` reasons and the `commit_message` — and for nothing else.
-
-    Driven by making every OTHER field of the result useless: `committed` omits "a" (only
-    "skip" rides the bucket, harmlessly, since it is filed under `consumed_skip` instead) and
-    a `held_forward_bad` bucket is absent, yet the well-cited file "a" is still checked and
-    committed off the tree rather than off the bucket's own say-so. `committed` still has to
-    stay HONEST about the tree overall (non-empty, corpus genuinely dirty) — the pre-existing
-    bidirectional self-report/tree cross-check (§7 FK-3) is a separate, earlier gate this test
-    is not about; `test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773` covers
-    it. Positive control on the same address: the two fields that ARE read do reach their
-    sinks — the skip reason onto the rotated row and the message into `git log`."""
+    """A NEGATIVE demand."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("a", run_id="a"), S.finding_row("skip", run_id="skip")],
@@ -286,11 +229,7 @@ def test_the_commit_step_reads_author_result_only_for_skip_reasons_and_commit_me
 
 def test_a_skipped_finding_lands_in_the_consumed_skip_category_773(tmp_path):
     """A finding the curator places in the `consumed_skip` bucket rotates into
-    `consumed.jsonl` tagged `consumed_skip`.
-
-    R4 obligation g2: the third distinguished member of the consumed-category domain,
-    pinned beside O3's `consumed_forward_bad` and O4's `consumed_committed` so all three are
-    individually exercised rather than two being inferred from the one."""
+    `consumed.jsonl` tagged `consumed_skip`."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("a", run_id="a"), S.finding_row("skip", run_id="skip")],
@@ -306,26 +245,7 @@ def test_a_skipped_finding_lands_in_the_consumed_skip_category_773(tmp_path):
 
 
 def test_author_result_committed_bucket_is_empty_773(tmp_path):
-    """An EMPTY `committed` bucket over a dirty corpus is not an input M5 ever sees: the tick
-    ends at `verify_agent_state` (`shared.py:279-283`, called at `drain.py:427`), before
-    `_project`, before the recompute, before any commit.
-
-    O5 SCOPED CORRECTLY. "The tree is the truth, the report is a hint" governs what the drain
-    SELECTS once a tick is running — which files are vouched, which pairs are checked, which
-    ids come back `consumed_committed`. It is not a licence for the report to CONTRADICT the
-    tree: the pre-existing bidirectional honesty gate still refuses that tick outright, and
-    §7's FK-3 resolution keeps it firing first and unchanged (claim P1, executed — both
-    mismatch directions raise). The bucket being ignorable and the bucket being allowed to lie
-    are different claims, and only the first is this delta's.
-
-    What the empty bucket genuinely no longer does is gate M3.2's vouching — that is the
-    `if committed:` conditional at `drain.py:436-437` (G13) this delta removes, and it is a
-    LATER gate than the one that fires here. `test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773`
-    carries that separation; this test's own job is that nothing downstream of the gate ran:
-    no commit recompute, no consumption, no rotation.
-
-    (Rewritten at the phase-F repair, 92-reconciliation.md F-1 — it previously asserted
-    `run() == 0` and `consumed_committed`, against §7's own resolution.)"""
+    """An EMPTY `committed` bucket over a dirty corpus is not an input M5 ever sees."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -340,10 +260,7 @@ def test_author_result_committed_bucket_is_empty_773(tmp_path):
 
 def test_author_result_committed_id_is_foreign_to_this_batch_773(tmp_path):
     """Pairs come from the tree's citations ∩ this batch's ids, so a FOREIGN id in the
-    committed bucket changes nothing about what is checked, committed or consumed.
-
-    The partition validator's own refusal of an unknown id is the surrounding machinery;
-    what this pins is that the check and commit read the tree either way."""
+    committed bucket changes nothing about what is checked, committed or consumed."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -357,11 +274,7 @@ def test_author_result_committed_id_is_foreign_to_this_batch_773(tmp_path):
 
 
 def test_git_status_reports_no_changed_corpus_files_773(tmp_path):
-    """Nothing to vouch, check or commit: the recomputed `committed` set is empty whatever
-    AUTHOR_RESULT claims (O5), no verifier call is made and no commit lands.
-
-    The tree is the truth — a curator that reports a commit and writes nothing gets an
-    empty tick, not a rotation."""
+    """Nothing to vouch, check or commit."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -375,10 +288,7 @@ def test_git_status_reports_no_changed_corpus_files_773(tmp_path):
 def test_git_status_reports_an_untracked_file_under_the_corpus_773(tmp_path):
     """`git status --porcelain --untracked-files=all -z` includes `??`, and only `D` is
     filtered (G1/C17), so an untracked corpus file is a changed non-deleted record and goes
-    through vouch, verdict and commit like any other.
-
-    The file here is genuinely new to git — written by the fake into a clean tree — so the
-    `??` status is produced by the real primitive."""
+    through vouch, verdict and commit like any other."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -390,13 +300,7 @@ def test_git_status_reports_an_untracked_file_under_the_corpus_773(tmp_path):
 
 def test_git_status_reports_a_rename_pair_or_a_mode_or_name_only_change_773(tmp_path):
     """A rename decomposes into new-path-changed plus old-path-deleted before anything
-    downstream sees it: the new path is vouched, checked and committed, the old path rides
-    the deletion list, and no record ever reaches the vouch step naming two paths.
-
-    §7 FK-32. A renamed lesson is the natural shape of "the repair spawn moved the file", so
-    this is not exotic: mishandled, either the old path rides into a delete nobody approved
-    or the new path is checked under the old path's citations. The rename is made with real
-    `git mv`, so git's own `R100 old -> new` record is what the census meets."""
+    downstream sees it."""
     def rename_it(rows, batch_id, cfg):
         S.git(cfg.repo_root, "mv", "defender/lessons/old.md", "defender/lessons/new.md")
         (cfg.corpus_dir / "new.md").write_text(S.lesson("older", "f1"), encoding="utf-8")
@@ -414,12 +318,7 @@ def test_git_status_reports_a_rename_pair_or_a_mode_or_name_only_change_773(tmp_
 
 def test_a_mode_only_change_with_identical_bytes_is_treated_as_unchanged_773(tmp_path):
     """A mode-only change with byte-identical content is NOT "changed" for the check's
-    purposes: it mints no pair, costs no verifier call, and does not fault the tick for want
-    of a voucher.
-
-    §7 FK-32's second half — "changed" has to keep meaning "content the check must judge",
-    which is the only meaning M3 uses. The chmod is real, so git's own mode record is what
-    the census meets. Positive control: the genuinely edited file beside it IS checked."""
+    purposes."""
     def chmod_it(rows, batch_id, cfg):
         (cfg.corpus_dir / "old.md").chmod(0o755)
 
@@ -433,14 +332,7 @@ def test_a_mode_only_change_with_identical_bytes_is_treated_as_unchanged_773(tmp
 
 
 def test_git_status_reports_an_unexpected_two_letter_status_code_773(tmp_path):
-    """An UNMERGED status code under the corpus refuses the tick loudly, before vouching:
-    nothing is checked, nothing is committed, and the failure is visible.
-
-    §7 FK-33. `UU`/`AA` pass the `"D" not in xy` filter untouched and would otherwise be
-    handed to the verdict step as ordinary changed files — committing a lesson full of
-    conflict markers into the corpus the defender reads at PLAN, an O1-shaped harm the
-    verifier might well pass, since conflict markers are just text. The conflict is produced
-    by a real `git merge`, so the status code is git's own."""
+    """An UNMERGED status code under the corpus refuses the tick loudly, before vouching."""
     def make_a_real_conflict(rows, batch_id, cfg):
         repo = cfg.repo_root
         S.git(repo, "checkout", "-q", "-b", "side", "HEAD~1")
@@ -474,13 +366,7 @@ def test_git_status_reports_an_unexpected_two_letter_status_code_773(tmp_path):
 
 def test_git_status_call_the_check_steps_paths_are_derived_from_fails_773(tmp_path):
     """A failed `git status` inside the new check step aborts the tick but does NOT bump
-    `attempts`: the row keeps its budget and the tick is recorded as stuck.
-
-    §7 FK-22, the same carve-out N5 already makes for a BAD ("a BAD is not a fault"):
-    `attempts` is a budget for "this batch keeps breaking things", and an index-lock race is
-    a property of the host, not of the batch. Three collisions over a queue's life would
-    otherwise delete work that was fine. The failure is real — the repo's git directory is
-    moved away mid-tick, so git genuinely fails."""
+    `attempts`."""
     def hide_the_git_dir(rows, batch_id, cfg):
         shutil.move(str(cfg.repo_root / ".git"), str(cfg.repo_root / ".git-gone"))
 
@@ -497,12 +383,7 @@ def test_git_status_call_the_check_steps_paths_are_derived_from_fails_773(tmp_pa
 
 
 def test_a_git_read_inside_the_new_check_step_that_loses_the_index_lock_race_773(tmp_path):
-    """The same carve-out reached through the contended-index door: the batch keeps its
-    attempt count and the row stays queued for an ordinary retry.
-
-    `GitProbeError` is deliberately not a `RETIRE_SET` member (GL2 lists the three that
-    are), which is the mechanism this rides — the new step's reads must go through the same
-    `_git_read` wrapper the existing ones do."""
+    """The same carve-out reached through the contended-index door."""
     def hide_the_git_dir(rows, batch_id, cfg):
         shutil.move(str(cfg.repo_root / ".git"), str(cfg.repo_root / ".git-gone"))
 

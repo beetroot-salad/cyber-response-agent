@@ -111,10 +111,7 @@ def _assert_unavailable(wire: Any, *, mentions: tuple[str, ...] = (),
 
 
 def test_1204_a_clone_on_a_branch_names_the_commit_its_loose_ref_holds(tmp_path):
-    """O1/D1: a tenant knowledge folder is a CLONE of the tenant's repo. `git clone` leaves HEAD
-    as `ref: refs/heads/main`, the branch as a LOOSE ref file, and the remote-tracking refs in
-    `packed-refs` — the commit is the loose ref's. Without this the field never names a commit
-    at all, or names one read from the wrong place."""
+    """O1/D1."""
     upstream = _repo(tmp_path / "upstream")
     upstream_head = _commit(upstream, "second")
     clone = tmp_path / "knowledge"
@@ -129,15 +126,7 @@ def test_1204_a_clone_on_a_branch_names_the_commit_its_loose_ref_holds(tmp_path)
 
 
 def test_1204_a_packed_ref_is_read_past_the_header_and_the_peeled_lines(tmp_path):
-    """O1/D1: after `git pack-refs --all` the branch has no loose file; its commit is the
-    `packed-refs` line naming it — past the `# pack-refs with:` header, and never a `^` peeled
-    line (an annotated tag's target). The fixture is built so that every plausible misread
-    answers WRONG: the peeled lines and the tag object name older commits, and one peeled line
-    sits BEFORE HEAD's own line (git peels every packed ref naming a tag object, and
-    `refs/backup/v1` sorts before `refs/heads/`); a branch `ma` sorts first and is a prefix of
-    `main`; a branch `a/refs/heads/main` sorts first and ends with the very name HEAD points
-    at. Without this a packed clone (git packs on `gc`) stamps another branch's or a tag's
-    sha."""
+    """O1/D1."""
     repo = _repo(tmp_path / "knowledge")
     first = _head(repo)
     _g(repo, "tag", "-a", "v1", "-m", "an annotated tag on the first commit")
@@ -205,10 +194,7 @@ def test_1204_a_sha256_repository_stamps_its_64_hex_commit(tmp_path):
 
 
 def test_1204_the_commit_is_read_with_git_off_the_path(tmp_path, monkeypatch):
-    """Decision 2 / C8: production runs where there is NO git binary (the runtime image), with
-    the tenant clone's `.git/` mounted in. The commit is read from `.git`'s files, so emptying
-    PATH changes nothing. Without this the field reads `unavailable` on every production run —
-    the one environment it exists for."""
+    """Decision 2 / C8."""
     repo = _repo(tmp_path / "knowledge")
     head = _commit(repo, "second")
     empty_bin = tmp_path / "empty-bin"
@@ -238,12 +224,7 @@ def test_1204_a_plain_folder_is_unversioned_and_a_repo_there_is_not(tmp_path):
                          ids=["depth-1", "depth-2", "depth-3"])
 def test_1204_a_plain_folder_inside_another_repo_is_unversioned_not_the_parents_commit(
         tmp_path, between):
-    """O1/A1/C7: no upward search, at ANY depth. A plain knowledge folder nested inside a git
-    checkout — directly inside it, one folder down, or two (the dev layout, where the data root
-    sits inside the product repo) — is `"unversioned"`, and the PARENT's sha appears nowhere in
-    what is stamped. `git rev-parse` from inside it would answer the parent's commit (C7,
-    executed), which is exactly the borrowed commit O1 forbids; a search bounded to a few
-    levels up is still a search."""
+    """O1/A1/C7."""
     outer = _repo(tmp_path / "product")
     outer_head = _commit(outer, "product work")
     knowledge = outer.joinpath(*between, "knowledge")
@@ -282,11 +263,7 @@ def test_1204_a_head_naming_a_ref_that_is_nowhere_is_an_unborn_branch(tmp_path):
 
 
 def test_1204_a_reftable_repository_is_unavailable_naming_reftable(tmp_path):
-    """O1/D1: a repository made with `--ref-format=reftable` keeps its refs in binary tables
-    under `.git/reftable/`; on disk `HEAD` reads `ref: refs/heads/.invalid` and
-    `.git/refs/heads` is a plain FILE. A files-backend reader that went HEAD-first would answer
-    "unborn" or a walk refusal; the reason must name reftable, so an operator knows the fix is
-    the repo's ref format — which forces the reftable check to precede ref resolution."""
+    """O1/D1."""
     if not _git_supports("--ref-format=reftable", tmp=tmp_path):
         pytest.skip("this host's git (< 2.45) cannot make a reftable repository; the planted "
                     "directory case below still pins D1's rule")
@@ -298,11 +275,7 @@ def test_1204_a_reftable_repository_is_unavailable_naming_reftable(tmp_path):
 
 
 def test_1204_a_git_FILE_is_unavailable_and_its_gitdir_is_not_followed(tmp_path):
-    """O1/A1/D1: `.git` that is not a real directory is not versioned-and-readable here. A
-    `git worktree` (like a submodule) has a `.git` FILE reading `gitdir: <elsewhere>`; following
-    it leaves the knowledge folder. Unavailable — not `"unversioned"`, which would claim there
-    is no repo — and the main repo's commit is not reached. The positive control is the main
-    repo itself."""
+    """O1/A1/D1."""
     main = _repo(tmp_path / "main")
     head = _head(main)
     worktree = tmp_path / "knowledge"
@@ -330,13 +303,7 @@ LINKED = {
 @pytest.mark.parametrize("linked", sorted(LINKED))
 def test_1204_a_link_anywhere_on_the_read_path_is_unavailable_and_never_followed(
         tmp_path, linked):
-    """O1/D1/C16: every read below the knowledge folder is no-follow on EVERY component, not
-    only the last. Each arm builds a knowledge `.git` as a byte-for-byte copy of a real repo's
-    (the positive control: it names that commit), then replaces one entry with a symlink to the
-    same entry in that real repo — so a reader that followed the link would get a valid ref
-    holding a valid sha and answer it. Unavailable, not `"unversioned"`, and the sha is not in
-    the stamp. Without this `.git/refs` linked to another tenant's clone stamps that tenant's
-    commit."""
+    """O1/D1/C16."""
     real = _repo(tmp_path / "real")
     head = _commit(real, "second")
     if LINKED[linked]:
@@ -359,12 +326,7 @@ def test_1204_a_link_anywhere_on_the_read_path_is_unavailable_and_never_followed
 
 
 def test_1204_a_linked_folder_of_a_slashed_branch_is_unavailable_and_never_followed(tmp_path):
-    """O1/D1/C16: no-follow holds on EVERY component of whatever ref HEAD names, not on a fixed
-    list of names. HEAD is on the slashed branch `team/x`, so its loose ref sits under a folder
-    `refs/heads/team/` that no fixed list mentions; that folder is replaced by a link into
-    ANOTHER repository whose `refs/heads/team/x` holds a valid sha of its own. A reader that
-    followed it would stamp the other repository's commit. Unavailable, neither sha stamped;
-    the positive control is the same copy before the link is planted."""
+    """O1/D1/C16."""
     real = _repo(tmp_path / "real")
     _g(real, "checkout", "-q", "-b", "team/x")
     head = _commit(real, "on team/x")
@@ -390,11 +352,7 @@ def test_1204_a_linked_folder_of_a_slashed_branch_is_unavailable_and_never_follo
 
 def test_1204_a_linked_loose_ref_is_not_read_as_absent_and_the_stale_packed_line_is_not_used(
         tmp_path):
-    """O1/D1: "the loose ref, ELSE the packed-refs line" falls through only when the loose ref
-    is ABSENT. A loose ref that is there but refused (a link) shadows the packed line exactly
-    as git's own loose-over-packed rule does — so the stale packed commit beneath it is not
-    stamped either. Built from real git: pack at the first commit, commit again (a fresh loose
-    ref over a stale packed line), copy, then link the loose ref back to the real one."""
+    """O1/D1."""
     real = _repo(tmp_path / "real")
     _g(real, "pack-refs", "--all")
     stale = _head(real)
@@ -454,10 +412,7 @@ CAPTURE_TIME_BOUND_S = 10.0
 
 
 def _plant_site_fault(repo: Path, site: str, fault: str, head: str) -> Path:
-    """Replace the entry `site` names in a real repo with `fault`; returns its path. For the
-    packed site the repo is packed first, so `packed-refs` is the only place the commit is.
-    The undecodable bytes sit where a LENIENT decode (`errors="ignore"`) would still read the
-    real commit or the real ref name — so only a strict reader answers unavailable."""
+    """Replace the entry `site` names in a real repo with `fault`;"""
     git_dir = repo / ".git"
     if site == "packed-refs":
         _g(repo, "pack-refs", "--all")
@@ -481,10 +436,7 @@ def _plant_site_fault(repo: Path, site: str, fault: str, head: str) -> Path:
 
 def _capture_within_bound(knowledge: Path, fifo: Path | None = None) -> Any:
     """`capture_knowledge(knowledge)`'s wire value, taken on a thread and given
-    `CAPTURE_TIME_BOUND_S` to answer: a reader still blocked after that fails the test (the
-    stamp is taken before the box starts, so a hang there is a run that never starts). Anything
-    the capture RAISES fails it too. A FIFO a hung reader is waiting on is opened for writing
-    afterwards, which releases the reader so the thread does not outlive the test."""
+    `CAPTURE_TIME_BOUND_S` to answer."""
     outcome: dict[str, Any] = {}
 
     def capture() -> None:
@@ -512,11 +464,7 @@ def _capture_within_bound(knowledge: Path, fifo: Path | None = None) -> Any:
 def test_1204_a_fault_at_any_read_site_is_unavailable_promptly_and_never_raises(
         tmp_path, site, fault):
     """O1/O4/D1 at EVERY place a commit is read — HEAD, the loose ref HEAD names, and
-    `packed-refs` — not only at HEAD: bytes that do not decode, a directory where a file
-    belongs, and a FIFO are each unavailable, answered within a time bound, never raised, and
-    the real commit is not stamped. A decode error or `IsADirectoryError` raised out of the
-    capture would take the stamp down with it; a FIFO read like a file blocks run start
-    forever. The positive control is the same repo before the fault is planted."""
+    `packed-refs` — not only at HEAD."""
     repo = _repo(tmp_path / "knowledge")
     head = _head(repo)
     assert _wire(repo) == {"commit": head}, "positive control: the real layout"
@@ -539,11 +487,7 @@ def test_1204_a_missing_or_non_file_head_is_unavailable(tmp_path):
 
 
 def test_1204_a_knowledge_folder_that_is_missing_or_a_file_is_unavailable(tmp_path):
-    """O1/O4, one rule for every read's answer (review fix): `"unversioned"` is a statement
-    ABOUT a folder — it is there, and it is not a repository — so a knowledge folder that does
-    not exist is unavailable, with a reason saying it is missing, not "unversioned"; a FILE at
-    the knowledge path is unavailable too. Neither raises. The positive control is an existing
-    plain folder, which is `"unversioned"`."""
+    """O1/O4, one rule for every read's answer (review fix)."""
     plain = tmp_path / "plain"
     plain.mkdir()
     assert _wire(plain) == "unversioned", "positive control: a folder that is there"
@@ -561,10 +505,7 @@ SHA_SITES = ("detached-head", "loose-ref", "packed-ref")
 
 
 def _plant_sha(repo: Path, site: str, sha: str) -> None:
-    """Put `sha` where `site` says, in a real repo, as the ONLY place HEAD's commit is read.
-    The packed site rewrites the `refs/heads/main` line of a `packed-refs` that real git wrote
-    (the test packs once, up front — git itself would refuse to re-pack over a malformed
-    line)."""
+    """Put `sha` where `site` says, in a real repo, as the ONLY place HEAD's commit is read."""
     git_dir = repo / ".git"
     if site == "detached-head":
         (git_dir / "HEAD").write_text(sha + "\n", encoding="utf-8")
@@ -582,12 +523,7 @@ def _plant_sha(repo: Path, site: str, sha: str) -> None:
 
 @pytest.mark.parametrize("site", SHA_SITES)
 def test_1204_only_a_40_or_64_lowercase_hex_sha_is_a_commit(tmp_path, site):
-    """D1 + non-obligation: a commit is 40 or 64 LOWERCASE hex characters at every place one
-    is read. Uppercase hex (which `git rev-parse` itself accepts), an abbreviation, one
-    character short or long, non-hex of the right length and a sha split by a space are
-    unavailable. The positive controls, at the same site of the same repo, are the real sha and
-    a 64-hex value — and, where the value is a whole file (HEAD, a loose ref), the real sha
-    with surrounding whitespace, which D1 strips."""
+    """D1 + non-obligation."""
     repo = _repo(tmp_path / f"knowledge-{site}")
     head = _head(repo)
     if site == "packed-ref":
@@ -654,11 +590,7 @@ def _materialise(tmp_path: Path, tenant: Any, run_id: str) -> tuple[Path, dict]:
 def test_1204_a_run_on_a_versioned_tenant_stamps_its_knowledge_clones_commit(
         tmp_path, monkeypatch):
     """O1/D3 at the ONE place every executed run is stamped (`materialize_run` -> `_stamp`,
-    fork siblings included): the written `provenance.json` carries `"knowledge": {"commit":
-    <the tenant clone's HEAD>}` beside the product `commit`, and the two differ — so a stamp
-    that borrowed the product's commit (or the build stamp's) cannot pass. The record reads
-    back with the same revision. Not via the e2e replay harness, which writes its own stamp
-    (C15)."""
+    fork siblings included)."""
     tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
     run_dir, doc = _materialise(tmp_path, tenant, "20260101t000000z-versioned")
 
@@ -671,10 +603,7 @@ def test_1204_a_run_on_a_versioned_tenant_stamps_its_knowledge_clones_commit(
 
 
 def test_1204_a_run_on_a_plain_copy_tenant_stamps_unversioned(tmp_path, monkeypatch):
-    """O1/D3, the negative beside the positive above on the same entry point: a tenant whose
-    knowledge is a plain copy (every test tenant today, C11) is stamped `"unversioned"` — said
-    explicitly — never `null`, never a commit. Without the pair a writer that always wrote
-    `"unversioned"` (or always the product's commit) would pass one of the two."""
+    """O1/D3, the negative beside the positive above on the same entry point."""
     tenant, _ = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=False)
     _run_dir, doc = _materialise(tmp_path, tenant, "20260101t000000z-plain")
 
@@ -701,12 +630,7 @@ def test_1204_an_unreadable_knowledge_git_stamps_unavailable_and_the_run_goes_on
 @pytest.mark.parametrize("fault", ["undecodable", "directory"])
 def test_1204_a_read_fault_inside_the_knowledge_git_still_writes_the_whole_stamp(
         tmp_path, monkeypatch, fault):
-    """O4 at the write site, for faults that are NOT a gitfile: the clone's loose ref is
-    replaced (after acceptance) by bytes that do not decode, or by a directory. A decode error
-    is not an `OSError`, and an `IsADirectoryError` is one `_stamp` swallows as "could not
-    stamp" — either way a capture that RAISED would leave the run unstamped or crash it. The
-    run is materialised, its stamp is written, the product's fields are the product's capture,
-    and `knowledge` says unavailable without naming the clone's commit."""
+    """O4 at the write site, for faults that are NOT a gitfile."""
     from defender import run_common
 
     tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
@@ -722,14 +646,7 @@ def test_1204_a_read_fault_inside_the_knowledge_git_still_writes_the_whole_stamp
 
 def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clones_commit(
         tmp_path, monkeypatch):
-    """O1/D3/C3: "every executed run, fork siblings included" — a branched sibling is a `run.py
-    --episode` process (`--resume` before #1105 PR 2) that reaches the same `materialize_run`, with a `ResumeWorld` resolved
-    from its episode's manifest. Stamped on a versioned tenant, the SIBLING's stamp carries
-    `{"commit": <the clone's HEAD>}` beside its lineage (world, source run, branch point) — so
-    `verify_family` has a knowledge commit to compare on every real sibling, not only on
-    unforked runs. Without this a writer that skipped knowledge on the fork path would leave
-    every real family with knowledge-absent siblings (waivable), and the anchor would never
-    bite."""
+    """O1/D3/C3."""
     from defender import run_common
     from defender.tests.tenant_1078_pass_a import _spec1078 as H
 
@@ -815,12 +732,7 @@ def _without_knowledge() -> dict[str, Any]:
 @pytest.mark.parametrize("name", sorted(MALFORMED))
 def test_1204_a_malformed_knowledge_value_folds_to_none_and_keeps_every_other_field(
         tmp_path, name):
-    """O4/D2: the stamp sits in the box's rw bind, so its knowledge value is arbitrary on read.
-    A malformed one folds to `knowledge=None` BEFORE the record is built — it never trips
-    `__post_init__`'s refusal, which voids the WHOLE record (C17) — and every other field reads
-    back exactly as written, off disk through the guarded reader as through `from_obj`.
-    Without this one forged knowledge value would erase the product commit the fork check
-    and the judge depend on."""
+    """O4/D2."""
     doc = {**_without_knowledge(), "knowledge": MALFORMED[name]}
     record = RunProvenance.from_obj(doc)
     assert record is not None, "a bad knowledge value voided the whole stamp"
@@ -835,10 +747,7 @@ def test_1204_a_malformed_knowledge_value_folds_to_none_and_keeps_every_other_fi
 
 @pytest.mark.parametrize("name", sorted(VALID))
 def test_1204_each_valid_knowledge_value_reads_back_as_itself(tmp_path, name):
-    """The positive control for the folding above, on the same record: each of the three wire
-    shapes (both sha lengths) reads back as itself, is written back out verbatim by `as_json`,
-    and survives the guarded write/read round trip. Without it, folding EVERY knowledge value
-    to `None` would pass the arm above."""
+    """The positive control for the folding above, on the same record."""
     doc = {**_without_knowledge(), "knowledge": VALID[name]}
     record = RunProvenance.from_obj(doc)
     assert record is not None
@@ -853,11 +762,7 @@ def test_1204_each_valid_knowledge_value_reads_back_as_itself(tmp_path, name):
 
 
 def test_1204_a_stamp_that_does_not_say_writes_null_and_an_old_stamp_reads_as_none():
-    """D2: `as_json` always emits the `"knowledge"` key — `null` for a record that does not say
-    — and a stamp written before #1204 (no key at all) reads back as `knowledge=None` with
-    every other field intact, as does an explicit `null`. Without the first a missing key could
-    mean "old writer" or "new writer, no answer"; without the second every pre-#1204 run
-    becomes unreadable."""
+    """D2."""
     on_disk = json.loads(RunProvenance(commit="a" * 40, dirty=False).as_json())
     assert "knowledge" in on_disk, on_disk
     assert on_disk["knowledge"] is None, on_disk

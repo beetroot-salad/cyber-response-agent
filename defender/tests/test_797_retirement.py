@@ -30,28 +30,7 @@ def _main_deps(tmp_path: Path):
 
 def test_797_a_confident_close_fails_closed_when_no_stage_is_bound(tmp_path):
     """A confident disposition reviewed through an UNBOUND bundle commits `inconclusive`, and
-    says on disk that the MACHINERY is what failed.
-
-    #797 asserted this of a gate with no reviewer at all. #796 bound one, and the property it
-    was really about survives the binding: a bundle whose stages are not bound — the shape
-    `driver.build_agent` produces, having no run dir to bind against — must fail a confident
-    close closed rather than let it through. RS9 gives the gate two options and picks the
-    override; silently committing would look identical to a review that ran and found nothing.
-
-    The run dir carries a real investigation.md so the fault is provably the unbound stage
-    rather than a document the projector could not read — both fail closed, and only one is
-    what this test names.
-
-    `failure_kind` is what separates this from an override the EVIDENCE produced: both commit
-    `forced-inconclusive`, and only a machinery failure names a kind. Asserting the
-    disposition alone would pass just as well if the gate had decided the case on evidence it
-    never looked at.
-
-    An `inconclusive` close reviewed through the same unbound bundle is the twin: since #992
-    it fails the gate closed exactly as a confident close does — the same override to the
-    host's `unresolved`, the same `CAUSE_REVIEW_INCOMPLETE`/`failure_kind` — and the record
-    still names `inconclusive` as what was under review. One rule for every reviewed
-    disposition: an unexamined claim never commits as the model's claim."""
+    says on disk that the MACHINERY is what failed."""
     pytest.importorskip("pydantic_ai")
     from defender._frontmatter import split_frontmatter
     from defender.runtime.close_tool import (

@@ -42,10 +42,8 @@ def _admitted_in_corpus(wt, deps, corpus_name: str, stem: str = "lesson") -> Non
 # O2 / S1 / S4 — the write scope roots at the worktree corpus, not run_dir
 
 def test_write_allow_roots_at_the_worktree_corpus_not_run_dir(tmp_path):
-    """The compiled write scope roots at <worktree>/defender/<corpus>, NOT run_dir: an in-corpus
-    .md write LANDS on both write surfaces, a run_dir .md write is DENIED on both. Fails if the
-    scope roots at run_dir (the #691 done-criterion) — a bind-built-at-run_dir policy would ADMIT
-    the run_dir write."""
+    """The compiled write scope roots at <worktree>/defender/<corpus>, NOT run_dir: an in-corpus .md
+    write LANDS on both write surfaces, a run_dir .md write is DENIED on both."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     _admitted_in_corpus(wt, deps, "lessons")                  # roots at the worktree corpus
@@ -98,12 +96,7 @@ def test_a_write_operand_path_is_given_relative_with_a_leading_dot_slash(tmp_pat
 
 def test_a_non_shipped_corpus_name_write_is_denied_by_confine_containment(tmp_path):
     """MD-1 / D1: a curator whose write scope roots OUTSIDE its own read confine is UNBUILDABLE —
-    bind REFUSES a name (e.g. `skills`) M7 shape-admits but that sits outside the three-corpus
-    confine (RG-1: `_resolved_read_roots` replaces the defender_dir base, so decide_write's
-    containment half denies every such write). §7 D1 pinned refuse-at-bind (a scope that cannot
-    author is unbuildable) and STRUCK R4's 'write byte-identical to today' clause. The raise must
-    NAME the scope/confine mismatch, so it is the DEMANDED refusal, not the incidental bindable=False.
-    Positive control: an in-confine corpus builds cleanly and authors."""
+    bind REFUSES a name (e.g."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     with pytest.raises(ValueError, match=r"confine|scope|outside|author|contain"):
         bind_curator(wt, rd, "skills")                       # skills ∉ the three-corpus confine
@@ -113,16 +106,7 @@ def test_a_non_shipped_corpus_name_write_is_denied_by_confine_containment(tmp_pa
 
 
 def test_a_shipped_corpus_write_is_denied_when_its_read_confine_excludes_it(tmp_path):
-    """MD-1 / D1 ISOLATED from MD-6 (the F18 scenario). A SHIPPED corpus name — one MD-6's exact-match
-    membership ACCEPTS (`lessons`) — is bound with a read confine that EXCLUDES that very corpus, so the
-    compiled write scope roots OUTSIDE its own read confine. bind REFUSES it (§7 D1 pinned refuse-at-bind:
-    a scope that cannot author is unbuildable; RG-1: `_resolved_read_roots` REPLACES the defender_dir
-    base, so decide_write's containment half would deny every such write). This isolates MD-1 from MD-6:
-    the name is membership-ACCEPTED, so only MD-1's confine-containment check can refuse it — an
-    implementation that ships MD-6 but omits MD-1 fails HERE, on the confine mismatch, not on membership.
-    The raise must NAME the scope/confine mismatch so it is the DEMANDED refusal, not the incidental
-    bindable=False. Positive control: the SAME shipped corpus, bound with a confine that INCLUDES it,
-    binds cleanly and authors."""
+    """MD-1 / D1 ISOLATED from MD-6 (the F18 scenario)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     excludes_lessons = (
         corpus(wt, "lessons-actor").resolve(),
@@ -152,13 +136,10 @@ def test_the_rm_lane_is_scoped_to_the_same_corpus_as_the_write_lane(tmp_path):
 
 def test_all_write_lanes_deny_a_symlink_out_of_corpus(tmp_path):
     """MD-3 (RG-adv4, the standout): one crafted operand — a symlink under the corpus pointing at a
-    sibling corpus, so `defender/lessons/escape/secret.md` RESOLVES out of the corpus — presented to
-    every write-capable lane must be DENIED by all of them. #773 M1 removed the fourth
+    sibling corpus, so `defender/lessons/escape/secret.md` RESOLVES out of the corpus — presented
+    to every write-capable lane must be DENIED by all of them. #773 M1 removed the fourth
     (`forward_check`, a tool the curator no longer carries at all) — the remaining three are
-    write_file, edit_file and the `rm` bash grant. RED against HEAD: the rm grant never
-    `resolve()`s, so it DELETES the out-of-corpus target (write_file/edit_file deny) — the
-    correction is the rm lane `resolve()`s + rechecks containment and all three AGREE. Positive
-    control: an in-corpus operand is ADMITTED by all three."""
+    write_file, edit_file and the `rm` bash grant."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     # a symlink inside the corpus pointing at the sibling corpus
@@ -182,7 +163,7 @@ def test_the_rm_grant_matches_the_shell_tokenized_argv(tmp_path):
     """MD-4 (RG-adv3): a `$(...)`/backtick operand DENIES because the shell TOKENIZER splits the
     substitution into separate tokens before the grant matches (NOT because of `_stage_unsafe`,
     which is dead code for this shape), and a `;`-joined command denies on the ungranted second
-    stage. Positive control: a plain single-operand in-corpus rm is admitted."""
+    stage."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     assert not bash_decision(deps, "rm defender/lessons/$(whoami).md").allow
@@ -217,10 +198,8 @@ def test_a_single_rm_naming_two_corpora_is_denied(tmp_path):
 
 def test_a_lesson_the_curator_can_write_it_can_read_back(tmp_path):
     """MD-7 / D3: every lesson filename the write lane admits, the read lane admits too — the write
-    lane is narrowed to the read segment class `[\\w.@=+-]+` via ONE shared derivation, foreclosing
-    the `[^\\x00]*` newline frame-injection channel (R6). RED against HEAD: a name with a space
-    (`my lesson.md`) is write=True read=False today (x6) — the correction is the write lane REFUSES
-    it. Positive control: a plain in-class name is admitted by write AND read back the same content."""
+    lane is narrowed to the read segment class `[\\w.@=+-]+` via ONE shared derivation,
+    foreclosing the `[^\\x00]*` newline frame-injection channel (R6)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     out_of_class = rel("lessons", "my lesson.md")   # a space — outside the read segment class

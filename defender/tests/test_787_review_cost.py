@@ -58,11 +58,7 @@ def _response(text: str = "reads sound"):
 
 
 class _FakeAgent:
-    """An agent that logs one round through whatever logger it was built with, then answers.
-
-    It stands in for the provider-backed one at the `build` seam, which is the whole reason
-    that seam exists: `_make_live_stage` is otherwise reachable only by calling a real model,
-    so the wiring it performs — which logger, which agent id — had no hermetic witness."""
+    """An agent that logs one round through whatever logger it was built with, then answers."""
 
     def __init__(self, logger: Any, agent_id: str) -> None:
         self._logger = logger
@@ -123,12 +119,7 @@ def test_every_live_stage_is_built_on_the_run_s_own_logger(run_dir):
 
 
 def test_a_stage_does_not_close_the_logger_it_shares(run_dir):
-    """The run is still going when a review stage returns.
-
-    The private-logger shape closed its own in a `finally`, which was correct while the
-    logger was its own. Carried onto the shared one it closes `llm_requests.jsonl` out from
-    under the main agent mid-investigation — so the write below must land, and it is the
-    whole point of this test that it is made AFTER a stage has run."""
+    """The run is still going when a review stage returns."""
     logger = observe.RequestLogger(observe.wire_log_path(run_dir))
     try:
         _drive_every_lens(run_dir, logger, {})
@@ -144,9 +135,7 @@ def test_a_stage_does_not_close_the_logger_it_shares(run_dir):
 
 def test_the_two_support_calls_stay_apart_in_the_log(run_dir):
     """SUPPORT is dispatched twice — as itself and as the ablation — and `observe` keys its
-    sequence and record ids on `agent_id`. One id for both would collapse two readings into
-    one, silently, which is the failure the per-lens split has always existed to prevent; it
-    used to be carried by the filename and is now carried by the id."""
+    sequence and record ids on `agent_id`."""
     logger = observe.RequestLogger(observe.wire_log_path(run_dir))
     try:
         _drive_every_lens(run_dir, logger, {})

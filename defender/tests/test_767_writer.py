@@ -76,15 +76,7 @@ def _render_comment(rec):
 
 def test_767_record_case_ticket_returns_and_receipts(tmp_path, monkeypatch):
     """d0_record_return — `record_case_ticket(run_dir, deps)` returns nothing, makes exactly
-    ONE call to the store — `POST /tickets/{case_id}/comments`: no transition, and no read-back
-    before it (#1221, amended) — and leaves a receipt `{key, status, url, ok}` (beside the run
-    dir since #1107) on BOTH branches — the success word is `"commented"`, not `"closed"`, and a
-    fault writes `ok: false`.
-
-    §7 R6/FK29 decided the success word: the receipt has ZERO readers (c5), so nothing breaks,
-    and keeping `"closed"` would record an event that no longer happens — after D2 the host
-    closes nothing. The failure branch's receipt is r1/c14's own observation, not a new
-    obligation: the `'error'` word and the `ok` boolean exist precisely for it."""
+    ONE call to the store — `POST /tickets/{case_id}/comments`."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     run_dir = make_run(tmp_path)
 
@@ -154,15 +146,7 @@ def test_767_case_record_to_comment_shape(tmp_path, monkeypatch):
 
 def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
     """o1_open_payload_status_open — the bridge open carries the mapping's literal
-    `status: open`, and NO alert field reaches that status: a crafted `rule.id`, description
-    and timestamp whose values are the store's closed status's own spelling render into the
-    labels and summary they are templated into and nowhere else.
-
-    That is the whole of the write-side guarantee, and it needs no loader guard: the status
-    is a literal in the `open:` section, the store enforces its vocabulary, and a label — any
-    label — is not a lifecycle state. `alert_to_open_payload` hands the WHOLE `open:` section
-    to the wire unfiltered (g7), so the assertion is over the payload's every value, not over
-    `labels` alone."""
+    `status."""
     use_mapping(monkeypatch, tmp_path / "dfn")
 
     hostile = {"rule": {"id": CLOSED_STATUS, "description": CLOSED_STATUS},
@@ -184,17 +168,7 @@ def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
 
 def test_767_writer_comments_on_a_closed_case(tmp_path, monkeypatch, capsys):
     """d_writer_never_records_behind_a_release, REVERSED by #1221's amendment (2026-10-08, which
-    also reverses #1221's own N7) — the writer no longer asks whether a case is closed. It used to
-    read the case back and refuse to append behind a person's close, because that close RELEASED
-    the case's comments to later runs. The release screen is gone — every comment is served,
-    the host's own tagged — so the reason is gone, and with it the last place the writer
-    assumed the lab ticket schema (a `status` field, a `released.status` setting).
-
-    A case whose store status is `closed` gets the comment like any other: the store sees
-    exactly ONE call, the `POST /tickets/{key}/comments`, and no read before it; the receipt
-    word is `commented`, `ok` true, no reason; nothing warns about a release. The store's
-    other states are the controls on the same address — the writer's single call is the same
-    whatever the case's status, because it never learns it."""
+    also reverses #1221's own N7) — the writer no longer asks whether a case is closed."""
     use_mapping(monkeypatch, tmp_path / "dfn")
 
     for n, status in enumerate((CLOSED_STATUS, "in_progress", OPEN_STATUS)):
@@ -229,14 +203,7 @@ def test_767_writer_comments_on_a_closed_case(tmp_path, monkeypatch, capsys):
 def test_767_the_loader_still_refuses_a_non_literal_open_status(
         tmp_path, monkeypatch, capsys, why, open_status):
     """The one lifecycle rule the loader KEEPS through #1221's amendment (named in the notes of
-    `o1_alert_cannot_move_lifecycle` and `d_predicates_fail_closed_by_construction`):
-    `open.status` must be a non-empty literal string. Nothing rendered from an alert
-    may set a case's status, and a template would let alert text pick it. Refused at the loader
-    (so every reader meets it), and the record step then makes no call and leaves an `error`
-    receipt.
-
-    The positive control is the same tenant with a literal `open.status`: it loads and the
-    writer posts its comment, so the refusals above are not a loader that refuses everything."""
+    `o1_alert_cannot_move_lifecycle` and `d_predicates_fail_closed_by_construction`)."""
     root = tmp_path / "dfn"
     use_mapping(monkeypatch, root, mapping_doc(open_status=open_status))
     with pytest.raises(case_ticket.CaseTicketError) as refusal:
@@ -260,15 +227,7 @@ def test_767_the_loader_still_refuses_a_non_literal_open_status(
 
 
 def test_767_no_host_payload_sets_verdict(tmp_path, monkeypatch, capsys):
-    """o1_no_host_verdict_write — NEGATIVE. No payload the host sends carries a case verdict
-    or moves the case's lifecycle: not the open, not the record, and there is no third write
-    site. `status` other than the bridge's `open`, any `resolution`, and the store's closed
-    status are all absent from every outbound body, and no transition path is requested at all.
-
-    Bound over EVERY surface the content could reach: the two POST bodies, their paths, and
-    the receipt the run leaves on disk. The positive control is
-    `o1_open_payload_status_and_labels` — the open's own `status: open` and its label set DO
-    cross, so "absent" here is not "the payload was empty"."""
+    """o1_no_host_verdict_write — NEGATIVE."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     run_dir = make_run(tmp_path)
     store = FakeStore()
@@ -297,18 +256,7 @@ def test_767_no_host_payload_sets_verdict(tmp_path, monkeypatch, capsys):
 
 
 def test_767_alert_content_cannot_reach_the_lifecycle(tmp_path, monkeypatch):
-    """o1_alert_cannot_move_lifecycle — no alert field can set a case's status. The retired
-    label guard existed because labels were BOTH the release channel and a slot alert fields
-    render into; a status is neither templated from an alert in the shipped mapping nor, on the
-    store's side, anything but a closed vocabulary. So the loader walks no templates and refuses
-    nothing about labels: an operator may template any label they like, including one spelled
-    exactly `closed`, and the open still opens `open`.
-
-    #1221's amendment drops the one refusal this test once ended on — `open.status` equal to
-    `released.status` — because nothing reads `released:` any more: such a mapping LOADS, and
-    its open carries the operator's literal `open.status` (here the store's `closed`), never an
-    alert's. The rule that stays, a literal `open.status`, is
-    `test_767_the_loader_still_refuses_a_non_literal_open_status`'s."""
+    """o1_alert_cannot_move_lifecycle — no alert field can set a case's status."""
     root = tmp_path / "dfn"
     hostile = {"rule": {"id": CLOSED_STATUS, "description": CLOSED_STATUS},
                "timestamp": CLOSED_STATUS}
@@ -341,14 +289,7 @@ def test_767_alert_content_cannot_reach_the_lifecycle(tmp_path, monkeypatch):
 def test_767_an_unsafe_open_status_is_refused_where_the_case_is_opened(
         tmp_path, monkeypatch, capsys):
     """The literal-status rule lives in the LOADER, so the open leg meets it too, not only the
-    record step. A TEMPLATED `open.status` would let alert text pick the status — a
-    `rule.description` of `closed` would open the case closed — so the open leg makes NO call
-    and warns: a per-run WARN at record time is not where an operator finds a config error.
-
-    #1221's amendment removed the other arm this test once had, `open.status` equal to
-    `released.status`: nothing reads `released:` any more, so that mapping is now a CONTROL —
-    it opens, with the operator's own literal status. The plain shipped-shape mapping is the
-    other control."""
+    record step."""
     root = tmp_path / "dfn"
     alert = {"rule": {"id": "5710", "description": CLOSED_STATUS}, "timestamp": "2026-09-17T00:00:00Z"}
 
@@ -381,15 +322,7 @@ def test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write(
     tmp_path, monkeypatch, capsys
 ):
     """d_loader_refusal_positive_control — the POSITIVE CONTROL for the mapper's refusals,
-    and §7 R12/FK-X1's decision: today's shipped mapping LOADS and records, a mapping whose
-    `open.status` is a template is refused, and a refusal warns and skips the write rather than
-    aborting the run. (The refused arm was an `open.status == released.status` mapping until
-    #1221's amendment made that one load.)
-
-    Without this demand every refusal test passes just as well against a loader that refuses
-    EVERYTHING. §7 R12: warn and skip, never abort — O7 is a whole-lane guarantee and a
-    config error must not take the estate's detection offline; the estate write is the
-    expendable part, which is what O7's precedence over O4 already says."""
+    and §7 R12/FK-X1's decision."""
     root = tmp_path / "dfn"
     shipped = shipped_mapping_doc()
     for dead in ("close", "annotate", "enrich"):
@@ -423,17 +356,7 @@ def test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write(
 
 def test_767_comment_carries_mapping_author(tmp_path, monkeypatch, capsys):
     """o3_comment_author_identity — every comment the system writes carries the mapping's
-    fixed author identity, and a mapping that cannot supply one produces NO write at all.
-
-    §7 R1/FAM-1, write side: the writer REFUSES TO POST rather than send an unattributable
-    comment, warns, and leaves the exit code unchanged (O7). C1's phrase "fail closed BY
-    ACCIDENT" is why this is pinned rather than assumed — an accidental fail-closed is not a
-    specification. Two undecidable shapes are exercised: the `comment` section missing
-    entirely (FK12) and an author that renders to the empty string (FK19 — an unattributable
-    comment on a store where attribution is what a person reads to know whose note it is).
-
-    Asserted on the CAPTURED INBOUND PAYLOAD; the identity is read back out of the mapping
-    the test wrote, never a literal the writer may hardcode (that is o5's demand)."""
+    fixed author identity, and a mapping that cannot supply one produces NO write at all."""
     root = tmp_path / "dfn"
     use_mapping(monkeypatch, root, mapping_doc(comment_author="soc-bot"))
     run_dir = make_run(tmp_path)
@@ -458,13 +381,7 @@ def test_767_comment_carries_mapping_author(tmp_path, monkeypatch, capsys):
 
 def test_767_comment_payload_keys_are_author_and_body_only(tmp_path, monkeypatch):
     """s1_payload_keys_subset — the record's outbound payload keys are exactly
-    `{author, body}`: the renderer emits the mapping's `comment:` section and nothing else,
-    so no status, resolution, label or transition field can ride along even when the mapping
-    carries them elsewhere.
-
-    The control is the same call with a mapping whose `close:` section is still present and
-    populated (FK27): those keys are inert — nothing reads them after D5 — and they must not
-    reach the wire through the comment write."""
+    `{author, body}`."""
     use_mapping(monkeypatch, tmp_path / "dfn", mapping_doc(close_section={
         "status": "closed",
         "resolution": "{disposition} — {cause}",
@@ -496,12 +413,7 @@ def test_767_comment_first_line_is_proposed_disposition(tmp_path, monkeypatch):
     """o4_first_line_disposition — the comment's first line below the agent tag (#1221) is the
     host-rendered `{disposition} — {cause}`, above a blank line, so a person opening the case
     reads which run wrote it and then the proposed disposition, before anything the model
-    wrote.
-
-    O4's own failure witness is "a comment whose first line lacks the proposed disposition",
-    and the structural guarantee is exactly this wide (S5/N11): the first line is host-
-    rendered from the closed cause vocabulary and the author is a field. Nothing about the
-    narrative's content is claimed."""
+    wrote."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     for disposition in ("benign", "malicious", "false-positive", "inconclusive"):
         run_dir = make_run(tmp_path, name=f"run-{disposition}", disposition=disposition,
@@ -517,24 +429,7 @@ def test_767_comment_first_line_is_proposed_disposition(tmp_path, monkeypatch):
 
 def test_767_unreadable_report_still_comments(tmp_path, monkeypatch):
     """o4_unreadable_report_records_the_fact — a run whose report yields no parsable
-    disposition still comments, with a host sentence saying so and NO narrative; an EMPTY
-    `report.md` takes that same branch (§7 R10/FK06).
-
-    BINDING IMPLEMENTATION CONSTRAINT (§7 R10, the human's own words): the empty-report case
-    must NOT be built as a second, bespoke emptiness check. `defender._report` is the SINGLE
-    existing reader of `report.md` — `read_case_record` already goes through
-    `require_report`, which raises `ReportUnreadable` exactly when `read_report(...)` yields
-    no disposition — and the unreadable classification must be a CONSUMER of that reader's own
-    result. This test is written so a parallel reader cannot satisfy it: the expected
-    classification is COMPUTED IN THE TEST from `_report.read_report` over each member, never
-    enumerated as a literal, and every member of the no-disposition family must produce the
-    SAME host sentence. A bespoke check that handled "empty" on its own would have to
-    reproduce the shared reader's verdict on every other member — missing file, no
-    frontmatter, unparsable frontmatter, a disposition outside the vocabulary — to stay green.
-
-    The positive control is the complementary condition FK06 splits on: a report with a
-    PARSABLE disposition and an empty body is the ORDINARY branch, rendering `(no notes)`.
-    """
+    disposition still comments, with a host sentence saying so and NO narrative;"""
     from defender._report import read_report
 
     use_mapping(monkeypatch, tmp_path / "dfn")
@@ -588,13 +483,7 @@ def test_767_unreadable_report_still_comments(tmp_path, monkeypatch):
 
 def test_767_narrative_is_the_fence_stripped_report_body(tmp_path, monkeypatch):
     """o4_narrative_is_report_body — the narrative segment is the report's own body, carried
-    verbatim up to the 4096-byte wire bound, with the frontmatter-fence strip applied.
-
-    This is `s4_no_standalone_fence`'s POSITIVE CONTROL and takes its shape: the same bytes
-    that a planted fence would have truncated ARE delivered through the sanctioned path when
-    no fence is present. Under §7 R2 there is ONE bound and it is 4096 bytes, so a body of a
-    few hundred characters crosses whole — under a surviving 472-character
-    `_TICKET_REASON_MAX` (r2) it would arrive as two sentences."""
+    verbatim up to the 4096-byte wire bound, with the frontmatter-fence strip applied."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     body = (
         "The account is a decommissioned service identity retained for a quarterly batch "
@@ -628,13 +517,7 @@ def test_767_narrative_is_the_fence_stripped_report_body(tmp_path, monkeypatch):
 def test_767_comment_body_is_bounded_on_the_wire(tmp_path, monkeypatch, why, filler):
     """o8_wire_bound — the comment body is at most 4096 UTF-8 BYTES on the wire, the agent tag
     line (#1221) counted inside it, the cut rounds DOWN to the last whole character, and the
-    `…` sits INSIDE the bound (§7 R2).
-
-    The multibyte members are the point: a raw 4096-BYTE slice lands inside a character, and
-    a surviving 472-CHARACTER cap (r2/c10) would cut at 472 and never reach the bound at all.
-    Both are visible here — the cut prefix is asserted to be a whole-character prefix of the
-    narrative the report carried, and the byte length is asserted to USE the bound rather
-    than merely respect it."""
+    `…` sits INSIDE the bound (§7 R2)."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     narrative = filler * 20000
     run_dir = make_run(tmp_path, name=f"run-{why.replace(' ', '-')}", body=narrative)
@@ -658,11 +541,7 @@ def test_767_comment_body_is_bounded_on_the_wire(tmp_path, monkeypatch, why, fil
 
 
 def test_767_wire_bound_wins_and_the_cut_is_visible(tmp_path, monkeypatch):
-    """p_o8_beats_o4 — the doc's own precedence, made observable: when O8's wire bound and
-    O4's "the report body" disagree, the BOUND WINS and the truncation is visible. The
-    comment ends in exactly one `…` that sits inside the 4096 bytes, and the full report is
-    still on disk untouched — what the approver sees is the record AS DISPLAYED (FK42), and
-    the bound was chosen for them, not for gather (c7 says what gather sees)."""
+    """p_o8_beats_o4 — the doc's own precedence, made observable."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     narrative = "x" * 20000
     run_dir = make_run(tmp_path, body=narrative)
@@ -680,19 +559,7 @@ def test_767_wire_bound_wins_and_the_cut_is_visible(tmp_path, monkeypatch):
 
 
 def test_767_planted_frontmatter_fence_never_reaches_the_wire(tmp_path, monkeypatch, capsys):
-    """s4_no_standalone_fence — NEGATIVE. No comment body the host writes contains a
-    standalone `---` line, nor any of the text that followed one, even when the fence is
-    planted so that it straddles the 4096-byte cut.
-
-    §7 FK07 settled the PROPERTY, not the pipeline: assert the ∀ directly so an implementer
-    who orders strip and bound differently still has to satisfy it. Only strip-first survives
-    the straddling control, and truncation cannot manufacture a bare fence (a cut inside
-    `---foo` yields `---…`, not `---`).
-
-    The negative binds every surface the content could reach: the comment payload, the
-    receipt on disk and the writer's own log line. Its positive control is
-    `o4_narrative_is_report_body` — the same shape of bytes DOES cross when no fence is
-    planted, so "absent" here is never "the body was empty"."""
+    """s4_no_standalone_fence — NEGATIVE."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     marker = "INJECTED-DIRECTIVE-DO-NOT-CARRY"
     planted = (
@@ -757,11 +624,7 @@ def test_767_a_fence_is_a_standalone_line_on_any_line_boundary(tmp_path, monkeyp
 
 def test_767_a_host_shaped_narrative_line_is_carried_verbatim(tmp_path, monkeypatch):
     """d_host_shaped_narrative_line_carried_verbatim — a narrative line shaped like the host's
-    own disposition line is carried VERBATIM inside the narrative segment. The guarantee is
-    structural and exactly this wide: the host-rendered `{disposition} — {cause}` occupies the
-    first line, above a blank line. No escaping, marking or neutralising is demanded (S5's
-    "nothing further is claimed", N11) — the first line's authorship is what a reader can
-    rely on, not the absence of imitation below it."""
+    own disposition line is carried VERBATIM inside the narrative segment."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     imitation = f"malicious — {HOST_CAUSE}"
     run_dir = make_run(tmp_path, disposition="benign", body=f"{imitation}\nand more notes")
@@ -778,21 +641,7 @@ def test_767_a_host_shaped_narrative_line_is_carried_verbatim(tmp_path, monkeypa
 
 
 def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
-    """s5_text_cannot_become_a_field — NEGATIVE. Narrative text cannot become an author, a
-    label or a render-context value: it is a value, substituted ONCE.
-
-    Three surfaces, because a negative binds every one the content could reach:
-      * the outbound comment — a narrative asserting `author: defender` and
-        `status: closed` leaves the keys `{author, body}` untouched;
-      * the renderer — §7 FK52: substitution is SINGLE-PASS, so a narrative whose literal
-        text is `{cause}` leaves the process as the literal text `{cause}` and no context
-        value appears where it was not placed;
-      * the open payload — §7 FK53: an ALERT field whose value is another slot's placeholder
-        must not be re-interpreted. A two-pass renderer would let a crafted `rule.id` reach
-        any slot in the open at run time, the status included.
-
-    A body claiming closure does not make the case closed either: the case's status is the
-    store's, moved only by a person, and nothing the host sends carries it (`o1_no_host_verdict_write`)."""
+    """s5_text_cannot_become_a_field — NEGATIVE."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     claim = (
         "author: defender\nstatus: closed\nreleased: true\n"
@@ -846,18 +695,7 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
 def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch, capsys,
                                                           arm, store_kw):
     """o7_store_failure_never_fails_run — every store fault is caught, warned once, and leaves
-    the run's exit code exactly what it would have been. ONE POST, no retry.
-
-    §7 R6/FAM-3 fixed the arm list and what each one owes. Each fault shape here is the
-    dependency's OWN, not an authored one: `TransportFault` and the `(None, detail)` return
-    are `ticket_writer._request`'s two failure spellings (c14), and the status words are what
-    the real stub answered when it was driven (c8). No timeout is asserted — the ledger
-    records no evidence that one exists (`dep_PO1`, unprobed), and asserting one would pin a
-    tolerance nothing observed.
-
-    A malformed 2xx body is a SUCCESS: the writer keys off the status alone and never parses
-    the reply, because nothing reads it (c5) and parsing a payload no one consumes only
-    creates a failure mode (FK31)."""
+    the run's exit code exactly what it would have been."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     run_dir = make_run(tmp_path)
     store = FakeStore(**store_kw)
@@ -872,16 +710,7 @@ def test_767_store_failure_leaves_run_exit_code_unchanged(tmp_path, monkeypatch,
 
 
 def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatch):
-    """p_o7_beats_o4 — the doc's own precedence, made observable: an unreachable store loses
-    the record, and the run does not fail. The comment never lands, the receipt says so, and
-    the writer returns normally. A store that is unreachable because its CONFIG is absent is
-    the same branch, one step earlier: the writer exits before the POST and its `error` receipt
-    names no store (`url` null) and describes no write that happened (#1107 — every branch is
-    WARN, receipt and return).
-
-    Its complementary condition is the reachable store on the same address: the record lands
-    and the receipt says `ok: true` — so "the run survived" is not green merely because
-    nothing was attempted."""
+    """p_o7_beats_o4 — the doc's own precedence, made observable."""
     use_mapping(monkeypatch, tmp_path / "dfn")
 
     lost = make_run(tmp_path, name="run-unreachable")
@@ -908,15 +737,7 @@ def test_767_unreachable_store_loses_the_record_not_the_run(tmp_path, monkeypatc
 
 
 def test_767_failed_write_leaves_no_capture_record(tmp_path, monkeypatch, capsys):
-    """d_failed_write_leaves_no_capture_record — NEGATIVE, settled premise 5. A failed record
-    POST leaves no capture entry anywhere: `guard_outbound` IS the capture recorder and is
-    never on the writer's path (g2/F3/RF4), so the only traces are the `_warn` line and the
-    receipt. The doc requires no audit trail for the host write and does not remediate the
-    bypass; D6's route inherits it.
-
-    The observation channel is proved to work by asserting what DOES exist — the warn line
-    and the receipt — beside what does not. Its positive control on the capture itself is
-    `d_capture_carries_the_screened_payload`: a real gather read leaves a real row."""
+    """d_failed_write_leaves_no_capture_record — NEGATIVE, settled premise 5."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     run_dir = make_run(tmp_path)
     before = {p.name for p in run_dir.iterdir()}
@@ -938,15 +759,7 @@ def test_767_failed_write_leaves_no_capture_record(tmp_path, monkeypatch, capsys
 
 
 def test_767_receipt_io_failure_warns_and_keeps_the_exit_code(tmp_path, monkeypatch, capsys):
-    """d_receipt_io_failure_warns — settled premise 6. A receipt-write IO failure is caught
-    and warned; the run's exit code is unchanged (c14, O7), independently of whether the
-    store call itself succeeded.
-
-    The fault is REAL and induced through the real primitive: the receipt's path is a
-    DIRECTORY, so the writer's own `write_text` raises `IsADirectoryError` — an `OSError`,
-    which is the class `_write_receipt` catches. (Not a chmod: this suite runs as root in the
-    devcontainer, where permission bits are ignored and a chmod-based fault silently
-    succeeds — see defender/CLAUDE.md.)"""
+    """d_receipt_io_failure_warns — settled premise 6."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     run_dir = make_run(tmp_path)
     receipt_path(run_dir).mkdir()
@@ -972,11 +785,7 @@ def test_767_receipt_io_failure_warns_and_keeps_the_exit_code(tmp_path, monkeypa
 )
 def test_767_every_mapping_fault_refuses_with_a_receipt(tmp_path, monkeypatch, capsys,
                                                          why, doc, kw):
-    """§7 R1/FAM-1 on EVERY arm that meant to call out: a mapping the writer cannot render
-    from — a broken template as much as a missing section, on the record arm, the aborted
-    arm and the unreadable arm alike — is a WARN, an `error` receipt and a return. Never a
-    bare `ValueError` into the post-step's catch-all (which leaves no receipt, and reads as
-    "record raised, ignored" rather than as the config error it is), and never a POST."""
+    """§7 R1/FAM-1 on EVERY arm that meant to call out."""
     use_mapping(monkeypatch, tmp_path / "dfn", doc)
     body = kw.pop("body", None)
     run_dir = make_run(tmp_path, **({"body": body} if body is not None else {}))
@@ -995,13 +804,7 @@ def test_767_every_mapping_fault_refuses_with_a_receipt(tmp_path, monkeypatch, c
 
 
 def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeypatch, capsys):
-    """d_non_dict_mapping_refused_first — settled premise 16. A mapping that parses to a
-    non-dict is refused by the PRE-EXISTING `isinstance(dict)` check before any section is
-    read (g6), and the writer's blanket envelope turns that into warn-and-skip with the exit
-    code unchanged (O7/c14).
-
-    "Before" is observable rather than asserted: the refusal message is the loader's own
-    non-dict wording, not a section-level wording."""
+    """d_non_dict_mapping_refused_first — settled premise 16."""
     root = tmp_path / "dfn"
     use_mapping(monkeypatch, root, "just a string, not a mapping\n")
 
@@ -1030,14 +833,7 @@ def test_767_case_record_splits_cause_from_narrative(tmp_path, monkeypatch):
     always present on a close-tool report — c3) and `narrative` (the report's body), derived
     at write time from `report.md` + `alert.json` and never stored. The single reader
     (`read_case_record`, through `_report.require_report`) is what produces both; its
-    `cause or body` fallback retires with the split.
-
-    FK21's finding is carried here regardless of how that fork landed: D3's comment template
-    needs `cause` AND `narrative` as render-context keys, and `case_ticket._ctx` does not
-    carry them at HEAD (auth_P5). The control drives a mapping whose body template names both
-    and observes both values arrive. A template naming a key the context does NOT carry fails
-    closed — no POST, warn, exit code unchanged — and the OBSERVABLE is pinned, never the
-    exception class."""
+    `cause or body` fallback retires with the split."""
     root = tmp_path / "dfn"
     use_mapping(monkeypatch, root, mapping_doc(comment_body="{cause}//{narrative}"))
     run_dir = make_run(tmp_path, cause=HOST_CAUSE, body="the model's own notes")

@@ -35,10 +35,7 @@ def _tpl(system: str, tid: str, *, status: str = "established", goal: str = "", 
 
 
 def _catalog(tmp_path: Path) -> Path:
-    """A synthetic defender tree with a 3-system catalog: 3 established + 2 drafts.
-
-    Returns the `defender_dir` (NOT the catalog dir) — the tree an `AgentDeps` threads.
-    """
+    """A synthetic defender tree with a 3-system catalog: 3 established + 2 drafts."""
     dfn = tmp_path / "wt" / "defender"
     q = dfn / "skills" / "gather" / "queries"
     for system, tid, goal in [
@@ -126,11 +123,8 @@ def test_d18b_missing_catalog_dir_yields_nothing_and_does_not_raise(tmp_path):
 
 
 def test_d13_malformed_template_is_skipped_with_a_warning_not_raised(tmp_path, capsys):
-    """load_catalog reads OUTSIDE its try (lead_neighbors.py:153) and drops an id-less file
-    SILENTLY (:156-157). Post-fold that walk runs on EVERY gather dispatch, so one undecodable
-    byte in one of 63 templates would take down every dispatch. The folded walk takes
-    iter_lessons' contract instead: read_text() inside the try, skip the bad file, warn on
-    stderr, yield the rest."""
+    """load_catalog reads OUTSIDE its try (lead_neighbors.py:153) and drops an id-less file SILENTLY
+    (:156-157)."""
     dfn = _catalog(tmp_path)
     q = dfn / "skills" / "gather" / "queries"
     (q / "elastic" / "no-fence.md").write_text("# no frontmatter at all\n\n## Goal\n\nx\n")
@@ -149,13 +143,11 @@ def test_d13_malformed_template_is_skipped_with_a_warning_not_raised(tmp_path, c
 
 
 def test_d12_corpus_module_imports_with_no_yaml_available(tmp_path):
-    """_corpus.py is deliberately yaml-free at import: the actor runs the pinned lesson scripts
-    as `python3 <script>` under the SYSTEM interpreter, which has no PyYAML, and each imports
+    """_corpus.py is deliberately yaml-free at import: the actor runs the pinned lesson scripts as
+    `python3 <script>` under the SYSTEM interpreter, which has no PyYAML, and each imports
     _corpus at module scope before re-execing into the venv. iter_query_templates needs
     parse_frontmatter (defender/_frontmatter.py imports yaml at module scope) — hoisting that
-    import to the top of _corpus breaks the actor's lesson retrieval live in the learning loop.
-
-    Drives it the honest way: a subprocess whose meta_path masks `yaml`, importing the module."""
+    import to the top of _corpus breaks the actor's lesson retrieval live in the learning loop."""
     probe = tmp_path / "probe.py"
     probe.write_text(textwrap.dedent(f"""
         import sys
@@ -193,11 +185,9 @@ def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
 
 
 def test_835_only_the_dispatched_systems_entries_carry_goal_prose(tmp_path):
-    """#835's demand, both directions off two renders of one corpus — so neither "keep every
-    Goal" (the shape being replaced) nor "drop every Goal" (which would strand the lead's own
-    system) can pass. The off-target entry keeps its PATH: there is no fetch-by-id tool, so the
-    path is what makes a cross-system reuse one `read_file` rather than a `template_search`
-    round-trip first."""
+    """#835's demand, both directions off two renders of one corpus — so neither "keep every Goal"
+    (the shape being replaced) nor "drop every Goal" (which would strand the lead's own system)
+    can pass."""
     dfn = _catalog(tmp_path)
     as_cmdb = _prompt_for(tmp_path, dfn, system="cmdb")
     as_elastic = _prompt_for(tmp_path, dfn, system="elastic")
@@ -214,12 +204,7 @@ def test_835_only_the_dispatched_systems_entries_carry_goal_prose(tmp_path):
 
 def test_835_a_system_with_no_templates_says_so_rather_than_rendering_nothing(tmp_path):
     """The tier split makes an empty on-target block reachable for the first time: main dispatches
-    systems the catalog has never had a template for (`ticket`, `threat-intel`). An omitted block
-    reads to the model as a truncated index — the silent-empty failure #585 exists to stop — so
-    the block renders and names itself empty, echoing the system so the lead can see WHICH tier
-    came back empty. A MALFORMED system never reaches here: `_run_gather` holds the param to
-    `verbs.is_system_name` first, so a mis-cased name is a retry rather than a catalog stripped of
-    every `## Goal`. A well-formed name the catalog simply has no template for is this case."""
+    systems the catalog has never had a template for (`ticket`, `threat-intel`)."""
     dfn = _catalog(tmp_path)
     prompt = _prompt_for(tmp_path, dfn, system="ticket")
 
@@ -231,9 +216,7 @@ def test_835_a_system_with_no_templates_says_so_rather_than_rendering_nothing(tm
 
 def test_d4_index_excludes_drafts_and_d4b_includes_established(tmp_path):
     """The index carries established templates only — a `_draft` Goal is machine boilerplate and
-    would poison a semantic index. Positive control (the complementary condition on the same
-    address): the established sibling in the SAME system IS there, so the exclusion is a filter
-    and not an empty render."""
+    would poison a semantic index."""
     prompt = _prompt_for(tmp_path, _catalog(tmp_path))
 
     assert "elastic.coined-redirect-probe" not in prompt
@@ -243,11 +226,8 @@ def test_d4_index_excludes_drafts_and_d4b_includes_established(tmp_path):
 
 
 def test_d4c_a_template_with_no_status_is_not_admitted_as_established(tmp_path):
-    """load_catalog does `fm.get("status") or "established"` (lead_neighbors.py:158) — an `or`
-    mis-fire on a valid-falsy value, exactly what defender/CLAUDE.md's anchor-a-default rule
-    bans. A draft_synthesis skeleton that lost its status key would be PROMOTED straight into
-    gather's prompt. The split must fail closed when the status field and the _draft/ path
-    segment disagree."""
+    """load_catalog does `fm.get("status") or "established"` (lead_neighbors.py:158) — an `or` mis-
+    fire on a valid-falsy value, exactly what defender/CLAUDE.md's anchor-a-default rule bans."""
     dfn = _catalog(tmp_path)
     q = dfn / "skills" / "gather" / "queries"
     (q / "elastic" / "_draft" / "no-status.md").write_text(
@@ -265,10 +245,7 @@ def test_d4c_a_template_with_no_status_is_not_admitted_as_established(tmp_path):
 
 def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
     """`if catalog:` is fail-open (tools_gather.py:237) — the block is silently omitted when it
-    cannot be built. That was safe while gather could still `ls` the catalog. Once the SKILL's
-    ls/Grep text is gone, a silently-omitted index leaves gather with NO discovery path: it
-    coins a fresh query for every lead, catalog reuse collapses, and nothing is ever raised. The
-    dispatch must still run, but the degradation must be VISIBLE in the prompt."""
+    cannot be built. That was safe while gather could still `ls` the catalog."""
     dfn = tmp_path / "empty" / "defender"
     (dfn / "skills").mkdir(parents=True)
     prompt = _prompt_for(tmp_path, dfn)
@@ -280,15 +257,7 @@ def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
 
 
 def test_an_all_denied_grant_is_not_reported_as_an_unreadable_corpus(tmp_path):
-    """d19's block claims a CAUSE — "the corpus could not be read" — for a condition with two.
-    A grant that allows no template in the catalog empties the same render, and the two want
-    opposite things said: "templates may well exist, go look" is true of a read failure and
-    misleading here, because `template_search` is NOT grant-filtered. It greps template TEXT
-    while the grant gates VERBS, so it returns hits this role cannot run, and the lead spends a
-    turn binding one to find out.
-
-    Both arms asserted here, on one corpus, so a future collapse back to a single message cannot
-    pass by satisfying whichever arm the test happened to check."""
+    """d19's block claims a CAUSE — "the corpus could not be read" — for a condition with two."""
     dfn = _catalog(tmp_path)
     deps = _deps(tmp_path, dfn)
     request = _request("elastic")
@@ -322,8 +291,7 @@ def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path)
     """Root a tree-dependent path off __file__ behind a memo and a worktree run injects the MAIN
     CHECKOUT's templates — the #551 bug bind() already fixed for the policy anchor, and the one
     descriptor_catalog carried until #591 (it now takes injectable skills_dir/adapters_dir, keys
-    its memo on them, and the dispatch threads deps.defender_dir into it). The index must not
-    re-grow that mould. Two trees, ONE process: each dispatch gets its own index."""
+    its memo on them, and the dispatch threads deps.defender_dir into it)."""
     tree_a = _catalog(tmp_path / "a")
     tree_b = tmp_path / "b" / "defender"
     qb = tree_b / "skills" / "gather" / "queries" / "identity"
@@ -347,10 +315,9 @@ class _ToolRecorder:
         self.fns: dict = {}
 
     def tool(self, fn=None, **kwargs):
-        """Mirrors `Agent.tool`, which is usable bare OR with keyword options — #836
-        registers the write verbs with `sequential=`/`prepare=`, so a recorder that only
-        accepted the bare form would break on registration rather than on the property
-        this suite is about."""
+        """Mirrors `Agent.tool`, which is usable bare OR with keyword options — #836 registers the
+        write verbs with `sequential=`/`prepare=`, so a recorder that only accepted the bare form
+        would break on registration rather than on the property this suite is about."""
         if fn is None:
             return self.tool
 
@@ -361,9 +328,8 @@ class _ToolRecorder:
 
 def test_d5_gather_registers_template_search_and_main_does_not():
     """Registration derives from the DEF's ToolSet, not a hand-built one: the existing
-    `ToolSet(read=True, bash=BashGrammar())` assertions feed a SYNTHETIC set and stay green
-    while GATHER_DEF drifts. Feed the REAL defs. Negative + positive control in one: gather has
-    template_search, main does not (defender/SKILL.md forbids main the corpus)."""
+    `ToolSet(read=True, bash=BashGrammar())` assertions feed a SYNTHETIC set and stay green while
+    GATHER_DEF drifts."""
     g = _ToolRecorder()
     tools.register_tools(g, GATHER_DEF.tools, FakeVerbs({}))
     assert "template_search" in g.names
@@ -377,10 +343,8 @@ def test_d5_gather_registers_template_search_and_main_does_not():
 
 
 def test_d6_template_search_exposes_no_path_parameter():
-    """The corpus root is HARNESS-owned (deps.defender_dir), unlike lesson_read, whose path arg
-    is model-supplied and decide_read-gated. The model may supply ONLY a pattern and an optional
-    system — so there is no path to point outside the corpus, and the tool is gated by
-    construction rather than by a check."""
+    """The corpus root is HARNESS-owned (deps.defender_dir), unlike lesson_read, whose path arg is
+    model-supplied and decide_read-gated."""
     rec = _ToolRecorder()
     tools.register_tools(rec, GATHER_DEF.tools, FakeVerbs({}))
     import inspect
@@ -403,14 +367,7 @@ def test_d7_no_system_value_escapes_the_corpus_root(tmp_path, bad):
 
 def test_d8_system_none_searches_every_system_and_a_name_restricts(tmp_path):
     """system=None is the default AND the falsy member: it searches every system. A named system
-    restricts to that dir.
-
-    The pattern is `LIMIT` (every template's `## Query` body carries `... | LIMIT 1`). As written,
-    this test searched for `measures` — the default goal `_tpl` renders when `goal` is falsy — but
-    `_catalog` passes an EXPLICIT goal to every template it writes, so that word appears in no file
-    in the fixture and no correct substring search could ever have found it. The demand (all-systems
-    vs. scoped) is unchanged; only the literal was repaired. Human-approved during
-    write-code-from-spec."""
+    restricts to that dir."""
     deps = _deps(tmp_path, _catalog(tmp_path))
 
     everywhere = tools_gather._tool_template_search(deps, "LIMIT", system=None)
@@ -519,11 +476,11 @@ def test_d22_the_empty_pattern_is_not_a_wildcard(tmp_path):
 
 
 def test_d10_a_draft_hit_comes_back_untrusted_wrapped(tmp_path):
-    """draft_synthesis writes {system}/_draft/{verb}.md from an executed gather query — the
-    skeleton embeds the lead's goal text and the query body the gather LLM coined in RESPONSE TO
-    ALERT DATA, which is attacker-influenced by definition. is_untrusted_read is False for every
-    corpus path today (files.py:178-182 — only alert.json / gather_raw), so that text would
-    reach the model bare. A hit under _draft/ must arrive inside the run's untrusted tags."""
+    """draft_synthesis writes {system}/_draft/{verb}.md from an executed gather query — the skeleton
+    embeds the lead's goal text and the query body the gather LLM coined in RESPONSE TO ALERT
+    DATA, which is attacker-influenced by definition. is_untrusted_read is False for every corpus
+    path today (files.py:178-182 — only alert.json / gather_raw), so that text would reach the
+    model bare."""
     dfn = _catalog(tmp_path)
     q = dfn / "skills" / "gather" / "queries"
     (q / "elastic" / "_draft" / "poisoned.md").write_text(
@@ -552,10 +509,7 @@ def test_d10_is_untrusted_read_distinguishes_a_draft_from_an_established_templat
 
 def test_d14_map_names_no_template_and_no_draft_filename():
     """workspace_map lists every template AND every _draft filename into MAIN's message 0
-    (orient.py:199-202) — while defender/SKILL.md forbids main the corpus. A draft filename is a
-    model-coined verb minted from attacker-influenced alert data (draft_synthesis.py:187), so it
-    is an untagged channel into the main prompt. Main dispatches leads by SYSTEM, never by
-    template: the filenames were never actionable there."""
+    (orient.py:199-202) — while defender/SKILL.md forbids main the corpus."""
     out = wsm.workspace_map(Path("/tmp/does-not-matter"), systems=())
 
     section = out.split("## Gather query templates", 1)[1]
@@ -566,14 +520,7 @@ def test_d14_map_names_no_template_and_no_draft_filename():
 
 
 def test_search_reads_sections_beyond_goal_and_query(tmp_path):
-    """The search must read the FULL body, not just the two parsed sections.
-
-    `_NO_HITS` asserts "no template's text carries that text". A search that reads only `## Goal`
-    and `## Query` makes that claim FALSE of every other section — and a template carries more:
-    `## What to summarize` is on 54 of the 63 in the shipped corpus, the pitfalls sections on ~30
-    more, all of it the concrete-artifact vocabulary SCHEMA.md tells authors to write FOR keyword
-    recall. Answering "no template carries that text" about a field a template names in plain
-    sight is the same coin-a-duplicate failure as a silent empty return."""
+    """The search must read the FULL body, not just the two parsed sections."""
     dfn = _catalog(tmp_path)
     tpl = dfn / "skills" / "gather" / "queries" / "elastic" / "sshd-auth-history.md"
     tpl.write_text(
@@ -587,11 +534,8 @@ def test_search_reads_sections_beyond_goal_and_query(tmp_path):
 
 
 def test_a_broad_pattern_is_bounded_and_says_that_it_truncated(tmp_path):
-    """A plain substring has no lower bound on breadth, and the guard above rejects only the
-    EMPTY pattern. `user` and `host` are exactly the words an analyst types, and uncapped they
-    return 25 and 41 of the 63 shipped templates (14 KB / 21 KB of dispatch context); a bare `e`
-    returns all 63. Both caps must hold, and both must ANNOUNCE — a silently clipped result reads
-    as a complete one, which is the same lie as the silent empty this tool exists to replace."""
+    """A plain substring has no lower bound on breadth, and the guard above rejects only the EMPTY
+    pattern."""
     corpus, lines_each = 40, 8
     assert corpus > tools_gather._SEARCH_MAX_TEMPLATES, "fixture too small to exercise the cap"
     assert lines_each > tools_gather._SEARCH_LINES_PER_TEMPLATE, "fixture too thin for the cap"
@@ -638,12 +582,7 @@ def test_the_truncated_list_keeps_the_densest_matches(tmp_path):
 
 
 def test_598_a_hash_line_inside_a_fence_does_not_split_the_section(tmp_path):
-    """`_sections` swept `^## ` over the whole body with re.MULTILINE, blind to code fences. Every
-    template's `## Query` IS a fence, and a query body may legitimately carry a `## ` line — a
-    shell/ES|QL comment, an embedded markdown snippet, a `#`-prefixed literal in a string. The
-    sweep read that line as the next heading, which TRUNCATED `## Query` at it and invented a
-    section named after whatever followed. Both silent, and the truncated body is the one gather
-    reads before it binds --query-id."""
+    """`_sections` swept `^## ` over the whole body with re.MULTILINE, blind to code fences."""
     body = (
         "---\nid: elastic.x\nstatus: established\n---\n\n"
         "## Goal\n\nmeasures x\n\n"
@@ -661,10 +600,7 @@ def test_598_a_hash_line_inside_a_fence_does_not_split_the_section(tmp_path):
 
 
 def test_598_the_walk_and_lead_render_agree_on_a_fenced_hash_query(tmp_path):
-    """The two consumers of the section parse must not disagree. `lead_render` carried its own
-    fence-blind `^## Query…(?=^## |\\Z)` copy: it truncated the section at the fenced `## ` line,
-    which left the fence UNTERMINATED, so its `_FENCE_RE` search missed and it returned the
-    truncated text verbatim as the query the lead author renders."""
+    """The two consumers of the section parse must not disagree."""
     from defender.learning.leads import lead_render
 
     q = tmp_path / "t.md"

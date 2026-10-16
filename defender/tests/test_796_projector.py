@@ -39,11 +39,7 @@ def companion():
 
 
 def _body(projection) -> dict:
-    """The record a lens actually reads, lifted back out of its untrusted frame.
-
-    Every assertion below is about what reached the MODEL, so it reads the rendered prompt
-    rather than the pruned object — a renderer that leaked past the prune would otherwise be
-    invisible to them."""
+    """The record a lens actually reads, lifted back out of its untrusted frame."""
     open_tag, close_tag = f"<run-{SALT}-untrusted>\n", f"\n</run-{SALT}-untrusted>"
     assert open_tag in projection.text, "the projection reached the lens unframed"
     return json.loads(projection.text.split(open_tag, 1)[1].split(close_tag, 1)[0])
@@ -51,19 +47,7 @@ def _body(projection) -> dict:
 
 def _every_lens(companion) -> list:
     """Every projection a LENS is handed on this record — support, and its ablation when the
-    record has a load-bearing edge to withhold.
-
-    The leak assertions below run over this list rather than a hand-written pair, so a lens
-    added to the gate cannot arrive with no leak coverage. It also closes a hole the
-    hand-written pair had: it named the two lenses #796 shipped with their own projection
-    builders and never the ABLATION, which is a third rendered prompt reaching a model. The
-    composer is deliberately absent — it is the one role the cut does not apply to.
-
-    The ablation is CONDITIONAL rather than asserted here, because a record with no strong
-    belief movement genuinely has no edge to withhold and the gate skips the lens on one. That
-    the GOLDEN is not such a record — so the leak tests really do cover both projections — is
-    pinned by `test_the_golden_yields_both_lens_projections` rather than by a hidden assert
-    that would also fire on the minimal fixtures."""
+    record has a load-bearing edge to withhold."""
     from defender.runtime.review.projector import ablation_target
 
     lenses = [support_projection(companion, SALT)]
@@ -76,8 +60,7 @@ def _every_lens(companion) -> list:
 def test_the_golden_yields_both_lens_projections(companion):
     """`_every_lens` skips the ablation on a record with no load-bearing edge, so on a golden
     that had none every leak test below would quietly cover one projection instead of two and
-    still pass. This is the guard on that, and it is a test rather than an assert inside the
-    helper because the minimal fixtures legitimately yield one."""
+    still pass."""
     assert len(_every_lens(companion)) == 2
 
 
@@ -94,16 +77,7 @@ def test_the_prune_drops_every_inference_key(companion):
 
 
 def test_a_leads_plan_blocks_do_not_reach_a_lens():
-    """The POSITIVE control for the two `INFERENCE_LEAD_KEYS` members #933 added.
-
-    No document in the corpus carries a `:L l-NNN.lead_preds` or `:L l-NNN.impact_preds`
-    block, so the golden-driven loop above asserts their absence from data that never held
-    them — and the prune is a DENYLIST, which the projector's own docstring says reaches a
-    field only once it is named. A `lead_preds` row carries `read_as` (the interpretation the
-    run pre-committed to) and `advance_to` (the disposition it planned to route to); an
-    `impact_preds` row carries the verdict mapping. Handing either to a blind lens tells it
-    which way the run had already decided to move.
-    """
+    """The POSITIVE control for the two `INFERENCE_LEAD_KEYS` members #933 added."""
     filled = parse_investigation(
         "```invlang\n"
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
@@ -139,14 +113,7 @@ def test_a_leads_plan_blocks_do_not_reach_a_lens():
 
 
 def test_no_hypothesis_carries_its_weight_into_a_lens():
-    """The `:H` half of the cut, and the one the `:T` family rule does not reach.
-
-    `:H hypothesize.hypotheses` declares `weight|status` columns and `_walkers.final_weights`
-    seeds the run's weights from them, so a document that fills them hands the support lens —
-    told in its own prompt that it does not see which way anything moved — the movement
-    itself, in the two characters it was asked to reconstruct. The golden leaves them `null`
-    and `active`, so only a fixture that fills them can witness this.
-    """
+    """The `:H` half of the cut, and the one the `:T` family rule does not reach."""
     filled = parse_investigation(
         "```invlang\n"
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
@@ -200,10 +167,7 @@ def test_the_disposition_reaches_no_lens(companion):
 def test_the_record_reaches_every_lens_inside_the_calls_own_untrusted_frame(companion):
     """A lens reads a document assembled out of alert-derived bytes — SIEM messages, entity
     identifiers an attacker's own activity shaped — and its reading is what the composer
-    weighs. Unframed, an instruction smuggled into a log line reaches the one role whose
-    output routes the gate. The frame is keyed on the STAGE CALL's salt, never the
-    investigation's: a role that reads payloads must not hold the delimiter of the frame its
-    own output returns inside."""
+    weighs."""
     for projection in _every_lens(companion):
         assert f"<run-{SALT}-untrusted>" in projection.text
         assert f"</run-{SALT}-untrusted>" in projection.text
@@ -227,9 +191,7 @@ def test_the_observation_side_survives_the_cut(companion):
 
 def test_the_support_lens_reads_the_results_it_reconstructs_from(companion):
     """The mirror of the leak tests, and the reason the cut is the `:T` FAMILY and not
-    something wider: `outcome` is a `:R` observation, so it must reach the lens. There is no
-    per-lens narrowing left below the family rule — the discrimination lens was the only one
-    that took a second cut (`outcome`, `tests_hypotheses`), and it is retired."""
+    something wider."""
     support = _body(support_projection(companion, SALT))
     assert any(lead.get("outcome") for lead in support["findings"]), (
         "the support lens has no results to reconstruct from"
@@ -253,8 +215,7 @@ def _edges(body: dict) -> set[str]:
 def test_the_ablation_removes_exactly_one_edge_and_changes_nothing_else(companion):
     """The ablation reading is only interpretable as a difference against the support
     reading, so the two projections must differ in the edge and in nothing else — including
-    the prompt. A second builder, or a second ask, and the difference measures the projection
-    rather than the edge."""
+    the prompt."""
     full = support_projection(companion, SALT)
     target = sorted(_edges(_body(full)))[0]
     ablated = support_projection(companion, SALT, without_edge=target)
@@ -270,12 +231,7 @@ def test_the_ablation_removes_exactly_one_edge_and_changes_nothing_else(companio
 
 
 def _named_edges(node) -> set[str]:
-    """Every edge id anything under `node` NAMES, at any depth.
-
-    A recursive walk rather than a per-bucket reader, because the property it serves is about
-    the whole document a lens reads: an id cited by a row that survives, when the edge itself
-    is gone, is a tell wherever the row carrying it happens to live. The keys come from the
-    projector's own constant rather than being restated here."""
+    """Every edge id anything under `node` NAMES, at any depth."""
     found: set[str] = set()
     if isinstance(node, dict):
         for key, value in node.items():
@@ -289,11 +245,7 @@ def _named_edges(node) -> set[str]:
 
 
 def _cited_edges(body: dict) -> set[str]:
-    """Every edge id the `:R` rows name as their SUBJECT.
-
-    The buckets come from the projector's own constant rather than being restated here: a
-    bucket added to the ablation and not to this list would leave the test green on exactly
-    the rows it stopped covering."""
+    """Every edge id the `:R` rows name as their SUBJECT."""
     ids: set[str] = set()
     for lead in body.get("findings") or []:
         outcome = lead.get("outcome") or {}
@@ -304,10 +256,7 @@ def _cited_edges(body: dict) -> set[str]:
 
 def test_the_ablation_takes_the_rows_that_are_about_the_withheld_edge_with_it(companion):
     """An ablation that removed the `:E` row and left the `:R` rows citing it removed a
-    citation, not the evidence: on the golden the withheld edge's whole discriminating
-    content — the `unauthorized` verdict and the reasoning quoting the sshd message — lives
-    in `authorization_resolutions`, so the lens reconstructs the same case, the reading never
-    collapses, and the composer is told the move did not rest on that edge on every run."""
+    citation, not the evidence."""
     target = "e-004"
     assert target in _cited_edges(_body(support_projection(companion, SALT))), (
         "the golden's `:R` rows do not cite the ablation target — the test proves nothing"
@@ -353,14 +302,7 @@ def _contracts(body: dict) -> list[dict]:
 
 def test_the_ablation_leaves_no_surviving_row_citing_the_edge_it_withheld():
     """The ablation lens is never told an edge was removed — and a `:H <h>.authz` row still
-    naming an id that appears nowhere else in the projection tells it exactly that. A lens
-    hunting for a gap is not reconstructing.
-
-    The row itself survives: a contract is the hypothesis's QUESTION side, not an observation,
-    so deleting it would be a second difference and the reading would measure the projection
-    rather than the edge. Its citation degrades to the spelling a contract carries when no
-    observed edge stands behind it, which is what the investigation would have recorded had
-    the edge never been observed."""
+    naming an id that appears nowhere else in the projection tells it exactly that."""
     from defender.runtime.review.projector import ablation_target
 
     doc = parse_investigation(_CONTRACT_CITES_THE_TARGET)
@@ -384,9 +326,7 @@ def test_the_ablation_leaves_no_surviving_row_citing_the_edge_it_withheld():
 
 def test_a_junk_edge_row_does_not_fault_a_projection_the_support_lens_renders(companion):
     """`_walkers.all_edges` isinstance-checks the same lists, so a non-dict element is
-    something the support projection renders without complaint. An ablation that RAISED on it
-    would fail the whole review closed — through the gate's stage-fault arm — for a fault the
-    ablation itself introduced, on a document every other lens read fine."""
+    something the support projection renders without complaint."""
     prologue = companion.get("prologue") or {}
     malformed = {
         **companion,
@@ -417,9 +357,7 @@ def test_ablating_an_unknown_edge_changes_nothing(companion):
 
 def test_an_unfenced_document_is_refused_rather_than_projected_empty():
     """`parse_dense_companion` reads only inside ```invlang fences and returns an empty
-    companion — no error, no warning — for a document with none. Projected, that is a lens
-    reconstructing from nothing and a composer reviewing a void. Every fixture in the tree is
-    fenced, so only an explicit arm catches it."""
+    companion — no error, no warning — for a document with none."""
     unfenced = ":V prologue.vertices [id|type]\nv-001|compute|\n"
     with pytest.raises(EmptyInvestigation):
         parse_investigation(unfenced)
@@ -434,10 +372,7 @@ def test_an_empty_document_is_refused():
 
 
 def test_the_ablation_target_is_a_load_bearing_edge_with_its_footprint(companion):
-    """On the golden, ONE edge supports every strong resolution. The count travels with the
-    target so the composer can tell "this edge was load-bearing" from "this case rests
-    entirely on one edge" — otherwise a reading that collapses reads as fragility when it is
-    really the whole case being removed."""
+    """On the golden, ONE edge supports every strong resolution."""
     from defender.runtime.review.projector import ablation_target
 
     target, carried = ablation_target(companion)
@@ -446,10 +381,7 @@ def test_the_ablation_target_is_a_load_bearing_edge_with_its_footprint(companion
 
 
 def test_targeting_reaches_a_close_carried_by_refutation():
-    """`--` on a refuted sibling is load-bearing exactly as `++` on a surviving hypothesis is.
-    Counting only the survivors leaves a benign close carried by refuting the adversarial
-    sibling with no ablation target at all — the highest-cost error class the gate exists to
-    catch."""
+    """`--` on a refuted sibling is load-bearing exactly as `++` on a surviving hypothesis is."""
     from defender.runtime.review.projector import ablation_target
 
     refuting = {
@@ -509,11 +441,7 @@ _AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION = (
 
 
 def test_an_edge_named_twice_in_one_cell_is_one_citation():
-    """#969. The `⟂` cell is free text and the parser read every MENTION of an edge id, while
-    the two sibling id lists on that same record were deduped — this was the one that was not.
-
-    Pinned at the parse, because that is where the field's contract lives: a reader asking
-    which edges a resolution cites must not have to know how many times the cell said one."""
+    """#969."""
     doc = parse_investigation(_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION)
     cited = [res["supporting_edges"] for _lead, res in _walkers.iter_resolutions(doc)]
     assert cited == [["e-001"], ["e-001"], ["e-002"]], (
@@ -522,14 +450,7 @@ def test_an_edge_named_twice_in_one_cell_is_one_citation():
 
 
 def test_the_ablation_target_counts_resolutions_not_mentions():
-    """#969's consequence, and the reason the parse matters. `ablation_target` withholds the
-    NARROWEST-supported edge — ablating one that carries every resolution removes the whole
-    case, and a lens reading a near-empty world diverges for reasons that have nothing to do
-    with fragility.
-
-    Counting mentions made one resolution look like three, so the edge with the widest real
-    support was scored as the narrowest, `e-001` was withheld instead, and the inflated count
-    travelled to the composer as "this edge was load-bearing"."""
+    """#969's consequence, and the reason the parse matters."""
     from defender.runtime.review.projector import ablation_target
 
     doc = parse_investigation(_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION)

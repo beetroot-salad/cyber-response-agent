@@ -6,10 +6,8 @@ from defender.tests._drain719 import git
 
 
 def test_a_crlf_only_rewrite_is_not_byte_identical_to_head(tmp_path):
-    """The exact counterexample the claims-adversary pass ran: HEAD holds LF line endings,
-    the working tree rewrites the same text with CRLF line endings. Genuinely different
-    bytes (`git status --porcelain` reports the file dirty), but decode-identical — the bug
-    was comparing the decoded strings instead of the bytes."""
+    """The exact counterexample the claims-adversary pass ran: HEAD holds LF line endings, the
+    working tree rewrites the same text with CRLF line endings."""
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q")
