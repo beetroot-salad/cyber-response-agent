@@ -568,18 +568,15 @@ class WorldRegistry(ModuleVerbRegistry):
 
     def _source_writes(self) -> list[tuple[str, str]]:
         """The source run's own writes to the world after the branch point (#1255 P5, O6): the
-        comment it posted on its case ticket when it closed, read off its host-only receipt
-        (`ticket_writer.read_posted_comment`). The host never transitions a case, so a comment
-        is the one write there is. `[]` with no source run, or none posted."""
+        comments it posted on its case ticket when it closed, read off its host-only record
+        (`ticket_writer.read_posted_comments`). The host never transitions a case, so its
+        comments are the writes there are. `[]` with no source run, or none posted."""
         if self._source_run is None:
             return []
-        from defender.scripts.case_history.ticket_writer import read_posted_comment
+        from defender.scripts.case_history.ticket_writer import read_posted_comments
 
-        posted = read_posted_comment(self._source_run)
-        if posted is None:
-            return []
-        key, body = posted
-        return [(f"its comment on case ticket {key}", body)]
+        return [(f"its comment on case ticket {key}", body)
+                for key, body in read_posted_comments(self._source_run)]
 
     def close(self) -> None:
         """Tear down the oracle's boxes (the sibling is ending)."""
