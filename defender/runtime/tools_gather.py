@@ -507,6 +507,14 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
             "the leads-table row's own text and the whole of what gather is dispatched to "
             "measure. Re-dispatch this same lead_id with the goal spelled out."
         )
+    # The dispatch gate: a system down for this run — not configured or its adapter broken at
+    # start, an escaped config fault, or tripped since — is refused here, before its lead is
+    # claimed (#1256 O-1, O-4, O-6): a refused dispatch writes no lead record, consumes no id
+    # and starts no gather.
+    refused = system_status.refusal_if_down(run_state_of(deps), system)
+    if refused is not None:
+        return refused
+
     # Harness-reserved leads are claimed at run start; re-claiming would raise a `ModelRetry`
     # with no model in the loop to retry it.
     if not pre_claimed:
@@ -521,12 +529,6 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
             raise LeadRecordFault(
                 f"lead {lead_id!r} could not be claimed: the run's leads table could not be "
                 "written")
-
-    # The dispatch gate: a system down for this run — not configured or its adapter broken at
-    # start, or tripped since — is refused here, its gather never started (#1256 O-1, O-4).
-    refused = system_status.refusal_if_down(run_state_of(deps), system)
-    if refused is not None:
-        return refused
 
     from defender.runtime.agent_definition import RunScope, bind
     from defender.runtime.driver import gather_def_for
