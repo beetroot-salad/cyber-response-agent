@@ -196,15 +196,19 @@ class RequestLogger:
 
     def log_policy_denial(
         self, *, role: str, system: str, verb: str, call_id: str, params: Any,
+        ts: str | None = None,
     ) -> dict:
         """Append one policy-denial record: role, system, verb, call id, and a digest of the
         param values (never the raw blob). A failed write propagates (unlike
-        `log_budget_refusal`), after the refusal it audits has already taken effect."""
+        `log_budget_refusal`), after the refusal it audits has already taken effect.
+
+        `ts` is the denied call's time: the run clock's reading when a run denied it (#1255 —
+        the log is model-readable), the wall clock when omitted (no run)."""
         seq = self._denial_seq
         self._denial_seq += 1
         rec = {
             "event_type": POLICY_DENIAL_EVENT_TYPE,
-            "ts": now_iso(),
+            "ts": ts if ts is not None else now_iso(),
             "seq": seq,
             "role": role,
             "system": system,

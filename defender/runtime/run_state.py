@@ -144,9 +144,7 @@ class RunState:
 
     def now(self) -> datetime:
         """The run clock's reading (aware UTC): the origin plus `elapsed`. Every time the
-        model can see is one of these.
-
-        @owns run clock reading"""
+        model can see is one of these."""
         with self.lock:
             return self.origin + timedelta(seconds=self.elapsed())
 

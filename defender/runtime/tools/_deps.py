@@ -13,13 +13,12 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 else:
     _RunTenant = Any  # `run_tenant` sits above this module in the import graph
 
-from defender._clock import now_iso
 from defender._paths import PATHS
 
 
 from defender.run_repository import Run
 from .. import box as box_mod
-from ..run_state import RunState
+from ..run_state import RunState, run_time_iso
 from .. import permission
 from ..agent_definition import ResolvedRoots
 from ..agent_role import AgentRole
@@ -245,7 +244,8 @@ def _record_lesson_load(
         return
     try:
         run: Run = run_of(deps)
-        row = {"lesson_name": name, "ts": now_iso(), "kind": kind, "role": deps.role.value}
+        row = {"lesson_name": name, "ts": run_time_iso(deps), "kind": kind,
+               "role": deps.role.value}
         run.observability.lessons_loaded.append([row])  # lint-run-records: ok — run_of requires the handed repository Run; the resolver does not trace its return type
     except Exception:  # noqa: BLE001 — best-effort observability
         pass

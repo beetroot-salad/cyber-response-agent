@@ -41,6 +41,7 @@ from defender._knowledge import KnowledgePaths
 from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
 
+from .. import box as box_mod
 from .. import branch
 from .. import compaction
 from .. import observe
@@ -209,6 +210,14 @@ def _run_state_at_boundary(run_state: RunState | None, run_dir: Path, run_id: st
     if clock is not None:
         run_state.attach_clock(clock)
     return run_state
+
+
+def _box_follows_run_clock(box: Any, state: RunState) -> None:
+    """The box's own programs read the run's clock (#1255 "Into the box"): a box this run
+    started (`BoxExecutor`) rewrites its clock file from `state.now` before every command. Any
+    other executor (a test's recording double) has no clock mount to feed."""
+    if isinstance(box, box_mod.BoxExecutor):
+        box.follow_clock(state.now)
 
 
 def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | None) -> None:
@@ -561,6 +570,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # (`RunState.now`). Omitted, the host's own (wall time).
     run_dir, run_id = run.run_dir, str(run.id)
     state = _run_state_at_boundary(run_state, run_dir, run_id, clock)
+    _box_follows_run_clock(box, state)
     model_name = resolve_main_model(model_name)
     # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not
     # inherit MAIN-gather's default registry.

@@ -80,19 +80,20 @@ def _raise_on_docker_error(ctx: VerbContext, rc: int, stderr: str, host: str) ->
 
 
 def _captured_at(ctx: VerbContext) -> str:
-    """When this observation was taken, as the run reckons time.
-
-    The only adapter-minted timestamp, and the one payload field not determined by the
-    question. On an ordinary run it is a real point-in-time capture. On a branched run,
-    wall-clock time would make siblings and re-runs differ for identical questions, so
-    `ctx.as_of` (the branch point's moment) is used instead.
+    """When this observation was taken, as the run reckons time: the run clock's reading
+    (#1255 "Time": capture stamps use the run clock), which on a branch arm continues from its
+    source's reading at the fork. Never the cut-off `ctx.as_of`: that bounds what a world
+    serves, and stamping it would freeze one visible time while every other one advances. A
+    context that belongs to no run (no run state: the CLI lane, pre-flight, a test stub) has
+    no run clock and stamps the wall clock (rev 5 C4).
 
     `getattr` because duck-typed contexts (CLI lane, test stubs) reach this adapter, and an
     `AttributeError` in a verb body is filed as an infra fault (exit 2). `health_check` stamps
     nothing and does not call this.
     """
-    at = getattr(ctx, "as_of", None)
-    return _clock.z_seconds(datetime.datetime.now(datetime.UTC) if at is None else at)
+    state = getattr(ctx, "run_state", None)
+    at = state.now() if state is not None else datetime.datetime.now(datetime.UTC)
+    return _clock.z_seconds(at)
 
 
 def health_check(ctx: VerbContext) -> dict:

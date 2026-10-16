@@ -64,15 +64,16 @@ def _tally(state: RunState, tool_name: str) -> None:
 
 
 def count_call(state: RunState, tool_name: str) -> dict:
-    """Count one call with no cap check (the unenforced posture). Returns the budget after."""
+    """Count one call with no cap check (the unenforced posture). Returns the run's budget as
+    the enforcing checks read it after the call (`enforcement_state`)."""
     with state.lock:
         _tally(state, tool_name)
-        return dict(state.budget)
+        return enforcement_state(state)
 
 
 def account_call(state: RunState, tool_name: str, *, limits: dict, tier: str) -> dict:
     """Count one executed call against the pool, re-checking the cap at commit time. Returns
-    the budget after.
+    the run's budget as the enforcing checks read it after the call (`enforcement_state`).
 
     The read, the cap check and the increment are one step under the state's lock, so no
     interleaving with another thread can lose an increment; a call at the cap changes
@@ -81,7 +82,7 @@ def account_call(state: RunState, tool_name: str, *, limits: dict, tier: str) ->
     with state.lock:
         if state.budget["tool_calls"] < limit:
             _tally(state, tool_name)
-        return dict(state.budget)
+        return enforcement_state(state)
 
 
 # S15 (#1224): the seconds a branched world's oracle held the turn, which every investigator
