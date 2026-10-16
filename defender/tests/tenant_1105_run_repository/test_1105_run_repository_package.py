@@ -60,7 +60,7 @@ def _type_checking_imports(tree: ast.Module, package: str) -> list[tuple[str, st
                 if sub.level:
                     base = package.rsplit(".", sub.level - 1)[0] if sub.level > 1 else package
                     module = f"{base}.{module}" if module else base
-                out += [(a.asname or a.name, module) for a in sub.names]
+                out += [(a.asname or a.name, module) for a in sub.names]  # lint-ast-resolve: ok — test helper over its own fixture source; no scoping to resolve
     return out
 
 

@@ -16,7 +16,8 @@ def test_list_slots_returns_sorted_strings():
     slots = vocab.list_slots()
     assert slots == sorted(slots)
     assert all(isinstance(s, str) for s in slots)
-    assert "types" in slots and "disposition" in slots
+    assert "types" in slots
+    assert "disposition" in slots
 
 
 def test_get_enum_returns_tuple_for_known_slot():

@@ -11,6 +11,16 @@ import pytest
 
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
+
+@pytest.fixture(autouse=True)
+def _roomy_payload_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No scenario here is about the default `JUDGE_PAYLOAD_CAP` except the two that set the knob
+    themselves (d07b's second half, s_AM27), which override this inside the test body. With the
+    cap out of reach, a reference trimmed or a world refused for size (A9) never decides a test
+    about routing, commits or call counts."""
+    monkeypatch.setenv(S.CAP_KNOB, "10000000")
+
+
 # --------------------------------------------------------------------------------------
 # Local helpers (requested as shared machinery in 82-writer-family_and_questioner.md).
 # --------------------------------------------------------------------------------------

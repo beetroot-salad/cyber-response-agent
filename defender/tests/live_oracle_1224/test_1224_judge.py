@@ -18,6 +18,16 @@ from defender.tests._state1135 import env_state
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
 
+@pytest.fixture(autouse=True)
+def _roots(tmp_path, monkeypatch):
+    """The episodes root a launch resolves (`DEFENDER_EPISODES_BASE`, outside the data root),
+    and the learning STATE root, so the judge's appender writes this test's own queues and never
+    the checkout's `learning/_pending/`."""
+    monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
+
+
+
 
 
 # --------------------------------------------------------------------------------------

@@ -86,7 +86,8 @@ _ORPHAN_DOC = _OPENING + _fence(_obs_vertices("l-001", _ORPHAN_VERTEX))
 def test_orphan_vertex_is_refused_with_exactly_one_diagnostic():
     errors = validate_companion(_ORPHAN_DOC, None)
     assert len(errors) == 1, errors
-    assert "l-001" in errors[0] and "v-010" in errors[0]
+    assert "l-001" in errors[0]
+    assert "v-010" in errors[0]
 
 
 # ---------------------------------------------------------------------------

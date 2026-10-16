@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 
 from defender import run as run_entry
 from defender.runtime import providers
@@ -19,6 +21,14 @@ from defender.runtime.review_roles import (
 from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_model_env(monkeypatch):
+    """Both knobs cleared, so every case below states its own environment."""
+    monkeypatch.delenv(REVIEW_MODEL_ENV, raising=False)
+    monkeypatch.delenv("DEFENDER_MODEL", raising=False)
+
 
 REVIEW_DEFS = (SUPPORT_DEF, COMPOSER_DEF)
 

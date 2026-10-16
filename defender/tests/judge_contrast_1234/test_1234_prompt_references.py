@@ -14,6 +14,12 @@ import pytest
 
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
+
+@pytest.fixture(autouse=True)
+def _payload_cap_lifted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(S.CAP_KNOB, str(_UNCAPPED))
+
+
 #: The words A2/M2 require on the aligned lead view and the fact surfaces (`S.COINED`).
 HEURISTIC = S.COINED["label.heuristic"]
 BASELINE = S.COINED["label.baseline"]
