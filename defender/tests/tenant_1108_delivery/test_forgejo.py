@@ -55,6 +55,29 @@ def test_create_sends_all_pr_fields_to_origin_repository():
     assert url.endswith("/tenants/blue/pulls/7")
 
 
+#: Every forge call, as the host makes it.
+_FORGE_CALLS = {
+    "verify_main_protection": lambda f: f.verify_main_protection(),
+    "list_open_prs": lambda f: f.list_open_prs("lessons/"),
+    "list_prs_for_head": lambda f: f.list_prs_for_head("lessons/a"),
+    "open_pr": lambda f: f.open_pr(base="main", head="lessons/a", title="t", body="b"),
+}
+
+
+@pytest.mark.parametrize("fault", [httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError],
+                         ids=["connect", "read-timeout", "protocol"])
+@pytest.mark.parametrize("call", sorted(_FORGE_CALLS))
+def test_a_transport_fault_is_a_forge_error(fault, call):
+    """Refusal contract (deck #678): the forge unreachable, slow past the timeout, or
+    speaking broken HTTP is a `ForgeError` from every call, like an HTTP error status, never
+    an `httpx` exception escaping the forge."""
+    http = ForgeHTTP()
+    http.fault = lambda request: fault("the forge's transport failed", request=request)
+    with pytest.raises(_forge_module().ForgeError):
+        _FORGE_CALLS[call](forge(http))
+    assert http.requests
+
+
 @pytest.mark.parametrize("response", [httpx.Response(403, json={"message": "denied"}),
                                       httpx.Response(200, text="not json"),
                                       httpx.Response(200, json={"protected": True}),
@@ -163,13 +186,17 @@ def _paged(first_rows, next_url, second_rows):
     "http://forge.invalid:3001/api/v1/repos/tenants/blue/pulls?page=2",
     "http://forge.invalid:3000/api/v1/repos/tenants/red/pulls?page=2",
     "http://forge.invalid:3000/api/v1/repos/mallory/blue/pulls?page=2",
+    "http://forge.invalid:3000/api/v1/repos/tenants/blue-fork/pulls?page=2",
+    "http://forge.invalid:3000/api/v1/repos/tenants/blue/../../mallory/blue/pulls?page=2",
     "http://forge.invalid:bad/api/v1/repos/tenants/blue/pulls?state=open&page=2",
     "http://[invalid]/api/v1/repos/tenants/blue/pulls?page=2",
 ])
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_pagination_refuses_outside_origin_repository_before_request(next_url, method):
     """O8/A5, O-G: an untrusted next-page Link that parses to another address, or does not
-    parse, cannot redirect the bot token."""
+    parse, cannot redirect the bot token. The repository is compared exactly, on the parsed
+    address: one whose name only begins with ours (`blue-fork`), or whose path reaches
+    another repository through dot-segments while its text begins with ours, is not ours."""
     calls, client = _paged([row(1, "lessons/ab")], next_url, [])
     with pytest.raises(_forge_module().ForgeError, match="origin|host|repo|page|credential|[Ll]ink|URL|[Ii]nvalid (port|IPv6)"):
         getattr(_forge_module().ForgejoForge(origin=ORIGIN, token=TOKEN, client=client), method)("lessons/a")

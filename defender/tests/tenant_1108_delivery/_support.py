@@ -10,6 +10,7 @@ import contextlib
 import importlib
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -85,13 +86,16 @@ class ForgeHTTP:
     """Boundary fake: replies from the observed Forgejo schema, records actual requests.
 
     `on_request(request)` runs before each reply (a probe of the host's state while the
-    request is in flight). PR lookup is the paginated listing (C19); the exact-head route
-    `/pulls/{base}/{head}` is not answered until K3 settles its semantics."""
+    request is in flight); `fault(request)`, when set, may return a transport exception
+    (`httpx.ConnectError`, say) to raise instead of replying. PR lookup is the paginated
+    listing (C19); the exact-head route `/pulls/{base}/{head}` is not answered until K3
+    settles its semantics."""
     def __init__(self, on_request=None):
         self.requests = []
         self.protection = {"name": "main", "protected": True, "user_can_push": False}
         self.pages = {1: []}
         self.fail_create = False
+        self.fault = None
         self.on_request = on_request
         self.client = httpx.Client(transport=httpx.MockTransport(self.reply))
 
@@ -99,6 +103,9 @@ class ForgeHTTP:
         self.requests.append(request)
         if self.on_request is not None:
             self.on_request(request)
+        fault = self.fault(request) if self.fault is not None else None
+        if fault is not None:
+            raise fault
         path = request.url.path
         if path.endswith("/branches/main"):
             return httpx.Response(200, content=json.dumps(self.protection),
@@ -349,6 +356,8 @@ class GitHTTP:
         self.on_service = None
         #: `(service, token sent, accepted)` per request.
         self.seen: list[tuple[str, bool, bool]] = []
+        #: The raw `Authorization` header of every request (`None` when absent).
+        self.authorizations: list[str | None] = []
         self._fired: set[str] = set()
         self._lock = threading.Lock()
         outer = self
@@ -397,6 +406,7 @@ class GitHTTP:
         authorized = sent and service not in self.refuse
         with self._lock:
             self.seen.append((service, sent, authorized))
+            self.authorizations.append(handler.headers.get("Authorization"))
             fire = authorized and service not in self._fired and self.on_service is not None
             if fire:
                 self._fired.add(service)
@@ -453,10 +463,49 @@ class GitHTTP:
         return any(s == service and sent and not ok for s, sent, ok in self.seen)
 
 
+class GitConfigHome:
+    """Where a credentialed test points git's per-user and system configuration: a private
+    `HOME` (its `.gitconfig`), `XDG_CONFIG_HOME` (its `git/config`), `GIT_CONFIG_GLOBAL` and
+    `GIT_CONFIG_SYSTEM`, all under the test's own folder and empty unless a test installs
+    spies there. So no git the code under test runs can reach a developer's real helpers."""
+
+    def __init__(self, base: Path):
+        self.home = base / "home"
+        self.xdg = self.home / "xdg"
+        self.global_config = base / "global.gitconfig"
+        self.system_config = base / "system.gitconfig"
+
+    def files(self):
+        return (self.home / ".gitconfig", self.xdg / "git" / "config", self.global_config,
+                self.system_config)
+
+    def create(self):
+        for path in self.files():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        return self
+
+    def env(self):
+        return {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.xdg),
+                "GIT_CONFIG_GLOBAL": str(self.global_config),
+                "GIT_CONFIG_SYSTEM": str(self.system_config)}
+
+
+def git_config_home(tmp_path) -> GitConfigHome:
+    """The isolated configuration `http_repo` installs for `tmp_path`'s test."""
+    return GitConfigHome(tmp_path / "git-config")
+
+
 @pytest.fixture
-def http_repo(tmp_path):
+def http_repo(tmp_path, monkeypatch):
     """Like `repo`, but `origin` is a real smart-HTTP remote demanding the bot's credential;
-    the credential entry names that remote. Yields `(tenant, bare remote, credentials, server)`."""
+    the credential entry names that remote. Git's per-user and system configuration point at
+    empty files under the test's folder (`git_config_home`), so a wrong implementation can
+    reach only what a test installs there, never a developer's own credential helper.
+    Yields `(tenant, bare remote, credentials, server)`."""
+    for name, value in git_config_home(tmp_path).create().env().items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
     root = tmp_path / "data"
     tenants.place_tenant(root, "blue")
     tenant = tenants.accept(root, "blue")
@@ -510,14 +559,31 @@ print(json.dumps(out))
 """
 
 
+#: What a freshly started process (cron, systemd) inherits: the program search path and the
+#: locale, nothing this process set or stored in its environment.
+_FRESH_ENV_KEYS = ("PATH", "LANG", "LC_ALL", "LC_CTYPE")
+
+
+def fresh_process_env(tenant, scratch: Path):
+    """The environment of a process started afresh for `tenant`: an allowlist of this
+    process's variables (never `os.environ` wholesale), the data root, this tree's imports,
+    and git configuration isolated under `scratch`."""
+    env = {key: os.environ[key] for key in _FRESH_ENV_KEYS if key in os.environ}
+    env.update(GitConfigHome(scratch).create().env())
+    env.update(PYTHONPATH=str(IMPORT_ROOT), PYTHONDONTWRITEBYTECODE="1",
+               DEFENDER_DATA_ROOT=str(tenant.data_root))
+    return env
+
+
 def in_a_later_process(tenant, verb, *args):
     """`verb(*args)` (`deliver` or `revert`) on a `TenantDelivery` opened in ANOTHER, freshly
-    started process with its own forge double, as a later drain would: nothing of this
-    process's objects or memory reaches it. Returns `{"url": ...}` or `{"refused": ...}`,
-    with `"creates"`, the PR requests it sent."""
+    started process with its own forge double and a fresh environment, as a later drain
+    would: nothing of this process's objects, memory or environment reaches it. Returns
+    `{"url": ...}` or `{"refused": ...}`, with `"creates"`, the PR requests it sent."""
+    scratch = Path(tenant.data_root).parent / f"later-{len(list(Path(tenant.data_root).parent.glob('later-*')))}"
     proc = subprocess.run([sys.executable, "-c", _LATER_SCRIPT, str(tenant.data_root), str(tenant.id),
                            verb, *map(str, args)], capture_output=True, text=True,
-                          env=_probe_env(), timeout=300, check=False)
+                          env=fresh_process_env(tenant, scratch), timeout=300, check=False)
     assert proc.returncode == 0, f"the later process crashed: {proc.stderr}"
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
@@ -565,6 +631,64 @@ def lock_probe(tenant):
                           env=_probe_env(), timeout=120, check=False)
     assert proc.returncode == 0, f"lock probe crashed: {proc.stderr}"
     return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+_GIT_OPTION_VALUES = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+
+
+def git_subcommand(argv):
+    """`(subcommand, argv)` of a spawned `git`, or `(None, argv)` for any other program."""
+    args = shlex.split(argv) if isinstance(argv, str) else [os.fsdecode(a) for a in argv]
+    if not args or os.path.basename(args[0]) != "git":
+        return None, args
+    rest = iter(args[1:])
+    for arg in rest:
+        if arg in _GIT_OPTION_VALUES:
+            next(rest, None)
+        elif not arg.startswith("-"):
+            return arg, args
+    return None, args
+
+
+class LockAudit:
+    """Probes the tenant lock from another process at chosen moments of THIS process: an
+    audit hook passes every event to `pick(event, args)`, and whenever it names a label the
+    lock is probed before the audited operation goes ahead (a spawn, an open, a rename).
+    `probes` collects `(label, verdict)`; a probe that crashes is recorded, never raised into
+    the code under test. Active only inside `with`; audit hooks cannot be removed."""
+
+    def __init__(self, tenant, pick):
+        self.tenant, self.pick = tenant, pick
+        self.probes: list[tuple[str, dict]] = []
+        self._active = False
+        self._inside = threading.local()
+        sys.addaudithook(self._audit)
+
+    def _audit(self, event, args):
+        if not self._active or getattr(self._inside, "on", False):
+            return
+        self._inside.on = True
+        try:
+            try:
+                label = self.pick(event, args)
+            except Exception as crash:  # noqa: BLE001 — recorded, judged by the caller
+                self.probes.append(("pick", {"crashed": f"{event}: {crash!r}"}))
+                return
+            if label is not None:
+                try:
+                    verdict = lock_probe(self.tenant)
+                except Exception as crash:  # noqa: BLE001 — recorded, judged by the caller
+                    verdict = {"crashed": repr(crash)}
+                self.probes.append((label, verdict))
+        finally:
+            self._inside.on = False
+
+    def __enter__(self):
+        self._active = True
+        return self
+
+    def __exit__(self, *exc):
+        self._active = False
 
 
 class LockHolder:

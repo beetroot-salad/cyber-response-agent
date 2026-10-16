@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
 import socket
 import stat
 import sys
+from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from defender import _io
@@ -33,6 +34,7 @@ from ._support import (
     files_under,
     git,
     git_bytes,
+    git_subcommand,
     in_a_later_process,
     install_planting_hook,
     merge_on_remote,
@@ -193,6 +195,33 @@ def test_change_set_is_the_draft_against_the_worktree_and_commits_as_plain_files
             assert git_bytes(wt, "cat-file", "blob", f"{sha}:{path}") == content
 
 
+#: Human content on `main` that would make git change bytes on their way into a blob: a
+#: root `.gitattributes` (outside every lane, so no claim can touch it) and, for the filter,
+#: a driver the clone's own configuration defines.
+_BYTE_CHANGERS = {
+    "eol-and-ident": ("*.md text eol=crlf ident\n", None),
+    "clean-filter": ("*.md filter=p3upper\n", "tr a-z A-Z"),
+}
+
+
+@pytest.mark.parametrize("changer", sorted(_BYTE_CHANGERS))
+def test_the_commit_maker_stores_the_boxs_bytes_whatever_mains_attributes_say(repo, tmp_path, changer):
+    """O-C: the commit-maker stores each changed file's bytes exactly as the box wrote them. A
+    `.gitattributes` on `main` asking for line-ending normalisation and `$Id$` collapsing, or
+    a clean filter whose driver the clone's configuration defines, changes nothing in the
+    committed blob (a commit made with `git add` would store converted bytes)."""
+    attributes, driver = _BYTE_CHANGERS[changer]
+    push_to_remote(repo, tmp_path, lambda c: _write(c / ".gitattributes", attributes))
+    if driver is not None:
+        git(repo[0].knowledge, "config", "filter.p3upper.clean", driver)
+    batch = delivery(repo, ForgeHTTP()).start_batch("bytes", lanes=LANES)
+    data = b"Line One\r\n$Id: 0123456789abcdef $\r\nlower case, mixed endings\n"
+    (batch.draft_root / "agent/lessons/exact.md").write_bytes(data)
+    sha = batch.commit(batch.change_set(), "exact bytes")
+    assert _name_status(batch.worktree, sha) == {"agent/lessons/exact.md": "A"}
+    assert git_bytes(batch.worktree, "cat-file", "blob", f"{sha}:agent/lessons/exact.md") == data
+
+
 def _mknod(lane):
     try:
         os.mknod(lane / "dev.md", stat.S_IFCHR | 0o600, os.makedev(1, 3))
@@ -203,6 +232,12 @@ def _mknod(lane):
 def _oversized(lane):
     with open(lane / "big.md", "wb") as big:
         big.truncate(_io.READ_LIMIT + 1)
+
+
+def _write_bytes_name(lane, name):
+    """A file whose name is raw bytes no UTF-8 decoding accepts (untrusted box output)."""
+    with open(os.path.join(os.fsencode(lane), name), "wb") as out:
+        out.write(b"a lesson under a name git cannot be given as text\n")
 
 
 def _replace(entry, plant):
@@ -244,6 +279,7 @@ _REFUSED_OUTPUT = {
     "replace-dir-with-link": lambda lane, agent, outside, wt: _replace(
         lane / "deep", lambda e: e.symlink_to(outside, target_is_directory=True)),
     "replace-file-with-fifo": lambda lane, agent, outside, wt: _replace(lane / "seed.md", os.mkfifo),
+    "non-utf8-name": lambda lane, agent, outside, wt: _write_bytes_name(lane, b"\xff\xfe.md"),
 }
 
 #: Base content a row needs before the batch starts (pushed as a human merge).
@@ -257,6 +293,7 @@ _REFUSED_BASE = {
 def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
         repo, tmp_path, monkeypatch, entry):
     """O-C/O-D: a link (to a file or a directory), FIFO, socket, device or oversized file, a
+    name that is not UTF-8 (refused, never a crash: orchestrator ruling), a
     path outside the lanes (a prefix sibling of one included), `agent/.tenant-id`, or a
     `.gitattributes`/`.gitignore`/`.gitmodules` at any depth (added or deleted), new or put in
     place of a base file or subdirectory, refuses the claim: nothing is skipped and nothing
@@ -356,6 +393,59 @@ def test_the_commit_maker_takes_nothing_but_a_change_set(repo, shape):
     assert git(batch.worktree, "status", "--porcelain") == ""
     sha = batch.commit(mod.ChangeSet((change,)), "a change set")
     assert _name_status(batch.worktree, sha) == {"agent/lessons/x.md": "A"}
+
+
+def _mutable_containers(root, depth=4):
+    """Every list, dict, set or bytearray reachable from `root` through containers, instance
+    attributes and slots, `depth` levels down."""
+    found, stack, seen = [], [(root, depth)], set()
+    while stack:
+        obj, left = stack.pop()
+        if id(obj) in seen or isinstance(obj, (str, bytes, int, float, type(None))):
+            continue
+        seen.add(id(obj))
+        if isinstance(obj, (list, dict, set, bytearray)):
+            found.append(obj)
+        if left == 0:
+            continue
+        inner = list(obj.values()) if isinstance(obj, dict) else \
+            list(obj) if isinstance(obj, (list, tuple, set, frozenset)) else []
+        inner += list(getattr(obj, "__dict__", {}).values())
+        inner += [getattr(obj, name) for cls in type(obj).__mro__
+                  for name in getattr(cls, "__slots__", ()) if hasattr(obj, name)]
+        stack.extend((item, left - 1) for item in inner)
+    return found
+
+
+def test_a_change_set_cannot_change_once_built(repo):
+    """O-C by construction (design: "immutable"): neither a built `ChangeSet` nor an
+    `AgentChange` in it lets an attribute be reassigned, and nothing reachable from a change
+    set is a mutable container, so nothing is slipped in after it was checked. Whatever a
+    mutation attempt achieves, the commit-maker checks what it is handed: a settings file
+    pushed into any mutable container found never reaches a commit."""
+    batch = delivery(repo, ForgeHTTP()).start_batch("frozen", lanes=LANES)
+    _write(batch.draft_root / "agent/lessons/ok.md", "ok\n")
+    built = batch.change_set()
+    [change] = list(built)
+    reassigned = []
+    for obj, name, value in [(change, "path", "settings/rogue.yaml"), (change, "content", b"x\n"),
+                             *((built, name, None) for name in getattr(built, "__dict__", {}))]:
+        try:
+            setattr(obj, name, value)
+        except (AttributeError, TypeError):
+            continue
+        reassigned.append(f"{type(obj).__name__}.{name}")
+    mutable = _mutable_containers(built)
+    for container in mutable:
+        if isinstance(container, list):
+            container.append(SimpleNamespace(path="settings/rogue.yaml", content=b"smuggled\n"))
+    _, error, _ = bounded(lambda: batch.commit(built, "claim"))
+    if error is None:
+        assert "settings/rogue.yaml" not in _name_status(batch.worktree, "HEAD")
+    assert reassigned == [], "an attribute of a built change set was reassigned"
+    assert mutable == [], "a built change set holds a mutable container"
+    assert error is None, error
+    assert _name_status(batch.worktree, "HEAD") == {"agent/lessons/ok.md": "A"}
 
 
 @pytest.mark.parametrize(("path", "content"), [
@@ -465,7 +555,8 @@ def test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links(repo, tmp_p
 def test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_write(repo):
     """O7: the commit lands on the tenant remote's batch branch, the PR opens against the
     tenant repo's `main` at the forge's repository API, and neither tenant `main` nor the
-    product repository changes."""
+    product repository changes. Finish sends the batch branch alone: other branches and tags
+    in the clone (a `lessons/` one included) never reach the remote."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     tenant, remote, _ = repo
@@ -473,8 +564,13 @@ def test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_
     batch = d.start_batch("one", lanes=LANES)
     _write(batch.draft_root / "agent/lessons/new.md", "review me\n")
     sha = batch.commit(batch.change_set(), "learning")
+    for rogue in ("refs/heads/lessons/rogue", "refs/heads/rogue", "refs/tags/rogue"):
+        plant_raw_commit(tenant.knowledge, rogue, "agent/lessons/rogue.md", b"never sent\n",
+                         base=batch.export.commit)
     assert d.finish(batch) == "http://forge.invalid:3000/tenants/blue/pulls/7"
     assert git(remote, "rev-parse", f"refs/heads/{batch.branch}") == sha
+    assert git(remote, "for-each-ref", "--format=%(refname)").splitlines() == \
+        sorted([f"refs/heads/{batch.branch}", "refs/heads/main"]), "finish sent more than its branch"
     assert git(remote, "rev-parse", "main") == batch.export.commit
     assert [(c["base"], c["head"]) for c in http.creates] == [("main", batch.branch)]
     assert all(r.url.path.startswith("/api/v1/repos/tenants/blue/") for r in http.requests)
@@ -593,18 +689,68 @@ def test_a_later_process_delivers_a_retained_branch_by_the_commit_maker_record(r
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
 
 
-def test_finish_and_deliver_ignore_a_fork_pr_with_the_same_branch_name(repo):
-    """O-G through delivery: a fork's open PR whose head has our branch name is not ours.
-    Finish opens our own PR; deliver then returns our open PR without opening another."""
+#: Where the forge's transport fails: `(request) -> fault?` on the route under test.
+_TRANSPORT_FAULTS = {
+    "protection-read": lambda request: request.url.path.endswith("/branches/main"),
+    "pr-listing": lambda request: request.url.path.endswith("/pulls") and request.method == "GET",
+    "pr-create": lambda request: request.method == "POST",
+}
+
+
+@pytest.mark.parametrize("where", sorted(_TRANSPORT_FAULTS))
+def test_a_forge_transport_fault_is_a_refusal_and_the_branch_is_retained(repo, where):
+    """Refusal contract (deck #678): the forge unreachable mid-request (a connection error,
+    not an HTTP status) is a `DeliveryRefused`, never an `httpx` exception escaping
+    delivery. At `open()` nothing is opened; during finish, the pushed branch is retained
+    and a later delivery, the forge back, opens its PR."""
+    http = ForgeHTTP()
+    matches = _TRANSPORT_FAULTS[where]
+
+    def fault(request):
+        return httpx.ConnectError("forge unreachable", request=request) if matches(request) else None
+    if where == "protection-read":
+        http.fault = fault
+        with pytest.raises(target().DeliveryRefused):
+            delivery(repo, http)
+        return
+    d = delivery(repo, http)
+    batch = d.start_batch("unreachable", lanes=LANES)
+    _write(batch.draft_root / "agent/lessons/new.md", "retained through a fault\n")
+    sha = batch.commit(batch.change_set(), "claim")
+    http.fault = fault
+    with pytest.raises(target().DeliveryRefused):
+        d.finish(batch)
+    assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
+    http.fault = None
+    assert delivery(repo, http).deliver("unreachable").endswith("/pulls/7")
+    assert {c["head"] for c in http.creates} == {batch.branch}
+
+
+#: Open PRs that are not this batch's: `(name, row for our branch name)`.
+_NOT_OUR_PR = {
+    "fork-same-name": lambda branch: pr_row(5, branch, repo=FORK),
+    "another-batch": lambda branch: pr_row(5, "lessons/another-batch"),
+    "longer-name": lambda branch: pr_row(5, branch + "-2"),
+    "shorter-name": lambda branch: pr_row(5, branch[:-1]),
+}
+
+
+@pytest.mark.parametrize("other", sorted(_NOT_OUR_PR))
+def test_finish_and_deliver_answer_only_with_the_pr_for_their_own_head(repo, other):
+    """O-G through delivery: a PR is this batch's only when its head is exactly the batch's
+    branch in this repository. A fork's open PR with our branch name, another batch's open
+    `lessons/` PR, and open PRs whose head names extend or truncate ours are not ours, even
+    listed first: finish opens our own PR; deliver then returns our open PR, listed after the
+    other, without opening another."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("forked", lanes=LANES)
-    http.pages = {1: [pr_row(5, batch.branch, repo=FORK)]}
+    http.pages = {1: [_NOT_OUR_PR[other](batch.branch)]}
     _write(batch.draft_root / "agent/lessons/new.md", "ours\n")
     batch.commit(batch.change_set(), "ours")
     assert d.finish(batch).endswith("/pulls/7")
-    assert len(http.creates) == 1
-    http.pages = {1: [pr_row(5, batch.branch, repo=FORK), pr_row(8, batch.branch)]}
+    assert [c["head"] for c in http.creates] == [batch.branch]
+    http.pages = {1: [_NOT_OUR_PR[other](batch.branch), pr_row(8, batch.branch)]}
     assert d.deliver("forked").endswith("/pulls/8")
     assert len(http.creates) == 1
 
@@ -613,23 +759,6 @@ def test_finish_and_deliver_ignore_a_fork_pr_with_the_same_branch_name(repo):
 #: that may only fast-forward makes none.
 _MAKES_COMMITS = {"commit", "commit-tree", "cherry-pick", "revert", "am", "rebase", "merge"}
 _SENDS_COMMITS = {"push", "send-pack"}
-_GIT_OPTION_VALUES = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
-
-
-def _git_subcommand(argv):
-    """`(subcommand, argv)` of a spawned `git`, or `(None, argv)` for any other program."""
-    args = shlex.split(argv) if isinstance(argv, str) else [os.fsdecode(a) for a in argv]
-    if not args or os.path.basename(args[0]) != "git":
-        return None, args
-    rest = iter(args[1:])
-    for arg in rest:
-        if arg in _GIT_OPTION_VALUES:
-            next(rest, None)
-        elif not arg.startswith("-"):
-            return arg, args
-    return None, args
-
-
 def _census(events, kinds):
     return {phase for phase, sub, args in events
             if sub in kinds and not (sub == "merge" and "--ff-only" in args)}
@@ -648,7 +777,7 @@ def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo,
 
     def audit(event, args):
         if active[0] and event == "subprocess.Popen":
-            sub, argv = _git_subcommand(args[1])
+            sub, argv = git_subcommand(args[1])
             if sub is not None:
                 events.append((phase[0], sub, argv))
 
@@ -763,6 +892,24 @@ def test_revert_undoes_only_the_latest_of_several_commit_maker_changes(repo, tmp
     assert git_bytes(repo[1], "cat-file", "blob", f"{tip}:{_LEARNED}") == history[-2]
 
 
+def test_revert_undoes_one_lesson_of_a_claim_that_wrote_several(repo, tmp_path):
+    """Flow 4 / O-C: a revert is a change set for the one lesson named, made by the
+    commit-maker, never an undoing of the agent's whole commit. One claim created two lessons
+    and changed the seed, merged; reverting one created lesson deletes it alone, leaving the
+    other lesson and the seed as `main` holds them."""
+    writer = delivery(repo, ForgeHTTP())
+    batch = writer.start_batch("several", lanes=LANES)
+    lane = batch.draft_root / "agent/lessons"
+    (lane / "learned.md").write_bytes(b"one of the claim's lessons\n")
+    (lane / "other.md").write_bytes(b"another of the claim's lessons\n")
+    (lane / "seed.md").write_bytes(b"seed, as the same claim rewrote it\n")
+    batch.commit(batch.change_set(), "learning several")
+    writer.finish(batch)
+    merge_on_remote(repo, tmp_path, batch.branch)
+    tip = _reverted(repo, _LEARNED, "learned")
+    assert _name_status(repo[1], tip) == {_LEARNED: "D"}
+
+
 def test_revert_ignores_a_later_commit_maker_change_whose_pr_is_still_open(repo, tmp_path):
     """Choice 5 (orchestrator ruling): the change a revert undoes is the most recent
     commit-maker change to the lesson whose resulting bytes equal `main`'s. The commit-maker
@@ -804,14 +951,21 @@ def test_revert_recreates_a_lesson_the_commit_maker_deleted(repo, tmp_path):
     assert _modes(repo[1], tip, "agent/lessons/seed.md") == {"agent/lessons/seed.md": "100644"}
 
 
-@pytest.mark.parametrize("path", [_LEARNED, "agent/lessons/seed.md"], ids=["agent-created", "agent-changed"])
-def test_revert_refuses_a_lesson_changed_on_main_since_the_commit_maker_wrote_it(repo, tmp_path, path):
+@pytest.mark.parametrize(("path", "edit"), [
+    (_LEARNED, b"a human's later edit\n"), ("agent/lessons/seed.md", b"a human's later edit\n"),
+    ("agent/lessons/seed.md", b"the human's words\n"),
+], ids=["agent-created", "agent-changed", "same-length-edit"])
+def test_revert_refuses_a_lesson_changed_on_main_since_the_commit_maker_wrote_it(
+        repo, tmp_path, path, edit):
     """Flow 4, choice 5 (user decision): revert proceeds only while `main`'s bytes for the
-    lesson equal those of the commit-maker's latest change to it. A human edit on `main`
-    after the merge refuses the revert (`DeliveryRefused`): nothing is pushed, no PR is
-    requested, and `main` is unchanged."""
-    merged_agent_lesson(repo, tmp_path, "written", path, b"the agent's words\n")
-    push_to_remote(repo, tmp_path, lambda c: _write(c / path, "a human's later edit\n"))
+    lesson equal those of the commit-maker's latest change to it, byte for byte (a human
+    edit of the same length is an edit). A human edit on `main` after the merge refuses the
+    revert (`DeliveryRefused`): nothing is pushed, no PR is requested, and `main` is
+    unchanged."""
+    agent_words = b"the agent's words\n"
+    assert len(agent_words) == len(b"the human's words\n")
+    merged_agent_lesson(repo, tmp_path, "written", path, agent_words)
+    push_to_remote(repo, tmp_path, lambda c: (c / path).write_bytes(edit))
     _refused_revert(repo, path, "written")
 
 
@@ -1025,7 +1179,8 @@ def test_credentials_loaded_once_and_token_not_in_representation(repo):
 @pytest.mark.parametrize("ambient", ["git-dir", "work-tree", "both"])
 def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, tmp_path, monkeypatch, ambient):
     """O7 under amendment 2: inherited `GIT_DIR`/`GIT_WORK_TREE` cannot redirect publish, the
-    batch, the commit-maker, finish or retained delivery into another repository."""
+    batch, the commit-maker, finish, retained delivery or, once a human has merged the PR,
+    the revert of its lesson into another repository."""
     foreign = tmp_path / "foreign"
     foreign.mkdir()
     git(foreign, "init", "-b", "main")
@@ -1035,11 +1190,14 @@ def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, t
     foreign_head = git(foreign, "rev-parse", "HEAD")
     expected = git(repo[0].knowledge, "rev-parse", "HEAD")
     http = ForgeHTTP()
-    with monkeypatch.context() as env:
+
+    def redirect(env):
         if ambient in {"git-dir", "both"}:
             env.setenv("GIT_DIR", str(foreign / ".git"))
         if ambient in {"work-tree", "both"}:
             env.setenv("GIT_WORK_TREE", str(foreign))
+    with monkeypatch.context() as env:
+        redirect(env)
         d = delivery(repo, http)
         batch = d.start_batch("ambient", lanes=LANES)
         assert (batch.draft_root / "agent/lessons/seed.md").read_text(encoding="utf-8") == "seed\n"
@@ -1054,6 +1212,14 @@ def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, t
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert git(repo[0].knowledge, "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert git(repo[1], "rev-parse", "main") == expected
+    merged = merge_on_remote(repo, tmp_path, batch.branch)
+    with monkeypatch.context() as env:
+        redirect(env)
+        assert d.revert("agent/lessons/ambient.md", "ambient").endswith("/pulls/7")
+    revert_head = http.creates[-1]["head"]
+    tip = git(repo[1], "rev-parse", f"refs/heads/{revert_head}")
+    assert git(repo[1], "rev-parse", f"{tip}^") == merged == git(repo[1], "rev-parse", "main")
+    assert _name_status(repo[1], tip) == {"agent/lessons/ambient.md": "D"}
     assert git(repo[0].knowledge, "show", f"{sha}:agent/lessons/ambient.md") == "tenant authored"
     assert _name_status(repo[0].knowledge, sha) == {"agent/lessons/ambient.md": "A"}
     assert git(foreign, "rev-parse", "HEAD") == foreign_head
