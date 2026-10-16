@@ -38,6 +38,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
 from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._clock import CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -89,6 +90,8 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         # The agent half lives under the data root, beside the run dir: moving it means moving
         # the data root.
         subjects.append(("tenant agent half", tenant_agent, "Set DEFENDER_DATA_ROOT to a path"))
+    # The run clock's directory (#1255) sits in a sibling of the runs base, under the data root.
+    subjects.append(("run clock directory", clock_dir(run_dir), "Set DEFENDER_DATA_ROOT to a path"))
     for subject, path, remedy in subjects:
         if mounts and not _covered(path, mounts):
             raise _uncovered_fault(subject, path, mounts, remedy)
@@ -123,6 +126,13 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
             f"type=bind,source={_daemon_source(tenant_agent, mounts)},"
             f"target={tenant_agent},readonly",
         ]
+    # The run clock's own read-only mount (#1255 "Into the box"): the file the image's
+    # time-faking preload reads, outside every tree the model view shows.
+    argv += [
+        "--mount",
+        f"type=bind,source={_daemon_source(clock_dir(run_dir), mounts)},"
+        f"target={CLOCK_TARGET},readonly",
+    ]
     argv += [
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
         "--workdir", str(run_dir),
@@ -236,8 +246,15 @@ def _start_boxed(
     except BoxFault as e:
         write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
+    try:
+        clock_file = prepare_clock(run_dir)
+    except (OSError, ValueError) as e:
+        write_did_not_run(run_dir, f"box start refused before create: the run clock's file "
+                                   f"could not be made: {e}", write_verdict=write_verdict)
+        raise BoxFault(f"could not make the run clock's file for the box {name}: {e}") from e
     created = _call(docker, create.argv)
     if created.returncode != 0:
+        remove_clock(clock_file)
         # `docker run --detach` is create-then-start, so a failure at task start can leave a
         # `created` container behind; reap it if it carries our token. Marker and reap are
         # best-effort and must not replace the create's stderr.
@@ -259,6 +276,7 @@ def _start_boxed(
         # The box is ours (create succeeded); the reap is best-effort so it cannot skip the
         # marker or replace `e`.
         _reap_on_fault(docker, name)
+        remove_clock(clock_file)
         write_did_not_run(
             run_dir, f"box startup faulted before the reap scan could run: {e}",
             write_verdict=write_verdict
@@ -266,6 +284,7 @@ def _start_boxed(
         raise
     return BoxExecutor(
         spec=spec, transport=_DockerTransport(name, spec), name=name, docker=docker,
+        clock_file=clock_file,
     )
 
 
@@ -486,6 +505,8 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
     reason = _remove_container(docker or _carried_docker(box), box.name)
     if reason is not None:
         raise BoxFault(f"could not tear down the box {box.name}: {reason}")
+    if box.clock_file is not None:
+        remove_clock(box.clock_file)
 
 
 def _carried_docker(box: object) -> DockerFn:

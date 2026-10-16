@@ -10,6 +10,7 @@ import os
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import ClassVar, Protocol, runtime_checkable
 
@@ -26,6 +27,7 @@ from defender.runtime.box_codec import (
     encode_request,
     encode_response,
 )
+from ._clock import write_clock
 from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`
     Finding,
     RunTainted,
@@ -106,6 +108,29 @@ class BoxExecutor:
     docker: Callable[..., subprocess.CompletedProcess] | None = field(
         default=None, compare=False, repr=False,
     )
+    #: The run clock's file on the host (#1255 "Into the box"), bound read-only into the box,
+    #: where the image's time-faking preload reads it. `None` for a box with no clock mount
+    #: (the unsandboxed fallback, a learning-loop box).
+    clock_file: Path | None = field(default=None, compare=False)
+    #: The run clock's reader (`RunState.now`) once the run has bound it (`follow_clock`).
+    _clock_reading: Callable[[], datetime] | None = field(
+        default=None, compare=False, repr=False,
+    )
+
+    def follow_clock(self, reading: Callable[[], datetime]) -> None:
+        """Have the box's programs read the run's clock: before every command, the clock file is
+        rewritten from `reading()` (the run clock moves against the wall — it pauses for an
+        oracle turn, and an arm's runs ahead of or behind it). A box with no clock file has no
+        preload to feed."""
+        self._clock_reading = reading
+
+    def _sync_clock(self) -> None:
+        if self.clock_file is None or self._clock_reading is None:
+            return
+        try:
+            write_clock(self.clock_file, self._clock_reading())
+        except OSError as e:
+            raise BoxFault(f"could not set the run clock for the box {self.name}: {e}") from e
 
     @property
     def sandboxed(self) -> bool:
@@ -116,6 +141,7 @@ class BoxExecutor:
         self, pipelines: Sequence[bash_exec.Pipeline], *,
         command: str, cwd: Path, timeout: float,
     ) -> BoxResult:
+        self._sync_clock()
         frame = encode_request(pipelines)
         try:
             raw = self.transport(frame, cwd=cwd, timeout=timeout)
