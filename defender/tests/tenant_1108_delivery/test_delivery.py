@@ -954,16 +954,18 @@ def test_revert_recreates_a_lesson_the_commit_maker_deleted(repo, tmp_path):
 @pytest.mark.parametrize(("path", "edit"), [
     (_LEARNED, b"a human's later edit\n"), ("agent/lessons/seed.md", b"a human's later edit\n"),
     ("agent/lessons/seed.md", b"the human's words\n"),
-], ids=["agent-created", "agent-changed", "same-length-edit"])
+    ("agent/lessons/seed.md", b"the agent's words\nand a human's addition\n"),
+], ids=["agent-created", "agent-changed", "same-length-edit", "appended-edit"])
 def test_revert_refuses_a_lesson_changed_on_main_since_the_commit_maker_wrote_it(
         repo, tmp_path, path, edit):
     """Flow 4, choice 5 (user decision): revert proceeds only while `main`'s bytes for the
-    lesson equal those of the commit-maker's latest change to it, byte for byte (a human
-    edit of the same length is an edit). A human edit on `main` after the merge refuses the
-    revert (`DeliveryRefused`): nothing is pushed, no PR is requested, and `main` is
-    unchanged."""
+    lesson equal those of the commit-maker's latest change to it, byte for byte: a human
+    edit of the same length is an edit, and so is one that appends to the agent's bytes. A
+    human edit on `main` after the merge refuses the revert (`DeliveryRefused`): nothing is
+    pushed, no PR is requested, and `main` is unchanged."""
     agent_words = b"the agent's words\n"
     assert len(agent_words) == len(b"the human's words\n")
+    assert b"the agent's words\nand a human's addition\n".startswith(agent_words)
     merged_agent_lesson(repo, tmp_path, "written", path, agent_words)
     push_to_remote(repo, tmp_path, lambda c: (c / path).write_bytes(edit))
     _refused_revert(repo, path, "written")
