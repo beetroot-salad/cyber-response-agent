@@ -14,20 +14,26 @@ the fork snapshot, P2), and the mid-pair refusal (reversed, D1). Their replaceme
 
 WHAT THESE ARE EVIDENCE FOR (contract review R1-7, recheck RC-2/RC-8c): every test here is a
 regression over the new branch point (D1) — each passes once D1 lands, fork snapshot or not —
-with three exceptions:
+with four exceptions:
 
 * the D4 pin, which holds today and after;
 * `test_c7_the_capture_is_the_one_the_branch_points_snapshot_holds` — C7's capture half. Today's
   `validate` reads the source's WHOLE finished queries table, so a D1-only lift admits a branch
   point that preceded every capture; only a check that reads the branch point's snapshot
   refuses it;
+* `test_c7_the_frontier_is_the_snapshots_not_a_fence_count_cut_of_the_finished_document` — C7's
+  frontier half (adversary pass 2, F2-C7). Today's frontier is the FINISHED document cut at the
+  branch point's fence count, which is the document at the branch point only while no fence
+  before the cut is edited later; a `fix_row` after the branch point breaks that, and a D1-only
+  lift refuses the legal branch point it leaves behind;
 * `test_d1_a_branch_response_that_batches_two_appends_is_rerun_whole` — P2 (the document
   restored by content as of the branch point); a D1-only lift over today's document seed
   failed it (recheck review RC-8c).
 
 The frontier rule (`test_the_frontier_is_the_one_the_branch_points_snapshot_holds`) stays a D1
-regression: today's frontier is already read at the branch point (the fence-count cut), not off
-the finished document, so it passes under a D1-only lift. Everything else about the snapshot
+regression: with no fence edited after the branch point, today's fence-count cut is already the
+document at the branch point, so it passes under a D1-only lift (its C7 counterpart above is the
+case where the cut and the snapshot disagree). Everything else about the snapshot
 is `test_1255_snapshot_restore.py`'s.
 
 RED TODAY (expected): every control arm is taken at a D1 branch point, which today's
@@ -46,6 +52,12 @@ pytest.importorskip("pydantic_ai")
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.tests import _1255_snapshot as S  # noqa: E402
+from defender.tests._invlang_warn_836 import (  # noqa: E402
+    PROLOGUE,
+    REPAIRED_ROW_ATTRS,
+    WARN_ROW,
+    attr_block,
+)
 from defender.tests._session_store_705 import sql, store_mod  # noqa: E402
 from defender.tests.e2e._replay_harness import Turn  # noqa: E402
 
@@ -209,6 +221,90 @@ def test_the_frontier_is_the_one_the_branch_points_snapshot_holds(tmp_path, capl
     assert "frontier" in caplog.text, (
         f"the refusal does not name the empty frontier: {caplog.text[-400:]!r}")
     _arm_launched(S.drive_arm(tmp_path, S.spec_for(source, after), S.Recorder([S.done()])))
+
+
+#: The F2-C7 source's first fence: `_invlang_warn_836.PROLOGUE` (two declared vertices and one
+#: lead, every cell held) with `v-001`'s one attribute OPEN (`owner=??`) — the only open thing in
+#: the document (the harness's lead-0 block opens nothing).
+OPEN_OWNER = PROLOGUE.replace("|bastion-01.corp|kind=physical\n", "|bastion-01.corp|owner=??\n")
+#: The in-place repair: the flagged `owner` row (a key that refines nothing, so the slot stays
+#: open) becomes `attrs.owner`, which closes it.
+REPAIR = Turn(tool_calls=[("fix_row", {"old_row": WARN_ROW, "new_row": REPAIRED_ROW_ATTRS})])
+#: Open slot declared, flagged row landed, `echo x` (the branch point), the repair, `echo z`.
+C7_FRONTIER_SCRIPT = (S.append(OPEN_OWNER), S.append(attr_block(WARN_ROW)), S.echo("x"), REPAIR,
+                      S.echo("z"), S.done())
+
+
+def _answers(request: list) -> list[tuple]:
+    """The tool answers a request's last message carries, as `S.project` renders them, minus
+    the call id: the arm's repair is its OWN call (not the inherited branch response's), so its
+    `pyd_ai_<hex>` id is a fresh random one (O4)."""
+    (*_head, parts), = S.project([request[-1]])
+    return [(part[0], part[1], part[3]) if len(part) == 4 else part for part in parts]
+
+
+def test_c7_the_frontier_is_the_snapshots_not_a_fence_count_cut_of_the_finished_document(
+        tmp_path, caplog):
+    """C7, the frontier half (adversary pass 2, F2-C7): "something open in the frontier" reads
+    the source's state AS OF THE BRANCH POINT's snapshot, not a cut of the finished document.
+    `investigation.md` is rewritable (`fix_row` edits a row in place), so the finished
+    document's first n fences are not the document at a branch point when a fence BEFORE the
+    cut was repaired after it.
+
+    This source declares `v-001` with one open attribute (`owner=??`), lands a refinement row
+    the gate flags (key `owner`, which refines nothing — the slot stays open), runs `echo x`
+    (the branch point), and only THEN repairs that row in place to `attrs.owner`, which closes
+    the slot; `echo z` follows. At `echo x` the frontier holds the open `attrs.owner`: a legal
+    branch point. The repair adds no fence, so the fence-count cut at `echo x` is the WHOLE
+    finished document — repaired, nothing open — and a check reading it refuses a legal point.
+
+    Branched at `echo x`, the arm launches; making the source's later calls itself, it makes
+    the repair against the document the snapshot holds (the flagged row still there), gets the
+    source's own answer, and ends holding the source's finished document. Negative control
+    on the same source: branched at `echo z`, after the repair closed the only open slot, the
+    arm is refused naming the frontier — the two branch points really differ in what is open.
+
+    EVIDENCE FOR C7 (legality reads the snapshot): a D1 lift that keeps today's fence-count
+    frontier refuses the `echo x` arm.
+
+    RED TODAY (class a): both arms are refused at a D1 branch point for D1's reason
+    ("unanswered")."""
+    assert "|owner=??\n" in OPEN_OWNER, "fixture: PROLOGUE's `v-001` row moved; nothing is open"
+    source = S.drive_source(tmp_path, C7_FRONTIER_SCRIPT)
+    assert REPAIRED_ROW_ATTRS in source.document, "the source's repair did not land"
+    assert WARN_ROW not in source.document, "the source's repair did not land in place"
+    calls = S.tool_calling_responses(source.store)
+    x, repair, z = calls[2], calls[3], calls[4]
+    for row, (tool, arg) in ((x, ("bash", "echo x")), (repair, ("fix_row", WARN_ROW)),
+                             (z, ("bash", "echo z"))):
+        (call,) = S.calls_of(S.message_at(source.store, row))
+        assert (call.tool_name, arg in call.args_as_dict().values()) == (tool, True), (
+            f"branch point {row} is not `{tool} {arg}`: {call}")
+    natural = _answers(source.main.requests[4])  # the repair's answer, as MAIN read it
+    assert "repaired 1 flagged row" in repr(natural), (
+        f"the source's repair was not answered as a repair: {natural!r}")
+    caplog.set_level(logging.INFO)
+
+    arm = S.drive_arm(tmp_path, S.spec_for(source, x), S.Recorder([REPAIR, S.echo("z"), S.done()]))
+
+    refused = S.refused_at_launch(arm)
+    assert refused is None, (
+        f"the arm at `echo x` was refused at launch ({refused}) — at that branch point `v-001`'s "
+        f"`attrs.owner` was still open; only the finished document's repaired row is closed: "
+        f"{caplog.text[-400:]!r}")
+    answer = _answers(arm.main.requests[1])
+    assert answer == natural, (
+        f"the arm's re-run repair was answered {answer!r}, not {natural!r} — the arm did not "
+        "hold the document as it stood at `echo x`")
+    assert arm.document == source.document
+
+    forked = len(S.child_sessions(source.store))
+    caplog.clear()
+    late = S.drive_arm(tmp_path, S.spec_for(source, z), S.Recorder([S.done()]), name="late",
+                       run_id="late-1255")
+    _refused(source, late, forked)
+    assert "frontier" in caplog.text, (
+        f"the refusal at `echo z` does not name the empty frontier: {caplog.text[-400:]!r}")
 
 
 #: What a refused arm's folder held before launch, by plant: (path, bytes) to compare after.
