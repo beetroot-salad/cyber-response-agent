@@ -596,6 +596,174 @@ def test_a_tenant_folder_swapped_for_a_link_after_acceptance_refuses_every_repos
     assert S.tree(b_dir) == b_before, "A's calls through its real folder changed B's tree"
 
 
+# ------------------------------------------------------------------------------------------
+# A level swapped AFTER the check (adversary F10: every link test above plants its link before
+# the call, so a walk that `lstat`s each level and then opens it by path passes them all).
+# ------------------------------------------------------------------------------------------
+
+def _decoy_episode(a: dict, root: Path, stranger: str) -> Path:
+    """A copy of A's episode folder at `<root>/<epA>`, standing for B's: its roster names
+    `stranger` for `a` and fresh ids for `b` and `c`, and its `runs/` holds an arm folder at
+    `stranger` (alert `decoy`) — so a view that reads through a link to it shows other ids, and
+    `open(stranger)` succeeds only there."""
+    decoy = root / a["episode_id"]
+    shutil.copytree(a["episode"], decoy, symlinks=True)
+    S.write_roster(decoy, {"a": stranger, "b": S.new_id(), "c": S.new_id()})
+    S.make_run(decoy / "runs", stranger, alert='{"alert": "decoy"}\n')
+    return decoy
+
+
+@pytest.mark.parametrize("level", ["episode", "arm_container"])
+def test_a_level_swapped_for_a_link_after_the_view_opened_is_never_followed(
+        tmp_path, data_root, level):
+    """O8 / S-iso step 2 ("opens `runs`, `episodes`, `<ep>`, `runs` and the run or arm entry,
+    each OFF ITS PARENT'S HANDLE, never following"), the time-of-check half (adversary F10): A's
+    view is opened while every level is real; THEN a level below it is swapped for a link to a
+    decoy episode (A's real folder renamed aside, so a held handle still reaches it) —
+    `<A>/episodes/<epA>` itself (`episode`) or its arm container `<epA>/runs`
+    (`arm_container`). The arm `stranger` is in A's roster but was never started in A: its
+    folder exists only in the decoy. The same view, asked afterwards, never answers from the
+    decoy: `open(stranger)` and `arms([stranger])` refuse (absent in A's own container, or a
+    link refused — either), and `arm_ids()` is A's roster or a refusal, never the decoy's. A view
+    that re-reaches a level by its path (`Path(episode.dir) / "runs"`, an `lstat` and then an
+    open by path) hands out the decoy's arm. Positive control, same calls: the swap undone and
+    `stranger` started in A's own container, a view opens it at A's path. RED at base: the view
+    is looked up under the episodes variable."""
+    a = _tenant_scene(data_root, A_ID)
+    stranger = a["roster"]["a"]
+    shutil.rmtree(a["episode"] / "runs" / stranger)
+    decoy = _decoy_episode(a, tmp_path / "decoy", stranger)
+    decoy_before = S.tree(decoy)
+    swapped = a["episode"] if level == "episode" else a["episode"] / "runs"
+    target = decoy if level == "episode" else decoy / "runs"
+    aside = data_root / f"aside-{level}"
+    runs = a["tenant"].runs_repository()
+
+    faults: list[str] = []
+    with runs.episode(a["episode_id"]) as view:
+        os.rename(swapped, aside)
+        os.symlink(target, swapped)
+        opened = S.raised(view.open, _rid(stranger))
+        if opened is None:
+            faults.append("open(stranger) after the swap handed out the decoy's arm")
+        elif not _is_refusal(opened):
+            faults.append(f"open(stranger) after the swap gave {opened!r}")
+        answers: list = []
+
+        def _arms() -> None:
+            with view.arms([_rid(stranger)]) as handout:
+                answers.append(handout[_rid(stranger)])
+
+        whole = S.raised(_arms)
+        answer = whole if whole is not None else answers[0]
+        if not _is_refusal(answer):
+            faults.append(f"arms([stranger]) after the swap handed out {answer!r}")
+        ids: list = []
+        read = S.raised(lambda: ids.append(view.arm_ids()))
+        if read is None:
+            got = {label: str(arm) for label, arm in (ids[0] or {}).items()}
+            if got != a["roster"]:
+                faults.append(f"arm_ids() after the swap answered {got}, not A's roster")
+        elif not _is_refusal(read):
+            faults.append(f"arm_ids() after the swap gave {read!r}")
+    assert faults == [], f"a level swapped for a link ({level}) was followed:\n  " + (
+        "\n  ".join(faults))
+    assert S.tree(decoy) == decoy_before, "A's view changed the decoy's tree"
+
+    os.unlink(swapped)
+    os.rename(aside, swapped)
+    S.make_run(a["episode"] / "runs", stranger)
+    with runs.episode(a["episode_id"]) as view:
+        assert Path(view.open(_rid(stranger)).run_dir) == a["episode"] / "runs" / stranger
+        assert {k: str(v) for k, v in view.arm_ids().items()} == a["roster"]
+
+
+#: The `_io` calls that open a folder by a path (`_spec1105.RecordingIO` records them).
+_PATH_OPENERS = ("hold", "hold_new", "bind")
+
+
+def _path_holds_below_the_tenant(rec, tenant_dir: Path, data_root: Path) -> list[str]:
+    """Why the folder openers `rec` recorded are not S-iso step 2's shape ([] when they are):
+    none at all went through the seam; a `hold` of anything but `<T>` itself, or one that
+    follows (a level below `<T>` held by its PATH follows every link above it — the time-of-
+    check window F10 exploits); a `bind` rooted anywhere but the data root (configuration); any
+    `hold_new` (its `makedirs` follows links)."""
+    opens = [(n, a, k) for n, a, k in rec.calls if n in _PATH_OPENERS]
+    if not opens:
+        return ["no folder was opened through the injected io= seam"]
+    why = []
+    for name, args, kwargs in opens:
+        root = Path(args[0] if args else kwargs.get("root", ""))
+        if name == "hold_new":
+            why.append(f"hold_new({root}) (its makedirs follows links)")
+        elif name == "hold" and (root != tenant_dir or kwargs.get("follow") is not False):
+            why.append(f"hold({root}, follow={kwargs.get('follow')!r}): not <T> held no-follow")
+        elif name == "bind" and root != data_root:
+            why.append(f"bind({root}): a folder below the data root bound by its path")
+    return why
+
+
+def test_the_episode_doors_open_through_the_seam_and_hold_nothing_below_the_tenant_by_path(
+        data_root):
+    """O8 / S-iso step 2, observed through the repository's injected `io=` seam (used to RECORD
+    calls, never to inject a fault — the owner's test shape, `_spec1105.RecordingIO`), as
+    `test_1105_every_repository_function_takes_an_injected_io_like_the_handle` pins it for the
+    natural doors: each episode door — `episode(ep)` with `arm_ids()` and `open(arm)`, the
+    sibling form `episode(ep, roster_label=)` with `arm_id`, `start_runs`, `episode_files(ep)`
+    and `create_episode()` — opens through the seam, and every folder it opens by path is `<T>`
+    itself, held no-follow (or the data root, bound as configuration); every level below is
+    stepped off a held handle. Adversary F10: a walk that `lstat`s `<T>/episodes/<ep>` and then
+    opens it by path (`Episode.open(<path>)`, or `hold(<ep>/runs)`) follows a link swapped in
+    between — this pins that no such path open happens, which no planted link can show.
+    Positive control for the checker: a `hold` of `<T>/episodes/<ep>` recorded through the same
+    seam is reported. RED at base: the doors read the episodes variable and open by path."""
+    from defender.run_repository import RunsRepository
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H5
+
+    a = _tenant_scene(data_root, A_ID)
+    tenant_dir = S.tenant_dir(data_root, A_ID)
+    bare_id = S.new_id()
+    S.make_episode(data_root, A_ID, bare_id, manifest=_manifest(bare_id), roster=False)
+
+    def episode(runs) -> None:
+        with runs.episode(a["episode_id"]) as view:
+            view.arm_ids()
+            view.open(_rid(a["roster"]["b"]))
+
+    def sibling(runs) -> None:
+        with runs.episode(a["episode_id"], roster_label="b") as view:
+            view.arm_id("b")
+
+    def start_runs(runs) -> None:
+        with runs.episode(bare_id) as view:
+            view.start_runs(["a", "b", "c"])
+
+    def episode_files(runs) -> None:
+        runs.episode_files(a["episode_id"]).close()
+
+    def create_episode(runs) -> None:
+        with runs.create_episode():
+            pass
+
+    faults = []
+    for door in (episode, sibling, start_runs, episode_files, create_episode):
+        rec = H5.RecordingIO()
+        err = S.raised(door, RunsRepository(a["tenant"], io=rec))
+        if err is not None:
+            faults.append(f"{door.__name__}: raised {err!r}")
+            continue
+        faults.extend(f"{door.__name__}: {why}"
+                      for why in _path_holds_below_the_tenant(rec, tenant_dir, data_root))
+    assert faults == [], "an episode door opened a level below <T> by its path:\n  " + (
+        "\n  ".join(faults))
+
+    probe = H5.RecordingIO()
+    with probe.hold(a["episode"], follow=False):
+        pass
+    assert _path_holds_below_the_tenant(probe, tenant_dir, data_root), (
+        "the checker passed a hold of <T>/episodes/<ep> by its path")
+
+
 # ==========================================================================================
 # Episodes: claimed under <T>/episodes by one exclusive create; no environment (O9, dc 3, 5).
 # ==========================================================================================
