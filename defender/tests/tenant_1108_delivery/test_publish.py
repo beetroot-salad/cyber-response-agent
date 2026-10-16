@@ -34,6 +34,7 @@ from ._support import (
     files_under,
     fresh_process_env,
     git,
+    git_config_home,
     git_subcommand,
     index_entry,
     lock_probe,
@@ -774,3 +775,118 @@ def test_worktrees_are_cut_only_under_the_tenant_lock(repo, tmp_path):
     assert git(tenant.knowledge, "worktree", "list", "--porcelain") == worktrees
     assert git(repo[1], "for-each-ref", "--format=%(refname) %(objectname)") == branches
     assert http.creates == []
+
+
+# ---------------------------------------------------------------------------------------
+# O-F: git's own upkeep never runs over the clone
+# ---------------------------------------------------------------------------------------
+
+#: A maintenance task the clone's own config forces on every `maintenance run --auto`: it
+#: writes a commit-graph, so a run leaves a file behind whatever environment the code under
+#: test gives its git (choice 20).
+_FORCED_TASK = (("maintenance.commit-graph.enabled", "true"),
+                ("maintenance.commit-graph.auto", "-1"))
+
+
+def _graphs(checkout):
+    info = Path(checkout) / ".git" / "objects" / "info"
+    return sorted(p.name for p in info.glob("commit-graph*"))
+
+
+def _upkeep_locks(checkout):
+    git_dir = Path(checkout) / ".git"
+    return [p.name for p in (git_dir / "objects" / "maintenance.lock", git_dir / "gc.pid")
+            if os.path.lexists(p)]
+
+
+def _running_in(*roots):
+    """`(pid, command line)` of every other process whose working folder is under `roots`."""
+    folders = [os.path.realpath(root) for root in roots]
+    found = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit() or int(entry) == os.getpid():
+            continue
+        try:
+            cwd = os.readlink(f"/proc/{entry}/cwd")
+            with open(f"/proc/{entry}/cmdline", "rb") as f:
+                argv = f.read(4096)
+        except OSError:
+            continue
+        if any(cwd == folder or cwd.startswith(folder + os.sep) for folder in folders):
+            found.append((int(entry), argv.replace(b"\0", b" ").decode("utf-8", "replace")))
+    return found
+
+
+def _quiet(*roots, seconds=60.0):
+    """Wait until no other process runs under `roots`; returns any still running at the end."""
+    deadline = time.monotonic() + seconds
+    while (running := _running_in(*roots)) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return running
+
+
+def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, monkeypatch):
+    """O-F: the clone changes only by what a call itself does. Git's automatic upkeep
+    (`maintenance run --auto` after a fetch, commit or merge; detached on git >= 2.47) is not
+    that: detached, it holds `maintenance.lock` and writes after the call has returned, racing
+    the next operation on the clone; in the foreground, it rewrites the clone inside a fetch or
+    commit the tenant lock does not cover. So after `open`, `publish`, `start_batch`, `commit`,
+    `reset` and `finish`: no process still runs in the tenant's folders, no upkeep lock stands
+    in the clone, and no upkeep has run there. How the code turns it off is not pinned.
+
+    The clone's own config forces a task that writes a commit-graph, so a run is seen after the
+    fact whatever environment the code gives its git (choice 20). Positive controls: with this
+    process's environment as it is (the fixtures' `no_upkeep` never reaches it), a plain fetch
+    in a clone armed the same way does leave the graph; the scan sees a process in the clone."""
+    for name, value in git_config_home(tmp_path).create().env().items():
+        monkeypatch.setenv(name, value)
+    tenant, remote = repo[0], repo[1]
+    clone = tenant.knowledge
+
+    control = tmp_path / "upkeep-control"
+    git(tmp_path, "clone", remote, control)
+    for key, value in _FORCED_TASK:
+        git(control, "config", key, value)
+    # lint-raw-git: positive control, a git with this process's own environment as the code
+    # under test inherits it (the fixtures' `git` turns upkeep off).
+    subprocess.run(["git", "fetch", "origin"], cwd=control, env=dict(os.environ), check=True,
+                   capture_output=True, timeout=60)
+    assert _quiet(control) == []
+    assert _graphs(control), "a plain fetch here must run git's upkeep, or the probe is blind"
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], cwd=clone)
+    try:
+        assert sleeper.pid in [pid for pid, _ in _running_in(tenant.dir)], \
+            "the scan must see a process running in the clone"
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+
+    for key, value in _FORCED_TASK:
+        git(clone, "config", key, value)
+    roots = [tenant.dir]
+
+    def probe(call, fn):
+        result = fn()
+        running, locks, during = _running_in(*roots), _upkeep_locks(clone), _graphs(clone)
+        left = _quiet(*roots)
+        ran = "before it returned" if during else "after it returned" if _graphs(clone) else ""
+        found = {what: got for what, got in (
+            ("still running at return", running), ("upkeep locks in the clone", locks),
+            ("upkeep's commit-graph written in the clone", ran),
+            ("still running a minute later", left)) if got}
+        assert found == {}, f"{call} left git's upkeep over the clone: {found}"
+        return result
+
+    http = ForgeHTTP()
+    d = probe("open", lambda: delivery(repo, http))
+    advance_remote(repo, tmp_path)
+    probe("publish", d.publish)
+    push_to_remote(repo, tmp_path, lambda checkout: (checkout / "agent/lessons/later.md")
+                   .write_text("a later human merge\n", encoding="utf-8"))
+    batch = probe("start_batch", lambda: d.start_batch("upkeep", lanes=LANES))
+    roots += [batch.worktree, batch.draft_root]
+    (batch.draft_root / "agent/lessons/upkeep.md").write_text("written in the window\n",
+                                                              encoding="utf-8")
+    probe("commit", lambda: batch.commit(batch.change_set(), "claim"))
+    probe("reset", batch.reset)
+    assert probe("finish", lambda: d.finish(batch)).endswith("/pulls/7")

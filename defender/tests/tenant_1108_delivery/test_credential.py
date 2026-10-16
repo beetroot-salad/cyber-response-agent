@@ -29,6 +29,7 @@ import uuid
 import pytest
 
 from ._support import (
+    BARE_NO_UPKEEP,
     LANES,
     TOKEN,
     ForgeHTTP,
@@ -343,7 +344,7 @@ def rewritten(http_repo, tmp_path):
     tenant, remote, _credentials, server = http_repo
     other_root = tmp_path / "other-served"
     (other_root / "tenants").mkdir(parents=True)
-    git(tmp_path, "clone", "--bare", remote, other_root / "tenants" / "blue.git")
+    git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, remote, other_root / "tenants" / "blue.git")
     other = GitHTTP(other_root)
     try:
         git(tenant.knowledge, "config", f"url.{other.url}/.insteadOf", f"{server.url}/")
