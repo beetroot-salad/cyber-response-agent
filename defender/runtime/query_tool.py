@@ -175,18 +175,6 @@ def _model_visible(deps: Any, detail: str) -> str:
     return redact_settings_path(text, tenant.settings)
 
 
-def _escaped_reason(deps: Any, detail: str) -> str:
-    """An escaped `ConfigFault`'s text as the reason a down system carries (#1256 O-5b): the run's
-    one reason redaction (`system_status.shown_reason`) when the call's deps name the run's
-    tenant, else `_model_visible`'s (deps no run built, as a unit test's)."""
-    tenant = getattr(deps, "tenant", None)
-    if tenant is None:
-        return _model_visible(deps, detail)
-    defender_dir = getattr(deps, "defender_dir", None)
-    return system_status.shown_reason(
-        detail, tenant, defender_dir=Path(defender_dir) if defender_dir else None)
-
-
 class QueryCapture(AbstractCapability[Any]):
 
     def __init__(self, registry: Any, role: str = "gather"):
@@ -616,7 +604,10 @@ class QueryCapture(AbstractCapability[Any]):
             # the row records the call that ran, uncharged (the breaker counts only what can
             # change during a run, DP2), and the answer is the not-configured refusal every
             # later call gets, naming the fault's reason.
-            system_status.mark_escaped(run_state_of(deps), system, _escaped_reason(deps, detail))
+            defender_dir = getattr(deps, "defender_dir", None)
+            system_status.mark_escaped(
+                run_state_of(deps), system, detail, tenant=getattr(deps, "tenant", None),
+                defender_dir=Path(defender_dir) if defender_dir is not None else None)
             await self._record(
                 deps, system=system, verb=verb, query_id=query_id, params=params,
                 payload=payload, exit_code=exit_code, detail=detail, system_key="",

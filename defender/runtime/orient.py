@@ -5,12 +5,12 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from types import MappingProxyType
 
 from defender import _alert_input
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft
 from defender._untrusted import wrap_fresh
+from defender.runtime.system_status import NONE_DOWN
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _DEFENDER_DIR.parent
@@ -160,19 +160,16 @@ def _build_corpus_vocab_section(
     return None
 
 
-#: No system down: an orientation for a run that judged none.
-_NONE_DOWN: Mapping[str, str] = MappingProxyType({})
-
-
 def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a run fact
     run_dir: Path, defender_dir: Path, alert_path: Path,
     *, systems: Sequence[str], lead_zero_section: str | None = None,
     shim: ShimRunner | None = None, tenant_agent: Path | None = None,
-    down: Mapping[str, str] = _NONE_DOWN,
+    down: Mapping[str, str] = NONE_DOWN,
 ) -> str:
     """`shim` is the injection seam for the lessons and corpus-vocabulary sections' three
-    subprocesses; omitted, they run for real. `down` is each granted system down at run start
-    with its cause (#1256 O-3), marked in the workspace view."""
+    subprocesses; omitted, they run for real. `down` is each system down for the run as this
+    view is built, with its cause (#1256 O-3, `system_status.down_notes`), marked in the
+    workspace view."""
     run_shim = shim if shim is not None else _shim
     try:
         from defender import run_common

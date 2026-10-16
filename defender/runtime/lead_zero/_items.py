@@ -9,13 +9,16 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender.runtime.run_state import RunState
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import VerbRegistry
 from ._agreement import CorrelationDispatch
 from ._spec import CORRELATION_REQUEST_LIMIT, L3
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.hooks.inject_system_skill_description import SystemIndex
 
 _logger = logging.getLogger(__name__)
 
@@ -116,7 +119,7 @@ async def run_correlation_lead(  # noqa: PLR0913 — the dispatch composition: r
     *, run: Any, run_state: RunState, defender_dir: Path,
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any = None,
-    catalog: str | None,
+    catalog: SystemIndex | None,
     dispatch: CorrelationDispatch, tenant: Any, session_id: str | None,
     on_stamp: Any, on_end: Any,
 ) -> str:

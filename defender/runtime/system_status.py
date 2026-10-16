@@ -1,4 +1,4 @@
-"""Which of a run's granted systems it can use — decided once, at run start (#1256).
+"""Which of a run's granted systems it can use — judged once per run, at its start (#1256).
 
 A system is UP or DOWN for a run, and a down system carries its cause:
 
@@ -18,18 +18,24 @@ that can reveal it (an escaped `ConfigFault`) is not charged (`mark_escaped`). S
 counts only what can change during a run (DP2).
 
 What makes a system usable is fixed before the agent's first turn (DP1): its settings are
-frozen in the run's record, and its adapter is the roster's. `startup_check` judges it there,
-once, from the adapter's own declaration (system rules live with the adapter, #1215); nothing
-is inferred from call outcomes.
+frozen in the run's record, and its adapter is the roster's. `judge_run` judges it there, once
+per run (`run.py` before the run folder exists; the driver only when started without that
+verdict), from the adapter's own declaration (`judge_adapter`; system rules live with the
+adapter, #1215); nothing is inferred from call outcomes. The verdict travels inward as one
+value (`RunSystems`) and is held on the run's state; every surface that marks a system down
+asks the state's CURRENT status when it renders (`down_notes`), not a copy taken at start.
 """
 from __future__ import annotations
 
+import functools
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 
+from defender._paths import adapters_under, name_roots, root_spellings
 from defender.learning.branch.redaction import redact_model_visible
 from defender.runtime import circuit_breaker
 from defender.runtime.verb_dispositions import HEALTH_CHECK, gather_query_systems
@@ -50,9 +56,9 @@ _logger = logging.getLogger(__name__)
 #: adapter's own fault text; a crash's can be arbitrarily long.
 REASON_MAX = 400
 
-#: How a reason names the two code trees an adapter's crash text can locate (`shown_reason`):
-#: the defender tree by its name, the adapters tree by a placeholder (it need not sit under the
-#: defender tree). Spelled here only — every surface's reason passes `shown_reason`.
+#: How a reason names the two code trees an adapter's crash text can locate
+#: (`ReasonScope.reason`): the defender tree by its name, the adapters tree by a placeholder (it
+#: need not sit under the defender tree). Spelled here only — every reason passes that method.
 _DEFENDER_TREE_NAME = "defender"
 _ADAPTERS_TREE_NAME = "<adapters>"
 
@@ -101,59 +107,124 @@ def granted_systems(grants: RunGrants) -> frozenset[str]:
     return grants.gather.systems | grants.correlation.systems
 
 
-def startup_check(
-    roster: RosterRead, tenant: RunTenant, *, defender_dir: Path,
-) -> dict[str, StartCause]:
+@dataclass(frozen=True)
+class ReasonScope:
+    """Where a run's down-cause reasons come from, so each is shown one way (`reason`): the run's
+    tenant (its settings folder named by its pointer, its folder and data root by name) and the
+    two code trees an adapter's own text can locate. Held on the run's state with its start
+    verdict (`hold_at_start`), so a cause made later (`mark_escaped`) hides what the start
+    check's did. Each part optional: the connect validator judges an adapter with no run."""
+
+    tenant: RunTenant | None = None
+    defender_dir: Path | None = None
+    adapters_root: Path | None = None
+
+    def reason(self, text: str) -> str:
+        """`text` as a down system's reason, fit for the model and the operator — THE redaction
+        every reason passes once, where its cause is made, so every surface that renders the
+        cause (the start log lines, the O-8 refusal, MAIN's workspace view, gather's system
+        index, `list_verbs`, the dispatch and call refusals) shows the same safe text. One line,
+        bounded; staged names and world ids removed (`redact_model_visible`); the tenant's
+        settings folder named by its pointer (`redact_settings_path`, the one settings
+        redaction); and every host root named rather than located, at path boundaries
+        (`_paths.name_roots`) — the tenant's folder and the data root (`Tenant.root_names`,
+        their owner's) and the code trees, each by its name here. An adapter's crash text often
+        carries its own file's absolute path, and a repr of the run's record the data root."""
+        text = redact_model_visible(text)
+        named: dict[str, str] = {}
+        if self.tenant is not None:
+            text = redact_settings_path(text, self.tenant.settings)
+            named.update(self.tenant.tenant.root_names())
+        for root, name in ((self.defender_dir, _DEFENDER_TREE_NAME),
+                           (self.adapters_root, _ADAPTERS_TREE_NAME)):
+            if root is not None:
+                named.update(root_spellings(Path(root), name))
+        one_line = " ".join(name_roots(text, named).split())
+        return one_line if len(one_line) <= REASON_MAX else one_line[:REASON_MAX - 1] + "…"
+
+
+#: What a system whose adapter declares no settings check is down for (O-5a).
+NO_CHECK = (
+    "its adapter declares no `check_settings` (every adapter declares its settings check; a "
+    "system needing none declares one that never raises)")
+
+
+def judge_adapter(
+    load: Callable[[], Any], *, tenant: RunTenant | None, scope: ReasonScope,
+) -> StartCause | None:
+    """THE judgement of an adapter (#1256 r4) — the start check's for each granted system, and
+    the connect validator's — and the maker of the cause it finds, its reason shown through
+    `scope`: `AdapterBroken` when `load()` (the adapter module) raises, when the module declares
+    no callable `check_settings`, or when that check raises anything but `ConfigFault`;
+    `NotConfigured` when it raises `ConfigFault`; `None` when the adapter is usable. The check
+    is the declaration every adapter module makes (O-5): `check_settings(tenant)`, a pure
+    function of the run's tenant record. With no `tenant` (the validator: there is no run's
+    record to judge) the judgement stops at the declaration. A verb's `ConfigFault` escaping at
+    call time is judged by `mark_escaped`, through the run's same scope."""
+    try:
+        module = load()
+    except Exception as e:  # noqa: BLE001 — an adapter that will not import is broken, not fatal
+        return AdapterBroken(scope.reason(
+            f"its adapter could not be imported ({type(e).__name__}: {e})"))
+    # Spelled literally, so a reader of the adapters (vulture's dead-code scan among them) sees
+    # the name is read.
+    check = getattr(module, "check_settings", None)
+    if not callable(check):
+        return AdapterBroken(NO_CHECK)
+    if tenant is None:
+        return None
+    try:
+        check(tenant)
+    except ConfigFault as e:
+        return NotConfigured(scope.reason(str(e)))
+    except Exception as e:  # noqa: BLE001 — a check that crashes is the adapter's defect, not the run's
+        return AdapterBroken(scope.reason(f"its `check_settings` raised {type(e).__name__}: {e}"))
+    return None
+
+
+@dataclass(frozen=True)
+class RunSystems:
+    """THE run's one judgement of its systems (#1256 r4): the roster it reads, each granted
+    system down at its start with the cause (`judge_run`), and the scope its reasons are shown
+    in. Made once per run — by `run.py` before the run folder exists, or by the driver when it is
+    started without one — and handed inward as this one value; the run's state holds the live
+    status from there (`hold_at_start`), which every surface asks when it renders."""
+
+    roster: RosterRead
+    down: Mapping[str, StartCause]
+    scope: ReasonScope
+
+
+def judge_run(roster: RosterRead, tenant: RunTenant, *, defender_dir: Path) -> RunSystems:
     """@owns system_down — each granted system the run cannot use, with why: the verdict of its
     adapter's own settings check over the run's frozen record (O-1, O-5), or the reason its
-    adapter cannot be judged (O-5a). Every other granted system is up. Pure: it logs nothing and
-    records nothing (`hold_at_start` does), so `run.py` can ask it before the run exists and
-    the driver again when it starts.
+    adapter cannot be judged (O-5a), each from `judge_adapter`. Every other granted system is
+    up. Pure: it logs nothing and records nothing (`hold_at_start` does), so `run.py` can ask it
+    before the run exists.
 
-    The adapters are `roster`'s — the tree the run reads, never an injected registry (K2). A
-    granted system the roster does not hold is not judged here: a registry built over that
-    roster refuses such a grant at construction (C11).
-
-    Reasons are made fit to show before they are kept (`shown_reason`): the settings folder
-    named by its pointer, and no host path of the data root, the tenant's folder, the defender
-    tree or the adapters tree."""
-    def shown(text: str) -> str:
-        return shown_reason(text, tenant, defender_dir=Path(defender_dir),
-                            adapters_root=Path(roster.root))
-
+    The adapters are `roster`'s — the tree the run reads, never an injected registry (K2) — each
+    imported afresh (`fresh_adapter_module`), never through the call-time cache. A granted
+    system the roster does not hold is not judged here: a registry built over that roster
+    refuses such a grant at construction (C11)."""
+    scope = ReasonScope(tenant=tenant, defender_dir=Path(defender_dir),
+                        adapters_root=Path(roster.root))
     down: dict[str, StartCause] = {}
     for system in sorted(granted_systems(tenant.grants) & set(roster.accepted)):
-        try:
-            module = fresh_adapter_module(roster, system)
-        except Exception as e:  # noqa: BLE001 — an adapter that will not import is broken, not fatal
-            down[system] = AdapterBroken(shown(
-                f"its adapter could not be imported ({type(e).__name__}: {e})"))
-            continue
-        # The declaration every adapter module makes (O-5): `check_settings(tenant)`, a pure
-        # function of the run's tenant record that returns None when the system is usable and
-        # raises `ConfigFault` naming what is wrong otherwise. Spelled literally, so a reader of
-        # the adapters (vulture's dead-code scan among them) sees the name is read.
-        check = getattr(module, "check_settings", None)
-        if not callable(check):
-            down[system] = AdapterBroken(
-                "its adapter declares no `check_settings` (every adapter declares its settings "
-                "check; a system needing none declares one that never raises)")
-            continue
-        try:
-            check(tenant)
-        except ConfigFault as e:
-            down[system] = NotConfigured(shown(str(e)))
-        except Exception as e:  # noqa: BLE001 — a check that crashes is the adapter's defect, not the run's
-            down[system] = AdapterBroken(shown(
-                f"its `check_settings` raised {type(e).__name__}: {e}"))
-    return down
+        cause = judge_adapter(
+            functools.partial(fresh_adapter_module, roster, system), tenant=tenant, scope=scope)
+        if cause is not None:
+            down[system] = cause
+    return RunSystems(roster=roster, down=MappingProxyType(down), scope=scope)
 
 
-def hold_at_start(state: RunState, down: Mapping[str, StartCause]) -> None:
-    """Record the start check's verdict on the run's state, before the agent's first turn, and
-    tell the operator: exactly one line per down system — WARNING for one not configured (O-7),
-    ERROR for a broken adapter (O-5a)."""
-    for system, cause in sorted(down.items()):
+def hold_at_start(state: RunState, systems: RunSystems) -> None:
+    """Hold the run's judgement on its state, before the agent's first turn: each system down
+    at start with its cause, and the scope later causes' reasons are shown in. Tell the
+    operator: exactly one line per down system — WARNING for one not configured (O-7), ERROR for
+    a broken adapter (O-5a)."""
+    with state.lock:
+        state.reason_scope = systems.scope
+    for system, cause in sorted(systems.down.items()):
         _mark(state, system, cause)
         line = f"system {system} is down for this run, from its start: {cause_text(cause)}"
         if isinstance(cause, AdapterBroken):
@@ -234,14 +305,22 @@ def cause_text(cause: Down) -> str:
     return f"tripped by {cause.failures} {circuit_breaker.INFRA_CAUSES}"
 
 
-def mark_escaped(state: RunState, system: str, fault_text: str) -> None:
+def mark_escaped(state: RunState, system: str, fault_text: str, *,
+                 tenant: RunTenant | None = None, defender_dir: Path | None = None) -> None:
     """A verb of `system` raised `ConfigFault` at call time (O-5b): its settings check missed a
     fault its verbs can raise. The system is down as not configured from this call on — the same
     status and accounting the start check gives, reached late — and the escape is logged as the
-    adapter defect it is. `fault_text` is the fault as `shown_reason` names it (the caller has
-    the run's tenant and tree); it becomes the reason every later refusal carries. The call is
-    not charged to the breaker (the caller's row is written uncharged)."""
-    cause = NotConfigured(" ".join(fault_text.split())[:REASON_MAX])
+    adapter defect it is. `fault_text` is the fault's own text: its reason is shown through the
+    scope the run's start verdict holds (`hold_at_start`), the start check's own; a state no
+    start held (a caller that built its own) shows it through the caller's `tenant` and
+    `defender_dir`. The call is not charged to the breaker (the caller's row is written
+    uncharged)."""
+    with state.lock:
+        held = state.reason_scope
+    scope = held if held is not None else ReasonScope(
+        tenant=tenant, defender_dir=defender_dir,
+        adapters_root=adapters_under(defender_dir) if defender_dir is not None else None)
+    cause = NotConfigured(scope.reason(fault_text))
     _logger.error(
         f"adapter defect: a {system} verb raised ConfigFault at call time — a settings fault "
         f"its `check_settings` does not cover. {system} is down for the rest of this run as "
@@ -249,10 +328,20 @@ def mark_escaped(state: RunState, system: str, fault_text: str) -> None:
     _mark(state, system, cause)
 
 
-def down_notes(down: Mapping[str, StartCause], systems: Iterable[str]) -> dict[str, str]:
-    """`cause_text` for each of `systems` that is down at start: what the workspace view and the
-    gather system index print beside it (O-3)."""
-    return {system: cause_text(down[system]) for system in systems if system in down}
+def down_notes(state: RunState, systems: Iterable[str]) -> dict[str, str]:
+    """`cause_text` for each of `systems` that is down NOW (`down_cause`): what MAIN's workspace
+    view, gather's system index and the like print beside it (O-3), asked when they render — so
+    a system downed after the start (an escaped config fault, a trip) is marked too."""
+    notes: dict[str, str] = {}
+    for system in systems:
+        cause = down_cause(state, system)
+        if cause is not None:
+            notes[system] = cause_text(cause)
+    return notes
+
+
+#: No system down: the notes of a surface rendered for no run, or for a run that judged none.
+NONE_DOWN: Mapping[str, str] = MappingProxyType({})
 
 
 def _mark(state: RunState, system: str, cause: StartCause) -> None:
@@ -262,39 +351,15 @@ def _mark(state: RunState, system: str, cause: StartCause) -> None:
         state.system_down.setdefault(system, cause)
 
 
-def shown_reason(
-    text: str, tenant: RunTenant, *, defender_dir: Path | None = None,
-    adapters_root: Path | None = None,
-) -> str:
-    """A down system's reason, fit for the model and the operator — THE redaction every reason
-    passes once, where its cause is made, so every surface that renders the cause (the start
-    log lines, the O-8 refusal, MAIN's workspace view, gather's system index, `list_verbs`, the
-    dispatch and call refusals) shows the same safe text. One line, bounded; the tenant's
-    settings folder named by its pointer (`redact_settings_path`, the one settings redaction);
-    staged names and world ids removed (`redact_model_visible`); and every host root named
-    rather than located — the tenant's folder and the data root (`Tenant.root_names`, their
-    owner's) and the code trees given — `defender_dir` and `adapters_root` (which need not sit in
-    either), each by its name here. An adapter's crash text often carries its own file's absolute
-    path, and a repr of the run's record carries the data root."""
-    text = redact_settings_path(redact_model_visible(text), tenant.settings)
-    named = dict(tenant.tenant.root_names())
-    for root, name in ((defender_dir, _DEFENDER_TREE_NAME), (adapters_root, _ADAPTERS_TREE_NAME)):
-        if root is None:
-            continue
-        named.update({spelling: name for spelling in (str(Path(root)), str(Path(root).resolve()))
-                      if len(spelling) > 1})
-    # Longest first, so a root that is a prefix of another's spelling cannot cut it in two.
-    for spelling in sorted(named, key=len, reverse=True):
-        text = text.replace(spelling, named[spelling])
-    one_line = " ".join(text.split())
-    return one_line if len(one_line) <= REASON_MAX else one_line[:REASON_MAX - 1] + "…"
-
-
 __all__ = [
     "AdapterBroken",
     "Down",
+    "NONE_DOWN",
+    "NO_CHECK",
     "NoUsableSystem",
     "NotConfigured",
+    "ReasonScope",
+    "RunSystems",
     "StartCause",
     "Tripped",
     "cause_text",
@@ -303,10 +368,10 @@ __all__ = [
     "granted_systems",
     "held_refusal",
     "hold_at_start",
+    "judge_adapter",
+    "judge_run",
     "mark_escaped",
     "message_for",
     "refusal_if_down",
     "require_usable",
-    "shown_reason",
-    "startup_check",
 ]

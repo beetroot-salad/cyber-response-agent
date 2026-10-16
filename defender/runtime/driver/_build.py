@@ -17,6 +17,8 @@ from pydantic_ai.capabilities import ProcessHistory
 if TYPE_CHECKING:
     from pydantic_ai.settings import ModelSettings
 
+    from defender.hooks.inject_system_skill_description import SystemIndex
+
 
 from .. import compaction
 from .. import lessons_push
@@ -374,7 +376,7 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     store: Any = None, session_id: str | None = None, review_stages: Any = None,
     bounds: challenge_gate.Bounds,
     toolset: Any = None,
-    catalog: str | None,
+    catalog: SystemIndex | None,
     gather_grant: VerbGrant,
 ) -> Agent[AgentDeps, str]:
     # `gather_grant` is the run's; every dispatched lead is bound over it. Pass

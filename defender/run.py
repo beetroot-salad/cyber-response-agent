@@ -55,8 +55,10 @@ from defender._episode_handle import Episode  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
+from defender.runtime import system_status  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.run_tenant import RunTenant  # noqa: E402
+from defender.runtime.system_status import RunSystems  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     RegistryError,
@@ -245,9 +247,10 @@ class _Investigate(Protocol):
     """The investigation seam's exact shape, so both the call site and `_drive_investigation`
     stay type-checked (tests inject the seam, so only a real run would catch a renamed keyword).
 
-    The adapters roster is not part of it: the lifecycle binds the roster `main` judged at run
-    start into the production drive (`_drive_investigation(roster=…)`); an injected seam reads
-    whatever roster it owns.
+    The run's judgement of its systems is not part of it: the lifecycle binds the one `main`
+    made at run start (`system_status.RunSystems`: the roster the run reads and each system down
+    at its start) into the production drive (`_drive_investigation(systems=…)`); an injected
+    seam reads whatever roster it owns.
     """
 
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
@@ -287,11 +290,12 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     source: Run | None = None,
     registry_cls: Any = ModuleVerbRegistry,
     investigate: Callable[..., dict[str, Any]] = _run_the_driver,
-    #: The adapters roster this run reads — the one `main` read once and judged each granted
-    #: system's settings check over at run start (#1256), so the registry and the driver use
-    #: the very roster run start judged. `None` (a direct caller with no `main` before it)
-    #: reads `defender_dir`'s here.
-    roster: RosterRead | None = None,
+    #: The run's one judgement of its systems (#1256), made by `main` before the run folder
+    #: existed: the roster the run reads and each granted system down at its start. The
+    #: registry is built over that roster and the driver holds that verdict, so the run is
+    #: judged once. `None` (a direct caller with no `main` before it): the roster is
+    #: `defender_dir`'s, read here, and the driver judges it.
+    systems: RunSystems | None = None,
 ) -> dict[str, Any]:
     """The production investigation call, as a synchronous callable (injected by the
     lifecycle so tests can pass a plain function).
@@ -304,8 +308,9 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     would route uncaptured keys to real adapters. The two registries are built in separate
     arms of one `if` so both can never exist.
     """
-    # Read once (by `main`, normally) and handed down to the registry and `run_investigation`.
-    roster = roster if roster is not None else read_roster(adapters_under(defender_dir))  # lint-default: ok — DI seam owning its default (a direct caller with no `main` before it)
+    # The roster `main` judged, handed down to the registry and `run_investigation` with its
+    # verdict; read here only for a direct caller, whose run the driver judges.
+    roster = systems.roster if systems is not None else read_roster(adapters_under(defender_dir))
     if world is not None:
         if episode is None:
             # The world's ledger is written through the episode `main` holds; there is no path
@@ -351,7 +356,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
                 alert_path=alert_path, run=run,
                 defender_dir=defender_dir, model_name=model_name,
                 model_override=model_override, box=box, verbs=verbs, roster=roster,
-                resume=resume, tenant=tenant, source_run=source,
+                systems=systems, resume=resume, tenant=tenant, source_run=source,
             )
         finally:
             verbs.close()
@@ -359,7 +364,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     return investigate(
         alert_path=alert_path, run=run, defender_dir=defender_dir,
         model_name=model_name, model_override=model_override, box=box, verbs=verbs,
-        roster=roster, tenant=tenant,
+        roster=roster, systems=systems, tenant=tenant,
     )
 
 
@@ -382,11 +387,11 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     serving: Any = None,
     #: The opened source run a world forks, threaded beside `world`.
     source: Run | None = None,
-    #: The adapters roster `main` read once and judged run start over (#1256), bound into the
-    #: production drive so the run reads that same roster (`None`: the drive reads
-    #: `defender_dir`'s, as a direct caller with no `main` before it does).
-    roster: RosterRead | None = None,
-    #: The investigation; `None` is the production drive (`_drive_investigation`) over `roster`.
+    #: The run's one judgement of its systems, made by `main` at run start (#1256), bound into
+    #: the production drive so the run reads that roster and holds that verdict (`None`: the
+    #: drive reads `defender_dir`'s roster and the driver judges it, as for a direct caller).
+    systems: RunSystems | None = None,
+    #: The investigation; `None` is the production drive (`_drive_investigation`) over `systems`.
     investigate: _Investigate | None = None,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
@@ -407,7 +412,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id,
                     write_verdict=write_verdict)
     drive: _Investigate = (investigate if investigate is not None
-                           else functools.partial(_drive_investigation, roster=roster))
+                           else functools.partial(_drive_investigation, systems=systems))
     investigation_ok = False
     try:
         summary = drive(
@@ -460,23 +465,23 @@ def _run_roster(defender_dir: Path) -> RosterRead:
         sys.exit(f"[run.py] {unreadable}")
 
 
-def _refuse_unusable_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path) -> None:
-    """#1256 O-8, before the run exists: judge each granted system by its own adapter's settings
-    check (`system_status.startup_check`) over `roster` — the roster this run reads, which
-    `main` hands on to the investigation unchanged, so the run start judged is the one the run
-    uses — and refuse a run (fresh or a sibling's) at whose start gather could query nothing
-    through the systems that are up (`system_status.require_usable`, the predicate the driver
-    asks again), naming each down system and its cause. Before the run folder, the box and any
-    model call; nothing is logged or held here — the driver does that once, when the run
-    starts. Never in the tenant resolution `tenant.py setup` and `defender-policy` share:
-    whether a system is usable is a run's question, not the tenant's (D4)."""
-    from defender.runtime import system_status
-
-    down = system_status.startup_check(roster, tenant, defender_dir=defender_dir)
+def _judge_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path) -> RunSystems:
+    """#1256 O-8, before the run exists: the run's ONE judgement of its systems
+    (`system_status.judge_run`) — each granted system judged by its own adapter's settings check
+    over `roster`, the roster this run reads — handed back whole, for `main` to hand on to the
+    investigation, which holds it and does not judge again. A run (fresh or a sibling's) at
+    whose start gather could query nothing through the systems that are up is refused
+    (`system_status.require_usable`), naming each down system and its cause. Before the run
+    folder, the box and any model call; nothing is logged or held here — the driver does that
+    once, when the run starts. Never in the tenant resolution `tenant.py setup` and
+    `defender-policy` share: whether a system is usable is a run's question, not the tenant's
+    (D4)."""
+    systems = system_status.judge_run(roster, tenant, defender_dir=defender_dir)
     try:
-        system_status.require_usable(tenant.grants, down)
+        system_status.require_usable(tenant.grants, systems.down)
     except system_status.NoUsableSystem as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.tenant_id!r} cannot be used: {refusal}")
+    return systems
 
 
 def _announce_provenance(run_dir: Path) -> None:
@@ -694,8 +699,9 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
     """`oracle` / `verifier` are a sibling's oracle and verifier models (#1224; `None` builds
     them from their knobs). `roster` is the adapters roster this run reads (`None`: the
     checkout's, read once here): run start judges each granted system's settings check over it
-    (#1256 O-8) and the lifecycle hands that same roster to the investigation, so the roster
-    judged and the roster used are one value."""
+    (#1256 O-8), once, and the lifecycle hands that judgement — the roster with its verdict, one
+    value — to the investigation, so the roster judged and the roster used are one and the run
+    is not judged twice."""
     # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
     # injection seams defaulting to production.
     ns = parse_args(argv)
@@ -735,12 +741,14 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         # The tenant's settings (and with them the one tenant check), resolved before the input
         # is read and before anything is spent; nothing below reads them again.
         tenant = tenant_of()
-        # The adapters roster this run reads, read once: judged here, then handed to the
-        # lifecycle, so run start and the investigation never read two rosters.
-        run_roster = roster if roster is not None else _run_roster(DEFENDER_DIR)  # lint-default: ok — DI seam owning its default (the checkout's roster)
-        # Whether any granted system is usable — decided by the adapters' own settings checks
-        # over those settings — before the run is made (#1256 O-8, a sibling's own start too).
-        _refuse_unusable_start(tenant, roster=run_roster, defender_dir=DEFENDER_DIR)
+        # The run's one judgement of its systems (#1256), before the run is made: the roster
+        # this run reads (the injected one, or the checkout's, read once here), judged by the
+        # adapters' own settings checks over those settings — a start at which no granted
+        # system is usable refused here (O-8, a sibling's own start too) — and handed to the
+        # lifecycle whole, so the investigation reads that roster and does not judge again.
+        systems = _judge_start(
+            tenant, defender_dir=DEFENDER_DIR,
+            roster=roster if roster is not None else _run_roster(DEFENDER_DIR))
 
         model = driver.resolve_main_model(ns.model)
         # Runs in siblings too: models are resolved per process, so each sibling must check (and
@@ -780,7 +788,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
                     tenant=tenant,
                     world=world,
                     episode=episode,
-                    roster=run_roster,
+                    systems=systems,
                     **seams,
                 )
             except (ServingAbort, BaseExceptionGroup) as escaped:

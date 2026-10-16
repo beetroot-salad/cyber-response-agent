@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from defender.runtime.tools._deps import run_of
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
@@ -14,6 +14,9 @@ from pydantic_ai.usage import UsageLimits
 from defender._model import model
 from defender.hooks.budget_enforcer import BudgetKill
 from defender.run_repository import Run
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.hooks.inject_system_skill_description import SystemIndex
 
 from . import circuit_breaker
 from . import system_status
@@ -458,7 +461,7 @@ def _compose(
 async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gather run can end
     deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
-    *, catalog: str | None, pre_claimed: bool = False,
+    *, catalog: SystemIndex | None, pre_claimed: bool = False,
     on_end: Callable[[Any], None] | None = None,
 ) -> str:
     """Run one gather lead and return main's wrapped result.
@@ -472,7 +475,8 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
     supplies it because the session is opened inside the factory. `None` skips stamping.
 
     `catalog` is the descriptor index, built once at run start so an unreadable adapters tree
-    fails there rather than mid-tool. `None` means no index to show.
+    fails there rather than mid-tool, and rendered here with the systems down NOW marked
+    (#1256). `None` means no index to show.
 
     The `except` arms are one per way a gather run can end: three faults degrade the lead into
     a notice, two run-level ends pass through. A harness stop is not an exception: a guard's
@@ -552,7 +556,11 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
         tenant=deps.tenant,
         harness_lead=getattr(deps, "harness_lead", False),
     )
-    prompt = _gather_prompt(deps, request, catalog, verb_grant)
+    # The index as it stands now: a system downed since the start (an escaped config fault, a
+    # trip) is marked in it (#1256).
+    index = None if catalog is None else catalog.render(
+        system_status.down_notes(run_state_of(deps), catalog.systems))
+    prompt = _gather_prompt(deps, request, index, verb_grant)
 
     def stamp(terminator: str | None) -> None:
         if terminator is not None and stamp_terminator is not None:
@@ -620,7 +628,7 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
 
 def register_gather_tool(
     main_agent, gather_factory: GatherFactory, request_limit: int, verb_grant: VerbGrant,
-    stamp_terminator: Callable[[str, str], None] | None = None, *, catalog: str | None,
+    stamp_terminator: Callable[[str, str], None] | None = None, *, catalog: SystemIndex | None,
 ) -> None:
 
     @main_agent.tool

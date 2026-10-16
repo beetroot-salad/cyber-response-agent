@@ -19,7 +19,7 @@ import math
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
@@ -56,6 +56,9 @@ from ._agreement import (
 )
 from ._capture import _declare_l_finding
 from ._items import LeadEnd, correlation_contract, run_correlation_lead
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.hooks.inject_system_skill_description import SystemIndex
 
 _logger = logging.getLogger(__name__)
 
@@ -223,7 +226,7 @@ def _classify_end(end: LeadEnd, run_state: RunState, system: str) -> str | None:
 async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit per way the lead fails to start; the dispatch seams
     *, run: Any, run_state: RunState, defender_dir: Path, verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any,
-    catalog: str | None, dispatch: CorrelationDispatch, tenant: Any, deadline: float,
+    catalog: SystemIndex | None, dispatch: CorrelationDispatch, tenant: Any, deadline: float,
 ) -> CorrelationOutcome:
     """Run `l-00c` to its end inside `deadline` seconds and say how it ended.
 

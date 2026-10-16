@@ -9,7 +9,8 @@ decides on while it runs:
   * the budget — the tool-call and spawn counters and the clock's two origins;
   * the circuit breaker — each system's failures and when it tripped;
   * each system down for a cause the breaker does not count — not configured, or its adapter
-    broken — judged at run start (#1256) and never cleared;
+    broken — judged once at run start (#1256) and never cleared, and the scope every such
+    cause's reason is shown in — the live status every surface asks when it renders;
   * the queries table's rows, by lead, in append order — the record of every call the run
     made (the table file is the model's view of it), or the rows seeding handed over for a
     branch sibling, never rows read back from the file;
@@ -39,7 +40,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
-    from defender.runtime.system_status import StartCause
+    from defender.runtime.system_status import ReasonScope, StartCause
 
 
 class RunState:
@@ -75,6 +76,10 @@ class RunState:
         #: at run start, or when a call's `ConfigFault` escapes the start check — and never
         #: cleared: a system does not come back up within a run.
         self.system_down: dict[str, StartCause] = {}
+        #: `system_status`: the scope this run's down-cause reasons are shown in, held with its
+        #: start verdict (`hold_at_start`) so a cause made later hides what the start's did;
+        #: `None` until then.
+        self.reason_scope: ReasonScope | None = None
         #: `record_query`: each lead's rows, in append order (an inherited prefix first).
         self.rows: dict[str, list[dict]] = {}
         #: `record_query`: call identity and the next number, owned by this run alone.

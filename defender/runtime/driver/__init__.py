@@ -71,7 +71,7 @@ from ..verb_grant import VerbGrant
 from ..verb_dispositions import RunGrants
 from ..verbs import ModuleVerbRegistry, RosterRead, read_roster
 from defender.skills.invlang.validate import hold_capabilities
-from defender.hooks.inject_system_skill_description import descriptor_catalog
+from defender.hooks.inject_system_skill_description import SystemIndex, descriptor_index
 
 from defender import _clock
 from defender._env import env_bool
@@ -384,35 +384,37 @@ async def _close_a_run_cut_short(
 def _dispatch_catalogs(
     defender_dir: Path, roster: RosterRead, grants: RunGrants,
     down: Mapping[str, system_status.StartCause],
-) -> tuple[str | None, str | None]:
+) -> tuple[SystemIndex, SystemIndex]:
     """The descriptor index each dispatch prompt opens with: MAIN's (narrowed to the gather
-    grant) and lead-0's (narrowed to the correlation grant), each marking the systems down at
-    run start with their cause (#1256 O-3).
+    grant) and lead-0's (narrowed to the correlation grant).
 
-    Built once at run start so a roster fault fails here, not mid-tool. Uses the run's grants,
-    not the injected `verbs=` registry, so a narrower registry does not narrow the catalog."""
+    Built once at run start so a roster fault fails here, not mid-tool; a system `down` at start
+    is listed without being loaded. Each is rendered when a dispatch prompt is built, its down
+    marks from the run's status then (#1256 O-3). Uses the run's grants, not the injected
+    `verbs=` registry, so a narrower registry does not narrow the catalog."""
     skills = KnowledgePaths.of_defender_dir(defender_dir).skills_dir
-    notes = system_status.down_notes(down, down)
     return (
-        descriptor_catalog(skills, roster, grants.gather, down=notes),
-        descriptor_catalog(skills, roster, grants.correlation, down=notes),
+        descriptor_index(skills, roster, grants.gather, unloaded=down),
+        descriptor_index(skills, roster, grants.correlation, unloaded=down),
     )
 
 
 def _systems_at_run_start(
-    state: RunState, roster: RosterRead, tenant: RunTenant, defender_dir: Path,
-) -> dict[str, system_status.StartCause]:
-    """Judge each granted system usable or down by its own adapter's settings check over the
-    run's frozen record (#1256 step 3), hold the verdict on the run's state and log each down
-    system — before the budget, the logger or any model — and refuse a start at which no
-    granted system that is up gives gather a query verb (O-8), naming each down system.
-
-    `run.py` asks the same predicate before the run exists; the driver asks it again, itself,
-    for every other way in (a direct caller, a branch sibling's world)."""
-    down = system_status.startup_check(roster, tenant, defender_dir=defender_dir)
-    system_status.hold_at_start(state, down)
-    system_status.require_usable(tenant.grants, down)
-    return down
+    state: RunState, systems: system_status.RunSystems | None, roster: RosterRead,
+    tenant: RunTenant, defender_dir: Path,
+) -> system_status.RunSystems:
+    """The run's one judgement of its systems (#1256): the one `run.py` made before the run
+    existed when handed it (`systems`), else — a direct caller, a run started without one —
+    judged here over `roster` by each adapter's own settings check over the run's frozen record.
+    Held on the run's state, each down system logged, before the budget, the logger or any
+    model; and a start at which no granted system that is up gives gather a query verb is
+    refused (O-8, the predicate over the verdict — never a second judgement), naming each down
+    system."""
+    judged = systems if systems is not None else system_status.judge_run(
+        roster, tenant, defender_dir=defender_dir)
+    system_status.hold_at_start(state, judged)
+    system_status.require_usable(tenant.grants, judged.down)
+    return judged
 
 
 def _correlation_dispatch_at_run_start(
@@ -488,7 +490,7 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
     correlation: CorrelationDispatch, *, run: Run, run_dir: Path, defender_dir: Path, run_id: str,
     verbs: Any, limits: dict, make_model: MakeModel, logger: Any, box: Any, store: Any,
     session_id: str, case_id: str, model_name: str | None, run_state: RunState,
-    catalog: str | None, tenant: RunTenant, deadline: float, run_started: float,
+    catalog: SystemIndex | None, tenant: RunTenant, deadline: float, run_started: float,
 ) -> tuple[str | None, dict | None]:
     """Run the correlation lead to its end and return `(the correlation section of MAIN's
     opening message, None)`, or `(None, the run summary)` when a run-level stop arrived first.
@@ -547,6 +549,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     make_model: MakeModel | None = None,
     verbs: Any = None,
     roster: RosterRead | None = None,
+    #: The run's one judgement of its systems, made by `run.py` before the run existed (#1256):
+    #: its roster is the run's, and the driver holds its verdict rather than judging again.
+    #: `None`: the driver judges the roster itself.
+    systems: system_status.RunSystems | None = None,
     limits: dict | None = None,
     box: Any = None,
     store_factory: StoreFactory | None = None,
@@ -577,13 +583,15 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # threaded inward.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
-    roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs, tenant)
-    down = _systems_at_run_start(state, roster, tenant, defender_dir)
+    roster, verbs = _adapters_at_run_start(
+        defender_dir, systems.roster if systems is not None else roster, verbs, tenant)
+    judged = _systems_at_run_start(state, systems, roster, tenant, defender_dir)
     _bind_call_ids(state, verbs, run_id)
     correlation = _correlation_dispatch_at_run_start(
         tenant=tenant, resume=resume, lead_zero_verbs=lead_zero_verbs,
     )
-    catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster, tenant.grants, down)
+    catalog, correlation_catalog = _dispatch_catalogs(
+        defender_dir, roster, tenant.grants, judged.down)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     # A usable deadline or no run: checked before the run folder is touched, never replaced by a
     # fallback. A lead the table withholds is never run, so it owes no deadline.
@@ -676,7 +684,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt = _opening_prompt(
         resume, run_dir, alert_path, defender_dir,
         systems=tuple(roster.accepted), correlation_section=correlation_section,
-        down=system_status.down_notes(down, roster.accepted),
+        # The systems down NOW — after the correlation lead, which can take one down (O-5b).
+        down=system_status.down_notes(state, roster.accepted),
         orient_shim=orient_shim, tenant_agent=tenant.agent,
     )
 
