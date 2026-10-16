@@ -831,6 +831,73 @@ def test_two_episodes_get_two_fresh_uuid_folders_and_never_a_retry_suffix(data_r
     assert sorted(os.listdir(S.episodes_dir(data_root, A_ID))) == sorted([one, two])
 
 
+#: The walk's owner, for the path-made-folder census below: the run repository and the episode
+#: handle (relative to `defender/`; a folder prefix ends in `/`).
+_WALK_OWNER = ("run_repository/", "_episode_handle.py")
+
+
+def _folders_made_by_path(root: Path) -> list[str]:
+    """Every call in the walk owner's source under `root` that makes a folder by its PATH or
+    adopts one already there: `os.makedirs(...)`, `os.mkdir(...)` with no `dir_fd=`, and any
+    call passing `exist_ok=True` (`Path.mkdir`, `makedirs`). Resolved through
+    `scripts/lint/_astlib.py`, so an alias or a local `import os as _os` is seen."""
+    astlib = _by_path.import_lint_lib("_astlib")
+    found = []
+    for rel in astlib.source_files(root, (".venv", "__pycache__", "node_modules", "tests")):
+        if not any(rel == own or (own.endswith("/") and rel.startswith(own))
+                   for own in _WALK_OWNER):
+            continue
+        _text, tree = astlib.read_and_parse(root / rel, rel)
+        module, package = astlib.module_and_package(rel, root="defender")
+        env = astlib.module_env(tree, module, package)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            called = astlib.callee(node, env)
+            if called == "os.makedirs" or (called == "os.mkdir" and not astlib.has_kw(
+                    node, "dir_fd")) or astlib.kw_is_true(node, "exist_ok"):
+                found.append(f"{rel}:{node.lineno} {ast.unparse(node)}")
+    return found
+
+
+def test_the_walk_owner_makes_no_folder_by_its_path(tmp_path):
+    """G15 / declared change 3 / S-iso ("`create_episode` ... steps `episodes` off the held
+    `<T>` and then makes the UUID folder exclusively"; "An entry already at the name refuses.
+    There is no retry"), the part a test CAN pin without a seam — a best effort at adversary F7
+    (`os.makedirs(<T>/episodes/<uuid>, exist_ok=True)` adopted a folder planted at the minted
+    name, and nothing here could plant one: the id is random and the design names no minting
+    seam). The run repository and the episode handle make no folder by its path: no
+    `os.makedirs`, no `os.mkdir` without `dir_fd=`, no `exist_ok=True` — each follows links
+    above its leaf, and `exist_ok` adopts what is already there. GREEN at base (a guard): the
+    owner makes its folders off held handles today. Positive control: a planted owner tree
+    with each shape is reported, a fd-relative `os.mkdir(name, dir_fd=fd)` is not.
+
+    NOT PINNED (still the code stage's): a claim made off a held handle that swallows `EEXIST`
+    — `Held.mkdir` does (`_io._step`'s `suppress(FileExistsError)`) — adopts a planted folder
+    just the same. Forcing a collision needs a minting seam or a fault-injecting `io=`, neither
+    of which the design or the owner's test shape provides (design question)."""
+    found = _folders_made_by_path(DEFENDER)
+    assert found == [], "the walk owner makes a folder by its path:\n  " + "\n  ".join(found)
+
+    planted = tmp_path / "planted"
+    (planted / "run_repository").mkdir(parents=True)
+    (planted / "run_repository" / "_lookup.py").write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def claim(episodes, episode_id, fd):\n"
+        "    import os as _os\n"
+        "    _os.makedirs(episodes / episode_id, exist_ok=True)\n"
+        "    os.mkdir(episodes)\n"
+        "    Path(episodes).mkdir(parents=True, exist_ok=True)\n"
+        "    os.mkdir(episode_id, dir_fd=fd)\n",
+        encoding="utf-8")
+    reported = _folders_made_by_path(planted)
+    assert len(reported) == 3, reported
+    assert not any("dir_fd" in line for line in reported), reported
+
+
 @pytest.mark.parametrize("variable", [
     "unset", "inside-data-root", "containing-data-root", "the-tenants-episodes", "decoy"])
 def test_the_episodes_variable_changes_nothing_and_no_episodes_root_refusal_fires(
