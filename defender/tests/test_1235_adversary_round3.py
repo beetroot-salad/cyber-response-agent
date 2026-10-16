@@ -1,7 +1,5 @@
-"""#1235 round 3 — the holes the third adversary pass found in the round-3 suite.
-
-Each test greens on an honest round-3 implementation and goes red under one cheating
-"""
+"""#1235 round 3 adversary holes: lead-0 gate clock agreement, enforced roles without run state
+raise, stored rows are handed out uncopied, state mismatch refused."""
 from __future__ import annotations
 
 import asyncio

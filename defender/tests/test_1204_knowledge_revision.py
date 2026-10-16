@@ -1,9 +1,6 @@
-"""#1204 — every run's stamp names the tenant knowledge revision it started with (O1, O4).
-
-Runs read `settings/` (and, after #1108, lessons, queries and skills) from the tenant's own
-knowledge clone, yet the stamp named only the PRODUCT commit. This suite pins the new field at
-its reader (`capture_knowledge`), its one production write site (`run_common.materialize_run`)
-"""
+"""#1204: every run's stamp names the tenant knowledge revision it started with.
+`capture_knowledge` (never raises, no subprocess, never follows links), the `materialize_run`
+write site, and the `RunProvenance` wire form."""
 from __future__ import annotations
 
 import contextlib

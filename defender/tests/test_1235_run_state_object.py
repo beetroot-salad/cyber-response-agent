@@ -1,6 +1,5 @@
-"""#1235, round 2 — the `RunState` object itself: fresh at its start, the only holder of a run's
-live state, its operations atomic under its own lock, and its oracle clock its own.
-"""
+"""#1235: the `RunState` object itself: fresh at start, sole holder of a run's live state, atomic
+under its own lock, with its own oracle clock."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165

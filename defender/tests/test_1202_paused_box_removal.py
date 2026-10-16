@@ -1,7 +1,5 @@
-"""#1202: removing a paused runsc box.
-
-Under runsc, `docker rm -f` on a PAUSED container kills it but answers non-zero ("could not
-"""
+"""#1202: removing a paused runsc box. `docker rm -f` on a paused box kills it but answers non-zero;
+every removal site must wait it out and retry, and none may thaw the box."""
 from __future__ import annotations
 
 import subprocess

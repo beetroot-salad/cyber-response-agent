@@ -1,5 +1,4 @@
-"""#773 — M7's bounded deferral, O9's conservation, and the tick's two counters.
-"""
+"""#773: bounded deferral, conservation of findings, and the tick's deferral/attempt counters."""
 from __future__ import annotations
 
 from pathlib import Path

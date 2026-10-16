@@ -5,14 +5,6 @@ from __future__ import annotations
 from defender.tests import _spec1047 as S
 
 
-def _verified_run_dir(tmp_path, name="run"):
-    """A finished run dir the corpus-refusal gate will accept: its alert, its report, and the
-    scrub verdict sidecar recording that the reap walk completed."""
-    run_dir = S.closed_run_dir(tmp_path, name=name)
-    S.mod("runtime.scrub")._write_verdict(run_dir, {"ran": True})
-    return run_dir
-
-
 # the exit class's other reader
 
 

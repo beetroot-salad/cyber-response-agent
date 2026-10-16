@@ -1,7 +1,5 @@
-"""Regressions for #1224's host checks and rate limiter, found by the claims adversary.
-
-- D: a `counts` entry with group "*" and base 0 laundered an arbitrary unclaimed added row
-"""
+"""Regressions for #1224's host checks and rate limiter: a `*` count laundering unclaimed rows,
+unrelated group counts hiding forged rows, and unspaceable limiter rates."""
 from __future__ import annotations
 
 from types import SimpleNamespace

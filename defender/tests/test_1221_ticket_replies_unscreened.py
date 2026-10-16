@@ -1,7 +1,5 @@
-"""#1221 O3 — gather is served a ticket reply as the store answered it.
-
-The design (issue #1221, D3/M2): both read screens go — the own-case identity exclusion and the
-"""
+"""#1221: gather is served a ticket reply exactly as the store answered it (capture and model
+view), through a real driven run."""
 from __future__ import annotations
 
 import copy

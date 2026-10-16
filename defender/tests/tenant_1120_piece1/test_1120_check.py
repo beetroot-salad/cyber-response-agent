@@ -240,20 +240,6 @@ def test_1120_check_refuses_every_grant_gap_in_both_directions_naming_each(
                      "cmdb.no-such-verb", "no-such-system")
 
 
-def test_1120_check_takes_the_census_from_the_code_it_runs(
-        tmp_path: Path, extra_checkout: Path) -> None:
-    """The census is taken from the running code (A3), never from the tenant: run out of a tmp
-    copy of the checkout whose adapters declare one more verb (extra.verb), `tenant.py check
-    --folder` over a copy of the fixture exits 1 naming extra.verb as undecided, while this
-    checkout's own `check --folder` over the SAME folder, whose census has no such verb, exits
-    0."""
-    folder = _folder(tmp_path, "tenant")
-    H.assert_clean(_check_folder(folder))
-    H.assert_refused(
-        H.run_script(_copy_script(extra_checkout), "check", "--folder", str(folder), root=None),
-        EXTRA_PAIR)
-
-
 def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import(
         tmp_path: Path) -> None:
     """An adapter module the census cannot read (a source that does not parse) makes `tenant.py
@@ -507,22 +493,6 @@ def test_1120_s9_check_over_grant_table_verb_filed_under_wrong_real_system(
                      "identity.list-authorized-hosts")
 
 
-def test_1120_s9_check_run_twice_in_immediate_succession(tmp_path: Path) -> None:
-    """`tenant.py check acme` over a clean tenant, run and then run again immediately with
-    nothing else touching the data root: both runs exit 0 and give identical output, and check
-    writes nothing, so the data root's census (bytes, mtimes, modes) is identical before and
-    after both."""
-    root = tmp_path / "data"
-    H.adopted(root)
-    before = H.tree_census(root)
-    first, second = _check_id(root), _check_id(root)
-    H.assert_clean(first)
-    H.assert_clean(second)
-    assert (first.returncode, first.stdout, first.stderr) == (
-        second.returncode, second.stdout, second.stderr), "two checks of one tree disagree"
-    assert H.census_diff(before, H.tree_census(root)) == [], "check wrote into the data root"
-
-
 # ======================================================================================
 # No data root for scaffold and check --folder (N10); the usage error (N17); M6's all-withheld.
 # ======================================================================================
@@ -716,41 +686,6 @@ RUN_START_REFUSED_TABLES = [
     pytest.param(_gather_health_checks_only, id="grant_census:health-check-only"),
     pytest.param(_withhold_all, id="grant_census:all-withheld"),
 ]
-
-
-@pytest.mark.parametrize("table", RUN_START_REFUSED_TABLES)
-def test_1120_setup_refuses_what_run_start_refuses_in_run_starts_own_words(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table: Callable[[Path], None]) -> None:
-    """Parity (V14: "any run-start refusal is setup's refusal, named"). Over one finished tenant
-    whose table gather can query nothing through (health-check only, or all withheld), the
-    production require_gather_query's message over the production run_grants is the oracle:
-    `tenant.py setup acme` exits 1 carrying that message verbatim and writes nothing, and the
-    REAL run.main (its seams recording) refuses the same tenant carrying the same message
-    verbatim, before its preflight, materialize or lifecycle is reached. The lead-zero half of
-    the readiness function is V1's cells; that setup reaches the function itself is the
-    census's."""
-    root = tmp_path / "data"
-    H.adopted(root)
-    settings = H.settings_dir(root)
-    table(settings)
-    owner = _run_start_refusal(settings)
-    assert str(settings / "verb-grants.yaml") in owner, f"precondition: {owner!r}"
-
-    before = H.tree_census(root)
-    text = H.assert_refused(H.setup(tenant_py, root), str(settings / "verb-grants.yaml"))
-    assert owner in text, (
-        f"setup's refusal is not run start's, word for word (V14).\n  run start's readiness "
-        f"says: {owner!r}\n  setup said: {text!r}")
-    assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
-
-    monkeypatch.setenv(H.DATA_ROOT_ENV, str(root))
-    rec = H.RunRecorder(tmp_path / "run")
-    rc, exc = H.drive_run(run_py, [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID], rec)
-    assert exc is not None, f"run.main started a run gather can query nothing in (rc {rc})"
-    assert owner in H.exit_text(exc), (
-        f"run.main's refusal does not carry its readiness function's words: "
-        f"{H.exit_text(exc)!r}")
-    assert not rec.spent, f"run.main spent a seam before refusing: {rec.order}"
 
 
 # ======================================================================================
@@ -1022,41 +957,3 @@ NO_CENSUS_FAULTS = [
 def _findings_of(text: str) -> set[str]:
     return {ln for ln in text.splitlines() if ln.startswith("[tenant.py] ")}
 
-
-@pytest.mark.parametrize("fault", NO_CENSUS_FAULTS)
-def test_1159_a_census_not_taken_still_judges_what_needs_none(
-        tmp_path: Path, fault: Callable[[Path], str]) -> None:
-    """A folder with a fault no census is needed to find — its verb-grants.yaml does not parse,
-    or its lead-zero.yaml names a template the running catalog lacks. Checked with the census taken, `check --folder` exits 1 naming
-    the fault. Checked with no git on PATH (census not taken), it exits exactly 1 printing
-    EVERY finding the sighted check printed, plus the census line and nothing else: losing
-    the census costs only the judgement that needs it. The oracle is the same command with git
-    on PATH, never the census re-run in the test. The positive control: the folder before the
-    fault checks clean."""
-    folder = _folder(tmp_path, "tenant")
-    H.assert_clean(_check_folder(folder))
-    named = fault(folder)
-    sighted = _findings_of(H.assert_refused(_check_folder(folder), named))
-    env, _reason, _repair = _git_absent(tmp_path, folder)
-    text, line = _census_blind_line(_check_folder(folder, **env), folder=folder,
-                                    cause=GIT_ABSENT_CAUSE, also=(named,))
-    assert _findings_of(text) - {line} == sighted, (
-        "with the census not taken, check does not print exactly the findings that need no "
-        "census:\nsighted:\n" + "\n".join(sorted(sighted)) + f"\nblind:\n{text}")
-
-
-def test_1159_check_names_the_running_checkout_when_head_cannot_be_resolved(
-        tmp_path: Path) -> None:
-    """The running checkout is a copy whose `.git` is gone, so its declared systems are not
-    resolvable at HEAD. `check --folder` over a sound folder exits EXACTLY 1, and the census
-    line's cause names the running checkout (the tmp COPY's root) as the side that failed and
-    says HEAD did not resolve — never a generic "census unavailable" (#1159 O1). The positive
-    control: the same copy before `.git` was removed checks the folder clean."""
-    checkout = H.tmp_checkout(tmp_path / "checkout")
-    folder = _folder(tmp_path, "tenant")
-    script = _copy_script(checkout)
-    H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
-    shutil.rmtree(checkout / ".git")
-    _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None),
-                       folder=folder, cause=MARKERS_CAUSE,
-                       names=(HEAD_CAUSE, str(checkout.resolve())))

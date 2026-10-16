@@ -1,7 +1,5 @@
-"""#1221 O1 — every comment the host posts opens with the agent tag naming the authoring run.
-
-The design (issue #1221, D1/M1): the write-back stays a plain comment, and the host marks it as
-"""
+"""#1221: every comment the host posts opens with the agent tag naming the authoring run, added at
+the single POST through the real writer and surviving the wire bound and the listing clip."""
 from __future__ import annotations
 
 import html

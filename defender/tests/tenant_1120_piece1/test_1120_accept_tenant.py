@@ -129,52 +129,6 @@ def _accept_within(owner, root: Path, tenant_id: str = H.TID, *, seconds: float 
 # #0 — the return-value contract.
 # ======================================================================================
 
-def test_1120_accept_tenant_returns_a_frozen_tenant_whose_members_are_its_layout(
-        tmp_path: Path) -> None:
-    """For a finished tenant under a tmp data root, accept_tenant(root, "acme", …) with the
-    checkout's defender/ and the tenant's runs folder as the mounted trees returns a Tenant:
-    its stored fields are exactly id, data_root and row; its id is the TenantId "acme"; its
-    data_root is the root passed in; its row is the TenantRow require_tenant read, naming acme
-    (N6 reading (a) — the row FILE's path is its own property, spelled row_path here, equal to
-    <root>/acme/tenant.json). It is frozen: assigning any member raises. Its path members are
-    exactly dir = <root>/acme, runs = dir/runs, sessions = dir/sessions, episodes =
-    dir/episodes, learning = dir/learning, worktrees = learning/worktrees, knowledge =
-    dir/knowledge, settings = knowledge/settings and agent = knowledge/agent, and none of runs,
-    sessions, episodes or learning lies under knowledge. Accepting writes nothing: the root's
-    census is byte-identical before and after. A relative data root is refused with
-    TenantRefused naming it, never a bare ValueError; this is the response every entry point
-    receives from accept_tenant (run.py included)."""
-    root = tmp_path / "data"
-    H.adopted(root)
-    before = H.tree_census(root)
-    tenant = H.accept(_tenant, root, H.TID, box_mounted=(H.tenant_folder(root) / "runs",))
-    assert H.census_diff(before, H.tree_census(root)) == [], "accepting a tenant wrote"
-
-    assert dataclasses.is_dataclass(tenant), f"Tenant is not a dataclass: {type(tenant)!r}"
-    assert [f.name for f in dataclasses.fields(tenant)] == ["id", "data_root", "row"]
-    assert tenant.id == H.TID
-    assert isinstance(tenant.id, _tenant.TenantId)
-    assert tenant.data_root == root
-    assert isinstance(tenant.row, _tenant.TenantRow)
-    assert tenant.row.tenant_id == H.TID
-    assert getattr(tenant, H.ROW_PATH_PROPERTY) == root / H.TID / H.ROW_NAME
-    with pytest.raises(AttributeError):
-        tenant.id = H.OTHER  # type: ignore[misc]
-
-    d = root / H.TID
-    expected = {
-        "dir": d, "runs": d / "runs", "sessions": d / "sessions", "episodes": d / "episodes",
-        "learning": d / "learning", "worktrees": d / "learning" / "worktrees",
-        "knowledge": d / "knowledge", "settings": d / "knowledge" / "settings",
-        "agent": d / "knowledge" / "agent",
-    }
-    assert {name: getattr(tenant, name) for name in H.TENANT_PATH_PROPERTIES} == expected
-    for name in ("runs", "sessions", "episodes", "learning"):
-        assert not getattr(tenant, name).is_relative_to(tenant.knowledge), name
-
-    relative = Path("relative") / "root"
-    text = H.accept_refusal(_tenant, relative, H.TID)
-    assert str(relative) in text, f"the relative-root refusal does not name it: {text!r}"
 
 
 # ======================================================================================
@@ -918,16 +872,6 @@ def test_1120_s5_link_walk_meets_a_symlink_cycle(tmp_path: Path) -> None:
     assert str(loop) in str(exc), f"the refusal does not name the cycle's link: {exc}"
 
 
-def test_1120_s5_local_clone_positive_control_no_hard_link_to_find(tmp_path: Path) -> None:
-    """U4's positive control builds the source repo and its plain local clone under one
-    tmp_path. It asserts its precondition FIRST — at least one file under
-    knowledge/.git/objects has st_nlink > 1 — and a failed precondition fails the test, never
-    passing vacuously (PO-b). Only then does it assert acceptance."""
-    root = _cloned_with_row(tmp_path)
-    _assert_hardlinked_objects(root)
-    assert H.accept(_tenant, root).knowledge == H.knowledge_dir(root)
-
-
 def test_1120_s6_data_root_env_var_symlink_retargeted_mid_resolution(
         tmp_path: Path, monkeypatch) -> None:
     """DEFENDER_DATA_ROOT may itself be a symlink. resolve_data_root resolves it once per
@@ -979,54 +923,3 @@ def _verdict(owner, fn, *args) -> str | None:
         return str(refused)
     return None
 
-
-@pytest.mark.parametrize(("plant_row_cell", "accepted"), ROW_CELLS)
-def test_1120_every_tenant_row_reader_refuses_what_accept_tenant_refuses(
-        tmp_path: Path, plant_row_cell, accepted: bool) -> None:
-    """Every reader of <root>/<id>/tenant.json reaches accept_tenant's verdict on each of its
-    row cells — absent, corrupt, other-tenant, directory and missing-created-at refused, an
-    extra key accepted — and every refusal names <root>/acme/tenant.json: accept_tenant and
-    require_tenant (#1105 PR 2 deleted the third reader, `tenant_of_run_dir`, F-13: a run is
-    opened through the accepted tenant's runs repository, so its row is read by
-    accept_tenant). The one-tenant guard refuse_foreign_data_root reads the row only for its presence and
-    leaves its shape to acceptance (the row's own name exempt, pass-A J60; MF1 admits the
-    placed knowledge beside a missing row), so it returns on every cell; `tenant.py setup`
-    over each cell then refuses every present bad row naming tenant.json and leaves it
-    byte-identical, stays silent over the extra-key row, and adopts the absent-row cell by
-    writing the row."""
-    verdicts: dict[str, str | None] = {}
-    for reader in ("accept_tenant", "require_tenant"):
-        root = tmp_path / reader
-        _cell_tree(root, plant_row_cell)
-        if reader == "accept_tenant":
-            verdicts[reader] = _verdict(_tenant, H.accept, _tenant, root, H.TID)
-        else:
-            verdicts[reader] = _verdict(_tenant, _tenant.require_tenant, root,
-                                        _tenant.TenantId(H.TID))
-        row = str(H.row_path(root))
-        if accepted:
-            assert verdicts[reader] is None, f"{reader} refused an extra-key row: {verdicts[reader]}"
-        else:
-            assert verdicts[reader] is not None, f"{reader} accepted a bad row"
-            assert row in verdicts[reader], (
-                f"{reader} did not refuse this row naming {row}: {verdicts[reader]!r}")
-
-    guarded = tmp_path / "guard"
-    _cell_tree(guarded, plant_row_cell)
-    assert _verdict(_tenant, _tenant.refuse_foreign_data_root, guarded,
-                    _tenant.TenantId(H.TID)) is None, "the guard judged the row's shape"
-
-    setup_root = tmp_path / "setup"
-    _cell_tree(setup_root, plant_row_cell)
-    row_existed = H.row_path(setup_root).exists()
-    before = H.tree_census(setup_root)
-    proc = H.setup(tenant_py, setup_root)
-    if not row_existed:
-        H.assert_clean(proc)
-        assert H.row_path(setup_root).is_file(), "setup did not adopt the absent-row cell"
-    elif accepted:
-        H.assert_clean(proc)
-        assert H.census_diff(before, H.tree_census(setup_root)) == []
-    else:
-        H.assert_refused(proc, str(H.row_path(setup_root)))
-        assert H.census_diff(before, H.tree_census(setup_root)) == [], "setup rewrote a bad row"

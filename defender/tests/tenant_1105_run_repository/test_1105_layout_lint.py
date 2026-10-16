@@ -1,78 +1,16 @@
-"""#1105 PR 1 — D7's layout lint, `scripts/lint/lint_run_layout_imports.py` (→ O1), and the
-neighbouring gates it must agree with (MF-05, MF-06, MF-07, MF-19, MF-20: the interim FENCE until
-#1082; NM-08, NM-09).
-
-Outside the owners, production code may not take a run-folder layout name, an episode-runs name,
-`Tenant.runs` or a handle constructor except where D7's category table exempts it or the PR 1
-allow-list names the use. The allow-list is the only hatch (no inline suppression); a stale
-entry fails; PR 1's list holds exactly 18 entries: ruling 1's nine sites, `cli.py:1089`
-(`tenant.tenant.runs`), `run_common.py:90` (`tenant.runs`) and `:96` (`Run.for_tenant`),
-`visualize_run.py:633` (`Run.at`) and the five unmigrated callers' module-level `RunPaths`
-imports. (PR 1 also carried a `deferred_legacy` row exempting four per-case readers by
-(module, function); #1166 deleted the readers and the row.)
-
-#1105 PR 2 reached that end state (D7″, J15): the allow-list is empty, the `unmigrated` row is
-gone (F-09 moved its modules to the rows their remaining use fits), and F-13 deleted
-`resolve_run_bundle`. The tests below that pinned PR 1's interim list now pin the empty one.
-
-THE LINT'S TEST INTERFACE (coined here; the implementer matches it, or renames it HERE):
-
-* the program `scripts/lint/lint_run_layout_imports.py`, run by CI as
-  `python scripts/lint/lint_run_layout_imports.py`, and imported by this suite as
-  `scripts.lint.lint_run_layout_imports` with `scripts/lint/` on `sys.path` (the gates import
-  `_astlib` by bare name);
-* `DEFENDER: Path` — the default root, derived from the script's own location
-  (`Path(__file__).resolve().parents[2] / "defender"`), so a run from any working directory or
-  a worktree sweeps its own checkout;
-* `main(argv: list[str] | None = None) -> int` — 0 clean, nonzero on any finding, every finding's
-  `display` printed to stdout; `--root DIR` sweeps a `defender/`-shaped tree DIR instead of
-  `DEFENDER`, with the same allow-list and table;
-* `scan(root: Path = DEFENDER, *, allow_list=None) -> list[Finding]` — the whole sweep;
-  `allow_list=None` means `ALLOW_LIST`. Every unlisted gated use, every stale or duplicate
-  allow-list entry and every module that does not parse or decode is a `Finding`;
-* `Finding.key: tuple[str, str, str] | None` — (module path under the root, posix; the enclosing
-  qualified function, or `"<module>"`; the gated name), `None` for a stale or duplicate entry and
-  an unreadable module; `Finding.display: str` names the module, the function and the name (a
-  stale entry's says `stale`, a duplicate's says `duplicate`, an unreadable module's names it);
-* gated names are spelled: a layout name bare (`RunPaths`); a gated member `Class.member`
-  (`Tenant.runs`, `Episode.runs`, `EpisodePaths.runs`, `EpisodePaths.sibling_run_dir`,
-  `EpisodeLayout.runs` / `.run` / `.run_page` / `.sibling_run_dir`); `RUNS_DIRNAME`; a
-  constructor call `Run` / `ArchivedWorld`; a constructor reference `Run.at`, `Run.for_tenant`,
-  `Run.under`, `ArchivedWorld.at`;
-* `ALLOW_LIST: Sequence[tuple[str, str, str, int]]` — `(module, function, name, count)` entries
-  (a sequence, so a duplicate can be written and is a finding; entries are not normalised);
-* `CATEGORIES: Mapping[str, Sequence[str]]` — row name -> module paths under `defender/`, the
-  rows `owners`, `running-investigation`, `names-only`, `run-lifecycle`, `path-taking-readers`,
-  `not-a-run`, `helpers-only` (PR 1's `unmigrated` row went with #1105 PR 2);
-* `HELPERS: frozenset[str]` — the eight ungated layout helpers;
-* the sweep skips `evals/` and `tests/` under the root, every `__pycache__` and hidden directory,
-  and a venv (a directory named `venv` / `.venv`, or one holding `pyvenv.cfg`; the planted venvs
-  here pin each clause alone: `venv` with no `pyvenv.cfg`, and a `pyvenv.cfg` directory of
-  another name);
-* the layout-name universe is read from the SWEPT tree's `run_repository/_layout.py` (its public
-  module-level bindings, of every form), so a planted tree carries its own; every planted tree
-  here starts from a copy of the real package and the owner sources the receiver typing reads;
-* the door keeps a static `__all__` (the universe test reads it to compute the layout names).
-
-Red at base 80888efb: the script does not exist (each test fails on the loader's
-`pytest.fail`), `ci.yml` has no step for it, `learning/core/config.py` still re-exports
-`RunPaths`, and `lint_run_records` / #1134's census do not recognise a door spelling.
-"""
+"""Layout lint (`scripts/lint/lint_run_layout_imports.py`): planted-tree cases for the gated names, stale allow-list entries, star imports and unparseable modules."""
 from __future__ import annotations
 
-import ast
 import collections
 import importlib
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 import pytest
-import yaml
 
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 
@@ -80,7 +18,6 @@ if TYPE_CHECKING:  # the import heuristic's view of the target; loaded by `_lint
     from scripts.lint import lint_run_layout_imports  # noqa: F401
 
 LINT_DIR = H.WORKTREE / "scripts" / "lint"
-LINT_FILE = LINT_DIR / "lint_run_layout_imports.py"
 
 #: The eight layout names that are not gated (D7: rev 3's five plus the predicates and shape
 #: constants in use outside the owners at bc4ce944, R4-26).
@@ -143,16 +80,6 @@ def _plant(root: Path, rel: str, text: str) -> Path:
     path.write_text(text, encoding="utf-8")
     return path
 
-
-def _add(root: Path, rel: str, text: str) -> Path:
-    """`text` appended to the planted tree's copy of `rel` (an owner keeps its own source), or
-    planted as `rel` when the tree has none."""
-    path = root / rel
-    if not path.is_file():
-        return _plant(root, rel, text)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write("\n\n" + text)
-    return path
 
 
 def _production_files(defender: Path) -> list[Path]:

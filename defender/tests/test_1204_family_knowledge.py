@@ -1,8 +1,6 @@
-"""#1204 — a fork family is not certified comparable across two tenant knowledge commits (O2,
-O3, D3, D4).
-
-A branched family (#947) forks one SOURCE run into siblings that must differ only in the one
-"""
+"""#1204: a fork family is not certified comparable across two tenant knowledge commits.
+A differing commit is never waivable; unversioned/unavailable/absent knowledge is waivable with
+`--allow-dirty`. Covers preflight, `verify_family`, and the stamp-field comparison."""
 from __future__ import annotations
 
 import json

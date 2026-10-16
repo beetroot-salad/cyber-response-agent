@@ -1,7 +1,5 @@
-"""PR #1232 — the family-stamp gate, the judge's and the episode readers'.
-
-Seventh round (finding 3): `verify_family` withholds the family stamp (`provenance.json`) when
-"""
+"""A family without a readable family stamp is stamped not-graded `not comparable`; `verify_family`
+records why it withheld the stamp and the judge and episode readers refuse a stampless family."""
 from __future__ import annotations
 
 import json

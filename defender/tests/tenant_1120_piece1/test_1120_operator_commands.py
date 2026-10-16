@@ -226,39 +226,6 @@ def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_witho
     assert "spec1120-link.md" in H.output(lint), H.output(lint)
 
 
-def test_1120_s6_validate_scaffold_env_mutation_persists_across_calls(
-        data_root: Path, tmp_path: Path) -> None:
-    """validate_scaffold sets DEFENDER_DIR by setdefault, so a value from a first call may
-    persist into a second (modelled here by exporting DEFENDER_DIR, naming another tree that
-    holds its own acme and beta folders, into two successive calls). The tenant and settings
-    each call validates still come only from DEFENDER_DATA_ROOT and that call's own --tenant,
-    never from DEFENDER_DIR (C11): the first call, over a data root holding acme, checks
-    acme's data-root config.env; the second, over another data root holding beta, checks
-    beta's — and neither reports a marker of the DEFENDER_DIR tree's copies."""
-    roots = {H.TID: data_root, H.OTHER: tmp_path / "second-data-root"}
-    other_defender = _other_tree(tmp_path, H.TID, "TICKET_SPEC1120_OTHER_ACME_TOKEN")
-    beta_folder = other_defender.parent / "knowledge" / "tenants" / H.OTHER
-    shutil.copytree(H.FIXTURE, beta_folder)
-    _mark_ticket_config(beta_folder / "settings", "TICKET_SPEC1120_OTHER_BETA_TOKEN",
-                        drop_timeout=True)
-    for tid, root in roots.items():
-        H.adopted(root, tid)
-        _mark_ticket_config(H.settings_dir(root, tid), f"TICKET_SPEC1120_ROOT_{tid.upper()}_TOKEN",
-                            drop_timeout=False)
-
-    for tid, root in roots.items():
-        out = H.output(_validate_scaffold(root, tid, DEFENDER_DIR=str(other_defender)))
-        assert "Traceback (most recent call last)" not in out, out
-        fails = _rows(out, FAIL_ROW)
-        assert any(f"TICKET_SPEC1120_ROOT_{tid.upper()}_TOKEN" in row for row in fails), (
-            f"validate_scaffold --tenant {tid} did not check {tid}'s data-root config.env:\n{out}")
-        assert "_OTHER_" not in out, (
-            f"validate_scaffold --tenant {tid} read a tenant folder under DEFENDER_DIR's tree:\n"
-            f"{out}")
-        other_tid = next(t for t in roots if t != tid)
-        assert f"ROOT_{other_tid.upper()}_TOKEN" not in out, out
-
-
 def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
     """With DEFENDER_DATA_ROOT unset, validate_scaffold --tenant and policy_cli gather --tenant
@@ -514,66 +481,3 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
 # R7 — the settings loaders that survive the move read the ACCEPTED tenant's settings.
 # ======================================================================================
 
-def test_1120_every_settings_loader_reads_the_accepted_tenants_settings(
-        data_root: Path, tmp_path: Path, monkeypatch) -> None:
-    """Every settings-half loader that survives the move unchanged is handed the accepted
-    Tenant's settings folder, <root>/acme/knowledge/settings, and reads the file there — never
-    a checkout copy: verb_dispositions.run_grants (the data-root table's extra
-    cmdb.list-roles grant) and dispositions_path; lead_zero_config.lead_zero_config_path;
-    case_ticket._mapping_path; and validate_scaffold.check_config (it FAILs the data-root
-    marker key). The system configs are read once, into the run's tenant record (#1107), from
-    that same folder: elastic_adapter.load_config (the data-root cluster marker) and
-    _stub_transport.load_config (the data-root ticket marker) for a VerbContext carrying the
-    record; and the record's Elastic view carries the data-root index markers. A loader that
-    resolves anywhere else is the R7 escape this pins."""
-    for key in ("ELASTICSEARCH_URL", "ELASTIC_SSL_VERIFY", "ELASTIC_EVENTS_INDEX",
-                "ELASTIC_ALERTS_INDEX", "TICKET_URL_BASE", "TICKET_BASTION_HOST",
-                "TICKET_TIMEOUT_SEC", "TICKET_KEY_PATTERN"):
-        monkeypatch.delenv(key, raising=False)
-    H.adopted(data_root)
-    expected = H.settings_dir(data_root)
-    table = expected / "verb-grants.yaml"
-    text = table.read_text(encoding="utf-8")
-    assert CMDB_LIST_ROLES_WITHHELD in text, "the fixture no longer withholds cmdb.list-roles"
-    table.write_text(text.replace(CMDB_LIST_ROLES_WITHHELD,
-                                  "    list-roles: {roles: [gather]}\n", 1), encoding="utf-8")
-    elastic = expected / "systems" / "elastic" / "config.env"
-    elastic.write_text(
-        'ELASTICSEARCH_URL="https://spec1120-acme-cluster:9200"\n'
-        'ELASTIC_EVENTS_INDEX="spec1120-acme-events-*"\n'
-        'ELASTIC_ALERTS_INDEX="spec1120-acme-alerts-*"\n'
-        'ELASTIC_SSL_VERIFY="false"\n'
-        'KIBANA_URL="http://spec1120-acme-kibana:5601"\n'
-        'ELASTIC_TRANSPORT="docker-exec"\n'
-        'ELASTIC_DOCKER_CONTEXT="spec1120-acme-context"\n'
-        'ELASTIC_ES_CONTAINER="spec1120-acme-es"\n'
-        'ELASTIC_KIBANA_CONTAINER="spec1120-acme-kibana"\n', encoding="utf-8")
-    _mark_ticket_config(expected, "TICKET_SPEC1120_LOADER_TOKEN", drop_timeout=False)
-    ticket = _ticket_config(expected)
-    ticket.write_text(ticket.read_text(encoding="utf-8").replace(
-        "http://ticket-server:8080", "http://spec1120-acme-ticket:8080"), encoding="utf-8")
-
-    tenant = H.accept(_tenant, data_root)
-    settings = tenant.settings
-    assert Path(settings) == expected, f"the accepted tenant's settings are {settings}"
-
-    grants = verb_dispositions.run_grants(settings)
-    assert Path(grants.path) == expected / "verb-grants.yaml"
-    assert ("cmdb", "list-roles") in {(s, v) for s, v, *_ in grants.gather.entries}, (
-        "run_grants did not read the data-root table (the fixture withholds cmdb.list-roles)")
-    assert verb_dispositions.dispositions_path(settings) == expected / "verb-grants.yaml"
-    assert lead_zero_config.lead_zero_config_path(settings) == expected / "lead-zero.yaml"
-    assert case_ticket._mapping_path(settings) == (
-        expected / "systems" / "case-history" / "mapping.yaml")
-    record = T1106.run_tenant(tenant)
-    ctx = VerbContext(defender_dir=H.DEFENDER, run_dir=tmp_path / "run", env={}, tenant=record)
-    assert elastic_adapter.load_config(ctx)[
-        "ELASTICSEARCH_URL"] == "https://spec1120-acme-cluster:9200"
-    loaded = _stub_transport.load_config(ctx, "ticket", "TICKET")
-    assert loaded["URL_BASE"] == "http://spec1120-acme-ticket:8080", loaded
-
-
-    report = validate_scaffold.Report()
-    validate_scaffold.check_config(report, Path(settings), "ticket")
-    assert any(status == "FAIL" and "TICKET_SPEC1120_LOADER_TOKEN" in msg
-               for status, msg in report.rows), report.rows

@@ -1,8 +1,5 @@
-"""#1221 O2 — rule #27: a benign verdict cannot rest on past cases alone.
-
-The design (issue #1221, D2/M3, as amended 2026-10-08): a comment a model wrote is a PAST CASE,
-cited `grounding past-case`, `cites_past_case <run id>`. What makes an `:R authz` row a past
-"""
+"""#1221: rule #27, a benign verdict cannot rest on past cases alone (a row citing a run is a past
+case), plus the row-structure rules on `cites_past_case`. Driven through `diagnose`."""
 from __future__ import annotations
 
 import re

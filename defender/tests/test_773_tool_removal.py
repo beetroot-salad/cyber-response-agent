@@ -1,6 +1,5 @@
-"""#773 — M1's deletion and O7's untouched sibling. (M2's per-channel check wiring and O10's
-key preflight went with the check, #1166.)
-"""
+"""#773: the curator partitions a batch into committed and consumed-skip only; the questioner
+channel keeps vouching without a verdict step."""
 from __future__ import annotations
 
 

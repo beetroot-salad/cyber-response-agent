@@ -1,5 +1,4 @@
-"""#773 — M5's explicit-list commit, O2's commit contents, O4/O5's tree-derived truth.
-"""
+"""#773: the drain commits an explicit approved list; commit contents and tree-derived truth."""
 from __future__ import annotations
 
 import shutil

@@ -1,7 +1,5 @@
-"""Regressions for PR #1232's review findings that structural changes dissolve (#1224).
-
-First round: the oracle on the agent loop (no unanswered tool call, a bounded verifier, no
-"""
+"""Regressions for the #1224 oracle loop found in PR #1232 review: turn/deadline handling, frozen
+forged rows, accounting and pricing, pre-flight worlds, pre-branch calls, esql forging checks."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165

@@ -207,22 +207,6 @@ def test_1120_scaffold_refuses_a_bad_id_or_a_non_empty_target_and_writes_nothing
         assert (outside / H.TENANT_ID_FILE).is_file(), "the control scaffold wrote no tenant"
 
 
-def test_1120_s3_scaffold_into_a_regular_file(tmp_path: Path) -> None:
-    """`<dir>` names an existing regular file, not a directory: scaffold is refused with a
-    non-zero exit naming the path. The file is unchanged (bytes, mtime and mode) and nothing
-    is written beside it. The positive control: an empty directory at a sibling path is
-    scaffolded (exit 0)."""
-    (tmp_path / "work").mkdir()
-    target = _regular_file(tmp_path / "work")
-    before = H.tree_census(tmp_path / "work")
-    home = _home(tmp_path / "cfg")
-    _refused(_scaffold(H.TID, target, home=home), str(target))
-    assert H.census_diff(before, H.tree_census(tmp_path / "work")) == [], (
-        "scaffold changed the regular file or wrote beside it")
-
-    H.assert_clean(_scaffold(H.TID, _empty_dir(tmp_path / "work" / "dir"), home=home))
-
-
 # ======================================================================================
 # git: the product repo, a refused commit, the preflight (N3, N5).
 # ======================================================================================

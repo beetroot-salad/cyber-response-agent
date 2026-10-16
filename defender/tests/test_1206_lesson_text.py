@@ -1,7 +1,5 @@
-"""#1206: lesson text leaves the shared loader in one of three forms the caller picks.
-
-A lesson's frontmatter is corpus text a model wrote. `Lesson.line` / `Lesson.lines` give a value
-"""
+"""#1206: lesson text leaves the shared loader as one printed line (`line`/`lines`) or as search
+lines (`match_text`); control characters and unprintable filenames are refused."""
 
 from __future__ import annotations
 

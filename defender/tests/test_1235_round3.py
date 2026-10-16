@@ -1,7 +1,5 @@
-"""#1235, round 3 — the review's fix list, pinned at the unit edge (the owner approved it).
-
-Round 2 gave every run one `RunState` (`defender/runtime/run_state.py`), carried by reference.
-"""
+"""#1235 round 3 at the unit edge: the run state is the record (a refused view write still charges
+the breaker), missing state fails closed for enforced roles, lead-0 reads the run's clock."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165

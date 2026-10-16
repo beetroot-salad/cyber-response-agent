@@ -1,37 +1,4 @@
-"""The run's wire log is not readable by the agents that write into it.
-
-`llm_requests.jsonl` is the run's ONE wire log: MAIN, every gather subagent (`gather:{lead_id}`)
-and every review stage (`review:{lens}`) log through the same `RequestLogger`, which is what
-makes all three priceable. That sharing is also what makes the file a boundary: it holds, in
-full and verbatim, the raw gather payload bytes `decide_read` refuses MAIN one call earlier with
-`RAW_DENY_REASON`, and MAIN's transcript that GATHER has never been shown.
-
-At the run ROOT it was readable by both of them. MAIN's and GATHER's run-dir read shape is
-`under(run, SEG)` (`permission/policies/_common.read_shapes`, the builder those two share) and
-`SEG` spells ONE path segment, so the shape admits every run-root file — the read tool and the
-bash `cat` lane alike, since they share the shape OBJECT. `is_untrusted_read` does not fire on
-the log either, so neither lane salt-framed the read: the bytes arrived as ordinary text.
-
-The fix is one directory, not one clamp: the log moved to `<run_dir>/wire_logs/llm_requests.jsonl`,
-one level down and therefore outside a single-segment shape, for MAIN and GATHER symmetrically
-and with no shape edited. `test_the_subdirectory_is_what_denies` is the falsification — it plants
-the same filename back at the run root and shows the gate admits it there, so these tests cannot
-pass for some reason other than the one they name.
-
-THE OFFLINE LANE IS THE SAME DEFECT AND NOT THE SAME FIX (the second class below). Every
-learning stage logs through the same `RequestLogger` into the learning run dir, and that dir is
-the gray-box ACTOR's own root — so `judge_trace.jsonl` at its root handed the actor the payload
-exemplars `judge/compare.unredacted_exemplar` puts in the judge's prompt UNREDACTED, which is
-exactly what `decide_read`'s `gather_raw` deny exists to keep from it. Both legs of an
-`inconclusive` case run CONCURRENTLY against one `LegDirs`, and a re-LEARN reopens the dir with
-the previous pass's traces still in it, so the actor is alive while those files exist.
-
-A subdirectory alone does NOT close that one, which is why the deny is a component rule rather
-than a shape: the ACTOR declares no read shape at all (root containment only admits every
-depth) and the JUDGE's `cat` scope is `under(run, TREE)` (a subdirectory fullmatches). So
-`wire_logs/` is denied OUTRIGHT by `files.names_wire_log_dir`, on both read surfaces, for every role —
-and `test_the_component_is_what_denies_in_the_learning_lane` is that half's falsification.
-"""
+"""The run's wire log (wire_logs/llm_requests.jsonl, holding raw gather payloads and MAIN's transcript) is unreadable by the agents that write into it: it sits one directory below the run root, outside MAIN's and GATHER's single-segment read shape, for the read tool and the bash cat lane alike, and no learning role can read a stage trace."""
 from __future__ import annotations
 
 from pathlib import Path

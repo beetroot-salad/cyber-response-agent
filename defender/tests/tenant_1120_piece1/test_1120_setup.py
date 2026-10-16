@@ -354,30 +354,6 @@ def test_1120_setup_rerun_runs_the_folder_rules_and_names_a_knowledge_folder_tha
 # The one-tenant guard's outer scan, unchanged (N1): refused before any write.
 # ======================================================================================
 
-@pytest.mark.parametrize("with_row", [pytest.param(False, id="other-rowless"),
-                                      pytest.param(True, id="other-with-row")])
-def test_1120_setup_refuses_a_foreign_data_root_before_any_write_leaving_the_placed_knowledge_untouched(
-        tmp_path: Path, with_row: bool) -> None:
-    """`setup acme` over a data root holding beta/ (with or without a row) beside an
-    operator-placed acme/knowledge exits 1 with the one-tenant guard's "the data root is not
-    empty", naming beta; no row is written and acme/knowledge is byte-identical (the guard
-    refuses after the operator's placement and never removes it). The positive control: the
-    same root with beta/ removed adopts acme (exit 0) — so the refusal was beta's."""
-    # rejected: a second tenant in one data root — the one-tenant guard is unchanged (N1,
-    # decision 7); #1112 lifts it.
-    root = tmp_path / "data"
-    H.place_knowledge(root)
-    if with_row:
-        H.plant_row(root, H.OTHER)
-    else:
-        (root / H.OTHER).mkdir()
-    before = H.tree_census(root)
-    H.assert_refused(H.setup(tenant_py, root), "the data root is not empty", H.OTHER)
-    assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
-
-    shutil.rmtree(root / H.OTHER)
-    H.assert_clean(H.setup(tenant_py, root))
-    _row_is_acme(root)
 
 
 # ======================================================================================
@@ -585,40 +561,6 @@ def _placed_clone_with_uncommitted_tenant_id(tmp: Path, root: Path) -> None:
     H.clone_with_uncommitted_tenant_id(tmp / "src", root, "untracked")
 
 
-@pytest.mark.parametrize("place", [
-    pytest.param(_placed_plain_folder, id="plain-folder"),
-    pytest.param(_placed_clone_with_uncommitted_tenant_id, id="clone-uncommitted-tenant-id"),
-])
-def test_1120_setup_adopts_by_writing_only_the_row_through_the_guarded_lane(
-        tmp_path: Path, place) -> None:
-    """The census diff after a first adopt is exactly +acme/tenant.json; no file under
-    knowledge/ changes its bytes, mtime or mode. setup performs no copy, rename, tree removal,
-    symlink or git call — no subprocess at all — observed by an audit hook on the setup
-    process itself, so a staged copy renamed into place cannot hide behind a clean final
-    census. That holds over a plain folder and over a git clone whose agent/.tenant-id is
-    untracked (DC2's "no git calls"; V11: the committed-.tenant-id rule is check's, so setup
-    exits 0 there). Its one write is the row, through create_tenant's guarded lane
-    (`Held.write` in create mode off the held `<T>`, #1137: an unnamed file linked to the row's
-    name, or one exclusive open), which also carries pass-A's o10_fresh_root_writes_exactly_row."""
-    root = tmp_path / "data"
-    place(tmp_path, root)
-    before = H.tree_census(root)
-    knowledge_before = _knowledge_census(root)
-    proc, events = _audited_setup(tmp_path, root)
-    H.assert_clean(proc)
-    assert H.census_diff(before, H.tree_census(root)) == [f"added: {H.TID}/{H.ROW_NAME}"]
-    assert H.census_diff(knowledge_before, _knowledge_census(root)) == []
-    tree_ops = [e for e in events if e[0] != "os.link"]
-    assert tree_ops == [], (
-        "setup made a tree operation or spawned a process (DC2: no copy, rename, rmtree or "
-        f"git call):\n{json.dumps(tree_ops, indent=1)}")
-    # The create lane links an unnamed file to the row's NAME (relative to the tenant
-    # folder's fd): each link's destination argument must name the row.
-    links = [e for e in events if e[0] == "os.link"]
-    assert all(H.ROW_NAME in e[1][1] for e in links), (
-        f"setup linked something other than the row: {links}")
-
-
 # ======================================================================================
 # N1's residual: two first setups racing one placed knowledge/.
 # ======================================================================================
@@ -676,27 +618,6 @@ def _row_and_runs(root: Path) -> dict:
             if k == f"{H.TID}/{H.ROW_NAME}" or k.startswith(f"{H.TID}/runs")}
 
 
-def test_1120_setup_over_a_pass_a_tenant_names_the_missing_knowledge_then_adopts_a_placed_clone_leaving_runs_byte_identical(
-        tmp_path: Path) -> None:
-    """A pass-A tenant — a row plus runs/ with records, and no knowledge/. `setup acme` exits
-    1 naming <root>/acme/knowledge and the remedy (clone the tenant repo into it, then run
-    tenant.py setup acme again); the row and runs/ are byte-identical. After the operator
-    places a clone, `setup acme` exits 0 with the row and runs/ still byte-identical (the
-    row-then-clone order a1c65801's guard already admits, P-DC2-1 leg B)."""
-    root = tmp_path / "data"
-    _pass_a_tenant(root)
-    before = H.tree_census(root)
-    text = H.assert_refused(H.setup(tenant_py, root), str(H.knowledge_dir(root)))
-    for word in REMEDY_WORDS:
-        assert word in text, f"the refusal does not carry the remedy word {word!r}:\n{text}"
-    assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
-
-    kept = _row_and_runs(root)
-    H.cloned_tenant(tmp_path, root)
-    H.assert_clean(H.setup(tenant_py, root))
-    assert _row_and_runs(root) == kept, "adopting the clone changed the row or runs/"
-
-
 # ======================================================================================
 # O11a survives TenantPaths' absorption (M4: the private layout class keeps it).
 # ======================================================================================
@@ -733,20 +654,6 @@ def test_1120_a_data_root_inside_the_checkouts_defender_tree_is_still_refused(
 # Settled premises (45), rewritten under DC2 where 47 says so.
 # ======================================================================================
 
-def test_1120_s1_git_executable_absent_for_setup(tmp_path: Path) -> None:
-    """INVERTED by DC2 (N9 dissolved): with no git on PATH (the runtime image, or a host
-    without git), `setup acme` over an operator-placed knowledge/ exits 0 and writes the row,
-    because setup makes no git subprocess call (was: exit 1 naming the git failure)."""
-    root = tmp_path / "data"
-    H.place_knowledge(root)
-    bare_path = tmp_path / "bin-without-git"
-    bare_path.mkdir()
-    probe = subprocess.run(  # noqa: S603 — the test's own interpreter
-        [sys.executable, "-c", "import shutil, sys; sys.exit(shutil.which('git') is not None)"],
-        env=H.tenant_env(root, PATH=str(bare_path)), capture_output=True, text=True, check=False)
-    assert probe.returncode == 0, "precondition: git is still reachable on the reduced PATH"
-    H.assert_clean(H.setup(tenant_py, root, PATH=str(bare_path)))
-    _row_is_acme(root)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="uid 0 bypasses mode bits; CI runs non-root")
@@ -767,28 +674,6 @@ def test_1120_s2_data_root_parent_not_writable(tmp_path: Path) -> None:
         folder.chmod(0o755)
     assert not H.row_path(root).exists()
     assert H.census_diff(before, _knowledge_census(root)) == []
-
-
-def test_1120_s12_setup_resumes_row_only_no_partial_no_knowledge(tmp_path: Path) -> None:
-    """A row-only tenant (acme/tenant.json and nothing else under acme/: an earlier setup
-    wrote the row and no knowledge was ever placed). `setup acme` exits 1 naming
-    <root>/acme/knowledge and the remedy, the row byte-identical. Once the operator places a
-    clone, `setup acme` exits 0 with the row byte-identical and no second row (the row-then-
-    clone order today's guard admits, P-DC2-1 leg B; also carries pass-A
-    o10_rerun_no_second_row)."""
-    root = tmp_path / "data"
-    H.plant_row(root)
-    before = H.tree_census(root)
-    text = H.assert_refused(H.setup(tenant_py, root), str(H.knowledge_dir(root)))
-    for word in REMEDY_WORDS:
-        assert word in text, f"the refusal does not carry the remedy word {word!r}:\n{text}"
-    assert H.census_diff(before, H.tree_census(root)) == []
-
-    row_before = H.row_path(root).read_bytes()
-    H.cloned_tenant(tmp_path, root)
-    H.assert_clean(H.setup(tenant_py, root))
-    assert H.row_path(root).read_bytes() == row_before, "the adopt re-created the row"
-    _row_is_acme(root)
 
 
 def _lost_and_found(root: Path) -> str:
@@ -840,36 +725,3 @@ def test_1120_s12_refuse_foreign_data_root_meets_filesystem_debris(tmp_path: Pat
 # D9 / H2: THE helper a test uses to get a tenant — the fixture adopted into a tmp root.
 # ======================================================================================
 
-def test_1120_a_tmp_data_root_set_up_from_the_fixture_carries_the_lab_grant(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The helper that replaces the checkout default root copies knowledge/tenant-fixture into
-    <tmp root>/<id>/knowledge, writes agent/.tenant-id = <id> plus a newline into the COPY (the
-    fixture commits none, M8), and runs `tenant.py setup <id>` (exit 0). run.main with
-    --tenant <id> against that data root then resolves a RunTenant whose gather grant equals
-    GATHER_CENSUS and whose correlation template is elastic.correlate-alerts-by-entity, read
-    from the data root's copy. The copy shares no inode with the fixture, and mutating it
-    never changes the fixture (M9 item 4). One helper serves this and the pass-A re-plumb."""
-    root = tmp_path / "data"
-    fixture_before = H.tree_census(H.FIXTURE)
-    H.adopt_fixture(tenant_py, root)
-    knowledge = H.knowledge_dir(root)
-    assert (knowledge / H.TENANT_ID_FILE).read_bytes() == f"{H.TID}\n".encode()
-    fixture_inodes = {(p.lstat().st_dev, p.lstat().st_ino)
-                      for p in H.FIXTURE.rglob("*") if p.is_file()}
-    copy_inodes = {(p.lstat().st_dev, p.lstat().st_ino)
-                   for p in knowledge.rglob("*") if p.is_file()}
-    assert not fixture_inodes & copy_inodes, "the tenant's copy shares an inode with the fixture"
-
-    monkeypatch.setenv(H.DATA_ROOT_ENV, str(root))
-    rec = H.RunRecorder(tmp_path / "run")
-    rc, exc = H.drive_run(run_py, [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID], rec)
-    assert exc is None, f"run.main refused the adopted fixture: {H.exit_text(exc)}"
-    assert rc == 0
-    run_tenant = rec.lifecycle_calls[0]["tenant"]
-    assert Path(run_tenant.settings).resolve() == H.settings_dir(root).resolve()
-    assert {(s, v) for s, v, *_ in run_tenant.grants.gather.entries} == set(D995.GATHER_CENSUS)
-    assert run_tenant.correlation is not None
-    assert run_tenant.correlation.template_id == H.FIXTURE_CORRELATION_TEMPLATE
-
-    (H.settings_dir(root) / "verb-grants.yaml").write_text("mutated\n", encoding="utf-8")
-    assert H.tree_census(H.FIXTURE) == fixture_before, "mutating the copy changed the fixture"

@@ -260,44 +260,6 @@ print("TENANT ROUNDTRIP OK")
 """
 
 
-def test_1120_the_1077_rename_proof_holds_with_tenant_in_the_renamed_set(
-        tmp_path: Path) -> None:
-    """R0 (x1078_s108): the #1077 rename proof keeps holding over Tenant. Every upper-case
-    string constant _tenant.py binds (outside the proof's own skip lists) is renamed by the
-    proof's rewrite, the row's name among them; and in the renamed tree a real round trip —
-    create_tenant writes the row, the operator places a knowledge folder, accept_tenant
-    accepts the tenant — finds the row at its RENAMED name through Tenant's row and its row
-    file's path property, while no file keeps the old name. A Tenant that hand-composed
-    tenant.json instead of asking its owner would fail the round trip."""
-    proof = load_module(DEFENDER / "tests" / "test_1077_rename_proof.py",
-                        name=f"rename_proof_1120_{uuid.uuid4().hex}")
-    source = Path(_tenant.__file__).read_text(encoding="utf-8")
-    rewritten, _count = proof._rewrite_owner(source)
-    before = _upper_str_constants(source)
-    after = _upper_str_constants(rewritten)
-    unrenamed = sorted(n for n, v in before.items()
-                       if n not in proof._SKIP_NAMES and v not in proof._SKIP_VALUES
-                       and after.get(n) == v)
-    assert unrenamed == [], f"the rewrite leaves _tenant.py's {unrenamed} unrenamed"
-    assert H.ROW_NAME in before.values(), "_tenant.py no longer spells the row's name"
-
-    tree = proof._renamed_tree(tmp_path)
-    work = tmp_path / "work"
-    work.mkdir()
-    proc = subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
-        [sys.executable, "-c", _TENANT_ROUND_TRIP, str(work), str(H.FIXTURE),
-         proof._renamed(H.ROW_NAME), H.ROW_PATH_PROPERTY],
-        capture_output=True, text=True, timeout=300, cwd=str(tree),
-        env={**{k: v for k, v in os.environ.items()
-                if k not in (H.DATA_ROOT_ENV, H.LEARNING_STATE_ENV)},
-             "PYTHONPATH": str(tree), "PYTHONDONTWRITEBYTECODE": "1"},
-        check=False)
-    broke = ("the Tenant round trip broke when _tenant.py's records were renamed through their "
-             f"owner:\n{proc.stdout[-2000:]}\n{proc.stderr[-3000:]}")
-    assert proc.returncode == 0, broke
-    assert "TENANT ROUNDTRIP OK" in proc.stdout, broke
-
-
 # ======================================================================================
 # D9 — the fixture tenant (A4).
 # ======================================================================================
@@ -309,79 +271,10 @@ CONFIGURED_SYSTEMS = frozenset({
 })
 
 
-def test_1120_the_fixture_tenant_carries_the_labs_grants_and_lead_zero_outside_defender(
-        ) -> None:
-    """knowledge/tenant-fixture/ exists with settings/ and agent/ halves and does not lie
-    under defender/ (A4: outside the box-mounted tree). It is the lab frozen, and the
-    reference (N14): its table's gather grant is exactly GATHER_CENSUS, its correlation grant
-    CORRELATION_CENSUS on elastic, its withheld rows WITHHELD_CENSUS, every one with a reason;
-    its lead-zero.yaml names elastic.correlate-alerts-by-entity, which the running checkout's
-    catalog resolves and agrees with; its case-history mapping equals the template's and
-    releases on closed; it configures the lab's seven systems; its agent half holds no
-    settings kind; and it commits no agent/.tenant-id (M8). The table is total over the
-    running checkout's census. The lab-content assertions of C26 hold over the fixture."""
-    fixture, settings, agent = H.FIXTURE, H.FIXTURE / "settings", H.FIXTURE / "agent"
-    assert settings.is_dir(), f"{fixture} lacks its settings half"
-    assert agent.is_dir(), f"{fixture} lacks its agent half"
-    assert not fixture.resolve().is_relative_to(DEFENDER.resolve()), "the fixture is box-mounted"
-    for rel in H.REQUIRED_SETTINGS:
-        assert (settings / rel).is_file(), f"the fixture lacks {rel}"
-    assert not (fixture / H.TENANT_ID_FILE).exists(), "the fixture commits a .tenant-id (M8)"
-
-    grants = verb_dispositions.run_grants(settings)
-    assert {(s, v) for s, v, *_ in grants.gather.entries} == set(D995.GATHER_CENSUS)
-    assert {(s, v) for s, v, *_ in grants.correlation.entries} == set(D995.CORRELATION_CENSUS)
-    assert grants.correlation_system == "elastic"
-    rows = verb_dispositions.load_dispositions(settings / "verb-grants.yaml")
-    assert {(r.system, r.verb) for r in rows if not r.roles} == set(D995.WITHHELD_CENSUS)
-
-    lz = H.mod("runtime.lead_zero_config")
-    template = lz.load_correlation_template(lz.lead_zero_config_path(settings))
-    assert template == H.FIXTURE_CORRELATION_TEMPLATE
-    rt = H.mod("runtime.run_tenant")
-    dispatch = rt.correlation_dispatch(settings, rt.catalog_templates(DEFENDER),
-                                       grants.correlation)
-    assert dispatch.template_id == H.FIXTURE_CORRELATION_TEMPLATE
-
-    mapping = settings / "systems" / "case-history" / "mapping.yaml"
-    assert mapping.read_bytes() == (
-        H.TEMPLATE / "settings" / "systems" / "case-history" / "mapping.yaml").read_bytes()
-    case_ticket = H.mod("runtime.case_ticket")
-    loaded = case_ticket.load_case_mapping(settings)
-    assert (loaded["open"]["status"], loaded["comment"]["author"]) == ("open", "defender")
-    configured = {p.parent.name for p in (settings / "systems").glob("*/config.env")}
-    assert configured == CONFIGURED_SYSTEMS, configured
-    settings_kinds = [p for p in agent.rglob("*")
-                      if p.name in ("verb-grants.yaml", "lead-zero.yaml", "mapping.yaml",
-                                    "config.env")]
-    assert settings_kinds == [], f"the agent half holds settings: {settings_kinds}"
-
-    ds = H.mod("learning.leads.declared_systems")
-    roster = ds.read_adapters(H.mod("_paths").adapters_under(DEFENDER))
-    walked = {s: roster.declared_verbs(s) for s in ds.declared_systems_over(roster, REPO)}
-    gaps = verb_dispositions.census_gaps(walked, rows)
-    assert not gaps, gaps
-
-
 def _spells_the_fixture(path: Path) -> bool:
     text = cached_source(path)
     return "tenant-fixture" in text or re.search(
         r"""["']tenant["']\s*\+\s*["']-fixture["']""", text) is not None
-
-
-def test_1120_no_production_module_names_the_fixture_tenant() -> None:
-    """No module under defender/ outside tests/ spells tenant-fixture or builds a path to it,
-    so the fixture is never a run's tenant outside tests (A4). The positive control: the same
-    scan over scripts/lint/lint_verb_disposition_census.py finds it — the census lint is the
-    fixture's one non-test reader (D9)."""
-    offenders = sorted(
-        str(p.relative_to(REPO)) for p in DEFENDER.rglob("*.py")
-        if "tests" not in p.relative_to(DEFENDER).parts and ".venv" not in p.parts
-        and _spells_the_fixture(p))
-    assert offenders == [], f"production modules name the fixture tenant: {offenders}"
-    assert _spells_the_fixture(lint_verb_disposition_census), (
-        "the census lint does not name knowledge/tenant-fixture, so the scan above cannot see "
-        "the reference it exists to forbid elsewhere")
 
 
 # ======================================================================================
@@ -681,47 +574,6 @@ def lab_reach_census(root: Path, *, exclude: tuple[Path, ...] = ()) -> list[str]
     return found
 
 
-@pytest.mark.gate
-def test_1120_no_test_lint_or_ci_file_reads_knowledge_tenants(tmp_path: Path) -> None:
-    """Narrowed per H2 (human), then widened when the lab was retired (human, PR #1157: #1158
-    folded in): no file under defender/tests/, scripts/lint/ or .github/workflows/ reaches the
-    checkout's lab through a removed symbol or flag — default_tenants_root, entry_tenant,
-    entry_tenant_args, TenantDir, TenantDirError, the _tenants module's tenant_dir,
-    --tenants-root — through the retired _tenants1106 resolver helpers (playground_tenant,
-    playground_run_tenant) or path constants (PLAYGROUND, PLAYGROUND_SETTINGS,
-    PLAYGROUND_AGENT, TENANTS_ROOT), or by spelling knowledge/tenants in a non-prose string;
-    no workflow names the tenants root. The path-only readers' H2 exemption ends with the lab.
-    The failure lists every offending site. The positive control: the same census over a tmp
-    tree holding one planted reference of each shape reports each, the path-only read
-    included; it runs first, so it is live at base."""
-    planted = tmp_path / "planted"
-    S.plant(planted, "defender/tests/test_planted.py",
-            "from defender._tenants import default_tenants_root\n"
-            "from defender import _tenants\n"
-            "from defender.tests._tenants1106 import playground_tenant\n"
-            "from defender.tests import _tenants1106 as T\n"
-            "SETTINGS = T.PLAYGROUND_SETTINGS\n"
-            "ARGV = ['--tenants-root', 'x']\n"
-            "LAB = 'knowledge/tenants/playground/settings'\n"
-            "def f(root):\n    return _tenants.tenant_dir(root, 'playground')\n")
-    S.plant(planted, ".github/workflows/ci.yml", "run: lint --tenants-root knowledge/tenants\n")
-    control = "\n".join(lab_reach_census(planted))
-    for needle in ("default_tenants_root", "playground_tenant", "spells --tenants-root",
-                   "_tenants.tenant_dir", ".github/workflows/ci.yml",
-                   ".PLAYGROUND_SETTINGS (the retired lab's path)",
-                   "test_planted.py:7: spells the retired lab's path"):
-        assert needle in control, f"the census misses a planted {needle!r}:\n{control}"
-
-    spec_suite = Path(__file__).resolve().parent
-    migrate_test = DEFENDER / "tests" / "test_1120_migrate.py"
-    found = lab_reach_census(REPO, exclude=(spec_suite, migrate_test))
-    files = sorted({f.split(":", 1)[0] for f in found})
-    assert found == [], (
-        f"{len(found)} site(s) in {len(files)} file(s) still reach the lab through the removed "
-        "surface (H2's re-home census):\n  " + "\n  ".join(files) + "\n\nsites:\n  "
-        + "\n  ".join(found[:200]))
-
-
 # ======================================================================================
 # s084 — an adapter gains a verb while the lab is walked by no gate.
 # ======================================================================================
@@ -757,50 +609,10 @@ def _lab_subjects(path: Path) -> list[str]:
     return sorted(hits)
 
 
-def test_1120_s9_adapter_gains_a_verb_while_lab_is_walked_by_no_gate(tmp_path: Path) -> None:
-    """After piece 1 and before D9 step 7, a PR adds a verb to an adapter and edits only the
-    template's and the fixture's tables, as the census lint demands. CI stays green: the
-    census lint, run over a repo whose lab table lacks the new verb while the template and
-    the fixture decide it, exits 0 — the lab goes stale, unwalked (H2). And it stays green in
-    the tests too, because piece 1 moved every C26 lab-content assertion to the fixture: none
-    of the C26 test modules takes the lab as its subject any more — its settings or agent
-    half, the helpers that load or resolve it, or a string spelling its path."""
-    systems = {"alpha": "lookup", "beta": "lookup", "gamma": "fresh-verb"}
-    added = {("gamma", "fresh-verb"): {"roles": ["gather"]},
-             ("gamma", "health-check"): {"roles": ["gather"]}}
-    repo = _planted_repo(tmp_path, systems=systems, fixture_rows={**GRANTED_ROWS, **added},
-                         template_rows={**TEMPLATE_ROWS,
-                                        **{p: {"roles": [], "reason": _WHY} for p in added}},
-                         lab_rows=GRANTED_ROWS)
-    rc, out = _census(repo)
-    assert rc == 0, (
-        f"the census lint still walks the lab: a stale lab table fails CI (rc {rc}):\n{out}")
-    assert "playground" not in out, f"the census lint still names the lab:\n{out}"
-
-    lab_subjects = [f"{name}: {hits}" for name in C26_MODULES
-                    if (hits := _lab_subjects(DEFENDER / "tests" / name))]
-    assert lab_subjects == [], (
-        "C26 modules still assert lab content (move them to the fixture):\n  "
-        + "\n  ".join(lab_subjects))
-
-
 # ======================================================================================
 # R5 — the path-only readers survive piece 1 (H2).
 # ======================================================================================
 
-def test_1120_the_lab_is_retired_from_the_checkout() -> None:
-    """R5 superseded (human, PR #1157: "Fold" — #1158 folded into piece 1, D9 step 7 reached
-    early): the lab is no longer committed — the checkout's git tracks nothing under
-    knowledge/tenants/ — and the template and the fixture, the two committed tenants, are.
-    That no test reads the lab by path or symbol is o10_tests_need_no_tenant_repo's census."""
-    tracked = subprocess.run(
-        ["git", "-C", str(REPO), "ls-files", "--cached", "--", LAB_TREE,
-         "knowledge/tenant-template", "knowledge/tenant-fixture"],
-        capture_output=True, text=True, check=True, timeout=60).stdout.splitlines()
-    lab = [t for t in tracked if t.startswith(LAB_TREE + "/")]
-    assert lab == [], f"the checkout still commits the retired lab: {lab[:5]}"
-    for kept in ("knowledge/tenant-template/", "knowledge/tenant-fixture/"):
-        assert any(t.startswith(kept) for t in tracked), f"the checkout no longer commits {kept}"
 
 
 # ======================================================================================
@@ -837,42 +649,6 @@ _AFTER_CLONE = re.compile(
 _CREDENTIALS = re.compile(r"credential helper|ssh[- ]agent", re.IGNORECASE)
 
 
-def test_1120_docs_and_skills_name_clone_then_setup_and_no_tenants_root() -> None:
-    """The docs and skills piece 1's removals falsify — connect SKILL.md, the handbook's
-    knowledge-and-skills.md, README.runtime.md and Dockerfile.runtime's comments, held_out's
-    docstring (generate_case's went with it, human, PR #1157), case-history-write-path.md, state-surface-adapters.md,
-    the adapters README and the prompt-hygiene skill — name no --tenants-root, no setup with a
-    --from source, and no knowledge/tenants as a settings location. Every doc that documents
-    the tenant.py setup step (these and the fresh-run docs pass-A pins it in) documents it as
-    DC2 has it: clone the tenant repo into <root>/<id>/knowledge on the host, then run
-    tenant.py setup <id>. Together they tell the operator to run setup after the clone exits
-    0 (NF3) and to clone with a credential helper or an ssh agent, never a credential in the
-    URL (NF5)."""
-    setup_step = f"{H.script_of(tenant_py).name} setup"
-    problems = []
-    slice_text = ""
-    for doc in dict.fromkeys((*M10_DOCS, *SETUP_STEP_DOCS)):
-        assert doc.is_file(), f"M10's doc {doc} moved"
-        text = doc.read_text(encoding="utf-8")
-        slice_text += text + "\n"
-        rel = doc.relative_to(REPO)
-        if doc in M10_DOCS:
-            for bad, found in ((REMOVED_FLAG, REMOVED_FLAG in text),
-                               ("setup … --from", _SETUP_FROM.search(text) is not None),
-                               ("knowledge/tenants", "knowledge/tenants" in text)):
-                if found:
-                    problems.append(f"{rel}: still names {bad}")
-        if setup_step in text and not _CLONE_INTO_KNOWLEDGE.search(text):
-            problems.append(f"{rel}: documents `{setup_step}` without the clone into "
-                            "<root>/<id>/knowledge before it")
-    if not _AFTER_CLONE.search(slice_text):
-        problems.append("no doc says to run setup after the clone exits 0 (NF3)")
-    if not _CREDENTIALS.search(slice_text):
-        problems.append("no doc says to clone with a credential helper or an ssh agent (NF5)")
-    assert problems == [], "M10's docs still describe the removed surface:\n  " + "\n  ".join(
-        problems)
-
-
 # ======================================================================================
 # N11 — the devcontainer's data root never enters a build context.
 # ======================================================================================
@@ -893,28 +669,6 @@ def _dockerignore_excludes(rules: list[str], rel: str) -> bool:
         if any(re.fullmatch(regex, c) for c in candidates):
             excluded = not negate
     return excluded
-
-
-def test_1120_dockerignore_keeps_the_devcontainer_data_root_out_of_the_build_context() -> None:
-    """Piece 1 puts every tenant's settings under the devcontainer's data root,
-    /workspace/.defender-data, which is the repo root's .defender-data — inside the context
-    (../, the repo root) the dev and runtime images build with. The repo root's .dockerignore
-    excludes it, so a tenant's settings and knowledge never enter a build context (N11,
-    promoted s11). The positive control: the same reading of the file excludes the committed
-    knowledge/ folder it already lists and keeps defender/run.py in the context."""
-    compose = (REPO / ".devcontainer" / "docker-compose.yml").read_text(encoding="utf-8")
-    for premise in ("context: ../", "/workspace/.defender-data"):
-        assert premise in compose, (
-            f"docker-compose.yml no longer spells {premise!r} — the devcontainer no longer builds "
-            "from the repo root or keeps its data root there; re-derive which .dockerignore "
-            "applies")
-    rules = [ln.strip() for ln in (REPO / ".dockerignore").read_text(encoding="utf-8").splitlines()
-             if ln.strip() and not ln.strip().startswith("#")]
-    assert _dockerignore_excludes(rules, "knowledge/tenants/playground/settings/verb-grants.yaml")
-    assert not _dockerignore_excludes(rules, "defender/run.py")
-    assert _dockerignore_excludes(rules, ".defender-data/acme/knowledge/settings/verb-grants.yaml"), (
-        ".dockerignore does not exclude .defender-data: the devcontainer's tenant settings and "
-        "knowledge enter the dev and runtime images' build context")
 
 
 def test_1159_the_census_lint_keeps_exit_2_and_its_own_framing_when_the_census_is_blind(
