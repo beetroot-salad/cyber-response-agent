@@ -264,7 +264,11 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     else:
         reason = None
         _logger.info(f"record {case_id}: comment posted ({status}, {word})")
-    _write_receipt(run, config, case_id, word if ok else RECEIPT_ERROR, reason)
+    # The posted body rides on a success receipt: the run's own write to the world after any
+    # branch point taken from it, which a branched world's oracle is handed so it serves the
+    # case as it stood at the fork (#1255 P5, O6). Host-only, like the receipt itself.
+    _write_receipt(run, config, case_id, word if ok else RECEIPT_ERROR, reason,
+                   comment=payload.get("body") if ok else None)
 
 
 def _prior_open_refusal(run: Run) -> str | None:
@@ -295,27 +299,55 @@ def clear_receipt(run: Run) -> None:
         _logger.warning(f"could not clear the stale receipt: {e}")
 
 
-def _write_receipt(
+def _write_receipt(  # noqa: PLR0913 — the receipt's fields, each the caller's to decide
     run: Run, config: dict[str, str] | None, case_id: str, status: str, reason: str | None,
+    *, comment: str | None = None,
 ) -> None:
     """@owns ticket_write receipt — `{key, status, url, ok, reason}`, the one shape the page
-    reads. `url` is null when there was no usable config to name a store; `reason` is null on a
-    success and the redacted failing text on every other status."""
-    receipt = {
+    reads, plus `comment` (the body the store accepted) when a comment was posted. `url` is
+    null when there was no usable config to name a store; `reason` is null on a success and the
+    redacted failing text on every other status. `read_posted_comment` is `comment`'s reader."""
+    receipt: dict[str, object] = {
         "key": case_id,
         "status": status,
         "url": (f"{config['URL_BASE'].rstrip('/')}/tickets/{case_id}" if config else None),
         "ok": status in _RECEIPT_OK,
         "reason": reason,
     }
+    if comment is not None:
+        receipt[RECEIPT_COMMENT] = comment
     try:
         run.observability.ticket_write.write(json.dumps(receipt, indent=2) + "\n")
     except OSError as e:
         _logger.warning(f"could not write receipt: {e}")
 
 
+#: The success receipt's field holding the comment body the store accepted (#1255 P5).
+RECEIPT_COMMENT = "comment"
+
+
+def read_posted_comment(run: Run) -> tuple[str, str] | None:
+    """The comment this run posted on its case ticket, as `(key, body)` — read off its receipt
+    (`_write_receipt`), or `None` when the receipt records no accepted comment (none written,
+    unreadable, a failure, or written before the receipt carried the body). The run's own write
+    to the world, which a world branched from it serves as never having happened (#1255 P5)."""
+    try:
+        text = run.observability.ticket_write.read()
+        doc = json.loads(text) if text is not None else None
+    except (OSError, ValueError, RecursionError) as unreadable:
+        _logger.warning(f"{run.run_dir.name}: the ticket receipt could not be read "
+                        f"({type(unreadable).__name__}); no posted comment is known")
+        return None
+    if not isinstance(doc, dict) or doc.get("ok") is not True:
+        return None
+    key, body = doc.get("key"), doc.get(RECEIPT_COMMENT)
+    if not isinstance(key, str) or not isinstance(body, str):
+        return None
+    return key, body
+
+
 # The path accessor remains the public read-side compatibility surface for run pages.
 __all__ = [
     "TicketWriterDeps", "DEFAULT_DEPS", "open_case_ticket", "record_case_ticket",
-    "receipt_path", "clear_receipt",
+    "receipt_path", "clear_receipt", "read_posted_comment", "RECEIPT_COMMENT",
 ]

@@ -39,9 +39,10 @@ from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths
 #: The five groups, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
 
-#: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table.
+#: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table, plus
+#: #1255's `call_join` (a host-only sidecar the query writer appends to; G4/G6).
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
-    "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
+    "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads", "call_join"),
     "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
     "documents": ("investigation", "report", "gather_summaries", "lead_author"),
     "observability": (
@@ -61,7 +62,7 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "review_record": "review_record", "lessons_loaded": "lessons_loaded",
     "ticket_write": "ticket_write", "runtime_html": "runtime_html",
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
-    "session_db": "session_db",
+    "session_db": "session_db", "call_join": "call_join",
 }
 #: The one write verb per member — per record, not per group, since the group only says how a
 #: record is read. `append` (JSONL), `write` (whole document or write-once fact), `open`
@@ -77,7 +78,7 @@ MEMBER_VERB: dict[str, str | None] = {
     "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
     "ticket_write": "write",
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
-    "session_db": "open",
+    "session_db": "open", "call_join": "append",
 }
 # The capability table is authoritative; MEMBER_VERB retains the primary-verb API.
 MEMBER_CAPABILITIES = {name: frozenset((verb,)) if verb else frozenset()
@@ -95,10 +96,10 @@ for _member in ("wire_log", "policy_denials", "review_trace"):
 
 UPWARD_ACCESSORS = (
     "run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer", "sessions_dir",
-    "session_db")
+    "session_db", "call_join")
 #: The sidecars sit directly in the runs base, so they are anchored there. (The session db's
 #: `open_store` anchors its own directory.)
-_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer")
+_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer", "call_join")
 #: Written once through the exclusive lane (a second lead claim must collide). The scrub
 #: verdict is a fact too but is rewritten, so it uses `replace` like every other `write`.
 _WRITE_ONCE_MEMBERS = frozenset({"alert", "alert_record", "provenance", "leads"})

@@ -466,15 +466,57 @@ def _read_world_ledger(
     return kept, malformed, rec
 
 
+def read_call_join(bound: Bound, label: str) -> dict[tuple[str, int], str]:
+    """World `label`'s archived call join (#1255 G4/G6): each row the run itself wrote, by its
+    `(lead_id, seq)`, mapped to the call's host-written id. An absent join is no rows of the
+    run's own (a world whose investigator asked nothing). `JudgeRefused` naming the file and
+    the refusal for a read the no-follow reader refuses, a torn line, a malformed line or two
+    lines for one `(lead_id, seq)`.
+
+    @owns call_join read — the one read of `worlds/<X>/call_join.jsonl`; its writer is
+    `record_query.append_query_row` (`CALL_JOIN_COLUMNS`)."""
+    name = LAYOUT.world(label).call_join
+    rows, torn, read = bound.read_jsonl(name)
+    if read.absent:
+        return {}
+    if read.refusal is not None:
+        raise JudgeRefused(f"world {label!r}: {read.refusal}")
+    if torn:
+        raise JudgeRefused(f"world {label!r}: {name} holds {torn} line(s) that do not parse "
+                           "as a row")
+    join: dict[tuple[str, int], str] = {}
+    for index, row in enumerate(rows):
+        lead, seq, call_id = row.get("lead_id"), row.get("seq"), row.get("call_id")
+        if (not isinstance(lead, str) or not isinstance(seq, int) or isinstance(seq, bool)
+                or not isinstance(call_id, str)):
+            raise JudgeRefused(f"world {label!r}: {name} row {index} is not a (lead_id, seq) "
+                               f"-> call id line ({row!r})")
+        if (lead, seq) in join:
+            raise JudgeRefused(f"world {label!r}: {name} joins ({lead!r}, {seq}) twice "
+                               f"(row {index})")
+        join[(lead, seq)] = call_id
+    return join
+
+
 def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
-    """World `label`'s archived query table, every line a row; `None` when nothing is at the
-    name (a world not archived); `JudgeRefused` naming the file and the refusal (a link, a
-    FIFO, a directory, an oversize file, a torn line, or malformed call fields).
+    """World `label`'s archived query table, every line a row joined to its call id; `None`
+    when nothing is at the name (a world not archived); `JudgeRefused` naming the file and the
+    refusal (a link, a FIFO, a directory, an oversize file, a torn line, or malformed call
+    fields).
+
+    The table carries no call id (#1255 G4: the model reads it). Each row the run itself wrote
+    is handed back carrying the id its host-only call join (`read_call_join`) records for the
+    row's own `(lead_id, seq)` — never by the row's place in the table — under `calls.CALL_ID`,
+    the one key every judge reader of a row's id reads. A row with no join line (a seeded,
+    pre-branch row) carries none; an id spelled on the table row itself is not the host's and
+    is dropped.
 
     Unlike the tolerant lead reader, grading must preserve the raw call identity rather than
     coerce it. Validate the string fields used by the computed views before admitting any
     rows, including unserved calls that have no ledger partner to check them against.
     Params retain the shared reader's tolerant handling of non-mappings."""
+    from defender.learning.judge.calls import CALL_ID
+
     table_name = LAYOUT.world(label).executed_queries
     table, torn_table, table_read = bound.read_jsonl(table_name)
     if table_read.absent:
@@ -491,7 +533,17 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
                 raise JudgeRefused(
                     f"world {label!r}: {table_name} row {index} has malformed {column} "
                     f"({row.get(column)!r}); expected str")
-    return table
+    join = read_call_join(bound, label)
+    joined: list[dict[str, Any]] = []
+    for row in table:
+        own = {k: v for k, v in row.items() if k != CALL_ID}
+        seq = row.get("seq")
+        call_id = (join.get((row["lead_id"], seq))
+                   if isinstance(seq, int) and not isinstance(seq, bool) else None)
+        if call_id is not None:
+            own[CALL_ID] = call_id
+        joined.append(own)
+    return joined
 
 
 def read_served_ledger(bound: Bound, label: str, *, episode_token: str) -> list[dict[str, Any]]:
@@ -1056,7 +1108,7 @@ def is_gradable_row(row: Any) -> bool:
 
 __all__ = [
     "InvestigationFacts", "WorldFacts", "control_world", "read_call_records",
-    "read_query_table", "read_served_ledger",
+    "read_call_join", "read_query_table", "read_served_ledger",
     "discriminator_of", "episode_id_of",
     "is_gradable_row", "json_mapping", "json_mapping_of", "lead_chain", "leads_by_id", "mapping_key",
     "names_one_file", "non_control_worlds", "raw_manifest", "read_manifest",

@@ -59,6 +59,9 @@ RUN_DIR_POINTER_NAME = "run_dir"
 #: dir's own, from `run_repository._layout`.
 ARCHIVED_SCRUB_VERDICT_NAME = "scrub_verdict.json"
 ARCHIVED_RUN_END_NAME = "run_end.json"
+#: The run's call join (`RunPaths.call_join`, #1255 G4/G6), re-homed under the world beside the
+#: query table it joins to the served ledger.
+ARCHIVED_CALL_JOIN_NAME = "call_join.jsonl"
 
 
 def _check_label(label: object, *, what: str = "label") -> str:
@@ -140,9 +143,15 @@ class ArchivedWorldLeaves:
 
     @property
     def executed_queries(self) -> PurePosixPath:
-        """The archived query table: the sibling run's own, copied under the world (#1234 A12:
-        the judge joins it to the served ledger by call id)."""
+        """The archived query table: the sibling run's own, copied under the world. It carries
+        no call id (#1255 G4); the judge joins it to the served ledger through `call_join`."""
         return PurePosixPath(RUN_LAYOUT.executed_queries)
+
+    @property
+    def call_join(self) -> PurePosixPath:
+        """The run's call join (#1255 G4/G6): `(lead_id, seq)` -> call id for every table row
+        the run itself wrote; a table row with no line here is inherited (seeded)."""
+        return PurePosixPath(ARCHIVED_CALL_JOIN_NAME)
 
     def gather_summary(self, lead_id: str) -> PurePosixPath:
         """`gather_summaries/<lead_id>.md`.
@@ -234,6 +243,10 @@ class WorldLayout:
     @property
     def executed_queries(self) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.executed_queries
+
+    @property
+    def call_join(self) -> PurePosixPath:
+        return self.dir / WORLD_LEAVES.call_join
 
     def gather_summary(self, lead_id: str) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.gather_summary(lead_id)
@@ -634,6 +647,10 @@ class WorldPaths:
     @property
     def run_end(self) -> Path:
         return self._at(self.rel.run_end, what="run_end")
+
+    @property
+    def call_join(self) -> Path:
+        return self._at(self.rel.call_join, what="call_join")
 
     @property
     def lessons_loaded(self) -> Path:

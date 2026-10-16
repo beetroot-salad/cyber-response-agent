@@ -41,6 +41,7 @@ from defender.scripts.gather_tools.record_query import (
     names_something_readable,
     payload_digest,
     payload_status,
+    payload_text_of,
     persist_payload as _persist_payload,  # noqa: F401
     raw_command,
     rejection_budget_trip,
@@ -614,7 +615,7 @@ class QueryCapture(AbstractCapability[Any]):
         lead_id = _dispatched_lead(deps)
         state = run_state_of(deps)
 
-        text = "" if exit_code != 0 else json.dumps(payload, default=str)
+        text = "" if exit_code != 0 else payload_text_of(payload)
 
         try:
             row = append_query_row(
