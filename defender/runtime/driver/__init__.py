@@ -59,6 +59,7 @@ from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
 from ..permission.policies import _common
 from ..providers import BuiltModel
+from ..run_clock import ClockSource
 from ..run_state import RunState
 from ..tools import (
     AgentDeps,
@@ -189,18 +190,24 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     }
 
 
-def _run_state_at_boundary(run_state: RunState | None, run_dir: Path, run_id: str) -> RunState:
+def _run_state_at_boundary(run_state: RunState | None, run_dir: Path, run_id: str,
+                           clock: ClockSource | None) -> RunState:
     """The run's one live state (#1235), resolved once: the one the caller handed in, which
     must be this run's — started for this folder, as spelled, under this run id — or, when
     handed none, a new one for the run (production's path: `run.py` hands none). Another
     run's state is a `ValueError`: counting this run on it would charge that run's budget
-    and breaker, and leave this one's decisions reading a state they never wrote."""
+    and breaker, and leave this one's decisions reading a state they never wrote.
+
+    `clock` is the run clock's source (#1255), attached here, before anything reads the clock;
+    `None` keeps the state's own (the host's: wall time)."""
     if run_state is None:
-        return RunState(run_dir, run_id)
+        return RunState(run_dir, run_id, clock=clock)
     if (run_state.run_dir, run_state.run_id) != (Path(run_dir), run_id):
         raise ValueError(
             f"run_investigation was handed the state of run {run_state.run_id!r} on "
             f"{run_state.run_dir}, not this run's ({run_id!r} on {run_dir})")
+    if clock is not None:
+        run_state.attach_clock(clock)
     return run_state
 
 
@@ -538,6 +545,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     tenant: RunTenant,
     orient_shim: orient.ShimRunner | None = None,
     run_state: RunState | None = None,
+    clock: ClockSource | None = None,
 ) -> dict:
     # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
     # dispatch identity). Required: there is no process-level fallback.
@@ -547,8 +555,12 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # driven — and carried by reference to every role of the run; a branch sibling's seeding
     # records its inherited rows into it. The summary does not hand it out: a caller that wants
     # it passes its own.
+    #
+    # `clock` is the run clock's source (#1255 "Time"): a zero-argument callable returning an
+    # aware UTC datetime, the single source every model-visible time of the run is read from
+    # (`RunState.now`). Omitted, the host's own (wall time).
     run_dir, run_id = run.run_dir, str(run.id)
-    state = _run_state_at_boundary(run_state, run_dir, run_id)
+    state = _run_state_at_boundary(run_state, run_dir, run_id, clock)
     model_name = resolve_main_model(model_name)
     # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not
     # inherit MAIN-gather's default registry.

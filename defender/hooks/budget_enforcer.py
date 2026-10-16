@@ -1,11 +1,8 @@
 
 from __future__ import annotations
 
-import time
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from defender._clock import parse_iso_utc
 from defender.runtime.agent_role import AgentRole
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
@@ -87,74 +84,63 @@ def account_call(state: RunState, tool_name: str, *, limits: dict, tier: str) ->
         return dict(state.budget)
 
 
-def _wall_origin(state: dict) -> datetime | None:
-    """The run's wall-clock origin as an aware UTC datetime. A naive one (from a preserved
-    offset-less stamp) would make `_elapsed`'s subtraction raise `TypeError`."""
-    for key in ("created_at", "started_at"):
-        parsed = parse_iso_utc(state.get(key))
-        if parsed is not None:
-            return parsed
-    return None
-
-
 # S15 (#1224): the seconds a branched world's oracle held the turn, which every investigator
 # time limit excludes, are the run's own host state (`RunState.oracle_credited`, and the open
-# turn's start). Nothing persists them, so no credit outlives its run (#1239).
+# turn's start). Nothing persists them, so no credit outlives its run (#1239). They are measured
+# on the run clock's own ticks (#1255): an oracle turn pauses the run clock, so it moves neither
+# the budget's elapsed time nor any time the model is shown.
 
 
 def oracle_turn_opened(state: RunState) -> None:
-    """Pause the investigator's clock: an oracle turn holds the world from now until
+    """Pause the run clock: an oracle turn holds the world from now until
     `oracle_turn_closed`. One turn at a time per world (`WorldRegistry._turn`), so an open
     mark is the turn's own; opening again restarts it."""
     with state.lock:
-        state.oracle_opened = time.monotonic()
+        state.oracle_opened = state.clock.ticks()
 
 
 def oracle_turn_closed(state: RunState) -> None:
-    """Resume the investigator's clock, crediting the closed turn's interval to the run, once.
+    """Resume the run clock, crediting the closed turn's interval to the run, once.
 
     @owns oracle_credited"""
     with state.lock:
         opened, state.oracle_opened = state.oracle_opened, None
         if opened is not None:
-            state.oracle_credited += max(0.0, time.monotonic() - opened)
+            state.oracle_credited += max(0.0, state.clock.ticks() - opened)
 
 
 def oracle_held(state: RunState) -> float:
-    """The oracle time the investigator's clock excludes: the credited total plus the turn
-    open now, if any. Zero for a run no oracle served."""
+    """The oracle time the run clock excludes: the credited total plus the turn open now, if
+    any. Zero for a run no oracle served."""
     with state.lock:
-        held = state.oracle_credited
-        if state.oracle_opened is not None:
-            held += max(0.0, time.monotonic() - state.oracle_opened)
-    return held
+        return state.oracle_held_at(state.clock.ticks())
+
+
+#: The key `enforcement_state` carries the run's live elapsed reader under.
+_ELAPSED = "elapsed_now"
 
 
 def enforcement_state(state: RunState) -> dict:
-    """The run's budget as every enforcing check reads it: the counters and the wall-clock
-    origin (`budget_snapshot`), the monotonic origin beside it (`started_monotonic`), and the
-    seconds oracle turns held the world (`oracle_held`), which `_elapsed` subtracts.
+    """The run's budget as every enforcing check reads it: the counters (`budget_snapshot`)
+    and the run's live elapsed reader (`RunState.elapsed`, on the run clock, less the seconds
+    oracle turns held the world) — read when a check runs, not when the view is built.
 
     The one builder of that view: the budget hooks (`driver._budget`) and lead-0's gate both
     read it, so on the same state they answer "is the tail spent?" from one clock."""
-    return {**state.budget_snapshot(), "started_monotonic": state.started_monotonic,
-            "oracle_held": oracle_held(state)}
+    return {**state.budget_snapshot(), _ELAPSED: state.elapsed}
 
 
 def _elapsed(state: dict) -> float | None:
-    """The investigator's elapsed seconds: the larger of the wall-clock and monotonic deltas
-    (a wall clock stepped back cannot extend the run), less the oracle-held seconds the state
-    carries (`enforcement_state`; none for a bare budget). `None` when it names no origin."""
-    deltas: list[float] = []
-    origin = _wall_origin(state)
-    if origin is not None:
-        deltas.append((datetime.now(UTC) - origin).total_seconds())
-    mono = state.get("started_monotonic")
-    if isinstance(mono, (int, float)) and not isinstance(mono, bool):
-        deltas.append(time.monotonic() - mono)
-    if not deltas:
+    """The run's elapsed seconds on its run clock (#1255 "Time": the clock is the only source),
+    read through the live reader `enforcement_state` carries. `None` for a view that carries
+    none — a bare budget names no clock, and every enforcing check fails closed on it."""
+    reader = state.get(_ELAPSED)
+    if not callable(reader):
         return None
-    return max(deltas) - state.get("oracle_held", 0.0)
+    value = reader()
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 def tail_exhausted(state: dict, limits: dict) -> bool:
