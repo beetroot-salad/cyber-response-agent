@@ -25,7 +25,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
@@ -54,6 +54,7 @@ from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
+from ..exception_groups import carried, carried_unless_overridden
 from .. import review_roles
 from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
@@ -282,8 +283,8 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
     except (run_end.CallRecordWriteFailed, providers.ProviderDown, BaseExceptionGroup) as e:
         # Two failures end the run by name. Concurrent leads may deliver either inside an
         # exception group; a group that carries neither propagates as itself.
-        failed = _carried(e, run_end.CallRecordWriteFailed)
-        down = _carried_alone(e, providers.ProviderDown)
+        failed = carried(e, run_end.CallRecordWriteFailed)
+        down = _provider_down_in(e)
         if failed is not None:
             # A call record the run could not write (A12, #1234), stamped with the record that
             # failed.
@@ -325,36 +326,10 @@ def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
     bind_call_ids(state, run if isinstance(run, str) and run else run_id)
 
 
-_E = TypeVar("_E", bound=BaseException)
-
-
-def _carried_alone(exc: BaseException, kind: type[_E]) -> _E | None:
-    """The `kind` that `exc` is, or that an exception group carries as its ONLY kind of
-    leaf. A group that also carries another failure (an interrupt, a kill) is not that
-    `kind`'s to end the run with: it propagates, as before."""
-    found = _carried(exc, kind)
-    if found is None:
-        return None
-    leaves = [exc]
-    while leaves:
-        leaf = leaves.pop()
-        if isinstance(leaf, BaseExceptionGroup):
-            leaves.extend(leaf.exceptions)
-        elif not isinstance(leaf, kind):
-            return None
-    return found
-
-
-def _carried(exc: BaseException, kind: type[_E]) -> _E | None:
-    """The `kind` that `exc` is or carries (an exception group may wrap it, however deep)."""
-    if isinstance(exc, kind):
-        return exc
-    if isinstance(exc, BaseExceptionGroup):
-        for inner in exc.exceptions:
-            found = _carried(inner, kind)
-            if found is not None:
-                return found
-    return None
+def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:
+    """The `ProviderDown` that should end the run on `exc` (bare, or carried by a group that
+    holds no interrupt, kill or abort), else `None`."""
+    return carried_unless_overridden(exc, providers.ProviderDown, (BudgetKill, RunAborted))
 
 
 def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
@@ -529,7 +504,7 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         return None, stop(session_store.TRUNCATED_BY_STORE, "StoreAppendError")
     except BaseException as e:
         # A provider that stayed down (#1243) may arrive inside an exception group.
-        down = _carried_alone(e, providers.ProviderDown)
+        down = _provider_down_in(e)
         if down is not None:
             _logger.error(f"{down}; stopping before the agent starts")
             return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")

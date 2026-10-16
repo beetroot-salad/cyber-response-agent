@@ -26,6 +26,7 @@ from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill, count_call
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker, providers, run_end
+from defender.runtime.exception_groups import carried_unless_overridden
 from defender.runtime.run_state import RunState
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from ._spec import (
@@ -250,6 +251,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
     except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run
+        if carried_unless_overridden(e, providers.ProviderDown, (BudgetKill, circuit_breaker.RunAborted)):
+            raise  # a provider that stayed down, inside a group (#1243)
         _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it")
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
     if not ends:
