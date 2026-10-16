@@ -329,13 +329,21 @@ def mark_escaped(state: RunState, system: str, fault_text: str, *,
 
 
 def down_notes(state: RunState, systems: Iterable[str]) -> dict[str, str]:
-    """`cause_text` for each of `systems` that is down NOW (`down_cause`): what MAIN's workspace
-    view, gather's system index and the like print beside it (O-3), asked when they render — so
-    a system downed after the start (an escaped config fault, a trip) is marked too."""
+    """The cause of each of `systems` that is down NOW (`down_cause`): what MAIN's workspace view,
+    gather's system index and the like print beside it (O-3), asked when they render — so a
+    system downed after the start (an escaped config fault, a trip) is marked too.
+
+    Named as `cause_text` names it, save a trip, named without its count: the count keeps
+    moving while the run goes on, and a mark is standing text — MAIN's opening prose, which two
+    runs ending their correlation lead the same way must share (#1222 A2), and gather's index,
+    the cached prefix of every dispatch. The trip's own refusal names the count."""
     notes: dict[str, str] = {}
     for system in systems:
         cause = down_cause(state, system)
-        if cause is not None:
+        if isinstance(cause, Tripped):
+            notes[system] = ("tripped: the circuit breaker stopped calls to it after repeated "
+                             f"{circuit_breaker.INFRA_CAUSES}")
+        elif cause is not None:
             notes[system] = cause_text(cause)
     return notes
 

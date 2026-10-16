@@ -381,7 +381,7 @@ def _load_adapter_module(path: Path) -> Any:
 
 def fresh_adapter_module(roster: RosterRead, system: str) -> Any:
     """`system`'s adapter module imported afresh from the file `roster` accepted for it, for
-    its settings check at run start (`system_status.startup_check`, #1256). Never cached: the
+    its settings check at run start (`system_status.judge_run`, #1256). Never cached: the
     call-time load (`ModuleVerbRegistry.verbs`) keeps its own semantics — imported once per
     process on success, retried on every call after a failure — and this read neither primes
     nor consults it. `KeyError` for a system the roster does not accept; an import that fails
