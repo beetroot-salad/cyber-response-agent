@@ -1,31 +1,45 @@
-"""Dormant tenant delivery (#1108 P3, amendment 2); P4 wires drains and runs onto it.
+"""Dormant tenant delivery (#1108 P3, amendments 2 and 3); P4 wires drains and runs onto it.
 
 Boxes see only host-made copies; git and the tenant's forge credential never touch a box's
 folders, and only host code here reads or writes git.
 
-- `publish` fetches (no lock held), then under the tenant's knowledge lock fast-forwards the
-  clone and writes a `TenantExport` from git objects: `<T>/exports/<commit>/`, immutable, with
+- `publish` fetches (no lock held), then under the tenant's knowledge lock sweeps dead draft
+  builds, keeps `* -filter` the last line of the clone's `$GIT_DIR/info/attributes` (no filter
+  driver the tenant names runs on the host), fast-forwards the clone and writes a
+  `TenantExport` from git objects: `<T>/exports/<commit>/`, immutable, with
   `<T>/exports/current` replaced atomically to name it. `current_export` reads it back without
   git.
-- A `Batch` is a host-only worktree of the clone at the export commit, attached to the batch
-  branch and never mounted, plus a git-free `Draft` copy of its `agent/` under
-  `<T>/drafts/<batch>/`. The box mounts the draft's root read-only (`staged`) and only the
-  batch's lanes writable.
-- Per claim the host derives a `ChangeSet` (the draft against the worktree: regular files in
-  the batch's lanes and nothing else), the commit-maker (`Batch.commit`, the one maker of
-  tenant commits) commits it as plain 100644 blobs, and `Batch.reset` re-syncs the draft.
-- Every push route (finish, retained deliver, revert) sends only commits the commit-maker made,
-  by its record under `<T>/learning/`, which outlives the process that made them.
-- Git runs with every credential helper reset and one helper that answers only `get`, only for
-  the forge's own scheme, host and port, with the credential `TenantDelivery.open` read (the
-  file's single reader), handed over an inherited pipe: never in a process's argument list or
-  environment, never in another file. No prompt can run.
+- A `Batch` is a branch in the tenant clone plus a git-free draft of the export commit's
+  `agent/` under `<T>/drafts/<batch>/`, built under the lock in a dot-named temporary and
+  renamed into place. No checkout is made for it: the branch exists from the batch's first
+  commit on. The box mounts the draft's root read-only (`staged`) and only the batch's lanes
+  writable.
+- Per claim the host derives a `ChangeSet` (the draft against the blobs of the branch's last
+  commit, or of the export commit: regular files in the batch's lanes and nothing else), the
+  commit-maker (`Batch.commit`, the one maker of tenant commits) writes it as git objects and
+  moves the branch by compare-and-swap (the first commit creates it), with no lock and never
+  touching `main`, the clone's index or its checkout; `Batch.reset` re-syncs the draft.
+- Truth comes from `main`'s content and the forge's PRs, never from history (amendment 3,
+  C1). The commit-maker's record under `<T>/learning/` (it outlives the process that wrote
+  it) lists every commit it made, tagged with its batch, and each batch's net change per
+  lesson. Every push route (finish, deliver, revert) sends only the batch's own commits, and
+  first looks the batch's PR up by its head commit and repository id: a PR found (open,
+  merged or closed) is answered, and nothing is pushed or opened again. Revert peels back
+  through the agent's own changes, the newest that `main` still holds exactly first.
+- Git runs with every credential helper reset and one helper that answers only `get`, only
+  for the forge's own scheme, host and port, with the credential `TenantDelivery.open` read
+  (the file's single reader), handed over a sealed in-memory file: never in a process's
+  argument list or environment, never in a file on disk. No prompt can run. Network git runs
+  no hook of the clone's, in a session of its own, bounded by a wall timeout, its process
+  group killed on any way out of the call.
 """
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -33,7 +47,8 @@ import shutil
 import stat
 import time
 from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
@@ -47,10 +62,9 @@ from defender import _flock
 from defender import _git, _io
 from defender._tenant import Tenant, TenantRefused, parse_tenant_id_bytes
 from defender.learning.author.branch import LESSONS_BRANCH_PREFIX
-from defender.learning.author.forge import ForgeError, ForgejoForge
+from defender.learning.author.forge import ForgeError, ForgejoForge, PullRequest
 from defender.runtime import box
 from defender.runtime.box._docker import DockerFn, _docker
-from defender.runtime.box._lifecycle import _start_boxed_request
 
 _logger = logging.getLogger(__name__)
 
@@ -345,25 +359,67 @@ def _create_new_at(dir_fd: int, name: str, data: bytes) -> None:
 _POINTER = "current"
 #: The name an export is written under before it is renamed into place.
 _PUBLISHING_PREFIX = ".publishing-"
+#: What a draft is built under (`.<id>-<rand>`) before it is renamed into place: a leading dot
+#: is outside the batch-id grammar, so no draft is ever named so.
+_DRAFT_TEMPORARY = "."
+#: The `info/attributes` line that turns every filter driver off (amendment 3, C2).
+_FILTERS_OFF = "* -filter"
 
 
-def _sweep_staging(exports: Path) -> None:
-    """Remove every staging folder a publisher cut off left in `exports/`, as the entry it is
-    (a folder removed with no link below it followed; anything else unlinked). Called under
-    the tenant's lock, so no live publisher is writing one."""
-    if not _io.entry_present(exports):
+def _sweep_temporaries(folder: Path, prefix: str) -> None:
+    """Remove every entry of `folder` named with `prefix` (a build cut off left it), as the
+    entry it is: a folder removed with no link below it followed, anything else unlinked.
+    Called under the tenant's lock, so no live builder is writing one."""
+    if not _io.entry_present(folder):
         return
-    fd = os.open(exports, _FOLDER_FLAGS)
+    fd = os.open(folder, _FOLDER_FLAGS)
     try:
         with os.scandir(fd) as entries:
             stale = [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in entries
-                     if entry.name.startswith(_PUBLISHING_PREFIX)]
+                     if entry.name.startswith(prefix)]
         for name, is_folder in stale:
             if is_folder:
                 shutil.rmtree(name, dir_fd=fd)
             else:
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(name, dir_fd=fd)
+    finally:
+        os.close(fd)
+
+
+def _remove_entry(folder: Path, name: str) -> None:
+    """Remove `folder/name` as the entry it is (a folder with no link below it followed,
+    anything else unlinked); nothing when it, or `folder`, is absent."""
+    try:
+        fd = os.open(folder, _FOLDER_FLAGS)
+    except FileNotFoundError:
+        return
+    try:
+        try:
+            st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if stat.S_ISDIR(st.st_mode):
+            shutil.rmtree(name, dir_fd=fd)
+        else:
+            os.unlink(name, dir_fd=fd)
+    finally:
+        os.close(fd)
+
+
+def _rename_new(folder: Path, source: str, name: str) -> None:
+    """Rename `folder/source` to `folder/name`, refusing any entry already at `name` (a plain
+    rename would replace an empty folder there). Both relative to one held, no-follow folder
+    descriptor. The caller holds the tenant's lock, under which alone such names are made."""
+    fd = os.open(folder, _FOLDER_FLAGS)
+    try:
+        try:
+            os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            os.rename(source, name, src_dir_fd=fd, dst_dir_fd=fd)
+            return
+        raise DeliveryRefused(f"{folder / name} already exists: a draft is never built over "
+                              "another entry")
     finally:
         os.close(fd)
 
@@ -417,9 +473,10 @@ def _lock_holder(handle: IO[str]) -> str:
 @contextlib.contextmanager
 def tenant_lock(tenant: Tenant) -> Iterator[None]:
     """The tenant's knowledge lock (`<T>/knowledge.lock`, under the tenant's own folder, never
-    `forge/`): held for a fast-forward, an export publish and a worktree's creation or removal,
-    never across network I/O or a box window. A second taker fails at once with `LockBusy`
-    naming the holder's pid; it never waits."""
+    `forge/`): held for a fast-forward, an export publish (its folder and `current`), the
+    `* -filter` write to the clone's `info/attributes`, and a draft's build, rename and sweep;
+    never across network I/O, a box window or a commit. A second taker fails at once with
+    `LockBusy` naming the holder's pid; it never waits."""
     path = tenant.knowledge_lock
     with _io.hold(path.parent) as folder:
         handle = _io.open_lock_at(folder, path.name)
@@ -438,25 +495,60 @@ def tenant_lock(tenant: Tenant) -> Iterator[None]:
 
 
 # ==========================================================================================
-# The commit-maker's record
+# The commit-maker's record: provenance, and each batch's net change per lesson
 # ==========================================================================================
 
 @dataclass(frozen=True)
+class _BatchKey:
+    """Which batch a commit-maker commit belongs to: the branch it was made on, the commit the
+    batch started from (the export commit for a drain's batch, `main` for a revert), and the
+    start's own random word, so a batch id used again is never mistaken for its earlier use."""
+
+    branch: str
+    base: str
+    start: str
+
+
+@dataclass(frozen=True)
 class _Made:
-    """One commit the commit-maker made: its lanes, and per path the blob before and after it
-    (`None`: absent). Read back by every push route and by revert."""
+    """One commit the commit-maker made (one record row): its batch and lanes; per path it
+    changed, the blob at the batch's base and the blob it left (`None`: absent); and, for a
+    revert commit, the batch change it undoes (`(batch, path)`). A revert commit changes no
+    batch's net change: it is provenance only."""
 
     commit: str
+    batch: _BatchKey
     lanes: tuple[str, ...]
     changes: tuple[tuple[str, str | None, str | None], ...]
+    reverts: tuple[_BatchKey, str] | None = None
+
+
+@dataclass(frozen=True)
+class _NetChange:
+    """A batch's net change to one lesson: the blob at the batch's base (`before`) and the
+    blob its last commit-maker commit left (`after`), `None` for absent. A lesson one claim
+    created and a later claim changed is one change, absent to the last bytes. `order` is the
+    record position of the commit that last touched it (larger is newer)."""
+
+    batch: _BatchKey
+    path: str
+    before: str | None
+    after: str | None
+    order: int
+
+
+def _batch_row(batch: _BatchKey) -> dict:
+    return {"branch": batch.branch, "base": batch.base, "start": batch.start}
 
 
 def _record_made(tenant: Tenant, made: _Made) -> None:
     """Append `made` to the tenant's commit-maker record, durably, before the commit is put on
     any branch: a crash in between leaves a recorded commit no branch holds, never a branch
     holding an unrecorded one."""
-    row = {"commit": made.commit, "lanes": list(made.lanes),
-           "changes": [{"path": p, "before": b, "after": a} for p, b, a in made.changes]}
+    row: dict = {"commit": made.commit, "batch": _batch_row(made.batch), "lanes": list(made.lanes),
+                 "changes": [{"path": p, "before": b, "after": a} for p, b, a in made.changes]}
+    if made.reverts is not None:
+        row["reverts"] = {"batch": _batch_row(made.reverts[0]), "path": made.reverts[1]}
     record = tenant.commit_record
     _io.rooted_mkdir(record.parent, ".")
     _io.rooted_write(record.parent, record.name, json.dumps(row, sort_keys=True) + "\n",  # lint-jsonl-io: ok — one durable, no-follow append of one JSON row to the host-only commit-maker record
@@ -471,6 +563,16 @@ def _oid_or_none(value: object) -> str | None:
     raise ValueError(f"not an object id: {value!r}")
 
 
+def _parse_batch(value: object) -> _BatchKey:
+    if not isinstance(value, dict):
+        raise ValueError("not a batch")
+    branch, base, start = value.get("branch"), value.get("base"), value.get("start")
+    if not isinstance(branch, str) or not isinstance(start, str) or not isinstance(base, str) \
+            or not _OID.fullmatch(base):
+        raise ValueError("not a batch")
+    return _BatchKey(branch=branch, base=base, start=start)
+
+
 def _parse_made(row: dict) -> _Made:
     """One record row as `_Made`; `ValueError` for a row of any other shape."""
     commit, lanes, changes = row.get("commit"), row.get("lanes"), row.get("changes")
@@ -483,53 +585,117 @@ def _parse_made(row: dict) -> _Made:
             raise ValueError("not a commit-maker change")
         parsed.append((change["path"], _oid_or_none(change.get("before")),
                        _oid_or_none(change.get("after"))))
-    return _Made(commit=commit, lanes=tuple(lanes), changes=tuple(parsed))
+    reverts = None
+    if "reverts" in row:
+        target = row["reverts"]
+        if not isinstance(target, dict) or not isinstance(target.get("path"), str):
+            raise ValueError("not a revert's target")
+        reverts = (_parse_batch(target.get("batch")), target["path"])
+    return _Made(commit=commit, batch=_parse_batch(row.get("batch")), lanes=tuple(lanes),
+                 changes=tuple(parsed), reverts=reverts)
 
 
-def _made_commits(tenant: Tenant) -> list[_Made]:
-    """Every commit the commit-maker recorded for this tenant, oldest first. A row of another
-    shape records nothing (a torn last line from a crash among them): its commit is then
-    refused by every push route, failing closed. An unreadable record refuses."""
-    record = tenant.commit_record
-    with _io.bind(record.parent) as folder:
-        rows, malformed, read = folder.read_jsonl(record.name)
-    if read.reason is not None:
-        raise DeliveryRefused(f"the commit-maker's record {record} could not be read: "
-                              f"{read.refusal}")
-    made: list[_Made] = []
-    for row in rows:
-        try:
-            made.append(_parse_made(row))
-        except ValueError:
-            malformed += 1
-    if malformed:
-        _logger.warning("the commit-maker's record %s holds %d rows of another shape; their "
-                        "commits count as not made by it", record, malformed)
-    return made
+@dataclass(frozen=True)
+class _Record:
+    """The commit-maker's record as read, oldest row first."""
+
+    made: tuple[_Made, ...]
+
+    @classmethod
+    def read(cls, tenant: Tenant) -> _Record:
+        """Every row the commit-maker recorded for this tenant. A row of another shape records
+        nothing (a torn last line from a crash among them): its commit is then refused by every
+        push route, failing closed. An unreadable record refuses."""
+        record = tenant.commit_record
+        with _io.bind(record.parent) as folder:
+            rows, malformed, read = folder.read_jsonl(record.name)
+        if read.reason is not None:
+            raise DeliveryRefused(f"the commit-maker's record {record} could not be read: "
+                                  f"{read.refusal}")
+        made: list[_Made] = []
+        for row in rows:
+            try:
+                made.append(_parse_made(row))
+            except ValueError:
+                malformed += 1
+        if malformed:
+            _logger.warning("the commit-maker's record %s holds %d rows of another shape; their "
+                            "commits count as not made by it", record, malformed)
+        return cls(made=tuple(made))
+
+    def commits_of(self, batch: _BatchKey) -> frozenset[str]:
+        """Every commit the commit-maker made for `batch`."""
+        return frozenset(m.commit for m in self.made if m.batch == batch)
+
+    def batch_holding(self, branch: str, tip: str) -> _BatchKey | None:
+        """The batch whose commits hold `tip` on `branch`; failing that (a tip the commit-maker
+        did not make), the batch that last committed on `branch`; `None` when none did."""
+        mine = [m for m in self.made if m.batch.branch == branch]
+        for m in mine:
+            if m.commit == tip:
+                return m.batch
+        return mine[-1].batch if mine else None
+
+    def lanes_of(self, batch: _BatchKey) -> tuple[str, ...]:
+        return next(m.lanes for m in self.made if m.batch == batch)
+
+    def net_changes(self, path: str) -> list[_NetChange]:
+        """Every batch's net change to `path`, newest first: per batch the blob at its base and
+        the blob its last commit touching `path` left."""
+        net: dict[_BatchKey, _NetChange] = {}
+        for order, m in enumerate(self.made):
+            for changed, before, after in m.changes:
+                if changed == path:
+                    net[m.batch] = _NetChange(batch=m.batch, path=path, before=before,
+                                              after=after, order=order)
+        return sorted(net.values(), key=lambda change: change.order, reverse=True)
+
+    def reverts_of(self, change: _NetChange) -> list[_Made]:
+        """The revert commits made of `change`, oldest first."""
+        return [m for m in self.made if m.reverts == (change.batch, change.path)]
 
 
 # ==========================================================================================
-# Git: the environment, the credential helper
+# Git: the environment, the credential, blobs
 # ==========================================================================================
 
-#: The most a credential answer may hold: it is written whole into a fresh pipe before git
-#: starts, so it must fit the pipe's buffer (64 KiB on Linux) without blocking.
+#: The most a credential answer may hold.
 _ANSWER_LIMIT = 16 * 1024
+#: Network git's wall timeout, in seconds, unless `TenantDelivery.open` is given another.
+_NETWORK_TIMEOUT = 120.0
 
 
 def _credential_helper(fd: int) -> str:
     """The one credential helper git consults (amendment 2, flow 5), as a shell snippet: it
-    drains git's request, answers only `get`, by copying out the answer written into the
-    inherited pipe `fd` from the credential `TenantDelivery.open` read (`/dev/fd/<fd>`: a
-    shell redirection cannot name a descriptor above 9), and ignores `store` and `erase`, so
-    no git operation can rewrite or empty the credential file. The snippet holds no
-    credential."""
+    drains git's request, answers only `get`, by copying out the sealed in-memory file `fd`
+    holding the answer from the credential `TenantDelivery.open` read (`/dev/fd/<fd>`: each
+    open starts at its beginning, so every `get` of one git run is answered; a shell
+    redirection could not name a descriptor above 9), and ignores `store` and `erase`, so no
+    git operation can rewrite or empty the credential file. The snippet holds no credential."""
     return f'!f() {{ cat >/dev/null; test "$1" = get || exit 0; cat /dev/fd/{fd}; }}; f'
 
 
 def _credential_answer(user: str, token: str) -> bytes:
     """What the helper hands git for `get`, in git's credential format."""
     return f"username={user}\npassword={token}\n".encode()
+
+
+def _sealed(data: bytes) -> int:
+    """A sealed in-memory file holding exactly `data` (amendment 3, C4): no name on any file
+    system, and once sealed it can be neither written, grown, shrunk nor unsealed, so the
+    child a descriptor of it is handed to can only read it. Close-on-exec: only a child it is
+    passed to (`pass_fds`) inherits it."""
+    fd = os.memfd_create("tenant-forge-credential", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+    try:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
+        fcntl.fcntl(fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW
+                    | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
 #: Settings every git process on a tenant repository runs with, so none outlives the call
@@ -563,38 +729,65 @@ def _local_env() -> dict[str, str]:
 
 
 def _cat_blobs(repo: Path, oids: Iterable[str], env: dict[str, str]) -> dict[str, bytes]:
-    """Each blob's exact stored bytes, by id, in one `cat-file --batch`."""
+    """Each blob's exact stored bytes, by id, in one `cat-file --batch` read by `_git`'s
+    parser."""
     wanted = list(dict.fromkeys(oids))
     if not wanted:
         return {}
-    out = _git.git_bytes(["cat-file", "--batch"], cwd=repo, env=env,
+    args = ["cat-file", "--batch"]
+    out = _git.git_bytes(args, cwd=repo, env=env,
                          input="".join(f"{oid}\n" for oid in wanted).encode("ascii"))
-    blobs: dict[str, bytes] = {}
-    pos = 0
-    for oid in wanted:
-        end = out.index(b"\n", pos)
-        header = out[pos:end].decode("ascii", "replace").split(" ")
-        if len(header) != 3 or header[0] != oid or header[1] != "blob":
-            raise DeliveryRefused(f"git could not read the blob {oid}: {' '.join(header[1:])}")
-        size = int(header[2])
-        blobs[oid] = out[end + 1:end + 1 + size]
-        pos = end + 1 + size + 1
-    return blobs
+    return dict(zip(wanted, _git.blob_batch(args, out, wanted), strict=True))
 
 
 def _tree_entries(repo: Path, rev: str, paths: Sequence[str], env: dict[str, str], *,
                   recursive: bool) -> list[tuple[str, str, str, str]]:
     """`(mode, kind, oid, path)` of each entry `rev` holds at `paths` (below them too, when
-    `recursive`), NUL-framed so no path is quoted or trimmed."""
+    `recursive`), NUL-framed (`_git`'s listing parser) so no path is quoted or trimmed; a path
+    that is not UTF-8 refuses."""
     args = ["ls-tree", "-z", "--full-tree", *(["-r"] if recursive else []), rev, "--", *paths]
-    entries = []
-    for record in _git.git_bytes(args, cwd=repo, env=env).split(b"\0"):
-        if not record:
-            continue
-        meta, _tab, raw_path = record.partition(b"\t")
-        mode, kind, oid = meta.decode("ascii").split(" ")
-        entries.append((mode, kind, oid, raw_path.decode("utf-8")))
-    return entries
+    return _git.tree_records(_git.git_bytes(args, cwd=repo, env=env), errors="strict")
+
+
+# ==========================================================================================
+# What finish, deliver and revert answer
+# ==========================================================================================
+
+class DeliveryStatus(StrEnum):
+    """Where a batch (or a revert) stands with the forge."""
+
+    OPENED = "opened"
+    """A PR this call opened."""
+    OPEN = "open"
+    """An open PR this call found; nothing was pushed or opened."""
+    MERGED = "merged"
+    CLOSED = "closed"
+    """Closed unmerged: a rejection (D-closed)."""
+    NOTHING = "nothing to deliver"
+    """No branch, or a branch holding nothing past its base."""
+
+
+@dataclass(frozen=True)
+class Delivered:
+    """`status`, and the PR's `url` for `opened` and `open` (also kept for `merged` and
+    `closed`)."""
+
+    status: DeliveryStatus
+    url: str | None = None
+
+
+#: When several of the forge's PRs carry a batch's commits, the one answered: an open one
+#: first (the live review), then a merged one, then a closed one.
+_PRECEDENCE = {"open": 0, "merged": 1, "closed": 2}
+
+
+#: A PR the forge already has, by its state, as finish, deliver and revert answer it.
+_FOUND = {"open": DeliveryStatus.OPEN, "merged": DeliveryStatus.MERGED,
+          "closed": DeliveryStatus.CLOSED}
+
+
+def _answer(pr: PullRequest) -> Delivered:
+    return Delivered(status=_FOUND[pr.status], url=pr.url)
 
 
 # ==========================================================================================
@@ -603,27 +796,29 @@ def _tree_entries(repo: Path, rev: str, paths: Sequence[str], env: dict[str, str
 
 @dataclass
 class _Line:
-    """A host-only worktree of the clone, attached to one branch: where the commit-maker
-    commits. `base` is the commit it was cut at, `tip` the last commit the commit-maker put
-    on the branch (the base until it has made one)."""
+    """Where the commit-maker commits for one batch: its branch and base (`batch`), its lanes,
+    and `tip`, the last commit it put on the branch (`None` before the first, when the branch
+    does not exist yet)."""
 
-    worktree: Path
-    branch: str
-    base: str
-    tip: str
+    batch: _BatchKey
     lanes: tuple[str, ...]
+    tip: str | None = None
+
+    @property
+    def head(self) -> str:
+        """What the batch's next commit builds on: its last, or the base."""
+        return self.tip or self.batch.base
 
 
 @dataclass(eq=False)
 class Batch:
-    """One drain batch: the host-only `worktree` (attached to `branch`, cut at `export`'s
-    commit, never mounted) and the git-free draft under `draft_root` its box writes into,
-    through `lanes` only."""
+    """One drain batch: a branch of the tenant clone (`branch`, made by the batch's first
+    commit, from `export`'s commit) and the git-free draft under `draft_root` its box writes
+    into, through `lanes` only. No checkout is made for it."""
 
     id: str
     branch: str
     export: TenantExport
-    worktree: Path
     draft_root: Path
     lanes: tuple[str, ...]
     _delivery: TenantDelivery = field(repr=False)
@@ -631,8 +826,8 @@ class Batch:
 
     def box_request(self) -> box.BoxRequest:
         """The drain box: product code read-only (`code`), the draft's root read-only (`staged`),
-        and each lane writable inside it. Never the worktree, the clone, an export, `settings/`,
-        `.git` or `forge/`. `agent/` is the workdir and `DEFENDER_AGENT_DIR`."""
+        and each lane writable inside it. Never the clone, an export, `settings/`, `.git` or
+        `forge/`. `agent/` is the workdir and `DEFENDER_AGENT_DIR`. It requires a sandbox."""
         agent = self.draft_root / "agent"
         code = self._delivery.defender_dir
         mounts = [box.Mount(source=code, target=code, kind="code"),
@@ -646,15 +841,15 @@ class Batch:
         )
 
     def change_set(self) -> ChangeSet:
-        """The claim: the draft's `agent/` against the branch's last commit (the worktree's
-        `HEAD`), as changes. The base is read from git's objects, not the worktree's checkout,
-        so attributes on `main` (`eol`, `ident`, a filter) never show a change the box did not
-        make. Only regular files in the lanes may differ; any other entry anywhere in the
-        draft, an oversized file, a change outside the lanes or one touching a forbidden name
-        refuses the claim whole."""
+        """The claim: the draft's `agent/` against the blobs of the batch's base (its branch's
+        last commit, or the export commit before the first), as changes. The base is read from
+        git's objects, never a checkout, so attributes on `main` (`eol`, `ident`, a filter)
+        never show a change the box did not make. Only regular files in the lanes may differ;
+        any other entry anywhere in the draft, an oversized file, a change outside the lanes or
+        one touching a forbidden name refuses the claim whole."""
         with _refusals():
             draft = _regular_files(self.draft_root / "agent")
-            base = self._delivery._agent_blobs(self._line.tip)
+            base = self._delivery._agent_blobs(self._line.head)
             changes = []
             for rel in sorted(draft.keys() | base.keys()):
                 if draft.get(rel) == base.get(rel):
@@ -669,13 +864,18 @@ class Batch:
         return self._delivery._commit(self._line, change_set, message)
 
     def reset(self) -> None:
-        """Re-sync the draft's `agent/` with the branch's last commit, in place, from git's
-        objects: the box's additions removed, its deletions and edits restored, links and
-        FIFOs removed without being followed or opened. The lanes stay, so a running box keeps
-        its binds."""
+        """Re-sync the draft's `agent/` with the blobs of the batch's base, in place: the box's
+        additions removed, its deletions and edits restored, links and FIFOs removed without
+        being followed or opened. The lanes stay, so a running box keeps its binds."""
         with _refusals():
-            files = self._delivery._agent_blobs(self._line.tip)
+            files = self._delivery._agent_blobs(self._line.head)
             _resync(self.draft_root / "agent", files, _folders_of(files, self.lanes))
+
+    def discard(self) -> None:
+        """Remove the draft (no link below it followed). The branch and its commits stay:
+        a branch with commits is `deliver`'s to pick up."""
+        with _refusals():
+            _remove_entry(self.draft_root.parent, self.id)
 
 
 # ==========================================================================================
@@ -692,16 +892,23 @@ class TenantDelivery:
     _origin: str = field(repr=False)
     _user: str = field(repr=False)
     _token: str = field(repr=False)
+    network_timeout: float = _NETWORK_TIMEOUT
     branch_prefix: str = LESSONS_BRANCH_PREFIX
 
     @classmethod
-    def open(cls, accepted_tenant: Tenant, *, defender_dir: Path,
-             client: httpx.Client) -> TenantDelivery:
+    def open(cls, accepted_tenant: Tenant, *, defender_dir: Path, client: httpx.Client,
+             network_timeout: float = _NETWORK_TIMEOUT) -> TenantDelivery:
         """The dormant factory, and the credential file's single reader. Refuses (O9) a tenant
         whose knowledge is not its own git repository, has no `main`, has no network `origin`,
-        or has no credential agreeing with that origin's scheme, host and port; then refuses
-        unless the forge reports `main` protected and not pushable by the bot (A10)."""
+        or has no credential agreeing with that origin's scheme, host and port; reads the
+        repository's id (what its PRs' head repositories are compared with); then refuses
+        unless the forge reports `main` protected and not pushable by the bot (A10).
+        `network_timeout` is network git's wall timeout, in seconds."""
         with _refusals():
+            if (isinstance(network_timeout, bool) or not isinstance(network_timeout, (int, float))
+                    or not math.isfinite(network_timeout) or network_timeout <= 0):
+                raise DeliveryRefused(f"the network timeout must be a positive number of "
+                                      f"seconds, not {network_timeout!r}")
             repo = accepted_tenant.knowledge
             env = _local_env()
             top = _git.git(["rev-parse", "--show-toplevel"], cwd=repo, env=env)
@@ -712,45 +919,46 @@ class TenantDelivery:
                 if not _git.git_ok(["show-ref", "--verify", "--quiet", ref], cwd=repo, env=env):
                     raise DeliveryRefused(f"tenant repository is missing its main ref {ref}")
             origin = _git.git(["config", "--get", "remote.origin.url"], cwd=repo, env=env)
-            user, token, entry = _read_credential(accepted_tenant.forge_credentials)
+            user, token, server = _read_credential(accepted_tenant.forge_credentials)
             forge = ForgejoForge(origin=origin, token=token, client=client)
-            if not forge.address.serves(entry):
+            if not forge.address.serves(server):
                 raise DeliveryRefused("the tenant credential and its origin must agree on "
                                       "scheme, host and port")
+            forge.repository_id()
             forge.verify_main_protection()
             return cls(tenant=accepted_tenant, defender_dir=defender_dir, forge=forge,
-                       _origin=origin, _user=user, _token=token)
+                       _origin=origin, _user=user, _token=token,
+                       network_timeout=float(network_timeout))
 
     # -- git, local and over the network ---------------------------------------------------
 
-    def _git(self, args: Sequence[str], *, cwd: Path | None = None, input: str | None = None,
+    def _git(self, args: Sequence[str], *, input: str | None = None,
              env: dict[str, str] | None = None) -> str:
-        return _git.git(args, cwd=cwd or self.tenant.knowledge, input=input,
+        return _git.git(args, cwd=self.tenant.knowledge, input=input,
                         env=env if env is not None else _local_env())
 
     def _network(self, args: Sequence[str]) -> str:
         """A fetch or push: every credential helper reset, then the one helper, keyed to the
         forge's own scheme, host and port so it answers no other server (a URL rewritten to
-        another host gets nothing), and `core.askPass` emptied. The credential `open` read is
-        written into a fresh pipe for this git run alone; git and what it spawns inherit the
-        read end, and the helper copies it out. Neither the argument list nor the environment
-        of any process holds it, and no file does."""
-        read_fd, write_fd = os.pipe()
+        another host gets nothing), `core.askPass` emptied, and no hook of the clone's run
+        (`core.hooksPath=/dev/null`) while the token is within reach. The credential `open`
+        read is put in a sealed in-memory file for this git run alone; git and what it spawns
+        inherit its descriptor, and the helper reads it. Neither the argument list nor the
+        environment of any process holds it, and no file on disk does. Git runs in its own
+        session under the wall timeout, curl giving up on its own on a stalled transfer
+        (`http.lowSpeedLimit`/`lowSpeedTime`), its process group killed on any way out."""
+        fd = _sealed(_credential_answer(self._user, self._token))
         try:
-            try:
-                answer = memoryview(_credential_answer(self._user, self._token))
-                while answer:
-                    answer = answer[os.write(write_fd, answer):]
-            finally:
-                os.close(write_fd)
-            helper = _credential_helper(read_fd)
             config = ["-c", "credential.helper=",
-                      "-c", f"credential.{self.forge.address.origin}.helper={helper}",
-                      "-c", "core.askPass="]
-            return _git.git([*config, *args], cwd=self.tenant.knowledge, env=_local_env(),
-                            pass_fds=(read_fd,))
+                      "-c", f"credential.{self.forge.address.origin}.helper={_credential_helper(fd)}",
+                      "-c", "core.askPass=", "-c", "core.hooksPath=/dev/null",
+                      "-c", "http.lowSpeedLimit=1",
+                      "-c", f"http.lowSpeedTime={max(1, math.ceil(self.network_timeout))}"]
+            return _git.git_network([*config, *args], cwd=self.tenant.knowledge,
+                                    env=_local_env(), timeout=self.network_timeout,
+                                    pass_fds=(fd,))
         finally:
-            os.close(read_fd)
+            os.close(fd)
 
     def _check_origin(self) -> None:
         if self._git(["config", "--get", "remote.origin.url"]) != self._origin:
@@ -763,9 +971,12 @@ class TenantDelivery:
     def _rev(self, rev: str) -> str:
         return self._git(["rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"])
 
-    def _has_ref(self, ref: str) -> bool:
-        return _git.git_ok(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
-                           cwd=self.tenant.knowledge, env=_local_env())
+    def _branch_tip(self, branch: str) -> str | None:
+        """The commit `refs/heads/<branch>` names, or `None` when the clone has no such
+        branch."""
+        tip = _git.git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}"],
+                       cwd=self.tenant.knowledge, env=_local_env(), check=False)
+        return tip or None
 
     # -- publish ----------------------------------------------------------------------------
 
@@ -780,7 +991,10 @@ class TenantDelivery:
                 return self._publish_locked()
 
     def _publish_locked(self) -> TenantExport:
-        """Fast-forward, export, point `current`: the caller holds the tenant's lock."""
+        """Sweep dead draft builds, turn tenant-named filters off, fast-forward, export, point
+        `current`: the caller holds the tenant's lock."""
+        _sweep_temporaries(self.tenant.drafts, _DRAFT_TEMPORARY)
+        self._filters_off()
         if self._git(["symbolic-ref", "--quiet", "HEAD"]) != "refs/heads/main":
             raise DeliveryRefused("the tenant clone must be on main to fast-forward")
         if self._git(["status", "--porcelain", "--untracked-files=all"]):
@@ -798,6 +1012,28 @@ class TenantDelivery:
         if _pointed_at(self.tenant) != upstream:
             _io.write_guarded(self.tenant.exports / _POINTER, f"{upstream}\n", mode="replace")
         return export
+
+    def _filters_off(self) -> None:
+        """Keep `* -filter` the last line of the clone's `$GIT_DIR/info/attributes`, which
+        outranks every `.gitattributes`, so no filter driver the tenant's attributes name runs
+        on the host (a later line in one file wins: an operator's line appended after it would
+        turn a filter back on, so it is re-appended whenever it is not last). Git's own `eol`
+        and `ident` keep applying. The caller holds the tenant's lock."""
+        attributes = Path(self._git(["rev-parse", "--path-format=absolute", "--git-path",
+                                     "info/attributes"]))
+        info = attributes.parent
+        _io.rooted_mkdir(info.parent, info.name)
+        with _io.bind(info) as folder:
+            read = folder.read(attributes.name)
+        if read.text is None and not read.absent:
+            raise DeliveryRefused(f"{attributes} could not be read: {read.refusal}")
+        lines = (read.text or "").splitlines()
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if lines and lines[-1].strip() == _FILTERS_OFF:
+            return
+        _io.rooted_write(info, attributes.name, "\n".join([*lines, _FILTERS_OFF]) + "\n",
+                         mode="replace")
 
     def _knowledge_at(self, commit: str) -> dict[str, bytes]:
         """`agent/` and `settings/` at `commit`, from git objects: every entry a regular blob
@@ -828,7 +1064,7 @@ class TenantDelivery:
         place; an export already there is immutable and kept as it is. The caller holds the
         lock, so any staging folder found is a dead publisher's and is removed first."""
         exports = self.tenant.exports
-        _sweep_staging(exports)
+        _sweep_temporaries(exports, _PUBLISHING_PREFIX)
         final = exports / commit
         if _io.entry_present(final):
             if not stat.S_ISDIR(final.lstat().st_mode):
@@ -848,30 +1084,55 @@ class TenantDelivery:
     # -- batches ----------------------------------------------------------------------------
 
     def start_batch(self, batch_id: str, *, lanes: Sequence[str]) -> Batch:
-        """Flow 3: publish, then under the same lock hold cut a worktree of the clone at the
-        export commit, attached to a new batch branch, under the layout's worktree base; then
-        (lock released) copy its `agent/` into the git-free draft `<T>/drafts/<batch_id>/`."""
+        """Flow 3: refuse at once an id whose draft or branch exists (ids are never retried, so
+        a reused one is caught before any box runs); publish; then, under the same lock hold,
+        build the git-free draft of the export commit's `agent/` in a dot-named temporary
+        under `<T>/drafts/` and rename it to `<T>/drafts/<batch_id>`. A build that fails leaves
+        nothing. No checkout is made, and the branch exists from the first commit on."""
         with _refusals():
             batch_id = _one_word(batch_id, "batch id")
             declared = _lanes(lanes)
             branch = f"{self.branch_prefix}{batch_id}"
-            worktree = self.tenant.worktrees / f"{_slug(self.branch_prefix)}-{batch_id}"
+            self._refuse_taken(batch_id, branch)
             self._fetch()
             with tenant_lock(self.tenant):
                 export = self._publish_locked()
-                self._cut(worktree, branch, export.commit)
-            files = self._agent_blobs(export.commit)
-            with _io.hold_new(self.tenant.drafts, batch_id, exclusive=True) as draft:
-                draft.mkdir("agent")  # lint-unguarded-tree-write: ok — `Held.mkdir`, the rooted core's no-follow walk off the held draft root, not a `Path.mkdir`
-                for rel, data in files.items():
-                    draft.write(f"agent/{rel}", data, mode="create")
-                for lane in declared:
-                    draft.mkdir(f"agent/{lane}")  # lint-unguarded-tree-write: ok — `Held.mkdir` below the held draft root, no link followed
-            line = _Line(worktree=worktree, branch=branch, base=export.commit,
-                         tip=export.commit, lanes=declared)
-            return Batch(id=batch_id, branch=branch, export=export, worktree=worktree,
+                self._refuse_taken(batch_id, branch)
+                self._build_draft(batch_id, export.commit, declared)
+            line = _Line(batch=_BatchKey(branch=branch, base=export.commit,
+                                         start=secrets.token_hex(8)), lanes=declared)
+            return Batch(id=batch_id, branch=branch, export=export,
                          draft_root=self.tenant.drafts / batch_id, lanes=declared,
                          _delivery=self, _line=line)
+
+    def _refuse_taken(self, batch_id: str, branch: str) -> None:
+        if os.path.lexists(self.tenant.drafts / batch_id):
+            raise DeliveryRefused(f"the batch id {batch_id} has a draft already: batch ids are "
+                                  "never used again while their draft remains")
+        if self._branch_tip(branch) is not None:
+            raise DeliveryRefused(f"the branch {branch} already exists in the tenant clone: "
+                                  "its commits are deliver's to pick up, and its id is not used "
+                                  "again")
+
+    def _build_draft(self, batch_id: str, commit: str, lanes: tuple[str, ...]) -> None:
+        """The draft of `commit`'s `agent/` (and each lane's folder), built whole in a fresh
+        `<T>/drafts/.<id>-<rand>` and renamed to `<T>/drafts/<id>`, refusing any entry already
+        there. A build that fails removes its temporary; one killed leaves only that temporary,
+        which the next publish or batch start sweeps. The caller holds the lock."""
+        files = self._agent_blobs(commit)
+        drafts = self.tenant.drafts
+        temporary = f"{_DRAFT_TEMPORARY}{batch_id}-{secrets.token_hex(4)}"
+        try:
+            with _io.hold_new(drafts, temporary, exclusive=True) as draft:
+                draft.mkdir("agent")  # lint-unguarded-tree-write: ok — `Held.mkdir`, the rooted core's no-follow walk off the held temporary, not a `Path.mkdir`
+                for rel, data in files.items():
+                    draft.write(f"agent/{rel}", data, mode="create")
+                for lane in lanes:
+                    draft.mkdir(f"agent/{lane}")  # lint-unguarded-tree-write: ok — `Held.mkdir` below the held temporary, no link followed
+            _rename_new(drafts, temporary, batch_id)
+        except BaseException:
+            _remove_entry(drafts, temporary)
+            raise
 
     def _agent_blobs(self, commit: str) -> dict[str, bytes]:
         """`agent/` at `commit`, by path below it, each file's exact stored bytes, from git's
@@ -886,34 +1147,27 @@ class TenantDelivery:
         blobs = _cat_blobs(self.tenant.knowledge, (oid for _m, _k, oid, _p in entries), env)
         return {path.removeprefix("agent/"): blobs[oid] for _m, _k, oid, path in entries}
 
-    def _cut(self, worktree: Path, branch: str, base: str) -> None:
-        """A new worktree at `base` on a new `branch`: never over an existing branch or folder
-        (the commit-maker never takes over a branch it did not start). The caller holds the
-        lock."""
-        if _io.entry_present(worktree):
-            raise DeliveryRefused(f"the worktree {worktree} already exists")
-        if self._has_ref(f"refs/heads/{branch}"):
-            raise DeliveryRefused(f"the branch {branch} already exists in the tenant clone")
-        _io.guarded_mkdir(self.tenant.worktrees, base=self.tenant.dir)
-        self._git(["worktree", "add", "--quiet", "-b", branch, str(worktree), base])
-
     def start_box(self, request: box.BoxRequest, *, docker: DockerFn = _docker) -> box.BoxExecutor:
-        """The tenant drain's box: always sandboxed, whatever the operator's opt-out, and never
-        over a draft root holding `settings/` (a run copy's half, never a draft's)."""
+        """The tenant drain's box, through `box.start_box`, the one entry: it requires a
+        sandbox, so a start fault raises whatever the operator's opt-out says, never an
+        unsandboxed executor, and leaves nothing under `<T>/drafts/` (no did-not-run marker).
+        Never over a draft root holding `settings/` (a run copy's half, never a draft's)."""
         for mount in request.mounts:
             if mount.kind == "staged" and _io.entry_present(Path(mount.source) / "settings"):
                 raise box.BoxFault(f"the draft root {mount.source} holds settings/: a draft "
                                    "holds agent/ alone")
-        return _start_boxed_request(request, docker)
+        return box.start_box(replace(request, require_sandbox=True), docker=docker)
 
     # -- the commit-maker -------------------------------------------------------------------
 
-    def _commit(self, line: _Line, change_set: ChangeSet, message: str) -> str:
+    def _commit(self, line: _Line, change_set: ChangeSet, message: str, *,
+                reverts: tuple[_BatchKey, str] | None = None) -> str:
         """The one maker of tenant commits. It takes only a `ChangeSet` within `line`'s lanes,
-        builds the commit from git objects on the branch's last own commit (refusing a branch
-        moved since, never setting it over another's commit), writes every blob as given with
-        mode 100644, records the commit, moves the branch by compare-and-swap, and brings the
-        worktree to it."""
+        writes git objects only (each blob exactly the change's bytes, mode 100644, in a tree
+        built in a private index), records the commit, and moves the branch by compare-and-swap
+        from its own last commit, the first commit expecting no branch at all (so it creates
+        it, and never takes one over). No lock: the compare-and-swap is enough, and it never
+        touches `main`, the clone's index or its checkout."""
         if not isinstance(change_set, ChangeSet):
             raise TypeError(f"the commit-maker takes a ChangeSet, not {type(change_set).__name__}")
         # Re-validated from scratch into a copy the commit-maker alone holds: a change set
@@ -927,45 +1181,51 @@ class TenantDelivery:
                 raise DeliveryRefused("the change set is empty: there is nothing to commit")
             for change in change_set:
                 _require_in_lanes(change.path, line.lanes)
-            ref = f"refs/heads/{line.branch}"
-            tip = self._rev(ref)
-            if tip != line.tip or self._git(["rev-parse", "HEAD"], cwd=line.worktree) != tip:
+            branch = line.batch.branch
+            tip = self._branch_tip(branch)
+            if tip != line.tip:
                 raise DeliveryRefused(
-                    f"the branch {line.branch} moved from the commit-maker's last commit "
-                    f"{line.tip} (now {tip}): it builds on nothing it did not make")
-            env = _local_env()
-            before = {path: oid for mode, kind, oid, path in _tree_entries(
-                line.worktree, tip, [change.path for change in change_set], env, recursive=False)
-                if kind == "blob" and mode in _REGULAR_MODES}
+                    f"the branch {branch} is at {tip or 'nothing'}, not the commit-maker's last "
+                    f"commit {line.tip or '(none yet)'}: it builds on nothing it did not make")
+            parent, env = line.head, _local_env()
+            paths = [change.path for change in change_set]
+            before = self._regular_blobs(parent, paths, env)
             for change in change_set:
                 if change.content is None and change.path not in before:
-                    raise DeliveryRefused(f"{change.path} is not a file {tip} holds: it cannot "
-                                          "be deleted")
-            tree, after = self._stage(line, tip, change_set, env)
-            if tree == self._git(["rev-parse", f"{tip}^{{tree}}"]):
+                    raise DeliveryRefused(f"{change.path} is not a file {parent} holds: it "
+                                          "cannot be deleted")
+            at_base = before if parent == line.batch.base else \
+                self._regular_blobs(line.batch.base, paths, env)
+            tree, after = self._stage(parent, change_set, env)
+            if tree == self._git(["rev-parse", f"{parent}^{{tree}}"]):
                 raise DeliveryRefused("the change set changes nothing")
-            commit = self._git(["commit-tree", tree, "-p", tip, "-F", "-"], cwd=line.worktree,
-                               input=message)
-            _record_made(self.tenant, _Made(commit=commit, lanes=line.lanes, changes=tuple(
-                (change.path, before.get(change.path), after[change.path])
-                for change in change_set)))
-            self._git(["update-ref", "-m", "tenant commit-maker", ref, commit, tip],
-                      cwd=line.worktree)
+            commit = self._git(["commit-tree", tree, "-p", parent, "-F", "-"], input=message)
+            _record_made(self.tenant, _Made(
+                commit=commit, batch=line.batch, lanes=line.lanes, reverts=reverts,
+                changes=() if reverts is not None else tuple(
+                    (path, at_base.get(path), after[path]) for path in paths)))
+            self._git(["update-ref", "-m", "tenant commit-maker", f"refs/heads/{branch}", commit,
+                       tip or "0" * len(commit)])
             line.tip = commit
-            self._git(["read-tree", "--reset", "-u", commit], cwd=line.worktree)
             return commit
 
-    def _stage(self, line: _Line, tip: str, change_set: ChangeSet,
+    def _regular_blobs(self, rev: str, paths: Sequence[str], env: dict[str, str]) -> dict[str, str]:
+        """The blob id `rev` holds at each of `paths` that is a regular file there."""
+        return {path: oid for mode, kind, oid, path in _tree_entries(
+            self.tenant.knowledge, rev, paths, env, recursive=False)
+            if kind == "blob" and mode in _REGULAR_MODES}
+
+    def _stage(self, parent: str, change_set: ChangeSet,
                env: dict[str, str]) -> tuple[str, dict[str, str | None]]:
-        """Write each change's blob (no filter: the bytes as given) and the tree `tip` plus the
-        changes makes, in a private index; every file 100644. Answers the tree, and each path's
-        new blob (`None`: deleted)."""
+        """Write each change's blob (no filter: the bytes as given) and the tree `parent` plus
+        the changes makes, in a private index; every file 100644. Answers the tree, and each
+        path's new blob (`None`: deleted)."""
         index = Path(self._git(["rev-parse", "--path-format=absolute", "--git-path",
-                                f"commit-maker-{secrets.token_hex(8)}.index"], cwd=line.worktree))
+                                f"commit-maker-{secrets.token_hex(8)}.index"]))
         staged = {**env, "GIT_INDEX_FILE": str(index)}
         try:
-            self._git(["read-tree", tip], cwd=line.worktree, env=staged)
-            zero = "0" * len(tip)
+            self._git(["read-tree", parent], env=staged)
+            zero = "0" * len(parent)
             after: dict[str, str | None] = {}
             rows = []
             for change in sorted(change_set, key=lambda c: c.content is not None):
@@ -974,135 +1234,170 @@ class TenantDelivery:
                     rows.append(f"0 {zero}\t{change.path}\0")
                     continue
                 oid = _git.git_bytes(["hash-object", "-w", "--no-filters", "--stdin"],
-                                     cwd=line.worktree, env=env,
+                                     cwd=self.tenant.knowledge, env=env,
                                      input=change.content).decode("ascii").strip()
                 after[change.path] = oid
                 rows.append(f"100644 {oid}\t{change.path}\0")
-            _git.git_bytes(["update-index", "-z", "--index-info"], cwd=line.worktree, env=staged,
-                           input="".join(rows).encode("utf-8"))
-            return self._git(["write-tree"], cwd=line.worktree, env=staged), after
+            _git.git_bytes(["update-index", "-z", "--index-info"], cwd=self.tenant.knowledge,
+                           env=staged, input="".join(rows).encode("utf-8"))
+            return self._git(["write-tree"], env=staged), after
         finally:
             index.unlink(missing_ok=True)
 
     # -- push routes ------------------------------------------------------------------------
 
-    def _require_made(self, base: str, tip: str) -> None:
-        """Every commit `tip` would send past `base` is one the commit-maker recorded."""
-        commits = self._git(["rev-list", f"{base}..{tip}"]).split()
-        made = {m.commit for m in _made_commits(self.tenant)}
-        foreign = [commit for commit in commits if commit not in made]
-        if foreign:
-            raise DeliveryRefused(
-                f"{len(foreign)} commit(s) between {base} and {tip} were not made by the "
-                f"commit-maker ({', '.join(foreign)}): nothing is pushed")
+    def _forge_prs(self, commits: Iterable[str]) -> list[PullRequest]:
+        """Our repository's PRs (open, merged or closed) whose head commit is one of
+        `commits`, by the forge's own listing: the branch name and the repository's full name
+        play no part (amendment 3, C1)."""
+        wanted = frozenset(commits)
+        return [pr for pr in self.forge.pull_requests() if pr.head_sha in wanted]
 
-    def _send(self, branch: str, base: str, tip: str, *, title: str, body: str) -> str:
-        """Push `tip` (by id, so a branch moved meanwhile sends nothing new) to the remote
-        `branch` once every commit past `base` is the commit-maker's; then the PR found by
-        exact head (forks excluded) or opened against `main`."""
-        self._require_made(base, tip)
+    def _deliver(self, batch: _BatchKey, tip: str, *, title: str, body: str) -> Delivered:
+        """Every push route's one path. Each commit between the batch's base and `tip` must be
+        one the commit-maker made for this batch (checked before anything else, so a branch
+        holding only a foreign commit refuses rather than having nothing to deliver). Then the
+        batch's PR is looked up, before any push: one found (open, merged or closed) is
+        answered and nothing is pushed or opened (D-closed). With none, a branch at its base
+        has nothing to deliver; otherwise `tip` (by id, so a branch moved meanwhile sends
+        nothing new) is pushed to the remote branch alone and a PR opened against `main`."""
+        mine = _Record.read(self.tenant).commits_of(batch)
+        if tip != batch.base:
+            sent = self._git(["rev-list", f"{batch.base}..{tip}"]).split()
+            foreign = [commit for commit in sent if commit not in mine]
+            if foreign or not sent:
+                raise DeliveryRefused(
+                    f"the branch {batch.branch} at {tip} holds {len(foreign) or 'no'} commit(s) "
+                    f"past its base {batch.base} that the commit-maker did not make for it "
+                    f"({', '.join(foreign) or 'it does not descend from its base'}): nothing "
+                    "is pushed")
+        found = sorted(self._forge_prs(mine) if mine else (),
+                       key=lambda pr: (_PRECEDENCE[pr.status], -pr.number))
+        if found:
+            return _answer(found[0])
+        if tip == batch.base:
+            return Delivered(status=DeliveryStatus.NOTHING)
         self._check_origin()
-        self._network(["push", "--quiet", "origin", f"{tip}:refs/heads/{branch}"])
-        for row in self.forge.list_prs_for_head(branch):
-            return str(row["url"])
-        return self.forge.open_pr(base="main", head=branch, title=title, body=body)
+        self._network(["push", "--quiet", "origin", f"{tip}:refs/heads/{batch.branch}"])
+        url = self.forge.open_pr(base="main", head=batch.branch, title=title, body=body)
+        return Delivered(status=DeliveryStatus.OPENED, url=url)
 
-    def finish(self, batch: Batch) -> str | None:
-        """Push the batch branch and find or open its PR; `None` when the batch made no commit.
-        A branch moved from the commit-maker's last commit, or holding any commit it did not
-        make, is refused before any push."""
+    def finish(self, batch: Batch) -> Delivered:
+        """Deliver the batch: `nothing to deliver` when it made no commit (it has no branch);
+        otherwise its PR's status when the forge has one, or its branch pushed and a PR
+        opened. A branch moved from the commit-maker's last commit, or holding any commit it
+        did not make for this batch, is refused before any push."""
         with _refusals():
             line = batch._line
-            tip = self._rev(f"refs/heads/{line.branch}")
+            tip = self._branch_tip(line.batch.branch)
             if tip != line.tip:
                 raise DeliveryRefused(
-                    f"the branch {line.branch} moved from the commit-maker's last commit "
-                    f"{line.tip} (now {tip}): nothing is pushed")
-            if tip == line.base:
-                return None
-            return self._send(line.branch, line.base, tip, title=_batch_title(batch.id),
-                              body=_batch_body(line.branch, line.base))
+                    f"the branch {line.batch.branch} is at {tip or 'nothing'}, not the "
+                    f"commit-maker's last commit {line.tip or '(none yet)'}: nothing is pushed")
+            if tip is None:
+                return Delivered(status=DeliveryStatus.NOTHING)
+            return self._deliver(line.batch, tip, title=_batch_title(batch.id),
+                                 body=_batch_body(line.batch.branch, line.batch.base))
 
-    def deliver(self, batch_id: str) -> str | None:
-        """Deliver a retained batch branch (pushed, or not, before its PR request failed), from
-        any later delivery: `None` when the clone holds no such branch or it holds nothing past
-        `origin/main`; refused if any commit on it is not the commit-maker's."""
+    def deliver(self, batch_id: str) -> Delivered:
+        """Deliver a batch's branch from any later delivery (its draft discarded, its push or
+        PR request failed before): the batch is the one the commit-maker's record says made
+        the branch's tip. `nothing to deliver` when the clone holds no such branch; refused
+        when the record knows no batch of it, or any commit on it past its base is not that
+        batch's."""
         with _refusals():
             branch = f"{self.branch_prefix}{_one_word(batch_id, 'batch id')}"
-            if not self._has_ref(f"refs/heads/{branch}"):
-                return None
-            self._fetch()
-            base, tip = self._rev("refs/remotes/origin/main"), self._rev(f"refs/heads/{branch}")
-            if not self._git(["rev-list", f"{base}..{tip}"]):
-                return None
-            return self._send(branch, base, tip, title=_batch_title(batch_id),
-                              body=_batch_body(branch, base))
+            tip = self._branch_tip(branch)
+            if tip is None:
+                return Delivered(status=DeliveryStatus.NOTHING)
+            batch = _Record.read(self.tenant).batch_holding(branch, tip)
+            if batch is None:
+                raise DeliveryRefused(f"the branch {branch} holds no commit the commit-maker "
+                                      "made: nothing is pushed")
+            return self._deliver(batch, tip, title=_batch_title(batch_id),
+                                 body=_batch_body(branch, batch.base))
 
     # -- revert -----------------------------------------------------------------------------
 
-    def revert(self, lesson_path: str, lesson_name: str) -> str:
-        """Flow 4: undo the most recent commit-maker change to `lesson_path` whose result is
-        exactly what `origin/main` holds there now, restoring the bytes from before it (or
-        deleting the lesson that change created), as one commit-maker commit on `main` pushed
-        to a branch of its own with its PR. Refused when no such change exists: a lesson
-        changed on `main` since, one the commit-maker never wrote, a path that is not one."""
+    def revert(self, lesson_path: str, lesson_name: str) -> Delivered:
+        """Flow 4, D-peel: undo the newest batch's net change to `lesson_path` whose result
+        `origin/main` still holds exactly there (absence included) and which has no merged
+        revert, restoring the bytes from before it (or deleting the lesson it created), as one
+        commit-maker commit on `main` pushed to a branch of its own with its PR (`opened`).
+        That change's last revert decides first: its PR open answers `open` with it; closed is
+        a rejection, refused; never a PR (its push or PR request failed) makes the revert
+        again. Refused when no change is eligible: a lesson the commit-maker never wrote, one
+        a human changed since, one already peeled back to human-written content."""
         with _refusals():
             path = _agent_path(lesson_path)
             name = _one_word(lesson_name, "lesson name")
             self._fetch()
             main = self._rev("refs/remotes/origin/main")
-            made, before = self._latest_change_matching(main, path)
-            content = None if before is None else _cat_blobs(
-                self.tenant.knowledge, [before], _local_env())[before]
-            suffix = secrets.token_hex(4)
-            branch = f"{self.branch_prefix}revert-{name}-{suffix}"
-            worktree = self.tenant.worktrees / f"revert-{name}-{suffix}"
-            with tenant_lock(self.tenant):
-                self._cut(worktree, branch, main)
-            try:
-                line = _Line(worktree=worktree, branch=branch, base=main, tip=main,
-                             lanes=made.lanes)
-                commit = self._commit(line, ChangeSet((AgentChange(path, content),)),
-                                      f"revert lesson: {name}")
-                tip = self._rev(f"refs/heads/{branch}")
-                if tip != commit:
-                    raise DeliveryRefused(f"the revert branch {branch} moved from the "
-                                          f"commit-maker's commit {commit} (now {tip}): nothing "
-                                          "is pushed")
-                return self._send(branch, main, tip, title=f"revert lesson: {name}", body=(
-                    f"Reverts `{path}` to what it held before the commit-maker's change "
-                    f"{made.commit[:12]}, which `main` still holds exactly."))
-            finally:
-                self._discard(worktree)
+            record = _Record.read(self.tenant)
+            change, pending = self._peel(record, path, self._regular_blob_on(main, path))
+            if pending is not None:
+                if pending.status == "open":
+                    return _answer(pending)
+                raise DeliveryRefused(
+                    f"the revert of {path} the commit-maker last made was closed unmerged "
+                    f"({pending.url}): a rejection, so it is not made again")
+            content = None if change.before is None else _cat_blobs(
+                self.tenant.knowledge, [change.before], _local_env())[change.before]
+            line = _Line(batch=_BatchKey(branch=f"{self.branch_prefix}revert-{name}-"
+                                                f"{secrets.token_hex(4)}",
+                                         base=main, start=secrets.token_hex(8)),
+                         lanes=record.lanes_of(change.batch))
+            commit = self._commit(line, ChangeSet((AgentChange(path, content),)),
+                                  f"revert lesson: {name}", reverts=(change.batch, path))
+            tip = self._branch_tip(line.batch.branch)
+            if tip != commit:
+                raise DeliveryRefused(f"the revert branch {line.batch.branch} moved from the "
+                                      f"commit-maker's commit {commit} (now {tip}): nothing is "
+                                      "pushed")
+            return self._deliver(line.batch, tip, title=f"revert lesson: {name}", body=(
+                f"Reverts `{path}` to what it held before the commit-maker's change in batch "
+                f"`{change.batch.branch}`, which `main` still holds exactly."))
 
-    def _latest_change_matching(self, main: str, path: str) -> tuple[_Made, str | None]:
-        """The most recent commit-maker change to `path` whose resulting blob is what `main`
-        holds there now (absence included), and the blob from before it."""
-        found = _tree_entries(self.tenant.knowledge, main, [path], _local_env(), recursive=False)
+    def _regular_blob_on(self, rev: str, path: str) -> str | None:
+        """The blob `rev` holds at `path`, or `None` when it holds none; refused when the
+        entry there is not a regular file."""
+        found = _tree_entries(self.tenant.knowledge, rev, [path], _local_env(), recursive=False)
         if found and (found[0][1] != "blob" or found[0][0] not in _REGULAR_MODES):
             raise DeliveryRefused(f"{path} on main is not a regular file")
-        current = found[0][2] if found else None
-        for made in reversed(_made_commits(self.tenant)):
-            for changed, before, after in made.changes:
-                if changed == path and after == current:
-                    return made, before
-        raise DeliveryRefused(f"no change the commit-maker made to {path} matches what main holds "
-                              "there now: nothing to revert")
+        return found[0][2] if found else None
 
-    def _discard(self, worktree: Path) -> None:
-        """Remove a revert's worktree (its branch stays), under the lock; left behind, with a
-        warning, when the lock is busy."""
-        try:
-            with tenant_lock(self.tenant):
-                self._git(["worktree", "remove", "--force", str(worktree)])
-        except (DeliveryRefused, _git.GitError) as e:
-            _logger.warning("the revert worktree %s was left behind: %s", worktree, e)
+    def _peel(self, record: _Record, path: str,
+              current: str | None) -> tuple[_NetChange, PullRequest | None]:
+        """D-peel: the newest batch's net change to `path` whose result is `current` and which
+        has no merged revert (merged by the forge's word on the revert commit's PR, whatever
+        the merge style), with its last revert's unmerged PR (`None`: it has no revert, or its
+        last revert never had a PR). Refused when there is none."""
+        prs: list[PullRequest] | None = None
+        for change in record.net_changes(path):
+            if change.after != current or change.before == change.after:
+                continue
+            reverts = record.reverts_of(change)
+            if not reverts:
+                return change, None
+            if prs is None:
+                prs = self._forge_prs(m.commit for m in record.made if m.reverts is not None)
+            statuses = {m.commit: sorted((pr for pr in prs if pr.head_sha == m.commit),
+                                         key=lambda pr: (_PRECEDENCE[pr.status], -pr.number))
+                        for m in reverts}
+            if any(pr.status == "merged" for found in statuses.values() for pr in found):
+                continue
+            last = statuses[reverts[-1].commit]
+            return change, (last[0] if last else None)
+        raise DeliveryRefused(f"no change the commit-maker made to {path} is what main holds "
+                              "there now, with no merged revert: nothing to revert")
 
 
 def _read_credential(path: Path) -> tuple[str, str, str]:
     """The tenant's forge credential (`<T>/forge/git-credentials`, git's credential-store
     format: one `scheme://user:token@host[:port]` line in a regular 0600 file), read once:
-    `(user, token, the entry)`. Anything else refuses, naming the file but not its content."""
+    `(user, token, the server it is for)`, the server `scheme://host[:port]` with the host and
+    port unquoted (git's store writes `host%3aport`, C5). Anything else refuses, naming the
+    file but not its content."""
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -1115,14 +1410,17 @@ def _read_credential(path: Path) -> tuple[str, str, str]:
         user, token = unquote(parts.username or ""), unquote(parts.password or "")
     except ValueError:
         raise DeliveryRefused(f"the tenant's forge credential {path} is not one URL") from None
+    server = unquote(parts.netloc.rpartition("@")[2])
     if ("\n" in entry or not user or not token or parts.path not in {"", "/"} or parts.query
-            or parts.fragment or any(ord(ch) < 0x20 for ch in user + token)):
+            or parts.fragment or any(ord(ch) < 0x20 for ch in user + token)
+            or not server or any(ch in server for ch in "/?#@\\") or any(
+                ord(ch) <= 0x20 or ord(ch) == 0x7F for ch in server)):
         raise DeliveryRefused(f"the tenant's forge credential {path} must be one "
                               "scheme://user:token@host[:port] line")
     if len(_credential_answer(user, token)) > _ANSWER_LIMIT:
         raise DeliveryRefused(f"the tenant's forge credential {path} is longer than "
                               f"{_ANSWER_LIMIT} bytes")
-    return user, token, entry
+    return user, token, f"{parts.scheme}://{server}"
 
 
 def _pointed_at(tenant: Tenant) -> str | None:
@@ -1133,10 +1431,6 @@ def _pointed_at(tenant: Tenant) -> str | None:
         return None
 
 
-def _slug(prefix: str) -> str:
-    return prefix.rstrip("/").replace("/", "-") or "batch"
-
-
 def _batch_title(batch_id: str) -> str:
     return f"learning: tenant knowledge batch {batch_id}"
 
@@ -1144,4 +1438,3 @@ def _batch_title(batch_id: str) -> str:
 def _batch_body(branch: str, base: str) -> str:
     return (f"Tenant agent knowledge batch `{branch}`, based on `{base[:12]}`. Changes `agent/` "
             "only, every commit made by the host's commit-maker.")
-
