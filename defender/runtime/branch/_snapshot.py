@@ -273,9 +273,13 @@ class ForkSnapshot:
         prefixes = self._append_only_prefixes(source_run)
         if self.document is not None:
             run.documents.investigation.seed(self.document)
-        rows = _rows_of(prefixes["executed_queries"])
-        if prefixes["executed_queries"]:
-            run.tables.queries.seed(rows)
+        # The table is copied as the source held it, byte for byte: a torn or foreign line is
+        # part of what the arm inherits, and re-recording rows could not reproduce it. The
+        # state inherits only the lines that parse as rows (a damaged table fails open).
+        table = prefixes["executed_queries"]
+        rows = _rows_of(table)
+        if table:
+            run.tables.queries.seed(table)
         lessons = prefixes["lessons_loaded"]
         if lessons:
             run.observability.lessons_loaded.append(_rows_of(lessons))
@@ -340,8 +344,7 @@ class ForkSnapshot:
 
 
 def _rows_of(data: bytes) -> list[dict]:
-    """The JSONL rows of a table's bytes, in order (a line that is no row is left out; the
-    read-back comparison then refuses the restore)."""
+    """The JSONL rows of a table's bytes, in order; a line that is no row is left out."""
     rows = []
     for line in data.decode("utf-8", errors="replace").splitlines():
         row = parse_jsonl_row(line)

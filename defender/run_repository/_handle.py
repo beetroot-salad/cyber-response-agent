@@ -218,9 +218,12 @@ class RecordHandle:
     def _do_start_stream(self, text: str) -> None:
         self._mutate(text, "replace")
 
-    def _do_seed_queries(self, rows: list[dict]) -> None:
-        """Replace the selected snapshot; sibling freshness belongs to the caller."""
-        self._mutate(_jsonl_text(rows), "replace")
+    def _do_seed_queries(self, rows: list[dict] | bytes) -> None:
+        """Replace the selected snapshot; sibling freshness belongs to the caller. `bytes` is a
+        table recorded elsewhere, written as it is (a branch arm's restore copies its source's
+        table cut to the snapshot's length, damaged lines and all, #1255 P2); rows are encoded
+        as every table writer encodes them."""
+        self._mutate(rows if isinstance(rows, bytes) else _jsonl_text(rows), "replace")
 
     def _do_seed(self, text: str) -> None:
         from defender.runtime.branch._seed import refuse_seeded_run_dir
