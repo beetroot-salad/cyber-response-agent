@@ -59,7 +59,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS  # noqa: E402
-from defender.hooks.inject_system_skill_description import descriptor_catalog  # noqa: E402
+from defender.tests import _system_index_1256 as SI  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.runtime import circuit_breaker, observe, permission, tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
@@ -578,8 +578,9 @@ def test_descriptor_catalog_advertises_only_declared_systems(tmp_path):
         described=("hollow", "solid"),
     )
     grant = VerbGrant(role="gather", entries=(("solid", "look", "r"),))
-    catalog = descriptor_catalog(tree / "skills", read_roster(tree / "scripts" / "adapters"), grant)
-    assert catalog is not None
+    catalog = SI.index_text(SI.index_module(), tree / "skills",
+                            read_roster(tree / "scripts" / "adapters"), grant)
+    assert SI.listing(catalog)
     assert "`solid`" in catalog
     assert "hollow" not in catalog, "a system with no declared verbs was advertised to gather"
 
@@ -592,8 +593,11 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
     b = _make_tree(tmp_path / "b", {"probe": _TREE_PROBE}, described=("probe",))
 
     grant = VerbGrant(role="gather", entries=(("probe", "whoami", "r"),))
-    assert descriptor_catalog(a / "skills", read_roster(a / "scripts" / "adapters"), grant) is not None
-    assert descriptor_catalog(b / "skills", read_roster(b / "scripts" / "adapters"), grant) is not None
+    module = SI.index_module()
+    assert SI.listing(SI.index_text(module, a / "skills", read_roster(a / "scripts" / "adapters"),
+                                    grant))
+    assert SI.listing(SI.index_text(module, b / "skills", read_roster(b / "scripts" / "adapters"),
+                                    grant))
 
     ctx_a = _tenants1106.verb_context(a, tmp_path / "run", {})
     ctx_b = _tenants1106.verb_context(b, tmp_path / "run", {})

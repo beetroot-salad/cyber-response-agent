@@ -30,6 +30,7 @@ from defender._vocab import DISPOSITION_ENUM
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp
 from defender.runtime.verbs import read_roster
+from defender.tests import _system_index_1256 as SI
 
 WORKTREE = Path(__file__).resolve().parents[2]
 
@@ -135,6 +136,8 @@ def test_d0_read_description(tmp_path):
 
 
 def test_d0_descriptor_catalog_seam(tmp_path):
+    """#1256 r4: the catalog is gather's system index, built once (`descriptor_index`) and
+    rendered at use; rendered with nothing down it lists what `descriptor_catalog` did."""
     hook = _hook()
     skills = tmp_path / "skills"
     adapters = tmp_path / "adapters"
@@ -146,18 +149,18 @@ def test_d0_descriptor_catalog_seam(tmp_path):
 
     grant = VerbGrant(role="gather", entries=(("alpha", "ping", "r"), ("beta", "ping", "r")))
 
-    out = hook.descriptor_catalog(skills, read_roster(adapters), grant)
-    assert out == "- `alpha`: alpha desc"
+    out = SI.index_text(hook, skills, read_roster(adapters), grant)
+    assert SI.listing(out) == ["- `alpha`: alpha desc"]
 
     empty_adapters = tmp_path / "adapters2"
     empty_adapters.mkdir()
     (empty_adapters / "beta_adapter.py").write_text("# adapter\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
-    assert hook.descriptor_catalog(skills, read_roster(empty_adapters), grant) is None
+    assert SI.listing(SI.index_text(hook, skills, read_roster(empty_adapters), grant)) == []
 
-    a = hook.descriptor_catalog(skills, read_roster(adapters), grant)
-    b = hook.descriptor_catalog(skills, read_roster(empty_adapters), grant)
-    assert a == "- `alpha`: alpha desc"
-    assert b is None
+    a = SI.index_text(hook, skills, read_roster(adapters), grant)
+    b = SI.index_text(hook, skills, read_roster(empty_adapters), grant)
+    assert SI.listing(a) == ["- `alpha`: alpha desc"]
+    assert SI.listing(b) == []
 
 
 def test_d0_parse_report(tmp_path):
@@ -286,7 +289,7 @@ def test_d_unfenced_skill_none(tmp_path):
 
     grant = VerbGrant(role="gather", entries=(("evil", "ping", "r"), ("good", "ping", "r")))
     assert hook.read_description("evil", skills_dir=skills) is None
-    catalog = hook.descriptor_catalog(skills, read_roster(adapters), grant) or ""
+    catalog = SI.index_text(hook, skills, read_roster(adapters), grant) or ""
     assert "BOGUS" not in catalog
     assert "`evil`" not in catalog
     assert hook.read_description("good", skills_dir=skills) == "real desc"
@@ -302,7 +305,8 @@ def test_d_fenced_skill_desc(tmp_path):
     (adapters / "good_adapter.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
     assert hook.read_description("good", skills_dir=skills) == "real desc"
     grant = VerbGrant(role="gather", entries=(("good", "ping", "r"),))
-    assert hook.descriptor_catalog(skills, read_roster(adapters), grant) == "- `good`: real desc"
+    assert SI.listing(SI.index_text(hook, skills, read_roster(adapters), grant)) == [
+        "- `good`: real desc"]
 
 
 def test_d_trailing_space_opener_none(tmp_path):
@@ -365,16 +369,16 @@ def test_d_catalog_survival():
 
     hook = _hook()
     # #1106 M4: the gather grant is a run's (the playground tenant's), not GATHER_DEF's.
-    out = hook.descriptor_catalog(
-        hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), T1106.fixture_grants().gather)
-    assert out is not None
+    out = SI.index_text(
+        hook, hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), T1106.fixture_grants().gather)
+    assert SI.listing(out)
     adapters_dir = DEFENDER / "scripts" / "adapters"
     systems = sorted(
         p.name[: -len("_adapter.py")].replace("_", "-")
         for p in adapters_dir.glob("*_adapter.py")
     )
     assert systems
-    lines = out.splitlines()
+    lines = SI.listing(out)
     assert len(lines) == len(systems)
     assert "- `elastic`:" in out
 

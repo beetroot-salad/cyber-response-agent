@@ -472,6 +472,59 @@ def _with_default_correlation(gather, main):
     return fn
 
 
+def _fake_make_model(main, gather, *, dispatches_correlation: bool):
+    """The driver's `make_model` seam over the replay doubles: the gather model NAME gets
+    `gather` (the correlation lead drawing its own default fake when the run dispatches it,
+    C01), every other name gets `main`."""
+    main_built = BuiltModel(FunctionModel(_awaiting(main)), None)
+    gather_fn = (
+        _with_default_correlation(gather, main)
+        if dispatches_correlation and driver.resolve_main_model() != driver.gather_model()
+        else gather)
+    gather_built = (
+        BuiltModel(FunctionModel(_awaiting(gather_fn)), None) if gather_fn is not None else None)
+
+    if gather_built is not None and driver.resolve_main_model() == driver.gather_model():
+        raise ValueError(
+            "replay harness can't inject distinct main/gather fakes when both resolve to "
+            f"the same model name ({driver.gather_model()!r}); the (name, effort) make_model "
+            "seam keys on the name — set DEFENDER_MODEL / DEFENDER_GATHER_MODEL to differ."
+        )
+
+    def make_model(name, effort):
+        if gather_built is not None and name == driver.gather_model():
+            return gather_built
+        return main_built
+
+    return make_model
+
+
+def investigate_as_handed(main, gather=None, *, review_stages=None, orient_shim=None):
+    """A production `investigate` for `run._drive_investigation(investigate=…)`: the REAL driver
+    run with EXACTLY the keywords production composed for it — the `run`, the `RunTenant`, the
+    roster, the verb registry, the box, and whatever else run.py hands its driver — plus only
+    what no hermetic run can build: the fake models (`main` / `gather`, wired as `drive` wires
+    them), the review bundle (`drive`'s `holds` default) and the ORIENT shims (none).
+
+    For a scenario about what run.py HANDS the run (#1256: its one judgement of the systems):
+    `drive` / `_spec1222.run_alert` re-resolve the tenant and build a fresh `Run`, so anything
+    run.py attached to either, or passed as a further lifecycle keyword, never reaches their
+    driver. Composed with production's own `_run_investigation_lifecycle` and
+    `_drive_investigation`, this keeps the whole chain production's."""
+    def investigate(**handed: Any) -> dict:
+        make_model = _fake_make_model(
+            main, gather,
+            dispatches_correlation=handed.get("resume") is None and handed.get("verbs") is not None)
+        with override_allow_model_requests(False):
+            return asyncio.run(driver.run_investigation(
+                **handed, make_model=make_model,
+                review_stages=review_stages if review_stages is not None else (
+                    _review_bundle.bundle(composer=_review_bundle.composer_reply("holds"))),
+                orient_shim=orient_shim if orient_shim is not None else no_orient_shims))
+
+    return investigate
+
+
 def _refuse_conflicting_store_seams(resume, store_factory) -> None:
     """`resume=` and `store_factory=` name the same thing and cannot both be honoured.
 
@@ -500,7 +553,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
-        roster: Any = None) -> dict:
+        roster: Any = None, systems: Any = None) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -610,6 +663,10 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     Omitted, an injected registry that carries its own roster (`ModuleVerbRegistry.roster`,
     e.g. a planted estate's) hands the run that one, so the run judges the adapters it calls,
     as production's one roster does; otherwise the run reads `defender_dir`'s.
+    `systems` is the run's judgement of its granted systems that run.py made before the run
+    folder existed and hands its lifecycle (#1256 r4: one judgement per run;
+    `run_investigation(systems=…)`). Passed through only when supplied: omitted, the driver
+    judges them itself, as it does when started without one.
 
     `driver_summary` is the same drive returning production's summary untouched."""
     # Legacy replay labels are retained in this helper's call shape. The real run identity
@@ -619,7 +676,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, limits=limits, box=box,
         store_factory=store_factory, review_stages=review_stages, bounds=bounds,
         toolset=toolset, resume=resume, source_run=source_run, defender_dir=defender_dir, tenant=tenant,
-        orient_shim=orient_shim, run_state=state, roster=roster,
+        orient_shim=orient_shim, run_state=state, roster=roster, systems=systems,
     )
     return {**summary, "run_state": state}
 
@@ -629,7 +686,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
-        roster: Any = None) -> dict:
+        roster: Any = None, systems: Any = None) -> dict:
     """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
     summary exactly as production's caller gets it. `run_state` is what the run is handed
     (`run_investigation(run_state=…)`), the caller keeping its reference; omitted, it is not
@@ -637,27 +694,8 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     hands none)."""
     _refuse_conflicting_store_seams(resume, store_factory)
     tree = defender_dir if defender_dir is not None else DEFENDER
-    main_built = BuiltModel(FunctionModel(_awaiting(main)), None)
-    # The correlation lead draws its own default fake, never MAIN's leads' script (C01).
-    dispatches_correlation = resume is None and verbs is not None
-    gather_fn = (
-        _with_default_correlation(gather, main)
-        if dispatches_correlation and driver.resolve_main_model() != driver.gather_model()
-        else gather)
-    gather_built = (
-        BuiltModel(FunctionModel(_awaiting(gather_fn)), None) if gather_fn is not None else None)
-
-    if gather_built is not None and driver.resolve_main_model() == driver.gather_model():
-        raise ValueError(
-            "replay harness can't inject distinct main/gather fakes when both resolve to "
-            f"the same model name ({driver.gather_model()!r}); the (name, effort) make_model "
-            "seam keys on the name — set DEFENDER_MODEL / DEFENDER_GATHER_MODEL to differ."
-        )
-
-    def make_model(name, effort):
-        if gather_built is not None and name == driver.gather_model():
-            return gather_built
-        return main_built
+    make_model = _fake_make_model(main, gather,
+                                  dispatches_correlation=resume is None and verbs is not None)
 
     seams: dict[str, Any] = {}
     if verbs is not None:
@@ -685,6 +723,8 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         roster = verbs.roster
     if roster is not None:
         seams["roster"] = roster
+    if systems is not None:
+        seams["systems"] = systems
     # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
     # grant is fixed per process, and no reader finds the settings folder itself). A scenario
     # names its own tenant when it is about one; every other replay runs as the committed

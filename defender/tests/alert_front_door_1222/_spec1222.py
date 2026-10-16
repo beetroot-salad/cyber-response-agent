@@ -1711,16 +1711,21 @@ class _ReplayLifecycle:
         run_dir = run.run_dir
         self.d.run_dir = Path(run_dir)
         self.d.lifecycle_calls.append({"run_dir": Path(run_dir), "tenant": tenant, **kw})
+        # #1256 r4: run.py judges the systems once, before the run folder exists, and hands that
+        # judgement on (`systems=`); production's lifecycle passes it to the driver, which then
+        # does not judge again. Passed on here too, so a run driven through this seam takes
+        # production's path (absent — run.py handed none — the driver judges, as before).
         summary = drive_run(
             self.d, Path(run_dir), tenant=tenant.tenant, verbs=self.verbs, limits=self.limits,
             store_factory=self.store_factory, defender_dir=self.defender_dir,
-            orient_shim=self.orient_shim)
+            orient_shim=self.orient_shim, systems=kw.get("systems"))
         return summary
 
 
 def drive_run(d: Drive, run_dir: Path, *, tenant: Any = None, verbs: Any = ...,  # noqa: PLR0913 — `drive`'s seams, passed through only when given
               limits: Any = None, store_factory: Any = None, defender_dir: Path | None = None,
-              orient_shim: Any = None, resume: Any = None, run_id: str | None = None) -> dict:
+              orient_shim: Any = None, resume: Any = None, run_id: str | None = None,
+              systems: Any = None) -> dict:
     """`_replay_harness.drive` over `run_dir` with `d`'s fakes. `verbs=...` means `d.backend`'s
     registry; `None` drives with NO registry (p172: withheld)."""
     kw: dict[str, Any] = {}
@@ -1731,7 +1736,7 @@ def drive_run(d: Drive, run_dir: Path, *, tenant: Any = None, verbs: Any = ..., 
         kw["verbs"] = registry
     for name, value in (("limits", limits), ("store_factory", store_factory),
                         ("defender_dir", defender_dir), ("orient_shim", orient_shim),
-                        ("tenant", tenant), ("resume", resume)):
+                        ("tenant", tenant), ("resume", resume), ("systems", systems)):
         if value is not None:
             kw[name] = value
     d.run_dir = Path(run_dir)

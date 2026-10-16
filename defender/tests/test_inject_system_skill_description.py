@@ -1,13 +1,13 @@
 """Tests for defender/hooks/inject_system_skill_description.py.
 
 Driven through `read_description` — the function the live callers reach
-(`descriptor_catalog` → `runtime/tools_gather.py:40`; the #289 experiment's
-`run_arms.py:55`). These used to run through the module's `claude -p` PreToolUse
+(`descriptor_index`, gather's system index, built once at run start and rendered at use since
+#1256 r4 — it replaced `descriptor_catalog`; the #289 experiment's `run_arms.py:55`). These used to run through the module's `claude -p` PreToolUse
 `main()`, which asserted a stdin/stdout hook contract nothing invokes any more;
 the frontmatter shapes each one really pins are asserted directly now.
 
-`descriptor_catalog` itself is pinned by `test_verbs_registry_containment.py` and
-`tests/e2e/test_query_tool_611.py`.
+`descriptor_index` itself is pinned by `test_verbs_registry_containment.py` and
+`tests/e2e/test_query_tool_611.py` (through `_system_index_1256`).
 """
 from __future__ import annotations
 

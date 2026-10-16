@@ -25,6 +25,7 @@ The seams
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -1027,6 +1028,118 @@ def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label
         f"validate_scaffold FAILED for some other reason than the {label} signature "
         f"(expected a row naming {expected!r})\nstdout:\n{bad.stdout}"
     )
+
+
+#: The adapter's settings check, by the name each adapter declares it under (K1).
+_CHECK = "check_settings"
+_STUB_CHECK = f"\n\ndef {_CHECK}(tenant):\n    return None\n"
+
+
+def _bound_names(node: ast.stmt) -> set[str]:
+    """The module-scope names one statement binds (a def, a class, an assignment's or a `for`'s
+    targets, an import's aliases)."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {node.name}
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return {(a.asname or a.name).split(".")[0] for a in node.names}
+    targets: list[ast.expr] = []
+    if isinstance(node, ast.Assign):
+        targets = list(node.targets)
+    elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor)):
+        targets = [node.target]
+    return {n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)}
+
+
+def _module_scope(body: list[ast.stmt]) -> list[ast.stmt]:
+    """Every statement that runs at module scope: the body's own, and those nested in its
+    compound statements (`if`, `try`, `with`, loops) — never a def's or a class's."""
+    out: list[ast.stmt] = []
+    for node in body:
+        out.append(node)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for field in ("body", "orelse", "finalbody"):
+            out += _module_scope(getattr(node, field, []))
+        for handler in getattr(node, "handlers", []):
+            out += _module_scope(handler.body)
+    return out
+
+
+def _binds_check(source: str) -> bool:
+    return any(_CHECK in _bound_names(n) for n in _module_scope(ast.parse(source).body))
+
+
+def _strip_check(source: str) -> str:
+    """`source` with every top-level binding of the settings check removed, read from its AST:
+    a def (from its first decorator line to its last line), an assignment binding it, an import
+    alias binding it (the statement rewritten with its other aliases). A binding this does not
+    remove — nested in a compound statement, or sharing an assignment with other names — fails
+    the arm loudly rather than leaving a check behind or dropping a neighbour."""
+    lines = source.splitlines(keepends=True)
+    edits: list[tuple[int, int, str]] = []  # (first line, last line) 1-based, replacement
+    for node in ast.parse(source).body:
+        if _CHECK not in _bound_names(node):
+            continue
+        first, last = node.lineno, node.end_lineno or node.lineno
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            first = min([first, *(d.lineno for d in node.decorator_list)])
+            edits.append((first, last, ""))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            kept = [a for a in node.names if (a.asname or a.name).split(".")[0] != _CHECK]
+            node.names = kept
+            edits.append((first, last, f"{ast.unparse(node)}\n" if kept else ""))
+        else:
+            assert isinstance(node, (ast.Assign, ast.AnnAssign)), (
+                f"premise: line {first} binds {_CHECK} in a form this arm does not strip: "
+                f"{ast.dump(node)[:200]}")
+            assert _bound_names(node) == {_CHECK}, (
+                f"premise: line {first}'s assignment binds {_bound_names(node)} — stripping it "
+                f"would drop a neighbour of {_CHECK}")
+            edits.append((first, last, ""))
+    for first, last, replacement in sorted(edits, reverse=True):
+        lines[first - 1:last] = [replacement]
+    stripped = "".join(lines)
+    compile(stripped, "<stripped adapter>", "exec")
+    assert not _binds_check(stripped), f"a binding of {_CHECK} survived the strip"
+    return stripped
+
+
+def _with_settings_check(source: str, arm: str) -> str:
+    """The copied cmdb adapter as each arm needs it: `declared` keeps the adapter's own check
+    (appending a stub that answers "usable" only when it declares none), `none` removes every
+    top-level binding of it, `not-callable` binds the name to a string instead — so an arm that
+    removes the check removes it for a reader that imports the module and for one that reads its
+    AST alike."""
+    if arm == "declared":
+        return source if _binds_check(source) else source + _STUB_CHECK
+    stripped = _strip_check(source)
+    if arm == "none":
+        return stripped
+    assert arm == "not-callable", arm
+    return stripped + f'\n\n{_CHECK} = "FD1256 a settings check that is not a function"\n'
+
+
+@pytest.mark.parametrize("arm", ["none", "not-callable"])
+def test_validate_scaffold_fails_an_adapter_without_a_callable_settings_check(tmp_path, arm):
+    """#1256 r4 "one maker for a down cause": the one function that judges an adapter is the start check's, the call-time escape's and the connect scaffold validator's, so the validator FAILS an adapter that declares no `check_settings` (K1: each adapter declares one) — and one whose `check_settings` is not callable — with a row naming `check_settings`. Discriminating control: the SAME tree whose adapter declares a callable check passes, so the FAIL is the check's absence, not an incidental scaffold defect. Red at base, whose validator never looks for the check."""
+    def tree(name: str, which: str) -> Path:
+        root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
+        adapter = root / "scripts" / "adapters" / "cmdb_adapter.py"
+        adapter.write_text(_with_settings_check(adapter.read_text(encoding="utf-8"), which),
+                           encoding="utf-8")
+        return root
+
+    good = _run_validate_scaffold("cmdb", defender_dir=tree(f"declared-{arm}", "declared"))
+    assert good.returncode == 0, (
+        "the control tree (its adapter declares a callable check_settings) did not pass — the "
+        f"FAIL below cannot be attributed to the check\nstdout:\n{good.stdout}\n{good.stderr}")
+    bad = _run_validate_scaffold("cmdb", defender_dir=tree(arm, arm))
+    assert bad.returncode != 0, (
+        f"validate_scaffold passed an adapter whose check_settings is {arm!r} (#1256 r4: the "
+        f"validator judges an adapter as run start does)\nstdout:\n{bad.stdout}")
+    assert "check_settings" in bad.stdout, (
+        f"validate_scaffold FAILED for some other reason than the missing check (expected a row "
+        f"naming check_settings)\nstdout:\n{bad.stdout}")
 
 
 def test_validate_scaffold_enforces_placeholder_invariant(tmp_path):
