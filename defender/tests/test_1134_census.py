@@ -343,12 +343,6 @@ ALLOW: tuple[Allowed, ...] = (
     # --- learning/author/drain.py -------------------------------------------------------------
     Allowed(DRAIN, "_put_back", "attr", "target.unlink()", D3,
             _MISS + "; `kind_at` answered it from that path, and only a file is unlinked"),
-    Allowed(DRAIN, "_spawn_repair", "attr", "cfg.repair_prompt.is_file()", D3,
-            "the checked-in repair prompt under learning/author/, outside every mount"),
-    Allowed(DRAIN, "_resolves_inside_runs_dir", "attr", "runs_dir.resolve()", N_D,
-            "containment check of a queue row's run id under the host runs dir"),
-    Allowed(DRAIN, "_resolves_inside_runs_dir", "attr", "(runs_dir / source_id).resolve()", N_D,
-            "containment check of a queue row's run id under the host runs dir"),
     # --- learning/author/shared.py ------------------------------------------------------------
     # --- _corpus.py: the shared readers' own Path form ----------------------------------------
     Allowed(CORPUS, "_viewed", "construct", "bind(Path(tree))", N_H, _VIEWED),
@@ -478,11 +472,6 @@ ALLOW: tuple[Allowed, ...] = (
             "curator's `diff --name-only` comparison (addendum 3 D1), the restore's `ls-files` "
             "fallback against an index file that does not exist, and #1120's `cat-file blob`)"),
     # --- the curator channels' run.py ---------------------------------------------------------
-    Allowed(LESSONS_RUN, "disposition_for", "attr", "refs.is_file()", N_E,
-            "the run dir's source_refs (`RunPaths(runs_dir / run_id).source_refs`)"),
-    Allowed(LESSONS_RUN, "disposition_for", "call",
-            "read_text_utf8(refs, limit=SOURCE_REFS_FILE_MAX)", N_E,
-            "the run dir's source_refs (`RunPaths(runs_dir / run_id).source_refs`)"),
     Allowed(LESSONS_RUN, "main", "construct", "open_drain_trees(paths, AUTHOR_DRAIN_LABEL)",
             D3, "the CLI's own trees over the live checkout, for its lane's label: " + _OPENER),
     Allowed(QUESTIONER_RUN, "main", "construct",
@@ -515,7 +504,7 @@ KNOWN_GAPS: tuple[Gap, ...] = ()
 
 #: The allow-list's size by reason at this base — a guard against an entry slipping in
 #: unannounced (update it with the table, and say why in the commit).
-ALLOW_COUNT_BY_REASON = {N_E: 7, D3: 23, N_D: 15, N_H: 9, B2: 17, N_A: 4}
+ALLOW_COUNT_BY_REASON = {N_E: 5, D3: 22, N_D: 13, N_H: 9, B2: 17, N_A: 4}
 
 
 def judge(
@@ -735,7 +724,7 @@ def _asks_tree_for(module: str, source: str, qualname: str) -> bool:
 
 def test_a_d3_fallback_still_asks_tree_for_first():
     d3 = {(e.module, e.qualname) for e in ALLOW if e.reason == D3 and e.kind != "construct"}
-    assert d3 - TREE_FOR_FALLBACKS == {(DRAIN, "_spawn_repair")}, (
+    assert d3 <= TREE_FOR_FALLBACKS, (
         "a new D3 entry: is it a fallback behind a `tree_for` miss (add it to "
         "TREE_FOR_FALLBACKS), or a checked-in file outside the mounts?")
     silent = [f for f in sorted(TREE_FOR_FALLBACKS) if not _asks_tree_for(f[0], _source(f[0]), f[1])]
@@ -1056,11 +1045,6 @@ def test_a_pinned_attribute_is_typed_exactly(module: str, cls: str, field: str, 
     assert any(a.endswith(f".{field}") for a in C.PINNED_ATTRS[kind])
 
 
-def test_judgement_cfg_is_the_curator_config():
-    ann = _class_field_annotation(DRAIN, "_Judgement", "cfg")
-    assert ast.unparse(ann) == "CorpusAuthorConfig"
-
-
 def _def(origin: str) -> tuple[C.ModuleScan, ast.FunctionDef]:
     dotted, _, name = origin.rpartition(".")
     module = TREE.module_file(dotted).relative_to(WORKTREE / "defender").as_posix()
@@ -1289,7 +1273,6 @@ _PUT_BACK_TAIL = (
     "    kind = kind_at(repo_root, tree_for, rel)\n    hit = tree_for(target)\n    if hit is None:\n"
     "        if kind == ENTRY_FILE:\n            target.unlink()\n        return\n" + _PUT_BACK_HANDLE)
 _RESTORE_WRITE = "        if name not in unchanged:\n            cfg.corpus.write(name, pre, mode=\"replace\")\n"
-_SNAPSHOT_TAIL = "        cfg.corpus.write(name, pre, mode=\"replace\")\n\n\ndef _append_terminal_block("
 _IO_IMPORT_TAIL = "    NotPlainEntry,\n)\n"
 _RUN_LOCKED_CATALOG = "lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)"
 #: `_snapshot_corpus`'s return: the before-state, git's blobs at `head` (C1).
@@ -1337,14 +1320,8 @@ REGRESSIONS: dict[str, Regression] = {
          "        if name not in unchanged:\n            target = cfg.corpus_dir / name\n"
          "            target.parent.mkdir(parents=True, exist_ok=True)\n"
          "            write_guarded(target, pre)\n", 1),
-        (_SNAPSHOT_TAIL,
-         "        target = cfg.corpus_dir / name\n"
-         "        target.parent.mkdir(parents=True, exist_ok=True)\n"
-         "        write_guarded(target, pre)\n\n\ndef _append_terminal_block(", 1),
     ), (("_restore_unapproved_files", "attr", "target.parent.mkdir(parents=True, exist_ok=True)", 1),
-        ("_restore_unapproved_files", "call", "write_guarded(target, pre)", 1),
-        ("_restore_from_snapshot", "attr", "target.parent.mkdir(parents=True, exist_ok=True)", 1),
-        ("_restore_from_snapshot", "call", "write_guarded(target, pre)", 1))),
+        ("_restore_unapproved_files", "call", "write_guarded(target, pre)", 1))),
     # v1 s5 H3b (02b-settle-restores-legacy-guarded-write): the same through the legacy seams.
     "s5-H3b-settle-restores-legacy-guarded-write": Regression(DRAIN, (
         (_IO_IMPORT_TAIL, "    NotPlainEntry,\n    guarded_mkdir,\n    write_guarded,\n)\n", 1),
@@ -1352,15 +1329,8 @@ REGRESSIONS: dict[str, Regression] = {
          "        if name not in unchanged:\n            target = cfg.corpus_dir / name\n"
          "            guarded_mkdir(target.parent, base=cfg.corpus_dir)\n"
          "            write_guarded(target, pre)\n", 1),
-        (_SNAPSHOT_TAIL,
-         "        entry_kind(cfg.corpus.view(), name)  # placed inside the corpus mount\n"
-         "        target = cfg.corpus_dir / name\n"
-         "        guarded_mkdir(target.parent, base=cfg.corpus_dir)\n"
-         "        write_guarded(target, pre)\n\n\ndef _append_terminal_block(", 1),
     ), (("_restore_unapproved_files", "call", "guarded_mkdir(target.parent, base=cfg.corpus_dir)", 1),
-        ("_restore_unapproved_files", "call", "write_guarded(target, pre)", 1),
-        ("_restore_from_snapshot", "call", "guarded_mkdir(target.parent, base=cfg.corpus_dir)", 1),
-        ("_restore_from_snapshot", "call", "write_guarded(target, pre)", 1))),
+        ("_restore_unapproved_files", "call", "write_guarded(target, pre)", 1))),
     # v1 s5 H4 (05-snapshot-plain-read), retargeted: v3 takes the before-state from git (C1),
     # so the snapshot's own walk is gone; s5v3 K02 is its v3 shape — git names the names, and
     # their bytes are read from the worktree by plain path (following a planted link).
@@ -1375,11 +1345,12 @@ REGRESSIONS: dict[str, Regression] = {
     # `cfg.corpus_dir`, the spelling.
     "s5-H5-handle-rebuilt-from-path": Regression(DRAIN, (
         (_IO_IMPORT_TAIL, "    NotPlainEntry,\n    hold,\n)\n", 1),
-        ("return _read_or_empty(self.cfg.corpus.view(), ",
-         "return _read_or_empty(hold(self.cfg.corpus_dir).view(), ", 1),
+        ("    field_name = provenance_field(cfg.channel.id_key)\n    view = cfg.corpus.view()\n",
+         "    field_name = provenance_field(cfg.channel.id_key)\n"
+         "    view = hold(cfg.corpus_dir).view()\n", 1),
         ("if not (_cited_ids(cfg.corpus.view(), ", "if not (_cited_ids(hold(cfg.corpus_dir).view(), ", 1),
         ("snapshot, corpus=cfg.corpus,", "snapshot, corpus=hold(cfg.corpus_dir),", 1),
-    ), (("_Judgement.read", "construct", "hold(self.cfg.corpus_dir)", 1),
+    ), (("_read_citations", "construct", "hold(cfg.corpus_dir)", 1),
         ("_assert_corpus_attributable", "construct", "hold(cfg.corpus_dir)", 1),
         ("_undo_agent_edits", "construct", "hold(cfg.corpus_dir)", 1))),
     # v1 s5 H9 (04-commit-split-plain-lexists) and s5v2 R11: the commit split asks the plain path.
@@ -1716,14 +1687,14 @@ REGRESSIONS: dict[str, Regression] = {
     ), (("_answered_after_batch", "reader", "_corpus._templates(where, where)", 1),)),
     # 04: `_io`'s private exclusive create, imported in the function, by the host path.
     "s7v2-04-io-private-create-named": Regression(DRAIN, (
-        ("    name the snapshot does not hold is skipped.\"\"\"\n",
-         "    name the snapshot does not hold is skipped.\"\"\"\n"
+        ("    here, so the `unlink` meets it and the core's `OSError` propagates.\"\"\"\n",
+         "    here, so the `unlink` meets it and the core's `OSError` propagates.\"\"\"\n"
          "    from defender._io import _create_named\n\n", 1),
-        (_SNAPSHOT_TAIL,
+        (_RESTORE_WRITE,
          "        try:\n            _create_named(cfg.repo_root / rel, pre)\n"
-         "        except OSError:\n            pass\n" + _SNAPSHOT_TAIL, 1),
-    ), (("_restore_from_snapshot", "load", "from defender._io import _create_named", 1),
-        ("_restore_from_snapshot", "call", "_create_named(cfg.repo_root / rel, pre)", 1))),
+         "        except OSError:\n            pass\n" + _RESTORE_WRITE, 1),
+    ), (("_restore_unapproved_files", "load", "from defender._io import _create_named", 1),
+        ("_restore_unapproved_files", "call", "_create_named(cfg.repo_root / rel, pre)", 1))),
     # --- the v3 curator step's adversary (scratchpad s5v3-adv-patches/), on this base's text ----
     # A3 / D1090: the fault sweep's names from a plain disk walk, not from `git status`.
     "s5v3-A3-sweep-by-a-plain-disk-walk": Regression(DRAIN, (

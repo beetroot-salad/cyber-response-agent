@@ -171,9 +171,9 @@ GROUPS = ("tables", "facts", "documents", "observability", "session")
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
     "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
-    "documents": ("investigation", "report", "gather_summaries", "lead_author", "source_refs"),
+    "documents": ("investigation", "report", "gather_summaries", "lead_author"),
     "observability": (
-        "wire_log", "review_trace", "forward_check_trace", "tool_trace", "review_record",
+        "wire_log", "review_trace", "tool_trace", "review_record",
         "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer"),
     "session": ("session_db",),
 }
@@ -191,9 +191,8 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "scrub_verdict": "scrub_verdict",
     "investigation": "investigation", "report": "report",
     "gather_summaries": "gather_summary", "lead_author": "lead_author",
-    "source_refs": "source_refs",
     "wire_log": "wire_log", "review_trace": "review_trace",
-    "forward_check_trace": "forward_check_trace", "tool_trace": "tool_trace",
+    "tool_trace": "tool_trace",
     "review_record": "review_record", "lessons_loaded": "lessons_loaded",
     "ticket_write": "ticket_write", "runtime_html": "runtime_html",
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
@@ -215,8 +214,8 @@ MEMBER_VERB: dict[str, str | None] = {
     "ticket_reads": "write",
     "alert": "write", "alert_record": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
     "investigation": "write", "report": "write", "gather_summaries": "write",
-    "lead_author": None, "source_refs": "write",
-    "wire_log": "append", "review_trace": "append", "forward_check_trace": "append",
+    "lead_author": None,
+    "wire_log": "append", "review_trace": "append",
     "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
     "ticket_write": "write",
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
@@ -322,21 +321,17 @@ def report_text(body: str) -> str:
     fence-less sample is refused there exactly as `permission.decide_write` refuses it."""
     return f"---\ndisposition: inconclusive\n---\n{body}"
 STAGE = "questioner"
-PREFIX, STEM, CHECK_INDEX = "forward", "a-lesson", 2
 
 ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("alert", "run", "alert"),
     Accessor("report", "run", "report"),
     Accessor("investigation", "run", "investigation"),
     Accessor("queries", "run", "executed_queries"),
-    Accessor("source_refs", "run", "source_refs"),
     Accessor("gather_raw", "run", "payload", (LEAD_ID, SEQ), composing=True),
     Accessor("lead_claim", "run", "lead_claim", (LEAD_ID,), composing=True),
     Accessor("gather_summaries", "run", "gather_summary", (LEAD_ID,), composing=True),
     Accessor("lead_author", "run", "lead_author"),
     Accessor("wire_log", "run", "wire_log"),
-    Accessor("forward_check_trace", "run", "forward_check_trace",
-             (PREFIX, STEM, CHECK_INDEX), composing=True),
     Accessor("review_trace", "run", "review_trace", (ROLE,), composing=True),
     Accessor("review_record", "run", "review_record", (TURN,), composing=True),
     Accessor("tool_trace", "run", "tool_trace"),
@@ -468,7 +463,7 @@ def member_args(name: str, *, runs_base: Path | None = None) -> tuple[Any, ...]:
     table: dict[str, tuple[Any, ...]] = {
         "leads": (LEAD_ID,), "payloads": (LEAD_ID, SEQ), "ticket_reads": (SEQ,),
         "gather_summaries": (LEAD_ID,), "review_trace": (ROLE,), "review_record": (TURN,),
-        "forward_check_trace": (PREFIX, STEM, CHECK_INDEX), "session_db": (LINEAGE_ID,),
+        "session_db": (LINEAGE_ID,),
     }
     return table.get(name, ())
 

@@ -45,8 +45,8 @@ just need a crisp "here's the rule, here's the source file."
   why it is a gate and not a sixth phase, and what a `forced-inconclusive`
   or a `failure_kind` on a report means
 - Understanding the offline learning loop (fork a finished run → question
-  → stage → replay-review → run the family → judge → queue → curate, with a
-  forward-check gate at curation time) and how lessons feed back
+  → stage → replay-review → run the family → judge → queue → curate) and how
+  lessons feed back
 - Seeing the layout of a run dir — `investigation.md`, `report.md`,
   `executed_queries.jsonl`, `gather_raw/` — and the contracts each artifact carries
 - Understanding how skills, per-system references, and lessons compose at
@@ -76,7 +76,7 @@ Each file under `content/` is a standalone reference document.
 |---|---|---|
 | `content/design.md` | What the defender is, the learning-loop-first philosophy, and the roster of runtime gates it carries | Overview question, or you need to ground a general answer about scope |
 | `content/runtime-loop.md` | The ORIENT → PLAN → GATHER → ANALYZE → REPORT loop: what each phase writes, the gather-dispatch discipline (the `gather` tool as the only route to a system of record, a cheap model by default, gather-raw isolation), the in-process reliability gates, and the write-time review gate on a confident close | Questions about phases, how gather is dispatched, why the main loop can't read raw payloads, what the gates do, or why a confident close came back challenged or landed as `inconclusive` |
-| `content/learning-loop.md` | The offline loop: fork a finished run → questioner → staged estate → review by replay → run the family → judge → two queues → two curators (the defender's lessons behind a forward-check, the questioner's behind an idempotency gate). The branched episode, the forward-check gate, the `_pending` threshold, and how lessons land | Questions about how the defender learns, what the questioner and the judge do, why lessons are forward-checked before they land, which queue a finding lands on, or when the curators fire |
+| `content/learning-loop.md` | The offline loop: fork a finished run → questioner → staged estate → review by replay → run the family → judge → two queues → two curators (the defender's lessons and the questioner's). The branched episode, the `_pending` threshold, and how lessons land (unchecked, #397) | Questions about how the defender learns, what the questioner and the judge do, whether lessons are checked before they land, which queue a finding lands on, or when the curators fire |
 | `content/run-artifacts.md` | Run-dir layout under a tenant's `<T>/runs`, the contract each artifact carries, the two-table schema (leads + queries), and the `gather_raw/` by-ref payloads | Questions about what's in a run dir, where a file comes from, the two-table schema, or how to debug a run |
 | `content/knowledge-and-skills.md` | The on-disk skills (`invlang`, `gather`, per-system references, the `connect` onboarding skill), how knowledge is discovered on demand, and the `lessons/` corpus the runtime agent reads at PLAN time | Questions about how skills compose, where per-system knowledge lives, how a new system is onboarded (the `/connect` skill), or how lessons are consumed vs authored |
 | `content/invlang.md` | The dense invlang block surface (`:V`/`:E`/`:H`/`:L`/`:R`/`:T`), the enum/advisory/hypothesis-name CLI, `:H` discovery vs `??` refinement, and the authz-contract resolution shape | Questions about the blocks in `investigation.md`, the invlang CLI, or how legitimacy contracts resolve |

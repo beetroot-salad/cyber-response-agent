@@ -120,15 +120,10 @@ class TriggerRecorder:
         })
         if module_name != "author":
             return
-        # #773: the drain's own verifier-key preflight runs ahead of the first curator
-        # spawn (O10) — this class fakes only the CURATOR's model (`invoke_agent`), so the
-        # verifier's key source is faked too, or a host with no real key configured
-        # (CI) would fail here on a scenario that was never about key sourcing at all.
         cfg = dataclasses.replace(
             lessons_run.build_author_config(
                 paths, state=state, trees=author_trees(paths), box=box),
             invoke_agent=self._agent,
-            source_key=lambda model, *, label=None: None,
         )
         lessons_run.run_batch(paths=paths, state=state, cfg=cfg, hold_committed=True, box=box)
 

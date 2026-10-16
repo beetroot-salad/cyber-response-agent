@@ -16,8 +16,8 @@ and the lead-author step's `lane_trees.kind_at` in their place; the curator call
   the agent made comes from `git status --untracked-files=all` over the corpus, so a name git
   does not report (gitignored, a FIFO, a socket) survives the fault undo (C2).
 - `drain._restore_corpus(repo_root, corpus_dir, snapshot, *, corpus: Held, head_before)` (fault
-  path), `_restore_unapproved_files(cfg, snapshot, rels, *, head_before)` /
-  `_restore_from_snapshot` through `cfg.corpus`, `_put_back(repo_root, rel, *, tree_for)`,
+  path), `_restore_unapproved_files(cfg, snapshot, rels, *, head_before)`
+  through `cfg.corpus`, `_put_back(repo_root, rel, *, tree_for)`,
   `_revert_strays(..., *, tree_for)`, `_byte_identical_to_head(repo_root, rel)`,
   `_cited_ids(view, name, field)`, `_read_or_empty(view, name)`.
 - Addendum 3 (2026-10-03, D1): the three "is this file still its before-state?" checks (the
@@ -770,7 +770,7 @@ def test_the_restore_does_nothing_without_a_snapshot(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# _restore_unapproved_files / _restore_from_snapshot: through cfg.corpus, refusals propagate
+# _restore_unapproved_files: through cfg.corpus, refusals propagate
 # ---------------------------------------------------------------------------------------
 
 
@@ -888,11 +888,9 @@ LANDING_CALLS = {"rename"}
 
 
 def _settle(step: str, cfg, snapshot, rel: str) -> None:
-    if step == "_restore_unapproved_files":
-        head = _git.git_head_sha(cfg.repo_root)
-        drain._restore_unapproved_files(cfg, snapshot, {rel}, head_before=head)
-    else:
-        drain._restore_from_snapshot(cfg, snapshot, [rel])
+    assert step == "_restore_unapproved_files", step
+    head = _git.git_head_sha(cfg.repo_root)
+    drain._restore_unapproved_files(cfg, snapshot, {rel}, head_before=head)
 
 
 def _recording_cfg(w):
@@ -901,9 +899,10 @@ def _recording_cfg(w):
     return seam, trees, dataclasses.replace(w.cfg(), corpus=trees.mount(w.corpus_dir))
 
 
-@pytest.mark.parametrize("step", ["_restore_unapproved_files", "_restore_from_snapshot"])
-def test_both_settle_restores_write_through_the_configs_held_corpus(tmp_path, step):
-    """H3: `_restore_unapproved_files` and `_restore_from_snapshot` reach the corpus through
+@pytest.mark.parametrize("step", ["_restore_unapproved_files"])
+def test_the_settle_restore_writes_through_the_configs_held_corpus(tmp_path, step):
+    """H3: `_restore_unapproved_files` reaches the corpus through (its sibling
+    `_restore_from_snapshot`, the repair spawn's deletion restore, went with #1166)
     `cfg.corpus`: over a held corpus whose `os_` records its calls, the restore lands (bytes on
     disk) and the call that landed it — the rename of the replace write, not just a read or a
     kind asked beforehand — is in the record.
@@ -939,7 +938,7 @@ def test_the_unapproved_restore_deletes_a_new_file_through_the_configs_held_corp
 
 
 @pytest.mark.parametrize("agent_left", ["nothing", "its own bytes"])
-@pytest.mark.parametrize("step", ["_restore_unapproved_files", "_restore_from_snapshot"])
+@pytest.mark.parametrize("step", ["_restore_unapproved_files"])
 def test_a_settle_restore_below_a_linked_folder_is_refused_and_writes_nothing_outside(
     tmp_path, step, agent_left,
 ):
@@ -968,33 +967,6 @@ def test_a_settle_restore_below_a_linked_folder_is_refused_and_writes_nothing_ou
     assert _plain_os_error(exc, errno.ELOOP), repr(exc)
     assert is_link_to(w.corpus_dir / "sub", moved)
     assert census(w.outside) == before
-
-
-@pytest.mark.parametrize("kind", ["symlink", "hard link"])
-def test_the_repair_deletion_restore_refuses_a_link_at_the_name(tmp_path, kind):
-    """`_restore_from_snapshot` (a deletion the repair spawn may not make): a link (or a hard
-    link) standing at the name is refused (`NotPlainEntry`), and the target is untouched.
-    Control: the name absent is rewritten with its exact snapshot bytes; a name the snapshot
-    never held is left alone."""
-    w = world(tmp_path)
-    cfg = w.cfg()
-    put(w.corpus_dir / "old.md", lesson_text("f0"))
-    w.commit()
-    snapshot = _snap(w)
-    target = w.target("secret.md")
-    plant_alias(kind, w.corpus_dir / "old.md", target)
-    before = census(w.outside)
-
-    exc = raised_by(lambda: drain._restore_from_snapshot(cfg, snapshot, [_rel("old.md")]))
-
-    assert leaf_refusal(exc), repr(exc)
-    assert alias_left(kind, w.corpus_dir / "old.md", target)
-    assert census(w.outside) == before
-
-    clear(w.corpus_dir / "old.md")
-    drain._restore_from_snapshot(cfg, snapshot, [_rel("old.md"), _rel("never.md")])
-    assert (w.corpus_dir / "old.md").read_bytes() == snapshot["old.md"]
-    assert not (w.corpus_dir / "never.md").exists()
 
 
 # ---------------------------------------------------------------------------------------
@@ -1105,7 +1077,7 @@ def test_the_settle_keeps_a_crlf_only_rewrite_as_changed_and_puts_back_a_mode_on
     else:
         os.chmod(w.corpus_dir / "t.md", 0o755)
 
-    tree = drain._settle_tree(cfg, state, honoured_deletions=None)
+    tree = drain._settle_tree(cfg, state)
 
     if change == "crlf only":
         assert tree.changed == (_rel("t.md"),)
@@ -1149,7 +1121,7 @@ def test_the_settle_judges_a_link_at_a_modified_lesson_as_git_sees_it(tmp_path, 
     before = census(w.outside)
 
     with kernel_watch(opens=[target]) as events:
-        tree = drain._settle_tree(cfg, state, honoured_deletions=None)
+        tree = drain._settle_tree(cfg, state)
         seen = events()
 
     assert tree.deleted == ()

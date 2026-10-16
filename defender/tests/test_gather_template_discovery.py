@@ -492,7 +492,7 @@ def test_d5_gather_registers_template_search_and_main_does_not():
 
 
 def test_d5_toolset_carries_the_template_search_bit():
-    """A new tool is a new declarative bit on the ToolSet, per the lesson_read/forward_check
+    """A new tool is a new declarative bit on the ToolSet, per the lesson_read
     mould — not a special case inside register_tools."""
     assert GATHER_DEF.tools.template_search is True
     assert MAIN_DEF.tools.template_search is False

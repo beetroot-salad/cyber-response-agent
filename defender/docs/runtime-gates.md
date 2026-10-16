@@ -75,9 +75,7 @@ hooks). The gates:
     JUDGE binds on the same dir and must keep reading exactly those files. Not the
     basename anywhere (a confined agent's other root is a lesson corpus), and
     `alert.json` is deliberately not in the set — it is the case INPUT, handed to
-    the actor in its own user message. The layout is unchanged on purpose: the
-    staged copies are what `verify_forward` and `disposition_for` read when a
-    finding later becomes a lesson, so they are not archival and cannot simply move.
+    the actor in its own user message.
   - **One alphabet for a lead id** (#850 F-09) — the gather payload shape
     (`_run_paths.GATHER_RAW_SHAPE`) and the four lead-id validators compose off one
     constant (`_run_paths.LEAD_ID_BODY`). They are not independent facts: the

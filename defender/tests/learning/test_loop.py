@@ -261,7 +261,7 @@ def _noop_scrub(_path, **_kw):
 
 def _isolate(tmp_path: Path) -> tuple[object, Path]:
     paths = LoopPaths(repo_root=tmp_path)
-    learning_run_dir = paths.runs_dir / "case-x"
+    learning_run_dir = paths.state_root / "runs" / "case-x"
     learning_run_dir.mkdir(parents=True)
     paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return paths, learning_run_dir

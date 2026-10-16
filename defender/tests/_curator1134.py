@@ -456,9 +456,8 @@ class World:
         return self.trees.tree_for
 
     def cfg(self, **replaced: Any) -> Any:
-        """The REAL lessons config over these trees, the drain-run check disarmed."""
-        return author_cfg(self.paths, trees=self.trees, state=self.state,
-                          **{"forward_check": None, **replaced})
+        """The REAL lessons config over these trees."""
+        return author_cfg(self.paths, trees=self.trees, state=self.state, **replaced)
 
     def target(self, name: str, text: str | bytes | None = None) -> Path:
         """A file outside the repo carrying the mark (or `text`)."""

@@ -31,11 +31,6 @@ from defender.agents import (
 )
 from defender.learning.author import shared as author_shared
 from defender.learning.author.curator_engine import CuratorDeps
-from defender.learning.author.verify_forward.checks import (
-    FINDINGS_CHECK,
-    CheckContext,
-    _run_findings,
-)
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.runtime.agent_definition import RunScope, bind
@@ -178,50 +173,6 @@ def _with_salt(fn, /, *args, salt: str, **kwargs):
 
 
 
-def _findings_prompt(tmp_path: Path, *, hostile="TRANSCRIPT-BODY", salt="5a" * 16):
-    runs = tmp_path / "runs"
-    source = runs / "case-1"
-    source.mkdir(parents=True)
-    (source / "investigation.md").write_text(hostile)
-    (source / "source_refs.yaml").write_text("normalized_disposition: malicious\n")
-    captured = {}
-
-    def run_verify(wiring, **kwargs):
-        captured.update(kwargs)
-        captured["wiring"] = wiring
-        return "VERDICT: GOOD"
-
-    lesson = tmp_path / "lesson.md"
-    lesson.write_text(hostile)
-    ctx = CheckContext(
-        FINDINGS_CHECK,
-        lesson,
-        hostile,
-        "case-1",
-        "adversarial",
-        runs,
-        tmp_path / "corpus",
-        ROOT,
-        0,
-        run_verify,
-    )
-    _with_salt(_run_findings, ctx, salt=salt)
-    return PromptObservation(
-        "_run_findings",
-        captured["user"],
-        (
-            "reader_contract",
-            "case_transcript",
-            "candidate_lesson",
-            "case_ground_truth_disposition",
-        ),
-        (hostile,),
-        salt,
-    )
-
-
-
-
 def _curator_prompt(tmp_path: Path, *, hostile="ROW-BODY", rows=None, salt="5a" * 16):
     rows = [{"lesson": hostile}] if rows is None else rows
     prompt = _with_salt(
@@ -306,20 +257,19 @@ def _all_prompt_observations(
 ):
     """Drive every bound real producer; no assertions are shared across owners.
 
-    FIVE PRODUCERS SINCE #922, down from nine. The judge fixture, both actor legs, the oracle's
+    FOUR PRODUCERS SINCE #1166, down from nine (#922 took four, #1166 the forward check). The judge fixture, both actor legs, the oracle's
     per-lead prompt and the actor forward-check were the four the old pipeline owned, and they
     went with it. What the tuple is FOR is unchanged: every surviving stage that assembles a
     model message from attacker-reachable text is driven here, so a producer that stopped
     framing its input fails in this file rather than in whichever suite happens to touch it.
 
-    The learning side keeps a witness — the curator, its forward check, the lead author and the
-    pitfalls curator all still read model-authored rows. The questioner and the family judge are
+    The learning side keeps a witness — the curator, the lead author and the pitfalls curator
+    all still read model-authored rows. The questioner and the family judge are
     the two new stages on the same shape, and they are witnessed in `test_922_witnesses.py`
     against their own archives rather than restaged here, because their whole input is an
     episode capture this harness has no builder for.
     """
     return (
-        _findings_prompt(tmp_path / "findings", hostile=hostile, salt=salt),
         _curator_prompt(tmp_path / "curator", hostile=hostile, salt=salt),
         _lead_author_prompt(
             tmp_path / "lead-author", monkeypatch, hostile=hostile, salt=salt

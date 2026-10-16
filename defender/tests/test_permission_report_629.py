@@ -278,10 +278,10 @@ def test_a_symlink_operand_resolves_before_keying(env, case, artifact, decoy_nam
 
 
 def test_forward_check_lesson_named_report_md_not_gated(tmp_path):
-    """ak4 (F-A2) — a `verify_forward` lesson operand literally named report.md, living in the
+    """ak4 (F-A2) — a curator lesson operand literally named report.md, living in the
     curator's OWN corpus (not at `<run_dir>/report.md`) with proposed_text="", is NOT subjected
     to the report.md branch: its resolved path is not the run-dir root key, so decide_write does
-    not route empty text into split_frontmatter (which would deny and break the forward-check's
+    not route empty text into split_frontmatter (which would deny and break the curator's
     pure-containment gate — the allow->deny regression F-A2 names). Positive control: an empty
     write to the actual `<run_dir>/report.md` DOES enter the branch and denies (no leading fence)."""
     run = tmp_path / "run"

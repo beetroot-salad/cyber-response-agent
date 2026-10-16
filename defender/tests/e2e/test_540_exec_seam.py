@@ -687,7 +687,7 @@ def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
     H3 closed the asymmetry this way rather than by making 'bash enabled + box absent'
     unconstructible: the four `ToolSet.bash=True` learning-pipeline roles (lead_author,
     curator, actor, judge — census A4) are ported alongside the two runtime agents, and
-    `verify_forward`/`oracle` have EMPTY ToolSets and are unaffected. The census is read off
+    `oracle` has an EMPTY ToolSet and is unaffected. The census is read off
     the live registry rather than restated here, so a newly bash-enabled role fails this test
     instead of quietly inheriting no box."""
     run_dir = _run_dir(tmp_path)

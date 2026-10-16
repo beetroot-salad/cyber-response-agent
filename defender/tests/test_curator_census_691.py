@@ -148,7 +148,7 @@ def test_one_shared_spawn_request_drives_every_role_in_the_registry(tmp_path):
             defn = T1106.fixture_gather_def()  # #1106 M4: gather binds with a RUN's grant
         try:
             # a role with its OWN scope requirements (confine/explicit-tree — e.g. ACTOR,
-            # VERIFIER, LEAD_AUTHOR) already raises on a bare RunScope() regardless of
+            # LEAD_AUTHOR) already raises on a bare RunScope() regardless of
             # corpus_name, so it is not a "generic bare-scope caller" candidate; only compare
             # roles for which the bare scope itself is buildable.
             bare = compile_policy_for(defn, rd, scope=RunScope(), tools=effective_tools_for(defn))

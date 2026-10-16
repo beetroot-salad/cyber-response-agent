@@ -10,15 +10,12 @@ from pathlib import Path
 
 from typing import Any
 
-import yaml
-
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.learning.author import drain
 from defender.learning.author import shared as _shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
-from defender._yaml import safe_load
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
     LoopPaths,
@@ -34,8 +31,6 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.learning.core.state import FINDINGS, LearningState
-from defender._artifact_schema import SOURCE_REFS_FILE_MAX
-from defender._io import TEXT_READ_ERRORS, read_text_utf8
 
 
 
@@ -70,10 +65,6 @@ def build_author_config(
     lane's open trees (`open_drain_trees`): they must hold `paths.lessons_dir` itself
     (`shared.lane_corpus`, else `FatalConfigError`). The config must not outlive `trees`."""
     from defender.learning.author import shared as _shared
-    from defender.learning.author.verify_forward.checks import (
-        FINDINGS_CHECK,
-        skips_forward_check,
-    )
 
     return AuthorConfig(
         repo_root=paths.repo_root,
@@ -81,7 +72,6 @@ def build_author_config(
         corpus=_shared.lane_corpus(trees, paths.lessons_dir),
         tree_for=trees.tree_for,
         corpus_dir_rel=paths.lessons_dir_rel,
-        runs_dir=paths.runs_dir,
         state=state,
         channel=FINDINGS,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
@@ -96,32 +86,9 @@ def build_author_config(
         post_rotate=_write_held_report_after_rotate,
         manifest_seed=manifest_seed,
         box=box,
-        # The drain runs this check itself; the curator never does.
-        forward_check=FINDINGS_CHECK,
-        exempt=skips_forward_check,
-        repair_prompt=paths.learning_dir / "author" / "lessons" / "repair.md",
-        invoke_repair=_shared.invoke_repair,
     )
 
 
-
-
-def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
-    # The layout import lives here, inside this deferred_legacy reader (#1105 D7, FR-1).
-    from defender.run_repository import RunPaths
-
-    refs = RunPaths(cfg.runs_dir / run_id).source_refs
-    if not refs.is_file():
-        return None
-    try:
-        doc = safe_load(read_text_utf8(refs, limit=SOURCE_REFS_FILE_MAX))
-    except (yaml.YAMLError, *TEXT_READ_ERRORS):
-        # Over SOURCE_REFS_FILE_MAX, unreadable or not UTF-8: held, like a YAMLError.
-        return None
-    if not isinstance(doc, dict):
-        return None
-    val = doc.get("normalized_disposition")
-    return val if isinstance(val, str) else None
 
 
 def existing_finding_ids(cfg: AuthorConfig) -> set[str]:
@@ -143,8 +110,7 @@ def build_user_prompt(
 
 
 def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict:
-    """Spawn the curator to author the batch and self-report. It runs no forward check; the
-    drain does that before committing."""
+    """Spawn the curator to author the batch and self-report."""
     from defender.learning.author import curator_engine
 
     stage_salt = uuid.uuid4().hex
@@ -184,19 +150,16 @@ def write_held_report(
     cfg: AuthorConfig,
     *,
     batch_id: str,
-    forward_bad_terminal: list[dict],
     deferred: list[dict],
     skipped: list[dict],
     gate_held: list[dict],
 ) -> None:
-    """The lessons channel's four decline reasons, as the labels its report line carries.
+    """The lessons channel's three decline reasons, as the labels its report line carries.
 
     `shared.write_disposition_report` composes the line and derives the `<label>_ids` keys;
     this function picks which labels the lessons channel reports. Each implies a different
     recovery:
 
-    - `forward_bad_terminal`: the lesson stayed BAD after the one repair attempt; consumed,
-      with its full account in the gap ledger.
     - `deferred`: couldn't land through no fault of its own; bounded and still queued.
     - `skipped`: terminal.
     - `gate_held`: never reached the agent; held every tick until a human moves it.
@@ -205,12 +168,9 @@ def write_held_report(
     _shared.write_disposition_report(
         cfg.state, cfg.channel, batch_id=batch_id,
         groups={
-            "forward_bad_terminal": forward_bad_terminal, "deferred": deferred,
-            "skipped": skipped, "gate_held": gate_held,
+            "deferred": deferred, "skipped": skipped, "gate_held": gate_held,
         },
     )
-
-
 
 
 _logger = logging.getLogger(__name__)
@@ -225,7 +185,6 @@ def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
     write_held_report(
         cfg,
         batch_id=outcome.batch_id,
-        forward_bad_terminal=outcome.held.get("forward_bad_terminal", []),
         deferred=outcome.held.get("deferred", []),
         skipped=outcome.consumed.get("consumed_skip", []),
         gate_held=outcome.gate_held,
@@ -252,12 +211,6 @@ def run_batch(
         cfg = build_author_config(paths, state=state, trees=trees, box=box)
     assert cfg is not None  # narrowed for mypy: exactly one of the two was given
     return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
-
-
-def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool:
-    if direction == "benign":
-        return disposition == "malicious"
-    return disposition == "benign"
 
 
 def _gate_family(entry: dict) -> tuple[str, dict] | None:
@@ -293,18 +246,16 @@ def _gate_family(entry: dict) -> tuple[str, dict] | None:
 def _gate_findings(
     batch: list[dict], cfg: AuthorConfig,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """The findings channel's pre-author policy: idempotency against the corpus, then either the
-    family partition for a `direction: family` row or the `source_refs.yaml` ground truth an
-    adversarial/benign finding needs before it can become a lesson.
+    """The findings channel's pre-author policy: idempotency against the corpus, then the
+    family partition. A row whose `direction` is not `family` — a per-case row from before
+    #1234, or one with no direction — is held naming it: nothing left can author it (#1166),
+    and a raise here would send the whole tick's batch to stuck.
 
     An empty batch returns without reading the corpus: `existing_finding_ids` is the most
     expensive non-agent step, and `_tick` runs for all-unreadable queues just to rotate."""
     if not batch:
         return [], [], []
-    # The channel's `exempt` predicate, the same one the drain keys EXEMPT on, rather than
-    # re-deriving `direction == "family"` here.
-    from defender.learning.author.verify_forward.checks import skips_forward_check
-    from defender.learning.judge.run import SUBJECT_WORLD
+    from defender.learning.judge.run import DIRECTION_FAMILY, SUBJECT_WORLD
 
     existing_ids = existing_finding_ids(cfg)
     held: list[dict] = []
@@ -324,29 +275,19 @@ def _gate_findings(
             rec["consumed_category"] = "consumed_idempotent"
             consumed_idempotent.append(rec)
             continue
-        if skips_forward_check(entry):
-            # The appender must refuse a row lacking `run_id`; indexing it here (value unused)
-            # fails loudly on one that slipped through rather than routing it silently.
-            entry["run_id"]  # noqa: B018 — see comment above
-            routed = _gate_family(entry)
-            if routed is not None:
-                kind, rec = routed
-                (consumed_idempotent if kind == "consumed" else held).append(rec)
-            continue
-        run_id = entry.get("run_id")
-        if not isinstance(run_id, str) or not run_id:
-            # No `run_id`, no ground truth to gate on; holding it forever would be silent. It
-            # falls through to authoring, and the forward check turns the uncheckable pair into
-            # a gap-ledgered BAD.
-            continue
-        disp = disposition_for(cfg, run_id)
-        direction = entry["direction"]
-        if not _has_confident_ground_truth(direction, disp):
+        direction = entry.get("direction")
+        if direction != DIRECTION_FAMILY:
             rec = dict(entry)
-            rec["held_reason"] = (
-                f"no_ground_truth(direction={direction!r}, disposition={disp!r})"
-            )
+            rec["held_reason"] = f"retired_direction({direction!r})"
             held.append(rec)
+            continue
+        # The appender must refuse a row lacking `run_id`; indexing it here (value unused)
+        # fails loudly on one that slipped through rather than routing it silently.
+        entry["run_id"]  # noqa: B018 — see comment above
+        routed = _gate_family(entry)
+        if routed is not None:
+            kind, rec = routed
+            (consumed_idempotent if kind == "consumed" else held).append(rec)
     gated = {h["finding_id"] for h in held} | {c["finding_id"] for c in consumed_idempotent}
     return held, consumed_idempotent, [f for f in batch if f["finding_id"] not in gated]
 

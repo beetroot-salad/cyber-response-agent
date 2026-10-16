@@ -247,41 +247,6 @@ def commit_corpus_paths(
                                  env=_git.committed_view_env())
 
 
-def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
-    """The default `cfg.invoke_repair`: spawns the bounded repair curator
-    (`curator_engine.CORPUS_REPAIR_DEF`) with the drain-built prompt.
-
-    Imports lazily: `curator_engine` pulls in the pydantic-ai stack, and `drain` imports this
-    module, so a top-level import would cycle."""
-    from defender.learning.author import curator_engine
-    from defender.learning.author import drain as _drain
-    from defender.learning.core.config import (
-        AUTHOR_DRAIN_LABEL, StageContext, StageWiring, author_request_limit)
-
-    stage_salt = uuid4().hex
-    # `repair_prompt=None` means `repair.md` beside this channel's curator prompt.
-    prompt_path = cfg.repair_prompt if cfg.repair_prompt is not None else (
-        cfg.author_prompt.parent / "repair.md"
-    )
-    return curator_engine.run_repair_stage(
-        wiring=StageWiring.for_batch(
-            prompt_path, cfg.author_model, cfg.author_effort,
-            batch_id=batch_id, label="repair",
-        ),
-        ctx=StageContext(
-            learning_run_dir=cfg.state.stage_dir(AUTHOR_DRAIN_LABEL),
-            user=_drain.build_repair_user_prompt(pairs, cfg, salt=stage_salt),
-            request_limit=author_request_limit(),
-            wall_clock_timeout=cfg.author_timeout,
-            repo_root=cfg.repo_root,
-            box=cfg.box,
-            salt=stage_salt,
-        ),
-        corpus_dir=cfg.corpus_dir,
-        log=_drain.channel_logger(cfg).getChild("repair"),
-    )
-
-
 def verify_agent_state(
     repo_root: Path,
     result: dict,

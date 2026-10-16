@@ -49,10 +49,6 @@ from pydantic_ai.usage import UsageLimits  # noqa: E402
 from defender._env import FatalConfigError  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.core import config  # noqa: E402
-from defender.learning.author.verify_forward.engine import (  # noqa: E402
-    VERIFY_REQUEST_LIMIT,
-    VerifierDeps,
-)
 from defender.agents import QUESTIONER_DEF  # noqa: E402
 from defender.learning.branch.questioner import QuestionerDeps  # noqa: E402
 from defender.runtime import driver, observe, permission, providers  # noqa: E402
@@ -74,10 +70,20 @@ from defender.runtime.agent_definition import (  # noqa: E402
 )
 from defender.runtime.permission import Grant, Route  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from typing import ClassVar  # noqa: E402
+
+from defender._model import model  # noqa: E402
+
+
+@model(frozen=True)
+class _ToolFreeDeps(AgentDeps):
+    """A plain run-scoped deps type for the tool-free agent tests below (the verifier's, which
+    they used until #1166 retired it, had no other trait)."""
+
+    role: ClassVar[AgentRole] = AgentRole.QUESTIONER
 from defender.agents import (  # noqa: E402
     AGENTS,
     MAIN_DEF,
-    VERIFY_DEF,
 )
 
 #: Two real directories under `defender/`, used as confine members below. They were the actor
@@ -344,23 +350,6 @@ def test_deny_all_role_empty_toolset(logger):
     assert "read_file" in list(main._function_toolset.tools)
 
 
-def test_verify_empty_toolset(logger):
-    """build_agent_core(VERIFY_DEF) with tools=ToolSet() registers NOTHING: tools == [].
-    POSITIVE CONTROL: a judge-shaped agent (read=True) registers read_file."""
-    with override_allow_model_requests(False):
-        verify = driver.build_agent_core(
-            VERIFY_DEF, deps_type=VerifierDeps, instructions="x", logger=logger,
-            agent_id="verify", make_model=_fake_model(_text_fn()),
-        )
-        judge = driver.build_agent_core(
-            _defn(role=AgentRole.VERIFIER, tools=ToolSet(read=True, bash=True)),
-            deps_type=VerifierDeps, instructions="x", logger=logger,
-            agent_id="judge", make_model=_fake_model(_text_fn()),
-        )
-    assert list(verify._function_toolset.tools) == []
-    assert "read_file" in list(judge._function_toolset.tools)
-
-
 def test_oracle_no_escape_hatch(logger, tmp_path):
     """The oracle built via ToolSet() has NO read_file even when its run_dir holds answer-
     bearing source (source_refs.yaml) — absence is STRUCTURAL (build-time), not a runtime
@@ -598,7 +587,7 @@ def test_effort_live_on_toolfree(logger, tmp_path):
     settings = {"extra_body": {"reasoning_effort": "none"}}
     fake, reqs = _counting_make_model(text=_ORACLE_YAML, settings=settings)
     defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "kimi-k3", effort="none", tools=ToolSet(),
-                 deps_cls=VerifierDeps)
+                 deps_cls=_ToolFreeDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=QuestionerDeps, instructions="x", logger=logger,
@@ -614,19 +603,13 @@ def test_effort_live_on_toolfree(logger, tmp_path):
 
 
 
-def test_request_limit_one():
-    """VERIFY_REQUEST_LIMIT == 1 (down from 6): no tool is
-    callable, so no headroom above 1 is needed."""
-    assert VERIFY_REQUEST_LIMIT == 1
-
-
 def test_request_limit_one_sufficient(logger, tmp_path):
     """Driving the tool-free questioner build with a single-turn replay COMPLETES under
     request_limit=1 — 1 request is SUFFICIENT (not merely non-crashing): the tool-free
     predictor makes exactly one model request and returns its output."""
     fake, reqs = _counting_make_model(text=_ORACLE_YAML)
     defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "kimi-k3", effort="none", tools=ToolSet(),
-                 deps_cls=VerifierDeps)
+                 deps_cls=_ToolFreeDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=QuestionerDeps, instructions="x", logger=logger,
@@ -646,7 +629,7 @@ def test_request_limit_reject_below_one(logger, tmp_path):
     not a silent coerce-to-1."""
     fake, _ = _counting_make_model(text=_ORACLE_YAML)
     defn = _defn(role=AgentRole.QUESTIONER, model=lambda: "kimi-k3", effort="none", tools=ToolSet(),
-                 deps_cls=VerifierDeps)
+                 deps_cls=_ToolFreeDeps)
     with override_allow_model_requests(False):
         agent = driver.build_agent_core(
             defn, deps_type=QuestionerDeps, instructions="x", logger=logger,

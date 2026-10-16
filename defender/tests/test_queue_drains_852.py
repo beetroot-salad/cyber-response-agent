@@ -91,8 +91,6 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
     stays queued for the next tick."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
-    for run_id in ("run-G", "run-B"):
-        h.write_source_refs(paths, run_id)
     h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
@@ -139,8 +137,6 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     `deferred` groups."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
-    for run_id in ("run-G", "run-B"):
-        h.write_source_refs(paths, run_id)
     h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
@@ -182,8 +178,6 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     call removed, this test fails."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
-    for run_id in ("run-G", "run-B"):
-        h.write_source_refs(paths, run_id)
     h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     seeded = h.cfg_for(paths, "findings")

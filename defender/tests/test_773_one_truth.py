@@ -3,7 +3,8 @@
 Regression coverage for the review of PR #1064, whose findings all shared a shape: the
 drain kept a second truth alive beside the tree — a pass-1 verdict that outlived the bytes
 it judged, the curator's own account of what it committed, a copy of the first spawn's
-cleanup that the second spawn was held to differently. Each test here is one of those
+cleanup that the second spawn was held to differently. (#1166 deleted the verdict and the
+second spawn; what is left here is the tree's side of each probe.) Each test here is one of those
 probes, replayed against the rewrite that removed the second truth.
 
 NOT part of the locked #773 spec suite (`test_773_*.py` committed by write-tests) — these
@@ -11,10 +12,12 @@ live beside it and drive the same scene substrate.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import stat
 
 from defender.tests import _spec773 as S
+from defender.tests._curator1134 import JournalBound, JournalHeld
 from defender.tests._drain719 import git
 
 LESSON = "defender/lessons/l1.md"
@@ -27,112 +30,78 @@ def _corpus_status(sc) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# a verdict never outlives the bytes it judged
+# an approval never outlives the bytes it read
 # ---------------------------------------------------------------------------
 
 
-def test_a_repair_that_drops_one_of_two_citations_is_terminal_for_the_dropped_finding(tmp_path):
-    """l1 cites f1 (BAD) and f2 (GOOD). The repair rewrites l1 citing only f1, which now
-    clears. f2's lesson is gone from the tree: it is terminal with a gap record naming the
-    drop, NOT `consumed_committed` on the strength of a pass-1 GOOD for bytes that no longer
-    exist. l1 itself still commits — the dropped pair is f2's fate, not l1's approval."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1"), S.finding_row("f2", run_id="f2")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1", "f2")}, committed=["f1", "f2"]),
-        verifier=S.FakeVerifier(verdicts={("l1.md", "f1"): ["BAD", "GOOD"]}),
-        repair=S.FakeRepair(writes={"l1.md": S.lesson("f1", body="narrowed to f1")}),
-    )
-    assert sc.run() == 0
-    assert sc.head_files() == [LESSON]
-    assert sc.category_of("f1") == "consumed_committed"
-    assert sc.category_of("f2") == "consumed_forward_bad"
-    [record] = sc.gap_records()
-    assert record["finding_id"] == "f2"
-    assert "dropped" in record["verdicts"][-1]["reasoning"]
+class _Rewriting(JournalHeld):
+    """The real corpus handle, except that reading `l1.md` through its view hands back what
+    the file held and then lets `edit(n)` rewrite it on disk, `n` counting those reads from 1:
+    another writer moving the file between the drain's reads."""
+
+    def __init__(self, root, edit) -> None:
+        super().__init__(root, [])
+        self.edit, self.reads = edit, 0
+
+    def view(self):
+        outer = self
+
+        class View(JournalBound):
+            def read(self, name, *, errors="strict"):
+                got = super().read(name, errors=errors)
+                if str(name) == "l1.md":
+                    outer.reads += 1
+                    outer.edit(outer.reads)
+                return got
+
+        return View(self._os, self._root, log=self.log, refuse=self.refuse, extra=self.extra)
 
 
-def test_a_concurrent_edit_that_strips_the_citations_mid_check_is_not_committed(tmp_path):
-    """The file is judged GOOD; while the check runs, another writer strips its citations.
-    The stale GOOD cannot stand for bytes that cite nothing: the file is not approved, not
-    committed, and the tree is put back."""
-    stripped = S.lesson(body="no citations any more")
-
-    def strip_during_check(ctx):
-        if ctx.lesson_text != stripped:
-            (ctx.corpus_dir / "l1.md").write_text(stripped, encoding="utf-8")
-
+def _rewriting_scene(tmp_path, edit):
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        verifier=S.FakeVerifier(on_call=strip_during_check),
     )
+    sc.cfg = dataclasses.replace(sc.cfg, corpus=_Rewriting(sc.cfg.corpus_dir, edit))
+    return sc
+
+
+def test_a_concurrent_edit_that_strips_the_citations_mid_read_is_not_committed(tmp_path):
+    """While the drain reads `l1.md`'s citations, another writer strips them (after the
+    second read: the attributable check's is the first, the citation read's own first round
+    the second). The citations the drain approved on cannot stand for bytes that cite
+    nothing: the re-read sees the move, the file is not approved, not committed, and the tree
+    is put back. (#1166 moved this from the deleted forward check to the citation read.)"""
+    stripped = S.lesson(body="no citations any more")
+    sc = _rewriting_scene(tmp_path, lambda n: n == 2 and (
+        sc.corpus / "l1.md").write_text(stripped, encoding="utf-8"))
+
     assert sc.run() == 0
+    assert sc.cfg.corpus.reads > 2, "the drain never re-read the file, so the row is vacuous"
     assert sc.head_files() == []
     assert sc.category_of("f1") != "consumed_committed"
     assert _corpus_status(sc) == []
 
 
+def test_a_file_that_never_holds_still_under_the_citation_read_refuses_the_tick(tmp_path):
+    """A writer that rewrites `l1.md` after every read, each version still citing f1: no
+    round of the citation read sees the same bytes twice, so the tick refuses with
+    `AuthorError` (rc 2, f1 charged an attempt) rather than commit bytes no citation was read
+    from."""
+    sc = _rewriting_scene(tmp_path, lambda n: (sc.corpus / "l1.md").write_text(
+        S.lesson("f1", body=f"version {n}"), encoding="utf-8"))
+
+    assert sc.run() == 2
+    assert sc.head_files() == []
+    assert sc.pending_by_id()["f1"].get("attempts") == 1
+    assert any("kept changing" in str(r.get("reason"))
+               for r in S.stuck_records(sc.paths, sc.channel))
+
+
 # ---------------------------------------------------------------------------
-# both spawns are held to the same tree rule
+# the settle puts back what no lesson needs
 # ---------------------------------------------------------------------------
-
-
-def test_a_repair_spawn_orphan_file_is_restored_and_the_tree_is_clean_after_the_tick(tmp_path):
-    """The repair spawn drops a file beside its fix that cites nothing from this batch.
-    Pass 1 would refuse the tick over it; after the repair it is simply not approved —
-    unlinked, never committed — and the corpus is clean when the tick ends, so the next tick's
-    cleanliness gate has nothing to trip on."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        verifier=S.FakeVerifier(verdicts={"l1.md": ["BAD", "GOOD"]}),
-        repair=S.FakeRepair(
-            writes={"l1.md": S.lesson("f1", body="fixed"), "orphan.md": S.lesson(body="noise")}
-        ),
-    )
-    assert sc.run() == 0
-    assert sc.head_files() == [LESSON]
-    assert sc.corpus_files() == ["l1.md"]
-    assert _corpus_status(sc) == []
-
-
-def test_a_repair_spawn_edit_to_an_untouched_head_lesson_is_restored(tmp_path):
-    """Same rule, other door: the repair spawn edits a lesson that was in HEAD before the
-    tick and cites nothing from this batch. Restored to its HEAD bytes, not left dirty."""
-    old = S.lesson("older", body="the old lesson")
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1")],
-        seed_corpus={"old.md": old},
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        verifier=S.FakeVerifier(verdicts={"l1.md": ["BAD", "GOOD"]}),
-        repair=S.FakeRepair(
-            writes={"l1.md": S.lesson("f1", body="fixed"), "old.md": S.lesson("older", body="drive-by")}
-        ),
-    )
-    assert sc.run() == 0
-    assert sc.head_files() == [LESSON]
-    assert (sc.corpus / "old.md").read_text(encoding="utf-8") == old
-    assert _corpus_status(sc) == []
-
-
-def test_a_non_md_stray_after_the_repair_spawn_is_reverted_exactly_as_after_the_first(tmp_path):
-    """A `notes.txt` under the corpus is a cleanup after the first spawn (§7 FK-5). It is
-    the same cleanup after the repair spawn — not a tick-wide refusal."""
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        verifier=S.FakeVerifier(verdicts={"l1.md": ["BAD", "GOOD"]}),
-        repair=S.FakeRepair(writes={"l1.md": S.lesson("f1", body="fixed"), "notes.txt": "scratch"}),
-    )
-    assert sc.run() == 0
-    assert sc.head_files() == [LESSON]
-    assert sc.corpus_files() == ["l1.md"]
-    assert "attempts" not in sc.pending_by_id().get("f1", {})
 
 
 def test_a_mode_only_change_is_put_back_and_the_tree_is_clean_after_the_tick(tmp_path):
@@ -199,44 +168,3 @@ def test_a_finding_the_curator_filed_as_skipped_but_wrote_a_lesson_for_takes_the
     assert sc.head_files() == [LESSON, LESSON2]
     assert [r["finding_id"] for r in sc.consumed()].count("x") == 1
     assert sc.category_of("x") == "consumed_committed"
-
-
-# ---------------------------------------------------------------------------
-# a per-row data fault is a per-pair ending, never a stuck tick
-# ---------------------------------------------------------------------------
-
-
-def test_a_missing_investigation_in_the_cited_run_is_a_bad_pair_not_a_stuck_tick(tmp_path):
-    """The real check over a run dir that has `source_refs.yaml` (so the gate passes) but no
-    `investigation.md`. Before: `SystemExit` out of the fan-out, a stuck record, the row
-    never retiring and the curator re-spawned every tick. Now: the pair is BAD with the
-    error prefix, the finding is terminal, and the tick completes."""
-    from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
-
-    sc = S.build_scene(
-        tmp_path,
-        rows=[S.finding_row("f1", run_id="f1")],
-        curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
-        forward_check=FINDINGS_CHECK,
-    )
-    (sc.cfg.runs_dir / "f1" / "investigation.md").unlink()
-    assert (sc.cfg.runs_dir / "f1" / "source_refs.yaml").is_file()
-    assert sc.run() == 0
-    assert sc.category_of("f1") == "consumed_forward_bad"
-    assert S.stuck_records(sc.paths, sc.channel) == []
-    [record] = sc.gap_records()
-    assert record["verdicts"][-1]["reasoning"].startswith(S.ERROR_PREFIX)
-
-
-# ---------------------------------------------------------------------------
-# the operator CLI can explain the repair spawn's policy
-# ---------------------------------------------------------------------------
-
-
-def test_the_policy_cli_compiles_the_repair_roles_scope(tmp_path):
-    from defender.runtime.agent_role import AgentRole
-    from defender.scripts import policy_cli
-
-    scope = policy_cli._scope_for(AgentRole.CORPUS_REPAIR, tmp_path, "lessons")
-    assert scope.corpus_name == "lessons"
-    assert scope.read_confine

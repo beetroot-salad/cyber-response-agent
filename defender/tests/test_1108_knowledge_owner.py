@@ -52,7 +52,7 @@ ALLOWED: dict[tuple[str, str], tuple[int, str]] = {
     ("evals/harness.py", "lessons"):
         (2, "a scenario's own `lessons/` folder and the results folder, not a knowledge root"),
     ("learning/author/lessons/run.py", "lessons"):
-        (2, "the `learning/author/lessons/` package's prompt files, code not knowledge"),
+        (1, "the `learning/author/lessons/` package's prompt file, code not knowledge"),
     ("runtime/driver/_build.py", "lessons"): (1, _P2_GATE),
     ("runtime/permission/policies/_common.py", "lessons"): (1, _P2_GATE),
     ("runtime/driver/_build.py", "skills"): (1, "gather's own SKILL.md: a general skill"),
