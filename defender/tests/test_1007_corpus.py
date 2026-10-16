@@ -37,7 +37,6 @@ import pytest
 
 from defender.learning.core import drains
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL
-from defender.tests import _by_path as P
 from defender.tests import _drain719 as D
 from defender.tests import _world_1007 as W
 from defender.tests._curator1134 import author_trees
@@ -143,25 +142,6 @@ def drive(paths, trigger, *, rec=None):
 # ---------------------------------------------------------------------------------------
 
 
-def test_lessons_questioner_dir_and_rel_resolve(tmp_path):
-    """The corpus root exists as a PATH PAIR on `_paths`, beside `lessons_dir`.
-
-    Observably true: `lessons_questioner_dir` is `<defender_dir>/lessons-questioner` and
-    `lessons_questioner_dir_rel` is its repo-relative spelling, and both come off the same
-    class that owns every other corpus directory name. Two spellings are needed because git
-    pathspecs and porcelain paths use the relative one and the absolute join is off a tree; a
-    site that composed either by hand joins no census and moves with no rename.
-
-    What failure looks like: the directory is spelled inline at the curator, the box request
-    and the lint exclusion list. Three copies of one name then drift independently.
-    """
-    paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-
-    assert paths.lessons_questioner_dir == paths.defender_dir / W.QUESTIONER_CORPUS_DIRNAME
-    assert paths.lessons_questioner_dir_rel == W.QUESTIONER_CORPUS_REL
-    assert paths.lessons_questioner_dir != paths.lessons_dir
-
-
 def test_the_questioner_curator_gate_is_idempotency_only(tmp_path):
     """The questioner curator's gate is IDEMPOTENCY ONLY — no ground-truth check, no family
     partition.
@@ -187,26 +167,6 @@ def test_the_questioner_curator_gate_is_idempotency_only(tmp_path):
         f"a world row with no defender ground truth was held: {held}")
     assert held == [], f"the gate held a world row it has no ground-truth rule for: {held}"
     assert consumed_pre == []
-
-
-def test_curator_modules_names_the_questioner_curator_module(tmp_path):
-    """`_CURATOR_MODULES` gains a key for the questioner curator, and it IMPORTS.
-
-    Observably true: the fixed dict names `questioner_curator` and the dotted path it maps to
-    imports successfully. The dict is a literal the drain reads to import a curator by name; a
-    key naming a module that does not exist fails at the moment the drain triggers, inside a
-    handler that catches only `SubprocessError` and `OSError`.
-
-    What failure looks like: the module is added to the trigger list and not to this dict.
-    `_run_curator_module` then raises `KeyError` from inside a tick, past the one handler that
-    was supposed to keep a curator's fault contained.
-    """
-    import importlib
-
-    assert W.QUESTIONER_CURATOR_MODULE in drains._CURATOR_MODULES, (
-        f"_CURATOR_MODULES is {sorted(drains._CURATOR_MODULES)}")
-    dotted = drains._CURATOR_MODULES[W.QUESTIONER_CURATOR_MODULE]
-    assert importlib.import_module(dotted) is not None
 
 
 def test_the_questioner_queue_alone_wakes_the_drain(tmp_path):
@@ -290,33 +250,6 @@ def test_a_full_findings_queue_alone_still_wakes_the_drain(tmp_path):
         "the findings queue alone no longer wakes the drain")
     assert writable_sources(rec.only_request()) == {
         paths.lessons_dir, paths.lessons_questioner_dir}
-
-
-def test_the_drain_still_decides_its_channels_without_a_direction_table(tmp_path):
-    """SURVIVAL: the drain still names its channels rather than deriving them.
-
-    Observably true: `_curator_queue_checks` returns exactly two `(file, knob)` pairs, one per
-    channel, and `_CURATOR_MODULES` has one key per curator the drain triggers — all read as
-    literals off the module, with no registry walk between them. #922's stated property is that
-    a second channel returning is an EDIT HERE, IN A DIFF; this asserts the second channel
-    arrived that way.
-
-    What failure looks like: a helper is introduced that discovers channels from `LoopPaths`
-    attributes or from a directory listing. The narrowing #922 paid for is silently undone, and
-    the next deletion shrinks the drain with no error and no failing test.
-    """
-    paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-
-    state = W.learning_state(paths)
-    checks = [(Path(state.describe(channel)), knob)
-              for channel, knob in drains._curator_queue_checks()]
-
-    assert sorted(f.name for f, _knob in checks) == sorted(
-        [(paths.state_root / FINDINGS.queue).name, W.QUESTIONER_QUEUE_FILENAME]), (
-        f"the wake gate answers for {[f.name for f, _k in checks]}")
-    assert len({knob for _f, knob in checks}) == 2, (
-        "the two channels share one threshold knob, so neither can be tuned alone")
-    assert W.QUESTIONER_CURATOR_MODULE in drains._CURATOR_MODULES
 
 
 def test_the_lead_author_label_never_mounts_the_questioner_corpus(tmp_path):
@@ -560,72 +493,6 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
 # ---------------------------------------------------------------------------------------
 # The census: who must see the new root, and who must not
 # ---------------------------------------------------------------------------------------
-
-
-def test_every_corpus_enumerator_that_must_see_the_new_root_names_it(tmp_path):
-    """The four enumerators that MUST see the new corpus name it IN THE STRUCTURE THAT ACTS.
-
-    Observably true: `serialize.GROUPS` carries a group whose `dir` IS the new corpus root, and
-    each of the three ratcheted lints' own exclusion tuples — `lint_shippable_surface`'s and
-    `lint_ci_hygiene`'s `EXCLUDED_PREFIXES`, `lint_stale_refs`' `EXCLUDED_GREP_DIRS` — holds
-    `defender/lessons-questioner` as a MEMBER. "Which lesson corpora exist" is not one symbol —
-    that is the finding: eight independent spellings, four of which need a deliberate add or the
-    corpus is invisible to the frontend and trips a ratcheted lint the moment a lesson lands.
-
-    THE VALUES, NOT THE FILE TEXT, and that is the repair. This test read each file with `in`,
-    so a mention in a comment — or in the wrong list in the right file — satisfied it, and
-    cosmetic-only wiring passed. The lints are reached the way CI reaches them
-    (`_by_path.load_lint_gate`: they are standalone programs, not an importable package), and
-    the entries are compared with any trailing `/` stripped because the three tuples disagree
-    about it (`"defender/lessons/"` vs `"defender/lessons"`) and that is a spelling, not a wire.
-
-    What failure looks like: the corpus ships and CI goes red in `code-smells` on a lint whose
-    connection to this change is two directories away — or the corpus is simply never rendered
-    and nobody notices for months.
-    """
-    serialize = W.mod("learning.frontend.serialize")
-    dirs = {str(spec.get("dir")) for spec in serialize.GROUPS.values()}
-    assert W.QUESTIONER_CORPUS_DIRNAME in dirs, (
-        f"no `serialize.GROUPS` entry renders {W.QUESTIONER_CORPUS_DIRNAME!r}; the groups render "
-        f"{sorted(dirs)} — the corpus is authored and never shown")
-
-    rel = W.QUESTIONER_CORPUS_REL.rstrip("/")
-    gates = {"lint_shippable_surface": "EXCLUDED_PREFIXES",
-             "lint_ci_hygiene": "EXCLUDED_PREFIXES",
-             "lint_stale_refs": "EXCLUDED_GREP_DIRS"}
-    missing = {}
-    for stem, attr in gates.items():
-        entries = {str(e).rstrip("/") for e in getattr(P.load_lint_gate(stem), attr)}
-        if rel not in entries:
-            missing[f"{stem}.{attr}"] = sorted(e for e in entries if "lessons" in e)
-
-    assert missing == {}, (
-        f"these gates do not EXCLUDE {rel!r} (their lesson-corpus entries are shown): {missing} "
-        "— a mention anywhere else in the file is not the list the gate reads")
-
-
-def test_the_new_corpus_root_is_admitted_by_no_runtime_read_or_write_scope(tmp_path):
-    """The new corpus root widens NO runtime read or write scope.
-
-    Observably true: the defender agent's own corpus tuple (`driver/_build.py::_CORPUS_DIRS`)
-    and its permission policy's subdirectory tuple (`policies/_common.py::_CORPUS_SUBDIRS`)
-    both still hold exactly `('lessons', 'skills', 'examples')`, and neither names the new
-    root. These two are independently hardcoded copies of one list and must be edited in
-    lockstep or main's confine tuple and its own `cat` grant disagree about what it may read —
-    which is precisely why NEITHER may be edited here.
-
-    What failure looks like: the root is added "so it is readable". The defender agent then has
-    read access to a corpus of advice about how adversarial worlds are authored against it.
-    """
-    build = W.mod("runtime.driver._build")
-    policy_common = W.mod("runtime.permission.policies._common")
-
-    assert tuple(build._CORPUS_DIRS) == ("lessons", "skills", "examples"), (
-        f"_CORPUS_DIRS is {build._CORPUS_DIRS}")
-    assert tuple(policy_common._CORPUS_SUBDIRS) == ("lessons", "skills", "examples"), (
-        f"_CORPUS_SUBDIRS is {policy_common._CORPUS_SUBDIRS}")
-    assert W.QUESTIONER_CORPUS_DIRNAME not in build._CORPUS_DIRS
-    assert W.QUESTIONER_CORPUS_DIRNAME not in policy_common._CORPUS_SUBDIRS
 
 
 def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):

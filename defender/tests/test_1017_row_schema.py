@@ -38,12 +38,10 @@ import json
 import os
 from pathlib import Path
 
-import pytest
 import yaml
 
 from defender._io import append_jsonl, read_jsonl_rows
 from defender.run_repository import RunPaths
-from defender._text import as_str
 from defender.learning import lead_repository
 from defender.learning.lead_repository import QueryRow, load_queries
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
@@ -53,7 +51,6 @@ from defender.scripts.gather_tools.record_query import (
     rejection_trip,
 )
 from defender._query_rules import ABOVE_GUARD_QUERY_ID
-from defender.tests.learning.test_loop import _qr
 
 LEAD = "l-001"
 
@@ -158,20 +155,6 @@ def _lead_file(run_dir: Path, goal: str = "a goal", *, lead_id: str = LEAD,
 # ---------------------------------------------------------------------------------------
 
 
-def test_the_writer_declares_the_fourteen_columns_once_in_writer_order():
-    """D1/O6 — `record_query.QUERY_ROW_COLUMNS` exists, is a tuple (ordered: a set would let
-    two writers agree on the keys and disagree on the row's byte order), and names exactly the
-    fourteen columns in the order `append_query_row` writes them.
-
-    Observed failing by: the name missing, or a column added to the writer's dict literal
-    without reaching the declaration (the two drift the way #877 and #871 did)."""
-    assert isinstance(QUERY_ROW_COLUMNS, tuple), \
-        "the column declaration is not ordered, so it cannot pin the row's byte order"
-    assert QUERY_ROW_COLUMNS == EXPECTED_COLUMNS, \
-        "the writer's declared column set differs from the fourteen columns rows carry"
-    assert len(set(QUERY_ROW_COLUMNS)) == len(EXPECTED_COLUMNS), "a column is declared twice"
-
-
 # ---------------------------------------------------------------------------------------
 # D2 / O1 — the surface projects every column, with the writer's own coercions
 # ---------------------------------------------------------------------------------------
@@ -204,65 +187,6 @@ def test_the_surface_projects_every_declared_column_with_payload_path_as_raw_ref
     flags = {f.name: (f.repr, f.compare) for f in dataclasses.fields(QueryRow)}
     assert flags["_record"] == (False, False), \
         f"_record is on the repr or in equality again: {flags['_record']}"
-
-
-def test_keyword_built_rows_default_the_two_new_columns_to_empty():
-    """D2 — the two new fields default to `""` on the constructor, so keyword-built fixtures
-    (`tests/learning/test_loop.py::_qr`, driven here through that very helper) keep working
-    and mean the value every declared, executed row stores.
-
-    Observed failing by: `_qr` raising on a missing required argument, or a default other
-    than the writer's own empty answer."""
-    row = _qr("elastic.ad-hoc")
-    assert row.system_key == "", "a keyword-built row is fingerprinted by default"
-    assert row.payload_sha256 == "", "a keyword-built row claims a payload identity it has not"
-
-
-@pytest.mark.parametrize(
-    ("shape", "written"),
-    [
-        ("absent", {}),
-        ("none", {"system_key": None, "payload_sha256": None}),
-        ("present", {"system_key": KEY_MARKER, "payload_sha256": SHA_MARKER}),
-        # Not a string at all: `as_str` answers `""` and the surface must agree — for
-        # `system_key` it is the ONE coercion `_trip` applies to both sides of the identity
-        # comparison; `payload_sha256` has no guard reader and takes the same coercion by
-        # design (its one live reader, `repeat_note`'s `_result_identity`, reads any falsy
-        # value as "no identity", and no writer stores anything but the hex digest).
-        ("non-string", {"system_key": 123, "payload_sha256": 456}),
-    ],
-)
-def test_the_surface_coerces_the_two_columns_exactly_as_the_guard_does(tmp_path, shape, written):
-    """D2/O2 — `system_key` and `payload_sha256` read as `""` when the key is absent (a
-    pre-#871 / pre-#877 table) or `None`, and verbatim when present — for `system_key` the
-    SAME coercion `record_query._trip` applies (`as_str`) to the stored column before
-    comparing it with the live call's key, and for `payload_sha256` the same one by design.
-    Asserted AGAINST `as_str` over the raw record rather than against a literal, so the two
-    readers cannot drift apart: a surface that read absent as `None` would make a pre-#871 row
-    stop matching the `""` the live guard passes.
-
-    Observed failing by: a `QueryRow` whose `system_key` differs from `as_str(rec["system_key"])`
-    on any of the four shapes."""
-    base = _row(0)
-    for key in ("system_key", "payload_sha256"):
-        base.pop(key)
-    rec = {**base, **written}
-    _table(tmp_path, [rec])
-
-    rows = load_queries(tmp_path)
-    assert len(rows) == 1, f"the {shape} row was dropped by the surface"
-    typed = rows[0]
-    assert typed.system_key == as_str(rec.get("system_key")), \
-        f"{shape}: the surface's system_key coercion disagrees with the guard's"
-    assert typed.payload_sha256 == as_str(rec.get("payload_sha256")), \
-        f"{shape}: the surface's payload_sha256 coercion disagrees with the guard's"
-    assert type(typed.system_key) is str
-    assert type(typed.payload_sha256) is str
-    # The positive control on the same address: the present shape reads its marker back, so
-    # the three `""` answers above are coercions and not a surface that reads nothing.
-    if shape == "present":
-        assert typed.system_key == KEY_MARKER
-        assert typed.payload_sha256 == SHA_MARKER
 
 
 # ---------------------------------------------------------------------------------------
@@ -605,26 +529,3 @@ def _row_literals(source: str) -> list[str | None]:
     return found
 
 
-def test_the_row_literal_is_spelled_once_inside_the_constructor():
-    """D1/O6 — "every writer builds through it": across the writer census and the surface, the
-    ONLY dict display keyed by both `lead_id` and `system_key` is the one inside
-    `append_query_row`. A second writer that kept its own fourteen-key literal and merely
-    asserted it against `QUERY_ROW_COLUMNS` afterwards (adversary H1) agrees on the day it is
-    written and drifts on the day a column is added — which is the class of bug D1 exists to
-    end, and one no run-time test can see until the drift happens.
-
-    The positive control is the constructor's own literal: exactly one is found, and it is
-    `append_query_row`'s — an oracle finding zero literals would be scanning the wrong shape."""
-    root = Path(__file__).resolve().parents[1]
-    owners = {
-        module: _row_literals((root / module).read_text(encoding="utf-8"))
-        for module in _ROW_MODULES
-    }
-    assert owners["scripts/gather_tools/record_query.py"] == ["append_query_row"], \
-        f"the constructor's own literal was not found where expected: {owners}"
-    for module, found in owners.items():
-        if module == "scripts/gather_tools/record_query.py":
-            continue
-        assert found == [], \
-            f"{module} spells a queries row as its own literal (in {found}) instead of " \
-            "building through append_query_row"

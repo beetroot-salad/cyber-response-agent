@@ -23,24 +23,12 @@ RESULT_90D = "4100 occurrences over 90d; actor uid-0 and host build-runner-07.pr
 
 
 def _utc(text: str) -> dt.datetime:
-    """The moment an ISO-8601 `Z` timestamp names, as an aware UTC `datetime`.
-
-    Spelled here rather than imported from the code under test: an oracle that called the
-    parser it is checking could not disagree with it (`lint-oracle`), and the whole point of
-    asserting on `window_start` is that the receipt did a real parse."""
+    """The moment an ISO-8601 `Z` timestamp names, as an aware UTC `datetime`."""
     return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
 def _receipts(text: str):
-    """The baseline receipts a companion carries.
-
-    Imported inside the call rather than at module scope so the two tests that ask nothing of
-    this function — the docstring invariant and the `_CloseFields` shape — report their own
-    failure instead of being masked by one module-level ImportError.
-
-    The reader takes a PARSED companion (the close holds one by the time it reaches this, and a
-    second parse out here was also an unguarded one on the close paths that reach it without
-    pricing anything). These suites hold text, so the parse is here."""
+    """The baseline receipts a companion carries."""
     from defender.skills.invlang.parser import parse_dense_companion
     from defender.skills.invlang.validate._gating import conclude_runtime_evidence_rows
 
@@ -61,19 +49,7 @@ def _body(report: str) -> str:
 
 
 def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
-    """A receipt is a TYPED record of one `:R consultations` row — the owning lead, the anchor
-    id, the free-text result and reasoning, and the effective window BOTH verbatim and PARSED
-    into two `datetime`s.
-
-    Mirrors `CeilingReceipt` (`validate/_gating`) down to the split it makes: a structured half
-    that is mechanically checkable and a free-text half that is for the human analyst. The
-    parsed window is what makes the guard and the report read ONE value — mechanism A's first
-    guard has to compare the window's end against the alert's timestamp, and a second parse
-    living in the renderer is the two-derivations-of-one-quantity shape (`lint-owns`).
-
-    A FROZEN dataclass, like `CeilingReceipt`: these travel from the projection into the close
-    tool's disposition argument and out into `report.md`, and a mutable record handed across
-    three boundaries is one any of them can edit on the way."""
+    """A receipt is a TYPED record of one `:R consultations` row — the owning lead, the anchor"""
     (receipt,) = _receipts(BENIGN_DOC)
 
     assert dataclasses.is_dataclass(receipt)
@@ -107,17 +83,7 @@ def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
 
 
 def test_runtime_evidence_rows_project_off_the_consultation_bucket():
-    """`conclude_runtime_evidence_rows` selects the `:R consultations` rows whose `anchor_kind`
-    is `runtime-evidence`, in document order, and nothing else.
-
-    Selection, not a filter over everything the document says: a consultation under some other
-    anchor kind is a different question being answered, and a `:R authz` row is a verdict. Both
-    are excluded, so the projection cannot widen into "every model-authored row" by accident.
-
-    `BENIGN_DOC` is the sharp case and the reason the fixture carries two consultations: the
-    lead's `tacit-knowledge` lookup record sits in the SAME bucket, one row above the baseline,
-    and it is not a baseline. A projection selecting the bucket rather than the anchor kind
-    would carry a registry citation into `report.md`'s recurrence paragraph."""
+    """`conclude_runtime_evidence_rows` selects the `:R consultations` rows whose `anchor_kind` is `runtime-evidence`, in document order, and nothing else."""
     receipts = _receipts(BENIGN_DOC)
     assert [r.anchor_id for r in receipts] == ["tk-baseline-30d"], (
         "the lead's own `tacit-knowledge` lookup record was projected as a baseline — the "
@@ -141,12 +107,7 @@ def test_runtime_evidence_rows_project_off_the_consultation_bucket():
 
 
 def test_runtime_evidence_consultation_lands_in_report_body():
-    """A close projects every qualifying `:R consultations` row into `report.md`'s BODY — one
-    line per row, in the body and never the frontmatter (demand `consultation_reaches_report_body`,
-    fork F4).
-
-    The unit half, over `render_report` itself; the whole-close half (benign AND inconclusive,
-    both `_CloseFields` construction sites) is `e2e/test_tacit_authz_e2e_983.py`."""
+    """A close projects every qualifying `:R consultations` row into `report.md`'s BODY — one"""
     receipts = _receipts(BENIGN_DOC)
     assert len(receipts) == 1, "fixture control: the document carries one qualifying consultation"
     (receipt,) = receipts
@@ -185,23 +146,7 @@ def test_runtime_evidence_consultation_lands_in_report_body():
 
 
 def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
-    """#767 SUPERSEDES this demand's premise (`baseline_not_wired_to_ticket`, non-obligation 3)
-    — recorded here rather than left a silently-deleted test, because the reversal is
-    deliberate and total, not an accident this change happened to cause.
-
-    Before #767, `read_case_record`'s outbound reason took the frontmatter's `cause` and fell
-    back to the report's body only when no `cause` was present; every close-gate report carried
-    one, so baseline-consultation text (which lives in the body) never reached the ticket
-    bridge. #767 D3 deletes that fallback: `CaseRecord` now always carries BOTH `cause` and
-    `narrative` (the report's own body, unconditionally), and `case_record_to_comment` renders
-    the narrative into the recorded comment's `body` on every case — that is O4's whole point,
-    "the report body (the model's notes)" is what a person needs to approve. So whatever the
-    model cited while investigating, baseline consultations included, now legitimately crosses
-    to the outbound comment. A LATER run that reads it back is served it (#1221 removed D4's
-    approval screen); what keeps it from passing as a person's finding is the agent tag line
-    every posted comment opens with and rule #27's refusal of a benign close resting on past
-    cases alone (`test_1221_agent_tag.py`, `test_1221_past_case_rule.py`), never an absence of
-    the content on the wire."""
+    """#767 SUPERSEDES this demand's premise (`baseline_not_wired_to_ticket`, non-obligation 3)"""
     from defender.runtime import case_ticket
 
     receipts = _receipts(BENIGN_DOC)
@@ -234,15 +179,7 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
 
 
 def test_the_projection_and_the_render_read_one_set():
-    """Whatever `conclude_runtime_evidence_rows` hands back is what `render_report` writes —
-    the "ONE renderer for both" discipline `ceiling_test_block` already states.
-
-    Two rows that DIFFER in every rendered cell — id, window, count — so three failures are
-    visible that one row or two identical rows would hide: a render that collapses or
-    deduplicates them, a render that emits the first row's values twice, and a projection
-    handing back a canned receipt per row rather than each row's own parse. A reader that
-    re-derived "qualifying" independently could disagree with the projection that already ran
-    and carry a row into `report.md` nothing ever selected."""
+    """Whatever `conclude_runtime_evidence_rows` hands back is what `render_report` writes —"""
     doc = scene.document(
         rows=scene.consult_block(
             scene.consultation_row(),
@@ -281,13 +218,7 @@ def test_the_projection_and_the_render_read_one_set():
 
 
 def test_close_fields_carries_the_baseline_on_every_disposition():
-    """`_CloseFields` carries the baseline as a companion-derived field alongside `ceiling_test`,
-    and it defaults empty.
-
-    The structural half of fork F4: `ceiling_test` is populated at ONE of the two construction
-    sites and only for `inconclusive`, which is why the cited carrier never reaches a benign
-    close. This asserts the field exists and is defaulted; the e2e asserts both sites actually
-    populate it."""
+    """`_CloseFields` carries the baseline as a companion-derived field alongside `ceiling_test`, and it defaults empty."""
     fields = {f.name: f for f in dataclasses.fields(close_tool._CloseFields)}
     assert "runtime_evidence" in fields, (
         "`_CloseFields` has no baseline field — the projection has no way onto either close path"

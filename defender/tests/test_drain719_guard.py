@@ -1,37 +1,4 @@
-"""Issue #719, part 2/5 — the ENUMERATED retire set (decision 8) and what reaches it.
-
-Executable spec, pre-implementation. Rewritten at §7 round 2: decision 8 reversed judge
-recommendation A12 ("the ceiling is total"). There is no bare `except Exception` and no
-re-raise carve-out. Retirement is reachable only from an enumerated set — `AuthorError`,
-`GitError`, `ModelRetry` — and any class outside it stays uncaught, leaving the row queued:
-stuck but recoverable and loud, as today.
-
-**Why, because it is the property these tests exist to protect.** A widened guard plus a total
-ceiling plus terminal retirement into a graveyard nothing reads composed into a path where any
-unnamed exception class permanently deleted a batch of real work every three ticks, with the
-only durable record in a file that has no production reader. The accepted trade is that a novel
-class returns to unbounded retry instead of silent permanent loss.
-
-**The trap inverted, and this module is where it is caught.** Under decision 6 the hazard was
-re-raising `GitError` by reaching for `faults.SYSTEMIC_FAULTS`. Under an allow-list the hazard
-is the mirror image and likelier: an implementer writes the obvious `except AuthorError`,
-silently drops `GitError` and `ModelRetry`, and reverts decision 1 paths 3 and 4 — with a suite
-that only checks *something* retires still green. So membership is asserted PER MEMBER, each
-driven through the real primitive: a real `GitError` out of `commit_corpus` with git's own index
-lock held, and the `ModelRetry` class PJ1c observed. The `AuthorError` case is invisible here —
-it passes under every wrong spelling.
-
-Decision 5 survives as stated (all four channels) but is now a property of the retire SET.
-Decision 6's extent half survives and is CONFIRMATORY rather than load-bearing: A11, B5 and D5
-are carried by non-membership now, not by where a line sits.
-
-**Scope of the set, because a reader meeting only this file would over-read it.** It governs the
-four AUTHOR channels. The pitfalls and lead-author legs keep `run_or_dead_letter`'s own re-raise
-set, which this change does not touch and which contains `GitError` — so a commit-time `GitError`
-retires here and kills the drain there. One class, two classifications, by channel: deliberate,
-carried as the waiver `retirement_classification_differs_across_the_pitfalls_boundary`, and both
-halves asserted rather than merely permitted.
-"""
+"""Drain retire set: only the enumerated failure classes bump attempts and retire; systemic faults propagate; stuck rows surface an operator signal."""
 from __future__ import annotations
 
 import subprocess
@@ -108,8 +75,6 @@ def _git_log(repo: Path) -> str:
 
 
 # Decision 8 — the trigger is an enumerated set, and A12 is reversed
-
-
 
 
 def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouched(
@@ -219,8 +184,6 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
     )
 
 
-
-
 def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(tmp_path: Path):
     """Decision 5 survives decision 8 unchanged in scope and changed in mechanism: the set is
     the same on all four drained channels, so a channel naming fewer classes fails here.
@@ -260,15 +223,7 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
     assert set(non_member_seen.values()) == {True}, non_member_seen
 
 
-
-
-
-
 # Decision 1's four paths — each is a named member, which is why each still retires
-
-
-
-
 
 
 def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp_path: Path):

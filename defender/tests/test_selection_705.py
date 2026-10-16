@@ -31,14 +31,7 @@ from defender.tests._session_store_705 import (
 # demand #0 — one entry point, three roles, one truncation rule
 
 def test_store_reader_return_shape_is_role_scoped(tmp_path):
-    """One reader entry point takes a role from the closed set {send, analysis, actor}:
-    `send` and `analysis` return a `list[ModelMessage]`, `actor` returns a payload-free
-    `(coord, agent_id, kind, tool_name)` row projection — from the same call with a
-    different role argument, over the same session_id.
-
-    Truncation belongs to `send` alone (R8), so over a mid-pair session the three shapes
-    differ in EXTENT as well as in type: a reader that ignored its role argument entirely
-    would be caught by the length, not by the shape."""
+    """One reader entry point takes a role from the closed set {send, analysis, actor}:"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, n_complete = mid_pair_session(store)
@@ -60,13 +53,7 @@ def test_store_reader_return_shape_is_role_scoped(tmp_path):
 
 
 def test_reader_serves_three_roles_against_the_same_session_id_back_to_back(tmp_path):
-    """`send`, `analysis` and `actor` reads of one session_id against one open handle, in
-    immediate succession, each return their own role's shape and extent with no state
-    carried between calls; over a mid-pair session `len(analysis) > len(send)`, and the
-    actor result is payload-free at both extents.
-
-    Under R5-as-worded the back-to-back calls differed only in shape; under R8 they also
-    differ in LENGTH, which is the stronger discriminator (P7)."""
+    """`send`, `analysis` and `actor` reads of one session_id against one open handle, in"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, _ = mid_pair_session(store)
@@ -87,18 +74,7 @@ def test_reader_serves_three_roles_against_the_same_session_id_back_to_back(tmp_
 
 
 def test_reader_role_vocabulary_is_closed_and_unknown_roles_are_refused(tmp_path):
-    """Exactly `send`, `analysis` and `actor` are accepted; every other value — an unknown
-    string, `None`, a missing argument, an empty string — is refused with an error rather
-    than defaulted to either the restrictive or the permissive projection.
-
-    The positive control enumerates all THREE accepted values and asserts each returns its
-    own shape: without it, "refuses everything" passes. R8 widened the closed set from two
-    names to three, and a reader that refused `send` would break the renderer — the one
-    caller whose output reaches a provider (P8/FK14/R17). The role tuple is asserted as an
-    exact equality because the role-only formulation is RATIFIED (F6, this file's module
-    docstring): the equivalent-`truncate`-flag variant R8 also offered is out of the
-    contract, so an implementation carrying a flag instead of these three names is
-    non-conforming rather than an accepted alternative."""
+    """Exactly `send`, `analysis` and `actor` are accepted; every other value — an unknown"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, _ = mid_pair_session(store)
@@ -117,13 +93,7 @@ def test_reader_role_vocabulary_is_closed_and_unknown_roles_are_refused(tmp_path
 
 
 def test_a_role_argument_supplied_by_agent_authored_content_is_not_honoured(tmp_path):
-    """A `role` value derived from agent- or tool-authored content does not select a
-    projection: the role comes from the caller's construction site, never from content.
-
-    The leak-relevant role is `analysis` (the payload-carrying one), so the discriminating
-    fixture is a tool result whose text IS the string "analysis" reaching the reader as a
-    role. Positive control: the same reader, called with `analysis` from the construction
-    site, does return the payloads (FK14/R17)."""
+    """A `role` value derived from agent- or tool-authored content does not select a"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, _ = mid_pair_session(store)
@@ -144,14 +114,7 @@ def test_a_role_argument_supplied_by_agent_authored_content_is_not_honoured(tmp_
 
 
 def _reachable_by_row_id(module, store, row_id: int) -> list[str]:
-    """Everything the reader hands back when it is DRIVEN with a raw row id.
-
-    The observation channel for the negative below. It calls every public callable the
-    module exposes with the row id in each argument position a by-row-id door could
-    plausibly take, and flattens whatever comes back into strings. A door under any name
-    — `peek`, `fetch_one`, `get_message` — is caught by what it RETURNS, which a scan of
-    `dir()` for the substrings `by_id`/`row_id` is not.
-    """
+    """Everything the reader hands back when it is DRIVEN with a raw row id."""
     out: list[str] = []
     for name in dir(module):
         if name.startswith("_"):
@@ -173,17 +136,7 @@ def _reachable_by_row_id(module, store, row_id: int) -> list[str]:
 @pytest.mark.parametrize("terminator", ["BudgetKill", "UsageLimitExceeded", "RunAborted"])
 def test_sendable_history_stops_at_the_last_complete_pair_on_every_terminator(
         tmp_path, terminator):
-    """The history the reader returns FOR ROLE=`send` ends on the last complete
-    (response, tool-returns) pair after a `BudgetKill`, a `UsageLimitExceeded` and a
-    `RunAborted` alike — one rule, in the reader, once, reached only through the `send`
-    role.
-
-    Its negative control is
-    `test_an_analysis_read_is_not_stopped_at_the_last_complete_pair`: without it an
-    implementation that truncates EVERY read — the shape §7 rejected — passes this
-    assertion exactly as the resolved shape does. R11 replaces `ForkStop` with
-    `RunAborted` in the observable terminator set; `ForkStop` stays design-provenance
-    owned by #696 (G12: zero hits repo-wide)."""
+    """The history the reader returns FOR ROLE=`send` ends on the last complete"""
     ss = store_mod()
     store = make_store(tmp_path, case_id=f"case-{terminator.lower()}")
     session_id, n_complete = mid_pair_session(store)
@@ -204,14 +157,7 @@ def _answered(messages, call: ToolCallPart) -> bool:
 
 
 def test_an_analysis_read_is_not_stopped_at_the_last_complete_pair(tmp_path):
-    """THE NEGATIVE CONTROL for the truncation demand: the same mid-pair session read at
-    role=`analysis` returns the FULL root-to-tip path including the orphan terminal
-    response, and is strictly longer than the same session read at role=`send`.
-
-    R8 amends R5: truncation is a property of the `send` role only. Under the rejected
-    reading an analysis read could not observe the orphan terminal response M3's run-end
-    flush exists to capture, so an analysis-role reader would silently drop the last
-    response of every truncated run — a live equivalence break (P1/P5)."""
+    """THE NEGATIVE CONTROL for the truncation demand: the same mid-pair session read at"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, n_complete = mid_pair_session(store)
@@ -232,15 +178,7 @@ def test_an_analysis_read_is_not_stopped_at_the_last_complete_pair(tmp_path):
 
 
 def test_the_actor_row_projection_over_a_session_that_ends_mid_pair(tmp_path):
-    """Over a session whose final response has no matching returns, the `actor` read
-    returns a `(coord, agent_id, kind, tool_name)` row for EVERY row on the path — the
-    orphan terminal response included — nothing is truncated, and every returned row is
-    payload-free.
-
-    This is the outright flip R8 produced: two of three phase-C answers asserted the actor
-    projection truncates, both citing R5's rejected "applies to both shapes" clause as
-    their sole ground. Truncation and payload-exclusion are two INDEPENDENT properties and
-    neither may stand in for the other, so both are asserted here (P3)."""
+    """Over a session whose final response has no matching returns, the `actor` read"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id, n_complete = mid_pair_session(store)
@@ -263,15 +201,7 @@ def test_the_actor_row_projection_over_a_session_that_ends_mid_pair(tmp_path):
 
 
 def test_actor_role_read_over_a_session_containing_only_synthesized_frontier_rows(tmp_path):
-    """An `actor` read over a session whose every row is a synthesized frontier returns a
-    NON-EMPTY row set — one row per synthesized row — each payload-free: the exclusion
-    branch is not conditioned on `synthesized`.
-
-    Non-emptiness is the load-bearing half. Under the clause R8 rejected the actor read
-    truncated to the last complete pair, and a session with no complete pair could
-    legitimately return EMPTY, making the payload-absence assertion pass vacuously — the
-    same failure `test_actor_role_read_against_a_session_with_zero_rows` was minted to
-    guard, arriving through a different door (P11)."""
+    """An `actor` read over a session whose every row is a synthesized frontier returns a"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -289,12 +219,7 @@ def test_actor_role_read_over_a_session_containing_only_synthesized_frontier_row
 
 
 def test_actor_role_read_against_a_session_with_zero_rows(tmp_path):
-    """An `actor` read of a session with no rows returns an empty projection without
-    raising — the vacuity control that makes the leak assertions above informative.
-
-    On its own this test carries no information; it exists so that "the actor sees no
-    payload" is never satisfiable by a reader that simply returns nothing, and it is
-    paired with the non-empty synthesized-only read above (consensus, O31)."""
+    """An `actor` read of a session with no rows returns an empty projection without"""
     ss = store_mod()
     store = make_store(tmp_path)
     empty = store.new_session(agent_id="main")
@@ -309,16 +234,7 @@ def test_actor_role_read_against_a_session_with_zero_rows(tmp_path):
 
 
 def test_run_end_flush_on_a_forked_sessions_own_terminal_turn(tmp_path):
-    """For a fork whose parent chain crosses into another `session_id` partway up, the
-    run-end flush writes the terminal response on the FORK's own session_id, and a
-    role=`send` read stops at the last complete pair OF THE ASSEMBLED PATH regardless of
-    which session each row of that pair belongs to.
-
-    The discriminating fixture is a fork whose fork point is a `ModelResponse` in the
-    parent and whose own first row carries the matching tool returns: that pair STRADDLES
-    the session boundary and must count as complete. An implementation computing
-    completeness within the fork's own rows would wrongly truncate it away (P4, settled by
-    derivation from R8's "one rule, in the reader, once" over a path-shaped input)."""
+    """For a fork whose parent chain crosses into another `session_id` partway up, the"""
     ss = store_mod()
     store = make_store(tmp_path)
     parent = store.new_session(agent_id="main")
@@ -345,14 +261,7 @@ def test_run_end_flush_on_a_forked_sessions_own_terminal_turn(tmp_path):
 # hydrate — the walk, and what separates it from the truncation rule
 
 def test_hydrate_returns_the_root_to_tip_path_in_order(tmp_path):
-    """The reader called with an untruncated role (`analysis`) returns the parent chain
-    from tip to root, reversed into send order, as a `list[ModelMessage]` carrying
-    EXACTLY the rows the walk visited — no row it did not visit, and no row it did visit
-    omitted.
-
-    The "no row omitted" half is only assertable under R8, and it is what separates the
-    WALK from the TRUNCATION RULE; exercised over a mid-pair session, or the distinction
-    is untested (D3)."""
+    """The reader called with an untruncated role (`analysis`) returns the parent chain"""
     ss = store_mod()
     store = make_store(tmp_path)
     fx = nine_row_fixture(store)
@@ -374,14 +283,7 @@ def test_hydrate_returns_the_root_to_tip_path_in_order(tmp_path):
 
 
 def test_the_synthesized_flag_is_surfaced_to_the_analysis_shape(tmp_path):
-    """A synthesized frontier row's provenance reaches the analysis consumer: the reader
-    returns, alongside the messages, which of them the store recorded as synthesized —
-    a frontier row is the model's own paraphrase of turns that may carry attacker-derived
-    content, and `list[ModelMessage]` has nowhere to carry the flag.
-
-    FK20/R17: decide whether the analysis shape carries provenance; if it does not, say so
-    explicitly so a downstream consumer cannot assume otherwise. This demand pins that it
-    DOES."""
+    """A synthesized frontier row's provenance reaches the analysis consumer: the reader"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -398,14 +300,7 @@ def test_the_synthesized_flag_is_surfaced_to_the_analysis_shape(tmp_path):
 # the renderer — inversion, the tail, the fold
 
 def test_ingest_tail_is_exactly_response_then_request_including_across_a_fold(tmp_path):
-    """On every turn of a store-rendered run — the fold turn included — the rows appended
-    past the previous render are exactly one `ModelResponse` followed by one
-    `ModelRequest`.
-
-    C5 measured `appended 1,2,2,2` across a fold with a store-rendering processor; dep:PO6
-    then confirmed the processor fires once per logical request node and that a real
-    `ModelRetry` builds a NEW node, so the retried pair appends as new rows rather than
-    re-ingesting the old one."""
+    """On every turn of a store-rendered run — the fold turn included — the rows appended"""
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -431,14 +326,7 @@ def test_ingest_tail_is_exactly_response_then_request_including_across_a_fold(tm
 
 
 def test_one_frontier_row_per_fold_boundary(tmp_path):
-    """A run that crosses one fold boundary several times over produces exactly ONE
-    synthesized frontier row for that boundary, looked up and reused rather than re-minted
-    per render; a SECOND boundary produces a second, distinct frontier row.
-
-    Identity is assigned by construction at creation, never by content-diffing, and the
-    lookup is a store query keyed on `(session_id, boundary)` — not an in-process cache
-    (FK10/R17). C13 measured the naive shape: `_compact_messages` minted 4 distinct
-    frontiers in one 6-request run and only 1 reached the log."""
+    """A run that crosses one fold boundary several times over produces exactly ONE"""
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -461,13 +349,7 @@ def test_one_frontier_row_per_fold_boundary(tmp_path):
 
 
 def test_a_composer_is_called_on_the_mint_only_and_its_action_runs_once_the_row_landed(tmp_path):
-    """`text` may be a `selection.Composer` (#936): a callable the mint invokes ON THE APPEND
-    PATH ONLY — after every refusal it can raise, never on a reuse round — returning the
-    row's text and an after-commit action the mint runs right after the row landed. The
-    driver composes the fold's lessons block this way and records the push in the action, so
-    "compose once per boundary" and "a row that exists has a record" hold by construction:
-    no caller re-asks the reuse predicate, and no record depends on what happens after the
-    append (a render that raised past it, say). An empty path refuses BEFORE composing."""
+    """`text` may be a `selection.Composer` (#936): a callable the mint invokes ON THE APPEND"""
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -496,13 +378,7 @@ def test_a_composer_is_called_on_the_mint_only_and_its_action_runs_once_the_row_
 
 
 def test_folds_are_restart_shaped_with_an_empty_tail(tmp_path):
-    """After a fold the rendered history is the orientation row plus the frontier and
-    nothing else — no verbatim tail of turns since the previous fold survives on the path.
-
-    This is Scope's named behaviour change to PIN rather than plumbing: `_compact_messages`
-    kept a live verbatim tail (`messages[marker+1:]`), and the store version absorbs
-    everything up to the fold point into the frontier. U1 (is the frontier a sufficient
-    carrier?) admits no hermetic probe, so this demand pins the SHAPE only."""
+    """After a fold the rendered history is the orientation row plus the frontier and"""
     sel = selection_mod()
     ss = store_mod()
     store = make_store(tmp_path)
@@ -553,14 +429,7 @@ def test_request_row_carries_run_step_duration_ms_and_wire_sha(tmp_path):
 
 
 def test_compaction_on_a_restored_history_survives_against_selection(tmp_path):
-    """Compaction over a restored history still folds correctly when the fold boundary is
-    a store query rather than a sentinel scan through message text — including over a
-    history whose message CONTENT contains the old sentinel string, which the scan it
-    replaces would have mistaken for a boundary.
-
-    `_frontier_index` has ZERO test coverage at this base (F14), so its behaviour is
-    unpinned at the moment it is replaced; this is the issue's own "keep the test" hedge
-    made executable against the replacement."""
+    """Compaction over a restored history still folds correctly when the fold boundary is"""
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -586,13 +455,7 @@ def test_compaction_on_a_restored_history_survives_against_selection(tmp_path):
 
 
 def test_the_human_coordinate_carries_a_session_component(tmp_path):
-    """A projected coordinate names the session as well as the agent and the ordinal —
-    `{session_id}/{agent_id}#{seq}` — so a source `main#0` and a fork `main#0` no longer
-    print identically.
-
-    C26 read the shipped form (`f"{agent_id}#{seq}"`) off `observe.py:65`; R14 re-mints the
-    coordinate and records the value change as an ACCEPTED, TESTED difference rather than
-    a silent one. This is the one exception in the whole four-reader equivalence set."""
+    """A projected coordinate names the session as well as the agent and the ordinal —"""
     ss = store_mod()
     store = make_store(tmp_path)
     main = store.new_session(agent_id="main")

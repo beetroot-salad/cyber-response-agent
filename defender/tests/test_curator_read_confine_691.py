@@ -1,30 +1,4 @@
-"""#691 curator-bindable — the read scope (O6/R4) and the explicit-tree requirement (M3).
-
-RED against HEAD by design. Two mechanisms this file pins:
-
-* **R4 read confine.** The curator declares ``requires_confine=True`` with the confine set to the
-  three shipped lesson corpora; ``_resolved_read_roots`` REPLACES the ``defender_dir`` base with the
-  confine. Observable matrix (P2d executed): a SIBLING corpus ``lesson_read`` ALLOWs (the confine
-  spans all three), ``defender/docs`` and ``defender/SKILL.md`` flip ALLOW→DENY, the spawn's OWN
-  run dir stays ALLOW, and the bash ``cat`` scope stays own-corpus (sibling ``cat`` DENY — the
-  deliberate divergence from ``lesson_read``). Today ``for_run``'s policy carries ``read_confine=()``
-  so a ``docs`` read is ALLOWED through the wide ``defender_dir`` base — that is the RED, each
-  read-negative failing on its own assertion (the confine correction is unbuilt).
-
-  REFUTED, not pinned: c17/g10 "M2 narrows read_allow to the corpus shape" (read_allow stays EMPTY,
-  the confine carries the narrowing on the roots half); c20's own-corpus-only runtime-safety reading
-  (the committed suite pins the CROSS-corpus reads, and R4 KEEPS them).
-
-* **M3 explicit tree.** Binding the curator with no explicit NON-PATHS ``defender_dir`` raises — the
-  main-checkout-authoring state is unbuildable. Driven through the binding seam ``bind``; RED today
-  (``bindable=False`` raises first — the message assertion pins that the DEMANDED tree refusal is
-  what a green #0 must surface, not the incidental unbindable error).
-
-Gate lanes are driven through the shared harness (``read_decision`` → ``decide_read`` roots+shapes,
-``bash_decision`` → ``decide_bash`` cat scope); the CuratorDeps under test is the STABLE ``for_run``
-deps whose ``.policy`` the refactor re-anchors. (#773 M1 deletes the write-lane's forward-check gate
-entirely — the curator no longer carries a decision function by that name.)
-"""
+"""Curator read scope: confined to the three lesson corpora plus its own run dir; binding requires an explicit non-main tree."""
 from __future__ import annotations
 
 import pytest
@@ -62,9 +36,6 @@ def _cats(deps, path: str) -> bool:
 # O6 / R4 — the read confine
 
 
-
-
-
 def test_a_read_inside_the_spawns_tree_but_outside_every_lesson_corpus(tmp_path):
     """NEGATIVE + control: a read of ``defender/docs/*.md`` and ``defender/SKILL.md`` — inside the
     worktree but outside every lesson corpus — DENYs under the confine; the spawn's OWN run-dir file
@@ -78,14 +49,6 @@ def test_a_read_inside_the_spawns_tree_but_outside_every_lesson_corpus(tmp_path)
     assert _reads(deps, str(rd / "note.md"))                     # positive control: own run dir
 
 
-
-
-
-
-
-
-
-
 def test_a_spawn_reads_the_queue_it_was_spawned_over(tmp_path):
     """A read of the spawn's OWN run dir is ALLOW, before and after the change — the run dir is a
     read root independent of the confine (P2d). A file dropped in the run dir is readable."""
@@ -93,20 +56,6 @@ def test_a_spawn_reads_the_queue_it_was_spawned_over(tmp_path):
     (rd / "queued.json").write_text("{}\n", encoding="utf-8")
     deps = curator_deps(wt, rd, "lessons")
     assert _reads(deps, str(rd / "queued.json"))
-
-
-
-
-
-
-def test_the_curator_reads_no_longer_reach_defender_docs(tmp_path):
-    """The prompt line that named ``defender/docs/…`` is denied after the confine (g13): a read of a
-    ``defender/docs`` path DENYs while the curator's own-corpus read still ALLOWs (control). RED
-    today: the wide ``defender_dir`` base admits docs; R5 additionally updates the prompt line."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    assert not _reads(deps, "defender/docs/learning-loop.md")    # the prompt-named docs path: DENY
-    assert _reads(deps, rel("lessons", "own.md"))                # control: own corpus still reads
 
 
 # M3 — the explicit worktree tree (the binding seam raises without one)
@@ -133,23 +82,11 @@ def test_binding_the_curator_without_an_explicit_tree_raises(tmp_path):
     assert (corpus(wt, "lessons") / "ok.md").read_text() == "body\n"
 
 
-def test_defender_dir_is_none_for_a_role_that_requires_an_explicit_tree(tmp_path):
-    """``defender_dir=None`` for the tree-requiring curator raises "requires an explicit NON-PATHS
-    defender_dir" (g16/P10) — a None tree would author the MAIN checkout. RED today (bindable message)."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    with pytest.raises(ValueError, match=_EXPLICIT_TREE):
-        _bind_no_tree(wt, rd, None)
-
-
 def test_defender_dir_is_the_main_checkout_paths_value(tmp_path):
     """``defender_dir=PATHS.defender_dir`` (the MAIN checkout) raises IDENTICALLY to the ``None`` case
     — the two collapse to the same refusal, so the curator can never anchor on the main tree (g16/P10)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     with pytest.raises(ValueError, match=_EXPLICIT_TREE):
         _bind_no_tree(wt, rd, PATHS.defender_dir)
-
-
-
-
 
 

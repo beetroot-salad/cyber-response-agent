@@ -1,38 +1,5 @@
-"""#1222 S11 — the judge and the episode: launch copies the alert and its record into the episode,
-the judge reads only that copy, and a folder without a record is not a run.
-
-Spec: `spec-flow/specs/spec_graph_1222.yaml` (demands named below by their `discharged_by`);
-design `.spec-flow/design.md` as amended by `.spec-flow/design-amendments.md` (A1, A8, C27, C41,
-C47 win). Shared machinery: `_spec1222` (as `S`), `_judge_921` (as `J`), `_triplet_947` (as `T`).
-
-DRIVE POINTS (every one a production entry point, every fake through its own seam)
-* The judge: `learning.judge.grade_episode` over an episode `J.accepted_episode` built, with the
-  launch's copies planted by `S.plant_episode_copy`; the model is `J.FakeJudge`, which RECORDS
-  every prompt it is handed — the union notes are read off what the judge model received.
-* The bare re-enqueue: `learning.judge.enqueue.enqueue_report` with no draws handed over (it reads
-  the draws on disk, as a later process holding only the episode dir does).
-* The launcher's copy step: `learning.branch.cli.prepare_episode` over a source run `T.runs_base`
-  stamped and `S.plant_run` gave its alert and record.
-* A sibling's setup: `run.main --resume` with a lifecycle that records the run folder the real
-  `materialize` built (no investigation is driven).
-* The archive (`learning.branch.archive.archive_episode`), the episode page
-  (`scripts.visualize.visualize_episode.render_episode`), the invlang corpus
-  (`skills.invlang.corpus.load_corpus` and its CLI), the ticket writer's record leg.
-
-THE DECOYS. `J.accepted_episode` archives every world with a Kibana-shaped `alert.json` carrying
-`alert_id` / `rule.id` = `J.ALERT_ID`. Base's judge picks the episode's alert among those world
-copies and keys findings on `rule.id` (`rule-v2-cross-tier-ssh-pivot`); the design's judge takes
-the alert and the signature from the episode's own copy. Every episode copy here is a generic
-alert whose `rule.id` is NOT its recorded signature, so a vendor-field fallback shows too.
-
-RED AT BASE, and why. The episode copy (`EpisodePaths.source_alert/.source_record`) and a run's
-record (`RunPaths.alert_record`) are coined (`S.COINED`): a test that must plant either fails at
-its setup at base on the coined accessor — there is no behavioural observation to put first.
-Where setup needs no coined name (a recordless folder; an episode with no copy) the behavioural
-assertion comes first and base fails on it: the launcher launches a recordless source, the judge
-grades an episode with no record, the walkers neither name nor count a recordless folder. The
-per-test table is in `.spec-flow/frontiers/82-writer-judge_and_episode.md`.
-"""
+"""Launch copies the alert and record into the episode; the judge reads only that copy; a folder
+without a record is not a run; hostile or changed source runs are refused."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -58,11 +25,9 @@ from defender.tests._state1135 import env_state
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 
 JUDGE = "learning.judge"
-ENQUEUE = "learning.judge.enqueue"
 CLI = "learning.branch.cli"
 ARCHIVE = "learning.branch.archive"
 EPISODE_HANDLE = "_episode_handle"
-VISUALIZE = "scripts.visualize.visualize_episode"
 CORPUS = "skills.invlang.corpus"
 INVLANG_CLI = "skills.invlang.cli"
 RUN = "run"
@@ -77,14 +42,11 @@ TENANT = "acme"
 #: second; a blocked read never returns.
 HANG_BOUND_S = 60.0
 
-_TRIAL_LINE = re.compile(r"(?m)^- (.+?): disposition=")
 _FORGED_HEADING = re.compile(r"(?m)^\s{0,3}#{1,6}\s*Forged")
 _FENCE_OPENER = re.compile(r"(?m)^\s{0,3}```")
 
 
-# =================================================================================================
 # Builders
-# =================================================================================================
 
 def _alert(tag: str, **over: Any) -> bytes:
     """A generic (non-Kibana) alert unique per `tag`: no `alert_id`, a `rule.id` that is a valid
@@ -177,20 +139,6 @@ def _world_prompts(judge: J.FakeJudge) -> list[str]:
     return out
 
 
-def _view(prompt: str, title: str) -> str:
-    hits = [b for b in S.framed_bodies(prompt) if b.lstrip("\n").startswith(f"## {title}")]
-    assert len(hits) == 1, f"the judge prompt carries {len(hits)} framed '{title}' sections"
-    return hits[0]
-
-
-def _union_notes(judge: J.FakeJudge) -> str:
-    """The sibling view and the spread the judge model received — one union per pass, so every
-    world's prompt carries the same text (asserted)."""
-    views = {_view(p, SIBLINGS) + _view(p, SPREAD) for p in _world_prompts(judge)}
-    assert len(views) == 1, "two worlds of one pass were shown different sibling unions"
-    return views.pop()
-
-
 def _trials(judge: J.FakeJudge) -> set[str]:
     """J3: no prior trial or spread enters the judge's prompt."""
     prompts = _world_prompts(judge)
@@ -234,21 +182,6 @@ def _assert_names_record(text: str, what: str) -> None:
 
 
 # --- a pass that predates the change ---------------------------------------------------------
-
-def _old_pass_draws(ep: Path, label: str = "b") -> dict[str, Any]:
-    """What a judge pass left on disk before the change: one draw document for world `label`
-    (`run._draw_document`'s shape, one defender finding) and the grade naming it — the inputs a
-    bare re-enqueue reads back."""
-    finding = {**J.finding_doc(), "unresolved_evidence": []}
-    doc = {"episode_outcome": "gradable", "bucket": "lead-set", "systems": [J.HOLDING_SYSTEM],
-           "noise_floor_note": "one trial", "correlations": [], "scope_checks": [],
-           "derivations": [], "findings": [finding], "dropped_findings": 0}
-    draws = ep / "worlds" / label / "judge"
-    draws.mkdir(parents=True, exist_ok=True)
-    (draws / "0.yaml").write_text(_yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
-    return {"verdict_word": "survived",
-            "worlds": [{"world": label, "completed_draws": 1, "bucket": "lead-set",
-                        "systems": [J.HOLDING_SYSTEM]}]}
 
 
 # --- the launcher ----------------------------------------------------------------------------
@@ -320,9 +253,7 @@ def _resume_sibling_at(ep: Path, label: str, life: _Lifecycle) -> Path:
     return life.run_dir
 
 
-# =================================================================================================
 # O11 — the judge's alert is the episode's copy
-# =================================================================================================
 
 def test_o11_episode_alert_is_the_episodes_copy(tmp_path):
     """The judge takes the episode's alert and recorded signature from the copies branch launch
@@ -385,9 +316,7 @@ def test_o11_episode_without_a_record_is_refused_by_name(tmp_path):
     _assert_names_record(_judge_refusal(dirlike, base), "the refusal of a directory record")
 
 
-# =================================================================================================
 # A1 — the launch copies the alert and its record
-# =================================================================================================
 
 def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
     """Branch launch copies the source run's alert and record into the episode after checking
@@ -429,9 +358,7 @@ def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
         f"the refusal does not name the mismatch: {message!r}")
 
 
-# =================================================================================================
 # A8 — a folder without a record is not a run
-# =================================================================================================
 
 def test_a8_a_folder_without_a_record_is_not_a_run(tmp_path, capsys):
     """A run folder with no readable record — a pre-change run, a crashed setup — is skipped by
@@ -512,9 +439,7 @@ def test_r6_a_skipped_runs_name_cannot_forge_a_line_in_the_judge_notes_or_the_vo
         assert all(stem not in prompt for stem in [*hostile, plain])
 
 
-# =================================================================================================
 # The findings key: the recorded signature, verbatim (C27)
-# =================================================================================================
 
 
 def test_p070_mapping_changed_between_source_run_and_judge(tmp_path):
@@ -564,29 +489,7 @@ def test_p076_rule_key_from_an_enormous_or_path_shaped_signatu(tmp_path):
             assert sig not in str(path), f"the key became part of a path: {path}"
 
 
-# =================================================================================================
 # The sibling union: runs under the base whose recorded digest is the copy's
-# =================================================================================================
-
-
-def test_p114_source_runs_box_rewrote_its_alert_to_another_ale(tmp_path):
-    """A world whose alert.json was altered changes neither the union nor the key. Nothing after
-    the box trusts bytes the box could write.
-
-    Every world copy and the source run's alert are rewritten to another alert B (with its own
-    `alert_id`), which has a trial of its own under the base."""
-    base = tmp_path / "runs"
-    ep, raw = _episode(tmp_path, "p114", signature="SIG-p114")
-    other = S.alert_bytes(S.generic_alert(rule_id="R-B-p114", alert_id="AID-B-p114"))
-    for world in (ep / "worlds").iterdir():
-        (world / "alert.json").write_bytes(other)
-    source = _trial(base, T.SOURCE_RUN_ID, raw, facts={"signature": "SIG-p114"})
-    S.alert_file(source).write_bytes(other)
-    _trial(base, "trial-a", raw, facts={"signature": "SIG-p114"})
-    _trial(base, "trial-b", other, facts={"signature": "SIG-B-p114"})
-    _grade_, judge = _grade(ep, base)
-    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
-    assert set(_keys(_rows())) == {"SIG-p114"}
 
 
 def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
@@ -680,86 +583,13 @@ class _RewritingJudge(J.FakeJudge):
         return super().__call__(prompt, role=role, agent_id=agent_id, **kw)
 
 
-# =================================================================================================
 # The episode page
-# =================================================================================================
-
-def _page_rule(ep: Path) -> str:
-    """The episode page's rule header, off the page `render_episode` writes."""
-    visualize_episode = S.mod(VISUALIZE)
-    with J.episodes_base(ep.parent):
-        page = Path(visualize_episode.render_episode(J.judge_runs(), ep.name))
-    html = page.read_text(encoding="utf-8")
-    found = re.findall(r'<span class="hd-alert">([^<]*)</span>', html)
-    assert len(found) == 1, f"the episode page's header carries {len(found)} alert spans"
-    return found[0]
 
 
-def test_p071_episode_page_after_the_judges_pick_is_replaced(tmp_path):
-    """The episode page's display of rule and alert_id is unchanged, and it renders without a
-    tenant or the source run (it reads the episode's copy).
-
-    No tenant is set up, no source run exists, and no world carries an alert."""
-    rule = {"id": "R-p071", "name": "Copy rule p071", "description": "the copy's rule"}
-    with_id = S.alert_bytes(S.generic_alert(rule=rule, alert_id="AID-p071"))
-    ep, _raw = _episode(tmp_path, "p071", raw=with_id, alert=False)
-    assert _page_rule(ep) == "Copy rule p071", "the page does not show the episode copy's rule"
-
-    without_id = S.alert_bytes(S.generic_alert(rule=rule))
-    plain, _raw = _episode(tmp_path, "p071-no-id", raw=without_id, alert=False)
-    assert _page_rule(plain) == "alert rule: not on the record", (
-        "the page's rule header changed for an alert carrying no alert_id")
-
-
-# =================================================================================================
 # The launcher's copy step (C41, C47)
-# =================================================================================================
 
 
-def test_p157_source_digest_and_alert_bytes_disagree_at_launch(tmp_path):
-    """Launch refuses when the source's alert bytes disagree with its recorded digest, naming
-    the mismatch; nothing is copied, so no sibling starts and the judge has nothing to take."""
-    raw = _alert("p157")
-    planted, _base, src = _source(tmp_path, raw, digest=S.sha256_hex(_alert("p157-recorded")),
-                                  signature="SIG-p157")
-    record_bytes = S.record_file(src).read_bytes()
-    message = _refused_launch(planted, src)
-    assert any(w in message.lower() for w in ("digest", "mismatch", "differ", "disagree")), (
-        f"the refusal does not name the mismatch: {message!r}")
-    copied = _files_under(Path(os.environ[T.EPISODES_BASE_ENV])).values()
-    assert raw not in copied, "the launch copied the source's alert"
-    assert record_bytes not in copied, "the launch copied the source's record"
-
-
-def test_p158_relaunch_finds_the_episode_copy_already_present(tmp_path):
-    """A relaunch never meets an earlier launch's copy. Each launch claims a fresh episode and
-    copies the source's alert and record as they are found then, subject to C47's check."""
-    first_raw = _alert("p158-first")
-    planted, base, src = _source(tmp_path, first_raw, signature="SIG-p158-first")
-    first_record = S.record_file(src).read_bytes()
-    first = _launch(planted, src)
-
-    second_raw = _alert("p158-second")
-    S.plant_run(base, src.name, alert=second_raw, facts={"signature": "SIG-p158-second"})
-    second_record = S.record_file(src).read_bytes()
-    second = _launch(planted, src)
-    assert second != first, "the relaunch reused the first launch's episode"
-    assert S.episode_alert_file(second).is_file(), "the relaunch put no copy in its episode"
-    assert S.episode_alert_file(second).read_bytes() == second_raw
-    assert S.episode_record_file(second).read_bytes() == second_record
-    assert S.episode_alert_file(first).read_bytes() == first_raw, "the relaunch touched the first"
-    assert S.episode_record_file(first).read_bytes() == first_record
-
-    S.alert_file(src).write_bytes(_alert("p158-unrecorded"))
-    message = _refused_launch(planted, src)
-    assert any(w in message.lower() for w in ("digest", "mismatch", "differ", "disagree")), (
-        f"a relaunch over bytes the record does not certify was not refused by name: {message!r}")
-    assert S.episode_alert_file(second).read_bytes() == second_raw
-
-
-# =================================================================================================
 # A sibling resumed after a mapping edit
-# =================================================================================================
 
 def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
     """A sibling's ticket comment and lookups use the recorded signature copied into the

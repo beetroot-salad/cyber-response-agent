@@ -1,48 +1,4 @@
-"""#1234 slice 6 — control_and_usability: which runs are usable, and what an unusable one costs.
-
-A3 decides usability from READS. A run is usable only when the one bounded no-follow reader
-reads every file its context needs, plain, within limits and well-formed: a report with exactly
-one valid disposition, every oracle-store row naming that world's own facts, and A12's call-id
-checks on both call records. A planted world that fails is malformed. It is ungradable, named by
-file and refusal, and leaves every reference set, and the rest of the family still grades. A
-control that fails, or has a world record, stamps the family not graded, naming the control and
-the cause. Nothing is graded against a thinned control (X5). The control check runs after the
-unchanged gates (door, manifest, outcome, O5, family stamp). A door refusal comes before all of
-them and writes nothing.
-
-HOW EACH FAULT ENTERS (author.md's hierarchy, rung 1 unless noted):
-  * Damaged archive files are planted on disk through `_spec1234`'s planters: a symlink, a hard
-    link, a FIFO, a directory, a sparse file one byte past `_io.READ_LIMIT`, a torn JSONL line, a
-    second `disposition:` key, undecodable bytes. The real bounded reader meets them on every
-    run. OB5 (p10_fs.py) observed these kinds on main, and observed that the reachable-by-box
-    ones are the sparse file and the hard link. The FIFO cases run under a SIGALRM bound, as
-    OB5's probe ran (`_within`): a reader that opened one blocking would hang the pass.
-  * A failed call-record write (d02d's AN01 arm) is a DIRECTORY the estate's adapter plants at the
-    record's name mid-run (`Estate1234.break_write`). It goes through the REAL launcher and the
-    REAL sibling. On main the table write raises `NotPlainEntry` out of `run.main` and the ledger
-    write is swallowed (AP-01/JP-02, the survey's smoke run).
-  * The judge model is `RoutedJudge`. It records every prompt and injects nothing here. The tests
-    read what it was HANDED (which worlds were called, which run's archive text reached which
-    prompt), never its canned reply.
-
-WHAT IS ASSERTED: names, never wording. A stamp or a row reason must carry the control's label
-(the hand-built control is `ctl`, a label no reason spells by accident; the real path's control
-is always `a`, matched only in a quoted or path form) and the cause's own name. The cause's name
-is a file name, a production constant (`outcome.NOT_ARCHIVED`), the coined call-id field, or the
-fixture's own input. Reference-set membership is read off the prompts. Every hand-built text
-carries `MARK-<label>-<what>`, so "c left every reference set" is "none of c's archive marks is
-in b's or d's prompt", always beside its positive control, "d's marks ARE in b's prompt". On main
-no prompt carries a reference run, so the bare negative would be green for the wrong reason.
-
-WHAT IS DELIBERATELY NOT PINNED:
-  * The control stamp's word. The design names the stamps "unchanged in kind" and gives the new
-    one no word. Only its presence (main's `not_graded` field) and its reason are read, apart from
-    g16, which needs O5's own word (`outcome.UNUSABLE`) to tell the two gates apart.
-  * AM15's sentence saying "the layer is absent". The only spelling is main's render text, and
-    no ruling names it. The test pins that the run stays usable.
-  * Where an overflow-refused world's reason sits on its row (#170: "a world-row reason"). Any of
-    the reason fields is accepted.
-"""
+"""#1234 judge contrast: control/reference usability checks and damaged-archive handling."""
 from __future__ import annotations
 
 import dataclasses

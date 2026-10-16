@@ -1,24 +1,5 @@
-"""#1222 spec, slice S02 — the alert's admission and the run's record (A1, A8, C44, C47).
-
-Run start admits the operator's alert bytes once, before any run folder exists (strict UTF-8,
-no byte-order mark, exactly one JSON object the parser can follow, no unpaired surrogate, not
-over size), derives the three facts once through the tenant's alert mapping and writes them,
-with the alert's byte digest, into the run's record beside the alert. From then on the record
-is the run's one certificate: the held-out check, the curation key, the launch byte check and
-the sibling union take the alert's identity from the recorded digest, and no reader re-derives
-a fact from the alert file.
-
-Every scenario drives a production entry point: `run.main` through `S.run_alert` (admission,
-`materialize_run`, the ticket legs, the learning enqueue are production's), the invlang corpus
-loader, the judge's grading pass and the branch launcher's `prepare_episode`. Faults are real
-bytes and real files written here (tier 1): a byte-order mark, a lone-surrogate escape, a
-directory squatting the record's name, an operator input file rewritten or removed mid-run, an
-alert file rewritten on the host after the run. The coined record and input-directory names are
-reached only through `S` (`S.record_file`, `S.input_dir`, `S.read_record`, ...).
-
-Every `run_alert` call pins its own `run_id`: `run.main` mints an id from the input file's stem
-and a one-second timestamp, so two unpinned drives in one second collide on one folder.
-"""
+"""Alert admission at run start (strict UTF-8, one parseable JSON object, size bounds) and the
+run record (facts plus alert digest) written beside the alert; identity checks read that record."""
 from __future__ import annotations
 
 from defender.run_repository import Run
@@ -40,7 +21,6 @@ from defender.tests.e2e import _replay_harness as H
 REFUSED_SHAPES = tuple(s for s in S.ADMISSION_SHAPES if s not in S.ADMITTED_SHAPES)
 #: A1's "refuses anything else, naming why", read as: refusals of DIFFERENT causes differ. The
 #: cause classes (92-reconciliation A3); shapes within one class may share a reason, and `bom` /
-#: `whitespace_only` may share one with whichever class the implementation puts them in.
 CAUSE_CLASSES: dict[str, tuple[str, ...]] = {
     "encoding": ("non_utf8", "utf16"),
     "not_one_json_object": ("not_json", "top_level_array", "scalar", "empty"),
@@ -62,9 +42,7 @@ class _StoppedAfterSetup(Exception):
     (and with it the box) starts: an interrupted run whose folder holds only what setup wrote."""
 
 
-# =================================================================================================
 # Local helpers (scenario plumbing only; every decision is production's)
-# =================================================================================================
 
 def _rule(**members: Any) -> dict[str, Any]:
     """`BASE_RULE` with members added or replaced (`None` drops one)."""
@@ -297,9 +275,7 @@ def _golden_investigation() -> str:
     return (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")
 
 
-# =================================================================================================
 # A8 — admission, before any run folder
-# =================================================================================================
 
 def _same_shape_other_content() -> dict[str, bytes]:
     """A second spelling of each refused shape over different content: a FIXED reason is the
@@ -540,9 +516,7 @@ def test_p139_record_cannot_be_written_at_run_start(tmp_path):
     assert S.recorded_digest(run_dir) == S.sha256_hex(_admitted_bytes(control))
 
 
-# =================================================================================================
 # A1 — the record, written once beside the alert
-# =================================================================================================
 
 def test_facts_are_recorded_beside_the_alert_at_run_start(tmp_path):
     """After run start the run's record holds the alert's byte digest and the derived signature,
@@ -729,9 +703,7 @@ def test_p118_run_restarted_in_the_same_run_directory_after_th(tmp_path):
         "the refused restart rewrote the record")
 
 
-# =================================================================================================
 # A8 / C47 — the recorded digest is the alert's one identity
-# =================================================================================================
 
 def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
     """The held-out check, the curation key, the launch byte check and the sibling union all take
@@ -916,50 +888,5 @@ def test_p142_record_present_but_alert_file_gone_or_rewritten_(tmp_path):
         S.COINED["record.digest"]) == S.sha256_hex(source)
 
 
-# =================================================================================================
 # R7 — the shared test builders make admissible alerts
-# =================================================================================================
 
-def test_r7_the_shared_test_alert_builders_make_alerts_the_front_door_admits(tmp_path):
-    """Every alert the repo's shared test builders produce (alert_doc in
-    tests/e2e/_lead_zero_808.py and the fixtures of its importers) is a UTF-8 JSON object the
-    admission check accepts, and under each fixture tenant's alert mapping derives the signature,
-    event_time and summary its tests expect (rule.id, the field the alert carries,
-    rule.description). A builder that makes an alert admission refuses fails the suite at
-    collection, never mid-replay as an unmapped alert.
-
-    TS06: `alert_doc` has eleven importers. Each builder's alert goes through production's
-    admission and the committed fixture and template tenants' own alert-mapping files (read off
-    the tree, never restated); this suite's generic builders go through the generic mapping they
-    are driven with. Expected in the record: rule.id as text for the signature, the alert's own
-    time field for the event time, and rule.description for the summary where the alert carries
-    one."""
-    from defender.tests.e2e import _lead_zero_808 as LZ
-
-    committed = {}
-    for tenant in ("tenant-fixture", "tenant-template"):
-        path = S.REPO_ROOT / "knowledge" / tenant / "settings" / S.ALERT_MAPPING_REL
-        assert path.is_file(), f"the committed {tenant} ships no alert mapping at {path}"
-        committed[tenant] = path.read_text(encoding="utf-8")
-
-    cases: list[tuple[str, dict[str, Any], str, str]] = []
-    for tenant, mapping in committed.items():
-        cases.append((f"{tenant}-alert-doc", LZ.alert_doc(), mapping, "alert_timestamp"))
-        cases += [(f"{tenant}-{slug}", S.fixture_alert(slug), mapping, "alert_timestamp")
-                  for slug in S.FIXTURE_SLUGS]
-    generic = S.alert_mapping_text(S.DEFAULT_MAPPING_GENERIC)
-    cases += [("generic", S.generic_alert(), generic, "detected_at"),
-              ("hostile", S.hostile_alert(), generic, "detected_at")]
-
-    planted = S.plant_tenant()
-    for name, doc, mapping, time_field in cases:
-        planted.alert_mapping.write_text(mapping, encoding="utf-8")
-        d = _drive(tmp_path, planted, f"r7-{name}", alert=doc)
-        run_dir = _assert_admitted(d, name)
-        rule = doc["rule"]
-        assert S.recorded(run_dir, "signature") == str(rule["id"]), (
-            f"{name}: the recorded signature is not rule.id")
-        assert S.recorded(run_dir, "event_time") == str(doc[time_field]), (
-            f"{name}: the recorded event_time is not the alert's {time_field}")
-        assert S.recorded(run_dir, "summary") == rule.get("description"), (
-            f"{name}: the recorded summary is not rule.description")

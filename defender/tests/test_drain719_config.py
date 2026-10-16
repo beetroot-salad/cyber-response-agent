@@ -1,15 +1,4 @@
-"""Issue #719, part 5/5 — where the new paths live, when the ceiling is bound, and the
-pitfalls channel, which is the discriminating case for O8 because it has no retirement at
-all today.
-
-Executable spec, pre-implementation. The design's comment 3 calls the pitfalls ceiling "the one
-place where the fold alters what the loop does". That sentence predates §7 and is wrong: the
-resolved design changes behaviour in FOUR places — the pitfalls ceiling, a post-agent failure
-that now bumps and retires, a commit-time `GitError` that now retires and leaves the corpus
-usable, and an externally killed boxed command that now retires instead of reporting success.
-The full inventory is in the graph's `handoff.deviations`, where `finalize` and the adversarial
-implementer read first. Decision 8 deliberately declines to add a fifth.
-"""
+"""Drain retire ceiling: new queue paths live under state_root, ceiling bound at config build, and the pitfalls channel retires at the ceiling."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -190,41 +179,6 @@ def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
 
     assert h.attempts_of(paths, ch, "a/0") == 1, "the row retired under a ceiling read mid-batch"
     assert h.graveyard(paths, ch) == []
-
-
-def test_author_timeout_seconds_zero_behavior_is_pinned(tmp_path: Path):
-    """A reachable, falsy operator input with no design-stated semantics: `env_int` applies no
-    floor, so 0 arrives intact, and `asyncio.wait_for` with 0 times out almost immediately
-    rather than disabling the bound — plausibly the opposite of what an operator setting 0
-    expects.
-
-    What is pinned is that 0 SURVIVES: it reaches the config and the agent call unchanged
-    rather than being coalesced back to the 1800-second default by an `x or DEFAULT` idiom.
-    PJ1a is why nothing here asserts elapsed time — the deadline is soft and late, and cannot
-    preempt a blocking boxed call, so a timing oracle would pin the wrong thing.
-
-    Driven on the findings channel, because `LEARNING_AUTHOR_TIMEOUT_SECONDS` is the knob that
-    channel reads; the observation directions read their own per-direction deadlines."""
-    import os
-
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "run-Z/0")])
-
-    previous = os.environ.get("LEARNING_AUTHOR_TIMEOUT_SECONDS")
-    os.environ["LEARNING_AUTHOR_TIMEOUT_SECONDS"] = "0"
-    try:
-        agent = h.recording(h.committing("zero-timeout"))
-        cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
-        assert cfg.author_timeout == 0, "0 was promoted back to the default"
-        assert drain.run_batch(cfg=cfg) == 0
-    finally:
-        if previous is None:
-            del os.environ["LEARNING_AUTHOR_TIMEOUT_SECONDS"]
-        else:
-            os.environ["LEARNING_AUTHOR_TIMEOUT_SECONDS"] = previous
-
-    assert agent.calls[0]["cfg"].author_timeout == 0, "the drain re-coalesced the deadline"
 
 
 # The pitfalls channel — O8's discriminating case

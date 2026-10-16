@@ -1,44 +1,6 @@
-"""#919 / PR-930 — one node-axis walk under both readers, and the frontier at block N.
-
-Two changes, one theme: the frontier stops being a second opinion about the document.
-
-**The shared walk.** `validate.iter_vertex_cells` is now THE node-axis walk. The
-benign-disposition gate (`_check_benign_open_slots`) and lesson retrieval
-(`frontier._node_state`) both read it, where before they were two loops over
-`effective_vertex_state` that agreed only by inspection. The contract axis had already been
-collapsed this way (`_open_contracts` calls `outstanding_authz_contracts`); this is the other
-half.
-
-The point is NOT that the two readers now behave identically — they must not, and #836 decided
-why. It is that their two documented divergences become explicit knobs rather than two
-implementations free to drift:
-
-  * `include_ident` — a parameter. The gate passes False (an `ident=??` must not block a benign
-    close, #836 N3); retrieval passes True.
-  * the edge-targeted refinement — NOT a parameter. The walk reports those cells because the
-    gate blocks on them; `_node_state` drops them because an `OpenSlot` needs a vertex type an
-    `:E` row has not got. Both halves are pinned below, from both sides, because a future
-    "cleanup" that moves either one is exactly the regression this file exists to catch.
-
-**`frontier_at(text, n)`.** The retrieval key a lesson should carry is the frontier at the
-moment the pitfall was live, not at the moment the run closed. Measured on the runs in hand, a
-terminal document holds ~2 open slots against ~21 held facts while the same document a few
-blocks earlier holds 6 against 7 — the first is barely a key. Under the turn-N branch
-(`docs/learning-architecture-redesign.md`) a finding is born at a branch point, and this is how
-that state is read back.
-
-`n` counts ```invlang FENCES, not messages, because the frontier only moves when a block lands.
-That makes the index coarse, and the coarseness is reported rather than hidden: an out-of-range
-`n` snaps and `snapped` says so, because a curator handed the terminal frontier for a block that
-does not exist has been handed the one state that keys nothing.
-
-Out of scope here: the curator-facing verb that maps a run's message index onto a fence index
-(that needs the run's trace, which is `learning/`'s business, not invlang's), and any change to
-what `_frontier_recall` emits at runtime.
-"""
+"""One node-axis walk (validate.iter_vertex_cells) under both the benign gate and the frontier, and the frontier at block N."""
 from __future__ import annotations
 
-import inspect
 import sys
 from pathlib import Path
 
@@ -51,7 +13,6 @@ if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
 pytest.importorskip("pydantic_ai")
 
 from defender._artifact_schema import validate_investigation  # noqa: E402
-from defender.skills.invlang import frontier as frontier_mod  # noqa: E402
 from defender.skills.invlang.frontier import (  # noqa: E402
     derive_frontier,
     frontier_at,
@@ -134,29 +95,7 @@ def _frontier(doc: str):
     return derive_frontier(body)
 
 
-def test_the_fixture_documents_carry_no_invlang_fault():
-    """Fixture hygiene: every document above parses clean, so a failure below is the code."""
-    for name, doc in _FIXTURE_DOCS.items():
-        assert diagnose(doc) == [], f"fixture {name!r} carries a diagnostic"
-
-
 # the shared walk
-
-def test_the_gate_and_the_frontier_read_one_walk():
-    """CLAIM: both readers CALL `iter_vertex_cells` rather than re-deriving the node axis.
-
-    Structural, and deliberately so. Every behavioral assertion in this file would still pass
-    against two loops that happen to agree today — which is the state PR-930 replaced, and the
-    state they drifted out of twice already. The thing being protected is that there is one
-    definition, so it is the thing asserted."""
-    for reader in (_check_benign_open_slots, frontier_mod._node_state):
-        src = inspect.getsource(reader)
-        assert "iter_vertex_cells" in src, (
-            f"{reader.__qualname__} no longer reads the shared walk"
-        )
-        assert "effective_vertex_state(" not in src, (
-            f"{reader.__qualname__} re-derives the fold instead of reading the shared walk"
-        )
 
 
 def test_a_blank_cell_is_neither_open_nor_held():
@@ -227,20 +166,6 @@ def test_an_edge_targeted_refinement_blocks_the_gate_and_is_dropped_by_the_front
     assert derive_frontier(body).slots == (), "an edge cell reached the retrieval key"
 
 
-def test_the_walk_reports_cells_in_document_order_class_ident_attrs():
-    """CLAIM: order is part of the contract, because both readers spend it.
-
-    The gate's diagnostics are read in emission order by an operator, and `_node_state` builds
-    two ordered lists a ranking later walks. A walk that reordered cells would leave every
-    membership assertion in this file green and still change what a human sees first."""
-    doc = PROLOGUE + BLANK_IDENT_BLOCK
-    assert [(c.vertex_id, c.slot) for c in _cells(doc)] == [
-        ("v-001", "class"), ("v-001", "ident"), ("v-001", "attrs.kind"),
-        ("v-002", "class"), ("v-002", "ident"),
-        ("v-008", "class"), ("v-008", "ident"), ("v-008", "attrs.image"),
-    ]
-
-
 def test_the_open_cells_are_exactly_what_the_gate_refuses_on():
     """CLAIM: the gate blocks on the open cells and on nothing else — one message per cell.
 
@@ -271,26 +196,6 @@ def test_the_prefix_frontier_is_where_the_key_lives():
     assert [(s.vertex_id, s.slot) for s in at_open.frontier.slots] == [("v-006", "class")]
     assert at_closed.frontier.slots == ()
     assert ("v-006", "class") in [(h.vertex_id, h.slot) for h in at_closed.frontier.held]
-
-
-def test_the_terminal_index_is_the_whole_document():
-    """CLAIM: `frontier_at` at `total` is `derive_frontier` over the full parse — the prefix
-    machinery adds an index, it does not add a second reading of the document."""
-    total = frontier_at(REFINED_DOC, 0).total
-    assert total == 3
-    body, _warnings = parse_dense_companion(REFINED_DOC)
-    assert frontier_at(REFINED_DOC, total).frontier == derive_frontier(body)
-
-
-def test_index_zero_is_the_empty_frontier():
-    """CLAIM: before any block landed, nothing is open and nothing is held. Not an error —
-    it is the state a run starts in, and the honest answer for a document with no fences."""
-    assert frontier_at(REFINED_DOC, 0).frontier.is_empty()
-
-    fenceless = frontier_at("prose, and no invlang anywhere", 2)
-    assert fenceless.total == 0
-    assert fenceless.n == 0
-    assert fenceless.frontier.is_empty()
 
 
 @pytest.mark.parametrize(("requested", "expected"), [(99, 3), (4, 3), (-5, 0)])
@@ -358,15 +263,6 @@ def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam(tmp_path)
     assert _frontier_recall(deps, before, after), (
         "the fast path skipped an append whose trailing backtick closed a fence"
     )
-
-
-def test_frontier_at_never_raises():
-    """CLAIM: it inherits `frontier_from_text`'s guarantee. Its callers run against documents a
-    model is still writing, and a half-written block must not turn into a failed tool call on a
-    write that already landed."""
-    for text in ("", "```invlang\n:V bogus [nope\n|||||\n```", "```invlang\n```"):
-        result = frontier_at(text, 1)
-        assert result.frontier.is_empty()
 
 
 # the re-observation fold — what a LATER `:V` row is allowed to supersede

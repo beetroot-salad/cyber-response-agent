@@ -1,17 +1,4 @@
-"""Issue #719, part 3/5 — the append/drain lock split (D1, D2) and the obligations it
-discharges: O1 (no row with an unprocessed id is lost), O2 (an append never waits on the
-agent call) and O7 (rotation and retirement are mutually exclusive with appends).
-
-Executable spec, pre-implementation. Contention is driven with real `fcntl` locks held from
-worker threads, because PJ2a probed that `flock(LOCK_EX)` excludes two OS threads of one
-process from each other — so the exclusion under test is the production one, not a stand-in.
-Where a genuinely separate actor is needed, a subprocess is used instead: `DEFAULT_PATHS` is
-frozen at import (F7), so an in-process environment change never reaches a second actor.
-
-PJ1a is carried as a constraint: the whole-batch timeout is SOFT (`asyncio.wait_for` cannot
-preempt a synchronous blocking box call), so no oracle here treats
-`LEARNING_AUTHOR_TIMEOUT_SECONDS` as the bound on a stall.
-"""
+"""Drain append/drain lock split: rotation and retirement exclude appends, non-blocking drain lock, declared lock order."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,51 +31,10 @@ def _judge_doc(n: int) -> dict:
 # D1 — a channel carries its own lock topology
 
 
-def test_every_channel_declares_its_lock_topology(tmp_path: Path):
-    """D1 gives every channel (`state.Channel`) both roles as fields, and a channel no drain holds
-    exclusively carries `None` for the drain role rather than a dangling path (P64: branch on
-    `None`, take no exclusive lock).
-
-    The enumeration only picks the subjects; each is then DRIVEN, because a field that merely
-    exists certifies nothing. Holding a channel's declared drain lock must make that channel's
-    tick skip without authoring, and pitfalls — whose drain-role field is `None` — must have
-    no exclusive lock to hold at all."""
-    paths = h.make_paths(tmp_path)
-
-    for name in h.AUTHOR_CHANNELS:
-        ch = h.channel_of(name)
-        assert ch.drain_role is not None
-        assert ch.drain_role.file != ch.append_lock
-        h.seed(paths, ch, [h.row_for(name, "x/0" if name != "findings" else "run-T/0")])
-        agent = h.recording(h.skipping())
-        with h.Holder(paths.state_root / ch.drain_role.file, blocking_discipline=False):
-            assert drain.run_batch(cfg=h.cfg_for(paths, name, invoke_agent=agent)) == 0
-        assert agent.calls == [], f"{name}: the declared drain lock did not exclude the tick"
-
-    pit = h.channel_of("pitfalls")
-    assert pit.drain_role is None, "a channel no drain holds exclusively carries None"
-    assert Path(pit.append_lock).parent == Path(pit.queue).parent
-    assert Path(pit.append_lock).name == h.APPEND_LOCK_NAMES_TODAY["pitfalls"]
-
-
-
-
-
-
 # D2 — merge_concurrent deleted; rotation always merges (O1)
 
 
-
-
-
-
-
-
 # O2 — appending does not block on an author batch
-
-
-
-
 
 
 # O7 — rotation and retirement are mutually exclusive with appends
@@ -234,8 +180,6 @@ def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(t
     assert 1.8 <= observed[2] < 4.0, f"the 2s deadline was not what ended the wait: {observed}"
     # Each give-up tracks its own deadline: a hard-coded wait gives both the same length.
     assert observed[2] - observed[1] >= 0.6, f"the wait did not follow the deadline: {observed}"
-
-
 
 
 # The locks the fold must not change

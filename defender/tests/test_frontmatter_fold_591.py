@@ -1,24 +1,4 @@
-"""Site A-E fold contracts for #591 (spec_graph_591-frontmatter-fold.yaml).
-
-Each folded reader (predicted_disposition / read_description + descriptor_catalog /
-parse_report / check_skill / strip_frontmatter) must route through the ONE
-canonical grammar in defender/_frontmatter.py. #810 finished that fold for the
-last one: `strip_frontmatter` now LIVES in `_frontmatter` rather than being a
-private copy in `orient` that delegated to it, so the prompt loaders in
-`runtime/driver.py` could reach it too. Most tests here are RED against
-HEAD — they fail on the OLD loose/hand-rolled behavior, on a missing seam, or on
-a read that raises where the fold makes it fall back. That red is the point; it
-goes green when the implementation lands.
-
-Fixtures that carry CRLF or non-UTF8 bytes are written with ``write_bytes`` so
-text-mode newline translation / decode cannot mask them.
-
-Import conventions mirror the collected neighbors:
-  - the hook + validate_scaffold are __main__ scripts -> importlib.spec_from_file_location
-    (as tests/test_inject_system_skill_description.py loads the hook);
-  - orient / held_out / visualize resolve through the ``defender.*`` namespace
-    (as tests/test_orient.py and tests/test_visualize_runtime.py do);
-"""
+"""Each frontmatter reader (predicted_disposition, read_description, descriptor_catalog, parse_report, check_skill, strip_frontmatter) routes through the one canonical grammar."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,8 +12,6 @@ from defender.scripts.visualize import visualize_primitives as vp
 from defender.runtime.verbs import read_roster
 
 WORKTREE = Path(__file__).resolve().parents[2]
-
-
 
 
 def _hook():
@@ -267,8 +245,6 @@ def test_d_non_utf8_report_none(tmp_path):
 def test_d_wellformed_report_unflipped(tmp_path):
     run = _report_run(tmp_path, "wf", b"---\ndisposition: benign\n---\nbody\n")
     assert predicted_disposition(run) == "benign"
-
-
 
 
 def test_d_unfenced_skill_none(tmp_path):

@@ -1,38 +1,4 @@
-"""#1234 slice 2 — the pointer resolver: A1's typed, episode-relative, no-follow resolver, the
-two-run contrast rule, A13's drop lanes, A15's quantifiers, and the R3 parity cells (g06-g09).
-
-Every scenario is a HAND-BUILT archived family (`S.family`: control `a`, planted `b` and `c`,
-plus a fourth world `d` where a test needs a run outside the reference set), graded through the
-judge's one entry point (`S.grade` -> `grade_episode`) with a scripted model seam (`S.judge`, a
-`RoutedJudge`) that answers world `b`'s draw with the findings under test. What the resolver
-decided is read only off what the pass leaves behind:
-
-* a queued defender row's `citations` — an investigator finding's RESOLVING pointers (A1;
-  s_D35: a manifest or oracle-store pointer filed beside a resolving pair rides along and is
-  cited when it resolves). A pointer filed beside a resolving two-run pair is among the
-  citations exactly when it resolves;
-* the ledger lane judge.yaml records for each filed finding id (A13): a routing fate (defender,
-  questioner, user record) or one drop reason, precedence pointers unresolved, names only
-  another run, no two-run pair. "Pointers unresolved" is the lane of a finding NO filed pointer
-  of which resolves: s_A10 ("a finding loses only the unresolved pointer, and is dropped when
-  no resolving pointer remains") and s_A59 (the two-run rule is computed over the resolved set)
-  fix that reading, so a finding keeping one resolving pointer in b falls to the no-pair lane;
-* the questioner queue (a design world finding) and the user record (a serving or gap-only
-  finding).
-
-World findings here file `mislabelled` unless the test is about measurement, so a kept world
-finding never changes whether `b` is measured (A7's not-measured predicates read `unreachable`,
-`incoherent` and flagged gaps only).
-
-Damage is real input through the real primitive (`S.plant_*`, `S.tear_jsonl`,
-`S.second_disposition`, `os.mknod`), planted in REFERENCE run `c` (or in `d`) so that focus
-world `b` stays gradable however the implementation classes the damaged run; every damaged case
-has a plain twin in the same position that resolves. Hard-link and symlink targets are scratch
-copies OUTSIDE the episode (a hard link raises `st_nlink` on its target too, so a target inside
-the archive would damage a second file; `S.scratch_copy`). Every pass runs under `S.no_hang`, a
-SIGALRM watchdog that turns a blocking open (a FIFO) into a named failure instead of a hung
-shared test lock.
-"""
+"""#1234 judge contrast: evidence/contrast pointer resolution."""
 from __future__ import annotations
 
 import json

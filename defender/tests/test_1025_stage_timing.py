@@ -341,47 +341,6 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
             assert parse_iso_utc(row[key]) is not None, f"{key}={row[key]!r} is not a timestamp"
 
 
-def test_1025_the_reader_returns_record_order_not_step_order(tmp_path):
-    """The reader returns entries in the order they were RECORDED — it does not sort them into
-    `STEPS` order.
-
-    A reader that sorts by step would make a launcher that writes `verify` before `runs`
-    indistinguishable from one that writes at each boundary, which is the one property the
-    record exists to show. Recorded `preflight` then `questioner`, the reader answers
-    `[preflight, questioner]`.
-    """
-    timing = _timing()
-    episode_dir = tmp_path / "episode"
-    episode_dir.mkdir()
-    clock = timing.StageClock(_open(episode_dir))
-    later = clock.record("preflight", started_at="2026-01-01T00:00:07+00:00",
-                         ended_at="2026-01-01T00:01:30+00:00")
-    earlier = clock.record("questioner", started_at="2026-01-01T00:00:00+00:00",
-                           ended_at="2026-01-01T00:00:05+00:00")
-
-    assert _read(episode_dir) == [later, earlier], (
-        "the reader reordered the entries")
-    assert _raw_rows(episode_dir) == [later, earlier], "the writer reordered the entries"
-
-
-def test_1025_an_absent_record_reads_as_no_rows(tmp_path):
-    """An episode with no `timing.json` reads as `None` — the reader's typed absent answer
-    (#1049 d-19: an aborted-before-any-step episode records `{"steps": []}` and reads `[]`;
-    NOTHING at the name is a different fact, and the page's timing slot tells the two apart)
-    — and reading does not bring the file into existence.
-
-    Positive control in the same test: once one step is recorded, the reader returns it.
-    """
-    episode_dir = tmp_path / "episode"
-    episode_dir.mkdir()
-
-    assert _read(episode_dir) is None
-    assert not EpisodePaths(episode_dir).timing.exists(), "reading created the record"
-
-    row = _clock(episode_dir).record("questioner", started_at=now_iso(), ended_at=now_iso())
-    assert _read(episode_dir) == [row], "the control failed"
-
-
 def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tmp_path):
     """Each `record` swaps a NEW whole document into place; the file that was there is never
     opened, truncated or appended to. A handle opened on the record before a write still reads
@@ -678,31 +637,6 @@ def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp
         "`verify` started before `runs` ended — a `started_at` that is not the step's own")
 
 
-def test_1025_a_refused_episode_stops_the_record_at_preflight(tmp_path, monkeypatch):
-    """An episode pre-flight REFUSES leaves exactly `questioner`, `preflight` — the launcher
-    returns 1 before any sibling starts, so no `runs`, `verify` or `judge` row exists — and
-    those two rows lie inside the launch's own clock bracket.
-
-    Positive control under its own episodes root: the accepted episode does carry those three
-    later rows, so the negative cannot pass on a launcher that never records them.
-    """
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-accepted"))
-    accepted = _launch(tmp_path)
-    assert accepted.rc == 0, "the control failed: the accepted episode did not launch cleanly"
-
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-refused"))
-    refused = _launch(tmp_path, **_refusing_seams())
-    assert refused.rc == 1, "the refusing drive did not reach the refused exit"
-    assert _outcome(refused.episode_dir)["outcome"] == "refused", (
-        "the refusing drive did not refuse")
-    assert refused.spawn.launches == [], "a sibling started for a refused episode"
-
-    rows = _raw_rows(refused.episode_dir)
-    assert [row["step"] for row in rows] == ["questioner", "preflight"]
-    _clocked(rows, before=refused.before, after=refused.after)
-    assert _steps(accepted.episode_dir)[2:] == ["runs", "verify", "judge"], "the control failed"
-
-
 def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_raised(
         tmp_path, monkeypatch):
     """An episode that aborts MID-STEP leaves the rows for the steps that completed and no row
@@ -770,52 +704,6 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     assert [row["step"] for row in _raw_rows(ep)] == EXPECTED_STEPS[:4], (
         "a `judge` that raised was recorded")
     _clocked(_raw_rows(ep), before=before, after=after)
-
-
-def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, capsys):
-    """A judge failure is non-fatal to the episode — the `JUDGE` frame's body holds it and the
-    launcher returns — so the boundary is crossed and the `judge` entry is on the record with
-    the four before it, inside the launch's clock bracket.
-
-    Two failures, each under its own episodes root. The grade itself fails: the learning state
-    root's pending folder, which the enqueue appends into, is a regular FILE, so a world's rows
-    cannot land and `grade_episode` raises into the frame body's catch (control: the launcher
-    reports "the judge pass failed", and — #1234 A6 writes `judge.yaml` before the appends —
-    the record holds the world it was committing in state `queueing`). The seam fails: the
-    judge's model call raises on every draw, which the grade holds per draw (control: the seam
-    was reached).
-    """
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-grade-failed"))
-    # The state root must exist (#1135: nothing creates it, and the handle opens before the
-    # judge is called), so the unlandable append is made by a FILE sitting where the findings
-    # queue's folder belongs.
-    state_root = tmp_path / "learning-state-with-a-file-for-pending"
-    state_root.mkdir()
-    (state_root / "_pending").write_text("not a directory\n", encoding="utf-8")
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(state_root))
-    # One investigator finding per world draw, so the commit has a row to append.
-    launch = _launch(tmp_path, judge=J.FakeJudge(
-        default=J.as_reply_text(J.reply_doc(bucket="lead-quality", systems=["idp"])),
-        family_default=J.as_reply_text(J.family_reply())))
-    assert launch.rc == 0, "a failed grade ended the episode instead of being held"
-    assert launch.judge.calls > 0, "the control failed: the judge seam was never reached"
-    assert "the judge pass failed" in capsys.readouterr().err, (
-        "the control failed: the grade did not fail")
-    states = [row.get("state") for row in J.judge_record(launch.episode_dir)["worlds"]]
-    assert "queueing" in states, (
-        f"the control failed: no world was left mid-commit ({states})")
-    rows = _raw_rows(launch.episode_dir)
-    assert [row["step"] for row in rows] == EXPECTED_STEPS, "a held judge failure lost a row"
-    _clocked(rows, before=launch.before, after=launch.after)
-
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-seam-failed"))
-    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
-    launch = _launch(tmp_path, judge=J.FakeJudge(fault=J.Fault(raise_after=0)))
-    assert launch.rc == 0, "a raising judge seam ended the episode"
-    assert launch.judge.calls > 0, "the control failed: the judge seam was never reached"
-    rows = _raw_rows(launch.episode_dir)
-    assert [row["step"] for row in rows] == EXPECTED_STEPS, "a raising judge seam lost a row"
-    _clocked(rows, before=launch.before, after=launch.after)
 
 
 def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path, capsys):

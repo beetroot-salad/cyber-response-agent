@@ -1,35 +1,4 @@
-"""#1234 slice 10 — the per-world commit (A6) and the re-run.
-
-What this file pins: judge.yaml's per-world row is the ONE owner of "graded and queued". Each
-world (and the family call) commits `queueing` -> its queue appends -> `queued`, the flip
-carrying the world's serving findings and named gaps; the final write adds the found gaps and
-runs on every pass; every later write carries recorded rows verbatim. A re-run regrades a world
-with no row (overwriting its draw files), skips a `queued` one, and refuses loudly, naming the
-world, at the first row left `queueing`. No reader reads a draw file judge.yaml does not record.
-Plus the three channel-identity obligations the per-world appends touch (g05, g20, g21).
-
-HOW A PASS IS STOPPED HERE (every stop is a real refusal through the real primitive, or the
-interpreter's own interrupt):
-  * a refused judge.yaml write — `Refuse` gives the record a second hard link outside the
-    episode (its bytes untouched), so the guarded writer's next replace refuses (`NotPlainEntry`,
-    EMLINK, observed at base 463833df by this writer's smoke run); before the record exists it
-    plants an empty directory at its name instead. Planted MID-PASS through a seam (a judge.yaml
-    planted before the pass refuses the pass's opening read instead, also observed);
-  * a refused queue append — the same plant at the channel's queue file: the state handle's
-    read under the append lock refuses it (`StateRefused`, a `BaseException`, observed);
-  * an operator's interrupt — `KeyboardInterrupt` raised as a named model call starts (what the
-    interpreter raises on SIGINT; it is not an `Exception`, so no containment arm in the pass
-    catches it).
-`Watch` wraps the pass's two seams (`judge=`, `state=`): it records what the pass had left at
-each model call and before each queue append, and fires the one fault a scenario declares. It
-never answers, classifies or routes — answers come from the wrapped `S.RoutedJudge`, every
-state verb from the real handle.
-
-NOT ON MAIN: at 463833df every amended reply is refused as malformed, nothing is queued, and
-judge.yaml is written once at the end — so each "unchanged / verbatim / once" assertion here is
-preceded by a presence assertion naming the world's own finding, which is what makes it red on
-main rather than vacuously green over empty queues.
-"""
+"""#1234 judge contrast: per-world commit order and bare reruns of the judge pass."""
 from __future__ import annotations
 
 import collections

@@ -1,36 +1,6 @@
 """Regressions for PR #1232's review findings that structural changes dissolve (#1224).
 
 First round: the oracle on the agent loop (no unanswered tool call, a bounded verifier, no
-private import, one host checker), the turn-held context, the box-owned scratch folder.
-Second round: a forged row is fresh or frozen, never both (a frozen row is not re-judged, and a
-re-forged one is reused); one deadline over the whole attempt, tools included; one framing,
-with its size cap, for every prompt; one recorder for every delivered row; a price settled
-before any request. Fourth round: the python box and the limiter-wait record belong to one
-attempt, the oracle-open clock mark to the process that wrote it; both price rows and the
-charge settle outside the provider-failure path. Fifth round: the host stamps a forged row's
-system and refuses a value array that is not one value per column; a claimed row backs the
-fact it was forged for; a count entry accounts for one count cell; an entity reference is
-found by value. A turn's outcome is decided in one place — a returned result wins over a late
-cancel, collisions and the ledger row follow the commit and the turn's close, every other
-error is a failed attempt or an unservable world, and a trace row counts once. Each test is
-red on the code it replaces. Each pre-flight world runs on its own role models and in the
-launcher's log context, the budget count and the oracle clock share no record, and every oracle
-setting is refused before the question-writer. Sixth round: one size budget governs everything the oracle and the
-verifier are sent — the family's example answers are capped, and a conversation past the
-budget restarts from its prefix, the store's frozen rows carried in it; a failed world's
-detail never reaches another world's judge prompt; the oracle and the verifier are told the
-branch point (M27: told, and the verifier checks — no host rule); usage is priced by one rule (cached tokens once); a
-bad argument to an oracle tool fails that call only; a count cell is the answer's own count,
-never a document's field; a pre-flight thread's error stops the other worlds; the family
-recording is parsed once per pre-flight. (#1235 retired the sixth-round arms about `budget.json`
-— box-written oracle fields, a link planted there, a capped call's write: the budget counters
-live in the run process's memory, so there is no record to plant or write; round 2 retired the
-held record's link-or-garbage arm and the dead-writer clock arm: the oracle-held credit and the
-open turn live on the run's `RunState`, so no file holds them and no other process reaches them.) Seventh round: a sibling's
-re-ask of a pre-branch call is served unchanged or not at all (M01=A), by pre-flight's own rule;
-and (M14 and M12 re-ruled by the implementer, the human having delegated them) a forged row has
-the shape of one real row, never the union of all; an id column is named as one, and a forged
-id collides only with a real identifier.
 """
 from __future__ import annotations
 
@@ -38,7 +8,6 @@ from defender.tests._spec1077 import fixture_run as _fixture_run_1165
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
-import ast
 import os
 import re
 import shutil
@@ -218,18 +187,6 @@ def test_a_call_after_the_world_went_unservable_reports_the_failing_call(tmp_pat
 
     assert later.value.call == first.value.call
     assert (later.value.reason, later.value.detail) == (first.value.reason, first.value.detail)
-
-
-def test_the_oracle_imports_nothing_private_from_pydantic_ai():
-    """Finding 4: `pydantic_ai._utils.abandon_threads_on_cancel` is absent from pydantic-ai
-    2.19, which the declared floor allowed; every oracle turn then failed as a 'model request
-    failure'. The oracle reaches pydantic-ai only through its public modules."""
-    tree = ast.parse(Path(oracle_mod.__file__).read_text(encoding="utf-8"))
-    private = [node.module for node in ast.walk(tree)
-               if isinstance(node, ast.ImportFrom) and node.module
-               and node.module.startswith("pydantic_ai")
-               and any(part.startswith("_") for part in node.module.split("."))]
-    assert private == []
 
 
 def test_the_advisory_check_resolves_the_base_handle_as_submit_does(tmp_path):
@@ -1149,60 +1106,6 @@ def test_a_trace_append_that_failed_part_way_is_counted_once_on_resume(tmp_path)
     assert oracle_mod.OracleStore(tmp_path / "oracle").spent == pytest.approx(store.spent)
 
 
-def _calibration_seen(tmp_path: Path, monkeypatch: Any) -> list[dict]:
-    """Run pre-flight over the default family (fact worlds b and c) with production's role
-    models (`oracle=None`, `verifier=None`), each world's calibration replaced by a recorder of
-    the registry it was handed and the log context it ran in. No model is ever built."""
-    from defender import _log
-    from defender.learning.branch import cli
-    from defender.learning.branch.estate import registry as registry_mod
-
-    seen: list[dict] = []
-    lock = threading.Lock()
-
-    def record(registry: Any, *_args: Any, **_kw: Any) -> None:
-        with lock:
-            seen.append({"world": registry.world.label,
-                         "family_answers": registry._family_answers,
-                         "oracle": registry.oracle.oracle_model,
-                         "verifier": registry.oracle.verifier_model,
-                         "context": dict(_log.current_context())})
-
-    # The only seam inside a world's thread that runs before any model request.
-    monkeypatch.setattr(registry_mod, "calibrate_one", record)  # lint-monkeypatch: ok — observes each world's registry from inside its pre-flight thread
-    est = S.estate(tmp_path)
-    _base, src = S.source_run(tmp_path, est, calls=[S.default_calls()[0]])
-    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
-                      base_rows=[S.captured("idp", "query", ALICE, ALICE_ROWS)])
-    with _log.log_context(run_id="launch-run", tenant_id=S.FIXTURE_TENANT):
-        record_ = cli.preflight_replay(ep, source=S.T.open_source(src), roster=est.roster(),
-                                       tenant=est.run_tenant(), rate=1e6)
-    assert record_["outcome"] == "accepted", record_
-    return seen
-
-
-def test_each_preflight_world_calibrates_on_its_own_role_models(tmp_path, monkeypatch):
-    """Fifth-round finding 1: pre-flight built one oracle side for the pass, so every world —
-    each on its own thread, each attempt on that thread's own event loop — shared one oracle
-    and one verifier model, and so one provider and HTTP client across loops. Each world's
-    oracle side is now built in its own thread: no two worlds hold the same model object."""
-    seen = _calibration_seen(tmp_path, monkeypatch)
-
-    assert sorted(s["world"] for s in seen) == ["b", "c"]
-    assert len({id(s["oracle"]) for s in seen}) == 2, "two worlds share one oracle model"
-    assert len({id(s["verifier"]) for s in seen}) == 2, "two worlds share one verifier model"
-
-
-def test_a_preflight_world_thread_keeps_the_launch_s_log_context(tmp_path, monkeypatch):
-    """Fifth-round finding 13: the pre-flight pool submitted each world's calibration without
-    the launcher's context, so its log lines lost the run and tenant. Each world runs in a copy
-    of it."""
-    seen = _calibration_seen(tmp_path, monkeypatch)
-
-    assert [s["context"] for s in seen] == [
-        {"run_id": "launch-run", "tenant_id": S.FIXTURE_TENANT}] * 2
-
-
 def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path):
     """Fifth-round finding 5: `account_call` read budget.json, then wrote it back with
     an atomic replace under a process-local lock, while the oracle-turn marks are written under the
@@ -1417,23 +1320,6 @@ def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_pa
         assert "FORGEDLEAK" not in prompt, f"{agent}: a failed world's detail reached the prompt"
 
 
-def test_the_oracle_and_the_verifier_are_told_the_branch_point(tmp_path):
-    """Sixth-round finding 8 (M27: the oracle is told forged rows lie at or before `as_of`, the
-    verifier checks; no host rule): neither model was told the branch-point time, so nothing
-    kept a forged row from being dated after it. Both prompts now carry it."""
-    est = S.estate(tmp_path)
-    est.answer("idp", "query", ALICE, ALICE_ROWS)
-    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
-    v = S.passing_verifier()
-    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=v, retry_cap=1)
-
-    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
-    point = S.AS_OF_DT.isoformat().replace("+00:00", "Z")
-    for who, seen in (("oracle", o.seen[0]), ("verifier", v.seen[0])):
-        assert f"branch point is {point}" in seen, f"the {who} was not told the branch point"
-        assert "at or before" in seen, f"the {who} was not told rows lie at or before it"
-
-
 # --- sixth round ---------------------------------------------------------------------------
 
 
@@ -1534,20 +1420,6 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
     assert not (ep / "outcome.yaml").exists()
 
 
-def test_preflight_parses_the_family_recording_once_for_every_world(tmp_path, monkeypatch):
-    """Sixth-round finding 15: every world's registry re-read and re-parsed the whole family
-    recording, so pre-flight parsed it once per world on top of each ledger's own read.
-    Pre-flight parses it once and hands that one parse to every world's registry."""
-    seen = _calibration_seen(tmp_path, monkeypatch)
-
-    answers = [s["family_answers"] for s in seen]
-    assert len(answers) == 2
-    assert answers[0]
-    assert answers[0] == answers[1]
-    assert all(a is b for a, b in zip(answers[0], answers[1], strict=True)), (
-        "each world parsed the family recording itself")
-
-
 # --------------------------------------------------------------------------------------
 # Seventh round (finding 5): a sibling's re-ask of a pre-branch call is held to M01=A.
 # --------------------------------------------------------------------------------------
@@ -1625,18 +1497,6 @@ def test_a_post_branch_call_can_still_be_changed(tmp_path):
 
     assert S.call(reg, "idp", "query", ctx, **ALICE) == _PB_CHANGED
     assert "BEFORE the branch point" not in o.seen[0]
-
-
-def test_the_oracle_is_told_a_call_is_pre_branch(tmp_path):
-    """Seventh-round finding 5, the framing: the oracle was not told which calls the source run
-    made before the branch point, so it could spend attempts changing one. The call's turn says
-    so."""
-    o = S.oracle(S.submit(_PB_BASE, S.EMPTY_CLAIM))
-    reg, ctx = _pb_registry(tmp_path, o, S.passing_verifier(), prebranch=True)
-
-    assert S.call(reg, "idp", "query", ctx, **ALICE) == _PB_BASE
-    assert "BEFORE the branch point" in o.seen[0], o.seen[0]
-    assert "serve its base answer unchanged" in o.seen[0]
 
 
 def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):

@@ -59,8 +59,6 @@ def typed(rec: VerbRecorder) -> FakeVerbs:
     return FakeVerbs({"elastic": {"probe": probe}})
 
 
-
-
 def test_a_mistyped_param_is_a_usage_error_not_an_infra_failure(tmp_path):
     """A string where the verb declares `int` is the AGENT's mistake: exit 64, error_class
     agent-fixable, and the verb is never reached. Unvalidated it raised TypeError inside the
@@ -120,8 +118,6 @@ def test_a_bool_is_not_an_int(tmp_path):
     assert r.row()["exit_code"] == 64
 
 
-
-
 def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_path):
     """The check must not reject what the verb actually declares: `None` for `X | None`, a dict
     for `dict[str, str]`, an int for `int`. A validator that denies the happy path is worse than
@@ -137,8 +133,6 @@ def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_p
     assert len(rec.calls) == 1, "a well-typed call was rejected"
     assert rec.calls[0].params["filters"] == {"host": "web-1"}
     assert r.row()["exit_code"] == 0
-
-
 
 
 @pytest.mark.parametrize(("system", "verb", "params", "why"), [

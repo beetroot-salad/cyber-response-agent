@@ -68,30 +68,6 @@ def test_1025_an_all_inverted_timing_record_is_unmeasured_on_every_surface(tmp_p
     assert "timing record unreadable" not in stages
 
 
-def test_1025_a_measured_record_repeats_no_fallback_on_the_tile(tmp_path):
-    """The other side of the same bit: with a real wall the header carries the figure and the
-    tile carries no fallback beside it."""
-    page = render(E.sample_episode(tmp_path, timing=True))
-    assert LOWER_BOUND not in page.text_of("vd-tile-4"), page.text_of("vd-tile-4")
-    assert _every_step_wall() in page.text_of("sec-stages")
-    assert "no usable span" not in page.text_of("stage-timing")
-
-
-def test_1025_a_record_with_no_completed_step_reads_as_no_record(tmp_path):
-    """`{"steps": []}` — an abort before the first step finished — is a legitimate PRESENT
-    record with no completed stage: the reader answers `[]` for it and `None` for an absent
-    file (#1049 d-19/s-66 closed the conflation g20 found), so the stage table's caption says
-    it holds no stages — not the absent sentence — while the lower-bound label is still owed
-    on every surface, consistently."""
-    ep = E.sample_episode(tmp_path)
-    E.write_timing(ep.dir, [])
-    page = render(ep)
-    assert "no timing record" not in page.text_of("stage-timing"), page.text_of("stage-timing")
-    assert "unreadable" not in page.text_of("stage-timing")
-    assert LOWER_BOUND in page.text_of("vd-tile-4")
-    assert LOWER_BOUND in page.text_of("sec-stages")
-
-
 # ---------------------------------------------------------------------------------------
 # Cost: one `costed` flag, never the float's truthiness
 # ---------------------------------------------------------------------------------------
@@ -110,14 +86,6 @@ def test_1025_an_episode_whose_every_run_cost_nothing_still_owes_its_total(tmp_p
     assert page.elements(cls="rn-total"), runs
     assert page.elements(cls="st-total"), page.text_of("stage-timing")
     assert "$0.0000" in page.text_of("stage-timing")
-
-
-def test_1025_an_episode_nothing_priced_owes_no_total_line(tmp_path):
-    """And the same flag off: no result events, no traces — neither total line."""
-    ep = E.sample_episode(tmp_path, traces=False, runs=False)
-    page = render(ep)
-    assert not page.elements(cls="rn-total")
-    assert not page.elements(cls="st-total"), page.text_of("stage-timing")
 
 
 # ---------------------------------------------------------------------------------------

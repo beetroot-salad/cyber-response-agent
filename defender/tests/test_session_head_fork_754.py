@@ -35,10 +35,7 @@ from defender.run_repository import SessionPaths  # noqa: E402
 # fork: the branch point becomes a log entry
 
 def test_fork_logs_null_to_branch_point(tmp_path):
-    """    Constructing a fork sets the new session's head to the branch point and records that move
-    as a `fork` entry whose `from_message_id` is SQL NULL — the fork came from nowhere, it
-    displaced nothing — and whose `to_message_id` is the branch point itself. The entry lands
-    under the CHILD's session_id: it is the child's head that moved."""
+    """Constructing a fork sets the new session's head to the branch point and records that move"""
     # provenance: issue obligation 4a.
     ss = store_mod()
     store = make_store(tmp_path)
@@ -59,13 +56,7 @@ def test_fork_logs_null_to_branch_point(tmp_path):
 
 
 def test_branch_point_survives_the_parent_folding_past_it(tmp_path):
-    """    After the parent folds past the branch point, the fork's branch point is still answerable
-    exactly: `branch_point` returns the recorded row even though the parent's own path no
-    longer reaches it, and a merge-base derivation over the two live paths would return a
-    DIFFERENT, wrong answer.
-
-    That is the whole case for recording the branch point rather than deriving it: derivation
-    does not fail, it answers the lineage root while the true branch point is elsewhere."""
+    """After the parent folds past the branch point, the fork's branch point is still answerable"""
     # provenance: issue obligation 4b (D2), reproduced from B5 (executed).
     ss = store_mod()
     sel = selection_mod()
@@ -91,10 +82,7 @@ def test_branch_point_survives_the_parent_folding_past_it(tmp_path):
 
 
 def test_a_forks_head_is_independent_of_the_parents_later_appends(tmp_path):
-    """    A fork's head never moves as a side effect of the parent's later appends, and the parent's
-    head never moves as a side effect of the fork's: every head UPDATE and every log INSERT
-    targets exactly one session_id, so the shared message-id space affects id VALUES and never
-    which session's head column moved."""
+    """A fork's head never moves as a side effect of the parent's later appends, and the parent's"""
     # provenance: P60 (the 'recorded, not derived' point), with P119 and P120.
     ss = store_mod()
     sel = selection_mod()
@@ -119,13 +107,7 @@ def test_a_forks_head_is_independent_of_the_parents_later_appends(tmp_path):
 
 
 def test_a_forks_first_append_is_linear_and_adds_no_second_entry(tmp_path):
-    """    A fresh fork's first append parents onto the head the fork already set, so the rule reads
-    it as LINEAR: it requires no reason, adds no second log row, and the session's only entry
-    stays the `fork` one written when the fork was constructed.
-
-    The complementary condition is driven too: the same append routed off head instead needs a
-    reason and is refused without one, so "no second entry" is a property of linearity rather
-    than of a log the fork cannot reach."""
+    """A fresh fork's first append parents onto the head the fork already set, so the rule reads"""
     # provenance: a fresh fork's hydrate IS the parent's prefix — the point of setting head at
     # fork time. B11 (executed) is the fact the design never stated; today the read is [].
     ss = store_mod()
@@ -153,15 +135,7 @@ def test_a_forks_first_append_is_linear_and_adds_no_second_entry(tmp_path):
 
 
 def test_a_fresh_fork_renders_its_inherited_prefix_exactly_once(tmp_path):
-    """    `fork` sets the child's `last_render_len` to the length of the prefix it inherits, so the
-    first ingest into a fresh fork appends NOTHING for the messages the prefix already covers
-    and appends exactly one row for the first genuinely new message. No message is stored
-    twice.
-
-    Leaving the render length behind is not a silent inefficiency but a duplication: the tail
-    slice reads zero regardless of how many rows the effective history already covers, so the
-    whole live list is re-appended as byte-identical rows, and the underflow guard cannot
-    catch it because it only fires when the live list is SHORTER than the last render."""
+    """`fork` sets the child's `last_render_len` to the length of the prefix it inherits, so the"""
     # provenance: PR-24 (executed) measured it — three inherited messages became ids [4,5,6]
     # beside [1,2,3]. Driven through fork plus ingest, not through the store alone.
     ss = store_mod()
@@ -196,10 +170,7 @@ def test_a_fresh_fork_renders_its_inherited_prefix_exactly_once(tmp_path):
 # the log readers
 
 def test_displaced_tip_survives_later_appends(tmp_path):
-    """    The tip a fold displaced stays answerable after the conversation moves on: ordinary turns
-    after the fold do not disturb it, and walking `parent_id` back from it still reaches every
-    turn the fold cut, so the log plus the message tree is a real reconstruction surface
-    rather than a marker."""
+    """The tip a fold displaced stays answerable after the conversation moves on: ordinary turns"""
     # provenance: issue obligation 3; P77. Which fold's tip a single reader returns — the most
     # recent — is why the ordered accessor exists beside it.
     ss = store_mod()
@@ -223,14 +194,7 @@ def test_displaced_tip_survives_later_appends(tmp_path):
 
 
 def test_the_full_fold_history_is_readable_in_order(tmp_path):
-    """    Over a session that folded three times, the fold history returns all three displaced tips
-    in head-move order, and its last element is what the single-value reader returns. Both
-    answer emptily — the empty history, and `None` — for a session that never folded and for a
-    session_id that does not exist, rather than raising.
-
-    "Most recent" alone makes the FIRST fold's tip unreachable through the helper, which is
-    precisely the addressability the log was built for and precisely what the reconstruction
-    case needs every entry for. Ids only: nothing projects an off-path id to its content."""
+    """Over a session that folded three times, the fold history returns all three displaced tips"""
     # provenance: FK-A(a) and (d); P77 is the reconstruction case.
     ss = store_mod()
     sel = selection_mod()
@@ -258,19 +222,7 @@ def test_the_full_fold_history_is_readable_in_order(tmp_path):
 
 
 def test_branch_point_ignores_a_log_row_with_a_non_null_from_message_id(tmp_path):
-    """    A `fork`-reasoned entry whose `from_message_id` is not NULL is not a branch point and the
-    reader ignores it: `branch_point` answers `None` for the session that holds it — and still
-    answers `None` once a NULL-origin row carrying a different reason sits beside it — while a
-    genuine fork's branch point on the same store still resolves.
-
-    A row like this records an ordinary non-linear move that happened to carry the fork
-    reason, and its origin is the head it displaced. It is distinguishable from a real branch
-    point — but only if the reader is specified to look, and without that the helper returns a
-    plausible, wrong branch point for any session someone reached that way.
-
-    The fixture is built through a raw connection, because `append` refuses the fork reason
-    from every caller and the schema constrains nothing: an out-of-band writer is the case the
-    reader's filter actually has to survive."""
+    """A `fork`-reasoned entry whose `from_message_id` is not NULL is not a branch point and the"""
     # provenance: P48, the sharpest single observation in the measurement; P32 for the raw
     # route. The writer-side refusal and the reader-side filter are two independent guards.
     ss = store_mod()
@@ -307,21 +259,7 @@ def test_branch_point_ignores_a_log_row_with_a_non_null_from_message_id(tmp_path
 
 
 def test_branch_point_requires_a_fork_reason_not_just_a_null_origin(tmp_path):
-    """A branch point is a log row that is BOTH origin-less and fork-reasoned: the reader
-    answers `None` for a session whose only NULL-origin row carries the fold reason, while a
-    genuine fork's branch point on the same store still resolves. On that same session
-    `displaced_tip` answers `None` too — a fold that displaced nothing is indistinguishable
-    from never having folded.
-
-    Filtering on a NULL origin alone is sound only while a NULL origin means "fork". It does
-    not: a session whose path is empty has no previous head, so any move recorded there —
-    including a fold — carries a NULL origin. A reader that checks only the origin hands that
-    row back as the branch point of a session nobody forked, which is exactly the wrong-answer
-    failure the branch point is recorded rather than derived to avoid.
-
-    The row is written through a raw connection because that is the route that survives every
-    writer-side rule: the schema constrains the reason column not at all, so the reader is the
-    guard that holds regardless of who wrote the row."""
+    """A branch point is a log row that is BOTH origin-less and fork-reasoned: the reader"""
     # provenance: the premise this closes was implicit in FK-A(c) and never written down —
     # a NULL origin was unreachable except through fork() until a linear reason-bearing move
     # became legal. PR-6 (executed) is what makes the fold-shaped route real.
@@ -359,23 +297,7 @@ def test_branch_point_requires_a_fork_reason_not_just_a_null_origin(tmp_path):
 # obligation 8 — the one transaction, in every failure shape
 
 def test_head_and_log_move_in_one_transaction(tmp_path):
-    """    The head UPDATE and the conditional log INSERT ride inside the same transaction as the
-    message rows: when a message partway through a batch cannot be stored, the whole call
-    leaves nothing — no message row, head unmoved, and no log entry — and the identical batch
-    with a storable payload commits all three effects together. **There is no state in which
-    head moved and its log entry is missing.**
-
-    The fault is real and lands mid-transaction: the second message of the batch is an object
-    the REAL serializer refuses, after the first message's row has already been inserted. A
-    fault at two further points inside one call cannot be addressed from outside it, so the
-    non-linear arm is what covers the log INSERT specifically — a log row was due on that
-    call, and wherever inside the transaction the fault lands, a fresh read shows no new row,
-    head unmoved and no entry.
-
-    The block stays synchronous: adding an `await` inside it reintroduces
-    interleaved-transaction corruption across concurrently-dispatched gather sessions sharing
-    one connection, which is why the new statements go inside the existing block rather than
-    beside it."""
+    """The head UPDATE and the conditional log INSERT ride inside the same transaction as the"""
     # provenance: issue obligation 8; P11-P14 and P16. The fault object cites B8 (executed).
     # The coroutine-shape assertion records the no-await constraint; it is true of today's
     # code and does not discriminate on its own.
@@ -413,18 +335,7 @@ def test_head_and_log_move_in_one_transaction(tmp_path):
 
 
 def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(tmp_path):
-    """    A refused append is invisible to a later reader, whatever refused it: when the wait for a
-    contended write expires before the transaction ever begins, when the database can no
-    longer grow, and when a writer abandons an open transaction without committing, the file
-    read back from scratch shows the complete pre-append state — head at its prior value, the
-    log exactly as it was, no message row — and head and log agree with each other and with
-    that state. A refusal for an unrelated reason leaves every previously recorded move
-    intact.
-
-    All three faults are real and no exception class is authored: a genuine second connection
-    really holds the write lock with the store's own `busy_timeout` lowered so the real wait
-    really expires; the database is really taken to its real growth ceiling; a real open
-    transaction is really abandoned on a real second connection."""
+    """A refused append is invisible to a later reader, whatever refused it: when the wait for a"""
     # provenance: P1, P2 (the class is deliberately unpinned — the assertion is the rollback),
     # P7, P8 and P86. rp-c1 (executed) measured the exhaustion failure: SQLITE_FULL with
     # already-committed rows still readable. What a contention outlasting the timeout raises
@@ -512,16 +423,7 @@ def test_a_unique_seq_collision_rolls_back_the_head_move_and_the_log(tmp_path):
 
 
 def test_foreign_key_violations_on_the_head_and_log_writes_raise_and_roll_back(tmp_path):
-    """    Every foreign key this change relies on is enforced at write time and every violation
-    rolls the whole call back: an append into a session_id that does not exist raises and
-    leaves no row, an append naming a parent id that does not exist raises inside the
-    transaction and leaves head unmoved with nothing logged, a head UPDATE naming a message
-    that does not exist raises the identical error an INSERT-time violation does — while the
-    same UPDATE to a real row succeeds — and a log row naming a message or a session that does
-    not exist is refused by the log's own keys.
-
-    A head naming a row that does not exist is unreachable through the store's own API, which
-    is what the raw UPDATE arm establishes from the other side."""
+    """Every foreign key this change relies on is enforced at write time and every violation"""
     # provenance: P3, P4, P22, P34 and P36. PR-8 (executed) probed the UPDATE path B9 had not
     # and confirmed PRAGMA foreign_keys is ON on the real connection; PR-4: message.session_id
     # does carry a key to session; PR-10: a nonexistent parent raises at the INSERT inside
@@ -562,14 +464,7 @@ def test_foreign_key_violations_on_the_head_and_log_writes_raise_and_roll_back(t
 
 
 def test_the_path_walk_crosses_session_boundaries_and_head_is_not_confined(tmp_path):
-    """    The key on `head_message_id` requires only that SOME message row with that id exists,
-    never that its session_id matches: a head pointed at another session's row is accepted, and
-    the walk from it returns that session's rows as this one's path and hydrate output.
-    Nothing catches it — no CHECK, no trigger, no application guard — and the fork case makes
-    the same permissiveness ordinary rather than pathological.
-
-    This pins the PERMISSIVENESS as the contract, so a later change that quietly adds
-    confinement is caught and the absence stays examined rather than assumed."""
+    """The key on `head_message_id` requires only that SOME message row with that id exists,"""
     # provenance: P21, P28 and P33, grounded in B12/B13 (executed): the walk follows parent_id
     # regardless of session_id, and agent_id does not scope it either.
     ss = store_mod()

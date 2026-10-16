@@ -1,16 +1,4 @@
-"""Direct pins of the canonical frontmatter grammar (defender/_frontmatter.py).
-
-These are the CENTER of #591: the five folded sites route through this one
-grammar, so the grammar itself is pinned here directly rather than transitively
-through the site tests (spec_graph_591 d_canonical_grammar_pin, rejected
-alternative: "rely on the five site tests to pin the grammar transitively"). This
-file is GREEN against HEAD — the canonical parser already exists; the fold does
-not change it.
-
-CRLF and non-UTF8 are exercised at the *parser* level here (strings constructed
-in-test, so no ``read_text`` newline translation can mask them); the site tests
-use binary fixtures.
-"""
+"""Direct pins of the canonical frontmatter grammar (defender/_frontmatter.py)."""
 from __future__ import annotations
 
 import pytest

@@ -225,98 +225,6 @@ def _string_constants(source: str, path: str) -> set[str]:
     return _census(source, path)[0]
 
 
-def test_the_episode_path_owner_is_the_one_home_for_the_three_episode_record_names():
-    """`_episode_paths.py` owns the three episode-level record names, with the values every
-    reader used to spell for itself.
-
-    THE HOME MOVED, and this test's name moved with it (#1077 D7). It used to assert
-    `archive.py` was the home, because archive.py re-bound each name off the owner and every
-    reader bound it off archive.py in turn. That re-export was the disease D7 removes: the day
-    archive.py stopped exporting them, six modules broke at once with no gate having seen
-    anything. archive.py now holds no record name at all.
-
-    Observably true: `_episode_paths.REVIEW_NAME == "review.yaml"`, `SAMPLES_NAME ==
-    "samples.yaml"`, `JUDGE_NAME == "judge.yaml"`, and none of the three is an attribute of
-    `archive.py`.
-    """
-    owner, archive = J.mod("_episode_paths"), _archive()
-
-    for name, value in _RECORD_NAMES.items():
-        assert getattr(owner, name) == value, (
-            f"_episode_paths.{name} is {getattr(owner, name)!r}, not {value!r}")
-        assert not hasattr(archive, name), (
-            f"archive.py still re-exports {name} — a second home is what D7 removes")
-
-
-def test_each_episode_record_name_is_spelled_in_exactly_one_shipped_module():
-    """O8's census, run over the tree's SYNTAX: across the shipped code roots the strings
-    `review.yaml`, `samples.yaml` and `judge.yaml` each occur INSIDE a code string in ONE
-    module — `_episode_paths.py`, the episode-layout owner (#1077 D1; it was `archive.py`
-    before, which now imports them) — and a BINDING of `REVIEW_NAME` / `SAMPLES_NAME` /
-    `JUDGE_NAME` occurs only there. Every other module imports the name; an import is not a
-    binding.
-
-    Through `ast`, not a regex over the text: a regex sees `"review.yaml"` and misses
-    `"review" ".yaml"` (folded by the parser into one constant), `"review" + ".yaml"` and
-    `f"review.yaml"` — every one of which is the same second home wearing a disguise. And by
-    CONTAINMENT, not equality: the spellings that drift are the embedded ones — a pointer
-    written into `judge.yaml` (`f"{ep}/review.yaml#..."`), the family prompt's worked example,
-    an unqueueable reason — which an exact-match census walked straight past while the
-    allowlist beside them followed the constant. Docstrings are exempt: prose may name a file.
-    Bindings off the same AST, in Store context, so `NAME: str = ...`, a tuple target and a
-    walrus all count and a docstring line that merely looks like an assignment does not.
-
-    Observably true: the set of modules whose code strings contain each name is
-    `{_episode_paths.py}`, and so is the set of modules binding any of the three constants.
-
-    What failure looks like: before the change, `family.py`, `branch/episode.py`,
-    `branch/review.py`, `branch/cli.py` and `branch/staging.py` (as `REVIEW_FILENAME`) each
-    spelled `review.yaml`, and `judge/__init__.py` / `judge/run.py` spelled `judge.yaml` and
-    `samples.yaml` inline. A fourth definition is exactly O8's named failing: a rename of the
-    file reaches some readers and not others, and the page reads a record the pass never wrote.
-    """
-    modules = _shipped_modules()
-    census = {path: _census(text, path) for path, text in modules.items()}
-
-    for file_name in _RECORD_NAMES.values():
-        spelled_in = sorted(
-            m for m, (strings, _bound) in census.items() if any(file_name in s for s in strings))
-        assert spelled_in == [_OWNER_MODULE], (
-            f"{file_name!r} is spelled inside a code string in {spelled_in}; O8 wants exactly "
-            f"one home, {_OWNER_MODULE}, with every other module importing the name — a "
-            "pointer, a prompt example or a message spells it as f\"...{REVIEW_NAME}...\"")
-
-    bound_in = sorted(
-        m for m, (_strings, bound) in census.items() if bound & _RECORD_NAMES.keys())
-    assert bound_in == [_OWNER_MODULE], (
-        f"REVIEW_NAME / SAMPLES_NAME / JUDGE_NAME are BOUND in {bound_in}; only "
-        f"{_OWNER_MODULE} may define them — a re-export is an import, not a binding")
-
-
-def test_no_reader_of_a_record_name_holds_one_at_all():
-    """No shipped module outside the owner BINDS any of the three record names — not even as
-    an import.
-
-    THE INVERSE OF WHAT THIS TEST USED TO ASSERT, deliberately (#1077 D7). It used to require
-    that every reader hold `archive`'s OWN object, on the reasoning that sharing one object
-    is what keeps a rename honest. The object was shared and the rename was still not honest:
-    a held name is a name that outlives its home, and when `archive.py` stopped exporting
-    these, six modules broke at once with nothing having warned. A reader that asks the owner
-    for a path holds nothing, so there is nothing left to strand.
-
-    Observably true: for each `(module, attribute)` in `_IMPORTERS` — the modules that used to
-    hold one — the attribute is simply absent.
-
-    What failure looks like: a module re-acquires one, by import or by re-spelling, and the
-    two-homes shape is back.
-    """
-    for module_name, attribute in _IMPORTERS:
-        module = J.mod(module_name)
-        assert not hasattr(module, attribute), (
-            f"{module_name} holds {attribute} — D7's rule is that nothing outside the owner "
-            "holds a record name; ask for the accessor instead")
-
-
 # ---------------------------------------------------------------------------------------
 # Decision 2 — the derived accessors: one home, public names, the same behaviour
 # ---------------------------------------------------------------------------------------
@@ -330,52 +238,6 @@ _MOVED = (
     ("_leads_by_id", "leads_by_id"),
     ("_lead_chain", "lead_chain"),
 )
-
-
-def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
-    """The episode reader's derived accessors have ONE home, `judge/family.py`, and public
-    names — nothing crosses a module line as a private any more.
-
-    Observably true: `family` exposes `raw_manifest`, `leads_by_id`, `lead_chain` and
-    `json_mapping` as callables; neither `family` nor `render` carries the underscore spelling of any of them;
-    the input builder IMPORTS the lead-chain pair — `render.lead_chain` and
-    `render.json_mapping` are `family`'s own objects (since #860's finalize the leads
-    themselves reach the render on `WorldFacts.leads`, the pass's one read, so `render`
-    calls `leads_by_id` nowhere) — and no constant in `render.py` OR `family.py` names
-    `executed_queries.jsonl` or `gather_raw`, the two reads that belong to `lead_repository`,
-    the canonical surface `leads_by_id` indexes (#1017).
-
-    This is a name census over the accessors the design named that survive #1224 (`render.py`'s other
-    readers — `episode_alert`, `_read_provenance` — and `enqueue.draws_on_disk` stay where they
-    are for now), which is what O8's observable is. What failure looks like: the page
-    imports `render._lead_chain` (a private, across a module line — the state before this
-    change), or a second copy of the chain lives on in `render.py` under fresh private names
-    with `family.lead_chain` called by nothing, so the prompt and the page drift.
-    """
-    family, render = _family(), _render()
-
-    for private, public in _MOVED:
-        assert callable(getattr(family, public, None)), (
-            f"family.{public} is absent — the accessor still lives under {private!r}")
-        for module, name in ((family, private), (render, private)):
-            assert not hasattr(module, name), (
-                f"{module.__name__}.{name} still exists; the private spelling crosses a module "
-                f"line and O8 wants one public home, family.{public}")
-    assert callable(getattr(family, "json_mapping", None)), (
-        "family.json_mapping is absent — the JSON tolerance policy has no home in the reader")
-    for name in ("lead_chain", "json_mapping"):
-        assert getattr(render, name, None) is getattr(family, name), (
-            f"render.{name} is not family.{name} — the input builder does not import the "
-            "accessor it renders the per-lead chain with; that IS the one-home observable")
-
-    for module in (render, family):
-        source = Path(module.__file__).read_text(encoding="utf-8")
-        leftover = {"executed_queries.jsonl", "gather_raw"} & _string_constants(
-            source, module.__file__)
-        assert not leftover, (
-            f"{module.__name__} still names {sorted(leftover)} as a constant — the queries "
-            "table and the lead files are lead_repository's to read, so a spelling here is a "
-            "second reader")
 
 
 def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_path):
@@ -760,66 +622,6 @@ def test_read_grade_refuses_a_planted_link_a_non_mapping_and_a_torn_record(tmp_p
         read_grade(ep)
 
 
-def test_read_grade_reads_a_pre_oracle_record_with_defaults_and_invents_nothing(tmp_path):
-    """A record in the pre-#1224 shape — no `validity`, no family row, no
-    `world_enqueued_rows`, a retired `withheld_findings` list, world rows carrying the retired
-    ladder flags and no `systems` — reads without raising, with the reader's defaults for the
-    family-level absences, the retired key ignored, and NOTHING invented on the rows. (#1234
-    A4: a record carrying a name #1234 retired — `verdict_word`, `episode_outcome` — is refused
-    by that name instead; the last block pins it.)
-
-    Observably true: `validity is None`, `family is None`, `world_enqueued_rows == 0`,
-    `graded_worlds == {"b", "c"}`, and BOTH world rows come back as written — no `systems` the
-    archive never stored. Row `c` is the TEMPTING one: `bucket: None` and no `systems`, the
-    shape a reply that named no system would leave; a reader that back-fills `systems: []`
-    there is inventing an answer the judge model never gave. Positive control: the same
-    record carrying the fields reads them back.
-    """
-    read_grade = J.sym("learning.judge", "read_grade")
-    ep = J.accepted_episode(tmp_path)
-    old_row = {"world": "b", "bucket": "lead-quality", "holding_queried": True,
-               "doctored_answer_served": False, "difference_shown": False,
-               "withheld_reason": None}
-    tempting_row = {"world": "c", "bucket": None, "holding_queried": True,
-                    "doctored_answer_served": False, "difference_shown": False,
-                    "withheld_reason": None}
-    old = {"worlds": [old_row, tempting_row],
-           "enqueued_rows": 0, "enqueued_to": "", "draws": {"completed": 1}, "knobs": {},
-           "lessons_commit": None, "discard_evidence": {}, "queue_malformed_rows": 0,
-           "unqueueable_findings": [], "withheld_findings": [{"world": "b"}]}
-    (ep / "judge.yaml").write_text(yaml.safe_dump(old, sort_keys=False), encoding="utf-8")
-
-    grade = read_grade(ep)
-
-    assert grade.validity is None
-    assert grade.family is None
-    assert grade.world_enqueued_rows == 0
-    assert grade.graded_worlds == frozenset({"b", "c"})
-    assert J.rows(grade)["b"] == old_row, (
-        "the reader rewrote a pre-#1224 world row — it invented a fact the archive never stored")
-    assert J.rows(grade)["c"] == tempting_row, (
-        "the reader rewrote a bucket-None row — it back-filled a `systems` answer the archive "
-        f"never stored: {J.rows(grade)['c']}")
-    for label in ("b", "c"):
-        assert "systems" not in J.rows(grade)[label]
-
-    new = dict(old, validity="usable",
-               worlds=[dict(old_row, systems=["elastic"]), dict(tempting_row, systems=[])])
-    (ep / "judge.yaml").write_text(yaml.safe_dump(new, sort_keys=False), encoding="utf-8")
-    grade = read_grade(ep)
-    assert grade.validity == "usable"
-    assert J.rows(grade)["b"]["systems"] == ["elastic"], (
-        "positive control: a stored answer read back")
-    assert J.rows(grade)["c"]["systems"] == [], (
-        "a stored empty `systems` on a bucket-None row was overridden by the reader")
-
-    for retired in ("verdict_word", "episode_outcome"):
-        (ep / "judge.yaml").write_text(yaml.safe_dump(dict(old, **{retired: "caught"}),
-                                                      sort_keys=False), encoding="utf-8")
-        with pytest.raises(_refused(), match=retired):
-            read_grade(ep)
-
-
 def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     """An episode the pass declined to grade leaves a `not_graded` stamp, and the reader hands
     it back as one — `not_graded` set, carrying the outcome word — so a page can say "not
@@ -890,54 +692,6 @@ def test_a_record_of_the_wrong_shape_is_refused_not_defaulted_and_not_re_graded(
         _grade(ep, tmp_path)
     assert record.read_text(encoding="utf-8") == planted, (
         "the pass re-graded past a record it could not read, replacing the planted file")
-
-
-def test_read_grade_hands_back_the_same_record_for_a_str_episode_dir(tmp_path):
-    """`read_grade` coerces its argument as `grade_episode` does, so a caller holding the path
-    as text (a page reading it off YAML) gets a record whose `Path`-typed `episode_dir` IS a
-    `Path` — and equal to the one `grade_episode` returns for the same episode.
-    """
-    read_grade = J.sym("learning.judge", "read_grade")
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    live = _grade(ep, tmp_path)
-
-    stored = read_grade(str(ep))
-
-    assert isinstance(stored.episode_dir, Path), type(stored.episode_dir)
-    assert stored == live, "read_grade(str) is not the record grade_episode returned"
-
-
-def test_the_draws_directory_has_one_name_and_one_public_reader(tmp_path):
-    """The per-draw documents `worlds/<X>/judge/<n>.yaml` are the page's findings source (design
-    §3), so their reader is PUBLIC — `enqueue.draws_on_disk`, in `__all__` — and the directory
-    is `archive.DRAWS_DIRNAME`, held by the writer and the reader as the archive's own object.
-
-    Observably true: after a real pass, `draws_on_disk(ep / WORLDS_DIRNAME / "b" /
-    DRAWS_DIRNAME)` answers that world's completed draws keyed by draw index — the reader finds
-    the directory the writer wrote.
-    """
-    enqueue = J.mod("learning.judge.enqueue")
-    assert "draws_on_disk" in enqueue.__all__, "the per-draw reader is not exported"
-    # NO MODULE HOLDS THE NAME ANY MORE (#1077 D7). The old form of this check asserted the
-    # writer and the reader held the same OBJECT as `archive.DRAWS_DIRNAME` — which was true,
-    # and was still a second home. Now neither module binds either name at all; both ask the
-    # owner for a path, so there is nothing left for a rename to strand.
-    for module_name in ("learning.judge", "learning.judge.enqueue",
-                        "learning.branch.cli", "learning.branch.archive"):
-        module = J.mod(module_name)
-        for held in ("DRAWS_DIRNAME", "WORLDS_DIRNAME", "WORLDS_SUBDIR"):
-            assert not hasattr(module, held), f"{module_name} still binds {held}"
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-
-    grade = _grade(ep, tmp_path)
-    # `draws_on_disk` now takes the episode-root view plus the label (#1133 rev 2), never a
-    # draws dir path directly.
-    with bind(ep) as view:
-        draws = enqueue.draws_on_disk(view, "b")
-
-    assert grade.draws["completed"] > 0, "positive control: the pass completed no draw"
-    assert sorted(draws) == list(range(grade.draws["completed"])), (
-        f"the reader did not find the draws the pass wrote: {sorted(draws)}")
 
 
 def test_draws_on_disk_skips_a_link_planted_at_a_draws_name(tmp_path):

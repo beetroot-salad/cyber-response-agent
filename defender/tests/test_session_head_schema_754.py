@@ -38,11 +38,7 @@ from defender.run_repository import SessionPaths  # noqa: E402
 # the two tables' declared shape
 
 def test_session_head_log_has_the_declared_shape(tmp_path):
-    """    `session_head_log` is one STRICT table with SIX columns — an integer primary key, the
-    `session_id` it belongs to, a NULLABLE `from_message_id` (the displaced head), a NOT NULL
-    `to_message_id` (the new head), a nullable `attached_to_message_id` (the first inserted
-    row's own parent) and a NOT NULL `reason` — and both head-move kinds land in it, a fold
-    and a fork side by side, distinguished only by that reason."""
+    """`session_head_log` is one STRICT table with SIX columns — an integer primary key, the"""
     # provenance: B9 (executed) verified the DDL is satisfiable verbatim on this connection —
     # STRICT accepts a NULL origin and refuses a bogus destination.
     # rejected: D1's alternative of three narrow columns — head_message_id plus
@@ -86,15 +82,7 @@ def test_session_head_log_has_the_declared_shape(tmp_path):
 # the log as an append-only record
 
 def test_no_head_log_row_is_ever_updated_or_deleted(tmp_path):
-    """    No head move the store's own API can make ever rewrites or removes an entry already in the
-    log: driving a long mixed run of folds, forks and ordinary turns leaves every earlier row
-    byte-identical and still present, each new move only ADDING a row beside the ones already
-    there.
-
-    Append-only is a property of the WRITE SURFACE, not a SQL-enforced guarantee — the handle
-    exposes no mutator for these rows — so the second half of this test shows a raw connection
-    mutating and deleting one unopposed. Pinning "SQLite forbids it" would pin a guarantee
-    nothing provides."""
+    """No head move the store's own API can make ever rewrites or removes an entry already in the"""
     # provenance: P87, scoped by PR-22 (executed census): the only two production UPDATEs
     # anywhere target session.truncated_by and session.last_render_len; no trigger, no
     # constraint and no STRICT mechanism forbids a direct write.
@@ -130,11 +118,7 @@ def test_no_head_log_row_is_ever_updated_or_deleted(tmp_path):
 
 
 def test_head_log_row_order_by_id_reproduces_head_move_order(tmp_path):
-    """    Read in `id` order, the log reproduces the true order of the head moves that were made —
-    folds and forks interleaved — skipping the gaps left by the linear turns between them, so
-    a reader can replay the sequence without a timestamp column.
-
-    Scoped to the documented single-writer, no-rollback shape and not beyond it."""
+    """Read in `id` order, the log reproduces the true order of the head moves that were made —"""
     # provenance: P88. PR-7 (executed): rowid reuse after a ROLLBACK is confirmed, but id order
     # never diverged from commit order in any construction tried, including a genuine second
     # writer connection — which BLOCKED on the first's held lock rather than racing it. PR-13
@@ -164,10 +148,7 @@ def test_head_log_row_order_by_id_reproduces_head_move_order(tmp_path):
 
 def test_a_message_id_named_by_both_a_fold_and_a_fork_entry_stays_independently_recoverable(
         tmp_path):
-    """    One message id named by a fold entry as the tip it displaced AND by a fork entry as the
-    branch point it opened stays independently recoverable from both sides: the two are
-    distinct entries, nothing merges or dedupes by message id, and each reader answers from
-    its own side of the log."""
+    """One message id named by a fold entry as the tip it displaced AND by a fork entry as the"""
     # provenance: P78, asserted against the raw log as well as through the helpers so it holds
     # whatever either reader does.
     ss = store_mod()
@@ -194,13 +175,7 @@ def test_a_message_id_named_by_both_a_fold_and_a_fork_entry_stays_independently_
 
 
 def test_the_log_reads_back_identically_from_a_second_process(tmp_path):
-    """    After the run ends, a second process holding only the run dir resolves the store through
-    the pointer file, opens it read-only and reads back exactly the same state:
-    `head_message_id`, the path and every log row are identical for a head-set session AND for
-    a NULL-head one.
-
-    The log is ordinary committed SQLite state, which is what makes this true — so the test
-    really runs a second interpreter rather than opening a second handle in this one."""
+    """After the run ends, a second process holding only the run dir resolves the store through"""
     # provenance: P83 + P121, grounded in F6/C11 (census): the visualizer opens the store
     # read-only after the fact through the run-dir pointer, and is the only cross-process
     # reader.
@@ -245,16 +220,7 @@ def test_the_log_reads_back_identically_from_a_second_process(tmp_path):
 # the reason domain has no SQL enforcement behind it
 
 def test_reason_is_a_python_closed_set_not_a_sql_check(tmp_path):
-    """    SQLite objects to nothing about a reason outside the closed set: a raw connection inserts
-    a `rewind` entry into `session_head_log` and it lands, and a reader can still read it. The
-    store's own module-level closed set is the entire enforcement — which is why adding a third
-    reason later is a Python edit and not a migration, and why an out-of-set reason through
-    `append` is refused by that check and by nothing else.
-
-    A reason is not checked against the MOVE's shape either: the store cannot tell a
-    compaction from a rewind, so a `fold` entry written over an arbitrary rewind is
-    indistinguishable in the log from a genuine one, and pretending otherwise would invent a
-    semantics the log does not carry."""
+    """SQLite objects to nothing about a reason outside the closed set: a raw connection inserts"""
     # provenance: P47/P32.
     ss = store_mod()
     store = make_store(tmp_path)
@@ -285,14 +251,7 @@ def test_reason_is_a_python_closed_set_not_a_sql_check(tmp_path):
 # every role-scoped reader over a NULL-head session
 
 def test_every_role_scoped_reader_returns_empty_for_a_null_head_session(tmp_path):
-    """    Every role-scoped read of a session whose head is NULL returns empty — `send`, `analysis`
-    and `actor` projections and the synthesized-flag projection alike — because all four derive
-    from the same path walk, and the walk from no head yields no rows.
-
-    The enumeration is how the four subjects are picked, not what is asserted about them: each
-    reader is DRIVEN over the same session, first with head cleared and then with head
-    restored, and the restored read is what makes "empty" a fact about the head rather than
-    about a reader that returns nothing to anybody."""
+    """Every role-scoped read of a session whose head is NULL returns empty — `send`, `analysis`"""
     # provenance: P117 (2/2 after discounting one copy) and P116, settled by C7: all four
     # surfaces go through path_row_ids, so an empty path yields nothing on every one.
     ss = store_mod()
@@ -328,17 +287,7 @@ def test_every_role_scoped_reader_returns_empty_for_a_null_head_session(tmp_path
 
 
 def test_hydrate_fails_closed_on_an_unresolvable_path_element(tmp_path):
-    """    When the walked path contains an id no `message` row resolves, every role-scoped read
-    raises a NAMED `StoreError` rather than dying on an uncaught `KeyError` — the read path
-    fails closed the way the write path already does.
-
-    The walk terminates cleanly on such an id and returns it as the path's OLDEST element
-    rather than raising or dropping it, so the failure surfaces one layer later, in a dict
-    lookup, as an error no caller can classify. The exception's own class is not pinned beyond
-    the family: what is demanded is that it is the store's, not the interpreter's. The live
-    route is a corrupted chain rather than an API call — the foreign key keeps a phantom id
-    out of both `parent_id` and `head_message_id` — which is why the fixture corrupts one
-    through a raw connection."""
+    """When the walked path contains an id no `message` row resolves, every role-scoped read"""
     # provenance: PR-3 (executed) measured the uncaught KeyError on the send and actor roles.
     # P29's consensus ('unreachable through the store's own API') is true of the WRITE path
     # only. This change makes it more reachable, not less: the walk's anchor stops being a
@@ -383,15 +332,7 @@ def test_hydrate_fails_closed_on_an_unresolvable_path_element(tmp_path):
 # the schema version, and where the refusal lands
 
 def test_open_store_refuses_a_user_version_1_file(tmp_path):
-    """    A store file stamped `PRAGMA user_version = 1` — the shape shipped before this change — is
-    refused at `open_store` with `UnknownSchemaVersion` naming the version it found, rather
-    than opened, migrated or read anyway.
-
-    Version 1 is pinned as a NAMED case, not as a member of a computed pair: the shipped
-    test's `(0, SCHEMA_VERSION + 1)` arithmetic becomes (0, 3) after the bump and leaves the
-    exact case the obligation names covered by nothing. The refusal deliberately stops at the
-    store boundary here; what the driver does with it is
-    `test_a_store_error_during_setup_ends_the_run_through_the_handled_exit`."""
+    """A store file stamped `PRAGMA user_version = 1` — the shape shipped before this change — is"""
     # provenance: issue obligation 9, as narrowed by correction C2.
     ss = store_mod()
     base = runs_base(tmp_path)
@@ -410,14 +351,7 @@ def test_open_store_refuses_a_user_version_1_file(tmp_path):
 
 
 def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
-    """    The reader refuses a stale file at the same point the writer does: `open_store_for_read` on
-    a version-1 file raises rather than handing back a handle that fails one call later, so the
-    refusal holds on EVERY via that reaches the store rather than on the writer's alone.
-
-    The reader is the only opener that ever meets a file it did not create — the writer always
-    mints its own fresh case_id file — so leaving it unchecked was exactly backwards. Both
-    openers are driven against the same file, with a current-version file both of them open as
-    the control."""
+    """The reader refuses a stale file at the same point the writer does: `open_store_for_read` on"""
     # provenance: OC-1 (census) refuted 'open_store_for_read version-checks': the check is
     # wired exclusively to hydrate. C11 for the asymmetry, OC-2 for the writer's fresh file.
     ss = store_mod()
@@ -441,10 +375,7 @@ def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
 
 
 def test_an_unknown_user_version_is_still_refused_at_the_new_raise_point(tmp_path):
-    """    A store whose `PRAGMA user_version` the store does not recognise is still refused — and the
-    refusal now arrives at `open_store` itself, not one call later at the first read. Below the
-    known version (0, the un-set sentinel), above it (3), and at a value nobody enumerated (99)
-    alike, so the check is a general inequality and not a named-member list."""
+    """A store whose `PRAGMA user_version` the store does not recognise is still refused — and the"""
     # provenance: correction C1 (binding), re-expressing #705's reader_refuses_an_unknown_user_
     # version at the new raise point; B16 (executed simulation) confirmed the shipped test
     # ERRORS once the check moves, because it calls open_store outside its pytest.raises block.
@@ -492,15 +423,7 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
 
 
 def test_the_session_pick_resolves_the_root_of_lineage_main_session(tmp_path):
-    """    The session the pick resolves is the ROOT-OF-LINEAGE main session — the one whose
-    `parent_session_id` is NULL — so a fork of main, which inherits `agent_id`, and a gather
-    leg's session are both excluded from the pick even when the row ordering favours them.
-
-    The counterfactual is what separates the predicate from the ordering: a forked main session
-    is given a LOWER rowid than the session it forked from, which the API cannot produce but
-    which a rowid-ordered pick would follow straight into the wrong transcript. The pick runs
-    in the VISUALIZER'S process, and a wrong pick renders the wrong run silently — no error,
-    just the wrong one."""
+    """The session the pick resolves is the ROOT-OF-LINEAGE main session — the one whose"""
     # provenance: P113, grounded in B14 (executed): today's picker returns the true main only
     # because rowid ordering happens to favour it, and a fork of main is a second agent_id
     # 'main' row.
@@ -533,17 +456,7 @@ def test_the_session_pick_resolves_the_root_of_lineage_main_session(tmp_path):
 
 
 def test_the_root_of_lineage_query_raises_on_zero_or_multiple_matches(tmp_path):
-    """    When the root-of-lineage query does not resolve to exactly one session the pick
-    RAISES instead of choosing one: a store with no root-of-lineage main session at all fails
-    loudly rather than falling back to whatever row happens to sort first, and a store with TWO
-    independently-created main sessions fails loudly rather than rendering one of them
-    silently.
-
-    A second, independently created non-forked main session also satisfies the predicate, so
-    the pick's uniqueness is a breakable presupposition rather than a guarantee; limiting the
-    ambiguity away would turn it into a silently wrong transcript, which is the one failure
-    this reader cannot afford. The raised class is deliberately unpinned; what is pinned is
-    that a deliberate refusal happens instead of a transcript."""
+    """When the root-of-lineage query does not resolve to exactly one session the pick"""
     # provenance: P111 (the bare rowid fallback the design never mentions — a branch no test
     # can reach is worse than none) and P90 (the new finding the measurement surfaced).
     empty_dir, empty_store = _rendered_run(tmp_path, case_id="case-nomain")

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._corpus import iter_query_templates, read_query_template, section_bodies
+from defender._corpus import iter_query_templates, read_query_template
 from defender._paths import PATHS
 from defender.runtime.verb_grant import VerbGrant
 from defender.tests._dispositions995 import grant_for, load_dispositions, write_table

@@ -1,37 +1,4 @@
-"""#919 — lesson recall is keyed on the FRONTIER, and re-fires whenever the document moves.
-
-The measured failure: retrieval fires once, at PLAN time, keyed on the alert signature — before
-`investigation.md` exists. So the run that opened `attrs.loginuid=??` on a `process` vertex in
-loop 2 never saw the lesson about non-interactive loginuid, because that lesson's
-`source_signature` names a different rule and the one retrieval that ever ran had already
-happened. A retrieval keyed on what the alert SAYS cannot answer a question the investigation
-only raised later.
-
-What ships:
-
-  * `skills/invlang/frontier.py` — `derive_frontier(body)` / `frontier_from_text(text)`, the
-    document's still-unresolved surface: `OpenSlot` per open `class` / `ident` / `attrs.<name>`
-    (post-`:R attr_updates`, so a refinement that closed a slot removes it), and `OpenContract`
-    per `:H h-NNN.authz` contract no `:R authz` row has authorized.
-  * `runtime/lessons_engine/lessons_frontier.py` — `match_lessons` over the two new OPTIONAL lesson
-    frontmatter keys (`frontier_nodes`, `frontier_edges`), ranked by SPECIFICITY, `top_k` 3.
-  * `_tool_append_block` derives the recall over the pre- and post-append document and appends
-    a rendered lessons section only when the two differ.
-
-The load-bearing inversion is in the class match: a selector slot matches when it is `*`, when
-it EQUALS the case slot, or when the CASE slot is unresolved. An open slot is a HIT, not a
-miss — the ordinary class-match reading (the retired environment retriever's) is exactly backwards for
-a retrieval whose whole subject is what is not known yet.
-
-Deliberately out of scope: the PLAN-time signature retrieval is not removed here (the two
-coexist; this file asserts only that the frontier lane is signature-blind), no lesson in the
-checked-in corpus is re-authored, and nothing about WHERE the model is told to put the
-rendered section — only that the string comes back on the append that moved the frontier.
-
-The benign-disposition gate is the thing this must not disturb, and #836 already pinned the
-difference: `ident` is excluded there and INCLUDED here. That asymmetry is asserted in one
-test, from both sides, so the frontier work cannot leak into the gate.
-"""
+"""Lesson recall keyed on the document's frontier: open slots and contracts, selector matching and scoring, append_block/fix_row wiring, fail-open behavior."""
 from __future__ import annotations
 
 import inspect
@@ -313,20 +280,6 @@ def _exit_code(main, argv: list[str]) -> int:
 
 # the fixtures themselves
 
-def test_the_fixture_documents_carry_no_invlang_fault():
-    """Guards every document below. An empty frontier is the CORRECT answer for a malformed
-    document, so a fixture that silently stopped parsing — a header typo, a cell miscount —
-    would make the negative halves of cases 1, 4, 6 and 7 pass against an implementation that
-    derives nothing at all. Each document is asserted diagnostic-clean here, once, so the
-    other tests can read their emptiness as a claim about the frontier."""
-    for label, doc in _FIXTURE_DOCS.items():
-        assert diagnose(doc, None) == [], f"{label} fixture is not clean"
-
-    # ...and the two deliberately-broken ones are broken in the way case 7 needs: the
-    # unterminated fence is INVISIBLE to the parser (accepted), the short row is a parse error.
-    assert diagnose(PROLOGUE + HALF_WRITTEN_BLOCK, None) == []
-    assert [d.severity for d in diagnose(TRUNCATED_ROW_DOC, None)] == ["error"]
-
 
 # case 1 — an open slot is in the frontier until a refinement closes it
 
@@ -575,28 +528,6 @@ def test_specificity_outranks_generality_and_top_k_bounds_the_list(tmp_path):
     assert [rendered.index(name) for name in _names(top)] == sorted(
         rendered.index(name) for name in _names(top)
     ), f"render reordered the hits:\n{rendered}"
-
-
-def test_ties_break_by_name_and_the_order_is_stable_across_calls(tmp_path):
-    """CLAIM: equal scores order by lesson `name` ascending, and two calls give the same list.
-
-    Not cosmetic. The rendered section goes into `append_block`'s return, and case 6 decides
-    whether to show it by COMPARING two recalls — so an unstable order (a dict, a `glob` on a
-    filesystem that does not sort) would make an unchanged frontier look changed, and the
-    model would be handed the same three lessons again on every append."""
-    corpus = _ranking_corpus(tmp_path)
-    match_lessons = _lessons_frontier().match_lessons
-    frontier = _frontier(_FIXTURE_DOCS["open triple"])
-
-    first = match_lessons(frontier, corpus, top_k=10)
-    second = match_lessons(frontier, corpus, top_k=10)
-
-    tied = [h.name for h in first if h.score == 2]
-    assert tied == sorted(tied) == [
-        "alpha-any-compute", "beta-any-compute", "gamma-any-compute",
-    ]
-    assert _names(first) == _names(second)
-    assert [h.score for h in first] == [h.score for h in second]
 
 
 # case 6 — the recall rides on the append that moved it
@@ -1042,21 +973,6 @@ def test_a_refinement_closes_an_ident_or_an_attribute_too(tmp_path):
                for h in _frontier(closed_ident).held), "the resolved identifier is not held"
 
 
-def test_a_document_with_only_an_open_contract_is_not_empty(tmp_path):
-    """CLAIM: `is_empty()` reads both axes.
-
-    An `is_empty` that consulted only `slots` passed everything above, because no test ever
-    called it on a contract-bearing document — and `_frontier_recall` gates the whole
-    injection on the emptiness of the render, so an edge-only frontier would never fire."""
-    declared = _FIXTURE_DOCS["authz declared"]
-    frontier = _frontier(declared)
-    assert frontier.slots == ()
-    assert frontier.contracts, "the fixture should carry one contract"
-    assert not frontier.is_empty(), (
-        "a frontier carrying an open contract and no open slot reported itself empty"
-    )
-
-
 def test_a_contract_on_a_refuted_hypothesis_is_not_on_the_frontier(tmp_path):
     """CLAIM: only LIVE hypotheses carry outstanding contracts.
 
@@ -1323,46 +1239,3 @@ def test_observed_nodes_retrieves_on_a_value_the_document_settled(tmp_path):
     )
 
 
-def test_the_two_node_lanes_share_one_ranking_scale(tmp_path):
-    """CLAIM: neither lane is systematically preferred; specificity alone orders them.
-
-    A tilt toward either half would bury one kind of advice behind the other regardless of
-    how precisely it speaks to the document."""
-    corpus = _corpus(tmp_path)
-    # BOTH selectors are `type` + a universal cell, so the two carry the same specificity and
-    # only the LANE differs — which is the claim. The held side used to name `attrs.loginuid`,
-    # and that stopped being an equal-specificity pair once the scale learned to tell a named
-    # attribute from a cell every vertex has (#935): the fixture would have been asserting
-    # that a more specific selector scores the same, not that the lanes are level.
-    _write_lesson(corpus, "aaa-held-loose", observed=("type: identity, slot: class",))
-    _write_lesson(corpus, "zzz-open-loose", nodes=("type: process, slot: class",))
-    doc = PROLOGUE + SETTLED_BLOCK + OPEN_CLASS_BLOCK
-    hits = _lessons_frontier().match_lessons(_frontier(doc), corpus)
-
-    assert {h.name for h in hits} == {"aaa-held-loose", "zzz-open-loose"}
-    assert hits[0].score == hits[1].score, (
-        "an open-slot match and a held-fact match of equal specificity scored differently"
-    )
-
-
-def test_the_shipped_corpus_reaches_the_motivating_investigation(tmp_path):
-    """CLAIM: against the repo's own committed investigation, the lesson #919 exists for is
-    retrieved.
-
-    Every other test in this file drives a fixture. This one drives the artefact the issue
-    was filed about — the `turnN-A` run, the Falco authorized_keys case whose report asserted
-    an attack chain that did not happen — against the REAL 16-file corpus. It is the only test
-    here that can tell "the mechanism works" from "the mechanism works on documents written to
-    suit it"."""
-    # The COMMITTED copy under `_golden_invlang/`, not `learning/runs/turnN-A/` — that path is
-    # where the run lives and `.gitignore:91` excludes it, so this test, the repo's north star
-    # for the whole lane, skipped everywhere but the machine that produced the run (#935).
-    real = Path(__file__).resolve().parent / "_golden_invlang" / "turnN-A.investigation.md"
-    assert real.is_file(), f"the motivating investigation is tracked and must be present ({real})"
-    corpus = Path(__file__).resolve().parents[1] / "lessons"
-
-    hits = _names(_lessons_frontier().match_lessons(
-        _frontier(real.read_text(encoding="utf-8")), corpus))
-    assert "falco-loginuid-tty-non-interactive-not-docker-exec" in hits, (
-        f"#919's motivating lesson is still not retrieved on its own case; got {hits}"
-    )

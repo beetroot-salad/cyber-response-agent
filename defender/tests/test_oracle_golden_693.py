@@ -70,12 +70,7 @@ _EVAL_TELLS = ("oracle", "negative control", "golden", "projection", "every lead
 
 @pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
 def test_no_story_states_the_expected_result(case_dir):
-    """A story is an ORACLE INPUT — the one file the hidden/visible split cannot
-    protect, because it is deliberately visible. The seed negative control's story
-    announced that it WAS a negative control and that the oracle "must therefore
-    return `0` for every lead", which is the scoring answer written into the
-    prompt. Rationale belongs in expected.yaml / manifest.yaml, which the oracle
-    never reads."""
+    """A story is an ORACLE INPUT — the one file the hidden/visible split cannot protect, because it is deliberately visible."""
     story = (case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8").lower()
     assert not [tell for tell in _EVAL_TELLS if tell in story], (
         f"{case_dir.name}/oracle_visible/story.md leaks the evaluation frame to the "
@@ -96,13 +91,7 @@ SCORE_FILES = list(_committed_scores())
 @pytest.mark.parametrize(("case_dir", "score_path"), SCORE_FILES,
                          ids=lambda p: p.name)
 def test_every_checked_in_score_names_the_judge_in_its_tag(case_dir, score_path):
-    """§6: the judge runs at score time, so it is part of the tag. A score whose tag does
-    not match the judge recorded inside it was filed under a judge that did not produce
-    it — the failure two machines with different `JUDGE_MODEL` defaults would cause.
-
-    This also fails EVERY committed score the moment either prompt is edited, because
-    the tag carries a hash over both. That is the design's rule made mechanical: editing
-    a prompt is a new tag requiring a full re-score, exactly like an oracle change."""
+    """§6: the judge runs at score time, so it is part of the tag."""
     doc = json.loads(score_path.read_text(encoding="utf-8"))
     assert doc["tag"] == score_path.stem, "the artifact disagrees with its own filename"
     recorded = doc["judge"]

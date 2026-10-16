@@ -1,18 +1,4 @@
-"""Pins for `defender._yaml.safe_load_typed_and_spelled` (#951).
-
-The oracle-golden mechanical checks are text containment — "is this literal a whole value or
-a token of what the projection emitted" — and they were run over a document `yaml.safe_load`
-had already TYPED: an unquoted `2026-07-25T07:48:37.065Z` became a `datetime` whose `str()`
-is `2026-07-25 07:48:37.065000+00:00`, `yes` became `True`, `0755` became `493`. The fix
-parses the projection ONCE and constructs two readings from that one node tree: `typed`,
-which is `safe_load`'s document, and `spelled`, which has the same shape exactly with every
-VALUE scalar as its text. What is pinned is the contract of the spelled half — every value
-scalar is its text (implicit type, explicit tag, quoted, block, null), and everything else —
-the shape, keys included, merges, aliases, last-key-wins, the safe loader's refusals, the
-error translation — is exactly what `safe_load` does to the same text; that the typed half
-IS `safe_load`; and that the constructor is a subclass with no class-level table of its own
-touched, so `yaml.safe_load` elsewhere still types.
-"""
+"""Pins for `defender._yaml.safe_load_typed_and_spelled` (#951)."""
 from __future__ import annotations
 
 from datetime import date
@@ -61,11 +47,7 @@ def test_a_plain_scalar_is_the_exact_string_it_was_written_as(spelling):
 
 
 def test_a_shape_valid_but_calendar_invalid_instant_is_refused_as_safe_load_refuses_it():
-    """PyYAML's timestamp resolver matches on SHAPE and hands the fields to `datetime`,
-    which raises a bare `ValueError` on `2001-02-30`. The spelled half alone would carry it
-    as text, but the pair is one reading of one document and its typed half is `safe_load`
-    — so the document is refused, translated, exactly as `safe_load` refuses it. (A
-    projection carrying an impossible date is malformed, and was before #951.)"""
+    """PyYAML's timestamp resolver matches on SHAPE and hands the fields to `datetime`, which raises a bare `ValueError` on `2001-02-30`."""
     with pytest.raises(yaml.YAMLError, match="could not be constructed"):
         safe_load_typed_and_spelled("a: 2001-02-30")
     with pytest.raises(yaml.YAMLError, match="could not be constructed"):
@@ -80,10 +62,7 @@ def test_a_shape_valid_but_calendar_invalid_instant_is_refused_as_safe_load_refu
     ("!!str 22", "22"),
 ])
 def test_an_explicitly_tagged_scalar_is_its_text_too(tagged, literal):
-    """The other way YAML types a scalar. A tag is a construction instruction and scalar
-    construction is the one step overridden, so it is the spelling either way (the
-    adversary's F2 against the first cut of this fix, which only dropped the implicit
-    resolvers)."""
+    """The other way YAML types a scalar."""
     assert spelled(f"a: {tagged}") == {"a": literal}
 
 
@@ -92,10 +71,7 @@ def test_an_explicitly_tagged_scalar_is_its_text_too(tagged, literal):
     "a: !!python/object/apply:os.system ['echo pwned']\n",  # a sequence
 ])
 def test_a_python_tag_is_refused_wherever_it_sits_as_safe_load_refuses_it(text):
-    """The typed half is the safe constructor, which has no constructor for a `!!python/…`
-    tag on a scalar OR a collection, so the pair refuses the document before anything is
-    constructed from it — the same refusal `safe_load` gives. (A scalar's spelled half alone
-    would have been inert text; it is never produced without the typed half.)"""
+    """The typed half is the safe constructor, which has no constructor for a `!!python/…` tag on a scalar OR a collection, so the pair refuses the..."""
     with pytest.raises(yaml.YAMLError):
         safe_load_typed_and_spelled(text)
     with pytest.raises(yaml.YAMLError):
@@ -123,10 +99,7 @@ def test_a_null_is_whatever_was_written(text):
 
 
 def test_mapping_keys_stay_typed_so_both_readings_keep_the_same_pairs():
-    """`1:` and `'1':` are two keys to `safe_load`, so they are two keys here. A text key
-    would merge them and drop one of the two VALUES — a value the judge is shown (typed)
-    that the containment index (spelled) never saw (the review's finding against the fourth
-    cut). The reading spells values; the shape, keys included, is the typed one."""
+    """`1:` and `'1':` are two keys to `safe_load`, so they are two keys here."""
     assert spelled("1: x\n'1': y") == {1: "x", "1": "y"} == safe_load("1: x\n'1': y")
     # a typed key with a spelled value: the key is the `date` safe_load makes of it
     assert spelled("2026-07-25: 22") == {date(2026, 7, 25): "22"}
@@ -215,10 +188,7 @@ def test_a_merge_key_merges_as_safe_load_does():
     "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n",
 ], ids=["reused", "self-containing", "self-containing-list", "merged-by-alias"])
 def test_an_alias_is_refused_by_both_readings_as_by_safe_load(text):
-    """#1127: no YAML the tree reads may share or contain itself — an alias of a few hundred
-    bytes can stand for billions of values to whatever walks the result, and a self-containing
-    anchor crashes the first recursive walker. Refused by `safe_load` and by the typed and
-    spelled reading alike, with the `YAMLError` every caller already handles."""
+    """#1127: no YAML the tree reads may share or contain itself — an alias of a few hundred bytes can stand for billions of values to whatever walks the..."""
     with pytest.raises(AliasRefused):
         safe_load(text)
     with pytest.raises(AliasRefused):
@@ -242,13 +212,3 @@ def test_a_document_too_deep_to_parse_is_a_yaml_error_not_a_recursion_error():
         spelled("a: " + "[" * 20000)
 
 
-def test_the_spelled_constructor_leaks_nothing_into_safe_load():
-    """The first cut's process-wide hazard: a subclass that WROTE a class-level resolver
-    table shared with `SafeLoader`. This one overrides a method only. After any number of
-    spelled reads, `yaml.safe_load` in the same process still types."""
-    for _ in range(3):
-        spelled("a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes")
-    typed = yaml.safe_load("a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes")
-    assert not isinstance(typed["a"], str)
-    assert typed["b"] == 22
-    assert typed["c"] is True

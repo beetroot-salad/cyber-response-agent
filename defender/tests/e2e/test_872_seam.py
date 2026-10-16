@@ -177,10 +177,6 @@ def test_an_unlabelled_toolset_is_treated_as_foreign_and_only_the_composition_ro
     )
 
 
-
-
-
-
 def test_the_golden_case_generators_subprocess_child_carries_the_gate() -> None:
     """A re-executed `run.py` child reaches `build_agent_core`, so the gate is on that path
     unconditionally."""

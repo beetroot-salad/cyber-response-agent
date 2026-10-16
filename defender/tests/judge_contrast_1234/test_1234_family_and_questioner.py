@@ -1,27 +1,4 @@
-"""#1234 slice `family_and_questioner`: the family-level call and the questioner channel.
-
-Twenty-three demands of `spec-flow/specs/spec_graph_1234.yaml` (80-survey.md, slice 9):
-
-* the family call (design M6 as amended): its reply is family-scope world findings only, each
-  carrying its own systems, with no verdict word (A4, A5, FX-reply-retired-names); its prompt
-  reads no per-world reply, so it is identical before, between and after the world calls
-  (P-c, A3); it carries every usable run's computed header, contrast table and fact surfaces,
-  charged whole under `JUDGE_PAYLOAD_CAP` (A9, NA06); it commits like a world, `queueing` ->
-  append -> `queued`, and a re-run asks it only when it has no row (A6); its draws combine by
-  union (A13); and a pass makes one model call per planted world per draw plus the family's;
-* routing (A1, A15, M5 residual (i)): a world or family finding that is not gap-only and has a
-  resolving plan pointer is design and reaches the questioner channel under its own finding id
-  with its own systems; a serving finding goes to the user record; a gap-only one goes to the
-  user record whatever else it cites; a samples citation of an unshown section is dropped
-  first (O16).
-
-Every scenario drives the judge's one entry point, `grade_episode`, through `S.grade` over a
-hand-built archived family (`S.family`), with the model seam `S.RoutedJudge` entering through
-`judge=`. A model failure is #921's P9 `RunUnprocessable` (`RoutedJudge(fail=...)`); a refused
-reply is scripted content in a retired shape the rulings refuse (A4, HOLE-2); a refused queue
-write is a directory planted at the queue's name (`S.plant_dir`). Coined names come from
-`S.COINED` / `S.RULED` only.
-"""
+"""#1234 judge contrast: family-scope call and questioner-queue routing."""
 from __future__ import annotations
 
 import contextlib

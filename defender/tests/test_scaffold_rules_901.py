@@ -22,12 +22,7 @@ def resolver() -> _scaffold_rules.VerbResolver:
 
 
 def _codes(text: str, system: str, tmp_path: Path, resolver) -> list[str]:
-    """`check_template`'s finding codes for `text` filed under `system/`.
-
-    Written to disk and read back through `read_query_template` on purpose: the system a
-    template belongs to is derived from its LOCATION, and a test that constructs the
-    `QueryTemplate` by hand would be checking a shape the corpus never produces.
-    """
+    """`check_template`'s finding codes for `text` filed under `system/`."""
     d = tmp_path / system
     d.mkdir(parents=True, exist_ok=True)
     path = d / "probe.md"
@@ -48,11 +43,7 @@ def test_a_well_formed_template_has_no_findings(tmp_path, resolver):
 
 
 def test_a_template_declaring_no_verb_is_undecidable_not_exempt(tmp_path, resolver):
-    """The rule is per-VERB — the engine exemption, the param roster and the body-substitution
-    classification all key on it — so a template that names none cannot be checked at all. It
-    fails; it does not pass by default. This is the shape `validate_scaffold` used to paper over
-    with two prose fallbacks (a `verb:` line inside the fence, then the first non-fence token),
-    both of which resolved a verb the corpus never declared."""
+    """The rule is per-VERB — the engine exemption, the param roster and the body-substitution"""
     text = _GOOD.replace("verb: get-host\nparams: [host]\n---", "---", 1)
     assert _codes(text, "cmdb", tmp_path, resolver) == ["no-verb"]
 
@@ -75,10 +66,7 @@ def test_a_marked_body_substitution_is_allowed(tmp_path, resolver):
 
 
 def test_a_params_entry_the_verb_does_not_declare_is_refused(tmp_path, resolver):
-    """`SCHEMA.md` says `params:` IS the verb's declared params. Nothing checked that until
-    #901: `validate_scaffold` read the signature and ignored `params:`, while the authoring
-    contract's copy read `params:` and never met the signature, so a template could declare a
-    param the adapter had renamed away and both enforcement copies would agree it was fine."""
+    """`SCHEMA.md` says `params:` IS the verb's declared params."""
     text = _GOOD.replace("params: [host]", "params: [host, hostname]", 1)
     assert _codes(text, "cmdb", tmp_path, resolver) == ["undeclared-param"]
 
@@ -95,11 +83,7 @@ def test_an_engine_verbs_body_placeholders_are_body_text_not_params(tmp_path, re
 
 
 def test_a_wrapper_only_param_is_not_bindable_from_a_template(tmp_path, resolver):
-    """`ticket.get-ticket` declares `require_closed` and reserves it to the first-party wrapper
-    (`@verb(wrapper_only=…)`, #900). A template's `${placeholder}` is a MODEL binding, so the
-    allowed surface here is `model_facing_params` — under `declared_params` this template would
-    pass the check and then be refused at `validate_params` with the gather turn already spent.
-    """
+    """`ticket.get-ticket` declares `require_closed` and reserves it to the first-party wrapper (`@verb(wrapper_only=…)`, #900)."""
     text = (
         "---\nid: ticket.probe\nstatus: established\nverb: get-ticket\n"
         "params: [key]\n---\n\n"
@@ -114,10 +98,7 @@ def test_a_wrapper_only_param_is_not_bindable_from_a_template(tmp_path, resolver
 
 
 def test_a_wrapper_only_param_cannot_be_smuggled_in_as_a_body_substitution(tmp_path, resolver):
-    """`body_substitutions:` is an UNCHECKED escape from the placeholder rule — it names what
-    the checker must not classify — so the reserved set has to be refused there too. Otherwise
-    the `model_facing_params` surface above is one frontmatter line from being optional, and
-    the refusal lands back at `validate_params` with the gather turn spent (#900)."""
+    """`body_substitutions:` is an UNCHECKED escape from the placeholder rule — it names what"""
     text = (
         "---\nid: ticket.probe\nstatus: established\nverb: get-ticket\n"
         "params: [key]\nbody_substitutions: [require_closed]\n---\n\n"
@@ -130,10 +111,7 @@ def test_a_wrapper_only_param_cannot_be_smuggled_in_as_a_body_substitution(tmp_p
 
 
 def test_a_params_mapping_is_read_as_a_declaration_not_as_nothing(tmp_path, resolver):
-    """YAML gives "a list of names" more than one spelling, and `params:` carrying a per-param
-    note is the one a template author reaches for. Read as nothing, the entries the verb does
-    not declare go unreported — for THIS rule an unread declaration is an unenforced one, not a
-    conservative one."""
+    """YAML gives "a list of names" more than one spelling, and `params:` carrying a per-param note is the one a template author reaches for."""
     text = _GOOD.replace(
         "params: [host]", "params:\n  host: the hostname\n  hostname: the other one", 1)
     assert _codes(text, "cmdb", tmp_path, resolver) == ["undeclared-param"]
@@ -142,16 +120,7 @@ def test_a_params_mapping_is_read_as_a_declaration_not_as_nothing(tmp_path, reso
 
 
 def test_a_yaml_boolean_param_entry_is_read_the_same_in_every_spelling(tmp_path, resolver):
-    """`params: [on]` is a BOOLEAN to YAML, not the name the author typed — and the reader has
-    to answer about it the same way in all three spellings, because it is one declaration.
-
-    It did not. The sequence branch excluded `bool`, so the entry was dropped and went
-    unreported, while the mapping branches stringified the same value and reported it. That is
-    the split `_declared_names`' own docstring rules out for this rule: an unread declaration is
-    an unenforced one, so a template carrying an unquoted `on` / `yes` / `no` passed a sweep
-    that used to refuse it. `'True'` is not a name either — reporting it is what tells the
-    author their `on` was coerced, instead of the declaration silently going unchecked.
-    """
+    """`params: [on]` is a BOOLEAN to YAML, not the name the author typed — and the reader has"""
     for spelling in (
         "params: [on]", "params: on", "params:\n  on: a note", "params:\n  - on: a note",
     ):
@@ -160,15 +129,7 @@ def test_a_yaml_boolean_param_entry_is_read_the_same_in_every_spelling(tmp_path,
 
 
 def test_a_bare_scalar_declaration_is_the_one_entry_spelling_not_nothing(tmp_path, resolver):
-    """`body_substitutions: window` is a one-entry list to everyone but YAML, which hands it
-    over as a plain string. Read as nothing, the ESCAPE the author wrote is unread and the
-    `${window}` it covers is refused as undeclared — a refusal naming a name the file declares,
-    and on the lead lane's promote it discards the whole batch. (For `params:` the same scalar
-    fails the other way, unenforced rather than over-refused; both are the shape going unread.)
-
-    A `str` is also ITERABLE, which is why it is answered ahead of the sequence branch: read as
-    a sequence it would declare one name per character.
-    """
+    """`body_substitutions: window` is a one-entry list to everyone but YAML, which hands it over as a plain string."""
     body = "## Query\n\n```query\nverb: get-host\nparams:\n  host: ${host}-${window}\n```\n"
     listed = (
         "---\nid: cmdb.probe\nstatus: established\nverb: get-host\n"
@@ -180,13 +141,7 @@ def test_a_bare_scalar_declaration_is_the_one_entry_spelling_not_nothing(tmp_pat
 
 
 def test_covers_reads_every_spelling_and_is_not_a_placeholder_declaration(tmp_path, resolver):
-    """`covers:` rides `_declared_names` for its SHAPE tolerance, not its name semantics.
-
-    What it carries are `query_id`s, so the tolerance is what matters and the classification is
-    not: it must never join `params:`/`body_substitutions:` in excusing a `${name}`. A template
-    that covered `cmdb.probe` and left `${probe}` undeclared would otherwise pass — a
-    frontmatter key that quietly widened the placeholder rule.
-    """
+    """`covers:` rides `_declared_names` for its SHAPE tolerance, not its name semantics."""
     from defender._corpus import parse_query_template
 
     def _covers(line: str):
@@ -213,15 +168,7 @@ def test_covers_reads_every_spelling_and_is_not_a_placeholder_declaration(tmp_pa
 
 
 def test_a_covers_entry_must_be_an_identity_of_the_system_it_is_filed_under(tmp_path, resolver):
-    """`covers:` is believed by the mint, so a wrong entry is a silent, permanent loss.
-
-    `synthesize_drafts` reads ids UNION `covers:` to decide whether an identity is already
-    answered. A `cmdb` template claiming `elastic.hunt-creds` — one copy-paste from a
-    cross-system neighbor — means `elastic` never gets that draft minted again, with nothing
-    reporting it. The shape half matters for the same reason: `_declared_names` is deliberately
-    tolerant, so an unquoted `covers: on` arrives as the string `True`, which no row can ever
-    match and which still reads as provenance to a human.
-    """
+    """`covers:` is believed by the mint, so a wrong entry is a silent, permanent loss."""
     body = "## Query\n\n```query\nverb: get-host\nparams:\n  host: ${host}\n```\n"
     head = "---\nid: cmdb.probe\nstatus: established\nverb: get-host\nparams: [host]\n"
 
@@ -257,11 +204,7 @@ def test_a_skill_md_whose_frontmatter_names_another_system_is_refused(tmp_path):
 
 
 def test_the_resolver_answers_about_the_tree_it_was_handed(tmp_path):
-    """The property the loop's commit gate stands on: the drain runs it from the main checkout
-    against a `lead-author/<id>` worktree, so a resolver that answered from the running
-    process's own adapters would be grading a different tree than the one being committed.
-    `_load_adapter_module` caches on the resolved absolute path, which is what keeps the two
-    apart — this pins that the roster follows the directory, not the import."""
+    """The property the loop's commit gate stands on: the drain runs it from the main checkout"""
     adapters = tmp_path / "scripts" / "adapters"
     adapters.mkdir(parents=True)
     (adapters / "cmdb_adapter.py").write_text(
@@ -277,14 +220,7 @@ def test_the_resolver_answers_about_the_tree_it_was_handed(tmp_path):
 
 
 def test_an_unresolvable_system_raises_rather_than_reporting_a_clean_template(tmp_path):
-    """`ScaffoldRuleError`, not an empty verb mapping. "Could not check" rendered as "nothing
-    wrong" is the #901 defect itself, and a caller that cannot tell the two apart re-opens it.
-
-    Two shapes of "could not check", each refused where it is first knowable. A tree with NO
-    adapters directory at all is refused at CONSTRUCTION (#1031 D2: the roster is read once,
-    there, and a directory that cannot be listed is a fault of the tree, not an empty roster —
-    a resolver that constructed over it would answer `frozenset()` to every membership
-    question). A tree WITH one that declares no such system is refused at `verbs()`."""
+    """`ScaffoldRuleError`, not an empty verb mapping."""
     with pytest.raises(_scaffold_rules.ScaffoldRuleError):
         _scaffold_rules.VerbResolver(tmp_path)
 

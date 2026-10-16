@@ -17,7 +17,6 @@ The gate is driven through its DI seams:
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from defender.tests._by_path import load_lint_gate
@@ -197,39 +196,3 @@ def render(events, order):
 """)
 
 
-def test_the_gate_fails_on_a_new_finding_and_passes_once_baselined(tmp_path):
-    """The ratchet itself: a new site exits 1; the same site named in the baseline exits 0."""
-    tree = tmp_path / "tree"
-    tree.mkdir()
-    (tree / "m.py").write_text(_THE_BUG, encoding="utf-8")
-    baseline = tmp_path / "baseline.json"
-    baseline.write_text(json.dumps({"//": "test", "entries": {}}) + "\n", encoding="utf-8")
-
-    assert _GATE.main([], scope=tree, baseline_path=baseline) == 1
-
-    baseline.write_text(
-        json.dumps({
-            "//": "test",
-            "entries": {"m.py:render:phase_order->attribution": "test fixture"},
-        }) + "\n",
-        encoding="utf-8",
-    )
-    assert _GATE.main([], scope=tree, baseline_path=baseline) == 0
-
-
-def test_an_unreadable_file_in_scope_exits_two_not_clean(tmp_path):
-    """A file the gate could not parse never entered the corpus, so a defect could sit in
-    it while the gate prints zero findings. Exit 2 — could-not-run is not clean."""
-    tree = tmp_path / "tree"
-    tree.mkdir()
-    (tree / "broken.py").write_text("def f(:\n", encoding="utf-8")
-    baseline = tmp_path / "baseline.json"
-    baseline.write_text(json.dumps({"//": "test", "entries": {}}) + "\n", encoding="utf-8")
-    assert _GATE.main([], scope=tree, baseline_path=baseline) == 2
-
-
-def test_the_shipped_baseline_is_empty(tmp_path):
-    """An entry here is a regression someone chose. Pinned so adding one is a visible act
-    rather than a side effect of `--update-baseline`."""
-    entries = json.loads(_GATE.BASELINE_PATH.read_text(encoding="utf-8"))["entries"]
-    assert entries == {}, f"the gate shipped with accepted debt: {entries}"

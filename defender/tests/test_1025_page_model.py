@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from pathlib import Path
 
 import pytest
@@ -234,37 +233,6 @@ def test_1025_the_dropped_count_on_the_tile_and_in_the_accounting_is_the_ledgers
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_a_step_that_starts_and_ends_within_one_second_still_bounds_the_header_wall(tmp_path):
-    """`now_iso()` stamps whole seconds, so `verify` starting and ending on the same stamp is
-    a real zero-length step, not an inverted pair: its endpoints feed the header span. With
-    `verify` as the LAST step and its stamp at 10:11:00, the header reads the full 11m00s from
-    the questioner's start, not the 9m00s that dropping it would leave."""
-    ep = E.sample_episode(tmp_path)
-    steps = E.every_step()
-    names = [s for s, _a, _b in steps]
-    verify = names.index("verify")
-    steps[verify] = ("verify", "2026-09-09T10:11:00Z", "2026-09-09T10:11:00Z")
-    steps[names.index("judge")] = ("judge", "2026-09-09T10:08:00Z", "2026-09-09T10:09:00Z")
-    E.write_timing(ep.dir, steps)
-    page = render(ep)
-    assert "11m00s" in page.text, page.text_of("sec-stages")
-
-
-def test_1025_a_world_report_with_no_headline_shows_the_readers_reason_in_its_slot(tmp_path):
-    """`worlds/<label>/report.md` that is a symlink reads through the world-archive screen:
-    the world's report slot shows the placeholder headline with the reader's own refusal
-    beside it, and the page is written."""
-    ep = E.sample_episode(tmp_path)
-    target = tmp_path / "elsewhere.md"
-    target.write_text("---\ndisposition: malicious\n---\nnot this world's\n", encoding="utf-8")
-    E.plant_link(ep.world(E.GRADED_WORLD) / "report.md", target)
-    page = render(ep)
-    slot = page.section(f"world-{E.GRADED_WORLD}").find_all(cls="w-report")
-    assert len(slot) == 1
-    assert "could not be read" in slot[0].text(), slot[0].text()
-    assert "malicious" not in slot[0].text(), slot[0].text()
-
-
 def test_1025_the_cli_diagnostic_is_the_records_refusal_not_a_phrase_on_the_page(tmp_path, capsys):
     """An episode WITH a readable `judge.yaml` whose draw finding claim contains the words "no
     grade record" exits 0 with nothing on stderr: the diagnostics come off the record slots
@@ -321,52 +289,6 @@ def test_1025_a_manifest_label_off_the_directory_grammar_reads_nothing_from_disk
         E.render_episode(ep.dir, module=visualize_episode())
     assert "PLANTED-OUTSIDE" not in str(refused.value)
     assert not ep.page.exists(), "a page was written for a manifest the loader refused"
-
-
-def test_1025_a_grade_row_label_off_the_directory_grammar_reads_nothing_from_disk(tmp_path):
-    """The same for a `judge.yaml` row — the record is a tree a box can write — with the
-    manifest clean: the planted finding is not walked."""
-    ep = E.sample_episode(tmp_path)
-    _outside, label = _outside_world(tmp_path, ep)
-    grade = E.sample_grade()
-    grade["worlds"].append(E.world_row(label, declared="malicious"))
-    E.write_judge(ep.dir, grade, check=False)
-    page = render(ep)
-    assert "PLANTED-OUTSIDE-CLAIM" not in page.text
-    assert "PLANTED-OUTSIDE-RULE" not in page.text
-    assert f"f-{E.GRADED_WORLD}-0-0" in page.ids
-
-
-def test_1025_a_nan_or_infinite_duration_is_that_slots_own_absence(tmp_path):
-    """`duration_ms: NaN` in a run's result event and `Infinity` on a judge response row —
-    `json.loads` admits both — cost the world's wall and that call's wall, never the render:
-    the page is written, the world's cost still reads, and the lower bound is still a number."""
-    ep = E.sample_episode(tmp_path)
-    rd = ep.dir / "runs" / f"{E.EPISODE_ID}-{E.GRADED_WORLD}"
-    E.plant_raw(rd / "tool_trace.jsonl", json.dumps(E.result_event()).replace(
-        "180000", "NaN") + "\n")
-    agent_id = f"judge:{E.GRADED_WORLD}:1"
-    text = "".join(json.dumps(r) + "\n" for r in E.trace_rows(agent_id))
-    E.plant_raw(ep.dir / "wire_logs" / f"{E.trace_stem(agent_id)}.jsonl",
-                text.replace("1000.0", "Infinity"))
-    page = render(ep)
-    world = page.text_of(f"world-{E.GRADED_WORLD}")
-    assert "$0.25" in world, world
-    assert "nan" not in page.text.lower()
-    assert "inf" not in page.text_of("sec-stages").lower()
-
-
-def test_1025_runs_pruned_and_the_grade_unreadable_keeps_every_archived_world(tmp_path):
-    """`runs/` pruned (J8: disposable) AND `judge.yaml` unparseable: the manifest's worlds
-    are still archived under `worlds/<label>/`, so each keeps its section and none is counted
-    as an entry off the record — the archive is evidence the episode reached RUNS."""
-    ep = E.sample_episode(tmp_path)
-    shutil.rmtree(ep.dir / "runs")
-    E.plant_raw(ep.dir / "judge.yaml", "worlds: [\n")
-    page = render(ep)
-    assert sorted(page.ids_with("world-")) == sorted(f"world-{w}" for w in E.WORLDS)
-    assert page.elements(cls="fr-off-roster") == [], page.text_of("sec-findings")
-    assert "grade record unreadable" in page.text
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permission bits")

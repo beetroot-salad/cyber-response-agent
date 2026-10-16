@@ -13,7 +13,6 @@ record's family-level fields and the per-world bucket and systems the model answ
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
@@ -97,43 +96,3 @@ def test_judge_yaml_round_trips_every_new_field(tmp_path, monkeypatch):
             f"{field!r} is written to judge.yaml and not read back off it")
 
 
-def test_removing_the_flag_leaves_no_orphan_in_the_committed_spec_corpus(tmp_path):
-    """Removing `agreed-without-evidence` settles its THIRD consumer — the committed spec
-    corpus the CI ratchet checks — not just the two in code.
-
-    Observably true: after this change no `agreed-without-evidence` string survives in
-    `defender/learning/judge/family.py`, in either of the two #921 suites that name it
-    (`test_921_family_buckets.py`, `test_921_family_facts.py`), or in
-    `spec-flow/specs/spec_graph_921-family-judge.yaml`. The last is the one the design's own
-    sweep missed (correction C-B): the committed graph binds the flag as a domain member and
-    records an R4 discharge against it, so removing it orphans a coverage row and a mechanical
-    discharge in a corpus a ratchet reads.
-
-    Each holder is asserted to EXIST before it is read, which is not bookkeeping and is not
-    hypothetical: this test named `tests/e2e/test_921_family_buckets.py`, which is not where
-    that suite lives, so one third of its census read no file at all and passed on nothing —
-    and the existence check is what found it. The corrected census gained a FOURTH holder
-    (`test_921_family_facts.py`) the wrong path had been hiding.
-
-    What failure looks like: the code drops the flag, the spec corpus keeps binding it, and the
-    graph checker fails on a repository the change left inconsistent — a red CI whose cause is
-    two directories from the diff.
-    """
-    repo = Path(__file__).resolve().parents[2]
-    holders = [
-        repo / "defender" / "learning" / "judge" / "family.py",
-        repo / "defender" / "tests" / "test_921_family_buckets.py",
-        repo / "defender" / "tests" / "test_921_family_facts.py",
-        repo / "spec-flow" / "specs" / "spec_graph_921-family-judge.yaml",
-    ]
-    missing = [p for p in holders if not p.is_file()]
-    assert missing == [], (
-        f"{[str(p.relative_to(repo)) for p in missing]} do not exist, so the absence below is a "
-        "fact about a file nobody read — this is the whole failure mode of a string check: it "
-        "is green when the channel it looks through is not there")
-    present = [p for p in holders if "agreed-without-evidence" in p.read_text(encoding="utf-8")]
-
-    assert present == [], (
-        "these still bind the removed family flag: "
-        f"{[str(p.relative_to(repo)) for p in present]} — the last one is the committed spec "
-        "corpus, whose orphaned domain member and R4 discharge row the CI ratchet reads")

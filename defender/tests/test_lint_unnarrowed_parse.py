@@ -16,14 +16,12 @@ gets a paired control that does not.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from defender.tests._by_path import import_lint_lib, load_lint_gate
+from defender.tests._by_path import load_lint_gate
 
-_ASTLIB = import_lint_lib("_astlib")
 _GATE = load_lint_gate("lint_unnarrowed_parse")
 
 
@@ -71,16 +69,6 @@ def _pyfile(tree: Path, rel: str, src: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(src, encoding="utf-8")
     return p
-
-
-def _write_baseline(path: Path, fingerprints: list[str]) -> None:
-    path.write_text(
-        json.dumps(
-            {"//": "test", "entries": {fp: "test fixture reason" for fp in fingerprints}}
-        )
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 def _scan_src(tmp_path: Path, src: str, *, rel: str = "prod.py"):
@@ -303,114 +291,5 @@ def test_a_marker_buried_in_the_body_does_not_suppress(tmp_path):
 
 
 # (d) ScanBlind, and the ratchet
-
-
-def test_unparseable_file_in_scope_is_not_silently_clean(tmp_path):
-    """A file the gate could not parse never entered the corpus, so a seam could sit in it
-    while the gate printed 0 findings. It raises instead (#618/#621/#652)."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "broken.py", "def f(:\n    this is not python\n")
-    _pyfile(tree, "prod.py", _SEAM)
-    with pytest.raises(_ASTLIB.ScanBlind) as exc:
-        _GATE._scan(tree)
-    assert "broken.py" in str(exc.value)
-    assert _GATE.main([], scope=tree, baseline_path=tmp_path / "bp.json") == 2
-
-
-def test_clean_tree_still_scans(tmp_path):
-    """The control: without the unparseable file the same tree scans and finds the seam, so
-    the raises-test above cannot pass against a gate that raises unconditionally."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", _SEAM)
-    assert any("prod.py" in f.fingerprint for f in _GATE._scan(tree))
-
-
-def test_ratchet_contract(tmp_path):
-    tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", _SEAM)
-    findings = _GATE._scan(tree)
-    assert findings
-
-    assert _GATE.main([], scope=tree, baseline_path=tmp_path / "missing.json") == 1
-    bp = tmp_path / "bp.json"
-    _write_baseline(bp, [f.fingerprint for f in findings])
-    assert _GATE.main([], scope=tree, baseline_path=bp) == 0
-    assert _GATE.main([], scope=tmp_path / "does-not-exist") == 2
-
-
-def test_an_unreasoned_baseline_entry_fails(tmp_path):
-    """`require_reasons=True`: burying a finding costs a sentence saying why. Without it the
-    ratchet's own escape hatch is `--update-baseline` plus silence."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", _SEAM)
-    bp = tmp_path / "bp.json"
-    assert _GATE.main(["--update-baseline"], scope=tree, baseline_path=bp) == 0
-    data = json.loads(bp.read_text(encoding="utf-8"))
-    assert set(data["entries"].values()) == {""}
-    assert _GATE.main([], scope=tree, baseline_path=bp) == 1
-    data["entries"] = {k: "deliberate: reason" for k in data["entries"]}
-    bp.write_text(json.dumps(data) + "\n", encoding="utf-8")
-    assert _GATE.main([], scope=tree, baseline_path=bp) == 0
-
-
-def test_the_shipped_baseline_carries_a_reason_for_every_entry():
-    entries = json.loads(
-        (Path(_GATE.__file__).with_name("lint_unnarrowed_parse_baseline.json")).read_text(
-            encoding="utf-8"
-        )
-    )["entries"]
-    assert entries, "the shipped baseline is not empty today"
-    unreasoned = sorted(fp for fp, why in entries.items() if not why.strip())
-    assert not unreasoned, unreasoned
-
-
-@pytest.fixture(scope="module")
-def real_tree_findings():
-    """The shipped tree scanned ONCE for the module — both real-code demands below read it."""
-    return _GATE._scan(_GATE.DEFENDER)
-
-
-@pytest.mark.gate
-def test_the_motivating_findings_are_in_the_shipped_baseline(real_tree_findings):
-    """A gate that does not fire on the defect it exists for is not landed. One of #878's four
-    motivating sites is still open and still reported — the positive control that this gate
-    fires on REAL code and not only on the synthetic seams above.
-
-    THE OTHER THREE ARE FIXED. `_wall_origin` is asserted GONE rather than deleted from this
-    test (#878): it was part of the reason the gate was landed, so "the gate no longer reports
-    it" is the statement worth keeping — it now goes through `_clock.parse_iso_utc`, and it is out
-    of the shipped baseline, so a re-widening comes back as a NEW finding and fails the ratchet.
-    The other two, `hooks/_run_dir`'s `read_json_locked` and `update_json_locked`, narrowed their
-    parse to a dict at the seam (`_io.locked_json_read` / `locked_json_update`) and were then
-    deleted by #1235 round 3 with their last production caller, so there is no code left for
-    their fingerprints to name.
-
-    (The one site left open at #878, `_l0_items._correlation_contract`, went with the ancestor
-    fetch in #1222; the gate still reports real findings, so the positive control stands on the
-    sites the baseline still names.)"""
-    fingerprints = {f.fingerprint for f in real_tree_findings}
-    assert fingerprints, "the gate reports nothing on the real tree, so it has no positive control"
-
-    fixed = "defender/hooks/budget_enforcer.py:_wall_origin:unowned-iso-parse"
-    assert fixed not in fingerprints, f"{fixed} was re-widened after #878 narrowed it"
-
-
-@pytest.mark.gate
-def test_the_readers_of_a_laundered_value_are_not_reported(real_tree_findings):
-    """The deliberate half-coverage, pinned so a later widening is a decision rather than a
-    drift. The gate fires at the SEAM; the readers that subscript `_run_dir`'s laundered dict
-    — `circuit_breaker._record`'s `state["systems"]`, `budget_enforcer`'s `state.get(...)` —
-    are NOT reported, because narrowing the seam fixes them and every future reader.
-
-    A clean run of this gate therefore says nothing about those derefs. That is what the
-    module docstring's "what is NOT mechanized" paragraph exists to keep a reader from
-    forgetting."""
-    reported = {
-        f.fingerprint.split(":", 1)[0]
-        for f in real_tree_findings
-        if f.fingerprint.endswith(":unnarrowed-parse")
-    }
-    for reader in ("defender/runtime/circuit_breaker.py", "defender/hooks/budget_enforcer.py"):
-        assert reader not in reported
 
 

@@ -68,10 +68,7 @@ def _gather(env):
 # F-09 — the payload shape and the lead-id validators are ONE alphabet
 
 def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
-    """The end-to-end path the defect broke: a lettered id is CLAIMED, its payload is PERSISTED
-    at the path the query tool then hands gather, and gather may `cat` and `read_file` that exact
-    path. Driven through the real functions rather than a hand-spelled path, because the bug was
-    a disagreement between what one of them writes and what another admits."""
+    """The end-to-end path the defect broke: a lettered id is CLAIMED, its payload is PERSISTED"""
     assert claim_lead({
         "run_dir": str(env.run), "lead_id": LETTERED,
         "goal": "who logged in", "what_to_summarize": ["actor"],

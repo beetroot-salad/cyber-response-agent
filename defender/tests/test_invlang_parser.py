@@ -375,7 +375,6 @@ def test_unquoted_pipe_in_attrs_drops_row_and_keeps_rest():
 
 
 def test_resolution_missing_perp_raises():
-    import pytest
     with pytest.raises(RowError, match="`⟂`"):
         _resolution_record(
             "h-001  null → +    "

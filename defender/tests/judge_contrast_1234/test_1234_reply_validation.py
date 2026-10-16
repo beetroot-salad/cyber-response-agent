@@ -1,27 +1,4 @@
-"""#1234 slice 1 — reply validation: what a judge reply may say, and what the pass does with it.
-
-The spec (`spec-flow/specs/spec_graph_1234.yaml`, design A1/A4/A5/A7/A13, the human's HOLE-1 and
-HOLE-2 rulings in `78-gate-resolutions.md`): a world reply carries its own `bucket` (an
-investigator bucket or `none`) and `systems`, and three filed lists — investigator findings
-(`contrast_evidence`, a boolean `on_verdict_path`), world findings (`unreachable` /
-`incoherent` / `mislabelled`, their own `systems`) and deployment gaps (what, how, evidence and
-the judge's `kept_facts_from_investigator` flag). Reply validation is the one enforcement point
-(A5): a reply that breaks the shape is refused and the draw is asked again within
-`_REPLY_ATTEMPTS`; a retired name (`episode_outcome`, `verdict_word`, an investigator finding's
-`evidence`) is refused BY THAT NAME (A4). Only failed pointer resolution drops a finding; enqueue
-refuses nothing for content; no code path computes a bucket.
-
-Two doors. `S.validate()` is the validator itself — every refusal there is paired with the
-accepted minimal variant in the same test and must NAME its cause, because main's validator
-refuses every new-shape reply for its missing `episode_outcome` (a bare `raises` would be green
-on main for the wrong reason). `S.grade()` is the pass (`grade_episode`) with a recording
-`RoutedJudge`: a LIST of replies under one key is consumed one per ask, so a re-ask is observed
-as the agent id `judge:<world>:<draw>:<attempt>` and as the second reply's content landing.
-
-Every name the implementer coins comes from `S.COINED` (the never-shown statement included,
-`context.never_shown`); main's own names it relies on from `S.EXISTING` (the retired
-`dropped_findings` count). Spelled here: main's kept `type`, `claim` and `systems`.
-"""
+"""#1234 judge contrast: judge reply validation and finding-type admission."""
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping

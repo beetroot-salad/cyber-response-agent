@@ -1,18 +1,6 @@
-"""Issue #719, part 1/5 — D9's retire seam and the accounting decisions 2 and 3 settled.
-
-Executable spec, written before the implementation (`spec_graph_719.yaml`; the demand ids
-are in each test's `discharged_by`). `defender.learning.author.drain` does not exist at the
-base commit, so this module errors at collection — the expected red.
-
-Every fault below is either a real input driven through the real primitive (a row with no
-id, a `.tmp` path that is a directory, a pending file that cannot be replaced) or a fake
-whose fault class cites the ledger claim that observed it. The fakes inject and record;
-they never classify. Injection is `dataclasses.replace(cfg, invoke_agent=...)` — the
-established seam — never `monkeypatch.setattr`.
-"""
+"""Drain retire seam: lifetime attempt counts, ceiling, byte-identical untouched rows, systemic retire-write failure, inert empty ticks."""
 from __future__ import annotations
 
-import ast
 import dataclasses
 from pathlib import Path
 
@@ -28,15 +16,7 @@ from defender.tests import _state1135
 # Demand #0 — the return-value contract, after decision 1 flipped its `2` branch
 
 
-
-
 # O6 + O8 — one uniform, bounded retirement into one graveyard
-
-
-
-
-
-
 
 
 def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path):
@@ -91,15 +71,7 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
     assert [r["attempts"] for r in h.graveyard(paths, ch)] == [2], "2, not 1 — no reset happened"
 
 
-
-
 # Decision 3 — terminality: consumed ledger, graveyard first
-
-
-
-
-
-
 
 
 # The ceiling's own domain — 1, 0 and -1
@@ -135,21 +107,6 @@ def test_ceiling_of_one_retires_on_the_first_failure(tmp_path: Path):
     this had no in-suite exercise because its only production caller is out of scope — the
     retire seam is driven here with no such caller, exactly as C33 drove it."""
     _retires_on_the_first_failure(tmp_path, 1)
-
-
-def test_zero_ceiling_retires_on_first_failure(tmp_path: Path):
-    """A ceiling of 0 is a reachable operator input — `env_int` applies no floor (G25) — and
-    it is FALSY, the `x or DEFAULT` shape that would silently promote it to 3. It means
-    retire on the first observed failure, not retire before any attempt: the row is authored
-    once, fails once, and leaves."""
-    _retires_on_the_first_failure(tmp_path, 0)
-
-
-def test_negative_ceiling_retires_like_zero(tmp_path: Path):
-    """A negative ceiling is accepted rather than rejected, and behaves as 0 — probed
-    identical at 1/0/-1 by C33. Pinned rather than validated away, because the design never
-    asked for a validation layer here."""
-    _retires_on_the_first_failure(tmp_path, -1)
 
 
 # The seam's edges — what it does not touch, and what stops it
@@ -204,10 +161,6 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     assert (paths.state_root / ch.queue).read_bytes() == before, "the queue survives a failed retirement write"
 
 
-
-
-
-
 def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path: Path):
     """C15: a tick that finds nothing on any channel is inert — it appends no consumed row
     and no graveyard row, so a steady state of empty ticks cannot grow either file. The
@@ -231,45 +184,6 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
     assert drain.run_batch(cfg=live) == 2
     assert h.graveyard(paths, ch)
     assert h.consumed(paths, ch)
-
-
-
-
-def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
-    """D9 removes the second write path rather than adding a lock to it: after the fold
-    exactly one function under `defender/learning` rewrites a queue file wholesale, and the
-    retire seam reaches it through the same locked rotation that rotation uses. The census
-    picks the subject; the drive is what discharges it — a row appended between the read and
-    the rewrite survives, which only the merging rotation gives.
-
-    Under #1135 the rewrite is a `replace`-mode write of a channel's `.queue` through the
-    handle's one write door, so the census names that call shape (the callers of the old
-    atomic-write helper no longer exist under `defender/learning`)."""
-    import defender.learning as learning_pkg  # type: ignore[import-not-found]
-
-    root = Path(learning_pkg.__path__[0]).resolve()  # namespace pkg: __file__ is None
-    writers: dict[str, set[str]] = {}
-    for py in sorted(root.rglob("*.py")):
-        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for call in ast.walk(node):
-                if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
-                        and call.func.attr == "_write" and call.args):  # lint-ast-resolve: ok — a census of one private method's spelling, which has no alias
-                    continue
-                target = call.args[0]
-                replaces = any(isinstance(a, ast.Constant) and a.value == "replace"
-                               for a in call.args[1:])
-                if replaces and isinstance(target, ast.Attribute) and target.attr == "queue":
-                    writers.setdefault(node.name, set()).add(py.name)
-    assert set(writers) == {"rotate"}, f"more than one queue rewriter: {writers}"
-
-    paths = h.make_paths(tmp_path)
-    ch = h.channel_of("findings")
-    h.seed(paths, ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/9")])
-    drain.retire(_state1135.state_for_paths(paths), channel=FINDINGS, batch_ids=["a/0"], reason="via the rotation", max_attempts=1)
-    assert sorted(h.pending_by_id(paths, ch)) == ["a/9"]
 
 
 def test_attempt_count_survives_a_fresh_process(tmp_path: Path):

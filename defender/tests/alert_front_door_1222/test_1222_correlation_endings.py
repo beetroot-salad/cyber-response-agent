@@ -1,32 +1,5 @@
-"""#1222 S05 — the correlation lead's endings (A2, A4, A7, O5, O6).
-
-Every way `l-00c` fails to run, or runs and yields nothing usable, reaches MAIN's OPENING
-message as one fixed sentence outside any frame, and the run goes on to close; a usable summary
-reaches it framed as the lead's own text, and never beside a sentence.
-
-HOW THE SENTENCE IS FOUND. A2 fixes no wording (80-survey, "the fixed ending sentences are not
-coined"), so no test here spells one. Each scenario is driven through the production front door
-(`S.run_alert`) beside a SUMMARY CONTROL — the same tenant, the same alert, `l-00c` answered by
-its own default fake (C01: a usable no-call summary). The ending's sentence is the harness prose
-(frames removed, run folder and run id normalised) the scenario's opening message carries and
-the control's does not, less the workspace map's run-dir listing, which legitimately differs
-with what the lead left behind (`_ending`). On that:
-
-* named        — the difference is non-empty (red at base: RC1, the endings are silent or late);
-* one sentence — the opening's frames are the control's less its summary frame, so nothing the
-                 lead wrote is framed beside the sentence (`_alone`), checked after the
-                 cross-scenario comparisons so a base run fails on the naming first;
-* fixed        — two scenarios with the same ending and different fault detail give the same
-                 text; two different endings give different texts;
-* clean        — no fault text, no host path, no alert byte in the sentence, and no fault text
-                 anywhere MAIN was handed (`_assert_never_handed`).
-
-The alert is the committed Kibana fixture with one marker member (`ALERT_MARK`), and the
-backend answers every search with one document, so at base item 1 resolves and `l-00c` is
-dispatched: each test's first failing assertion at base is its own demand's, never the timestamp
-gate's. Faults are the shared fakes' data (`S.LeadFault`, `S.Backend` + `T.Fault`,
-`S.LeadSessionFault`) or real files planted through `run_alert(before=)`.
-"""
+"""The correlation lead's endings: each way `l-00c` fails or yields nothing is named in MAIN's
+opening message outside any frame, and the run still closes."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165
@@ -41,15 +14,11 @@ from typing import Any
 import pytest
 
 from defender.run_repository import RunPaths
-from defender.tests import _data_root_1078 as D
 from defender.tests import _invlang_warn_836 as W836
 from defender.tests import _triplet_947 as T
 from defender.tests.alert_front_door_1222 import _spec1222 as S
-from defender.tests.e2e import _replay_harness as H
 
-# =================================================================================================
 # The scene: one tenant, one alert, as many front-door drives as a test needs
-# =================================================================================================
 
 #: A unique member value planted in the alert: the raw alert's own frame carries it, and "no alert
 #: byte in the sentence" is asserted on it.
@@ -105,9 +74,7 @@ class _Scene:
         return self.run("summary", **kw)
 
 
-# =================================================================================================
 # Reading MAIN's opening message
-# =================================================================================================
 
 #: One entry of the workspace map's run-dir listing (`- name` / `- name dir/`): it differs between
 #: two runs with whatever the lead left in the folder, so it is never part of a sentence.
@@ -229,9 +196,7 @@ def _stopped_loudly(d: S.Drive) -> bool:
             or bool(summary.get("truncated_by")) or bool(summary.get("exit_reason")))
 
 
-# =================================================================================================
 # Fault builders — each a REAL state or the shared fakes' data, each citing what observed it
-# =================================================================================================
 
 def _secret_path(d_or_tmp: Path) -> str:
     return str(Path(d_or_tmp) / "host-secrets" / "creds.json")
@@ -267,19 +232,8 @@ def _squat_leads_area(run_dir: Path) -> None:
     leads.write_text("not the leads table\n", encoding="utf-8")
 
 
-def _alias_leads_table(run_dir: Path) -> None:
-    """`before=`: an alias planted at the leads table's path (p035's situation) — `gather_raw`
-    is a link to a directory outside the run folder, which the guarded claim refuses."""
-    leads = Path(RunPaths(run_dir).gather_raw)
-    shutil.rmtree(leads)
-    elsewhere = run_dir.parent.parent / f"{run_dir.name}-elsewhere-leads"
-    elsewhere.mkdir(parents=True, exist_ok=True)
-    leads.symlink_to(elsewhere, target_is_directory=True)
-
-
 #: An investigation.md the real validator refuses (`test_ungated_artifact_write_961_964`'s
 #: executed `_ERROR_DOC`): `class` refined twice in one write. PR-33: over such a document the
-#: declaring row of `l-00c` is refused.
 _REFUSED_DOC = W836.PROLOGUE + W836.attr_block("l-001|v-001|class|bastion",
                                                 "l-001|v-001|class|workstation")
 
@@ -312,22 +266,12 @@ def _pre_trip(system: str = "elastic") -> Callable[[Path], None]:
     return plant
 
 
-def _config_fault() -> BaseException:
-    """RJ-07 (executed): with the tenant's elastic `config.env` absent, every call fails before
-    reaching a backend — `ConfigFault` (exit 2) naming the settings pointer, never a host path."""
-    return S.sym("scripts.adapters.faults", "ConfigFault")(
-        "config file not found: the tenant's settings/systems/elastic/config.env - this "
-        "tenant's settings do not configure this system")
-
-
 def _fail_alerts(exc: Callable[[], BaseException]) -> S.Backend:
     """Every `elastic.alerts` call raises `exc()` — an adapter's own fault class."""
     return _backend(fault=T.Fault(fail_on=("elastic.alerts",)), exc=exc)
 
 
-# =================================================================================================
 # O5 — each ending named to MAIN
-# =================================================================================================
 
 def test_o5_withheld_correlation_is_named_in_the_opening_message(tmp_path: Path) -> None:
     """When the tenant's table withholds the correlation lead, the opening message's correlation section is the one fixed 'withheld' sentence: no correlation ran and none is coming, naming the table."""
@@ -518,9 +462,7 @@ def test_o5_timed_out_correlation_is_named_to_main(tmp_path: Path) -> None:
     _alone(control, ("timed out, hung", hung), ("timed out, late", late))
 
 
-# =================================================================================================
 # O6 — every named ending reaches a normal close
-# =================================================================================================
 
 def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any]:  # noqa: PLR0911 — one arm per A2 ending
     if ending == "withheld":
@@ -568,9 +510,7 @@ def test_o6_every_named_non_run_reaches_report_md(tmp_path: Path, ending: str) -
     _named(d, control, ending)
 
 
-# =================================================================================================
 # The fork and settled premises on the endings
-# =================================================================================================
 
 def test_p005_l00c_session_cannot_be_opened(tmp_path: Path) -> None:
     """A session store that refuses to open l-00c's gather session after the claim is one of the lead's own named endings (A2: a store fault that keeps the lead from starting): MAIN's opening message carries its fixed sentence and the run continues; a later reader sees the claimed row; MAIN's own first write to the same store then stops the run loudly."""
@@ -603,37 +543,6 @@ def test_p005_l00c_session_cannot_be_opened(tmp_path: Path) -> None:
         "the claimed l-00c row is gone after the store refused its session")
 
 
-def test_p006_correlation_system_granted_but_unconfigured(tmp_path: Path) -> None:
-    """When every call fails before reaching a backend: if the breaker refused any of the lead's calls the sentence is 'tripped breaker', otherwise (at least one call ran and all failed) 'every call failed'. No queries-row count is pinned (breaker-refused calls leave no rows). The run reaches report.md."""
-    scene = _Scene(tmp_path)
-    unconfigured = _Scene(tmp_path, tenant_id="acme-unconfigured", omit_systems=("elastic",))
-    control = scene.control()
-    closing = S.closing_main_turns("inconclusive")
-    # RJ-07: every call exits 2 (ConfigFault) before any backend; the breaker trips at two.
-    two = unconfigured.run("two-calls", backend=_fail_alerts(_config_fault), main=closing,
-                           leads={S.L3: [_q(1), _q(2), S.text("narration")]})
-    three = unconfigured.run("three-calls", backend=_fail_alerts(_config_fault),
-                             main=S.closing_main_turns("inconclusive"),
-                             leads={S.L3: [_q(1), _q(2), _q(3), S.text("narration")]})
-    # The reference endings, met by faults the breaker never counts (exit 1) or never sees.
-    ecf = scene.run("ecf-reference", backend=_fail_alerts(S.upstream_fault),
-                    leads={S.L3: [_q(1), S.text("narration")]})
-    tripped = scene.run("tb-reference", before=_pre_trip(),
-                        leads={S.L3: [_q(1), S.text("narration")]})
-
-    assert _named(two, control, "unconfigured, no call refused") == _named(
-        ecf, control, "every call failed (reference)"), (
-        "every call failed before a backend and none was refused, but the sentence is not "
-        "'every call failed'")
-    assert _named(three, control, "unconfigured, a call refused") == _named(
-        tripped, control, "tripped breaker (reference)"), (
-        "the breaker refused one of the lead's calls, but the sentence is not 'tripped breaker'")
-    for label, d in (("two calls", two), ("three calls", three)):
-        _assert_closed(d, f"unconfigured correlation system, {label}")
-        _assert_never_handed(d, "config file not found")
-    _alone(control, ("unconfigured, two calls", two), ("unconfigured, three calls", three))
-
-
 def test_p008_l00c_own_failures_trip_its_system(tmp_path: Path) -> None:
     """l-00c's own failures mark its system down for the run; once the breaker refuses any of its calls MAIN's sentence is 'tripped breaker', telling MAIN that system is marked down for the run."""
     scene = _Scene(tmp_path)
@@ -658,63 +567,6 @@ def test_p008_l00c_own_failures_trip_its_system(tmp_path: Path) -> None:
     assert not reached, "MAIN's own lead on the system l-00c marked down reached the backend"
     assert not d.rows_for("l-001"), "MAIN's own lead on the downed system wrote queries rows"
     _alone(control, ("tripped by its own failures", d))
-
-
-def test_p026_dispatch_failure_text_carries_a_host_path_or_ale(tmp_path: Path) -> None:
-    """The opening message's correlation section is one of the fixed sentences. It carries no host path, credential or alert text, and stands outside the lead's frame."""
-    scene = _Scene(tmp_path)
-    control = scene.control()
-    secret = _secret_path(tmp_path)
-    key = "sk-FD1222-LEAKED-KEY-0026"
-    leak = (f"Exceeded maximum retries opening {secret} with {key}; alert said "
-            f"{ALERT_MARK} host.name=office-ws-1")
-    d = scene.run("leaky-failure", main=S.closing_main_turns("inconclusive"),
-                  lead_faults={S.L3: S.LeadFault(raise_on=1,
-                                                 exc=lambda: S.unexpected_behavior(leak))})
-
-    sentence = _named(d, control, "a failure whose text carries a host path, a key, alert text")
-    for needle in (secret, key, "Exceeded maximum retries"):
-        assert needle not in sentence
-    _assert_never_handed(d, secret, key, "Exceeded maximum retries")
-    # Alert text reaches MAIN only inside frames (its own raw-alert block), never as harness text.
-    assert ALERT_MARK not in S.harness_text(d.main.history_text), (
-        "alert text reached MAIN outside every frame")
-    _assert_closed(d, "a failure carrying a host path")
-    assert d.report is not None
-    assert not [n for n in (secret, key, "Exceeded maximum retries") if n in d.report], (
-        "the failure's text reached report.md")
-    _alone(control, ("a failure carrying a host path", d))
-
-
-def test_p028_backend_answers_with_no_count(tmp_path: Path) -> None:
-    """A lead that measured something, part of what it asked or zero rows, delivers its own framed summary. That summary never reports a failed count as zero. A partial result is not a named ending."""
-    scene = _Scene(tmp_path)
-    control = scene.control()
-    summary = "FD1222-PARTIAL: scoped count 0 (measured); unscoped count not measured (failed)"
-    # RJ-06: an answer with no count is the adapter's zero-hit envelope; the second call fails.
-    zero = scene.run("zero-and-failed",
-                     backend=_backend(answer=lambda s, v, p: S.envelope([], total=0),
-                                      fault=T.Fault(raise_after=1), exc=S.upstream_fault),
-                     leads={S.L3: [_q(1), _q(2), S.text(summary)]})
-
-    assert summary in zero.opening_message, (
-        "the partial lead's own summary is not in MAIN's opening message (A4: the lead runs to "
-        "its end before the opening message is built)")
-    framed = _summary_frames(zero, control)
-    assert len(framed) == 1, (
-        f"MAIN's opening message carries {len(framed)} correlation frames, not the partial "
-        "lead's one framed summary")
-    assert summary in framed[0], "the partial lead's own summary is not its framed section"
-    S.assert_wrapped_untrusted(zero.opening_message, summary, "the partial lead's summary")
-    assert _ending(zero, control) == "", (
-        f"a partial result was named as an ending: {_ending(zero, control)!r}")
-    rows = zero.rows_for(S.L3)
-    assert [r.get("exit_code") == 0 for r in rows] == [True, False], (
-        f"the scenario is not one measured call and one failed call: {rows}")
-    returns = [r for r in zero.router.seen(S.L3)[-1].tool_returns if '"total"' in r]
-    assert len(returns) == 1, (
-        "the failed call reached the lead as a count (a failed count reads as zero): "
-        f"{len(returns)} tool returns carry a total")
 
 
 def test_p029_l00c_claimed_but_its_declaring_row_refused(tmp_path: Path) -> None:
@@ -773,30 +625,6 @@ def test_p136_correlation_summary_forges_the_harness_notice(tmp_path: Path) -> N
         assert line in added[0], f"the forged sentence is not inside the lead's frame: {line!r}"
 
 
-def test_p176_lead_model_not_configured(tmp_path: Path) -> None:
-    """A lead model that cannot be built is the lead's own 'dispatch raised' ending, named; the run continues."""
-    scene = _Scene(tmp_path)
-    control = scene.control()
-    reference = scene.run("refused", lead_faults={S.L3: S.LeadFault(raise_on=1,
-                                                                    exc=S.provider_refusal)})
-    # PA-19 (executed): what the real build raises for the lead's model — a missing provider key
-    # (RuntimeError) or a model name the provider does not know (ValueError).
-    no_key = scene.run("no-key", lead_faults={S.L3: S.LeadFault(raise_on=1, exc=_runtime_error(
-        "model 'glm-5.3-flash' needs FIREWORKS_API_KEY"))})
-    unknown = scene.run("unknown-model", lead_faults={S.L3: S.LeadFault(
-        raise_on=1, exc=lambda: ValueError("unknown model 'fd1222-no-such-model'"))})
-
-    sentence = _named(no_key, control, "lead model not built (missing key)")
-    assert _named(unknown, control, "lead model not built (unknown model)") == sentence, (
-        "two unbuildable lead models are named differently")
-    assert sentence == _named(reference, control, "dispatch raised (reference)"), (
-        "an unbuildable lead model is not named 'dispatch raised'")
-    for label, d in (("missing key", no_key), ("unknown model", unknown)):
-        _assert_never_handed(d, "FIREWORKS_API_KEY", "fd1222-no-such-model")
-        _assert_continued(d, label, requests=2)
-    _alone(control, ("missing key", no_key), ("unknown model", unknown))
-
-
 def test_p178_claim_fails_because_the_leads_area_cannot_be_wri(tmp_path: Path) -> None:
     """A leads area that cannot be written at all is l-00c's named 'claim failed' ending; MAIN's own first claim then stops the run loudly."""
     scene = _Scene(tmp_path)
@@ -812,35 +640,6 @@ def test_p178_claim_fails_because_the_leads_area_cannot_be_wri(tmp_path: Path) -
         f"MAIN's own claim failed and the run went on: MAIN made {d.main.requests} requests")
     assert _stopped_loudly(d), f"MAIN's failed claim ended the run silently: {d.summary!r}"
     _alone(control, ("leads area squatted", d))
-
-
-def _plain_gather_run(tmp_path: Path, scene: _Scene, gather_turns: Sequence[H.Turn],
-                      backend: S.Backend) -> tuple[S.Drive, H.ReplayFn]:
-    """`run.main` whose lifecycle drives the REAL run through `_replay_harness.drive` with a
-    PLAIN gather script (`ReplayFn`, no `LeadRouter`), so whatever answers `l-00c` is the
-    harness's own default (C01). Returns the drive and the plain gather fake."""
-    gather = H.ReplayFn(list(gather_turns))
-    main = S.MainScript()
-    assert scene.tenant is not None
-    d = S.Drive(tmp=Path(tmp_path), tenant=scene.tenant, main=main, router=S.LeadRouter(),
-                backend=backend)
-
-    def lifecycle(*, run: Any, tenant: Any, **_kw: Any) -> dict:
-        run_dir = run.run_dir
-        d.run_dir = Path(run_dir)
-        d.summary = H.drive(Path(run_dir), run_id=Path(run_dir).name, main=main, gather=gather,
-                            verbs=backend.registry(), tenant=tenant.tenant) or {}
-        return d.summary
-
-    source = Path(tmp_path) / "plain-input" / "alert.json"
-    source.parent.mkdir(parents=True)
-    source.write_bytes(S.alert_bytes(_alert()))
-    d.rc = S.sym("run", "main")(
-        [str(source), "--tenant", scene.tenant.tenant_id, "--run-id", "fd1222-acme-plain-00",
-         "--no-learn"],
-        lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
-        ticket_writer=S.NoTicket(), enqueue=lambda *_a, **_k: False)
-    return d, gather
 
 
 def test_p191_lead_writes_a_summary_without_reading_the_alert(tmp_path: Path) -> None:

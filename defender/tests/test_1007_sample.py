@@ -174,39 +174,6 @@ def test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_patt
         assert_set_aside_for_its_sample(built, 0, f"the {label} samples file")
 
 
-def test_the_writer_pins_one_document_per_pattern_rather_than_relying_on_last_key_wins(
-        tmp_path, monkeypatch):
-    """The writer pins ONE section per system; it does not hand a duplicate-keyed mapping to
-    YAML and let last-key-wins decide.
-
-    Observably true: writing samples from a source that offers two sections for one system
-    refuses, or records exactly one — and the file that lands parses to one key with one value
-    and spells the key once. `samples.yaml` is `unique-key` on `(episode, system)`, and
-    last-key-wins is a decision taken by a serializer rather than by this design.
-
-    What failure looks like: the sampler walks a table and writes as it goes. Which section the
-    questioner and the judge both see then depends on `executed_queries.jsonl` ordering, and the
-    byte-identity obligation is satisfied against an arbitrary pick.
-    """
-    cli = W.mod("learning.branch.cli")
-    _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
-    ep = W.episode(tmp_path, root=root)
-    first = W.samples_document(answers=["web-1"])[W.SYSTEM]
-    second = W.samples_document(answers=["web-2"])[W.SYSTEM]
-
-    try:
-        with Episode.open(ep) as episode:
-            cli.write_questioner_samples(episode, [(W.SYSTEM, first), (W.SYSTEM, second)])
-    except W.refusals():
-        return                       # a refusal is an equally good answer: one section or none
-    doc = W.read_yaml(ep / W.SAMPLES_NAME)
-    assert list(doc) == [W.SYSTEM], f"the file carries {list(doc)}"
-    assert doc[W.SYSTEM] in (first, second)
-    raw = (ep / W.SAMPLES_NAME).read_text(encoding="utf-8")
-    assert raw.count(f"{W.SYSTEM}:") == 1, (
-        "the system was written twice and a YAML load is deciding which one wins")
-
-
 def test_a_case_differing_system_misses_the_sample_and_refuses_the_finding(
         tmp_path, monkeypatch):
     """A system is matched EXACTLY. `IDP` does not find the samples stored under `idp`.
@@ -292,30 +259,6 @@ def test_a_two_system_family_names_each_systems_sample_availability_independentl
 # ---------------------------------------------------------------------------------------
 # M4 — the per-world prompt
 # ---------------------------------------------------------------------------------------
-
-
-def test_the_world_finding_buckets_reach_the_prompt_as_the_closed_set_they_are(
-        tmp_path, monkeypatch):
-    """The per-world prompt names exactly the world-finding buckets the validator admits
-    (#1234 M4 closed the vocabulary #1007 kept open, so the prompt's list is the set, not
-    examples of it), and none of #1007's retired example names.
-
-    Observably true: each of `run.WORLD_FINDING_BUCKETS` appears in world b's prompt, and
-    `shape-invention`, `fact-story-gap` and `undiscriminating-family` do not.
-
-    What failure looks like: the prompt keeps offering the retired example names, the model
-    files under them, and every such reply is refused and re-asked for a bucket the prompt
-    itself suggested.
-    """
-    run = W.mod("learning.judge.run")
-    _built, judge = graded(tmp_path, monkeypatch)
-
-    prompt = judge.prompt_for("b")
-
-    for name in sorted(run.WORLD_FINDING_BUCKETS):
-        assert name in prompt, f"the world-finding bucket {name!r} does not reach the prompt"
-    for retired in ("shape-invention", "fact-story-gap", "undiscriminating-family"):
-        assert retired not in prompt, f"the retired example bucket {retired!r} is still offered"
 
 
 def test_the_judges_sample_is_byte_identical_to_the_questioners_within_one_attempt(

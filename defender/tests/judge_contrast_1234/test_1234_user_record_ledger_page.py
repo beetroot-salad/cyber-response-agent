@@ -1,38 +1,4 @@
-"""#1234 slice 11 — the user section of `judge.yaml`, the per-finding ledger, and the page.
-
-What these tests pin (spec_graph_1234.yaml; design.md as amended by design-amendments.md
-A1-A15; 70-resolutions.md, 78-gate-resolutions.md):
-
-* the user section's three lists — the judge's NAMED gaps (listed only when every completed
-  draw names the same blocked call, A7), the code's FOUND gaps (one entry per blocked call keyed
-  (run, system, verb, params) with a count, from every run's served ledger, plus pre-flight's
-  `not_replayable` entries and J3's inherited pre-branch `∅.denied` row as family entries,
-  A2/A12/A14), and the serving-only world findings;
-* the ledger: every filed finding keeps its index in ONE index space over the three filed lists
-  and carries exactly one lane (A11, A13);
-* the episode page renders the user section and every lane, pairs each ledger entry with the
-  finding it names, and renders every record field it shows as data (OB19).
-
-Builders, as `80-survey.md` assigns them: the REAL path (`S.real_family`, I-10) wherever J3's
-row has to be identified the way A12 says (no id of this run, identical in every readable
-table) or a run is not archived / cut short by a real failed write; the hand-built archive
-(`S.family`) for named gaps, ledger fates and the page. Two hand-built deviations from the
-survey's builder column are recorded in `82-writer-user_record_ledger_page.md`: s_AM11 (a
-`refused` then a `fault` row for ONE call key — no real writer produces both, since `refused`
-is a grant denial and `fault` an adapter that cannot load) and s_A39 (no A12/A14 identification
-at stake).
-
-Entry spellings are COINED (`S.COINED`): a found/named gap entry carries `run`, `system`,
-`verb`, `params`, `count`; a family entry's `run` is `S.COINED["found.family_run"]`; an entry
-named unread carries its cause under `S.COINED["found.unread"]`. A world's `run` value is its
-label (`_run`), the spelling world rows and finding ids already use; the integrator is asked
-to move that spelling into `S.COINED`. Lane words are `S.LANES`.
-
-Every import of the code under test goes through `S.mod()` / `S.sym()` inside a test (via the
-shared drivers), so a missing target is one red per test, never a collection error. Every test
-is expected RED at base 463833df: main has no user section, no call id and refuses the amended
-reply shape (`malformed_replies`).
-"""
+"""#1234 judge contrast: user record, gap census, ledger fates and episode page."""
 from __future__ import annotations
 
 import json

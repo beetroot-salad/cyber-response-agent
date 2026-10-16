@@ -1,22 +1,4 @@
-"""#705 — `gather_boundary`, the danger-lens surface.
-
-`args` is 100% model-authored (`ToolCallPart.args`), and a retried tool call leaves its
-original response in the history, so a malformed `args` string is REACHABLE in production
-rather than hypothetical. Every fixture here is real input through the real primitive:
-the crafted `args` value is written into a real store through the real append path and the
-real SQLite view is queried — no fake stands between the test and the engine, so the
-taxonomy assumption ceases to exist rather than being pinned once.
-
-The governing refutation:
-
-  * **adv:PO2** — the guarded double `json_extract` does NOT survive all malformed JSON.
-    `args` nested past SQLite's ~1000-level parser ceiling raises
-    `OperationalError: malformed JSON` and aborts the ENTIRE query (measured: 1 poison row
-    among 99 healthy → all 100 lost). O12/C17/M9's guard guarantee holds for garbage text
-    and fails here, so `test_a_malformed_args_row_nulls_itself_without_aborting_the_query`
-    is scoped to garbage text and the depth case is its own demand, red against HEAD
-    because the design owes a depth guard nothing currently states.
-"""
+"""gather_boundary SQL view over model-authored args: malformed/over-deep args null their own row, session and fold scoping, cyclic parent chains, inert SQL-shaped content."""
 from __future__ import annotations
 
 import json

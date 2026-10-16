@@ -17,7 +17,6 @@ from defender.skills.invlang.validate import diagnose  # noqa: E402
 from defender.tests._lessons_corpus import _write_lesson  # noqa: E402
 
 CORPUS = DEFENDER / "lessons"
-SKILL_MD = DEFENDER / "skills" / "invlang" / "SKILL.md"
 
 #: The issue's reproduction of defect 1, verbatim. A `compute` vertex whose identifier is open
 #: and an `identity` vertex holding `loginuid=-1` — the shape #919 was filed about, in two rows.
@@ -436,16 +435,6 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
 
 #: One `compute` vertex with an open class triple and an open ident, and the ordinary append
 #: that declares a second. The pair is the churn shape the gate below exists for — see the test.
-_ONE_COMPUTE = """```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|ip-only/??/??|??|knowledge=partial
-```
-"""
-_SECOND_COMPUTE = """```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-004|compute|??/??/??|host-4.corp|knowledge=partial
-```
-"""
 
 
 def test_a_lesson_tied_across_two_cells_is_placed_on_the_one_nothing_else_covers(tmp_path):

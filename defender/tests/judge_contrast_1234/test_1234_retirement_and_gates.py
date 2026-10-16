@@ -1,43 +1,4 @@
-"""#1234 slice `retirement_and_gates` — retired shapes refused at every reader (A4), the gates
-and appenders that hold the new row shape, the bare re-enqueue path gone (A8), and the
-retirement censuses.
-
-THE RULE (A4, design-amendments.md): a persisted record carrying a retired name
-(`judge_outcome`, `verdict_word`, `episode_outcome`, `family_outcome`, an `observability`
-finding type, a `never_eligible` or legacy `withheld` lane) or missing a required new field is
-refused BY NAME at its reader:
-
-* a queued defender row is held at `_gate_family` (I10), its `held_reason` naming the field;
-* a queued questioner row is held at `_gate_questioner` the same way (T4 reverses that gate's
-  "consumed, never held" rule; K7 executed the drain's support for it);
-* an old `judge.yaml` is refused by `read_grade`, for the re-run and the page alike, and the
-  page renders the named refusal (OB12, K6: only key names tell an old record from a new one);
-* repo source carrying the names (the eval seed and its README, the prompts, the docs) is
-  edited, never tolerated; and unknown NON-retired keys keep today's drop (g01).
-
-HOW IT IS DRIVEN. Queue rows go through the real drain tick (`drain.run_batch` over the real
-channel config, `_drain719`'s harness as `test_921_enqueue_gate.py` uses it): the curator is a
-recording fake that only commits what it is handed, so "authored" and "held" are where the row
-ENDS UP, never which function ran. The judge's record goes through `grade_episode` (the
-`_spec1234` driver) and `read_grade`; the page through `open_episode_view` + `build_page`.
-The drain's paths are rooted at the env-named learning-state root, so the judge's appends and
-the drain read ONE queue.
-
-PRE-CHANGE RECORDS ARE HAND-WRITTEN IN MAIN'S SHAPE (463833df): the defender row's thirteen
-keys with `judge_outcome` (G29), the questioner row with `judge_outcome` forced to None (G27),
-and `judge.yaml` as `EpisodeGrade` dumps it (verdict_word / episode_outcome / family_outcome on
-every record, G21; `never_eligible` and `withheld` lanes readable today, OB12, K12). A
-post-change record is made by the real pass, then edited by one key, so the refusal can only
-be for the edit.
-
-THE CENSUS SCANNER is one root-parameterised function used for the real tree (d08h, d08i) and
-for a planted tree (d08k): it lists files through `_astlib.source_files` (the gates' one
-listing: git's view inside the work tree, a walk outside it) and skips every `tests/` folder.
-
-Expected red at base 463833df: no retired-name refusal exists anywhere; `_gate_family` holds a
-row with no `judge_outcome` and authors one with it; `enqueue()` and the bare
-`enqueue_report` exist; the eight files of C11 name the family words.
-"""
+"""#1234 judge contrast: queue gates and appender guards for judge rows."""
 from __future__ import annotations
 
 import os

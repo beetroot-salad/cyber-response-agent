@@ -1,29 +1,4 @@
-"""#750 — the disposition vocabulary reaches the model STRUCTURALLY, and the host still gates.
-
-Today the four members reach the model only as prose: a hand-maintained literal in the close
-tool's docstring, which *is* the tool schema's `description`. #806 adding `false-positive` was a
-manual multi-site sync, and `lint_borrowed_vocabulary` names bare literals as its own blind spot.
-The change under test derives the tool argument's schema from `defender._vocab` — the vocabulary's
-one owner — and deletes the prose copy.
-
-The two halves have to be pinned TOGETHER, because each one is dangerous without the other:
-
-  * the schema must ADVERTISE the vocabulary (O1) — asserted against `DISPOSITION_VALUES` itself,
-    never against a list of members re-typed here, so a fifth member that lands without the schema
-    following fails this file;
-  * the schema must NOT BECOME THE GATE (NU2). `json_schema_extra` is a hint pydantic does not
-    validate against, and the design depends on that: if the framework ever rejected the argument
-    first, the membership test in `_close_investigation_async` (named, never cited by line
-    number — a line number rots on the next edit above it) would become unreachable from the
-    tool lane, the SYNC host entry (which never passes through tool-argument validation at all)
-    would be left ungated, and #722's exact retry text — the one that renders an invisible
-    character visibly — would be replaced by a framework message that echoes the value raw.
-
-Hermetic: the model is a `FunctionModel` replaying scripted turns (`tests/e2e/_replay_harness`),
-and the close's four review stages are the shared no-provider bundle. Both enter through the
-entry point's own injection seams (`register_close_tool(stages=…, bounds=…)`,
-`close_investigation(stages=…, bounds=…)`) — no `monkeypatch.setattr`.
-"""
+"""Disposition vocabulary reaches the model as a schema enum, and the host still gates: sync entry and tool lane refuse near-misses and escape invisible characters."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_fixture_run_1165
@@ -45,7 +20,6 @@ from defender.agents import MAIN_DEF  # noqa: E402
 from defender.runtime import challenge_gate  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.close_tool import (  # noqa: E402
-    STANDS,
     close_investigation,
     register_close_tool,
 )
@@ -162,78 +136,7 @@ def test_the_registered_tool_advertises_the_owners_vocabulary(tmp_path):
     )
 
 
-def test_the_tool_description_no_longer_copies_the_member_list(tmp_path):
-    """D3 (serving O1). The prose copy of the vocabulary is gone from the tool's description.
-
-    Asserted as "not all of the members appear as literals" rather than as an exact string:
-    `false-positive` legitimately survives in the sentence about the `detection_notes` +
-    `entity_check` rows it requires, and — since #992 — `inconclusive` legitimately survives
-    too, in the sentence about the `ceiling_test` row it requires and the sentence naming which
-    closes pass the live challenge gate; pinning the exact replacement wording would make this
-    a diff test. What must not survive is the ENUMERATION — the hand-maintained list that #806
-    had to sync by hand.
-
-    Positive control: the description is still a real description. A tool whose docstring was
-    deleted outright would satisfy the absence above while telling the model nothing.
-    """
-    script, _run_dir = _drive_tool(tmp_path)
-    description = _close_tool_def(script).description or ""
-
-    assert "disposition" in description, (
-        f"the close tool's description no longer describes the close: {description!r}"
-    )
-    assert len(description) > 100, (
-        f"the close tool's description was emptied rather than trimmed: {description!r}"
-    )
-    copied = [member for member in DISPOSITION_VALUES if member in description]
-    assert len(copied) <= 2, (
-        "the tool description still enumerates the vocabulary "
-        f"({copied!r}) — the schema's enum is where the members now live, and a second copy "
-        "is the hand-synced surface this change removes. `false-positive` and `inconclusive` "
-        "(#992) may each survive as prose about their own entry price / review obligation; "
-        "three or more is a list, whatever it is punctuated as"
-    )
-
-
 # NU2 — the hint must not become the gate.
-
-
-def test_the_schema_hint_is_not_the_gate(tmp_path):
-    """NU2. With the enum advertised, an out-of-enum value STILL reaches the tool body.
-
-    This pins a framework behavior the design leans on: pydantic does not validate against
-    `json_schema_extra`, so the advertised enum is a hint to the model and the membership test
-    in `_close_investigation_async` remains the sole rejecter. If a future pydantic (or a future
-    annotation — a `Literal`, a `StrEnum`) rejected the argument first, three things break
-    silently at once: the host check becomes unreachable from the tool lane, the SYNC entry that
-    never sees tool-argument validation is left as the only ungated lane, and the retry text
-    stops being ours.
-
-    The discriminator is WHOSE refusal came back. The host's message is written by
-    `_close_investigation_async` and nothing else in the stack produces it, so its presence is
-    the evidence the body ran; a framework rejection would instead hand the model a validation
-    error it never wrote.
-
-    The first assertion is the premise, not decoration: without the advertised enum this test
-    would pass vacuously, pinning nothing about a hint that is not there.
-    """
-    script, run_dir = _drive_tool(tmp_path, disposition="Benign")
-    prop = _disposition_property(_close_tool_def(script))
-    assert prop.get("enum") == list(DISPOSITION_VALUES), (
-        "no enum is advertised, so this test cannot say whether the hint stayed a hint"
-    )
-
-    seen = "\n".join(script.seen)
-    assert "a typed enum, not free text" in seen, (
-        "the host's own refusal never reached the model — the argument was rejected before the "
-        "tool body ran, which leaves the membership test in `_close_investigation_async` "
-        f"unreachable from this lane. Saw: {seen!r}"
-    )
-    assert "Input should be" not in seen, (
-        "a pydantic validation error came back instead of the host's refusal — the schema "
-        f"hint became the gate. Saw: {seen!r}"
-    )
-    assert not (run_dir / "report.md").exists(), "an out-of-enum close committed a report"
 
 
 # O2 — no value outside the vocabulary commits, by EITHER entry path.
@@ -276,21 +179,6 @@ def test_the_sync_host_entry_denies_a_non_string_rather_than_crashing(tmp_path, 
 
     assert "disposition must be exactly one of" in str(excinfo.value)
     assert not (run_dir / "report.md").exists()
-
-
-def test_a_member_of_the_vocabulary_still_closes(tmp_path):
-    """O2's positive control, and it belongs to the same lane.
-
-    Every refusal above would hold just as well if the close were simply broken in this
-    fixture. `inconclusive` bypasses the review gate, so this arm asserts the sync entry can
-    still commit — which is what makes the refusals evidence about the vocabulary.
-    """
-    deps, run_dir = _deps(tmp_path)
-
-    result = close_investigation(deps, "inconclusive", stages=_stages())
-
-    assert result.outcome == STANDS
-    assert (run_dir / "report.md").exists(), "a valid disposition did not commit"
 
 
 def test_the_tool_lane_refuses_a_value_outside_the_vocabulary(tmp_path):

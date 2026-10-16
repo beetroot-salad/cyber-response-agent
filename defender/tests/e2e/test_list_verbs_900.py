@@ -123,8 +123,6 @@ _MISMATCH: dict[str, Any] = {
 }
 
 
-
-
 def _parse(out: str) -> dict[tuple[str, str], dict[str, str]]:
     """`{(system, verb): {param: descriptor}}` — the whole of this spec's rendering contract."""
     calls: dict[tuple[str, str], dict[str, str]] = {}
@@ -257,8 +255,6 @@ def _ask(registry: VerbRegistry, system: str, tmp_path: Path) -> str:
         out = asyncio.run(out)
     assert isinstance(out, str), f"list_verbs must return a str, got {type(out).__name__}"
     return out
-
-
 
 
 def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
@@ -469,8 +465,6 @@ def test_o3_an_unresolvable_annotation_is_published_as_type_unenforced(tmp_path)
     assert _type_claim(resolved["limit"]) == "int"
 
 
-
-
 def test_o5_a_withheld_but_declared_verb_is_never_published(tmp_path):
     """O5 — the tool never names a `(system, verb)` gather's grant withholds, and the five real
     ones are named here so the demand is measured against the shipped grant rather than a
@@ -510,8 +504,6 @@ def test_o5_the_published_set_is_exactly_what_decide_grants(tmp_path):
     for system in _grant_systems():
         published = {v for _, v in _parse(_ask(registry, system, tmp_path))}
         assert published == set(_granted(registry, system)), f"{system}: {sorted(published)}"
-
-
 
 
 def test_o4_an_unknown_system_degrades_loudly_and_names_it(tmp_path):
@@ -602,8 +594,6 @@ def test_gather_registers_list_verbs_and_main_does_not():
     assert "list_verbs" not in main._function_toolset.tools
 
 
-
-
 def test_list_verbs_writes_no_queries_row_and_leaves_the_guards_untouched(tmp_path):
     """The queries table is "what the defender RAN" — the join the whole offline learning loop
     rests on. `list_verbs` runs nothing: it inspects signatures and never calls an adapter, so a
@@ -645,8 +635,6 @@ def test_list_verbs_writes_no_queries_row_and_leaves_the_guards_untouched(tmp_pa
     ]
     assert own_rows == [], f"a list_verbs call wrote a queries row: {own_rows}"
     assert not (run_dir / "gather_raw" / LEAD).exists(), "a list_verbs call persisted a payload"
-
-
 
 
 def _resolved_verb(ctx: VerbContext, *, host: str, limit: int = 10) -> list[dict]:

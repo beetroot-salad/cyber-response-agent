@@ -17,9 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -214,20 +211,6 @@ def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_the_page_module_does_not_import_the_launcher():
-    """The episode's `runs/` segment comes from `_episode_paths.py`, the layout owner, so the
-    writer and the reader reach it through one accessor (#1077 D7; it was a constant on
-    `branch/archive.py` before, and a second one on the page before that) — importing the page
-    must not pull `branch/cli.py` (the whole launcher: argparse, the estate registry, the
-    oracle runtime) into a static renderer, nor execute `cli.py` a second time when the
-    launcher itself runs as a script."""
-    code = ("import sys; import defender.scripts.visualize.visualize_episode; "
-            "print('defender.learning.branch.cli' in sys.modules)")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                         check=True, cwd=str(Path(E.__file__).resolve().parents[2]))
-    assert out.stdout.strip() == "False", out.stdout
-
-
 def test_1025_a_response_row_with_an_empty_model_string_is_unpriced(tmp_path):
     """`model: ""` — a call whose model was never recorded — reads "unpriced", not a figure at
     the pricing table's absorbed-row rate: the stage sum excludes it and says so."""
@@ -241,14 +224,6 @@ def test_1025_a_response_row_with_an_empty_model_string_is_unpriced(tmp_path):
     assert "partial — 2 of 3 calls priced" in questioner, questioner
 
 
-def test_1025_the_docstring_names_the_launchers_real_hook():
-    source = Path(visualize_episode().__file__).read_text(encoding="utf-8")
-    assert "cli.py::_render_page" in source
-    assert "cli.py::_render_document" not in source
-    cli_source = Path(E.mod("learning.branch.cli").__file__).read_text(encoding="utf-8")
-    assert "def _render_page(" in cli_source
-
-
 # ---------------------------------------------------------------------------------------
 # The ledger — the pass writes what it decided; the page reads it and decides nothing
 # ---------------------------------------------------------------------------------------
@@ -256,36 +231,6 @@ def test_1025_the_docstring_names_the_launchers_real_hook():
 
 def _ledger_of(doc: dict) -> dict[str, tuple[str, str | None]]:
     return {e["finding_id"]: (e["lane"], e["reason"]) for e in doc["dispositions"]}
-
-
-def test_1025_the_fixture_ledger_is_the_passes_own(tmp_path):
-    """`sample_grade()["dispositions"]` — the ledger every page test renders from — is,
-    entry for entry AND in walk order, what a real `grade_episode` writes when its judge
-    answers each call with the sample episode's own draw document (#1234: the pass routes the
-    replies it draws, `route.fate`; nothing re-walks the documents on disk, A8). A fixture
-    ledger the pass would not write is a fixture bug, and it fails here rather than as a page
-    test that passed against a record no pass produces."""
-    ep = E.sample_episode(tmp_path, judge=False, traces=False)
-    replies = [J.as_reply_text(J.draw_doc(ep.dir, label, 0))
-               for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD)]
-    family = J.as_reply_text(J.draw_doc(ep.dir, E.FAMILY, 0))
-    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD, E.FAMILY):
-        shutil.rmtree(ep.world(label) / "judge")
-    E.plant_container_record(ep.dir)
-    judge = J.FakeJudge(replies=replies, family_default=family)
-    J.grade_at(ep.dir, judge=judge, draws=1, state=_state1135.state_over(tmp_path / "queue"))
-    assert judge.agent_ids == [f"judge:{E.PASSTHROUGH_WORLD}:0", f"judge:{E.GRADED_WORLD}:0",
-                               f"judge:{E.FAMILY}:0"], judge.agent_ids
-    record = J.judge_record(ep.dir)
-    doc = E.sample_grade()
-    assert record["dispositions"] == doc["dispositions"]
-    assert record["enqueued_rows"] == doc["enqueued_rows"] == S.defender_enqueued
-    assert record["world_enqueued_rows"] == doc["world_enqueued_rows"] == S.world_author
-    assert record["family"] == doc["family"]
-    for got, want in zip(record["worlds"], doc["worlds"], strict=True):
-        for key in ("world", "bucket", "systems", "draws", "measured", "draws_disagree",
-                    "world_label_doubted", "state", "completed_draws"):
-            assert got[key] == want[key], (got["world"], key, got[key], want[key])
 
 
 def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):

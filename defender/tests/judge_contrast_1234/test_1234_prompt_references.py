@@ -1,38 +1,4 @@
-"""#1234 slice 4, prompt_references: what each judge prompt carries once a planted world is
-judged against labelled reference runs (the control and every gradable sibling).
-
-The world prompt (M3 as amended by A9, A10 and the drift overlay) runs: task and taxonomy,
-computed header, contrast table, fact surfaces and aligned lead view, compressed reference runs,
-the judged world's views, and the noise context (pre-flight's record). Every prompt test drives
-the real entry point (`S.grade` -> `grade_episode`) and reads what the recording model seam
-(`S.RoutedJudge`, the `judge=` seam) was handed. The `JudgeContext` tests call `render` through
-`S.render_context` and read what it returns.
-
-HOW A TEST FINDS A SECTION AND A RUN'S BLOCK. A10 puts host-authored section titles and run labels
-outside the untrusted frames, so:
-  * a section starts at its title in host text (`_sections`). The titles are the implementer's to
-    name (F2), so they are COINED and live in `S.COINED["title.<section>"]`. Each title must
-    occur exactly once in a prompt's host text.
-  * a run's labelled block is the text whose nearest preceding host-text run label is that run's
-    (`_blocks`, label tokens by `S.label_re`). A frame belongs to the run whose label heads it —
-    the same reading frames_and_cap's `_owner` takes.
-The labels are `ctl` (the control), `wb` and `wc`, never `a`/`b`/`c`: host prose spells those as
-words ("a reference run"). Every scripted pointer therefore names its run explicitly; `S.inv` and
-`S.wf` default to `b`/`a` pointers.
-
-THE `JudgeContext` WALK. The context's field names are the implementer's too (F2). The context
-tests make no guess at them: they assert the class is `S.COINED["cls.context"]` and read what the
-context holds by walking it (`_nodes`): its strings, its collections (a row list is any list or
-mapping in it), and the lead ids each element holds.
-
-THE SALT. Every message frames its sections in a fresh random salt (#875 F-1,
-`_untrusted.message_salt`). Two renders of the same archive therefore differ in the salt alone.
-"Byte-identical" (s_A9, s_L24, d03k) is compared with the frame tags' salt normalised
-(`S.unsalted`); every other byte must match.
-
-THE CAP is A9's and frames_and_cap's to pin. Here it is lifted (`_UNCAPPED`) so no trim decides
-what a reference test sees. g18 sets its own cap, because a cut section is one of its cases.
-"""
+"""#1234 judge contrast: judge prompt construction: references, contrast tables, facts."""
 
 from __future__ import annotations
 

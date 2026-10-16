@@ -14,13 +14,6 @@ DEFENDER = Path(__file__).resolve().parents[1]
 from defender.learning.frontend import serialize  # noqa: E402
 
 
-CORPUS_DIR = {
-    "defender": DEFENDER / "lessons",
-    "actor": DEFENDER / "lessons-actor",
-    "environment": DEFENDER / "lessons-environment",
-}
-
-
 def test_three_groups_present():
     """#1007 M7 adds a FOURTH group, `questioner` — findings about a WORLD rather than
     about the defender agent, folded from the family judge's own world findings. Name kept

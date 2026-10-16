@@ -1,37 +1,4 @@
-"""#1234 slice 8 — defender routing: which channel each filed finding reaches, and what a queued
-defender row carries.
-
-The judge routes every finding of every completed draw by mechanical rules over its typed
-pointers (A1, A13, A14, A15), never by a word another world or the family call said (P-c, I2):
-
-* an investigator finding of a MEASURED world whose every completed draw agrees on one
-  investigator bucket is queued on the defender channel under its own draw's finding id (A7,
-  A13); a not-measured, withheld (draws disagree) or `none` world queues none (I4, I9);
-* a finding whose every resolving conduct pointer (context set aside) is a blocked-call row —
-  a served-ledger `refused`/`fault` row, or J3's inherited `∅.denied` table row — is gap-only
-  and goes to the user record, never a queue (I3, P-a); an outage (`real-error`) row and an
-  exit-64 reject are ordinary conduct;
-* a world finding with a resolving plan pointer that is not gap-only is design and reaches the
-  questioner queue from every draw; withholding stops only defender rows;
-* a queued defender row replaces `judge_outcome` with `contrast_evidence`, `on_verdict_path`
-  and `world_label_doubted` (the doubt mark: set when any of that world's OWN draws filed
-  `mislabelled`), keeps today's other keys, and carries its own world's alert rule key.
-
-Drive points: the hand-built archived episode (`S.family`) for the routing rules, and the REAL
-launcher path (`S.real_family`, I-10) where the blocked call or the reject must be written by
-the real writers (s_AM8: J3's inherited row seeded by the real `_inherit_evidence`; s_A44: a
-grant refusal at run time). Every pass goes through `grade_episode` (`S.grade`) with the
-recording `S.RoutedJudge` scripting each world's draws (scripted content in the design's reply
-shape; it routes, it never decides). Assertions read the two queues through the state
-handle's own reader, the ledger lanes and the user section off `judge.yaml`, and, for g13 and
-s_D35, what `build_finding_row` and the lesson writer's prompt builder return.
-
-RED at base 463833df: main's reply validator refuses the amended reply shape (no
-`episode_outcome`; three filed lists), so every draw is malformed and nothing is queued; main
-has no user section, no per-finding lanes beyond its five, no doubt mark, an episode-level
-alert key (OB14), a `judge_outcome` keyword on `build_finding_row`, and its defender lane is
-keyed on the family's verdict word.
-"""
+"""#1234 judge contrast: routing of judge findings to the defender/user-record queues."""
 from __future__ import annotations
 
 import ast

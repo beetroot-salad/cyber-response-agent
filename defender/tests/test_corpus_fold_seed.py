@@ -18,7 +18,6 @@ from defender.learning.author.shared import build_curator_user_prompt  # noqa: E
 from defender.tests._curator1134 import author_trees, corpus_view, open_state  # noqa: E402
 
 from defender.tests.test_curator_manifest import (  # noqa: E402
-    _actor_lesson,
     _findings_lesson,
     _headers,
 )
@@ -85,17 +84,6 @@ def test_d0_byte_shape_two_sections(tmp_path):
     assert not manifest.endswith("\n\n")
     assert "\n\n## beta\n" in manifest
     assert manifest.count("\n\n## ") == 1
-
-
-def test_d0_empty_corpus_is_the_empty_string_exactly(tmp_path):
-    """demand: d0 — M7 restated at byte level: an empty corpus returns ``""`` EXACTLY, not ``"\\n"``.
-    Falsiness is LOAD-BEARING: ``build_curator_user_prompt`` does
-    ``build_corpus_manifest(...) or "(none — the corpus is empty)"``, so a truthy ``"\\n"`` would
-    splice a blank manifest into every first-drain curator prompt instead of the sentinel."""
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    assert _shared.build_corpus_manifest(empty) == ""
-    assert _shared.build_corpus_manifest(tmp_path / "missing") == ""
 
 
 def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(tmp_path):

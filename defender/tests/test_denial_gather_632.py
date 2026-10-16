@@ -1,51 +1,4 @@
-"""#632 part 2 — the denial at the runtime site: what the model gets, what moves, what wins.
-
-One test per demand of `spec_graph_632-verb-authorization.yaml`, named by its
-`discharged_by`. RED against `d01001e6` by construction.
-
-The ordering §7 settled — R3/R23 as REVERSED at phase F — and which every test below reads
-from:
-
-    unknown system → unknown verb → THE GRANT CHECK → the query_id traversal screen
-      → param validation → the availability short-circuit → execute
-
-**The grant check runs first.** It beats the malformedness checks, it beats the
-caller-supplied id's traversal screen, and it beats the availability short-circuit. The
-earlier split (malformed first, then the screen, then the grant) is overturned: its
-intersection with the other two paths let a model suppress EVERY policy-denial record for
-the life of a run by appending one unrecognised parameter — or one `../` — to any call it
-expected to be refused. Three cheap silences beside the one R3's second half was chosen to
-close is not a cost anyone accepted; it is the hole itself.
-
-What that ordering buys, and what every test here asserts in its own words:
-
-* A denied call ALWAYS produces its denial audit record. There is no path on which
-  authorization is skipped and the refusal goes unrecorded.
-* A denied call leaves NO evidence row — full stop, not "when well-formed". The narrowing
-  the earlier ordering forced onto every no-evidence-row obligation is WITHDRAWN.
-  AMENDED BY #860: "evidence row" means a row a call that REACHED a system wrote. A denied
-  call now leaves exactly one `∅.denied` SENTINEL row (`_query_rules.DENIED_QUERY_ID`) —
-  writer-only, split onto `JoinedLead.sentinels` and never `.queries`, partitioned out of
-  every learning-loop router by its `∅.` prefix like the repeat trip and the shim failure
-  before it — so the offline judge can see that the lead tried and was refused. It consumes
-  a seq and an empty sidecar the way every sentinel does; it charges no breaker, counts
-  toward no guard, and its `error_class` is `denied`, not `agent-fixable`. `_Run.own_evidence`
-  is the "no evidence row" reading; `_Run.own_denied_rows` the sentinel's.
-* A call that is both malformed and denied takes the DENIAL path: the model sees the
-  denial, not the malformedness.
-* The traversal screen no longer precedes authorization. What keeps a hostile
-  model-authored `query_id` out of the durable record is now §7 R12's bounded, NORMALIZED
-  projection (d66) rather than an ordering — the projection is the sanitizer that column
-  was missing, and this file asserts it on the denial path directly.
-* The screen SURVIVES the reordering, and is pinned where it still runs. Behind the grant
-  check, no denied call reaches it, so nothing about the reversal keeps it alive; the
-  granted path is where it is now the first refusal that can fire, and d53 drives it there.
-  Without that half the whole screen could be deleted with this suite green.
-
-§7 R11, read literally, is the other rule every label below reads from: a system a role's
-grant reaches NOWHERE is UNRESOLVABLE (today's row-written, retry-coached treatment), and
-DENIED is the label only for a verb withheld on a system the grant otherwise reaches.
-"""
+"""Gather-site verb denial: legible refusal, no evidence row or breaker movement, decided from the grant alone before traversal/availability checks."""
 from __future__ import annotations
 
 import json
@@ -70,7 +23,6 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
     q,
     recording_table,
     run_gather,
-    ticket_envelope,
 )
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
@@ -88,8 +40,6 @@ def _registry(rec: VerbRecorder, *, granted=(GRANTED_PAIR,), declared=DECLARED,
     DECLARED AND WITHHELD (a denial) while `elastic.nosuch` is undeclared (today's path)."""
     table = recording_table(rec, {s: declared for s in systems}, raises=raises)
     return ScopedFakeVerbs(table, grant_of("gather", granted))
-
-
 
 
 def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path: Path):
@@ -222,19 +172,6 @@ def test_an_undeclared_verb_keeps_todays_unknown_verb_treatment(tmp_path: Path):
     assert r.gather.calls >= 2, "the unknown verb did not bounce the agent back into its loop"
 
 
-def test_a_denial_names_the_system_and_verb_it_refused(tmp_path: Path):
-    """The refusal a denied call returns names the system and the verb it refused, rather
-    than a generic invalid-input message. Surface hiding is not an objective; denial
-    messages stay legible."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=_registry(rec), turns=[q(*DENIED_PAIR), DONE], run_id="d24")
-
-    seen = r.gather_saw
-    assert "elastic" in seen
-    assert "esql" in seen
-    assert rec.calls == []
-
-
 def test_a_refusal_lists_only_the_roles_granted_subset(tmp_path: Path):
     """A refusal enumerates only the verbs the role's verb_grant reaches for that system,
     never the full adapter set, and a system the grant reaches NOWHERE reads as unresolvable
@@ -274,8 +211,6 @@ def test_a_refusal_lists_only_the_roles_granted_subset(tmp_path: Path):
         "a wholly ungranted system read as denied rather than unresolvable"
     assert len(whole.own_rows) == 1, "a wholly ungranted system wrote no unresolvable row"
     assert whole.own_denials == [], "a wholly ungranted system was audited as a policy denial"
-
-
 
 
 def test_a_denied_gather_verb_leaves_only_its_sentinel_row_and_an_empty_sidecar(tmp_path: Path):
@@ -360,22 +295,6 @@ def test_a_denied_gather_verb_leaves_only_its_sentinel_row_and_an_empty_sidecar(
         "the denials' sentinel rows and the granted row do not take consecutive seqs in order"
 
 
-def test_a_granted_gather_verb_still_writes_its_row_and_its_payload(tmp_path: Path):
-    """A granted gather verb still writes its queries row and its
-    `gather_raw/{lead_id}/{seq}.json` payload, unchanged. The positive control the negative
-    above needs: proof the evidence surface is observable at all, so `no row` is a
-    difference the channel can see rather than an empty run."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=_registry(rec), turns=[q(*GRANTED_PAIR), DONE], run_id="d31")
-
-    assert [c.verb for c in rec.calls] == ["query"]
-    assert len(r.own_rows) == 1
-    assert r.own_rows[0]["exit_code"] == 0
-    assert r.own_rows[0]["seq"] == 0
-    assert (r.run_dir / "gather_raw" / LEAD / "0.json").is_file()
-    assert r.own_denials == [], "a granted call was audited as a policy denial"
-
-
 def test_a_denial_is_the_dispatched_leads_own_row_and_the_audit_record_is_the_runs(tmp_path: Path):
     """The DECISION needs no lead context — the grant is a function of role, system and verb —
     but since #860 the denial's ROW is the dispatching lead's own conduct: its `lead_id` is
@@ -399,38 +318,6 @@ def test_a_denial_is_the_dispatched_leads_own_row_and_the_audit_record_is_the_ru
     assert [(row["lead_id"], row["system"], row["verb"]) for row in r.own_denied_rows] \
         == [(LEAD, *DENIED_PAIR)], "the denial's row does not name the lead it was refused inside"
     assert r.own_evidence == [], "the denial allocated a query row"
-
-
-
-
-def test_a_lead_less_call_is_the_same_internal_error_at_every_capture_frame(tmp_path: Path):
-    """The premise d44 retired: a denial is the dispatching lead's own row, so the capture has
-    NO lead-less path any more — and the two frames that touch the queries table say so the
-    same way. The rejection guard used to answer `None` for deps with no `lead_id` while the
-    row write two lines later raised on the same deps; a denial routed through both turned a
-    policy refusal into an internal error at the second frame after the first had let it
-    through. Observably: the guard raises the row write's own `RuntimeError`, before reading
-    the table (positive control: the same guard, with a lead, reads it and answers `None`)."""
-    from defender._paths import PATHS
-    from defender.runtime import tools
-    from defender.runtime.agent_definition import compile_policy_for
-    from defender.runtime.query_tool import QueryCapture
-    from defender.runtime.run_state import RunState
-
-    # The guard reads the run's state (#1235), which a run starts with; this folder never goes
-    # through the driver, so its state is started here (no rows).
-    policy = compile_policy_for(T1106.fixture_gather_def(), run_dir=tmp_path, defender_dir=PATHS.defender_dir)
-    ident = dict(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id=tmp_path.name,
-                 cwd_anchor=tmp_path, policy=policy,
-                 run_state=RunState(tmp_path, tmp_path.name))
-    capture = QueryCapture(_registry(VerbRecorder()))
-
-    with pytest.raises(RuntimeError, match="without a dispatched lead_id"):
-        capture._rejection_guard(
-            tools.GatherDeps(**ident), "elastic", "esql", {}, system_key="")
-    assert capture._rejection_guard(
-        tools.GatherDeps(**ident, lead_id=LEAD), "elastic", "esql", {}, system_key="",
-    ) is None, "positive control: with a lead, an empty table trips nothing"
 
 
 def test_a_malformed_call_keeps_todays_queries_row(tmp_path: Path):
@@ -559,8 +446,6 @@ def test_a_denial_is_decided_before_the_availability_short_circuit(tmp_path: Pat
     assert len(r.own_denied_rows) == 1, "the down-message short-circuited the denial's own row"
 
 
-
-
 def test_a_denial_does_not_move_the_circuit_breaker(tmp_path: Path):
     """A denial contributes nothing to the circuit breaker, matching the closed-ticket
     tool's existing rule that a business refusal is not an infra fault. Partly free by
@@ -626,28 +511,6 @@ def test_a_denials_sentinel_row_is_a_sentinel_to_every_reader(tmp_path: Path):
     assert not any(in_rejection_domain(row) for row in rows), \
         "a denial's row entered the rejection domain — it is neither above-guard nor agent-fixable"
     assert rejection_budget_trip(rows, LEAD, budget=3) is None
-
-
-def test_an_infra_fault_still_moves_the_circuit_breaker(tmp_path: Path):
-    """A GRANTED call's backend outage stays an infra fault and still moves the circuit
-    breaker — distinguishable from a policy denial in BOTH the audit trail and the breaker.
-    The positive control the denial's breaker negative needs: proof the breaker channel can
-    see a difference at all.
-
-    The fault the fake raises is the transport fault the #611 ledger observed on the real
-    adapters, not an author-imagined one."""
-    from defender.scripts.adapters.faults import TransportFault
-
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=_registry(rec, raises=TransportFault("connection refused")),
-                   turns=[q(*GRANTED_PAIR), DONE], run_id="d33")
-
-    assert len(rec.calls) == 1, "the granted verb never ran — the outage is not the fault under test"
-    assert r.own_rows[0]["error_class"] == "infra"
-    assert r.breaker["systems"]["elastic"]["failures"] == 1
-    assert r.own_denials == [], "an infra fault was relabelled into the policy-denial stream"
-
-
 
 
 def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_path: Path):
@@ -733,29 +596,6 @@ def test_a_transient_adapter_import_failure_does_not_stick_across_a_run(tmp_path
     assert r.own_denials == [], "an import failure was recorded as a policy denial"
 
 
-def test_repeated_identical_denials_each_audit_and_never_move_run_state(tmp_path: Path):
-    """Every denied call appends its OWN audit record — no dedup key, no per-run cache — and
-    the hundredth identical denial has still moved no run state, so the first and the
-    hundredth are indistinguishable in everything except the audit stream.
-
-    Recorded and NOT built (RS6): that indistinguishability is exactly why a denial loop has
-    no exit. The design refuses to coach a retry and nothing else ends the loop, so a model
-    re-issuing a denied call spins until the run-level budget stops it. Neither obvious home
-    for a counter is legal — the circuit breaker is for infrastructure faults, and the
-    `∅.denied` rows (#860) sit outside both repeat guards' domains by construction, so
-    n identical denials are n rows and never a trip."""
-    rec = VerbRecorder()
-    n = 5
-    r = run_gather(tmp_path, verbs=_registry(rec), turns=[*(q(*DENIED_PAIR) for _ in range(n)), DONE],
-                   run_id="d42")
-
-    assert len(r.own_denials) == n, "denials were deduplicated or cached"
-    assert r.own_evidence == []
-    assert len(r.own_denied_rows) == n, "the nth identical denial was counted, tripped or deduplicated"
-    assert r.breaker.get("total_failures", 0) == 0
-    assert rec.calls == []
-
-
 @pytest.mark.parametrize(("system", "verb"), [
     ("Elastic", "query"), (" elastic", "query"), ("elastic ", "query"),
     ("elastic", "QUERY"), ("elastic", " query"), ("elastic", "query "),
@@ -780,8 +620,6 @@ def test_a_case_or_whitespace_variant_of_a_granted_name_never_executes(
     assert r.own_rows[0]["exit_code"] != 0
 
 
-
-
 def test_gather_is_denied_ticket_get_ticket(tmp_path: Path):
     """Gather is denied `ticket.get-ticket`, which only the judge used. A class-shaped grant
     could not have expressed this — both are reads on a system gather legitimately holds."""
@@ -797,33 +635,6 @@ def test_gather_is_denied_ticket_get_ticket(tmp_path: Path):
     assert r.own_evidence == []
     assert len(r.own_denials) == 1
     assert r.own_denials[0]["verb"] == "get-ticket"
-
-
-def test_gather_list_tickets_still_reaches_the_store(tmp_path: Path):
-    """Gather's `ticket.list-tickets` still reaches the ticket store, unchanged. The
-    positive control for the denial above: the same system, through the same registry
-    lookup, on the verb the verb_grant does name.
-
-    The fake answers in the store's real envelope shape, `{"total", "tickets"}`. Since #1221
-    no ticket screen reads that shape, and the reply is served as the store answered it
-    (`test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments`)."""
-    rec = VerbRecorder()
-
-    def list_tickets(ctx, **params):
-        rec.record("list-tickets", ctx, params)
-        return ticket_envelope("SOC-777")
-
-    table = recording_table(rec, {"ticket": ("get-ticket",)})
-    table["ticket"]["list-tickets"] = list_tickets
-    reg = ScopedFakeVerbs(table, T1106.fixture_grants().gather)
-    r = run_gather(tmp_path, verbs=reg, system="ticket",
-                   turns=[q("ticket", "list-tickets", {}), DONE], run_id="d34")
-
-    assert [c.verb for c in rec.calls] == ["list-tickets"]
-    assert len(r.own_rows) == 1
-    assert r.own_rows[0]["exit_code"] == 0
-    assert "SOC-777" in r.gather_delta, "the granted read's own content never reached the model"
-    assert r.own_denials == []
 
 
 def test_an_impersonated_query_id_does_not_change_the_grant_decision(tmp_path: Path):

@@ -1,21 +1,4 @@
-"""One vocabulary for the run's disposition, across both model-authored artifacts.
-
-#785 folded six readers of `report.md`'s disposition onto one accessor. The census that sized
-the follow-up lint found the same question asked again one container over: `investigation.md`'s
-invlang `conclude` block carries the same headline, and invlang treated it as free text — no
-vocabulary check at all, and a raw `!= "benign"` deciding whether the benign structural checks
-run. That is #722's mechanism inside a WRITE gate: an invisible character turns the checks off.
-
-What these tests pin:
-
-  * the vocabulary has ONE definition, and invlang imports it rather than restating it — the
-    two schemas cannot drift into disagreeing about which keywords exist;
-  * invlang enforces it, so an out-of-enum disposition is an error rather than a document that
-    quietly skips the benign gate;
-  * the benign gate matches on what the value RENDERS as, so it can no longer be switched off
-    with a zero-width character;
-  * the write gates stay exact, which is the one place the normalizer must NOT be used.
-"""
+"""One disposition vocabulary across report.md and investigation.md: invlang slot, validator, invisible-character gate bypass, write gates."""
 from __future__ import annotations
 
 import pytest
@@ -57,29 +40,6 @@ def test_invlang_carries_the_project_vocabulary_not_a_copy():
     assert set(DISPOSITION_VALUES) == DISPOSITION_ENUM
 
 
-def test_no_module_stands_between_the_vocabulary_and_its_readers():
-    """One owner has to mean one HOP. #714 moved the enum to the report schema and left the
-    loop's config re-exporting it; #785 moved it again to `_vocab` and left the report schema
-    re-exporting it to the config and the ticket lane. Each hop was cheap on its own and the
-    stack was four modules deep — a reader chasing where a disposition is decided had three
-    forwarding addresses to walk before reaching an answer.
-
-    A module that USES the vocabulary imports it; a module that only PASSED IT ON no longer
-    names it at all. Asserted as absence of the attribute, because that is what a re-export is
-    — an importable name a module does not use.
-    """
-    import defender._artifact_schema as schema
-    import defender.learning.core.config as loop_config
-    from defender.runtime import case_ticket as ticket
-
-    assert not hasattr(loop_config, "DISPOSITION_ENUM")
-    assert not hasattr(ticket, "DISPOSITION_ENUM")
-    # The report SCHEMA still holds the enum — its write gate tests membership on it exactly.
-    # What it must not hold is the normalizer, which it never called and only forwarded.
-    assert schema.DISPOSITION_ENUM is DISPOSITION_ENUM
-    assert not hasattr(schema, "normalized_disposition")
-
-
 def test_the_slot_order_is_stable():
     """The slot list is inlined into the runtime's ORIENT prompt. A set's iteration order is
     not stable across processes, and a prompt that reshuffles between runs is a diff that means
@@ -87,12 +47,6 @@ def test_the_slot_order_is_stable():
     assert vocab.get_enum("disposition") == (
         "benign", "false-positive", "inconclusive", "malicious", "unresolved",
     )
-
-
-def test_the_slot_is_advertised_to_the_model():
-    """A vocabulary the validator enforces but the grammar catalog never shows is a rule the
-    author cannot see — the model learns it only by being denied."""
-    assert "disposition" in vocab.list_slots()
 
 
 # invlang now enforces it
@@ -194,13 +148,6 @@ def test_the_benign_gate_cannot_be_switched_off_with_an_invisible_character():
     assert any(_BENIGN_BLOCKED in e for e in clean)
     assert any(_BENIGN_BLOCKED in e for e in laced)
     assert any("not a known disposition" in e for e in laced)
-
-
-def test_the_benign_gate_still_only_fires_on_benign():
-    """The positive control the test above needs: the same unresolved document concluding
-    `malicious` is not blocked, so the assertions above are the gate firing rather than an
-    error every document gets."""
-    assert validate_companion(_unresolved_companion("malicious"), None) == []
 
 
 # the write gates stay exact

@@ -1,18 +1,4 @@
-"""Pure unit tests for the gather lead claim + the payload-view core (no model, CI).
-
-`record_lead.claim_lead()` is the atomic lead-id claim the `gather` dispatch tool calls.
-
-**What used to live here.** This file was the unit suite for `record_query.capture()` — the
-subprocess wrapper that ran an adapter, persisted its stdout and appended the queries row. #611
-deleted that function: a data-source call is the typed `query` tool now, and the row + by-ref
-payload are written in-process by its capture capability. Every capture assertion this file made
-(the frozen queries row, per-lead `seq` monotonicity, the error/empty statuses, the traversal-
-`query_id` rejection, the `adapter | defender-sql` aggregation) is re-made END-TO-END against the
-real tool in `tests/e2e/test_query_tool_611.py`, one layer up and through the real gate — so they
-are not lost, they moved to where the behaviour now is. What remains here is the part that was
-never about the process boundary: the lead claim, and the payload VIEW helpers `record_query`
-still owns (`_next_seq` and the truncated in-context view), which the `read_file` tool shares.
-"""
+"""Unit tests for the gather lead claim and the payload-view core."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run

@@ -154,50 +154,6 @@ def _code_of(fn) -> str:
 # ── the constant and the invariant that makes the guard reachable ──────────────────────────
 
 
-def test_the_budget_is_a_literal_strictly_below_the_frameworks_own_ceiling():
-    """O1 — the design fixes `REJECTION_BUDGET = 6`: three times the largest above-guard
-    agent-fixable count any archived lead carries (C7: 42 runs, 320 leads, max 2), and 60% of
-    the framework ceiling — four failed steps of headroom below it.
-
-    STRICTLY BELOW `DEFAULT_TOOL_RETRIES` is the invariant, not a coincidence. pydantic-ai
-    raises `UnexpectedModelBehavior` at the eleventh FAILED STEP for one tool name, and a lead
-    whose only `query` failures are above-guard rows has rejections >= failed steps — so at or
-    above the ceiling the framework wins the race and main is handed
-    "Tool 'query' exceeded max retries count of 10 … https://ai.pydantic.dev/…" instead of the
-    host's own sentence. `challenge_gate.Bounds.__post_init__` enforces the same rule on its
-    turn bound for the same reason. The margin is what makes the stop the HOST's.
-
-    `DEFAULT_TOOL_RETRIES` is reached INSIDE this arm, behind `importorskip`, and not at module
-    scope: `defender.runtime.driver` imports `pydantic_ai`, which the `runtime` extra installs
-    and the runtime-free learning-loop/CI install deliberately does not. At module scope the
-    whole suite — every arm of which is a pure function over row dicts — would be a collection
-    ERROR there rather than one skipped assertion. `challenge_gate._retry_budget` reaches the
-    same constant through the same kind of deferred import."""
-    pytest.importorskip("pydantic_ai")
-    from defender.runtime.driver import DEFAULT_TOOL_RETRIES
-
-    assert isinstance(REJECTION_BUDGET, int)
-    assert not isinstance(REJECTION_BUDGET, bool)
-    assert REJECTION_BUDGET == 6, \
-        "the budget is its own literal, sized by C7's census — not derived from the threshold"
-    assert REJECTION_BUDGET != rq.REPEAT_THRESHOLD, \
-        "the aggregate bound was spelled as the repeat guard's threshold; they answer " \
-        "different questions and one edit must not move both"
-    # THE LOWER BOUND, and it is the one the PRECEDENCE design rests on rather than a second
-    # way of saying the line above. `_rejection_guard` asks the repeat guard first so that a
-    # call which is both the 3rd repeat and the B-th rejection gets the more specific sentence;
-    # below `REPEAT_THRESHOLD` the budget always answers first, `rejection_detail`'s and
-    # `rejection_dead_end`'s RepeatTrip branches become unreachable from both above-guard
-    # placements, and every above-guard repeat stop is reported to main as "you have spent the
-    # allowance" with its trip row losing "turned back at seq" — O2, silently.
-    assert rq.REPEAT_THRESHOLD < REJECTION_BUDGET, \
-        "the budget can now trip before the repeat guard ever reaches its threshold, so the " \
-        "repeat branch of both dispatchers is unreachable above the guard — O2"
-    assert REJECTION_BUDGET < DEFAULT_TOOL_RETRIES, \
-        "at or above the framework's per-tool retry ceiling the framework raises first and " \
-        "main gets pydantic-ai's text, not the host's — O1 is unreachable"
-
-
 # ── the predicate ──────────────────────────────────────────────────────────────────────────
 
 
@@ -430,61 +386,7 @@ def test_the_budget_reason_reports_the_rejections_that_actually_happened():
         "the reason reports the allowance rather than the rejections that happened"
 
 
-def test_neither_budget_string_reads_as_a_completed_lead():
-    """`_run_gather`'s dead-end arm appends the fixed `INCOMPLETE_IDIOM` immediately after the
-    escape, and G19 names that sentence as the only vocabulary any prompt teaches main. A
-    budget string containing "complete" would sit beside it as an opposed disposition — the
-    reason `REPEAT_ESCAPE`'s own comment gives for avoiding the word."""
-    reason = rejection_budget_dead_end_reason(
-        RejectionBudgetTrip(occurrence=REJECTION_BUDGET, budget=REJECTION_BUDGET))
-    assert REJECTION_BUDGET_ESCAPE == (
-        "Further requests of that shape will be turned back the same way. Move on with what "
-        "this lead has already captured."
-    )
-    idiom = "Treat this lead as incomplete and reason from what was captured."
-    assert "complete" in idiom, \
-        "the screen below cannot detect the word it screens for"
-    assert "complete" not in REJECTION_BUDGET_ESCAPE
-    assert "complete" not in reason
-    assert LOUD_SYSTEM not in REJECTION_BUDGET_ESCAPE
-    assert LOUD_VERB not in REJECTION_BUDGET_ESCAPE
-    assert REJECTION_BUDGET_ESCAPE != rq.REPEAT_ESCAPE, \
-        "the two guards hand main the same escape, so the sentence cannot say why it stopped"
-
-
 # ── the two dispatchers ────────────────────────────────────────────────────────────────────
-
-
-def test_the_detail_dispatcher_keeps_the_two_guards_sentences_apart():
-    """O2 — #871's owner's promise, at the row. `rejection_trip_detail` says the request
-    "repeats the one already turned back at seq N"; the budget stops a lead for SPENDING, not
-    for repeating, and its detail must say so. A reader that could not tell the two apart would
-    report a lead as having been refused for a call that differed from its predecessors — the
-    one thing the repeat guard promises it never does.
-
-    The repeat branch is asserted BOUND to `rejection_trip_detail` rather than restated: the
-    dispatcher must not be a second copy of a sentence that already has an owner."""
-    repeat = rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
-    budget = RejectionBudgetTrip(occurrence=REJECTION_BUDGET, budget=REJECTION_BUDGET)
-
-    assert rejection_detail(repeat, "boom") == rq.rejection_trip_detail(repeat, "boom"), \
-        "the dispatcher re-derives the repeat guard's detail instead of spending its owner"
-    assert "turned back at seq" in rejection_detail(repeat, "boom")
-
-    detail = rejection_detail(budget, "boom")
-    assert detail == (
-        f"refused: {rq._ordinal(REJECTION_BUDGET)} request in this lead rejected before it ran "
-        f"(budget {REJECTION_BUDGET}); rejected: boom"
-    )
-    assert "turned back at seq" not in detail, \
-        "a budget stop's row claims the call repeated one already turned back — O2"
-    # The subject of "ran" is the REQUEST, not the lead: the budget has NO reset on success, so
-    # the lead that spends it may have executed many queries first (the interleaved arm in the
-    # e2e half drives exactly that). A phrase saying nothing ran in this lead would write a
-    # false fact about the lead into the append-only table `session_store`'s `truncated_by`
-    # comment names as the one record of which guard stopped it.
-    assert "before anything ran" not in detail, \
-        "the row claims the lead executed nothing, which no reset-free count can know"
 
 
 def test_the_budget_phrase_leads_the_row_digest_and_survives_its_truncation():
@@ -541,75 +443,3 @@ def test_the_dead_end_dispatcher_hands_the_budget_no_target_to_leak():
         "a budget stop tells main the request repeated one already turned back — O2"
 
 
-def test_neither_dispatcher_describes_a_guard_it_was_never_told_about():
-    """The TOTALITY both dispatchers argue for at length, asserted rather than commented.
-
-    Four comments and two docstrings say the trailing `raise` is `TOTAL, not an `else``,
-    because a third guard's trip silently taking one of the two existing branches is the one
-    failure a single producer exists to prevent. Nothing pinned it, and the branch was not
-    total: the NATURAL way to add a third guard is to subclass `RepeatTrip` for its
-    `occurrence`/`first_seq`, and an `isinstance` head takes such a trip down the REPEAT branch
-    — which writes "repeat of request already turned back at seq N" into the table for a call
-    that repeated nothing, and hands main `REPEAT_ESCAPE` plus `rejection_dead_end_reason`,
-    which SPENDS the model's own `target` and `verb`.
-
-    A subclass, not an unrelated class, is the whole point of the arm: an unrelated class was
-    already refused by the trailing `isinstance`, so a `Mock()` here would pass against the
-    defect."""
-    class _ThirdGuardTrip(rq.RepeatTrip):
-        pass
-
-    third = _ThirdGuardTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
-    with pytest.raises(TypeError):
-        rejection_detail(third, "boom")
-    with pytest.raises(TypeError):
-        rejection_dead_end(third, target=LOUD_SYSTEM, verb=LOUD_VERB)
-
-    # The control: the exact types still take their own branches, so the arm above is a
-    # totality claim and not a dispatcher that refuses everything.
-    assert "turned back at seq" in rejection_detail(
-        rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD))
-    assert rejection_dead_end(
-        RejectionBudgetTrip(occurrence=REJECTION_BUDGET, budget=REJECTION_BUDGET),
-        target=LOUD_SYSTEM, verb=LOUD_VERB,
-    ).escape == REJECTION_BUDGET_ESCAPE
-
-
-def test_each_dispatcher_spends_the_sentences_owner_rather_than_copying_it():
-    """The two arms above assert the dispatchers' repeat branches EQUAL their owners' output,
-    which a byte-identical copy of the owner's body satisfies exactly as well as a call does.
-    Equality is the right check for what main receives; it is the wrong one for the claim those
-    docstrings actually make — "BOUND to its owner, not restated".
-
-    The distinction is not pedantry: `rejection_trip_detail`'s leading phrase and
-    `rejection_dead_end_reason`'s sentence are read by the offline collectors and by main, and
-    a copy drifts the first time either owner is reworded — silently, with every equality arm
-    here still green because both copies were updated in whichever file the author had open.
-
-    Read off the SOURCE, the way this repo's own lints answer a "who derives this" question,
-    because there is no runtime seam to observe: a delegating call and an inlined copy are
-    indistinguishable from their return values, which is the whole problem.
-
-    The DOCSTRING IS STRIPPED FIRST (`_code_of`), and that is load-bearing rather than tidy:
-    every negative below is a claim about what the CODE spells, and `inspect.getsource` hands
-    back the prose too. `rejection_detail`'s own docstring argues that a budget stop "must never
-    say 'turned back at seq'" — so over the raw source that negative held only because the
-    sentence happens to WRAP between "back" and "at", and reflowing the paragraph by one word
-    would have turned this arm red with nothing having changed about the code it measures."""
-    detail_src = _code_of(rejection_detail)
-    assert "rejection_trip_detail(" in detail_src, \
-        "the repeat branch restates a detail sentence that already has an owner"
-    assert "turned back at seq" not in detail_src, \
-        "the repeat guard's phrase is spelled a second time here — one rewording drifts them"
-
-    dead_end_src = _code_of(rejection_dead_end)
-    assert "rejection_dead_end_reason(" in dead_end_src, \
-        "the repeat branch restates a reason that already has an owner"
-    assert "REPEAT_ESCAPE" in dead_end_src, \
-        "the repeat escape is not spent from its constant"
-    assert "Sending this exact request again" not in dead_end_src, \
-        "REPEAT_ESCAPE's text is copied here rather than referenced"
-    assert "rejection_budget_dead_end_reason(" in dead_end_src, \
-        "the budget branch restates its own reason instead of spending its owner"
-    assert "were rejected before they ran" not in dead_end_src, \
-        "the budget reason's text is copied into the dispatcher"

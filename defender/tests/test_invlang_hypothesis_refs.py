@@ -29,18 +29,15 @@ anything references it", now that three more sites can be the thing referencing 
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
 from defender.skills.invlang._walkers import (
     all_hypotheses,
     final_weights,
-    live_hypothesis_ids,
 )
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import validate_companion
-from defender.tests._invlang_corpus import corpus_docs, corpus_id
 
 _HYP_HEADER = (
     ":H hypothesize.hypotheses "

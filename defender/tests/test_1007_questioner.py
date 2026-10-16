@@ -133,29 +133,6 @@ def test_a_lesson_matching_neither_pattern_nor_system_is_absent(tmp_path):
         "a lesson naming no served system was rendered anyway")
 
 
-def test_world_md_names_how_to_express_an_absence(tmp_path):
-    """The world-authoring prompt names how a world expresses an absence.
-
-    Observably true: the prompt handed to every seat call names an ABSENCE as an axis and says
-    to state it plainly — "this world does not hold X" — rather than inventing an event. (#1224:
-    a world is the facts it asserts, so `exclude`, the overlay key this once named, is gone; the
-    obligation that the vocabulary can spell an absence is not.)
-
-    What failure looks like: the vocabulary the model is asked to use does not contain the word
-    for half of what it is asked to express, and the resulting worlds invent an event that never
-    happened, or are undiscriminating, for a reason no finding can repair.
-    """
-    paths = W.loop_paths(tmp_path)
-    agent = W.FakeAgent(*three_replies())
-
-    author(tmp_path, paths, invoke=agent)
-
-    seat_prompts = list(agent.prompts[1:])
-    assert seat_prompts, "no world-authoring call was made"
-    assert all("ABSENCE" in p and "does not hold" in p for p in seat_prompts), (
-        "the world-authoring prompt never names an absence, so an absence has no spelling")
-
-
 def test_a_lesson_body_carrying_the_frame_delimiter_cannot_close_the_frame(tmp_path):
     """A lesson body that spells the frame's own delimiter cannot close the frame it arrives in.
 

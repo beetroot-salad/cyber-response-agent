@@ -18,10 +18,7 @@ TENANT_ID = "t976"
 
 
 def _set_up_tenant(tmp_path, monkeypatch):
-    """A fresh, accepted tenant under its own data root — every run names its tenant, and there
-    is no default (#1078); its runs base (`.runs`) is the test's stand-in for the old,
-    directly-controllable runs base. Set up from the fixture tenant the way an operator does
-    (#1120), so `materialize_run` is handed the `Tenant` `accept_tenant` returns."""
+    """A fresh, accepted tenant under its own data root — every run names its tenant, and there"""
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
     return set_up_tenant(data_root, TENANT_ID)
@@ -112,12 +109,7 @@ def test_an_unborn_head_is_reported_with_its_reason(tmp_path):
 
 
 def test_capture_never_raises_when_git_is_not_on_path(tmp_path, monkeypatch):
-    """A run that cannot be stamped still has to run: this is a record, not a gate.
-
-    Driven by emptying PATH rather than by patching the facade, so the exception is the REAL
-    one this arm exists for: with no `git` to resolve, `subprocess` raises before git can
-    report anything, so it is not a `GitError` and would otherwise escape as an unhandled
-    OSError out of run-dir creation — the one shape a `GitError`-only handler misses."""
+    """A run that cannot be stamped still has to run: this is a record, not a gate."""
     repo = _repo(tmp_path)
     monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
     prov = _provenance.capture_tree(repo)
@@ -128,12 +120,7 @@ def test_capture_never_raises_when_git_is_not_on_path(tmp_path, monkeypatch):
 
 
 def test_status_failing_after_a_good_sha_keeps_the_sha_and_unknowns_the_dirt(tmp_path):
-    """The sha is worth keeping on its own; what is unknown is whether it describes the bytes
-    that ran, and `dirty=None` is exactly that statement rather than a discarded record.
-
-    A corrupted index is a REAL split between the two calls rather than an authored one:
-    `rev-parse HEAD` reads refs and still answers, while `status` must read the index and
-    cannot. Nothing else in this module can produce that asymmetry honestly."""
+    """The sha is worth keeping on its own; what is unknown is whether it describes the bytes"""
     repo = _repo(tmp_path)
     head = _git.git_head_sha(repo)
     (repo / ".git" / "index").write_bytes(b"\x00 not an index \xff" * 8)
@@ -169,11 +156,7 @@ def test_a_bool_is_not_accepted_as_the_path_count(tmp_path):
 
 
 def test_materialize_run_dir_stamps_every_run(tmp_path, monkeypatch):
-    """Stamped at the ONE place a run the box will EXECUTE is materialised, so no caller can
-    forget — the branch launcher materialises its siblings through this same call, which is
-    what makes a family's worlds comparable on their code rather than merely assumed to be.
-    (The learning loop's ARCHIVED bundle is built elsewhere and carries no stamp — see
-    `run_common.materialize_run`, which names that gap where a reader will meet it.)"""
+    """Stamped at the ONE place a run the box will EXECUTE is materialised, so no caller can"""
     from defender import run_common
 
     tenant = _set_up_tenant(tmp_path, monkeypatch)
@@ -202,13 +185,7 @@ def test_the_three_valued_dirt_survives_the_round_trip(tmp_path, dirty):
 
 
 def test_a_git_that_cannot_be_EXECUTED_is_recorded_rather_than_raised(tmp_path, monkeypatch):
-    """The failure an absent-binary arm does NOT cover.
-
-    A `git` that resolves and cannot be exec'd raises a BARE `OSError` (ENOEXEC) — not
-    `FileNotFoundError`, not a `SubprocessError` — and so do the fork/pipe failures a loaded
-    host produces (ENOMEM, EMFILE). A handler that names three OSError subclasses lets every
-    one of them out of `materialize_run`, which turns a record into a hard startup crash
-    that also leaves a half-built run dir behind and wedges the run id."""
+    """The failure an absent-binary arm does NOT cover."""
     repo = _repo(tmp_path)
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -263,23 +240,14 @@ def test_a_deeply_nested_payload_reads_as_no_stamp(tmp_path):
     ],
 )
 def test_a_record_capture_cannot_produce_is_not_a_record(tmp_path, doc):
-    """Type-checking each field alone is not enough. An object saying NOTHING would otherwise
-    answer "this run carries a stamp" to a caller whose only question is whether one exists,
-    and an answer about the dirt with no sha behind it is the clean bill of health with nothing
-    behind it — the one error the record must not make. Every `commit is None` path in
-    `capture_tree` leaves `dirty` at `None` and sets a reason."""
+    """Type-checking each field alone is not enough."""
     path = tmp_path / PROVENANCE
     path.write_text(json.dumps(doc), encoding="utf-8")
     assert _provenance.read(path) is None
 
 
 def test_every_field_reaches_the_wire_and_comes_back(tmp_path):
-    """`as_json` spells the wire shape out, which makes it a SECOND census of the class's
-    fields — so this arm derives the expected set from `dataclasses.fields` rather than from a
-    list typed here. Without it, a sixth field is silently dropped by the writer and defaulted
-    by `from_obj`, and the round-trip arms above keep passing on the five they do spell: a
-    stamp claiming a completeness it does not have, which for a provenance record is the whole
-    failure mode."""
+    """`as_json` spells the wire shape out, which makes it a SECOND census of the class's"""
     declared = {f.name for f in fields(RunProvenance)}
     on_disk = json.loads(RunProvenance(commit="a" * 40, dirty=False).as_json())
     assert set(on_disk) == declared, (
@@ -300,12 +268,7 @@ def test_every_field_reaches_the_wire_and_comes_back(tmp_path):
 
 
 def test_a_rename_counts_both_paths_the_sha_fails_to_name(tmp_path):
-    """The count must not UNDER-report, which is the direction that would be a lie.
-
-    With rename detection on, `git mv a b` is a single `R  b` record whose original `a` rides
-    as the record's trailing field — which `_git.git_status` consumes and drops — so two paths
-    that differ from HEAD are counted once and the vanished one is named nowhere. `capture_tree`
-    asks with `no_renames=True` so the same move reports `D  a` + `A  b`."""
+    """The count must not UNDER-report, which is the direction that would be a lie."""
     repo = _repo(tmp_path)
     (repo / _provenance.CODE_SCOPE / "moved.md").write_text("moved\n", encoding="utf-8")
     _git.git(["add", "-A"], cwd=repo)
@@ -322,10 +285,7 @@ def test_a_rename_counts_both_paths_the_sha_fails_to_name(tmp_path):
 
 
 def test_one_dirty_path_earning_two_status_records_is_counted_once(tmp_path):
-    """`git status -z` emits one record per (path, reason) and a single path can earn two:
-    `git rm --cached foo` leaves `D  foo` AND `?? foo`. Counting records would overstate the
-    dirt — in exactly the direction `DIRTY_PATH_SAMPLE`'s comment promises the count never
-    does — and would spend two of the sample's 50 slots on one file."""
+    """`git status -z` emits one record per (path, reason) and a single path can earn two: `git rm --cached foo` leaves `D foo` AND `??"""
     repo = _repo(tmp_path)
     _git.git(["rm", "--cached", "-q", SEED], cwd=repo)
 
@@ -340,11 +300,7 @@ def test_one_dirty_path_earning_two_status_records_is_counted_once(tmp_path):
 
 
 def test_dirt_is_scoped_to_the_code_the_box_mounts(tmp_path):
-    """A scratch file outside the mounted package must not mark the run dirty.
-
-    The bit exists for ONE consumer — the refusal a fork or an archive makes — and a bit that
-    a note in `docs/` sets is True on a working machine nearly always, so that consumer would
-    either refuse everything or learn to ignore it."""
+    """A scratch file outside the mounted package must not mark the run dirty."""
     repo = _repo(tmp_path)
     (repo / "docs").mkdir()
     (repo / "docs" / "note.md").write_text("scratch\n")
@@ -404,10 +360,7 @@ def test_a_read_refuses_a_hard_link_the_write_would_refuse(tmp_path):
 
 
 def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, monkeypatch, capsys):
-    """`capture_tree` goes to some length never to raise; a write that raised beside it would
-    hand that promise back — and it arrives AFTER the run dir exists. (Before #1077 an escaping
-    OSError also burned the run id; setup is resumable now, so this drives the whole
-    materialisation over the wedged directory rather than `_stamp` alone.)"""
+    """`capture_tree` goes to some length never to raise; a write that raised beside it would"""
     from defender import run_common
 
     tenant = _set_up_tenant(tmp_path, monkeypatch)
@@ -430,11 +383,7 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
 
 
 def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
-    """Every run stamps ITSELF at materialisation, and there is no seam for a caller to hand a
-    record in: a branched family's siblings are `run.py --resume` processes that each reach
-    this call, and the family stamp is a conclusion about their N per-process records (#976)
-    — a capture hoisted above the family would describe the launcher's moment, not any
-    sibling's."""
+    """Every run stamps ITSELF at materialisation, and there is no seam for a caller to hand a"""
     from defender import run_common
 
     tenant = _set_up_tenant(tmp_path, monkeypatch)
@@ -495,10 +444,7 @@ IMPOSSIBLE = {
 
 @pytest.mark.parametrize("why", sorted(IMPOSSIBLE))
 def test_nothing_can_construct_a_record_no_capture_could_produce(why):
-    """THE POINT OF MOVING THESE ONTO THE CLASS. Written in the parser they read as a reader
-    being careful, and were one edit away from the writer they constrain: `capture_tree` could
-    have grown a fifth return that broke one, and no parser test would have noticed, because
-    parser tests feed the parser."""
+    """THE POINT OF MOVING THESE ONTO THE CLASS."""
     kwargs, refusal = IMPOSSIBLE[why]
     with pytest.raises(ValueError, match=refusal):
         RunProvenance(**kwargs)

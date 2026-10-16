@@ -41,8 +41,6 @@ from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 from defender.run_repository import WIRE_LOG_DIR  # noqa: E402
 
-_SKILLS_REL = "defender/skills"
-
 
 def _lead_deps(run_dir: Path, wt: Path) -> LeadAuthorDeps:
     """The lead-author deps via the SINGLE bind seam (#551 — replaces the retired

@@ -46,18 +46,7 @@ def _lead(*, sql: str, digest: str = UNNEST, system: str = "elastic",
 
 def _row(pid: str, *, digest: str = UNNEST, system: str = "elastic",
          query_id: str = "elastic.esql", **extra) -> dict:
-    """A queued record as it stands on disk — the pre-#840 shape, carrying no count.
-
-    A SYSTEM row by default, and that is #870's correction to this file rather than a drift.
-    `query_id` defaulted to `∅.bash-shim` here, which every one of these tests read as an
-    incidental field — #840 put `query_id` deliberately OUT of the mistake's identity, so the
-    value could not matter. #870 made it matter in a different way: it is now what says WHICH
-    SURFACE owns the lesson, so a sentinel row keys to the reducer whatever it is attributed
-    to. Every demand in this file is about the collapse on the lane that has one `execution.md`
-    per system, so the default is now spelled as what those demands always meant. The reducer
-    half has its own arm (`the_reducer_owns_its_lesson_whatever_attributed_it`) and #870's own
-    suites.
-    """
+    """A queued record as it stands on disk — the pre-#840 shape, carrying no count."""
     return {"schema_version": 1, "pitfall_id": pid, "source_run": pid.split(":")[0],
             "system": system, "query_id": query_id, "goal": "g",
             "executed_query": "SELECT unnest(data)", "stderr_digest": digest,
@@ -125,20 +114,7 @@ def test_the_same_digest_from_two_systems_stays_two_records(paths):
 
 
 def test_the_reducer_owns_its_lesson_whatever_attributed_it(paths):
-    """#870's half of the same key, and the two directions it moves.
-
-    A reducer row's owner is the SURFACE its lesson is taught on, never the system whose
-    envelope happened to provoke it (F1) — so the pre-M5′ row that still carries `elastic` and
-    the post-M5′ one that carries `""` are ONE `defender-sql` mistake and merge. Keying on
-    `system` alone made them two, which handed the curator the same bullet twice on the one
-    entry whose whole purpose is collecting them.
-
-    And the converse, which is the worse one: a SYSTEM row and a REDUCER row that happen to
-    share a digest must stay two records. Under the old key they were one, and which surface
-    the lesson then reached was decided by whichever row the merge happened to keep as
-    exemplar — so a `defender-sql` lesson could be taught onto `elastic/execution.md` while its
-    own queue row was held for a later tick.
-    """
+    """#870's half of the same key, and the two directions it moves."""
     persist.append_pitfalls(
         [_shim("r:l-001:0", system="elastic"), _shim("r:l-002:0"),
          _row("r:l-003:0")],
@@ -179,10 +155,7 @@ def test_a_later_run_repeating_the_mistake_bumps_the_count(paths):
 
 
 def test_a_merged_record_keeps_the_exemplars_queue_bookkeeping(paths):
-    """The merge copies the exemplar row whole, so whatever the drain has stamped on it is
-    still there — here `attempts`, from a batch whose curation already failed once. A merge
-    that rebuilt the record from selected fields would reset a recurring mistake's
-    retirement clock and a batch that always fails could never reach the ceiling."""
+    """The merge copies the exemplar row whole, so whatever the drain has stamped on it is"""
     persist.append_pitfalls([_row("r:l-001:0"), _row("r2:l-001:0")], state=_state1135.state_for_paths(paths))
     drain.retire(_state1135.state_for_paths(paths), channel=PITFALLS, batch_ids=["r:l-001:0", "r2:l-001:0"],
                  reason="the curator exited nonzero", max_attempts=5)
@@ -207,14 +180,7 @@ def test_merging_a_record_set_twice_changes_nothing(paths):
 
 
 def test_a_row_whose_digest_carries_no_diagnosis_keys_to_itself(paths):
-    """The absence of a verdict is not a verdict two rows hold in common. An adapter that
-    fails with an empty stderr writes the SAME `exit=N;` envelope on every call, so keying on
-    it would fold unrelated mistakes behind one exemplar — the curator would see one query,
-    and `rotate_pitfalls` would then retire the rest as though they had been curated.
-
-    The discriminating shape is N rows carrying the SAME empty digest — rows carrying
-    DIFFERENT empty-ish strings would stay N records under any key, including the one this
-    carve-out replaces."""
+    """The absence of a verdict is not a verdict two rows hold in common."""
     same = [_row(f"r:l-00{i}:0", digest="exit=1; ", executed_query=f"SELECT {i}")
             for i in range(3)]
     persist.append_pitfalls(same, state=_state1135.state_for_paths(paths))
@@ -247,18 +213,7 @@ def _invoke_spy(calls: list) -> object:
 
 
 def test_a_single_lesson_repeated_does_not_clear_the_threshold(paths, monkeypatch):
-    """#840's headline, ON THE SYSTEM LANE. Eight copies of one mistake used to clear a
-    threshold of 3 and spawn the curator; now they are one record and the queue waits —
-    intact, not dropped — for two more distinct lessons.
-
-    THE LANE IS THE DEMAND'S SCOPE, not an incidental of the fixture. #870 FK-3 decided the
-    opposite for the REDUCER lane on purpose: there, one diagnosed mistake repeated N times is
-    the strongest evidence the lane produces, and a count that could never reach 3 on it was
-    anti-correlated with evidence quality. That disjunct is asserted by
-    `an_attributed_reducer_lesson_repeated_does_clear_it` directly below, which is this
-    demand's deliberate counterpart — the two differ in the row's `query_id` and in nothing
-    else, so what separates them is visible rather than incidental.
-    """
+    """#840's headline, ON THE SYSTEM LANE."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(8)], state=_state1135.state_for_paths(paths))
     calls: list = []
@@ -271,18 +226,7 @@ def test_a_single_lesson_repeated_does_not_clear_the_threshold(paths, monkeypatc
 
 
 def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch):
-    """The same eight rows, differing only in `query_id`, DO open the lane — and they carry an
-    attributed `system`, which is the population the lane's spellings used to disagree about.
-
-    #870 FK-3's disjunct was written as `system == ""` while every other seam routed on the
-    sentinel. Post-M5′ rows normalize `system` to `""`, so the two agreed on everything the
-    collector had minted since — and disagreed on exactly the rows queued BEFORE it deployed,
-    which still carry the system their payload was attributed to. Those rows were routed to the
-    reducer surface, split per attributed system by the merge, and refused the lane: the
-    round's own motivating incident (one unchanging `Binder Error` under eight varied attempts
-    against an `elastic` envelope) could not reach the curator. The gate now asks the routing
-    predicate, so the row that is treated as the reducer's everywhere else opens the lane too.
-    """
+    """The same eight rows, differing only in `query_id`, DO open the lane — and they carry an"""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     persist.append_pitfalls(
         [_shim(f"r:l-003:{i}", system="elastic") for i in range(8)], state=_state1135.state_for_paths(paths))
@@ -301,14 +245,7 @@ def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch)
 
 
 def test_the_wake_gate_counts_what_the_curation_gate_counts(paths, monkeypatch):
-    """`_has_lead_author_work` is what spins the drain up. If it counted rows while
-    `run_pitfalls` counted mistakes, every tick would start a lead-author drain that then
-    declined to curate.
-
-    The two gates are ONE function (`persist.pitfalls_lane_is_open`) since #870 FK-3, so what
-    this now discriminates is that neither reader grew a second opinion of it — including on
-    the disjunct, whose own both-readers arm is
-    `an_attributed_reducer_lesson_repeated_does_clear_it`."""
+    """`_has_lead_author_work` is what spins the drain up."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(8)], state=_state1135.state_for_paths(paths))
     assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False
@@ -335,13 +272,7 @@ def test_the_handoff_carries_the_count_and_leads_with_it():
 
 
 def test_every_duplicate_row_behind_a_curated_record_rotates(paths, monkeypatch):
-    """The orphan hazard the collapse creates: the curator sees one record, but the batch is
-    named by RAW `pitfall_id`s, so all four rows behind it leave the queue. A row left
-    behind would sit in pending forever and re-clear the threshold with a curated lesson.
-
-    On the SYSTEM lane since #870, for the reason `three_distinct_lessons_do_clear_it` records:
-    a `∅.bash-shim` row is a reducer row now and is HELD, not rotated, on a tick whose curator
-    made no reducer edit."""
+    """The orphan hazard the collapse creates: the curator sees one record, but the batch is"""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(
         [_row(f"r:l-003:{i}", query_id="elastic.esql") for i in range(4)], state=_state1135.state_for_paths(paths),

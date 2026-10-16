@@ -39,6 +39,12 @@ from defender.tests.tenant_1107_settings import _spec1107 as S
 from defender.run_repository import RunPaths
 
 
+@pytest.fixture(autouse=True)
+def _tmp_roots(tmp_path, monkeypatch):
+    monkeypatch.setenv(P.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
+    monkeypatch.setenv(P.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+
+
 class SpawnRecorder:
     """`spawn=`: records each child's argv and env, and the tenant record the child's runs base
     held at the moment the child was started."""

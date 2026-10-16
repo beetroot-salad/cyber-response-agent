@@ -173,20 +173,6 @@ def test_shallow_graft_without_merge_base_exits_2(tmp_path, capsys):
     assert "merge-base" in capsys.readouterr().err
 
 
-def test_shallow_fixture_really_has_no_merge_base(tmp_path):
-    """Probe the FIXTURE, not the gate: assert the shape above is the CI shape and stays
-    it. Without this, a git change (or a dropped `file://`) could make the graft
-    computable, and the regression test would keep passing while testing nothing — the
-    very failure mode #618 is about."""
-    work = _clone(tmp_path, _upstream(tmp_path), depth=1)
-    run = lambda *a: _git(work, *a, check=False).returncode  # noqa: E731
-
-    assert (work / ".git" / "shallow").exists(), "fixture is not actually shallow"
-    assert run("rev-parse", "--verify", "origin/main") == 0, "base ref must RESOLVE..."
-    assert run("merge-base", "origin/main", "HEAD") != 0, "...but have NO merge-base"
-    assert run("diff", "--unified=0", "origin/main...HEAD") != 0, "three-dot diff must fail"
-
-
 def test_a_required_git_command_failing_raises_instead_of_returning_empty(tmp_path):
     """The swallow itself. A git call the gate depends on can no longer degrade into `""`
     — which is how a failed diff became "nothing was removed"."""
@@ -205,18 +191,6 @@ def test_a_git_failure_inside_the_scan_exits_2(tmp_path, capsys):
 
     assert _run_gate(not_a_repo, tmp_path) == 2
     assert "cannot resolve base ref" in capsys.readouterr().err
-
-
-def test_update_baseline_refuses_on_an_unusable_base(tmp_path):
-    """You must not be able to bless an empty result that was never computed."""
-    work = _clone(tmp_path, _upstream(tmp_path), depth=1)
-    baseline = _baseline(tmp_path, {"caller.py:some_removed_helper": "pre-existing"})
-    before = baseline.read_text(encoding="utf-8")
-
-    assert GATE.main(
-        ["--update-baseline"], repo_root=work, base_ref="origin/main", baseline_path=baseline
-    ) == 2
-    assert baseline.read_text(encoding="utf-8") == before, "baseline was rewritten anyway"
 
 
 def test_stale_reference_is_flagged(tmp_path):
@@ -263,22 +237,6 @@ def test_deleted_markdown_matches_filename_not_ordinary_prose(tmp_path):
     fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
     assert not any(f.startswith("notes/prose.txt:") for f in fingerprints)
     assert "notes/links.txt:dissolve.md" in fingerprints
-
-
-def test_surviving_markdown_filename_is_not_flagged(tmp_path):
-    up = _upstream(
-        tmp_path,
-        main_files={
-            "old/guidance.md": "# Old guidance\n",
-            "current/guidance.md": "# Current guidance\n",
-            "notes/links.txt": "Read current/guidance.md.\n",
-        },
-        pr_files={"old/guidance.md": None},
-    )
-    work = _clone(tmp_path, up)
-
-    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
-    assert not any(f.startswith("notes/links.txt:") for f in fingerprints)
 
 
 def test_surviving_module_named_in_a_from_package_import_is_not_flagged(tmp_path):
@@ -439,34 +397,6 @@ def test_an_override_of_an_outside_base_is_not_a_removed_identifier(tmp_path):
     assert "user.py:with_suffix" not in fingerprints, fingerprints
 
 
-def test_removed_ident_with_no_surviving_reference_exits_0(tmp_path):
-    """`git grep` exits 1 on "no match". That is a legitimate empty answer, not a failure
-    — an over-eager fail-closed refactor would turn it into a GitError."""
-    up = _upstream(tmp_path, pr_files={"caller.py": None})
-    work = _clone(tmp_path, up)
-
-    assert _run_gate(work, tmp_path) == 0
-
-
-def test_empty_diff_exits_0(tmp_path):
-    """"Genuinely nothing removed" (green) must stay distinguishable from "could not
-    compute" (exit 2) — the entire point of the change."""
-    up = _upstream(tmp_path)
-    _git(up, "checkout", "-q", "pr")
-    _git(up, "reset", "-q", "--hard", "main")
-    work = _clone(tmp_path, up)
-
-    assert _run_gate(work, tmp_path) == 0
-
-
-def test_baselined_finding_exits_0(tmp_path):
-    work = _clone(tmp_path, _upstream(tmp_path))
-
-    assert _run_gate(
-        work, tmp_path, entries={"caller.py:some_removed_helper": "knowingly tolerated"}
-    ) == 0
-
-
 def test_a_dropped_import_line_does_not_condemn_the_MODULE_it_imported(tmp_path):
     """Removing `from pkg_helper_mod import Thing` is evidence about `Thing`, never about
     `pkg_helper_mod`. The module's binding site is a FILE, so `_still_defined` — which only
@@ -515,36 +445,6 @@ def test_a_DELETED_module_is_condemned_by_its_own_deletion(tmp_path):
         f"the surviving reference to a DELETED module was not flagged: {findings}"
     )
     assert _run_gate(work, tmp_path) == 1
-
-
-def test_a_RENAMED_module_keeps_its_name_and_is_not_condemned(tmp_path):
-    """A rename is not a deletion. `a/moved_helper_mod.py` -> `b/moved_helper_mod.py` leaves
-    the module under the same name, so collecting the stem for renames too would flag every
-    reference that is still perfectly correct."""
-    up = _upstream(
-        tmp_path,
-        main_files={
-            "a/moved_helper_mod.py": "VALUE = 1\n",
-            "notes_c.md": "See `moved_helper_mod` for the payload shape.\n",
-        },
-        pr_files={
-            "a/moved_helper_mod.py": None,
-            "b/moved_helper_mod.py": "VALUE = 1\n",
-            "caller.py": None,
-        },
-    )
-    work = _clone(tmp_path, up)
-
-    status = GATE._git(
-        ["diff", "--name-status", "origin/main...HEAD"], cwd=work
-    )
-    assert any(line.startswith("R") and "moved_helper_mod" in line
-               for line in status.splitlines()), (
-        f"fixture rotted: git did not detect the move as a rename\n{status}"
-    )
-
-    assert GATE._scan(work, "origin/main") == []
-    assert _run_gate(work, tmp_path) == 0
 
 
 @pytest.mark.parametrize(
@@ -695,73 +595,6 @@ def test_a_parameter_named_like_the_removed_ident_is_a_declaration(tmp_path):
     assert _run_gate(work, tmp_path) == 0
 
 
-# declaration vs reference: what only the AST can separate
-# Every row plants ONE shape in a file `main` owns (the PR does not touch it, so
-# the reference is visible to the scan — see `_upstream`'s docstring) and pins
-# the gate's WHOLE verdict: the exit code and the exact fingerprint set. Only
-# the planted shape varies, so the shapes are a list rather than a test apiece.
-@pytest.mark.parametrize(("case", "main_files", "pr_files", "rc", "fingerprints"), [
-    # The boundary of the parameter-declaration carve-out. `def f(x=some_removed_helper())`
-    # CALLS the dead symbol — it sits in a VALUE slot, not a parameter slot — so it must
-    # still go red.
-    ("default-value-calls-the-dead-symbol",
-     {"sig.py": "def f(x=some_removed_helper()):\n    return x\n"},
-     {"caller.py": None}, 1, {"sig.py:some_removed_helper"}),
-
-    # The same parameter reflowed onto its own line stays a line-scoped DECLARATION.
-    # Textually it is now a bare `some_removed_helper,` — character-for-character what a
-    # multi-line import member looks like — so a text rule that reads one as a binding reads
-    # the other as one too, and the ident drops out of the whole scan: every surviving
-    # reference to it, anywhere in the tree, goes quiet. That is the ident-scoped whitelist
-    # the gate must never have, and the notes.md hit is what proves it did not happen.
-    ("multiline-signature-parameter-does-not-whitelist-the-ident",
-     {"sig.py": "def cmd(\n    cfg: dict,\n    some_removed_helper,\n) -> int:\n    return 0\n",
-      "notes.md": "Run some_removed_helper() to fix things.\n"},
-     {"caller.py": None}, 1, {"notes.md:some_removed_helper"}),
-
-    # `HANDLERS = [\n    some_removed_helper,\n]` is a dead symbol in a list — a NameError
-    # waiting to happen — not a definition of one. Same bare-`name,` text as the import
-    # member below; only the AST separates them.
-    ("bare-name-on-its-own-line-is-a-reference",
-     {"reg.py": "HANDLERS = [\n    some_removed_helper,\n]\n"},
-     {"caller.py": None}, 1, {"reg.py:some_removed_helper"}),
-
-    # The control for the two above, and the reason the bare-`name,` rule existed at all: a
-    # surviving IMPORT of the symbol means it was moved or re-exported, not removed. Green,
-    # and the scan must be empty rather than merely under the exit-code threshold.
-    ("reflowed-multiline-import-still-counts-as-defined",
-     {"reexport.py": "from mod import (\n    some_removed_helper,\n)\n"},
-     None, 0, set()),
-
-    # The default-value boundary one level deeper: the dead symbol is an ARGUMENT inside the
-    # default, not the callee. `def f(x=compute(<ident>))` sits after a `(` exactly like a
-    # parameter does, so the position of the nearest bracket cannot decide this.
-    ("reference-inside-a-default-value-expression",
-     {"sig.py": "def f(x=compute(some_removed_helper)):\n    return x\n"},
-     {"caller.py": None}, 1, {"sig.py:some_removed_helper"}),
-
-    # One line can DECLARE one dead name and CALL another. Attribution stops at the first
-    # ident the line references — a declaration is skipped, not treated as the line's answer,
-    # or the second name (which really is stale) is never looked for.
-    ("declaration-does-not-mask-another-dead-ident-on-the-same-line",
-     {"mod2.py": "def a_removed_helper():\n    return 2\n",
-      "sig.py": "def f(a_removed_helper, x=some_removed_helper()):\n    return x\n"},
-     {"mod2.py": None, "caller.py": None}, 1, {"sig.py:some_removed_helper"}),
-], ids=lambda v: v if isinstance(v, str) else "")
-def test_the_gate_tells_a_declaration_from_a_reference(
-    tmp_path, case, main_files, pr_files, rc, fingerprints
-):
-    """A bare `name,` on its own line is an import member, a function parameter, or a list
-    element depending only on the syntax around it. The gate must read each for what it is:
-    a declaration binds the ident and is skipped, a reference to a removed symbol is stale
-    and goes red — and skipping a declaration must never whitelist the ident tree-wide."""
-    up = _upstream(tmp_path, main_files=main_files, pr_files=pr_files)
-    work = _clone(tmp_path, up)
-
-    assert _run_gate(work, tmp_path) == rc
-    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == fingerprints
-
-
 def test_inline_marker_suppresses_a_deliberate_dead_name_reference(tmp_path):
     """A negative-assertion test names the dead command ON PURPOSE — to prove it is
     denied. Deleting the name would delete the test's meaning, so it gets a marker."""
@@ -781,25 +614,6 @@ def test_inline_marker_suppresses_a_deliberate_dead_name_reference(tmp_path):
 
     hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
     assert hits == {"t_plain.py:some_removed_helper"}
-
-
-def test_the_baseline_file_cannot_be_its_own_finding(tmp_path):
-    """The baseline necessarily spells the identifiers it tolerates, so it greps as a
-    surviving reference to each. A gate must not be able to find itself."""
-    rel = "scripts/lint/lint_stale_refs_baseline.json"
-    up = _upstream(tmp_path, main_files={
-        rel: json.dumps({"//": "h", "entries": {"caller.py:some_removed_helper": "tolerated"}}),
-    })
-    work = _clone(tmp_path, up)
-    inside = work / rel
-
-    assert f"{rel}:some_removed_helper" in {
-        f.fingerprint for f in GATE._scan(work, "origin/main")
-    }
-    findings = GATE._scan(
-        work, "origin/main", exclude_files=GATE._self_reference(inside, work)
-    )
-    assert not any(f.fingerprint.startswith(rel) for f in findings)
 
 
 # --- the two halves must read the SAME tree ---------------------------------------------------

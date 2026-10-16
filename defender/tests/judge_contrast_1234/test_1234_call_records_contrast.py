@@ -1,42 +1,4 @@
-"""#1234 slice `call_records_contrast` — one identity per call on both call records (A12), the
-contrast row built from them (design M2, A2, A14), and fail-closed writes of either record.
-
-Every scenario here runs the REAL path (I-10, 45-dispositions-drift): the launcher over the
-#1224 fixture tenant with real pre-flight, each sibling the real `run.main --tenant T
---episode <id> --world L` driven in-process (`S.real_family`), so both call records are written
-by the real writers — the registry's `decide_call` / `_deliver` / `_record_beside`, the query
-tool's `append_query_row` / `_record_denied`, the shim's `_record_shim_failure`, and the seed's
-`_inherit_evidence`. A test reads the call id OFF the rows; it never plants one.
-
-THE DEFAULT SHAPE (observed at 463833df by this writer's smoke runs). The source run made three
-pre-branch calls on the held lead `l-001` (idp `Q1`, edr `Q2`, siem-x `L3`) and one post-branch
-call (`QP`); `capture_sentinel` adds J3's inherited `∅.denied` row. Every sibling's table starts
-with that seeded prefix, byte-identical in every run (JQ-01 (i)); its own rows follow. World
-`b`'s oracle alters `QP`; `edr lookup` is withheld, so the grant refuses it (a `refused` ledger
-row and a `∅.denied` table row).
-
-HOW FAULTS ENTER (author.md's hierarchy; nothing is monkey-patched):
-  * a live outage is the estate's real `faults.UpstreamFault` (`Estate.fail`), GA-40;
-  * an adapter that cannot load is the adapter file importing a module that does not exist —
-    p32's own shape (`test_jp01_scope_adapter_fault`, JP-01/JP-02 "fault" rows);
-  * a failed write of a call record is a DIRECTORY planted at the record's name — by the
-    estate's adapter just before it answers (`Estate1234.break_write`), or by `_Between` just
-    before the gather model's next call. AP-01 observed the lost ledger write (swallowed for
-    error and refusal rows, an infra fault for a delivered row); JP-02 `s_tw_denied` the lost
-    `∅.denied` table write; the survey's smoke the table write raising `NotPlainEntry` out of
-    `run.main`;
-  * "the estate recovers between two identical calls" is `_Between` re-answering the key —
-    AP-01a's and JP-02 `s_lw_realerror`'s own shape;
-  * where a shape cannot be produced by one run in a deterministic order (A32's ledger order
-    against table order — AP-14 observed it only under an injected stall), the archived file is
-    permuted with `S.rewrite_jsonl` after the real writers wrote it: real rows, real ids, one
-    order changed. Likewise A30's oracle row with no table row.
-
-COINED NAMES. F2 leaves the contrast row's fields to the implementer. They are spelled ONCE, in
-`S.COINED` (`ctx.*`, `contrast.*`, `entry.*`, `cut.*`); the accessors (`_contrast`, `_field`,
-`_numbers`, `_focus_calls`, `_reference_calls`, `_entry_at`) are their only readers here.
-A call number is the table row's 0-based line index — the numbering `S.table_ptr` cites.
-"""
+"""#1234 judge contrast: contrast rows and call records (ids, retries, write failures) for judged runs."""
 from __future__ import annotations
 
 import json

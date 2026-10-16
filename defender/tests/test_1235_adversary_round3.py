@@ -1,22 +1,6 @@
 """#1235 round 3 — the holes the third adversary pass found in the round-3 suite.
 
 Each test greens on an honest round-3 implementation and goes red under one cheating
-implementation the round-3 tests let through:
-
-  O3 — lead-0's gate reads only the monotonic delta: the wall clock ahead of the
-      monotonic one (a suspend, a forward step) is spent for the hooks, fresh for lead-0.
-  O3 — lead-0's gate credits only CLOSED oracle turns: an oracle turn open now holds
-      the world for the hooks (`oracle_held`), not for lead-0.
-  O2 — the raise keyed on MAIN only: GATHER is budget-enforced too, and its deps with
-      no state must raise, not run unbudgeted.
-  O2 — the raise placed after the handler: an enforced role with no state must raise
-      BEFORE its first call executes ("not counted, not refused, raised"), not after the call
-      reached the box.
-  O6 — the boundary check placed after store setup: a mismatched state handed to a
-      run whose store cannot open is a ValueError, never the store exit's summary.
-  O7 — `lead_rows` still deep-copying: it hands out the stored rows themselves.
-  O6 — production's path resolving a second state for lead-0: the run handed no state
-      carries ONE object to lead-0's verb context and to the gather lead's.
 """
 from __future__ import annotations
 

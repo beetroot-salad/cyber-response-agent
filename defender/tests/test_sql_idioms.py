@@ -1,45 +1,11 @@
-"""The SQL idioms a gather lead is taught must actually RUN, through the real command.
-
-`skills/gather/SKILL.md` sends every investigating lead to `defender-sql.md` before it
-writes SQL, and `defender-sql.md` teaches one binding per payload shape. A binding that
-does not run is not a documentation bug — it is a lead that burns its turns on Binder
-Errors and then reports an absence it never established.
-
-These guards were written for a judge pipeline that no longer exists and were deleted
-whole with it (`e9e11a48`, #922); 20 of the 23 were never about the judge at all, they
-were about the sql engine (`runtime/sql_engine/sql.py`), which is still the lead's tool.
-This file is those 20, restored against the surfaces that survive and re-driven as a REAL
-subprocess: `sys.executable -P -m defender.runtime.sql_engine.sql '<query>'` with the
-payload on stdin is what a lead's `cat payload.json | defender-sql '...'` actually does, so
-the exit code, the stdout JSON and the stderr hint are all observed the way the lead observes
-them. `test_sql.py` keeps
-the in-process harness for the internals (sandbox, column disambiguation); nothing here
-monkeypatches anything.
-
-The shapes are the ones a gather_raw payload actually comes in, from the corpus survey
-that motivated the tool:
-
-    {index, total, returned, truncated, hits}   -> unnest(hits) yields a STRUCT
-    {columns, values, row_count}  (ES|QL)       -> declared: `--rows values --names columns`
-                                                   makes each name a column (#1138)
-    flat object                                 -> one row, its keys are the columns
-    bare array                                  -> one row per element
-    empty / not JSON                            -> input error (exit 2), NOT an empty result
-
-duckdb lives in the `runtime` extra. CI syncs it (every test job runs `uv sync --extra dev
---extra runtime`), so these guards do block a merge; a dev-only checkout skips exactly the
-tests that run a QUERY — the tool imports duckdb lazily, so `--help`, the adapter binding
-and the doc census need nothing and run everywhere.
-"""
+"""The SQL idioms a gather lead is taught run through the real `defender-sql` subprocess: one binding per payload shape (search hits, ES|QL declared rows, flat object, bare array), the hints on a query error, truncation notes, and the arrow-precedence refusals. Internals (sandbox, column disambiguation) are in test_sql.py."""
 from __future__ import annotations
 
 import json
 import re
 import subprocess
-from pathlib import Path
 
 import pytest
-from markdown_it import MarkdownIt
 
 from defender._io import read_text_utf8
 from defender.scripts.adapters.elastic_adapter import esql_payload
@@ -54,8 +20,6 @@ from defender.tests._defender_sql import (
 from defender.tests._sql_warm import run_sql_warm
 from defender.tests._locale import C_LOCALE_ENV
 
-_DOC = DEFENDER / "skills" / "gather" / "defender-sql.md"
-_SKILLS = DEFENDER / "skills"
 
 #: The real ES|QL payload a lead was handed in a checked-in scenario run: `columns`
 #: `failed:long, source.ip:ip`, three POSITIONAL rows, `row_count: 3`. Hand-writing this
@@ -69,11 +33,6 @@ _REAL_ESQL = (
 def esql() -> str:
     """The real ES|QL payload, as text — what goes on the tool's stdin."""
     return read_text_utf8(_REAL_ESQL)
-
-
-@pytest.fixture(scope="module")
-def doc() -> str:
-    return read_text_utf8(_DOC)
 
 
 def _sql(

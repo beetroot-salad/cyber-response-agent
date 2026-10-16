@@ -334,7 +334,7 @@ def test_quoted_pipe_cells_round_trip_unchanged():
 
 
 def test_the_backslash_pipe_escape_is_still_accepted_by_the_splitter():
-    """`split_cells` still reads `\|` as one escaped delimiter inside a cell, and a row carrying one still parses to the declared width with no parse warning (D10)."""
+    """`split_cells` still reads `|` as one escaped delimiter inside a cell, and a row carrying one still parses to the declared width with no parse warning (D10)."""
     assert cells(r"a|b\|c") == ["a", "b|c"]
 
     doc = attr_doc(ESCAPED_PIPE_ROW)

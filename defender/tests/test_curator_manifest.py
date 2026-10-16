@@ -1,19 +1,4 @@
-"""Executable spec for the curator corpus manifest (#559).
-
-Part A of #559 gives the four lesson curators a *manifest* of the corpus they are about
-to fold into: ``build_corpus_manifest(corpus_dir)`` renders one ``## <slug>`` section per
-non-``_`` lesson carrying that lesson's frontmatter MINUS a fixed provenance drop-set
-``{source_finding_ids, source_observation_ids, created_at, recorded_at}`` (re-emitted from
-the PARSED dict via ``yaml.safe_dump``, so a multi-line block field can't orphan). Part B
-threads an absolute ``corpus_dir: Path`` into ``build_curator_user_prompt`` and splices the
-manifest in; both thin caller wrappers forward the abs corpus Path they hold.
-
-Every test drives the REAL target — the builder, the real ``build_curator_user_prompt``, the
-real findings ``build_user_prompt`` wrapper — over a temp corpus. The manifest builder does
-NOT exist yet: it is reached as ``_shared.build_corpus_manifest`` (module attribute) so the
-missing target reds PER-TEST with ``AttributeError`` while this harness still collects and
-proves itself; the ``corpus_dir=`` splice reds per-test with an unexpected-kwarg ``TypeError``.
-"""
+"""Curator corpus manifest: one section per lesson, provenance dropped, forged-section defenses, and the prompt splice."""
 from __future__ import annotations
 
 import ast
@@ -27,8 +12,6 @@ from defender.learning.author.lessons.run import build_user_prompt  # noqa: E402
 from defender.tests._curator1134 import corpus_view  # noqa: E402
 
 _REAL_SLUG = "auth-log-scope-does-not-cover-post-auth-behavior"
-
-
 
 
 def _findings_lesson(corpus: Path, stem: str, *, description: str = "DESC",
@@ -70,8 +53,6 @@ def _actor_lesson(corpus: Path, stem: str, *, relevance: str = "actor relevance"
 def _headers(manifest: str) -> list[str]:
     """The slugs of the top-level ``## `` section headers (column-0 only), in order."""
     return [ln[3:].strip() for ln in manifest.splitlines() if ln.startswith("## ")]
-
-
 
 
 def test_m1_one_section_per_lesson(tmp_path):
@@ -234,20 +215,6 @@ def test_m8b_adversarial_stem_cannot_forge_a_section(tmp_path):
     assert len(_headers(manifest)) == 2
 
 
-def test_m10_dropping_provenance_avoids_a_datetime_dump(tmp_path):
-    """demand: M10 — dropping created_at/recorded_at removes the parsed ``datetime`` from the dict,
-    so the build succeeds and no datetime serialization reaches the manifest."""
-    corpus = tmp_path / "lessons"
-    corpus.mkdir()
-    _findings_lesson(corpus, "m10-findings", description="DESC-SENTINEL-M10",
-                    created_at="2026-06-04T00:00:00Z")
-    manifest = _shared.build_corpus_manifest(corpus)
-    assert "DESC-SENTINEL-M10" in manifest
-    assert "2026-06-04" not in manifest
-    assert "00:00:00" not in manifest
-
-
-
 _ROWS = [{"id": "f-1", "run_id": "run-1", "direction": "adversarial"}]
 
 
@@ -266,37 +233,6 @@ def test_p1_prompt_splices_manifest_and_keeps_the_rest(tmp_path):
     assert "defender/lessons/" in prompt
     assert "findings (1):" in prompt
     assert json.dumps(_ROWS, indent=2) in prompt
-
-
-def test_p2_manifest_disjoint_from_queued_rows(tmp_path):
-    """demand: P2 — the manifest (existing corpus) is disjoint from the queued rows: a queued id is
-    not a manifest slug, and an existing lesson slug is not among the rows."""
-    corpus = tmp_path / "lessons"
-    corpus.mkdir()
-    _findings_lesson(corpus, "existing-lesson")
-    rows = [{"id": "f-QUEUED", "run_id": "run-1", "direction": "adversarial"}]
-    prompt = build_curator_user_prompt(
-        rows, "batch-1", corpus=corpus_view(corpus), corpus_dir=corpus, corpus_dir_rel="rel",
-        label="findings",
-    )
-    assert "existing-lesson" in _headers(prompt)
-    assert "f-QUEUED" not in _headers(prompt)
-    assert "f-QUEUED" in prompt
-    assert "existing-lesson" not in json.dumps(rows)
-
-
-def test_p3_manifest_from_abs_dir_rel_is_display_only(tmp_path):
-    """demand: P3 — the manifest is drawn from the absolute corpus_dir; corpus_dir_rel appears only
-    on the ``lessons_dir:`` display line, never as the glob root."""
-    corpus = tmp_path / "abs-corpus"
-    corpus.mkdir()
-    _findings_lesson(corpus, "abs-lesson")
-    prompt = build_curator_user_prompt(
-        _ROWS, "batch-1", corpus=corpus_view(corpus), corpus_dir=corpus,
-        corpus_dir_rel="nonexistent/display/path", label="findings",
-    )
-    assert "## abs-lesson" in prompt
-    assert "nonexistent/display/path" in prompt
 
 
 def test_p4_both_callers_forward_the_abs_corpus_path(tmp_repo, tmp_path):

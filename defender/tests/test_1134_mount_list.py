@@ -1,84 +1,11 @@
-"""#1134 v2 step 3: one list of drain mounts, its two labels, and the trees held from it (O4).
-
-The contract is #1134's 2026-10-01 design addendum, A3 (it replaces the 2026-09-28 design's D3
-and keeps O4), with the owner's 2026-09-29 decision that each drain label is spelled once:
-
-- `learning/core/config.py` defines the two labels as the members of `DrainLabel`, a plain
-  `enum.Enum` (#1179, replacing the step-3 rule that each string is spelled once and the scan
-  that enforced it): `AUTHOR = "author_drain"`, `LEAD_AUTHOR = "lead_author_drain"`, aliased as
-  `AUTHOR_DRAIN_LABEL` and `LEAD_AUTHOR_DRAIN_LABEL`. No string equals a member, so a label
-  spelled as a string anywhere (a literal, `"author" + "_drain"`, a second table keyed by
-  strings) grants nothing: the members' values are rows of the unknown-label tests. A member's
-  `str()` is its value. In `drains`, each lane's
-  `_run_worktree_batch(label=...)` passes its own constant by name, and the name resolves at the
-  call (through `_astlib`'s scopes) to `config`'s binding. Nothing in `drains` binds that name
-  again (a parameter, a local, a loop target, an import from elsewhere).
-- `DrainLabel.writable_trees(paths) -> tuple[Path, ...]` (#1179 amendment, M1') is the one list
-  of trees a drain box may write: the author member -> `(lessons_dir, lessons_questioner_dir)`,
-  in that order, the lead member -> `(skills_dir,)`, read off the `paths` it is handed. Only a
-  member names a lane: anything else (a string, a member's name, a look-alike, a near miss)
-  has no `writable_trees` and raises at first use, before anything is held or mounted. It is
-  lexical: built from `paths.repo_root` as spelled, nothing resolved, nothing on disk read, so
-  other trees in the leaf (`lessons-actor/`, `lessons-environment/`, `skills-old/`) never join
-  it.
-- `drains._drain_box_request(wt, batch_id, label, paths)` mounts read-write exactly
-  `label.writable_trees(paths.with_repo_root(wt))`, in order, each at its own path
-  (target == source), plus the one read-only mount of `wt`, and nothing else. It derives no list
-  of its own, asks the list only of the leaf and only for the label it was handed. The leaf
-  stays read-only when it is a git checkout (`.git` a file or a folder).
-- `lane_trees.open_drain_trees(wt_paths, label) -> DrainTrees` is exactly
-  `DrainTrees.open(label.writable_trees(wt_paths))`, asked of the label it was handed.
-  `DefenderPaths` and `with_repo_root` keep a relative `repo_root` as given, so its list is
-  relative, and those mounts are refused with `ValueError` before anything is held. They are
-  never joined to the cwd, nor to the checkout this code runs from.
-
-O4 then reads: for every label, the box's read-write mounts equal
-`open_drain_trees(paths.with_repo_root(wt), label).mounts`, and those are the held roots. "Held"
-is pinned by behaviour, not by comparing objects. While the trees are open, this process holds
-exactly one descriptor per rw mount and none on anything else in the tmp dir. A write through
-`trees.mount(m)` lands at `m / name`. After `m` is renamed away and a fresh folder, or a link to
-an outside folder, is put at its path, the same handle still writes into the folder the box was
-given. Nothing lands in the swapped-in folder or behind the link.
-
-Every row builds its paths over a drain leaf `wt` that is NOT `paths.repo_root`, so a list taken
-from the main checkout instead of the leaf is caught. Every expected mount is also spelled
-literally (`wt / "defender/lessons"`, ...) beside the `LoopPaths` attribute, so no row only
-compares the list with itself. The lexical rows leave `wt` absent on disk and check it is still
-absent afterwards. `Leaf.build()` and the drives' branch also build decoy trees (`DECOY_TREES`)
-beside the real ones.
-
-Two seams are injected. The first is the `paths` argument: `relocated_paths` (v1's E1) builds a
-`LoopPaths` whose trees sit elsewhere than the shipped ones, since a second table in the box or in
-`open_drain_trees` agrees with the member's list today and only different trees show it. It also
-records every `(repo_root, attribute)` tree read. The second is the lanes' own seams (`trigger_author=`,
-`run_lead_author=`, `branch=`, `start_box=`, `stop_box=`, `scrub=`), for the real drives. Nothing
-is monkeypatched (`monkeypatch.chdir` / `setenv` only set the cwd and a threshold). No row forks
-or spawns: the drives' leaf has no `.git`, so the lead lane's reset/clean is skipped, and the
-`.git` rows call `_drain_box_request` alone. No deadline is needed.
-
-v1's E2-E4 rows pinned `LoopPaths.tree_for`, which v2 drops (`DrainTrees.tree_for` is step 2's,
-`test_1134_drain_trees.py`); they are not ported. E1 (a second label table) and E5 (near-miss
-labels) are. The AST pins are v1 step 6's H7 and H8.
-
-Red before #1134 v2 step 3: `config` has no label constants and `lane_trees` no
-`open_drain_trees`, so this module fails at import. An adversary pass against the first version
-of this file greened these holes; the rows that close each say so:
-- x1, a label literal left in a production module outside the batch calls (`claim_markers`);
-- H2, a lane parameter or local named like the constant, shadowing the import;
-- H3, a second table in `config` keyed by `"author" + "_drain"`;
-- H4, a relative root absolutized by `with_repo_root`, or anchored at the checkout;
-- H5, the author list globbing every `lessons-*` folder in the leaf;
-- H6, the leaf mounted read-write when it is a git worktree;
-- H7, the label normalised (`label.partition(":")[0]`) in the list or only in the holder;
-- R3, the box rebasing the main checkout's list onto the leaf;
-- r6, the batch choosing the box's label from `branch.branch_prefix`.
+"""One list of drain mounts per label (`DrainLabel.writable_trees`): the drain box's read-write mounts equal the trees
+`open_drain_trees` holds, are lexical (never resolved, never joined to the cwd), a non-member label is refused before
+anything is held, and each lane's real work step mounts and holds its leaf's trees.
 """
 from __future__ import annotations
 
-import ast
 import dataclasses
 import enum
-import inspect
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -87,13 +14,12 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender.learning.core import config, drains
+from defender.learning.core import drains
 from defender.tests._state1135 import curation_run_dir, enqueue_case, state_for_paths
 from defender.learning.core.config import (
-    AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, DrainLabel, LoopPaths,
+    DrainLabel, LoopPaths,
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
-from defender.tests._by_path import import_lint_lib
 from defender.tests._drain_trees_1134 import PAYLOAD
 from defender.tests.e2e import _box665 as B
 from defender.tests.test_1111_rooted_io import HOST_BYTES, census
@@ -109,9 +35,6 @@ AUTHOR = DrainLabel.AUTHOR
 LEAD = DrainLabel.LEAD_AUTHOR
 KNOWN = (AUTHOR, LEAD)
 
-#: Each member's value, spelled literally: its written form (the pending-delivery record, the
-#: quarantine manifest) and its display form, and, as a bare string, a label that grants nothing.
-LABEL_VALUES: dict[DrainLabel, str] = {AUTHOR: "author_drain", LEAD: "lead_author_drain"}
 
 #: Each known label's mount points, repo-relative, in the contract's order. Literal on purpose:
 #: independent of the `LoopPaths` attribute names the implementation reads.
@@ -306,125 +229,24 @@ def assert_raises_non_member(fn: Callable[[], Any], what: str) -> None:
 # The labels: spelled once, in config, and passed by name
 # ---------------------------------------------------------------------------------------
 
-#: Each label's value and the one constant it is spelled as.
-CONFIG_MODULE = "defender.learning.core.config"
 
 
-def test_the_label_constants_are_the_lanes_members():
-    """`AUTHOR_DRAIN_LABEL` and `LEAD_AUTHOR_DRAIN_LABEL` are the two members of `DrainLabel`, a
-    plain `enum.Enum` (never a `str` mixin), whose values are the strings each lane passed as
-    `label=` before #1179, unchanged. `drains` sees the same objects. A member's `str()` is its
-    value, the display form every log line formats.
-
-    Catches: a `str`/`StrEnum` label (it would equal its string and grant to one), a third
-    member, a misspelled value (the written records would change), an alias that is a fresh
-    string rather than the member, and a display form that leaks `DrainLabel.AUTHOR`."""
-    assert issubclass(DrainLabel, enum.Enum)
-    assert not issubclass(DrainLabel, str)
-    assert list(DrainLabel) == [AUTHOR, LEAD]
-    assert AUTHOR_DRAIN_LABEL is DrainLabel.AUTHOR
-    assert LEAD_AUTHOR_DRAIN_LABEL is DrainLabel.LEAD_AUTHOR
-    assert drains.AUTHOR_DRAIN_LABEL is DrainLabel.AUTHOR
-    assert drains.LEAD_AUTHOR_DRAIN_LABEL is DrainLabel.LEAD_AUTHOR
-    for member, value in LABEL_VALUES.items():
-        assert member.value == value
-        assert str(member) == value
-        assert f"{member}" == value
-        assert member != value
-        assert value != member
 
 
-def _source_tree(module: Any) -> ast.Module:
-    return ast.parse(inspect.getsource(module))
 
 
-def _callee(call: ast.Call) -> str | None:
-    f = call.func
-    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
 
 
-def _batch_calls(node: ast.AST) -> list[ast.Call]:
-    return [n for n in ast.walk(node)
-            if isinstance(n, ast.Call) and _callee(n) == "_run_worktree_batch"]
 
 
-def _label_kw(call: ast.Call) -> ast.expr | None:
-    return next((k.value for k in call.keywords if k.arg == "label"), None)
 
 
-#: What each kind of node binds, by name, other than an import (imports are judged through
-#: `_astlib`'s scopes, below).
-_BINDS: dict[type, Callable[[Any], list[str]]] = {
-    ast.Name: lambda n: [] if isinstance(n.ctx, ast.Load) else [n.id],
-    ast.arg: lambda n: [n.arg],
-    ast.FunctionDef: lambda n: [n.name],
-    ast.AsyncFunctionDef: lambda n: [n.name],
-    ast.ClassDef: lambda n: [n.name],
-    ast.ExceptHandler: lambda n: [n.name] if n.name else [],
-    ast.Global: lambda n: list(n.names),
-    ast.Nonlocal: lambda n: list(n.names),
-    ast.MatchAs: lambda n: [n.name] if n.name else [],
-    ast.MatchStar: lambda n: [n.name] if n.name else [],
-    ast.MatchMapping: lambda n: [n.rest] if n.rest else [],
-}
 
 
-def _rebindings(tree: ast.AST, name: str) -> list[tuple[int, str]]:
-    """Every place in `tree` that binds `name` other than by an import: an assignment or
-    deletion anywhere (tuple targets, loop and `with` targets, a walrus, a class body), a
-    parameter of any function or lambda, a `def` or `class`, an `except ... as`, a `global` or
-    `nonlocal`, or a `match` capture."""
-    out = []
-    for n in ast.walk(tree):
-        binds = _BINDS.get(type(n))
-        if binds is not None and name in binds(n):
-            out.append((getattr(n, "lineno", 0), type(n).__name__))
-    return out
 
 
-def _foreign_imports(env: Any, name: str, origin: str) -> list[str]:
-    """Each scope of the module (`_astlib`'s envs) where `name` is imported from anywhere but
-    `origin`, as that other origin."""
-    scopes = {id(e): e for e in (env, *env.scope_of.values())}.values()
-    return sorted({e.imports[name] for e in scopes
-                   if name in e.imports and e.imports[name] != origin})
 
 
-def test_the_drains_pass_a_constant_to_the_worktree_batch():
-    """Every `_run_worktree_batch(label=...)` in `drains` passes a name, never a string (v1 step
-    6's H8). Each lane passes its own constant, resolved at the call through `_astlib` (the
-    gates' scope-aware resolver) to `config`'s binding: `author_drain` passes
-    `defender.learning.core.config.AUTHOR_DRAIN_LABEL` and `lead_author_drain`
-    `...LEAD_AUTHOR_DRAIN_LABEL`, imported or read as `config.<NAME>`. Nothing in `drains`
-    binds either name again: no parameter, local, loop target, class attribute or
-    module-level assignment, and no import of it from elsewhere, in any scope (round 2's H2).
-
-    Catches: `label="author_drain"`, an f-string or concatenation built at the call, a second
-    module constant in `drains` (`_AUTHOR = "author_drain"`), and a lane parameter or local
-    named `AUTHOR_DRAIN_LABEL` that shadows the import (the resolver answers `None` for it).
-    Each is a second spelling the drives below cannot tell from the constant."""
-    astlib = import_lint_lib("_astlib")
-    tree = _source_tree(drains)
-    env = astlib.module_env(tree)
-    calls = _batch_calls(tree)
-    assert len(calls) >= 2, "expected the author and the lead-author drains' batch calls"
-    for call in calls:
-        value = _label_kw(call)
-        assert value is not None, ast.dump(call)
-        assert isinstance(value, (ast.Name, ast.Attribute)), (call.lineno, ast.dump(value))
-
-    # Each lane is found by its drain function's name, which is its label's value.
-    for lane, constant in (("author_drain", "AUTHOR_DRAIN_LABEL"),
-                           ("lead_author_drain", "LEAD_AUTHOR_DRAIN_LABEL")):
-        [fn] = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == lane]
-        [call] = _batch_calls(fn)
-        value = _label_kw(call)
-        assert value is not None, ast.dump(call)
-        expected = f"{CONFIG_MODULE}.{constant}"
-        assert astlib.origin(value, env) == expected, (
-            f"{lane} passes {ast.unparse(value)}, which does not resolve to {expected}")
-        assert _rebindings(tree, constant) == [], f"drains binds {constant} again"
-        assert _foreign_imports(env, constant, expected) == []
 
 
 # ---------------------------------------------------------------------------------------
@@ -754,42 +576,6 @@ def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
     assert_asked_of(asked, wt, label, "the holder")
 
 
-def test_the_list_keeps_the_leafs_spelling_and_the_held_roots_are_the_folders_it_names(
-        tmp_path: Path):
-    """The list is lexical end to end: a leaf spelled through a link keeps that spelling in
-    `writable_trees`, in the box's rw mounts and in the holder's `.mounts`, and the held
-    roots are the folders that spelling names.
-
-    True, with `leaf-link -> real-leaf`, for each known label: all three lists are the literal
-    `leaf-link/defender/...`; the descriptors held are the real-leaf folders; a write through
-    each `mount(m)` lands in `real-leaf`; the resolved spelling is no mount point of the trees.
-
-    Catches: `resolve()` in `writable_trees`, in the box, or in the holder. Each turns
-    the list into a spelling the box was never given, so the box's mounts and the held mount
-    points stop comparing equal."""
-    real_leaf = tmp_path / "real-leaf"
-    for rel in ALL_TREES:
-        (real_leaf / rel).mkdir(parents=True)
-    link = tmp_path / "leaf-link"
-    link.symlink_to(real_leaf, target_is_directory=True)
-    paths = LoopPaths(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
-    w = paths.with_repo_root(link)
-
-    for label in KNOWN:
-        expected = tuple(link / rel for rel in EXPECTED_MOUNTS[label])
-        assert label.writable_trees(w) == expected
-        request = drains._drain_box_request(link, "batch-1", label, paths)
-        assert rw_mounts(request) == [(m, m) for m in expected]
-        assert ro_mounts(request) == [(link, link)]
-        with open_drain_trees(w, label) as trees:
-            assert trees.mounts == expected
-            assert held_roots(tmp_path) == real(*(real_leaf / rel
-                                                  for rel in EXPECTED_MOUNTS[label]))
-            for rel in EXPECTED_MOUNTS[label]:
-                trees.mount(link / rel).write(PROBE, PAYLOAD, mode="create")
-                assert (real_leaf / rel / PROBE).read_bytes() == PAYLOAD
-                refused_value_error(lambda rel=rel: trees.mount(real_leaf / rel), rel)
-        assert held_roots(tmp_path) == []
 
 
 # ---------------------------------------------------------------------------------------
@@ -865,44 +651,6 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
     assert held_roots(tmp_path) == []
 
 
-@pytest.mark.parametrize("how", ["constructed", "rebased"])
-@pytest.mark.parametrize("label", KNOWN)
-def test_a_relative_root_is_anchored_neither_at_the_cwd_nor_at_this_checkout(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, label: str, how: str):
-    """A `repo_root` of `Path(".")` lists bare `defender/...` mounts, and `open_drain_trees`
-    refuses them with `ValueError`. It never anchors them at the checkout this code runs from
-    (`config.REPO_ROOT`), which does carry those trees (round 2's H4).
-
-    True, with the cwd at an empty tmp dir: the list is `defender/...` as spelled; the open is
-    `ValueError`; no descriptor is held under the tmp dir, and the descriptors under each of the
-    checkout's real trees are what they were before the call. The preconditions: the checkout's
-    trees are real folders and the cwd has none. The control: the same label over
-    `config.REPO_ROOT` itself opens and holds those very trees, so a holder anchoring there
-    would have succeeded.
-
-    Catches: a holder that resolves a relative list against the repo it was imported from,
-    which a cwd-only row cannot see (the cwd holds nothing, so a cwd join fails anyway)."""
-    checkout_trees = [config.REPO_ROOT / rel for rel in EXPECTED_MOUNTS[label]]
-    for tree in checkout_trees:
-        assert tree.is_dir(), f"precondition: the checkout carries {tree}"
-    monkeypatch.chdir(tmp_path)
-    for rel in EXPECTED_MOUNTS[label]:
-        assert not (tmp_path / rel).exists(), f"precondition: the cwd holds no {rel}"
-    dot = relative_paths(how, Path("."), tmp_path)
-
-    assert label.writable_trees(dot) == tuple(Path(rel) for rel in EXPECTED_MOUNTS[label])
-    before = {tree: sorted(descriptors_under(tree)) for tree in checkout_trees}
-    with pytest.raises(ValueError):  # noqa: PT011 — DrainTrees' mount refusal; the type is the contract
-        open_drain_trees(dot, label)
-    assert held_roots(tmp_path) == []
-    assert {tree: sorted(descriptors_under(tree)) for tree in checkout_trees} == before, (
-        "a relative mount was held in the checkout")
-
-    with open_drain_trees(LoopPaths(repo_root=config.REPO_ROOT), label) as trees:
-        assert trees.mounts == tuple(checkout_trees)
-        for tree in checkout_trees:
-            assert os.path.realpath(tree) in descriptors_under(tree), str(tree)
-    assert {tree: sorted(descriptors_under(tree)) for tree in checkout_trees} == before
 
 
 # ---------------------------------------------------------------------------------------

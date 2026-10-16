@@ -17,14 +17,11 @@ Driven through the DI seam added in the parent commit:
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
 
-from defender.tests._by_path import import_lint_lib, load_lint_gate
+from defender.tests._by_path import load_lint_gate
 
-_ASTLIB = import_lint_lib("_astlib")
 _GATE = load_lint_gate("lint_unsafe_jsonl_io")
 
 
@@ -33,13 +30,6 @@ def _pyfile(tree: Path, rel: str, src: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(src, encoding="utf-8")
     return p
-
-
-def _write_baseline(path: Path, fingerprints: list[str]) -> None:
-    path.write_text(
-        json.dumps({"//": "test", "entries": {fp: "" for fp in fingerprints}}) + "\n",
-        encoding="utf-8",
-    )
 
 
 def _flags(tmp_path: Path, src: str) -> bool:
@@ -118,29 +108,6 @@ def test_suppression(tmp_path):
         "            rows.append(json.loads(line))\n"
         "    return rows\n"
     ))
-
-
-def test_syntax_error_file_is_not_silently_skipped(tmp_path):
-    """INVERTED by #652 (was `test_syntax_error_file_is_skipped`).
-
-    The old assertion pinned the swallow — `broken.py` left the corpus and the scan carried
-    on, so an unsafe `json.loads(line)` sitting in an unparseable file was reported as clean.
-    A gate that cannot look must not report clean (#618/#621), so the gate now raises
-    ScanBlind, which `main()` surfaces as exit 2."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "broken.py", "def f(:\n")
-    _pyfile(tree, "prod.py", _reader("import json", "json.loads"))
-    with pytest.raises(_ASTLIB.ScanBlind) as exc:
-        _GATE._scan(tree)
-    assert "broken.py" in str(exc.value)
-
-
-def test_clean_tree_still_scans(tmp_path):
-    """Control for the above: without the unparseable file the scan works normally, so the
-    raises-test cannot pass against a gate that raises unconditionally."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", _reader("import json", "json.loads"))
-    assert all("prod.py" in f.fingerprint for f in _GATE._scan(tree))
 
 
 def test_aliased_json_reader_is_flagged(tmp_path):

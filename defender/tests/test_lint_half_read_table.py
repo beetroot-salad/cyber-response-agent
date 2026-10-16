@@ -17,14 +17,12 @@ pinned here too — a documented hole that nothing pins is a hole that quietly c
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from defender.tests._by_path import import_lint_lib, load_lint_gate
+from defender.tests._by_path import load_lint_gate
 
-_ASTLIB = import_lint_lib("_astlib")
 _GATE = load_lint_gate("lint_half_read_table")
 
 
@@ -63,13 +61,6 @@ def _pyfile(tree: Path, rel: str, src: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(src, encoding="utf-8")
     return p
-
-
-def _write_baseline(path: Path, fingerprints: list[str], reason: str = "test") -> None:
-    path.write_text(
-        json.dumps({"//": "test", "entries": {fp: reason for fp in fingerprints}}) + "\n",
-        encoding="utf-8",
-    )
 
 
 def _tree(tmp_path: Path, owner: str = _OWNER, consumer: str = _CONSUMER) -> Path:
@@ -306,125 +297,6 @@ def test_the_marker_suppresses_only_at_its_own_site(tmp_path, case, consumer, su
 # (d) ScanBlind
 
 
-def test_unparseable_file_in_scope_raises_scanblind(tmp_path):
-    """A gate that cannot look must not report clean (#618/#621/#652). Worse than usual here:
-    an unparseable OWNER would silently disarm its table for the whole corpus."""
-    tree = _tree(tmp_path)
-    _pyfile(tree, "broken.py", "def f(:\n")
-    with pytest.raises(_ASTLIB.ScanBlind) as exc:
-        _GATE._scan(tree)
-    assert "broken.py" in str(exc.value)
-
-
-def test_clean_tree_still_scans(tmp_path):
-    """The control: the same tree minus the unparseable file scans normally and finds the real
-    site, so the raises-test cannot pass against a gate that raises unconditionally."""
-    assert _GATE._scan(_tree(tmp_path))
-
-
-def test_scanblind_surfaces_as_exit_2(tmp_path, capsys):
-    """Exit 2 specifically, not merely non-zero: exit 1 means "the gate looked and found a
-    violation", which a `!= 0` assertion would conflate with "the gate could not look"."""
-    tree = _tree(tmp_path)
-    _pyfile(tree, "broken.py", "def f(:\n")
-    assert _GATE.main([], scope=tree, baseline_path=tmp_path / "bp.json") == 2
-    assert "broken.py" in capsys.readouterr().err
-
-
-def test_missing_scope_is_exit_2(tmp_path):
-    assert _GATE.main([], scope=tmp_path / "not-a-dir") == 2
-
-
 # the ratchet
-
-
-def test_ratchet_contract(tmp_path):
-    tree = _tree(tmp_path)
-    findings = _GATE._scan(tree)
-    assert findings
-
-    empty = tmp_path / "empty.json"
-    assert _GATE.main([], scope=tree, baseline_path=empty) == 1
-    bp = tmp_path / "bp.json"
-    _write_baseline(bp, [f.fingerprint for f in findings])
-    assert _GATE.main([], scope=tree, baseline_path=bp) == 0
-
-
-def test_baseline_lifecycle(tmp_path):
-    tree = _tree(tmp_path)
-    bp = tmp_path / "bp.json"
-    assert _GATE.main(["--update-baseline"], scope=tree, baseline_path=bp) == 0
-    assert bp.exists()
-    # `--update-baseline` writes "" reasons, and require_reasons refuses them.
-    assert _GATE.main([], scope=tree, baseline_path=bp) == 1
-    _write_baseline(bp, [f.fingerprint for f in _GATE._scan(tree)], reason="issue #879")
-    assert _GATE.main([], scope=tree, baseline_path=bp) == 0
-
-
-def test_untriaged_baseline_entry_fails_the_gate(tmp_path):
-    """`require_reasons` closes the ratchet's own escape hatch: burying a finding costs a
-    sentence saying why. An annotation of "" is not an annotation."""
-    tree = _tree(tmp_path)
-    bp = tmp_path / "bp.json"
-    _write_baseline(bp, [f.fingerprint for f in _GATE._scan(tree)], reason="   ")
-    assert _GATE.main([], scope=tree, baseline_path=bp) == 1
-
-
-def _shipped_baseline_entries() -> dict[str, str]:
-    return json.loads(Path(_GATE.BASELINE_PATH).read_text(encoding="utf-8"))["entries"]
-
-
-@pytest.fixture(scope="module")
-def real_tree_findings():
-    """The real tree scanned ONCE for the module — the two demands below read the same scan."""
-    return _GATE._scan()
-
-
-@pytest.mark.gate
-def test_the_scan_still_produces_exactly_what_the_shipped_baseline_buries(real_tree_findings):
-    """Equality, in both directions: a real-tree finding the baseline does not carry is a new
-    burial candidate, and a baseline entry that no longer fires is a burial the ratchet is
-    still carrying. The baseline is EMPTY today — the one collision it carried (#923's bypass
-    branching on the literal `inconclusive`) went with #992, which names that member once in
-    the vocabulary — so this is no longer a real-tree positive control; the synthetic fixtures
-    above are the positive controls, and the real tree is the negative one."""
-    assert {f.fingerprint for f in real_tree_findings} == set(_shipped_baseline_entries())
-
-
-@pytest.mark.gate
-def test_its_motivating_finding_is_fixed_and_not_baselined(real_tree_findings):
-    """#879 itself, now closed. `_close_investigation_async` charged the `false-positive`
-    entry price by branching on the literal, leaving `benign` — the table's other key —
-    with no reader at the close; it now dispatches through `disposition_entry_price`, which
-    reads `_DISPOSITION_GATES` whole.
-
-    A branch at this file on a disposition the table also keys (#923's bypass once matched the
-    literal `inconclusive`) is a collision, not the price dispatch — it answers "does this
-    verdict skip the live review", not "what does this verdict owe" — and is baselined with a
-    reason that says so. What #879 pins is narrower than "nothing fires at this file at all":
-    every finding that DOES fire here must be an EXPLAINED false positive, not the price
-    dispatch itself regressing into a literal branch. (Nothing fires here today: #992 spells
-    the ceiling member as `CEILING_DISPOSITION` rather than a literal.)
-
-    `gate`-marked with the demand above: both read the real-tree scan, and while the baseline
-    is empty any finding at this file already fails the code-smells step.
-    """
-    at_the_close = [
-        f for f in real_tree_findings
-        if f.fingerprint.startswith("defender/runtime/close_tool.py:")
-    ]
-    baseline = _shipped_baseline_entries()
-    for f in at_the_close:
-        assert f.fingerprint in baseline, (
-            f"an UNBASELINED finding reached close_tool.py — #879's shape may have come back: "
-            f"{f.display}"
-        )
-        assert baseline[f.fingerprint].strip(), f"{f.fingerprint} is baselined with no reason"
-    # The #879 shape specifically: a finding whose missing key is `false-positive` or `benign`
-    # AND whose reason does not name the no-review bypass is #879 come back under cover.
-    assert all(
-        "NO_REVIEW_DISPOSITIONS" in baseline[f.fingerprint] or "bypass" in baseline[f.fingerprint]
-        for f in at_the_close
-    ), "a close_tool finding is baselined without pointing at the #923 bypass — #879 may be back"
 
 

@@ -1,29 +1,4 @@
-"""#1234 slice `frames_and_cap`: the payload cap (A9, M08(a)) and the untrusted frames (A10,
-M16(a)) of the judge's world and family prompts.
-
-Every scenario drives the real entry point (`grade_episode`, through `S.grade`) over a
-hand-built archived family (`S.family`) and reads what the model seam was handed
-(`RoutedJudge.prompt_for`): the prompt is the captured inbound payload, never the fake's reply.
-The fake answers `QUIET` unless a scenario scripts otherwise; it classifies nothing.
-
-WORLD LABELS. These scenarios label the runs `ctl` (the control), `wbee` (the judged world) and
-`wcee` (its planted sibling), plus `wdee`... where a family needs more, never `a`/`b`/`c`. "The
-block labelled with that world" is observed as the run label the HOST text names last before a
-frame (`_owner`), and a one-letter label is an English word in host prose.
-
-FRAMES are read off the text (`_frames`): an open tag `<run-<salt>-untrusted>` and the first
-close with the SAME salt after it, sequentially. A planted opener or closer inside a body carries
-another salt (`message_salt` keeps the real one out of every body), so it never starts or ends a
-frame here. Host text is everything outside those frames (`_host`).
-
-HOSTILE TEXT (`_hostile`) is real input written into the archive: a marker, a closer under a
-salt minted from that marker, a forged `## ` title, a forged instruction, an after-marker and a
-re-opener. A closer that ended its frame would leave the after-marker in host text.
-
-CAP SIZES are fixed inputs with wide margins, never measured off the target: reference text in
-the hundreds of KB, everything A9 never trims in the tens, so each cap sits plainly between what
-A9 charges and what it must trim.
-"""
+"""#1234 judge contrast: untrusted-text frames and the judge payload cap."""
 from __future__ import annotations
 
 import functools

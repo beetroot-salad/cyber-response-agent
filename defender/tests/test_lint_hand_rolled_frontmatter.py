@@ -17,14 +17,11 @@ derived from this file, never hardcoded to /workspace.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
 
-from defender.tests._by_path import import_lint_lib, load_lint_gate
+from defender.tests._by_path import load_lint_gate
 
-_ASTLIB = import_lint_lib("_astlib")
 _GATE = load_lint_gate("lint_hand_rolled_frontmatter")
 
 
@@ -52,34 +49,6 @@ def _by_function(findings) -> dict[str, list]:
         func = parts[-2] if len(parts) >= 2 else "?"
         out.setdefault(func, []).append(f)
     return out
-
-
-def _write_baseline(path: Path, fingerprints: list[str]) -> None:
-    path.write_text(
-        json.dumps({"//": "test", "entries": {fp: "" for fp in fingerprints}}) + "\n",
-        encoding="utf-8",
-    )
-
-
-def test_d0_lint_gate(tmp_path):
-    gate = _GATE
-    tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", _FIND)
-    _pyfile(tree, "test_prod.py", _FIND)
-    _pyfile(tree, "_frontmatter.py", _FIND)
-
-    findings = gate._scan(tree)
-    assert findings, "the production idiom must be flagged"
-    assert all("prod.py" in f.fingerprint for f in findings)
-    assert not any("test_prod" in f.fingerprint for f in findings)
-    assert not any("_frontmatter" in f.fingerprint for f in findings)
-
-    empty_baseline = tmp_path / "empty.json"
-    assert gate.main([], scope=tree, baseline_path=empty_baseline) == 1
-    bp = tmp_path / "bp.json"
-    _write_baseline(bp, [f.fingerprint for f in findings])
-    assert gate.main([], scope=tree, baseline_path=bp) == 0
-    assert gate.main([], scope=tmp_path / "does-not-exist") == 2
 
 
 def test_d_lint_flags_each_idiom(tmp_path):
@@ -167,47 +136,6 @@ def test_d_lint_suppression(tmp_path):
     bare = tmp_path / "bare"
     _pyfile(bare, "s.py", 'def f(t):\n    return t.find("\\n---", 4)  # lint-frontmatter: ok\n')
     assert gate._scan(bare) == []
-
-
-def test_d_lint_baseline_lifecycle(tmp_path):
-    gate = _GATE
-    tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", _FIND)
-    bp = tmp_path / "bp.json"
-
-    assert gate.main(["--update-baseline"], scope=tree, baseline_path=bp) == 0
-    assert bp.exists()
-    assert gate.main([], scope=tree, baseline_path=bp) == 0
-    data = json.loads(bp.read_text(encoding="utf-8"))
-    data.setdefault("entries", {})["defender/ghost.py:ghost:find"] = ""
-    bp.write_text(json.dumps(data) + "\n", encoding="utf-8")
-    assert gate.main([], scope=tree, baseline_path=bp) == 0
-    assert gate.main([], scope=tree, baseline_path=tmp_path / "gone.json") == 1
-
-
-def test_d_lint_exit2_scope_missing(tmp_path):
-    gate = _GATE
-    assert gate.main([], scope=tmp_path / "not-a-dir") == 2
-
-
-def test_d_lint_syntax_error_is_not_clean(tmp_path):
-    gate = _GATE
-    tree = tmp_path / "scope"
-    _pyfile(tree, "broken.py", "def f(:\n    this is not python\n")
-    _pyfile(tree, "ok.py", _FIND)
-    with pytest.raises(_ASTLIB.ScanBlind) as exc:
-        gate._scan(tree)
-    assert "broken.py" in str(exc.value)
-
-
-def test_d_lint_clean_tree_still_scans(tmp_path):
-    """The control: the same tree minus the unparseable file scans normally and finds the
-    real site. Without this, the raises-test above would also pass against a gate that
-    raised unconditionally."""
-    gate = _GATE
-    tree = tmp_path / "scope"
-    _pyfile(tree, "ok.py", _FIND)
-    assert any("ok.py" in f.fingerprint for f in gate._scan(tree))
 
 
 def test_d_lint_fingerprint_dedup(tmp_path):

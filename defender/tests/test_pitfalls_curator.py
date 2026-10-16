@@ -107,16 +107,7 @@ def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path)
 
 
 def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
-    """Two execution.md edits that interleave across git's status-class boundary → the
-    returned list is sorted, discriminating `return sorted(changed)`: a tracked-modified
-    `elastic/execution.md` (changed class, sorts LATE) is listed by git BEFORE an
-    untracked `cmdb/execution.md` (untracked class, sorts EARLY), so only `sorted()`
-    yields [cmdb, elastic]. A regression to `return changed` returns [elastic, cmdb].
-
-    `cmdb` is seeded as a REAL system dir (its `SKILL.md` is committed here, as the fixture
-    commits elastic's) because an `execution.md` under a directory holding no `SKILL.md` is
-    refused outright now — #855 F-06's minting gate. The untracked-`execution.md` half of the
-    interleaving, which is what this test needs, is untouched by that."""
+    """Two execution.md edits that interleave across git's status-class boundary → the"""
     cmdb = tmp_git_repo / "defender" / "skills" / "cmdb"
     cmdb.mkdir(parents=True)
     (cmdb / "SKILL.md").write_text("---\nname: defender-cmdb\n---\n# cmdb\n")
@@ -212,15 +203,7 @@ def test_run_pitfalls_no_edit_tick_still_rotates(tmp_git_repo: Path, tmp_path: P
 
 
 def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git_repo: Path):
-    """#855 F-06, the offline half. The handoff's `path` is a PATH BUILT FROM A QUEUE FIELD and
-    the curator is told to read and write it, so a `system` that reached the queue from
-    anywhere unvetted mints a brand-new single-segment directory under `defender/skills/` — the
-    phantom-system class #821/#828 closed for `h-*` and `system_for_payload_operands` closed
-    for the reducer names. The writer is where this is really fixed (`query_tool.
-    _system_of_record`); this is the boundary that would have contained it anyway.
-
-    The positive control is in the same call: `elastic`, a system whose directory the fixture
-    committed, keeps its handoff — a filter that dropped everything would pass the negative."""
+    """#855 F-06, the offline half."""
     rows = [
         {"system": s, "query_id": f"{s}.esql", "goal": "g", "executed_query": "x",
          "stderr_digest": f"exit=64; boom {s}"}
@@ -232,10 +215,7 @@ def test_a_queued_system_with_no_skills_dir_never_becomes_a_handoff_path(tmp_git
 
 
 def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(tmp_git_repo: Path):
-    """The last gate on the same class (#855 F-06), and it asks about the DIRECTORY's
-    MEMBERSHIP, not the file: a declared system with no `execution.md` yet may still take a
-    first one, so creating the file in a declared system's dir stays legal while creating an
-    undeclared directory around it does not."""
+    """The last gate on the same class (#855 F-06), and it asks about the DIRECTORY's"""
     ghost = tmp_git_repo / "defender" / "skills" / "ghost"
     ghost.mkdir(parents=True)
     (ghost / "execution.md").write_text("# ghost\n## Common pitfalls\n- invented\n")

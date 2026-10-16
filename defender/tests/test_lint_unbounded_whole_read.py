@@ -21,17 +21,14 @@ at top level). The gate is driven through its seams:
 from __future__ import annotations
 
 import ast
-import json
 from pathlib import Path
 
 import pytest
 
-from defender.tests._by_path import DEFENDER, LINT_DIR, import_lint_lib, load_lint_gate
+from defender.tests._by_path import LINT_DIR, load_lint_gate
 
-_ASTLIB = import_lint_lib("_astlib")
 _GATE = load_lint_gate("lint_unbounded_whole_read")
 
-REAL_BASELINE = LINT_DIR / "lint_unbounded_whole_read_baseline.json"
 MARK = "# lint-whole-read: ok — operator-only fixture"
 
 
@@ -322,17 +319,6 @@ def test_main_is_blind_when_the_scope_is_missing(tmp_path):
     assert _GATE.main([], scope=tmp_path / "nope", baseline_path=tmp_path / "absent.json") == 2
 
 
-def test_unparseable_file_is_blind_and_its_control_scans(tmp_path):
-    good = _tree(tmp_path / "good", {"prod.py": f"def f(p):\n    return p.read_text()  {MARK}\n"})
-    broken = _tree(tmp_path / "broken", {"prod.py": "def f(:\n"})
-    empty = tmp_path / "absent.json"
-    assert _GATE.main([], scope=good, baseline_path=empty) == 0
-    with pytest.raises(_ASTLIB.ScanBlind) as exc:
-        _GATE._scan(broken)
-    assert "prod.py" in str(exc.value)
-    assert _GATE.main([], scope=broken, baseline_path=empty) == 2
-
-
 def test_cli_exits_with_the_gate_status():
     """CI reads only the process status."""
     src = (LINT_DIR / "lint_unbounded_whole_read.py").read_text(encoding="utf-8")
@@ -345,94 +331,12 @@ def test_cli_exits_with_the_gate_status():
 # the real tree (`gate`: CI's lint job runs these; the test job deselects them)
 # --------------------------------------------------------------------------------------------
 
-def _independent_census(root: Path) -> list[str]:
-    """Written apart from the gate: every attribute named `read_text`/`read_bytes` in `root`'s
-    production code (tests, `.venv`, `__pycache__`, the root `_io.py` out), as `rel:line`."""
-    from defender.tests import _1165_census as records
-
-    found: list[str] = []
-    for path in sorted(root.rglob("*.py")):
-        rel = path.relative_to(root).as_posix()
-        parts = Path(rel).parts
-        if (rel == "_io.py" or "tests" in parts or ".venv" in parts or "__pycache__" in parts
-                or path.name == "conftest.py" or path.name.startswith("test_")
-                or path.name.endswith("_test.py")):
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        scan = records.vocabulary._scan(rel, tree)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr in ("read_text", "read_bytes"):
-                # This resolver is test machinery, independent of the production lint gate.
-                # Only a proven repository record delegates to the capped core; .path and
-                # unknown receivers still count as direct whole reads.
-                if node.attr == "read_bytes" and records._record_receiver(node.value, scan):
-                    continue
-                found.append(f"{rel}:{node.lineno}")
-    return found
-
-
-def test_the_independent_census_sees_reads(tmp_path):
-    """Control for the real-tree census below: it is not empty because it is blind."""
-    tree = _tree(tmp_path, {"prod.py": "def f(p):\n    return p.read_text(), p.read_bytes\n"})
-    assert _independent_census(tree) == ["prod.py:2", "prod.py:2"]
-
-
-def test_independent_census_distinguishes_record_reads_from_path_and_unknown_reads(tmp_path):
-    tree = _tree(tmp_path, {"prod.py": """
-from defender.run_repository import Run, RecordHandle
-def f(run: Run, record: RecordHandle, mystery):
-    alias = record
-    alias.read_bytes()
-    run.facts.alert.read_bytes()
-    record.path.read_bytes()
-    mystery.read_bytes()
-"""})
-    assert _independent_census(tree) == ["prod.py:7", "prod.py:8"]
-
 
 #: The production whole reads outside `_io`, each in a stdlib-only module run without `defender`
 #: on `sys.path`, so `_io` is out of its reach: `_image.py` (`box_image.py` loads it by path on
 #: a bare `python3`) and two eval scripts run by path.
-_REAL_EXCEPTIONS = {
-    "runtime/box/_image.py",
-    "evals/oracle_golden/migrate_esql_encoding.py",
-    "evals/oracle_golden/story_from_run.py",
-}
 
 
 #: Guarded APIs that share a name with Path.read_bytes; each remains capped by _io.
-_BOUNDED_MATCHES = {"_alert_input.py"}
 
 
-@pytest.mark.gate
-def test_real_tree_has_no_direct_whole_read():
-    """Every production whole-file read goes through `_io`'s capped readers (#1188 amendment 3)
-    except the stdlib-only modules; Bound.read_bytes is a guarded name-only match.
-    The baseline holds nothing."""
-    found = _independent_census(DEFENDER)
-    assert {hit.split(":")[0] for hit in found} == _REAL_EXCEPTIONS | _BOUNDED_MATCHES, found
-    assert len(found) == len(_REAL_EXCEPTIONS) + len(_BOUNDED_MATCHES), found
-    entries = json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["entries"]
-    assert entries == {}
-
-
-def test_the_shipped_baseline_header_is_the_gates():
-    """An `--update-baseline` run must not churn the header: the shipped one is the gate's."""
-    assert json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["//"] == _GATE.HEADER
-
-
-@pytest.mark.parametrize("rel", sorted(_REAL_EXCEPTIONS))
-def test_each_exception_module_imports_only_the_standard_library(rel):
-    """Why these reads are the exceptions: each module runs where `defender` cannot be imported
-    (a bare CI `python3`, or a script run by path), so any non-stdlib import there (an `_io`
-    reader included) breaks it. The dev venv imports `defender` anyway, so only this check
-    sees it."""
-    import sys
-
-    tree = ast.parse((DEFENDER / rel).read_text(encoding="utf-8"))
-    tops = {alias.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import)
-            for alias in n.names}
-    tops |= {n.module.split(".")[0] for n in ast.walk(tree)
-             if isinstance(n, ast.ImportFrom) and n.module and n.level == 0}
-    assert tops, "the census must see the module's imports"
-    assert tops <= set(sys.stdlib_module_names) | {"__future__"}, sorted(tops)

@@ -13,10 +13,7 @@ from defender import _io  # type: ignore[import-not-found]
 
 @contextlib.contextmanager
 def _deadline(seconds: int):
-    """Turn "this call never returns" into an ordinary test failure.
-
-    `SIGALRM` rather than a thread or a subprocess: the read under test is a blocking syscall,
-    so only a signal can interrupt it in-process, and pytest has no timeout plugin here."""
+    """Turn "this call never returns" into an ordinary test failure."""
 
     def _fire(_signum, _frame):
         raise AssertionError(f"read_guarded did not return within {seconds}s — it blocked")
@@ -57,11 +54,7 @@ def test_a_symlink_is_refused_not_followed(tmp_path):
 
 
 def test_a_looped_parent_keeps_the_os_own_words_and_blames_no_leaf(tmp_path):
-    """`ELOOP` is relabelled "aliased entry" only when the entry AT the name is the link. A
-    loop in a PARENT component (`worlds/b -> worlds/b`) is the OS's own finding about that
-    directory: the reason keeps "symbolic links" and does not call `report.md` an alias it is
-    not (review of PR #1042). Positive control beside it: a link at the leaf still reads as
-    the alias refusal."""
+    """`ELOOP` is relabelled "aliased entry" only when the entry AT the name is the link."""
     looped = tmp_path / "b"
     looped.symlink_to("b")
     text, err = _io.read_guarded(looped / "report.md")

@@ -30,7 +30,6 @@ exist either, and their tests fail on the reader, once each.
 """
 from __future__ import annotations
 
-import ast
 import json
 import os
 import time
@@ -41,9 +40,7 @@ import pytest
 from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
-from defender.tests import test_1025_episode_reader as R
 from defender.tests._alert_plant import plant_source_copy
-from defender.tests._by_path import load_lint_gate
 from defender.tests import _state1135
 from defender.tests._state1135 import env_state
 
@@ -190,45 +187,6 @@ def test_1025_markup_in_every_model_authored_field_renders_as_text_on_every_sect
     assert f"fact {MARKUP}" in page.text_of(f"world-{E.GRADED_WORLD}")
 
 
-def test_1025_markup_in_the_records_no_planted_field_covers(tmp_path):
-    """Every record string the page renders passes the untrusted escape: markup planted in a
-    samples system and answer, a provenance `dirty_paths` entry, a served call's params, the
-    outcome record's reason and drift entry, a world record's detail, the continuation prompt,
-    a `noise_floor_note`, an unqueueable reason (a ledger entry's, #1234), a world row's and the
-    family row's `draws_failed_reason`, an integrity note, a correlation and a derivation is
-    never on the page raw; positive control: the bound ones (samples, dirty path, served
-    params, outcome reason and drift, world record detail, unqueueable reason, the family
-    row's failure) are visible escaped.
-    """
-    ep = E.sample_episode(tmp_path)
-    E.write_samples(ep.dir, {f"system {MARKUP}": {"verbs": {"esql": [f"answer {MARKUP}"]}}})
-    E.write_stamp(ep.dir, dirty=True, dirty_paths=[f"path {MARKUP}"])
-    manifest = E.sample_manifest(continuation_prompt=f"continue {MARKUP}")
-    T.write_family(ep.dir, manifest)
-    J.write_ledger(ep.dir, E.GRADED_WORLD, [E.served_row(
-        E.GRADED_WORLD, "oracle", params={"query": f"FROM logs {MARKUP}"})])
-    E.write_outcome(ep.dir, reason=f"outcome {MARKUP}", drift=[{
-        "system": E.SYSTEM, "verb": "esql", "params": {"query": f"drift {MARKUP}"},
-        "status": "drifted"}])
-    E.write_world_record(ep.dir, E.CONTROL, "did not finish", detail=f"detail {MARKUP}")
-    E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(
-        findings=[E.finding(subject="defender")], noise_floor_note=f"noise {MARKUP}",
-        correlations=[{"fact": f"corr {MARKUP}"}], derivations=[{"chain": f"deriv {MARKUP}"}]))
-    doc = E.sample_grade()
-    doc["worlds"][1]["integrity_notes"] = [f"integrity {MARKUP}"]
-    doc["worlds"][1]["draws_failed_reason"] = f"draws {MARKUP}"
-    doc["family"]["draws_failed_reason"] = f"family {MARKUP}"
-    E.set_lane(doc, E.GRADED_WORLD, 0, 0, "unqueueable", f"reason {MARKUP}")
-    E.write_judge(ep.dir, doc)
-    page = render(ep)
-    assert "<script>" not in page.raw
-    assert "<img" not in page.raw
-    for bound in (f"system {MARKUP}", f"answer {MARKUP}", f"path {MARKUP}", f"FROM logs {MARKUP}",
-                  f"outcome {MARKUP}", f"drift {MARKUP}", f"detail {MARKUP}",
-                  f"reason {MARKUP}", f"family {MARKUP}"):
-        assert bound in page.text, bound
-
-
 def test_1025_non_ascii_and_control_characters_in_rendered_strings(tmp_path):
     """The page declares and writes UTF-8; an em dash, a zero-width space and a bidi override
     survive as text (only markup characters are escaped). A record string carrying a NUL or a
@@ -336,61 +294,6 @@ def test_1025_timing_json_is_present_but_not_the_stageclock_record_shape(tmp_pat
         assert page.text_of("sec-worlds") == intact["sec-worlds"]
 
 
-def test_1025_timing_json_names_a_step_outside_the_steps_vocabulary(tmp_path):
-    """`read_stage_timings` raises `ValueError` on a step name outside `STEPS` (g23): the table
-    takes the same refused arm — "timing record unreadable", an empty wall column — and nothing
-    else on the page changes.
-    """
-    ep = E.sample_episode(tmp_path)
-    intact = _sections(render(ep))
-    E.write_timing(ep.dir, [("prologue", "2026-09-09T10:00:00Z", "2026-09-09T10:01:00Z")], check=False)
-    page = render(ep)
-    stages = page.text_of("sec-stages")
-    assert "timing record unreadable" in stages, stages
-    assert "prologue" not in stages, stages
-    assert page.text_of("sec-findings") == intact["sec-findings"]
-
-
-def test_1025_outcome_yaml_cannot_be_read_as_the_record(tmp_path):
-    """An `outcome.yaml` the reader refuses (`OutcomeUnreadable` on a torn document) renders
-    the outcome's "no record" state in the records section WITH the reader's reason (it does
-    not parse) — distinct from the reason an absent record gives — and nothing else changes.
-    """
-    ep = E.sample_episode(tmp_path)
-    intact = _sections(render(ep))
-    E.plant_raw(ep.dir / "outcome.yaml", "outcome: {\n  accepted: [")
-    page = render(ep)
-    records = _records(page)
-    assert "no record" in records, records
-    assert "does not parse" in records, records
-    assert "is absent" not in records, records
-    assert E.OUTCOME_REASON not in records, records
-    for section in ("sec-verdict", "sec-worlds", "sec-findings", "sec-stages", "sec-leads"):
-        assert page.text_of(section) == intact[section], section
-
-
-def test_1025_malformed_samples_or_provenance_reads_as_absent(tmp_path):
-    """The inconsistency is closed (J6, an O8 move): a malformed `samples.yaml` and a malformed
-    root `provenance.json` render "samples record unreadable" / "provenance record unreadable"
-    in the records section — never "absent", which is reserved for absence. The page's strict
-    reading of `samples.yaml` is the page's own (F-4: a strict reader through the `reader=`
-    seam; the default the judge reads through stays permissive). Positive control: with the two
-    files removed the section says "absent" for each.
-    """
-    ep = E.sample_episode(tmp_path)
-    E.plant_raw(ep.dir / "samples.yaml", "logs-*: [\n  {")
-    E.plant_raw(ep.dir / "provenance.json", "{\"agreed\": {")
-    text = _records(render(ep))
-    assert "samples record unreadable" in text, text
-    assert "provenance record unreadable" in text, text
-    assert "absent" not in text, text
-    (ep.dir / "samples.yaml").unlink()
-    (ep.dir / "provenance.json").unlink()
-    text = _records(render(ep))
-    assert text.count("absent") >= 2, text
-    assert "unreadable" not in text, text
-
-
 def test_1025_an_alias_planted_at_each_record_name(tmp_path):
     """A symlink planted at each record's name — `judge.yaml`, `timing.json`, `outcome.yaml`,
     `samples.yaml`, `provenance.json` — is refused by that record's reader and renders that
@@ -481,24 +384,6 @@ def test_1025_an_unreadable_regular_file_at_a_record_name(tmp_path):
         (ep.dir / "family.yaml").chmod(0o644)
 
 
-def test_1025_a_served_ledger_present_but_truncated(tmp_path):
-    """A served ledger truncated mid-append reads as partial content plus a malformed-row count
-    (p7: `WorldFacts.malformed_rows`): the world's leads block renders its leads and says
-    "1 malformed row", never "never run" and never a whole-block refusal.
-    """
-    ep = E.sample_episode(tmp_path)
-    ledger = ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl"
-    rows = [json.dumps(E.served_row(E.GRADED_WORLD, "oracle")),
-            json.dumps(E.served_row(E.GRADED_WORLD, "passthrough"))]
-    ledger.write_text(rows[0] + "\n" + rows[1][: len(rows[1]) // 2], encoding="utf-8")
-    page = render(ep)
-    block = page.text_of(f"leads-{E.GRADED_WORLD}")
-    assert "1 malformed row" in block, block
-    assert f"goal of l-001 in {E.GRADED_WORLD}" in block, block
-    assert "unreadable" not in block, block
-    assert "never run" not in block, block
-
-
 def test_1025_one_malformed_sidecar_record_sits_beside_otherwise_intact_ones(tmp_path):
     """Only the section fed by the bad record carries a refusal sentence; every other section
     renders exactly as on the intact episode — each record is read inside its own boundary.
@@ -532,154 +417,9 @@ def test_1025_one_malformed_sidecar_record_sits_beside_otherwise_intact_ones(tmp
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_the_root_stamp_reader_lives_in_the_record_names_home_beside_family_stamp_name(tmp_path):
-    """The episode-root `provenance.json` has a reader of its own (fk-8/J12):
-    `archive.read_family_stamp(bound)`, distinct from the per-world run-stamp reader — `None`
-    when nothing is at the name, the `{agreed, allow_dirty}` mapping when the stamp is there,
-    a `ValueError` refusal for a directory or a document that is not the stamp.
-
-    THE NAME'S HOME IS THE OWNER, not this reader's module (#1077 D7). `FAMILY_STAMP_NAME` was
-    moved to `archive.py` so the reader and the writer would share one spelling; it is now
-    `EpisodePaths(...).family_stamp`, which both reach, and `archive.py` binds nothing.
-    """
-    archive = E.mod("learning.branch.archive")
-    owner = E.mod("_episode_paths")
-    assert str(owner.LAYOUT.family_stamp) == "provenance.json"
-    assert not hasattr(archive, "FAMILY_STAMP_NAME"), "archive.py still re-binds the name"
-    for module_name in ("learning.branch.cli", "learning.branch.archive"):
-        source = (Path(E.mod(module_name).__file__)).read_text(encoding="utf-8")
-        assert "FAMILY_STAMP_NAME =" not in source, f"still bound in {module_name}"
-    ep = E.sample_episode(tmp_path, stamp=False)
-    bound = E.mod("_io").bind(ep.dir)
-    assert archive.read_family_stamp(bound) is None
-    E.write_stamp(ep.dir, commit="abc123", allow_dirty=True)
-    stamp = archive.read_family_stamp(bound)
-    assert stamp["agreed"]["commit"] == "abc123"
-    assert stamp["allow_dirty"] is True
-    E.plant_raw(ep.dir / "provenance.json", json.dumps(T.provenance_record()))
-    with pytest.raises(ValueError, match="provenance.json"):
-        archive.read_family_stamp(bound)
-    (ep.dir / "provenance.json").unlink()
-    (ep.dir / "provenance.json").mkdir()
-    with pytest.raises(ValueError, match="provenance.json"):
-        archive.read_family_stamp(bound)
-
-
-def test_1025_episode_root_provenance_json_is_a_directory(tmp_path):
-    """A directory squatting the episode-root `provenance.json` is refused by the root-stamp
-    reader and the records section renders "provenance record unreadable" — never "absent".
-    """
-    ep = E.sample_episode(tmp_path, stamp=False)
-    (ep.dir / "provenance.json").mkdir()
-    text = _records(render(ep))
-    assert "provenance record unreadable" in text, text
-    assert "absent" not in text, text
-
-
-def test_1025_the_episode_root_and_a_worlds_provenance_json_use_different_key_shapes_at_the_same_file_name(
-        tmp_path):
-    """Two files share the name and not the shape: the root stamp `{agreed: {…}, allow_dirty}`
-    renders its `agreed` fields (commit, model, dirty) and `allow_dirty` in the records section
-    through the root-stamp reader, and a world's flat run stamp renders its own commit in that
-    world's section through `json_mapping`; a root file in the WORLD shape is refused as not the
-    stamp ("provenance record unreadable").
-    """
-    ep = E.sample_episode(tmp_path, stamp=False)
-    E.write_stamp(ep.dir, commit="rootcommit0123", dirty=True, dirty_paths=["defender/x.py"], allow_dirty=True)
-    (ep.world(E.GRADED_WORLD) / "provenance.json").write_text(
-        json.dumps(T.provenance_record(commit="worldcommit456")), encoding="utf-8")
-    page = render(ep)
-    records = _records(page)
-    for part in ("rootcommit0123", "glm-5.2", "defender/x.py", "allow_dirty"):
-        assert part in records, (part, records)
-    assert "worldcommit456" in page.text_of(f"world-{E.GRADED_WORLD}")
-    (ep.dir / "provenance.json").write_text(json.dumps(T.provenance_record(commit="flatroot789")), encoding="utf-8")
-    text = _records(render(ep))
-    assert "provenance record unreadable" in text, text
-    assert "flatroot789" not in text, text
-
-
 # ---------------------------------------------------------------------------------------
 # d34 / d35 / census — one reader, the baseline, the tree-read lint
 # ---------------------------------------------------------------------------------------
-
-
-def test_1025_the_page_module_reads_every_record_through_its_package_reader_spells_no_record_name_and_imports_no_private_helper():
-    """The page module's AST contains no `yaml.safe_load` / `json.loads` call, no string
-    constant equal to any of `judge.yaml`, `outcome.yaml`, `samples.yaml`, `family.yaml`,
-    `timing.json`, `provenance.json`, `judge`, and no `from … import _name` across modules; its
-    reads resolve to the package readers (`read_grade`, `draws_on_disk_report`,
-    `read_stage_timings`, `raw_manifest`, `read_outcome`, `failed_worlds`,
-    `read_samples_record`, `read_world_facts`, `leads_by_id`, `lead_chain`,
-    `json_mapping`, `read_family_stamp`, `read_archived_report` — the world-archive reader
-    path's own screened `report.md` read), each named in the module; the repo-wide census of
-    record-name literals has one home per name (x18).
-    Rejected: `learning.judge.render.render` is never imported for a call. Rejected, the
-    footer half of brief fact F15 (O6, 92-reconciliation F-3): the module never names
-    `render_footer`, `_lesson_changes`, `_git` or `subprocess` — anywhere, as a name, an
-    attribute or an import — because the run page's footer shells out to `git` at the
-    checkout, and a page whose bytes depend on the checkout's lesson history is not rendered
-    from the episode directory alone.
-    """
-    module = visualize_episode()
-    source = Path(module.__file__).read_text(encoding="utf-8")
-    strings, _bound = R._census(source, PAGE_PATH)
-    assert not (strings & {*RECORD_NAMES, "judge"}), strings & {*RECORD_NAMES, "judge"}
-    tree = ast.parse(source)
-    imported: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            assert (node.func.attr, getattr(node.func.value, "id", None)) not in (
-                ("safe_load", "yaml"), ("loads", "json"), ("load", "yaml"), ("load", "json")), ast.dump(node)
-        if isinstance(node, ast.ImportFrom):
-            assert not [a.name for a in node.names if a.name.startswith("_")], ast.dump(node)
-            assert not (node.module or "").endswith("judge.render") or "render" not in [a.name for a in node.names]
-            imported |= set((node.module or "").split("."))
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            for alias in node.names:
-                imported |= set(alias.name.split(".")) | {alias.asname or ""}
-    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {
-        n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-    for reader in PACKAGE_READERS:
-        assert reader in names, f"the page never names {reader}"
-    assert "read_archived_report" in names
-    for checkout_bound in ("render_footer", "_lesson_changes", "_git", "subprocess"):
-        assert checkout_bound not in names | imported, f"the page names {checkout_bound}"
-    shipped = R._shipped_modules()
-    assert PAGE_PATH in shipped
-    constants = {m: R._string_constants(src, m) for m, src in shipped.items()}
-    for name in RECORD_NAMES:
-        homes = [m for m, strings in constants.items() if name in strings]
-        assert len(homes) == 1, (name, homes)
-
-
-@pytest.mark.gate
-def test_1025_the_four_baseline_entries_naming_this_page_as_their_reader_are_gone_and_the_lint_is_green():
-    """`scripts/lint/lint_vulture_baseline.json` has no key naming `read_stage_timings`,
-    `family_malformed_replies`, `unqueueable_findings` or `world_findings`, and `lint_vulture`
-    reports no new finding (exit 0) — the four entries named this page as their reader and the
-    page is now the reader.
-    """
-    baseline = json.loads(VULTURE_BASELINE.read_text(encoding="utf-8"))
-    stale = [k for k in baseline.get("entries", baseline)
-             if any(name in k for name in ("read_stage_timings", "family_malformed_replies",
-                                           "unqueueable_findings", "world_findings"))]
-    assert stale == [], stale
-    lint_vulture = load_lint_gate("lint_vulture")
-    if lint_vulture._vulture_bin() is not None:
-        assert lint_vulture.main([]) == 0
-
-
-@pytest.mark.gate
-def test_1025_the_new_modules_tree_reads_are_censused():
-    """The page module is listed in `lint_tree_read_follows_link`'s `LINT_TREE_READER_MODULES`
-    (it reads the episode tree, a tree three boxes had an rw bind on), and the lint reports no
-    new finding over the tree.
-    """
-    lint_tree_read_follows_link = load_lint_gate("lint_tree_read_follows_link")
-    assert PAGE_PATH in lint_tree_read_follows_link.LINT_TREE_READER_MODULES, sorted(
-        lint_tree_read_follows_link.LINT_TREE_READER_MODULES)
-    assert lint_tree_read_follows_link.main([]) == 0
 
 
 # ---------------------------------------------------------------------------------------

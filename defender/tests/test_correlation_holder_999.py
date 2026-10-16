@@ -8,11 +8,9 @@ from pathlib import Path
 import pytest
 
 from defender._paths import PATHS, adapters_under
-from defender.runtime.agent_role import AgentRole
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry
 from defender.tests._dispositions995 import (
-    CORRELATION_CENSUS,
     DispositionError,
     dispositions_path,
     grant_for,

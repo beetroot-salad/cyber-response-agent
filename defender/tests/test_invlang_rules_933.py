@@ -533,7 +533,7 @@ def _moved(after: str) -> str:
 
 @pytest.mark.parametrize("after", ["confirmed", "x", "+++", "CONFIRMED"])
 def test_an_off_vocabulary_after_token_settles_no_prediction(after: str) -> None:
-    """The `after` cell is an unvalidated `\S+` and nothing checks it against `WEIGHT_BUCKETS`, so a "moved unless null" test made a misspelling the CHEAPEST row in the language:"""
+    """The `after` cell is an unvalidated a non-whitespace run and nothing checks it against `WEIGHT_BUCKETS`, so a "moved unless null" test made a misspelling the CHEAPEST row in the language:"""
     errors = _errors(_PROLOGUE + _ONE_PRED + _LEAD + _moved(after) + _CLOSE_UNPRICED)
     assert any("h-001.p1" in e and "declared and then abandoned" in e for e in errors), errors
 
@@ -736,7 +736,7 @@ p1|proposed_edge|"{second}"
 
 
 def test_an_off_vocabulary_grade_is_refused_rather_than_ignored() -> None:
-    """The `after` cell was an unvalidated `\S+`, and every weight-keyed gate is a membership test — so a misspelled grade skipped the strong-move provenance gate and the `++` coverage gate at once, where the honest `++` is refused for what it leaves open."""
+    """The `after` cell was an unvalidated a non-whitespace run, and every weight-keyed gate is a membership test — so a misspelled grade skipped the strong-move provenance gate and the `++` coverage gate at once, where the honest `++` is refused for what it leaves open."""
     for token in ("confirmed", "+++"):
         errors = _errors(_SIX_PARTIAL.replace("null → ++", f"null → {token}"))
         assert len(errors) == 1, token

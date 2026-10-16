@@ -1,15 +1,4 @@
-"""Issue #719, review hardening — four ways the drain charged a batch for something that
-was not the batch's fault, or cleaned up too much, or waited forever.
-
-Written AFTER the implementation, unlike the five spec modules beside this one, and kept
-separate from them so the spec graph's demand-to-test accounting stays exact. Each test
-below is a regression an `xhigh` review found in the shipped fold and the human ratified;
-each drives the real primitive rather than a stand-in, and each is written so it FAILS on
-the pre-fix behaviour rather than merely passing on the new one.
-
-The project idiom holds here too: faults enter through `dataclasses.replace` seams and
-through genuinely broken git state, never through `monkeypatch.setattr`.
-"""
+"""Drain hardening: read-only git probe failures, bounded append-lock wait at retire, and strays that must not whitelist themselves."""
 from __future__ import annotations
 
 import subprocess

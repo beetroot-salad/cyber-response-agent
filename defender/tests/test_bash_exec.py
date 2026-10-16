@@ -1,10 +1,4 @@
-"""Tests for defender/runtime/bash_exec.py — the shell=False executor.
-
-These assert two things: (1) ordinary read-only shapes the gate approves run
-correctly without a shell (single command, pipes, `&&`/`||`/`;`, `cd`, benign
-stderr redirects); (2) the security property — bash never re-parses, so `$VAR`
-and globs do NOT expand (the whole reason the lane stopped using `shell=True`).
-"""
+"""Tests for defender/runtime/bash_exec.py — the shell=False executor."""
 from __future__ import annotations
 
 import os
@@ -22,13 +16,9 @@ def _env(**extra: str) -> dict[str, str]:
 
 
 def _run(cmd: str, *, env=None, cwd="/", timeout: float = 10.0):
-    # `parse` takes the raw command text directly (#959 D1/C3) — there is no second,
-    # standalone wrapper step to apply first, and no trim ahead of it either: the scanner
-    # itself treats a blank-only command as zero pipelines, which `run_parsed` runs as a no-op.
     return bash_exec.run_parsed(
         bash_exec.parse(cmd), command=cmd, env=env or _env(), cwd=cwd, timeout=timeout,
     )
-
 
 
 def test_single_command():
@@ -51,17 +41,9 @@ def test_two_stage_pipe(tmp_path):
     assert out == "alpha\nalpha\n"
 
 
-# The executor reproduces bash's own composition rules without a shell. Each row is one
-# spelling and the exact stdout bash itself would produce for it — exact, because "close
-# enough" output is how a silently dropped stage looks.
 @pytest.mark.parametrize(("cmd", "rc", "out"), [
     ("echo hello | cat | cat", 0, "hello\n"),        # pipes chain past two stages
     ("echo 'a | b'", 0, "a | b\n"),                  # a QUOTED pipe is data, not a split
-    # NOT wrappers any more (#971): nothing unpacks a `-c` payload and nothing strips a
-    # `timeout` prefix. Both rows now spawn the real `bash`/`timeout` BINARY as an ordinary
-    # program, which is what bash itself does with them — and they stay here for exactly that
-    # reason: they are the pin that no word is parsed specially. (The permission gate refuses
-    # both as ungranted programs a layer up; `run_parsed` never sees them from the gate.)
     ("bash -c 'echo wrapped'", 0, "wrapped\n"),      # `bash` is an ordinary program here
     ("timeout 5 echo hi", 0, "hi\n"),                # ...and so is `timeout`
     ("true && echo yes", 0, "yes\n"),                # && runs the tail on success ...
@@ -70,9 +52,7 @@ def test_two_stage_pipe(tmp_path):
     ("echo a\necho b", 0, "a\nb\n"),                 # a bare NEWLINE separates commands too
 ], ids=lambda v: v if isinstance(v, str) and "\n" not in v else "")
 def test_a_composed_command_runs_and_returns_exactly_bashs_output(cmd, rc, out):
-    """Pipes, quoting, `bash`/`timeout` as ordinary programs, and the `&&`/`||`/`;`/newline
-    separators each compose the way bash composes them — and stdout matches byte-for-byte,
-    which is what makes a dropped stage visible rather than plausible."""
+    """Pipes, quoting, `bash`/`timeout` as ordinary programs, and the `&&`/`||`/`;`/newline separators each..."""
     assert _run(cmd)[:2] == (rc, out)
 
 
@@ -90,7 +70,6 @@ def test_and_short_circuits_on_failure():
     assert "nope" not in out
 
 
-
 def test_cd_then_relative_read(tmp_path):
     (tmp_path / "data.txt").write_text("X")
     rc, out, err = _run(f"cd {tmp_path} && cat data.txt")
@@ -103,7 +82,6 @@ def test_cd_missing_dir_fails():
     assert rc == 1
     assert "after" not in out
     assert "No such file" in err
-
 
 
 def test_stderr_to_devnull_is_suppressed():
@@ -141,7 +119,6 @@ def test_mid_pipe_stderr_is_captured():
     assert "nope_aaa" in err
 
 
-
 def test_dollar_var_does_not_expand():
     rc, out, err = _run("echo $SECRET", env=_env(SECRET="topsecret-value"))
     assert out == "$SECRET\n"
@@ -158,7 +135,6 @@ def test_glob_does_not_expand(tmp_path):
 def test_brace_does_not_expand():
     rc, out, err = _run("echo x{1,2}")
     assert out == "x{1,2}\n"
-
 
 
 def test_command_not_found_is_127():
@@ -200,19 +176,11 @@ def test_non_utf8_output_does_not_crash():
     "echo a &&\necho b",
     "echo a\n|| echo b",
     "echo a ||\necho b",
-    # The connector does not close the line — a bare `;` does — so the token check at the line
-    # end never sees it, and `pending_connector` is builder state that outlives a line. Checked
-    # only once after the whole parse, the `&&` REACHES ACROSS the boundary and runs `echo b`
-    # conditionally on `echo a`, which is the guess this module refuses to make one line up.
     "echo a && ;\necho b",
     "echo a || ;\necho b",
 ])
 def test_line_boundary_connector_fails_closed(cmd):
-    """A `|`/`&&`/`||` at a line boundary used to be DROPPED — each physical line is lexed
-    on its own, so `A |\\nB` silently ran as `A ; B`: the second stage got /dev/null instead
-    of the first's output, and the reported rc was the last pipeline's. Nothing downstream
-    could tell that from a genuine no-match, so it has to refuse like its `\\`-continuation
-    sibling (#854 F-22)."""
+    """A `|`/`&&`/`||` at a line boundary used to be DROPPED — each physical line is lexed on its own, so `A..."""
     with pytest.raises(bash_exec.UntokenizableCommand):
         _run(cmd)
 
@@ -228,15 +196,7 @@ def test_line_boundary_connector_fails_closed(cmd):
     "cat /etc/hostname | 2> /dev/null",  # right side empties itself, with no separator
 ])
 def test_dangling_pipe_within_a_line_fails_closed(cmd):
-    """A `|` with no complete command on one side, spelled within a single line. #854 F-22
-    closed the line-boundary spellings and claimed this one with a test that only ever
-    exercised `| grep a` — everything with a stage banked to the LEFT of the connector fell
-    through, and `A | ; B` ran B on /dev/null while reporting rc 0, indistinguishable from a
-    genuine no-match in the data (#884 F-28).
-
-    Every case here is a bash syntax error EXCEPT the last: `A | 2>/dev/null` is a null
-    command consuming the pipe, which bash accepts and this executor cannot reproduce, so it
-    refuses rather than silently dropping both the pipe and the redirect."""
+    """A `|` with no complete command on one side, spelled within a single line. #854 F-22 closed the..."""
     with pytest.raises(bash_exec.UntokenizableCommand):
         _run(cmd)
 
@@ -245,18 +205,10 @@ def test_dangling_pipe_within_a_line_fails_closed(cmd):
     ("echo a | grep a | wc -l", "1\n"),   # cur_argv is non-empty at the second `|`
     ("echo a ; ; echo b", "a\nb\n"),      # the leading-`;` carve-out drops NOTHING
     ("echo a 2>&1 | wc -l", "1\n"),       # a stderr redirect is not an empty right side
-    # The carve-out's reach after a CONNECTOR, which is where the refusal above stops: a
-    # command CAN start after `&&`, so the `;` in `A && ; B` drops nothing and this runs as
-    # `A && B`. `A && ;` — the same shape with nothing following — is refused one block up,
-    # and the two together are what UNTOKENIZABLE_REASON's cause (4) has to say precisely: a
-    # connector left with no command AT ALL to its right on its own line, not any connector
-    # whose neighbour happens to be a `;`.
     ("echo a && ; echo b", "a\nb\n"),
 ])
 def test_the_dangling_pipe_guard_leaves_real_pipelines_alone(cmd, out):
-    """The positive control for the guard above. Stated separately because the guard is an
-    invariant over pipeline CLOSING, not a token check — the failure mode of getting it wrong
-    is refusing legitimate multi-stage pipelines, which no refusal-only test would catch."""
+    """The positive control for the guard above. Stated separately because the guard is an invariant over..."""
     rc, got, _err = _run(cmd)
     assert rc == 0
     assert got == out
@@ -274,7 +226,6 @@ def test_unexpected_redirect_fails_closed(tmp_path):
     with pytest.raises(bash_exec.BashExecError):
         _run(f"echo hi > {target}")
     assert not target.exists()
-
 
 
 def test_run_parsed_empty_is_noop():

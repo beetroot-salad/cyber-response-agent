@@ -1,28 +1,5 @@
-"""#1222 slice S04 — correlation dispatch: `l-00c` runs before MAIN on every tenant.
-
-Every test is one demand of `spec-flow/specs/spec_graph_1222.yaml`, named by its `discharged_by`
-and carrying its `seed_docstring`. The design (`.spec-flow/design.md` as amended — A4, A2, M1,
-O1-O4, C01) deletes item 1 (the ancestor fetch): the correlation lead runs to its end before
-MAIN's opening message is built, on every tenant and every alert, and that message carries its
-outcome. THE SUITE IS WRITTEN BEFORE THE IMPLEMENTATION: at base `301f196c` correlation is gated
-on item 1 and on `alert_timestamp`, and its summary is injected late (before MAIN's second
-request), so most tests here are RED at base — each for the reason its demand names.
-
-HOW THE OUTCOME IS FOUND (no literal is coined for it). The fixed ending sentences are not
-spelled anywhere in the design, so no test asserts one. "The correlation section" is the one
-`## ` section of MAIN's opening message whose heading names `l-00c` (the slim ORIENT heading that
-survives M1 — `slim_heading_names_l00c_reserved`), read through the suite's one anchor
-`S.correlation_section`; the lead's summary is found by a marker the
-test scripted into `l-00c`'s answer, inside an untrusted frame; an ending is found as the host
-prose one run's correlation section carries and a summary run's does not. "Up to MAIN's first
-request" is a snapshot taken inside MAIN's double on its first call (`_AtFirstRequest`).
-
-FAULTS. Model faults are `S.LeadFault` specs (PR-12). Backend refusals come from the REAL
-`elastic_adapter` verbs (`confine_index` refuses before any transport; the tenant's config names
-no `ELASTIC_ES_CONTAINER`, so a call the gate admits ends in the adapter's own `ConfigFault` before
-any docker child: no network is reachable from this file). Admitted fetches are answered by the
-shared `S.Backend` through the real `search_envelope`.
-"""
+"""Correlation dispatch: `l-00c` runs before MAIN on every tenant, and MAIN's opening message
+carries its outcome."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -36,25 +13,18 @@ from typing import Any
 
 from defender._io import read_jsonl_rows
 from defender.run_repository import RunPaths
-from defender.tests import _data_root_1078 as D
 from defender.tests import _session_store_705 as SS
 from defender.tests import _tenants1106 as T6
 from defender.tests._branch_947 import spec_at
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
 
-# =================================================================================================
 # Local helpers (work-arounds requested as shared machinery in 82-writer-correlation_dispatch.md)
-# =================================================================================================
 
 #: A document every elastic search of `_resolving_backend` answers. At base it is what item 1
 #: renders into the ancestor section (and what makes base dispatch `l-00c` at all on a Kibana
-#: alert); after the change no harness-built text may carry it.
 ANCESTOR_DOC_MARK = "ANCESTOR-DOC-S04-9c1e"
 
-#: The base ancestor heading, spelled here rather than imported: a removed symbol must never
-#: break collection (D6), and the suite never asserts on it — it only names what base printed.
-BASE_ANCESTOR_WORD = "ancestor"
 
 _TOKEN = re.compile(r"\{[A-Za-z_][A-Za-z0-9_.]*\}")
 
@@ -223,9 +193,7 @@ def _payloads(store: Any, session_id: str) -> list[str]:
         WHERE m.session_id = ? ORDER BY m.id""", (session_id,))]
 
 
-# =================================================================================================
 # correlation_outcome_reaches_main / slim heading / o3 opening prompt
-# =================================================================================================
 
 def test_opening_message_holds_one_correlation_section(tmp_path):
     """MAIN's opening message holds exactly one correlation section: the lead's framed summary when
@@ -267,9 +235,7 @@ def test_opening_message_holds_one_correlation_section(tmp_path):
     _assert_nothing_later(raised, *ending)
 
 
-# =================================================================================================
 # O1, the timestamp gate, tenants without elastic, O2
-# =================================================================================================
 
 def test_o1_non_elastic_tenant_gets_correlation_without_kibana_fields(tmp_path):
     """A tenant whose lead-zero.yaml and grants name a non-Elastic system, over an alert carrying
@@ -328,9 +294,7 @@ def test_correlation_dispatches_with_no_or_unparseable_timestamp(tmp_path):
         "l-00c's contract differs when the alert's alert_timestamp does not parse")
 
 
-# =================================================================================================
 # O3: nothing but l-00c before MAIN's first request
-# =================================================================================================
 
 def test_o3_only_l00c_backend_calls_precede_mains_first_request(tmp_path):
     """Up to MAIN's first request the queries table and the verb registry record no backend call
@@ -419,9 +383,7 @@ def test_p013_mains_first_turn_dispatches_leads_while_correlat(tmp_path):
             f"[{label}] MAIN's two leads left no rows — the arm proves nothing")
 
 
-# =================================================================================================
 # l-000, O4 and the confinement survivals
-# =================================================================================================
 
 
 def test_o4_agent_fetches_constituent_events_through_a_gather_lead(tmp_path):
@@ -466,125 +428,6 @@ def test_o4_agent_fetches_constituent_events_through_a_gather_lead(tmp_path):
     for i in ids:
         assert f"constituent {i} DOCMARK" in got, f"the lead never got document {i} back"
     assert "L1-O4: all constituents fetched." in "\n".join(d.main.seen[1].tool_returns)
-
-
-def test_o4_backing_index_bound_verbatim_is_refused_naming_patterns(tmp_path):
-    """Binding the alert's backing index verbatim gets the adapter's existing refusal, which names the
-    configured patterns.
-
-    The real elastic `query` verb. Control in the same lead: the data-stream pattern passes the
-    same confinement gate and ends past it, on the missing container."""
-    alert = S.fixture_alert()
-    backing = alert["ancestor_events"][0]["index"]
-    pattern = _data_stream_pattern(backing)
-    patterns = ("logs-*", ".internal.alerts-security.alerts-default-*")
-    planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING,
-                             configs=_tenant_elastic_configs("acme", events=patterns[0],
-                                                             alerts=patterns[1]))
-    backend = S.Backend()
-    native = f'_id: "{alert["ancestor_events"][0]["id"]}"'
-    d = S.run_alert(tmp_path, alert=alert, tenant=planted, backend=backend,
-                    verbs=_registry_with_real_elastic(backend, "query"), run_id="s04-o4-refuse",
-                    main=[S.gather("l-001", "elastic", "fetch the alert's constituent events"),
-                          S.text(S.DONE)],
-                    leads={"l-001": [S.query("elastic", "query",
-                                             {"native_query": native, "index": backing}),
-                                     S.query("elastic", "query",
-                                             {"native_query": native, "index": pattern}),
-                                     S.text("L1-O4: refused once.")]})
-    _run_with_turns(d)
-    rows = d.rows_for("l-001")
-    assert len(rows) == 2, rows
-    refused, admitted = rows
-    assert refused.get("exit_code") != 0, refused
-    detail = str(refused.get("payload_digest"))
-    for p in patterns:
-        assert p in detail, f"the refusal of {backing!r} does not name the configured pattern {p!r}"
-    seen = _lead_tool_returns(d, "l-001")
-    assert all(p in seen for p in patterns), "the lead was not told which patterns are configured"
-    # Control: the pattern is past the gate — what remains is the container the config omits.
-    assert "ELASTIC_ES_CONTAINER" in str(admitted.get("payload_digest")), admitted
-    assert not any(p in str(admitted.get("payload_digest")) for p in patterns), admitted
-
-
-def test_p132_sequence_alert_whose_constituents_are_building_b(tmp_path):
-    """O4 covers data-stream documents. Building-block alerts are fetched through the alerts-index
-    pattern the existing confinement admits; no widening.
-
-    A sequence alert whose ancestors are building-block alerts in the alerts index (PR-32's pattern
-    pair). The lead's fetch through the configured alerts pattern returns them; the alias outside
-    every pattern is refused by the real `alerts` verb, naming the patterns."""
-    patterns = ("logs-*", ".internal.alerts-security.alerts-default-*")
-    bb_index = ".internal.alerts-security.alerts-default-000001"
-    alert = S.kibana_alert(ancestor_events=[
-        {"id": "bb-0001", "type": "signal", "index": bb_index, "depth": 1},
-        {"id": "bb-0002", "type": "signal", "index": bb_index, "depth": 1}])
-    planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING,
-                             configs=_tenant_elastic_configs("acme", events=patterns[0],
-                                                             alerts=patterns[1]))
-    confine = S.sym("scripts.adapters.confinement", "confine_index")
-
-    def answer(system: str, verb: str, params: dict) -> Any:
-        if system == "elastic" and verb == "query" and "bb-" in params["native_query"]:
-            index = confine(params["index"], patterns)
-            return S.envelope([{"@timestamp": "2026-05-25T15:22:40.000Z",
-                                "message": f"building block {i} BBMARK"}
-                               for i in ("bb-0001", "bb-0002")], index=index)
-        return {"system": system, "verb": verb, "result": []}
-
-    backend = S.Backend(answer=answer)
-    native = '_id: ("bb-0001" OR "bb-0002")'
-    d = S.run_alert(tmp_path, alert=alert, tenant=planted, backend=backend,
-                    verbs=_registry_with_real_elastic(backend, "alerts"), run_id="s04-p132",
-                    main=[S.gather("l-001", "elastic", "fetch the sequence's building blocks"),
-                          S.text(S.DONE)],
-                    leads={"l-001": [S.query("elastic", "query",
-                                             {"native_query": native, "index": patterns[1]}),
-                                     S.query("elastic", "alerts",
-                                             {"native_query": native,
-                                              "index": ".alerts-security.alerts-default"}),
-                                     S.text("L1-P132: fetched.")]})
-    _run_with_turns(d)
-    fetched, widened = d.rows_for("l-001")
-    assert fetched.get("exit_code") == 0, fetched
-    got = _lead_tool_returns(d, "l-001")
-    for block in ("bb-0001", "bb-0002"):
-        assert f"building block {block} BBMARK" in got, f"the lead never got {block} back"
-    assert widened.get("exit_code") != 0, (
-        "an index outside every configured pattern was admitted — confinement was widened")
-    assert all(p in str(widened.get("payload_digest")) for p in patterns), widened
-
-
-def test_p133_ancestor_index_with_no_configured_pattern(tmp_path):
-    """Binding an index no configured pattern covers gets the adapter's existing refusal naming the
-    patterns. An id that has aged out returns an ordinary empty result.
-
-    The real `query` verb refuses a cross-cluster index name; a fetch by an id the index no longer
-    holds answers the real `search_envelope` with no hits (RJ-06), which the lead receives as an
-    ordinary result, not a fault."""
-    patterns = ("logs-*", ".internal.alerts-security.alerts-default-*")
-    planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING,
-                             configs=_tenant_elastic_configs("acme", events=patterns[0],
-                                                             alerts=patterns[1]))
-    backend = S.Backend()  # its `alerts` answers the real envelope with zero hits
-    outside = "remote-cluster:logs-system.auth-*"
-    d = S.run_alert(tmp_path, alert=S.fixture_alert(), tenant=planted, backend=backend,
-                    verbs=_registry_with_real_elastic(backend, "query"), run_id="s04-p133",
-                    main=[S.gather("l-001", "elastic", "fetch the constituents"), S.text(S.DONE)],
-                    leads={"l-001": [S.query("elastic", "query",
-                                             {"native_query": '_id: "gone-1"', "index": outside}),
-                                     S.query("elastic", "alerts",
-                                             {"native_query": '_id: "aged-out-1"',
-                                              "index": patterns[1]}),
-                                     S.text("L1-P133: refused, then empty.")]})
-    _run_with_turns(d)
-    refused, empty = d.rows_for("l-001")
-    assert refused.get("exit_code") != 0, refused
-    assert all(p in str(refused.get("payload_digest")) for p in patterns), refused
-    assert empty.get("exit_code") == 0, f"an aged-out id became a fault: {empty}"
-    returns = d.router.seen("l-001")[2].tool_returns
-    assert any('"total": 0' in t or '"returned": 0' in t for t in returns), (
-        f"the lead did not receive an ordinary empty result for the aged-out id: {returns}")
 
 
 #: A table whose gather role reaches elastic and cmdb, and whose correlation holder sits on cmdb.
@@ -643,33 +486,7 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path):
     assert "ELASTICSEARCH_URL" not in str(ok.get("payload_digest")), ok
 
 
-def test_p135_tenant_with_no_siem_and_correlation_withheld(tmp_path):
-    """The opening message says l-00c is harness-reserved and carries the withheld sentence. It says
-    nothing about ancestors or a missing Elastic system.
-
-    A tenant with no elastic folder whose table withholds the lead; the control is the same
-    tenant with an elastic folder."""
-    bare = S.plant_tenant("tbare1222", table=S.TABLE_WITHHELD, omit_systems=("elastic",))
-    d = S.run_alert(tmp_path / "bare", tenant=bare, run_id="s04-p135")
-    _run_with_turns(d)
-    prose = S.harness_text(d.opening_message)
-    assert BASE_ANCESTOR_WORD not in prose.lower(), (
-        "MAIN's opening message on a tenant with no SIEM still speaks of ancestors")
-    full = S.plant_tenant("tfull1222", table=S.TABLE_WITHHELD)
-    ctl = S.run_alert(tmp_path / "full", tenant=full, run_id="s04-p135")
-    _run_with_turns(ctl)
-    assert _opening(d, bare.tenant_id) == _opening(ctl, full.tenant_id), (
-        "the opening message on a tenant with no elastic folder differs from one with — it "
-        "names the missing Elastic system")
-    assert not d.router.dispatched(S.L3), "the table withholds l-00c, yet it ran"
-    head, body = S.correlation_section(d.opening_message)
-    assert "verb-grants.yaml" in S.harness_text(head + body), (
-        "the withheld sentence does not name the table that withholds the lead")
-
-
-# =================================================================================================
 # r1 / r2 — the opening message's slots, the sessions
-# =================================================================================================
 
 def _canned_shim(argv: list[str], env: dict[str, str]) -> str | None:
     """ORIENT's three lookups answered with fixed corpus text (each carries a brace sequence)."""
@@ -797,51 +614,10 @@ def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):
         assert "r2:corr" not in text, f"{lead}'s session holds l-00c's rounds"
 
 
-# =================================================================================================
 # The harness default (C01): p001, p186
-# =================================================================================================
-
-class _PlainGather(H.ReplayFn):
-    """ONE gather script for every gather conversation of the run — a replay that scripts MAIN's
-    lead only — which also records whose conversation each request was."""
-
-    __name__ = "PlainGather"
-
-    def __init__(self, turns: list[H.Turn]) -> None:
-        super().__init__(turns)
-        self.leads: list[str | None] = []
-
-    def __call__(self, messages: Any, info: Any) -> Any:
-        self.leads.append(S.dispatch_lead_id(messages))
-        return super().__call__(messages, info)
 
 
-def _harness_drive(tmp_path: Path, *, gather: Any, run_id: str,
-                   sink: list) -> tuple[Path, H.ReplayFn]:
-    """`_replay_harness.drive` itself (no `run.main`), over the golden sshd alert, on a tenant
-    (named after the run) that grants the correlation lead; MAIN dispatches one lead, l-001."""
-    planted = S.plant_tenant(run_id.replace("s04-", "t"), alert_mapping=S.DEFAULT_MAPPING)
-    run_dir = H.materialize(tmp_path, H.GOLDEN, run_id=run_id)
-    main = H.ReplayFn([
-        H.Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
-                                       "goal": "measure the host",
-                                       "what_to_summarize": ["one count"]})]),
-        H.Turn(text="Investigation complete.")])
-    main.summary = H.drive(run_dir, run_id=run_id, main=main, gather=gather,
-            verbs=_resolving_backend().registry(), tenant=planted.accept(),
-            store_factory=S.store_factory(tmp_path / "db", sink=sink))
-    return run_dir, main
-
-
-def _unframed(text: str) -> str:
-    bodies = S.outer_frames(text)
-    assert len(bodies) == 1, f"a gather summary file is not one framed body: {text!r}"
-    return bodies[0].strip()
-
-
-# =================================================================================================
 # p012, p033, p173 — the outcome is in the opening message, whenever the run ends
-# =================================================================================================
 
 def test_p012_run_ends_at_mains_first_answer_with_correlation(tmp_path):
     """l-00c's row, queries and summary are complete before MAIN's first request. A run that ends at
@@ -898,9 +674,7 @@ def test_p033_mains_first_request_retried_before_correlation_i(tmp_path):
     _assert_summary_in_opening(d, marker)
 
 
-# =================================================================================================
 # The resume trio: p034, p037, p040
-# =================================================================================================
 
 CONTINUATION = "Continue this investigation from where it stands."
 

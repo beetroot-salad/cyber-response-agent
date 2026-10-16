@@ -1,4 +1,5 @@
-"""#1241: queue identity is finding_id, across retries and within an append."""
+"""#1241: queue identity is finding_id, across retries and within an append.
+"""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor

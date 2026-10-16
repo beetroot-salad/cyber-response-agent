@@ -35,13 +35,7 @@ from defender.run_repository import SessionPaths
 # the handle, the connection, the schema version
 
 def test_store_connection_is_strict_fk_wal_with_a_busy_timeout(tmp_path):
-    """A freshly opened store reports STRICT tables, foreign_keys on, journal_mode wal,
-    and a non-zero busy_timeout, so a contended write waits instead of failing a
-    fail-closed append.
-
-    Deliberately silent about type rejection: PR1 refuted the 3/3 consensus that STRICT
-    is a type guard. What STRICT buys here is pinned by what it DOES reject (a BLOB in
-    an INTEGER column), never by what the consensus wrongly believed it rejects."""
+    """A freshly opened store reports STRICT tables, foreign_keys on, journal_mode wal,"""
     store = make_store(tmp_path)
     conn = store.connection
 
@@ -63,12 +57,7 @@ def test_store_connection_is_strict_fk_wal_with_a_busy_timeout(tmp_path):
 
 
 def test_the_store_refuses_a_wrong_typed_coordinate_at_its_own_boundary(tmp_path):
-    """A coordinate value of the wrong Python type — a bool, a numeric string or an
-    integer-valued float where `seq` is required — is refused by the store's own
-    validation before it reaches SQLite, because PR1 proved STRICT silently coerces all
-    three (FK21(ii): the design has no coordinate type guard to fall back on).
-
-    The positive control is the same append with a real `int`, which succeeds."""
+    """A coordinate value of the wrong Python type — a bool, a numeric string or an"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -87,22 +76,7 @@ def test_the_store_refuses_a_wrong_typed_coordinate_at_its_own_boundary(tmp_path
 
 
 def test_reader_refuses_an_unknown_user_version(tmp_path):
-    """A store whose `PRAGMA user_version` the reader does not know is refused with an
-    error rather than migrated or read anyway; the version the writer stamps reads
-    normally.
-
-    `is:PO1` established that a never-versioned file reads 0, so the refusal is
-    symmetric: below the known version (0, the un-set sentinel) and above it alike.
-
-    RE-EXPRESSED AT THE NEW RAISE POINT by #754's correction C1: `_check_schema_version`
-    moves into `open_store`, so the refusal now arrives when the file is OPENED and not one
-    call later at `hydrate`. B16 (executed simulation) is why the change is made here rather
-    than left to break silently — with `open_store` outside the `pytest.raises` block this
-    test ERRORS for both bogus values. The demand this discharges is unchanged; only where
-    the refusal lands is. #754's `test_an_unknown_user_version_is_still_refused_at_the_new_raise_point`
-    carries the same guarantee on the reader side, and version 1 — which this test's
-    computed `(0, SCHEMA_VERSION + 1)` pair stops covering once SCHEMA_VERSION is 2 — is
-    pinned by name there (correction C2)."""
+    """A store whose `PRAGMA user_version` the reader does not know is refused with an"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -130,12 +104,7 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
 # append-only: the negative and its positive control
 
 def test_message_rows_are_never_updated_or_deleted(tmp_path):
-    """Driving a fold and a fork issues no UPDATE and no DELETE against `message`; every
-    row present after the first append is byte-identical at the end.
-
-    Observed through SQLite's own authorizer callback, not through the writer's promise:
-    a re-parent is always a NEWLY APPENDED row choosing its parent, which is why folded
-    turns survive as an orphaned branch rather than being edited out (O4)."""
+    """Driving a fold and a fork issues no UPDATE and no DELETE against `message`; every row present after the first append is byte-identical at the end."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request("root")], agent_id="main")
@@ -164,13 +133,7 @@ def test_message_rows_are_never_updated_or_deleted(tmp_path):
 # payloads — round-trip, coercion, unknown fields, the encoding
 
 def test_ingested_payload_round_trips_verbatim(tmp_path):
-    """Every ingested row's stored payload re-validates into a ModelMessage that
-    re-dumps byte-identically to the dump of the ORIGINAL object, ThinkingParts and the
-    `instructions` blob included.
-
-    Compared against the original, never stored-to-stored: adv:PO4 showed a
-    stored-to-stored comparison passes `None == None` on a value dump_python silently
-    coerced."""
+    """Every ingested row's stored payload re-validates into a ModelMessage that"""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     originals = part_kind_zoo()
@@ -189,13 +152,7 @@ def test_ingested_payload_round_trips_verbatim(tmp_path):
 
 
 def test_payload_sha_digests_the_stored_payload_text_at_write_time(tmp_path):
-    """`message_payload.payload_sha` is the digest of the payload TEXT as stored, taken
-    at write time — an integrity check, never an identity and never a diffing key.
-
-    R15 resolved the dangling bind by keeping the column and minting this demand: two
-    rows with identical payload text carry identical `payload_sha` and are still two
-    distinct rows, so nothing may use the digest to deduplicate or to match on ingest
-    (invariant 3)."""
+    """`message_payload.payload_sha` is the digest of the payload TEXT as stored, taken"""
     import hashlib
 
     store = make_store(tmp_path)
@@ -217,11 +174,7 @@ def test_payload_sha_digests_the_stored_payload_text_at_write_time(tmp_path):
 # lineage: the path walk, ordering, cycles
 
 def test_path_exactness_nine_row_fixture(tmp_path):
-    """Over the nine-row fixture `fork-a`'s tip walks to exactly 1,5,6,8,9 and `main`'s
-    to exactly 1,5,6,7; rows 2,3,4 lie on no path from any tip; and re-parenting the
-    frontier to row 4 instead of the root makes `fork-a` walk to a strict superset —
-    the counterfactual that proves the assertion is about the parent chain and not about
-    row ordering."""
+    """Over the nine-row fixture `fork-a`'s tip walks to exactly 1,5,6,8,9 and `main`'s"""
     ss = store_mod()
     store = make_store(tmp_path)
     fx = nine_row_fixture(store)
@@ -251,12 +204,7 @@ def test_path_exactness_nine_row_fixture(tmp_path):
 
 
 def test_order_comes_from_the_parent_chain_not_from_seq(tmp_path):
-    """A fork that restarts `seq` at 0 still reads back in true send order, because order
-    is the parent chain and nothing records membership separately (O9).
-
-    The discriminating fixture is a fork whose own rows carry seq 0,1 while the prefix it
-    inherits carries higher seq values: an implementation that sorted by seq would emit
-    the fork's rows first."""
+    """A fork that restarts `seq` at 0 still reads back in true send order, because order is the parent chain and nothing records membership separately (O9)."""
     ss = store_mod()
     store = make_store(tmp_path)
     main = store.new_session(agent_id="main")
@@ -283,13 +231,7 @@ def test_order_comes_from_the_parent_chain_not_from_seq(tmp_path):
 
 
 def test_the_path_walk_refuses_a_cyclic_parent_chain(tmp_path):
-    """A cyclic `parent_id` chain is refused by the walk with a loud error rather than
-    walked forever: `hydrate` carries its own depth cap or cycle guard.
-
-    dep:PO1 (executed): SQLite's recursive CTE does NOT detect a cycle, does NOT error
-    and does NOT truncate — it alternated between two mutually-parented rows for
-    2,000,000 rows before the probe broke out manually. There is no free lunch from the
-    engine, and the design does not name the gap."""
+    """A cyclic `parent_id` chain is refused by the walk with a loud error rather than walked forever: `hydrate` carries its own depth cap or cycle guard."""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -356,12 +298,7 @@ def test_two_forks_from_one_point_share_a_parent_id_and_differ_only_in_session_i
 
 
 def test_case_id_is_inherited_by_a_fork_and_the_eval_join_key_is_not(tmp_path):
-    """A fork's `session` row carries the source's `case_id` and a freshly minted
-    `session_id`, while the eval dir-name join key does not follow the fork.
-
-    This demand asserts what the store carries — the inheritance — and nothing about a
-    ticket screen: the own-case screen that once keyed on `deps.run_id` was removed by
-    #1221, and the learning-path leak it partly covered is #1224's."""
+    """A fork's `session` row carries the source's `case_id` and a freshly minted `session_id`, while the eval dir-name join key does not follow the fork."""
     store = make_store(tmp_path, case_id="case-alpha")
     main = store.new_session(agent_id="main")
     r1 = store.append(main, [user_request("root")], agent_id="main")[0]
@@ -378,12 +315,7 @@ def test_case_id_is_inherited_by_a_fork_and_the_eval_join_key_is_not(tmp_path):
 
 
 def test_config_row_is_content_addressed_over_the_reproducibility_set(tmp_path):
-    """Two runs with identical models, corpus git_sha, prompt digests and library
-    versions produce the same `config_sha`, and changing any one of the four changes it.
-
-    FK19/R17: the serialization is canonical JSON — sorted keys, no whitespace — and all
-    four fields are required, so the digest cannot depend on dict insertion order across
-    two code paths (which would defeat O14's purpose with no warning signal)."""
+    """Two runs with identical models, corpus git_sha, prompt digests and library"""
     ss = store_mod()
     store = make_store(tmp_path)
     base = {"models": {"main": "m1"}, "corpus": {"git_sha": "abc"},
@@ -410,10 +342,7 @@ def test_config_row_is_content_addressed_over_the_reproducibility_set(tmp_path):
 # retention, absences, the session row's bookkeeping
 
 def test_payload_lives_in_its_own_table_and_retention_drops_only_bodies(tmp_path):
-    """`DELETE FROM message_payload` for one session drops the bodies while leaving that
-    session's coordinates, parent chain and `gather_boundary` rows intact and queryable —
-    and X9's consequence is pinned with it: every per-response `model_name`, `usage`,
-    `provider` and `finish_reason` fact lives ONLY in the payload and goes with it."""
+    """`DELETE FROM message_payload` for one session drops the bodies while leaving that"""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [
@@ -445,11 +374,7 @@ def test_payload_lives_in_its_own_table_and_retention_drops_only_bodies(tmp_path
 
 
 def test_raw_gather_payloads_are_not_stored_in_the_message_payload_table(tmp_path):
-    """A run whose gather leg wrote a large raw payload to `gather_raw/` stores only the
-    summary the model saw; the raw bytes appear in no `message_payload` row.
-
-    Positive control: `test_ingested_payload_round_trips_verbatim` — the summary the
-    model DID see is stored, so this negative is not passing on an empty table."""
+    """A run whose gather leg wrote a large raw payload to `gather_raw/` stores only the"""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     raw_marker = "RAW-ELASTIC-HIT-" + ("x" * 4096)
@@ -499,12 +424,7 @@ def test_synthesized_rows_occupy_their_own_seq_address_space(tmp_path):
 
 
 def test_a_session_ends_on_an_incomplete_pair_only_when_truncated_by_is_set(tmp_path):
-    """A session whose last row is an unanswered response has `truncated_by` set, and a
-    session with `truncated_by` unset always ends on a complete pair.
-
-    G13/F6 found this FALSE of today's driver — `truncated_by` is written only inside
-    `except BudgetKill` — so R11 widens the write to all three caught exits and this
-    demand pins the widened rule, not the shipped one."""
+    """A session whose last row is an unanswered response has `truncated_by` set, and a session with `truncated_by` unset always ends on a complete pair."""
     ss = store_mod()
     store = make_store(tmp_path)
 
@@ -525,12 +445,7 @@ def test_a_session_ends_on_an_incomplete_pair_only_when_truncated_by_is_set(tmp_
 
 
 def test_an_append_is_one_commit_per_render_boundary(tmp_path):
-    """One append is one transaction: the `message` row and its `message_payload` row
-    commit together, and no transaction spans more than one render boundary.
-
-    FK15/R17 settles the granularity the design left unstated. Observed through a real
-    second connection sampling mid-append (life:po7 shape (3): an uncommitted row is
-    NEVER visible), so a torn (row, payload) pair is observable if it exists."""
+    """One append is one transaction: the `message` row and its `message_payload` row"""
     ss = store_mod()
     base = runs_base(tmp_path)
     store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
@@ -557,14 +472,7 @@ def test_an_append_is_one_commit_per_render_boundary(tmp_path):
 
 
 def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(tmp_path):
-    """Two gather legs appending concurrently against one store, each under its own
-    `agent_id`, both land every row: no lost write, no collision under `message`'s
-    composite key, and each leg's rows read back complete.
-
-    `auth:P2` (executed) confirms this concurrency is reachable in THIS PR from ordinary
-    gather fan-out — not only from #696's parallel forks — and `life:po7` (executed)
-    observed the WAL behaviour (leg-a=20, leg-b=10, no lost writes, monotonic
-    cross-visibility) that this demand pins as a test rather than as a probe."""
+    """Two gather legs appending concurrently against one store, each under its own"""
     ss = store_mod()
     base = runs_base(tmp_path)
     owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
@@ -602,19 +510,7 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
 
 
 def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp_path):
-    """One writer racing ITSELF — the same `session_id` and the same `agent_id`, appending
-    concurrently, with no caller-supplied `seq` — loses no row and collides on none: the
-    store allocates the coordinate under contention, so the rows land with the full
-    contiguous `seq` range and every row is readable afterwards.
-
-    `test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows` races two
-    DISTINCT `agent_id`s and hands each leg its own pre-computed `seq`, so `message`'s
-    composite key separates them by construction and the allocation is never contended.
-    This is the case that leaves: `life:po7` observed WAL cross-visibility and `auth:P2`
-    that ordinary gather fan-out reaches concurrent appends in THIS PR, but nothing observed
-    one writer's own two legs competing for the same next coordinate. Positive control: the
-    row count under a single-threaded append of the same shape, so "no collision" is not
-    satisfied by an empty table."""
+    """One writer racing ITSELF — the same `session_id` and the same `agent_id`, appending"""
     ss = store_mod()
     base = runs_base(tmp_path)
     owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
@@ -669,11 +565,7 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
     pytest.param(__import__("fractions").Fraction(1, 2), id="Fraction"),
 ])
 def test_duration_ms_is_refused_at_the_boundary_unless_a_finite_real_number(tmp_path, bad):
-    """`duration_ms` is bound straight into the INSERT and never meets the payload's
-    isfinite discipline, so its own check is the only one: a `bool`, a string, a NaN/inf, or
-    a numeric type sqlite3 cannot bind is `PayloadNotRepresentable` BEFORE the transaction
-    opens — never a `sqlite3` error out of a half-written batch, and never a NaN silently
-    stored as SQL NULL."""
+    """`duration_ms` is bound straight into the INSERT and never meets the payload's"""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")

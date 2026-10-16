@@ -50,10 +50,7 @@ _BENIGN_CONFINE = (_CONFINE_B,)
 
 
 def _policy(*, read_confine=(), bash_allow=(), read_roots=()):
-    """An AgentPolicy for gate tests. Defaults model a confined, reader-less actor leg
-    (empty `bash_allow` -> no bash readers at all). Override per case. `read_allow` stays empty:
-    an agent with no `cat` grant has no path SHAPES, so `decide_read` is root-only for it —
-    bounded by its confine/roots, which is exactly the actor's design."""
+    """An AgentPolicy for gate tests."""
     return AgentPolicy(
         read_roots=read_roots, read_confine=read_confine, bash_allow=bash_allow,
     )
@@ -124,13 +121,7 @@ def test_denylist_still_fires_inside_confine(tmp_path, name):
 
 
 def test_confined_actor_cannot_reach_gather_raw(tmp_path):
-    """the actor cannot read a gather_raw payload — pinned as CONTAINMENT, not as the deleted
-    `raw_reads` bit (#575: the per-agent capability bits are gone; an agent reaches a path iff its
-    grants/roots carry it). The payloads live under the INVESTIGATION run dir, which is not a root of
-    the actor's policy at all: neither its confine (the two lesson corpora) nor its run dir (the
-    LEARNING run dir) contains them, so the read denies at the roots gate.
-    Positive control: the actor's own run-dir artifact IS readable — the deny is the payload's
-    location, not a dead policy."""
+    """the actor cannot read a gather_raw payload — pinned as CONTAINMENT, not as the deleted"""
     pol = _policy(read_confine=_MALICIOUS_CONFINE)
     investigation_raw = tmp_path / "investigation-run" / "gather_raw" / "l-001" / "0.json"
     assert not permission.decide_read(
@@ -190,11 +181,7 @@ def test_actor_all_generic_readers_denied(cmd):
 
 
 def test_reduction_is_per_policy_not_global(tmp_path):
-    """the reader reduction is per-policy, NOT a global removal: an actor policy with empty
-    `bash_allow` denies every bash reader, while main's grants still permit an IN-SCOPE `cat` and the
-    stdin-only viewers behind it. The narrowing lives in the policy, not the gate. (#575: `grep foo
-    {file}` is dead for main too — grep lost its file operand — so the surviving reduction shape is
-    `cat {file} | grep foo`; the full matrix is in test_read_confine_bash.py.)"""
+    """the reader reduction is per-policy, NOT a global removal: an actor policy with empty"""
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()
@@ -235,11 +222,7 @@ def test_reduction_is_per_policy_not_global(tmp_path):
     'cat {r} | defender-sql "SELECT 1\nFROM data"',
 ])
 def test_multiline_command_is_denied_with_a_reason_that_says_why(tmp_path, cmd):
-    """`bash_exec.parse` lexes each PHYSICAL LINE on its own (an unquoted newline is a
-    command separator), so it does not model bash's line-JOINING: both shapes leave line 1
-    unbalanced and fail closed. That is deliberate — but the deny must SAY so. The generic
-    `policy.deny_reason` reads as "this program is forbidden", which sends the model
-    hunting for another one when its command was fine and only its line breaks were not."""
+    """`bash_exec.parse` lexes each PHYSICAL LINE on its own (an unquoted newline is a"""
     # ANY compiled policy answers this: the refusal happens in the LEXER, before a program or
     # a path is looked at, so the demand is policy-independent. It used to ride on the deleted
     # judge's gate purely because that helper was to hand; MAIN's is the one that ships.
@@ -275,11 +258,7 @@ def test_multiline_command_is_denied_with_a_reason_that_says_why(tmp_path, cmd):
 
 
 def test_main_cat_scope_is_the_read_surface(tmp_path):
-    """MAIN keeps a viewer lane, and its `cat` grant's SCOPE is the run dir + corpus over the RESOLVED
-    path — an in-scope cat is allowed, an out-of-scope cat is denied (pre-#535: any operand allowed).
-    `operand_gated` is gone: every cat grant is scope-checked, so there is no bit to assert. What
-    replaces it is the identity that made the bit unnecessary — `read_allow` IS the cat grant's scope
-    OBJECT, so the read tool and the bash lane cannot drift. Full matrix: test_read_confine_bash.py."""
+    """MAIN keeps a viewer lane, and its `cat` grant's SCOPE is the run dir + corpus over the RESOLVED"""
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()
@@ -293,14 +272,7 @@ def test_main_cat_scope_is_the_read_surface(tmp_path):
 
 
 def test_gather_stream_plumbing_anchored(tmp_path):
-    """GATHER's compute lane still works over IN-SCOPE payloads — cat {run}/… | defender-sql,
-    cat {run}/… | jq — but jq is stdin-only and an out-of-scope /tmp operand is denied (the bypass
-    #535 closed, now enforced against the RESOLVED path). Note the payload path must match the
-    machine-tight gather_raw shape (`gather_raw/l-<digits>/<seq>.json`).
-
-    #611: the standalone adapter left this lane (it is the `query` tool's job now), so the plumbing
-    pinned here is what REMAINS — local computation over a payload already on disk — and the adapter
-    is asserted DENIED, which is the same anchoring statement with the verdict flipped."""
+    """GATHER's compute lane still works over IN-SCOPE payloads — cat {run}/… | defender-sql,"""
     run, dfn = tmp_path / "run", tmp_path / "defender"
     run.mkdir()
     dfn.mkdir()

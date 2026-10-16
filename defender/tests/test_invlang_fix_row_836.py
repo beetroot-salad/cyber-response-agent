@@ -40,7 +40,6 @@ from defender.tests._invlang_warn_836 import (
     attr_block,
     flagged_rows,
     main_deps,
-    offered_tool_defs,
     offered_tool_names,
     run_one_response,
     seed_investigation,

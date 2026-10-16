@@ -28,11 +28,7 @@ def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
 
 
 def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
-    """The findings curator (A → defender/lessons/) gets the SAME batch-granular dead-letter as
-    the observation curators (spec: the ``curator_A -> dlq`` edge, findings.jsonl's NEW ``attempts``
-    field): a poison findings batch that faults every tick quarantines to the ``deadletter.jsonl``
-    sidecar after ``config.author_max_attempts()`` tries instead of retrying forever and wedging the
-    ``defender/lessons/`` queue."""
+    """The findings curator (A → defender/lessons/) gets the SAME batch-granular dead-letter as the observation..."""
     # config.author_max_attempts() reads this key at call time, so the setenv now bites.
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")  # lint-stale-ref: ok — the ENV
     # VAR outlives the retired module constant of the same name (#717).
@@ -85,8 +81,7 @@ def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):
 
 
 def _commit_lesson(tmp_repo, a, *, name: str, fid: str):
-    """Return a fake invoke_agent that writes one lesson citing ``fid`` — no git
-    (the loop is the sole committer)."""
+    """Return a fake invoke_agent that writes one lesson citing ``fid`` — no git (the loop is the sole committer)."""
     def fake(findings, batch_id, cfg):
         body = (
             f"---\nname: {name}\ndescription: d\nsource_finding_ids:\n  - {fid}\n"
@@ -101,10 +96,7 @@ def _commit_lesson(tmp_repo, a, *, name: str, fid: str):
 def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
     tmp_repo, helpers, monkeypatch
 ):
-    """Under the drain (hold_committed), a just-committed finding STAYS queued —
-    the PR isn't merged yet, so a rejected PR can't strand it. Once the lesson is
-    in the corpus, the next batch filters it via existing_finding_ids (idempotent)
-    and rotates it out without re-authoring."""
+    """Under the drain (hold_committed), a just-committed finding STAYS queued — the PR isn't merged yet, so a..."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-H/0", run_id="run-H")
 
@@ -128,8 +120,7 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
 
 
 def test_default_rotate_consumes_committed_immediately(tmp_repo, helpers, monkeypatch):
-    """Standalone (hold_committed=False, the default): a committed finding rotates
-    straight to consumed.jsonl, as before this change."""
+    """Standalone (hold_committed=False, the default): a committed finding rotates straight to consumed.jsonl, as..."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-D/0", run_id="run-D")
     cfg = replace(

@@ -107,19 +107,7 @@ def run_dir_listing(message_zero: str) -> list[str]:
 
 
 def test_every_frame_in_one_model_context_carries_its_own_salt(tmp_path, monkeypatch):
-    """Every frame the model is shown carries a DISTINCT delimiter.
-
-    THE INVERSE of #647's `..._carries_the_minted_token` and of #545's coherence canary, and
-    deliberately so. Those pinned "exactly one distinct salt across the run", on the reasoning
-    that a second token would leave the agent unable to match a delimiter it had been told
-    about. #875 F-1 is what that reasoning cost: one token shared across a run is one token the
-    gather subagent reads in plaintext on every payload view, and can therefore echo to close
-    the frame its own summary arrives in.
-
-    Nothing was actually resting on coherence. Both SKILL.md contracts ship a literal `{salt}`
-    placeholder — neither MAIN nor GATHER is ever told a value — so both already read frames
-    structurally, by matching open/close pairs. What replaces coherence is the property below,
-    which coherence could never have given: no framed party holds its own delimiter."""
+    """Every frame the model is shown carries a DISTINCT delimiter."""
     run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="per-frame-647")
     main, gather, rec = gather_scenario(run_dir, run_id=run_dir.name)
 
@@ -135,11 +123,7 @@ def test_every_frame_in_one_model_context_carries_its_own_salt(tmp_path, monkeyp
 
 
 def test_no_frames_salt_occurs_inside_the_content_it_delimits(tmp_path, monkeypatch):
-    """A frame's delimiter never appears in that frame's own body.
-
-    This is the guarantee `wrap_fresh`'s re-mint loop buys, and the one the old per-run token
-    could not: the salt is drawn AFTER the content is in hand and re-drawn while it collides,
-    so the body cannot contain the delimiter — by construction, not by improbability."""
+    """A frame's delimiter never appears in that frame's own body."""
     run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="no-echo-647")
     main, gather, rec = gather_scenario(run_dir, run_id=run_dir.name)
 
@@ -156,18 +140,7 @@ def test_no_frames_salt_occurs_inside_the_content_it_delimits(tmp_path, monkeypa
 
 
 def test_the_gather_subagent_is_bound_with_no_salt_at_all(tmp_path, monkeypatch):
-    """The gather subagent inherits NO token, because there is none to inherit.
-
-    AMENDED PREMISE (#875 F-1). This test used to require the opposite — that gather
-    INHERITS the parent run's token — reasoning that a fresh token on gather's side "would wrap
-    the returned summary in a delimiter MAIN was never told about, quarantine failing open at
-    exactly the boundary it exists to guard."
-
-    That reasoning inverts the direction of the threat. `_run_gather` re-wraps gather's output
-    unconditionally before it reaches MAIN, so a foreign inner tag is inert TEXT inside MAIN's
-    frame — it cannot close anything. Inheritance is what fails open: it hands the subagent
-    whose output MAIN frames the very delimiter MAIN frames it with. MAIN was never "told" any
-    delimiter in the first place — `defender/SKILL.md` ships a literal `{salt}` placeholder."""
+    """The gather subagent inherits NO token, because there is none to inherit."""
     run_dir = build(tmp_path, monkeypatch, golden=GOLDEN_AB3, run_id="no-inherit-647")
     main, gather, rec = gather_scenario(run_dir, run_id=run_dir.name)
 
@@ -188,14 +161,7 @@ def test_the_gather_subagent_is_bound_with_no_salt_at_all(tmp_path, monkeypatch)
 def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_children(
     tmp_path, monkeypatch
 ):
-    """MAIN's first model request enumerates the run dir's REAL children, and the removed file
-    is not among them. The orientation inlines a workspace map whose run-dir section lists one
-    line per child, skipping the names `workspace_map._unlisted()` suppresses — the subagent-only
-    raw-payload subdir, and since #976 the run's own provenance stamp; every name it lists
-    exists on disk, and every artifact the builder materialized appears. This listing was
-    unpinned before this change, which is precisely why removing a file that gets listed —
-    and therefore altering MAIN's prompt — went unnoticed through three review passes. The
-    listing legitimately loses that one line; the section itself stays."""
+    """MAIN's first model request enumerates the run dir's REAL children, and the removed file is not among them."""
     run_dir = build(tmp_path, monkeypatch, run_id="msg0-647")
     assert run_dir.is_dir(), (
         "there is no materialized run dir for the orientation to enumerate"
@@ -232,22 +198,7 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
 def test_replay_harness_run_dir_and_production_run_dir_present_the_same_file_set(
     tmp_path, monkeypatch
 ):
-    """The two run-dir builders present the same file set FOR A FIXTURE THAT CARRIES NO
-    SIBLING `ground_truth.yaml` — the scope of this parity claim, stated rather than implied.
-    The harness keeps its own divergent signature — it takes the token as a parameter and
-    hands back a bare path — and convergence on that signature is not owed; what IS owed is
-    that a run dir a scenario drives looks like a run dir an operator gets, because the change
-    edits the two builders separately and their file sets can otherwise drift silently.
-    Immediately after materialization, before anything is driven, both hold exactly the copied
-    alert, the raw-payload subdir and the provenance stamp (#976).
-
-    The scope is not decoration: the production builder conditionally copies a sibling
-    `ground_truth.yaml` into the run dir (`run_common.py:69-71`) and the replay harness has NO
-    such branch, so on a ground-truth-carrying fixture the two builders PROVABLY diverge by
-    exactly that file. That axis is out of this change's scope — neither builder's ground-truth
-    handling is edited here — so rather than assert a parity that does not hold, this pin
-    checks its own precondition (the driven golden carries no sibling ground truth) and claims
-    nothing about the other column."""
+    """The two run-dir builders present the same file set FOR A FIXTURE THAT CARRIES NO"""
     assert not (GOLDEN / "ground_truth.yaml").exists(), (
         "this parity claim is scoped to fixtures WITHOUT a sibling ground_truth.yaml, and the "
         "golden now carries one — the production builder would copy it and the harness would "

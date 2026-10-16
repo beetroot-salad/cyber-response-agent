@@ -1,17 +1,4 @@
-"""Regression coverage for a claims-adversary finding on #773 (write-code-from-spec's
-claims-adversary pass, PR #1064): `drain._byte_identical_to_head` compared DECODED TEXT
-(via `_git.git_show_file` / `read_text_utf8`, both of which apply universal-newline
-translation) rather than raw bytes, despite its name and its caller's own docstring
-promising a byte comparison. A CRLF-only rewrite of an LF-committed file decodes identical
-on both sides and was silently treated as "unchanged" — dropped from
-`_changed_corpus_records` even though git itself reports the file dirty, so the file got no
-vouching, no forward-check verdict, and was left dirty in the worktree with no error, at
-odds with the tick's own "the corpus is clean at the top of every tick" invariant.
-
-NOT part of the locked #773 spec suite (`test_773_*.py`) — this is a regression test for a
-bug the claims-adversary pass found in this PR's own code, added after (not part of) the
-committed spec, so it lives in its own file rather than editing a locked one.
-"""
+"""drain._byte_identical_to_head compares raw bytes, not newline-translated text."""
 from __future__ import annotations
 
 from defender.learning.author import drain

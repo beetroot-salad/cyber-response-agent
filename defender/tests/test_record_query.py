@@ -52,12 +52,7 @@ def test_derive_system_skips_non_adapter_and_unknown():
 
 
 def _row(seq, *, params, payload, lead="l-001"):
-    """One prior queries row, its digest AND its content hash derived from the PAYLOAD TEXT.
-
-    Both are derived rather than passed (#877 F-9): a fixture free to state a digest and a hash
-    that disagree could pin `repeat_note` against a table the writers cannot produce, which is
-    how the defect survived — the old helper took a digest string alone, so "same digest" and
-    "same payload" were indistinguishable in the tests exactly as they were in the code."""
+    """One prior queries row, its digest AND its content hash derived from the PAYLOAD TEXT."""
     return {
         "lead_id": lead, "seq": seq, "system": "elastic", "verb": "query",
         "query_id": "elastic.probe", "params": params, "exit_code": 0,
@@ -113,12 +108,7 @@ def test_repeat_note_names_the_identical_earlier_request(tmp_path):
 
 
 def test_repeat_note_flags_a_changed_request_that_moved_nothing(tmp_path):
-    """l-001's real turn 2: a narrowing filter was added and `total` did not move.
-
-    The filter was a wildcard-phrase clause the query language silently ignores, so the
-    payload came back byte-identical. Nothing in the loop compared the two, and the lead
-    spent its remaining 35 turns varying a filter that was never applied.
-    """
+    """l-001's real turn 2: a narrowing filter was added and `total` did not move."""
     state = _write_rows(tmp_path, [
         _row(0, params={"q": "host:db-1"}, payload=_PAYLOAD),
         _row(1, params={"q": 'host:db-1 AND message: *"Accepted"*'}, payload=_PAYLOAD),
@@ -133,14 +123,7 @@ def test_repeat_note_flags_a_changed_request_that_moved_nothing(tmp_path):
 
 
 def test_a_different_payload_of_the_same_length_is_not_a_no_op(tmp_path):
-    """#877 F-9 — THE regression. The NO-OP arm tells the lead "the payload is byte-identical",
-    and it used to establish that from `payload_digest`: `f"{len(text)} bytes, 1 line(s)"`, a
-    serialized LENGTH (`json.dumps` escapes every newline, so the line count is always 1).
-
-    Fixed-schema enumeration produces same-length payloads by construction, so this fired
-    constantly on genuinely different results — 55 false NO-OPs against 41 true ones across the
-    recorded runs, the sharpest being a `fim-checksum` of `/etc/passwd` and one of `/etc/shadow`
-    at 160 bytes each: the lead was told the checksum of shadow was the checksum of passwd."""
+    """#877 F-9 — THE regression."""
     assert len(_PAYLOAD) == len(_SAME_LENGTH), "the fixture stopped exercising the defect"
     state = _write_rows(tmp_path, [
         _row(0, params={"host": "web-1"}, payload=_PAYLOAD),
@@ -212,12 +195,7 @@ def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
 
 
 def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
-    """`payload_sha256` is the one field whose contract is that different bytes hash
-    differently, so its error handler may not be `replace`: U+FFFD is one character and every
-    unencodable codepoint would map onto it, colliding two distinct payloads under the very
-    claim the column exists to license ("byte-identical"). Moot for today's writers — both hand
-    it `json.dumps(..., ensure_ascii=True)` output, which is pure ASCII — and pinned anyway,
-    because #834's compact encoding is a live proposal to turn `ensure_ascii` off."""
+    """`payload_sha256` is the one field whose contract is that different bytes hash"""
     a, b = "\ud800", "\ud801"
     assert ge.payload_sha256(a) != ge.payload_sha256(b), \
         "two different payloads share one content hash"
@@ -275,13 +253,7 @@ def _write_table(run_dir, rows):
 
 
 def test_the_live_readers_answer_from_the_rows_the_host_recorded_not_from_the_file(tmp_path):
-    """A run-folder file cannot move a live decision (#1235 O1, at the reader): overwriting
-    `executed_queries.jsonl` with planted rows, or truncating it, changes nothing the live
-    readers answer from the run's state. Planted rows neither feed the next seq nor make a
-    repeat; a truncated table does not reset one.
-
-    Positive controls: a reader of the FILE does see each plant, so the plant landed; and the
-    planted request, once the host itself records it, does make the note fire."""
+    """A run-folder file cannot move a live decision (#1235 O1, at the reader): overwriting"""
     rq = _live()
     run_dir, state = _bare_run(tmp_path)
     assert [_append(rq, state, params={"q": "a"})["seq"] for _ in range(2)] == [0, 1]
@@ -315,10 +287,7 @@ def test_the_live_readers_answer_from_the_rows_the_host_recorded_not_from_the_fi
 
 
 def test_state_rows_are_the_lines_written_not_the_dicts_the_writer_built(tmp_path):
-    """Each row the state holds is `json.loads` of the line `append_query_row` wrote — the same
-    value a reader of the file gets back — not the dict the host assembled: the live readers and
-    the record agree byte for byte, and an edit to the writer's returned dict after the write
-    does not reach what the guards read."""
+    """Each row the state holds is `json.loads` of the line `append_query_row` wrote — the same"""
     import json
 
     rq = _live()
@@ -357,21 +326,7 @@ def _unplant(path, kind: str, saved: bytes) -> None:
 
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent(tmp_path, kind):
-    """R3, round 3 (#1235): the run's state is the record of what the run did, and
-    `executed_queries.jsonl` is the model's view of it. An append validates first, then takes
-    the seq and records the row in the state, and only then writes the view. The table squatted
-    mid-run (a planted symlink, or a directory): the append raises the write's `OSError`, the row
-    IS in the state with the next seq — the call it records was made — and the following append
-    takes the seq after it. The view holds only the lines that landed, and the symlink's target
-    outside the run is untouched.
-
-    Params too deep to store are refused before anything: no row, no seq, no line — the control
-    that validation still comes first.
-
-    Positive control: the rows before and after the fault are in both the state and the view.
-
-    Observed failing by: round 2's ordering (write the line, then record), under which a
-    refused view write leaves an executed call out of every live decision."""
+    """R3, round 3 (#1235): the run's state is the record of what the run did, and `executed_queries.jsonl` is the model's view of it."""
     from defender._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
     from defender.run_repository import RunPaths
 

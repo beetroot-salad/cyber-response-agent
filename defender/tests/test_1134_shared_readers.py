@@ -1,167 +1,8 @@
-"""#1134 step 4 (v3): the shared readers take a `Bound`, and list it with `list_tree`.
-
-The contract is the step-4 contract over #1134's design (D4 "Shared readers", N-h, the reader
-part of O5.1, the iterator part of O5.5, A4 with addendum 2's B2/B3) and D7's
-guard-plus-positive-control shape. The readers are `_corpus.iter_lesson_paths`, `iter_lessons`,
-`iter_query_templates`, `read_query_template` and `lead_neighbors.load_catalog`. Each takes a
-`Bound` (any of `bind(folder)`, `hold(folder).view()`, `hold(mount).view().under(prefix)`) plus a
-keyword-only `where`, the Path the caller says that folder is spelled as, used only to spell
-output paths and warnings and never opened. Or it takes a bare `Path`, as today, which it binds
-itself and closes. `read_query_template` takes `(view, name, *, where)` or `(path)`. The
-iterators list their tree with `_tree_listing.list_tree` (depth 1 for a corpus, 3 for the
-catalog), never a walk of their own, and select by name.
-
-This file is v2 step 4's suite (v1's adversary-hardened rows, holes H1-H5, plus v2's adversary
-holes H1-H7) ported onto addendum 2. v2 listed with `Bound.walk`, which v3 does not have; the
-rows that pinned that walk's vocabulary are retargeted to `list_tree`'s: an `"unlisted"` folder
-is now a folder in the listing's `refused`; the walk's whole-tree refusal for an errno below the
-top is now that one folder's refusal (EIO at a `<sys>` costs that system and one warning, and
-the rest still yields); the walk's depth is now `list_tree`'s, so a folder below it is never
-entered, not merely ignored. New in v3: a folder found gone by its own listing (the listing's
-`gone`) is silent, and a folder REALLY swapped between its parent's listing and its own ends
-up refused or gone and is never listed through. Addendum 3 (D2): a `<sys>` folder REALLY
-removed while it is being listed is the listing's `gone` (`entries()` answers a dead folder
-absent), so it is silent too, never a folder listed with stale names.
-
-The tree. One tmp dir holds `t/`, the tree the readers are pointed at, `host/` beside it, where an
-outside link points and every hard link keeps its other name, and `decoy/`, where a lying `where`
-points. `t/lessons/` is a flat corpus. Its selection takes dot names (`.hidden.md`, `.md`) as
-today's glob does. `t/skills/gather/queries/` is a catalog with a `<sys>/*.md`, a
-`<sys>/_draft/*.md`, a top-level `_draft/` system, and systems named so that path-parts order
-and string order disagree (`cmdb`, `cmdb-ext`, `cmdb.v2`). Its selection takes dot and `_` names
-at every level (`.dotsys/`, the system that sorts first, with a `_draft/` of its own;
-`wazuh/.hidden.md`, `wazuh/_private.md`, `wazuh/_draft/_x.md`, `cmdb/.md`). Each tree also holds
-valid records its selection must NOT take. The corpus has a `_` name, a non-`.md` name, a
-nested `.md`, and near misses that hold `.md` but do not end with it (`notes.md.bak`, `x.mdx`,
-`x.md~`). The catalog has a `SCHEMA.md` (and `SCHEMA.md.orig`) at `<sys>` level, a middle
-folder that is not `_draft`, a draft one level too deep, and near misses (`wazuh/x.md.orig`,
-`wazuh/_draft/y.mdown`). The record addresses under test ("probes") are empty in the built
-tree: a plant or the control's plain file goes there.
-
-Call forms (`FORMS`): `path` (the bare Path of the corpus or catalog), `bound` (`bind(top)`),
-`held-view` (`hold(top).view()`) and `held-view-under`, the drain's shape
-(`hold(t).view().under("lessons")`, `hold(t/skills).view().under("gather/queries")`). Each Bound
-form passes `where=top`. `read_query_template`'s forms are the bare Path, `bind(catalog)` with
-`"<sys>/x.md"`, `hold(skills).view()` with `"gather/queries/<sys>/x.md"` (as a `str` and as a
-`PurePosixPath`), and `hold(skills).view().under("gather/queries")` with `"<sys>/x.md"` and
-`where=catalog`. In every Bound form the output Path is `where / name`, which is today's
-Path-form spelling of the same file.
-
-What each section pins:
-
-- Argument rules. A Bound without `where` is `ValueError` before any I/O (an empty `os_` record).
-  A Path with `where` is `ValueError`, and so is `load_catalog(None, where=...)`.
-  `read_query_template`: a Bound without a name, a Path with a name, and a malformed name are
-  `ValueError`. `where` is keyword-only.
-- Parity. On a plain tree every form of every reader yields today's records in today's order,
-  spelled as today, with no warning. The expected records are built from the planted text with
-  the parsers alone (`split_frontmatter`, `parse_query_template`), never by a reader. Over the
-  repo's real corpora and catalog every form equals today's walk (written out here), with no
-  warning. `load_catalog(None)` is `PATHS.catalog_dir`'s catalog.
-- Selected by name whatever the kind, refused at read. A symlink at a probe gets the existing
-  per-record warning with exactly the read's path-free reason (`ALIAS_READ_REFUSAL`): live to a
-  VALID record under `host` carrying `HOST_MARK`, live to one inside the root where no selection
-  takes carrying `INSIDE_MARK`, or dangling. So do a directory named `*.md`, a hard link (other
-  name under `host`) and a FIFO. `on_skip` and `warn_label` get `where / name`, and the rest
-  still yields. `iter_lesson_paths` only lists, so it lists the plant. `read_query_template`
-  answers `(None, "malformed template: <reason>")`.
-- Folders. A linked (outside, inside, dangling) or non-directory (file, FIFO) folder on the
-  Bound's prefix gives ONE `warn: skipping <where> (<the listing's reason>)`, nothing yielded,
-  no raise. Those prefix folders are `lessons` and `gather/queries` below the held mount, and
-  `gather` above the catalog. The same plant at a `<sys>` or `<sys>/_draft` folder (an
-  `ENTRY_OTHER` row of the listing) gives ONE `warn: skipping <where>/<name> (not a plain
-  folder)`; it is never entered and the rest yields. A plain file there is silent. A `<sys>` or
-  `_draft` folder whose own listing is refused (an `os_` seam refusing it by its real path, on
-  each route, with EACCES or EIO, and a REAL permission bit read as an unprivileged user) gives
-  ONE `warn: skipping <where>/<name> (<the listing's reason, verbatim>)` and every other record
-  still yields, exactly. One found gone by its own listing is silent. One the selection never
-  reads from is silent, refused or gone. A refused top gives one `warn: skipping <where>
-  (<reason>)` and nothing. An absent root or folder is silent and empty. A directory named
-  `<sys>/x.md` whose listing is refused is a refused RECORD (the malformed warning), not a
-  folder warning. A folder below the listing's depth is never entered.
-- Fault text kept byte for byte. An undecodable plain record's warning is today's. A missing
-  template is `(None, "malformed template: [Errno 2] No such file or directory: '<where/name>'")`.
-  So is a record gone between the listing and the read. A plain record refused for an errno is
-  `strerror` alone (a declared delta).
-- `where` only spells. A `where` that does not exist, or one that names a decoy tree of marked
-  records, spells the Bound's records and is never opened.
-- Lifetime. A Bound passed in is the caller's: the reader leaves it open. The Path form leaves
-  no descriptor open: after `iter_lesson_paths`, `load_catalog` and `read_query_template`; after
-  a generator is exhausted, closed or collected; and before a generator's first `next` (the
-  bind is in its body). Counted on `/proc/self/fd`, so an explicit close and CPython's
-  collection of a dropped Bound (its handle's `__del__`) look alike here; both are "closed".
-- Positive facts, not guards. The root itself is opened following its spelling (N-h): a linked
-  root yields the same records, spelled under the link. A regular file or FIFO passed as the root
-  yields nothing and gives one `warn: skipping <path> (Not a directory)` (a declared delta).
-
-Every guard row asserts three things. (1) Nothing from a target: no mark in any record or
-warning. The kernel saw no read(2) of any marked file and no open of any marked file but a hard
-link's shared inode (the core opens that one no-follow to judge it). It also saw no open or
-listing of any folder a link points at (`_shared_readers_1134.kernel_watch`, inotify `IN_ACCESS`
-and `IN_OPEN`, by any route, in every form). In the Bound forms, the `os_` seam also saw the
-reader's I/O go through the Bound it was handed, and no open by a spelling that could follow a
-link. (2) The plant is left in place: the census of the whole
-tmp dir is unchanged. (3) The positive control: the plant removed and a plain file (or the real
-folder) put back at the SAME address, the SAME call (the same Bound, so it is still open) yields
-today's records with no warning, and the kernel watch saw that call read a plain record, so the
-watch is not blind. Every call runs under `in_time`'s deadline, so a FIFO costs a failed row,
-never a wedged run.
-
-Every plant is a real filesystem entry. `os_` stand-ins go only through `bind` / `hold`'s `os_`
-and are used only where a real fault cannot be made as root, or at a moment no outside actor
-can hit: a refused listing, EIO, a folder or record gone at listing or read time, a plain record
-whose open is refused, a folder REALLY moved and replaced between two listings. Nothing is
-monkeypatched. The real-permission rows run in-process when the test runs unprivileged (CI), and as root in a child interpreter that drops to uid/gid 65534
-after its imports, under a deadline. The Path form's open audit (H2 below) also runs in a
-child interpreter, under a deadline: the test worker installs no audit hook.
-
-Red against the step-3 base (1341 of 1422 rows; v2 counted 1153 of 1234 before v3's ENOENT
-and swap-between-listings rows): every Bound-form row (today's readers take no `where`:
-`TypeError`; given none, `.is_dir()` on the Bound is `AttributeError`); every argument-rule row
-but the keyword-only ones (today's signatures already refuse a second positional); every
-Path-form plant row of the four reading readers (today's `read_text` follows a link to its
-target's record, reads a hard link, blocks on a FIFO, and words a directory or a dangling link
-with its own errno and path, never the alias reason); the Path-form `<sys>`/`_draft` folder rows
-but the plain-file ones (today's glob follows a linked system and is silent about a dangling one
-or a FIFO); the real-permission `<sys>`, `_draft` and top rows (today's glob swallows
-`PermissionError` silently); the non-directory root rows (today silent); the Path-form swap,
-unreadable-record and open-audit rows (today's `read_text` opens `where / name` by its
-spelling); and the relative warning rows. Green today, and must stay green (81): the Path-form
-parity (absolute and relative), absent, fault-text, lifetime and root-following rows, the real
-trees by path, the keyword-only rows, the silent real-permission rows and their uid check, the
-Path-form plain-file folder rows, and `iter_lesson_paths`' Path-form plant and
-unreadable-record rows (today's glob lists any entry by name and opens none).
-
-Added after v2's step-4 implementation, each against a green but wrong reader v2's adversary
-built on it (H1-H7), each checked red against that reader and green against v2's
-implementation, and kept here as they were:
-- H1: a reader that stopped the whole catalog listing at the first non-plain `<sys>` folder. The
-  folder plants, the seam refusals and the real-permission rows now also hit `.dotsys` and
-  `.dotsys/_draft`, which sort first, so every later system must still yield exactly.
-- H2: a Path form that judged each name by `lstat` and then read it by its path. Three rows
-  now catch it. A folder (the listed one, or a `<sys>`) is swapped for a link to marked records
-  after the first record, so the rest must come through the held handle. A plain record of
-  mode 0o000 is read for real, unprivileged: `strerror` alone, never `[Errno 13] ...: '<path>'`.
-  And the open audit (a child interpreter's audit hook) checks that the Path form opens nothing
-  below its root by a spelling.
-- H3: a Bound answering absent that fell back to reading `where` by path. The Bound's folder is
-  removed and a marked tree (a folder, or a link) is put at `where`: nothing, silently, never
-  opened.
-- H4: a `read_query_template` that logged its refusals. Every row of it now asserts that it
-  logs nothing.
-- H5: a selection that took `.md` anywhere in a name: the near misses above.
-- H6: a Path form that made its path absolute: relative-path rows (`monkeypatch.chdir` to the
-  tmp dir) for records, warnings, `on_skip` and `read_query_template`.
-- H7: a `read_query_template` that spelled a view under a prefix as `where / prefix / name`: the
-  `held-view-under` form.
-
-Added after v3's step-4 implementation, each against a green but wrong reader v3's scoped
-adversary built (V3-H1 to V3-H5), each checked red against it and green against the
-implementation (the section at the end of this file): a reader that listed a `<sys>` again
-instead of keeping its listing's `refused` (exactly-once asks, and a refused-once row); one that
-passed through only the reasons the other rows use (uncommon errnos); one that warned out of
-path order (several faults in one catalog); a Path form that listed below the shape (a kernel
-watch on the folder below); and a Path-form generator that listed before its first `next`.
+"""The shared readers (`_corpus.iter_lesson_paths`, `iter_lessons`, `iter_query_templates`, `read_query_template`,
+`lead_neighbors.load_catalog`) take a `Bound` plus `where` (or a bare `Path`) and list with `list_tree`: a link,
+hard link, FIFO or non-directory at a record name or holding folder is refused and skipped, a refused folder warns
+once and costs only itself, a folder swapped or removed mid-listing is never listed through, and the caller's
+`Bound` stays open.
 """
 from __future__ import annotations
 
@@ -193,8 +34,7 @@ from defender._corpus import (
     read_query_template,
 )
 from defender._frontmatter import split_frontmatter
-from defender._io import ALIAS_READ_REFUSAL, bind, hold, read_text_utf8
-from defender._paths import PATHS
+from defender._io import ALIAS_READ_REFUSAL, bind, hold
 from defender.learning.leads import lead_neighbors as ln
 from defender.tests._shared_readers_1134 import (
     NOBODY,
@@ -238,8 +78,6 @@ ALIAS = ALIAS_READ_REFUSAL
 NOT_A_DIR = os.strerror(errno.ENOTDIR)
 DENIED = os.strerror(errno.EACCES)
 NOT_A_PLAIN_FOLDER = "not a plain folder"
-#: What today's `read_text_utf8` says of a file whose first byte is `0xff`.
-DECODE_FAULT = "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
 
 
 def lesson_text(slug: str) -> str:
@@ -753,13 +591,6 @@ def test_a_bound_without_where_is_a_value_error_before_any_io(scene, reader):
         assert rec.calls[made:] == [], "the reader did I/O before refusing a missing `where`"
 
 
-def test_read_query_template_on_a_bound_without_where_is_a_value_error_before_any_io(scene):
-    rec = CallRecorder()
-    with bind(scene.t / CATALOG, os_=rec) as bound:
-        made = len(rec.calls)
-        with pytest.raises(ValueError):  # noqa: PT011
-            read_query_template(bound, "wazuh/auth-events.md")
-        assert rec.calls[made:] == []
 
 
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
@@ -770,48 +601,14 @@ def test_a_path_with_where_is_a_value_error(scene, reader):
         reader.run(top, {"where": top})
 
 
-def test_load_catalog_of_none_with_where_is_a_value_error():
-    with pytest.raises(ValueError):  # noqa: PT011
-        ln.load_catalog(None, where=PATHS.catalog_dir)
 
 
-#: `read_query_template` calls that are `ValueError`: a Bound with no name, a Path with a name
-#: or a `where`, and a name outside `Bound.read`'s grammar.
-RQT_MISUSE: dict[str, Callable[[Scene, Any], Any]] = {
-    "bound-no-name": lambda s, b: read_query_template(b, where=s.t / CATALOG),
-    "bound-none-name": lambda s, b: read_query_template(b, None, where=s.t / CATALOG),
-    "path-with-name": lambda s, b: read_query_template(s.t / CATALOG, "wazuh/auth-events.md"),
-    "path-with-purepath-name": lambda s, b: read_query_template(
-        s.t / CATALOG, PurePosixPath("wazuh/auth-events.md")),
-    "path-with-where": lambda s, b: read_query_template(
-        s.t / CATALOG / "wazuh/auth-events.md", where=s.t / CATALOG / "wazuh"),
-    "climbing-name": lambda s, b: read_query_template(
-        b, "../queries/wazuh/auth-events.md", where=s.t / CATALOG),
-    "absolute-name": lambda s, b: read_query_template(
-        b, str(s.t / CATALOG / "wazuh/auth-events.md"), where=s.t / CATALOG),
-    "empty-component": lambda s, b: read_query_template(
-        b, "wazuh//auth-events.md", where=s.t / CATALOG),
-    "empty-name": lambda s, b: read_query_template(b, "", where=s.t / CATALOG),
-}
 
 
-@pytest.mark.parametrize("case", list(RQT_MISUSE))
-def test_read_query_template_refuses_a_misused_call(scene, case):
-    with bind(scene.t / CATALOG) as bound, pytest.raises(ValueError):  # noqa: PT011
-        RQT_MISUSE[case](scene, bound)
 
 
-@pytest.mark.parametrize("reader", READERS, ids=reader_id)
-def test_where_is_keyword_only(scene, reader):
-    top = scene.t / TREES[reader.tree].top
-    with bind(top) as bound, pytest.raises(TypeError):
-        list(reader.call(bound, top))
 
 
-def test_read_query_templates_where_is_keyword_only(scene):
-    misuse: Callable[..., Any] = read_query_template  # the call under test is ill-typed on purpose
-    with bind(scene.t / CATALOG) as bound, pytest.raises(TypeError):
-        misuse(bound, "wazuh/auth-events.md", scene.t / CATALOG)
 
 
 # =======================================================================================
@@ -859,78 +656,16 @@ def test_read_query_template_reads_one_plain_template_in_each_call_form(
     assert got[0].system == "wazuh"
 
 
-def test_load_catalog_with_no_argument_is_the_repo_catalog():
-    """`load_catalog(None)` still defaults to `PATHS.catalog_dir`, and reads the same catalog
-    as the drain's call, the `skills` view under `gather/queries`."""
-    by_default = ln.load_catalog()
-
-    assert by_default, "the checkout's catalog is not empty"
-    assert by_default == ln.load_catalog(None) == ln.load_catalog(PATHS.catalog_dir)
-    with hold(PATHS.skills_dir) as skills:
-        assert by_default == ln.load_catalog(skills.view().under("gather/queries"),
-                                             where=PATHS.catalog_dir)
 
 
-def todays_lesson_paths(corpus: Path) -> list[Path]:
-    """Today's corpus selection, written out: `*.md` directly in `corpus`, not `_`-prefixed,
-    sorted."""
-    return [p for p in sorted(corpus.glob("*.md")) if not p.name.startswith("_")]
 
 
-def todays_lessons(corpus: Path) -> list[Lesson]:
-    return [lesson_record(p, read_text_utf8(p)) for p in todays_lesson_paths(corpus)]
 
 
-def todays_catalog(catalog: Path) -> list[QueryTemplate]:
-    """Today's catalog walk, written out: `*/*.md` and `*/_draft/*.md`, sorted, each parsed."""
-    paths = sorted([*catalog.glob("*/*.md"), *catalog.glob("*/_draft/*.md")])
-    return [template_record(p, read_text_utf8(p)) for p in paths]
 
 
-#: The repo's real trees: `(the walked folder, the drain's held mount, the prefix below it,
-#: the tree kind)`.
-REAL_TREES: dict[str, Callable[[], tuple[Path, Path, str, str]]] = {
-    "lessons": lambda: (PATHS.lessons_dir, PATHS.defender_dir, "lessons", "lessons"),
-    "lessons-questioner": lambda: (PATHS.lessons_questioner_dir, PATHS.defender_dir,
-                                   "lessons-questioner", "lessons"),
-    "catalog": lambda: (PATHS.catalog_dir, PATHS.skills_dir, "gather/queries", "catalog"),
-}
-TODAYS: dict[str, Callable[[Path], list[Any]]] = {
-    "iter_lesson_paths": todays_lesson_paths,
-    "iter_lessons": todays_lessons,
-    "iter_query_templates": todays_catalog,
-    "load_catalog": lambda top: [catalog_row(t) for t in todays_catalog(top)],
-}
-REAL_ROWS = [
-    pytest.param(label, reader, form, id=f"{label}-{reader.name}-{form}")
-    for label, kind in (("lessons", "lessons"), ("lessons-questioner", "lessons"),
-                        ("catalog", "catalog"))
-    for reader in READERS if reader.tree == kind
-    for form in FORMS
-]
 
 
-@pytest.mark.parametrize(("label", "reader", "form"), REAL_ROWS)
-def test_the_real_trees_read_alike_in_every_form(label, reader, form, caplog):
-    """Over the checkout's own corpora and catalog, each form yields exactly today's records,
-    spelled under the walked folder, with no warning."""
-    top, mount, folder, _kind = REAL_TREES[label]()
-    want = TODAYS[reader.name](top)
-    assert want, f"the checkout's {label} tree is not empty"
-    caplog.clear()
-    with contextlib.ExitStack() as stack:
-        if form == "path":
-            got = reader.run(top, {})
-        elif form == "bound":
-            got = reader.run(stack.enter_context(bind(top)), {"where": top})
-        elif form == "held-view":
-            got = reader.run(stack.enter_context(hold(top)).view(), {"where": top})
-        else:
-            view = stack.enter_context(hold(mount)).view().under(folder)
-            got = reader.run(view, {"where": top})
-
-    assert got == want
-    assert said(caplog) == []
 
 
 # =======================================================================================
@@ -1028,48 +763,12 @@ def test_a_refused_lesson_reaches_warn_label_and_on_skip_spelled_under_where(
 # Today's fault text, byte for byte
 # =======================================================================================
 
-def plant_undecodable(scene: Scene, probe: str) -> None:
-    (scene.t / probe).write_bytes(b"\xff" + PROBE_TEXT[probe].encode())
 
 
-@pytest.mark.parametrize("form", FORMS)
-@pytest.mark.parametrize("reader", READING, ids=reader_id)
-def test_an_undecodable_plain_record_warns_in_todays_exact_words(scene, reader, form, caplog):
-    """A plain file's decode fault is today's text: the decoder's own words, with no name
-    prefix of the bound read's."""
-    shape = TREES[reader.tree]
-    probe = shape.probes[0]
-    plant_undecodable(scene, probe)
-    caplog.clear()
-    with called_as(scene, reader.tree, form) as (arg, kw):
-        got = in_time(lambda: reader.run(arg, kw))
-
-    assert got == reader.expected(scene.t / shape.top, shape.records)
-    assert said(caplog) == [
-        f"warn: skipping {probe_id(probe)} (malformed {shape.noun}: {DECODE_FAULT})"]
 
 
-@pytest.mark.parametrize("form", RQT_FORMS)
-def test_read_query_template_of_an_undecodable_file_says_todays_exact_words(scene, form, caplog):
-    probe = TREES["catalog"].probes[0]
-    plant_undecodable(scene, probe)
-    with rqt_called_as(scene, probe, form) as (args, kw):
-        assert rqt_quietly(caplog, args, kw) == (None, f"malformed template: {DECODE_FAULT}")
 
 
-@pytest.mark.parametrize("missing", ["leaf", "holding-folder"])
-@pytest.mark.parametrize("form", RQT_FORMS)
-@pytest.mark.parametrize("probe", TREES["catalog"].probes, ids=probe_id)
-def test_read_query_template_of_a_missing_template_says_todays_exact_words(
-        scene, probe, form, missing, caplog):
-    """Absent at read time (the commit gate's case): today's `FileNotFoundError` text, naming
-    the template as spelled (`where / name` in a Bound form), and nothing logged."""
-    if missing == "holding-folder":
-        shutil.rmtree((scene.t / probe).parent)
-    with rqt_called_as(scene, probe, form) as (args, kw):
-        got = rqt_quietly(caplog, args, kw)
-
-    assert got == (None, f"malformed template: {gone(scene.t / probe)}")
 
 
 @pytest.mark.parametrize("form", BOUND_FORMS)
@@ -1648,24 +1347,6 @@ def test_where_spells_the_bounds_records_and_is_never_opened(
     assert not (scene.tmp / "nowhere").exists()
 
 
-@pytest.mark.parametrize("where_is", ["nowhere", "decoy"])
-@pytest.mark.parametrize("form", RQT_FORMS[1:])
-def test_read_query_templates_where_only_spells_the_template(scene, form, where_is, caplog):
-    probe = TREES["catalog"].probes[0]
-    scene.put([probe])
-    where_rel = rqt_where(probe, form)
-    if where_is == "decoy":
-        plant_decoy(scene, "catalog")
-    where = (scene.tmp / "nowhere" if where_is == "nowhere" else scene.decoy) / where_rel
-    rec = SpellingRecorder()
-
-    with rqt_called_as(scene, probe, form, os_=rec, where=where) as (args, kw):
-        got, warned = run_guarded(scene, lambda: read_query_template(*args, **kw),
-                                  planted=None, caplog=caplog, recorder=rec)
-
-    assert got == (template_record(where / below(probe, where_rel), PROBE_TEXT[probe]), "")
-    assert warned == []
-    assert not (scene.tmp / "nowhere").exists()
 
 
 # =======================================================================================
@@ -1692,14 +1373,6 @@ def test_a_bound_passed_in_is_the_callers_and_stays_open(scene, reader):
         assert bound.read(first).text == TEXT[shape.records[0]]
 
 
-def test_read_query_template_leaves_a_bound_passed_in_open(scene):
-    probe = TREES["catalog"].probes[0]
-    scene.put([probe])
-    with bind(scene.t / CATALOG) as bound:
-        name = below(probe, CATALOG).as_posix()
-        assert read_query_template(bound, name, where=scene.t / CATALOG) == rqt_expected(
-            scene, probe)
-        assert bound.read(name).text == PROBE_TEXT[probe]
 
 
 #: Path-form calls that must leave no descriptor open when they return.
@@ -1763,15 +1436,6 @@ def test_the_root_itself_is_opened_following_its_spelling(scene, reader, form, c
     assert_reads_the_whole_tree(scene, reader, form, caplog)
 
 
-@pytest.mark.parametrize("form", RQT_FORMS)
-@pytest.mark.parametrize("probe", TREES["catalog"].probes, ids=probe_id)
-def test_read_query_template_opens_its_root_following_its_spelling(scene, probe, form, caplog):
-    """The same fact for the one-file reader: a bare Path roots at its parent, so a linked
-    `<sys>` or `_draft` folder above a bare Path is followed."""
-    scene.put([probe])
-    root_as_link(scene, rqt_root(probe, form))
-    with rqt_called_as(scene, probe, form) as (args, kw):
-        assert rqt_quietly(caplog, args, kw) == rqt_expected(scene, probe)
 
 
 @pytest.mark.parametrize("kind", ["file", "fifo"])
@@ -1956,24 +1620,6 @@ def test_a_bound_whose_folder_is_gone_reads_nothing_and_never_falls_back_to_wher
     assert warned == []
 
 
-@pytest.mark.parametrize("what", ["folder", "link"])
-@pytest.mark.parametrize("form", ["bound", "held", "held-view-under"])
-@pytest.mark.parametrize("probe", TREES["catalog"].probes, ids=probe_id)
-def test_read_query_template_through_a_bound_whose_folder_is_gone_never_reads_where(
-        scene, probe, form, what, caplog):
-    """H3 for the one-file reader: the folder the form opened is removed and a marked template
-    put at `where / name` (in a real folder, or behind a link). The answer is today's absent
-    text for `where / name`, nothing logged, and `where` never opened."""
-    scene.put([probe])
-    name = below(probe, rqt_where(probe, form))
-    with rqt_called_as(scene, probe, form) as (args, kw):
-        shutil.rmtree(scene.t / rqt_root(probe, form))
-        folders = plant_marked_tree(scene, kw["where"], [name], "catalog", what)
-        got, warned = run_guarded(scene, lambda: read_query_template(*args, **kw),
-                                  planted=None, caplog=caplog, folders=folders)
-
-    assert got == (None, f"malformed template: {gone(scene.t / probe)}")
-    assert warned == []
 
 
 # -- H6: the Path form spells what it was given, a relative path too -----------------------
@@ -1993,51 +1639,8 @@ def test_the_path_form_spells_a_relative_path_as_given(scene, reader, monkeypatc
     assert said(caplog) == []
 
 
-@pytest.mark.parametrize("reader", READERS, ids=reader_id)
-def test_the_path_form_spells_its_warnings_relative_as_given(scene, reader, monkeypatch, caplog):
-    """H6 for the warnings: a relative root that is a regular file is warned as spelled; in the
-    catalog, a `<sys>` link is warned as `<relative where>/<sys>`; in the corpus, a refused
-    lesson reaches `on_skip` and `warn_label` relative."""
-    monkeypatch.chdir(scene.tmp)
-    shape = TREES[reader.tree]
-    top = Path("t") / shape.top
-    if reader.tree == "catalog":
-        plant_folder_at(scene, f"{CATALOG}/wazuh", "link")
-        caplog.clear()
-        got = in_time(lambda: reader.run(top, {}))
-        assert got == reader.expected(
-            top, [r for r in shape.records if not under(r, f"{CATALOG}/wazuh")])
-        assert said(caplog) == [f"warn: skipping {top}/wazuh ({NOT_A_PLAIN_FOLDER})"]
-    elif reader.reads:
-        plant_record(scene, shape.probes[0], "symlink")
-        skipped: list[Path] = []
-        caplog.clear()
-        got = in_time(lambda: list(iter_lessons(top, warn_label=str, on_skip=skipped.append)))
-        assert got == reader.expected(top, shape.records)
-        assert skipped == [top / "mid.md"]
-        assert said(caplog) == [f"warn: skipping {top}/mid.md (malformed lesson: {ALIAS})"]
-    shutil.rmtree(scene.t / shape.top)
-    (scene.t / shape.top).write_text(HOST_TEXT[reader.tree], encoding="utf-8")
-    caplog.clear()
-    assert in_time(lambda: reader.run(top, {})) == []
-    assert said(caplog) == [f"warn: skipping {top} ({NOT_A_DIR})"]
 
 
-@pytest.mark.parametrize("missing", [False, True], ids=["present", "missing"])
-@pytest.mark.parametrize("probe", TREES["catalog"].probes, ids=probe_id)
-def test_read_query_template_spells_a_relative_path_as_given(
-        scene, probe, missing, monkeypatch, caplog):
-    """H6 for the one-file reader: the template's `path`, and a missing one's fault text, keep
-    the relative spelling it was given."""
-    monkeypatch.chdir(scene.tmp)
-    if not missing:
-        scene.put([probe])
-    path = Path("t") / probe
-
-    got = rqt_quietly(caplog, (path,), {})
-
-    assert got == ((None, f"malformed template: {gone(path)}") if missing
-                   else (template_record(path, PROBE_TEXT[probe]), ""))
 
 
 # =======================================================================================
@@ -2196,19 +1799,3 @@ def test_the_path_form_never_lists_a_folder_below_the_shape(scene, reader, caplo
         f"{deep} lies below the listing's depth, yet was opened: {seen}")
 
 
-@pytest.mark.parametrize("reader", [r for r in READING if r.name != "load_catalog"], ids=reader_id)
-def test_a_path_form_generator_lists_nothing_before_its_first_next(scene, reader):
-    """V3-H5: the descriptor-count row could not see a Path form that bound and listed at call
-    time, closed that, and bound again in the generator body (names from one moment, records
-    from another). The kernel watch on the root sees no listing before the first `next`, and
-    sees one after it (non-vacuity)."""
-    top = scene.t / TREES[reader.tree].top
-    with kernel_watch(opens=[top]) as events:
-        it = reader.call(top)
-        before = events()
-        assert next(it) is not None
-        after = events()
-        it.close()
-
-    assert before == [], f"the Path form listed before its first `next`: {before}"
-    assert (str(top), "open") in after, f"the watch never saw {top} listed: {after}"

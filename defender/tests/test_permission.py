@@ -239,13 +239,7 @@ def test_a_wrapped_viewer_denies_and_its_payload_alone_does_not(wrapped, payload
     "timeout 5 cat /run/investigation.md",
 ])
 def test_a_timeout_prefix_denies_and_the_same_command_without_it_does_not(cmd):
-    """#971: the prefix used to be STRIPPED before the decision, so these were allows. It is an
-    ordinary ungranted word now and they deny — on the capability reason, which names the
-    programs the lane does have.
-
-    The pairing is the point. Each command is asserted twice: with the prefix (denied) and with
-    it removed (allowed), so what this pins is that the PREFIX is the whole difference. A bare
-    `assert not allow` would also pass if the pipeline or the payload had quietly broken."""
+    """#971: the prefix used to be STRIPPED before the decision, so these were allows."""
     for policy in (MAIN, _gather()):
         assert not _bash(cmd, policy).allow, f"{cmd!r}: `timeout` is not a granted program"
         assert _bash(cmd, policy).reason == policy.deny_reason
@@ -293,10 +287,7 @@ def test_unparseable_quote_spanning_newline_fails_closed(cmd):
     "cat /run/report.md | | wc -l",
 ])
 def test_dangling_pipe_within_a_line_fails_closed_at_the_gate(cmd):
-    """The gate and the executor stay pinned together. Both parse through the same
-    `bash_exec.parse`, so a spelling the executor refuses must reach the model as the LEXING
-    reason rather than a policy one — and, more to the point, a spelling the executor would
-    mis-decompose must never be handed on as a shape the gate then grant-checks."""
+    """The gate and the executor stay pinned together."""
     d = _bash(cmd, _gather())
     assert not d.allow
     assert not _bash(cmd, MAIN).allow
@@ -515,14 +506,7 @@ def test_write_investigation_invalid_invlang_denied(tmp_path):
 
 
 def test_decide_write_requires_policy_and_roots(tmp_path):
-    """decide_write requires an explicit policy AND both run roots — omitting any of the three is
-    a TypeError, never a silent default. The policy carries the write allowlist, so a default
-    would hand the caller an unearned write scope (mirrors decide_read). The roots are required
-    for the mirror-image reason (#681): `run_dir` is what the #629 output-structure gate keys
-    `<run_dir>/report.md` on, so under the former `run_dir: Path | None = None` a caller that
-    forgot the kwarg silently lost the whole gate — an over-bound report with an out-of-enum
-    disposition fell through to Decision(True). Failing at the call site is the only signal that
-    cannot be missed; there is no runtime branch to test because the argument cannot be absent."""
+    """decide_write requires an explicit policy AND both run roots — omitting any of the three is a TypeError, never a silent default."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     with pytest.raises(TypeError):
@@ -569,10 +553,7 @@ def test_write_allow_md_only_denies_non_md(tmp_path):
 
 
 def test_write_allow_no_implicit_run_dir(tmp_path):
-    """the flat allowlist REPLACES the old run-dir base (no implicit run_dir): a writer that declares
-    only a skills subtree may NOT write run_dir. This is the #3 fix — the lead author (run_dir=source
-    case dir) and pitfalls curator (run_dir=the pending folder) no longer get a blanket run-dir write grant.
-    Positive control: the declared skills path IS allowed."""
+    """the flat allowlist REPLACES the old run-dir base (no implicit run_dir): a writer that declares only a skills subtree may NOT write run_dir."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skills = tmp_path / "defender" / "skills"
@@ -611,13 +592,7 @@ def test_write_empty_allow_denies_all(tmp_path):
 
 
 def test_write_allow_corpus_file_named_investigation_not_gated(tmp_path):
-    """invlang validation is keyed on `<run_dir>/investigation.md`, so a CORPUS file that merely
-    shares the basename is NOT routed into the validator — it is a lesson, not an invlang work log,
-    and denying it for failing a grammar it was never written in is the allow→deny regression #629
-    F-A2 names for report.md. Both artifacts key the same way since #681: the exact-basename
-    fallback this test used to pin existed only for a `run_dir`-less caller, and both roots are
-    now required, so no such caller exists. Positive control: the SAME invalid text at the run-dir
-    root DOES deny with the invlang reason, so the validator is live, not dead."""
+    """invlang validation is keyed on `<run_dir>/investigation.md`, so a CORPUS file that merely"""
     skills = tmp_path / "defender" / "skills"
     skills.mkdir(parents=True)
     run_dir = tmp_path / "run"
@@ -674,10 +649,7 @@ _PAYLOAD_PIPE = "cat /run/gather_raw/l-001/0.json | defender-sql"
     "--rows values",
 ])
 def test_gather_admits_the_declared_rows_flags_on_defender_sql(flags):
-    """#1138 O7: the lead can INVOKE the declaration from gather's bash lane — `--rows` and
-    `--names` are `defender-sql`'s shim flags, each in the `--flag VALUE` and `--flag=VALUE`
-    spellings, and a bracketed PATH is one value token. Before the flags existed on the gate,
-    every one of these was refused (C11) and the refusal pointed at the `query` tool."""
+    """#1138 O7: the lead can INVOKE the declaration from gather's bash lane — `--rows` and"""
     for cmd in (f"{_PAYLOAD_PIPE} {flags} 'SELECT count(*) AS n FROM data'",
                 f"{_PAYLOAD_PIPE} 'SELECT count(*) AS n FROM data' {flags}"):
         decision = _bash(cmd, _gather())
@@ -689,10 +661,7 @@ def test_gather_admits_the_declared_rows_flags_on_defender_sql(flags):
     "--name columns", "-r values", "--format csv",
 ])
 def test_gather_admits_nothing_else_new_on_defender_sql(flag):
-    """#1138 O7's other half — the gate admits `--rows`/`--names` and NOTHING else new: an
-    unknown flag, a near-miss spelling, a prefix of either, a short option. The paired control
-    is the same pipe carrying only the declaration, which the gate admits — so each refusal is
-    about the extra flag, not about the pipe, the payload or the declaration."""
+    """#1138 O7's other half — the gate admits `--rows`/`--names` and NOTHING else new: an"""
     declared = f"{_PAYLOAD_PIPE} --rows values --names columns 'SELECT 1'"
     assert _bash(declared, _gather()).allow
     extra = f"{_PAYLOAD_PIPE} --rows values --names columns {flag} 'SELECT 1'"

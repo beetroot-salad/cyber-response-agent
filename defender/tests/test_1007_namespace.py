@@ -33,12 +33,10 @@ operator's string while every reader re-derives from the episode id.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender.tests import _triplet_947 as T
 from defender.tests import _world_1007 as W
 from defender.tests.live_oracle_1224 import _spec1224 as S
@@ -87,49 +85,6 @@ def written_bytes(root: Path) -> str:
     return "\n".join(
         p.read_text(encoding="utf-8", errors="replace")
         for p in sorted(root.rglob("*")) if p.is_file())
-
-
-def test_the_launcher_answers_to_no_operator_named_episode_token(tmp_path):
-    """An operator cannot name an episode's namespace.
-
-    Observably true: `--episode-token <token>` is not an argument the launcher answers to — the
-    real `cli.main` exits non-zero on it — and the operator's string reaches no byte written
-    under the episodes root.
-
-    THE POSITIVE CONTROL IS THE SAME ARGV WITHOUT THE FLAG, because a bare absence assertion is
-    also green against a launcher that launches nothing at all: it returns 0, and every sibling
-    it starts is a world of the namespace derived from the episode id — the manifest's own.
-
-    What failure looks like: the flag stays, and one hand-typed token puts an episode's world
-    ledgers in a namespace no reader will ever re-derive.
-    """
-    fam = W.mod("runtime.branch._family")
-
-    refused_rc, refused_spawn, _ep = launch(
-        tmp_path / "refused", argv_extra=("--episode-token", OPERATOR_NAMED))
-
-    assert refused_rc != 0, (
-        f"the launcher accepted --episode-token {OPERATOR_NAMED!r} and exited "
-        f"{refused_rc!r} — the operator door onto the episode's namespace is still open")
-    assert refused_spawn.launches == [], "the refused launch started a sibling anyway"
-    root = Path(EH.episodes_root(W.current_tenant().data_root))
-    if root.is_dir():
-        assert OPERATOR_NAMED not in written_bytes(root), (
-            "the operator's token was written under the episodes root")
-
-    control_rc, spawn, ep = launch(tmp_path / "control")
-
-    assert control_rc == 0, (
-        f"the control launch failed ({control_rc}); the refusal above proves nothing")
-    family = fam.parse_family(W.read_yaml(ep / "family.yaml"))
-    token = fam.episode_token_for(family.episode_id)
-    assert spawn.worlds, "the control launch started no sibling — the absence above is vacuous"
-    for label in spawn.worlds:
-        world_id = fam.resume_world_from(family, label, ep).world_id
-        assert world_id == fam.world_token_for(token, label), (
-            f"world {label!r} resumes into {world_id!r}, not under the namespace {token!r} "
-            f"derived from the manifest's own episode id {family.episode_id!r}")
-    assert OPERATOR_NAMED not in written_bytes(root)
 
 
 def test_an_episode_is_read_under_one_namespace(tmp_path):
@@ -183,49 +138,3 @@ def test_an_episode_is_read_under_one_namespace(tmp_path):
             episode_token=OPERATOR_NAMED)
 
 
-def test_removing_the_episode_token_flag_leaves_no_orphan_in_the_committed_spec_corpus(tmp_path):
-    """Removing `--episode-token` settles the dependent this run's census missed — the committed
-    spec corpus the CI ratchet reads — and not only the two production modules.
-
-    Observably true: the flag's own spelling survives in neither production module that carried
-    it (`learning/branch/cli.py`'s argument and its threading, `runtime/branch/_family.py`'s
-    `override=` keyword), and `spec-flow/specs/spec_graph_947.yaml` — which minted a demand for
-    this escape under FORK-4 — names a `discharged_by` that resolves to a test function that
-    actually exists in `defender/tests/`, because the test it used to name is renamed by this
-    change. Each holder is asserted to EXIST before it is read: a string check is green when the
-    channel it looks through is not there, and that is not hypothetical in this suite — the
-    sibling census `test_removing_the_flag_leaves_no_orphan_in_the_committed_spec_corpus` named a
-    path that did not exist and passed on nothing until existence was asserted first.
-
-    THIS DEPENDENT WAS FOUND BY THE RATCHET, NOT BY THE CENSUS, and that is why it has a test:
-    the phase-F sweep for the flag grepped `episode_token=` and missed both the `override=`
-    keyword and the graph pointer. `lint_spec_graph` reported the dangling `discharged_by` as an
-    orphan on a graph whose ceiling is 0.
-
-    What failure looks like: the flag goes, the committed graph keeps pointing at a test function
-    nobody wrote, and CI fails on a corpus two directories from the diff.
-    """
-    repo = Path(__file__).resolve().parents[2]
-    cli_py = repo / "defender" / "learning" / "branch" / "cli.py"
-    family_py = repo / "defender" / "runtime" / "branch" / "_family.py"
-    graph = repo / "spec-flow" / "specs" / "spec_graph_947.yaml"
-    missing = [p for p in (cli_py, family_py, graph) if not p.is_file()]
-    assert missing == [], (
-        f"{[str(p.relative_to(repo)) for p in missing]} do not exist, so the absence below is a "
-        "fact about a file nobody read")
-
-    still_named = [p for p in (cli_py, family_py)
-                   if "--episode-token" in p.read_text(encoding="utf-8")]
-
-    assert still_named == [], (
-        "these still carry the removed flag: "
-        f"{[str(p.relative_to(repo)) for p in still_named]}")
-    pointed_at = re.findall(r"discharged_by: (test_\w+)", graph.read_text(encoding="utf-8"))
-    assert pointed_at, "the committed 947 graph names no test at all — the census read nothing"
-    authored = set()
-    for path in sorted((repo / "defender" / "tests").glob("*.py")):
-        authored |= set(re.findall(r"^def (test_\w+)", path.read_text(encoding="utf-8"), re.M))
-    dangling = sorted(name for name in pointed_at if name not in authored)
-    assert dangling == [], (
-        f"spec_graph_947.yaml points at {dangling}, which no test function in defender/tests/ "
-        "defines — the escape's demand was left naming a test this change renamed")

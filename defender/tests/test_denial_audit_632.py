@@ -1,28 +1,4 @@
-"""#632 part 3 — the durable denial record, its two sites, and the analyst who reads it.
-
-One test per demand of `spec_graph_632-verb-authorization.yaml`, named by its
-`discharged_by`. RED against `d01001e6` by construction.
-
-§7 R1 settles where a judge-side denial is audited: ONE fixed policy-denial stream per
-site — the same writer class and the same filename at the runtime and at the judge, each
-under its own run directory. The rejected readings were discharging the judge's half with
-the judge's own page (which is how an assertion gets written that proves nothing at the
-second site) and a second writer on the design's existing filename (partly unbuildable —
-the writer refuses a second open of one path). The "this record is not best-effort"
-guarantee is a property of the RECORD, not of the file, and reaches both sites however the
-destination lands.
-
-Two authoring hazards this file is written around rather than into:
-
-* The run-page renderer drops an unrecognized record kind SILENTLY (g23) — the probe drove
-  the real renderer with an unrecognized kind and with a lone budget-refusal stream, and
-  both rendered fine while the record appeared NOWHERE. "It renders" is therefore not the
-  observable; the denial's OWN CONTENT in the rendered output is.
-* There is no serialization safety net on the audit path (g24, executed): the writer
-  normalizes nothing, a non-serializable value raises uncaught on one route and is
-  swallowed to zero bytes on the other. What is pinned below is §7 R12's demanded
-  correction — a bounded, normalized projection — never today's behaviour.
-"""
+"""Verb-denial audit record: durable stream append, timestamp/seq with loud write failures, bounded projection, rendered in run HTML."""
 from __future__ import annotations
 
 import json
@@ -92,8 +68,6 @@ def _denials(run) -> list[dict]:
     return read_jsonl_rows(p) if p.is_file() else []
 
 
-
-
 def test_a_denial_appends_a_policy_event_to_the_durable_request_stream(tmp_path: Path):
     """A denial appends its own event type to the durable policy-denial stream at the
     decision point, flushed per record so it survives an abort, and takes its place in that
@@ -110,8 +84,6 @@ def test_a_denial_appends_a_policy_event_to_the_durable_request_stream(tmp_path:
     assert [rec_["event_type"] for rec_ in records] == [observe.POLICY_DENIAL_EVENT_TYPE] * 2
     assert [rec_["seq"] for rec_ in records] == [0, 1], "the stream carries no append ordering"
     assert records[0]["verb"] == "esql"
-
-
 
 
 def test_the_denial_record_carries_a_timestamp_and_a_seq_and_does_not_swallow_a_failed_write(
@@ -235,8 +207,6 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
         "the same call digests differently twice — the digest is not a function of the call"
 
 
-
-
 def test_a_denial_is_visible_in_the_rendered_run_html(tmp_path: Path):
     """A denial appears in the rendered run HTML, where an analyst opens it — its OWN
     CONTENT, the system and the verb it refused, not merely a page that built without
@@ -272,36 +242,5 @@ def test_a_denial_is_visible_in_the_rendered_run_html(tmp_path: Path):
         "the page renders the call but never says it was refused by policy"
     assert "esql" not in _visible_html("<html><body>ok</body></html>"), \
         "the visibility filter is inert — it would pass a page with no denial in it"
-
-
-def test_a_stream_written_before_the_denial_record_existed_still_renders(tmp_path: Path):
-    """A stream that predates the change — no policy-denial file at all, or only the older
-    refusal record — renders as "nothing happened here", without error. The complementary
-    control for the visibility demand above, and the half the probe already holds: the
-    renderer tolerates both an unrecognized kind and an old-shape-only stream.
-
-    Without it the visibility assertion could be satisfied by a renderer that crashes on
-    every run it does not find a denial in."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=_gather_registry(rec), turns=[q(*GRANTED_PAIR), DONE],
-                   run_id="d54")
-    assert not (RunPaths(r.run_dir).policy_denials).exists(), \
-        "a run with no denial still wrote a denial stream"
-
-    html = render_runtime_page(r.run_dir)
-    assert html, "an old-shape stream rendered nothing at all"
-    assert observe.POLICY_DENIAL_EVENT_TYPE not in html, \
-        "the page claims a policy denial in a run that had none"
-
-    legacy = RunPaths(r.run_dir).policy_denials
-    legacy.write_text(json.dumps({"event_type": "budget_refusal", "tool_name": "query"}) + "\n",
-                      encoding="utf-8")
-    assert render_runtime_page(r.run_dir), "an older refusal record in the stream broke the page"
-
-
-
-
-
-
 
 

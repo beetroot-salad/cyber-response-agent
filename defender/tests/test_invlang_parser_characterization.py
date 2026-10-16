@@ -44,18 +44,15 @@ from pathlib import Path
 
 import pytest
 
-from defender.skills.invlang import parser
 from defender.skills.invlang.parser import (
     Block,
     ParseWarning,
     RowError,
     _parse_attrs,
     _parse_auth,
-    _require,
     _row_cells,
     _row_dict,
     _split_cells,
-    _split_csv,
     _split_csv_or_semi,
     _split_quoted,
     _split_subcells,

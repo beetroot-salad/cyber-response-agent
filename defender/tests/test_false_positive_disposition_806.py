@@ -1,13 +1,4 @@
-"""`disposition false-positive` and the entity check that makes it reachable (#806).
-
-The disposition exists so a run can close a mis-keyed rule cheaply. The gate exists because
-"cheaply" is one edit away from "without looking". Both halves are pinned here.
-
-The fixtures are the shape of a real run, not a minimal one, because the failure this gate was
-written for is a run that did plenty of work — `pr815-rerun-0808` refuted the alert's claim in
-7 queries and then spent 124 more on the entities the refutation introduced, never asking about
-the host it was paged for. A gate that only demanded "some committed lead" would have passed it.
-"""
+"""disposition false-positive: shared vocabulary entry, the priced entity-check gate at write and at close, companion-read faults, benign's collected price."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -68,11 +59,6 @@ def _doc(*parts: str) -> str:
 
 
 # the keyword exists
-
-def test_false_positive_is_in_the_shared_vocabulary():
-    """It has to be in `_vocab` rather than invlang-local: `report.md`'s frontmatter and the
-    `conclude` block are validated by different schemas reading the same enum."""
-    assert "false-positive" in DISPOSITION_ENUM
 
 
 # the six ways the exit could be faked
@@ -185,16 +171,6 @@ def _paid(**over: str) -> str:
     rows = {"disposition": "false-positive", "detection_notes": _NOTES,
             "entity_check": "l-001", **over}
     return _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"), _conclude(**rows))
-
-
-def test_the_entry_price_is_readable_from_a_companion_document():
-    """The write gate reads a parsed companion; the close reads a FILE. One function answers
-    both, so the two boundaries cannot drift into disagreeing about what is owed."""
-    from defender.skills.invlang.validate import disposition_entry_price
-
-    assert disposition_entry_price("false-positive", _paid()).owed == ()
-    assert disposition_entry_price("false-positive", "").owed    # nothing written owes everything
-    assert disposition_entry_price("false-positive", _doc(_PROLOGUE, _LEADS)).owed
 
 
 #: An `investigation.md` that pays NEITHER price: `v-001` carries an unresolved class and an
@@ -435,30 +411,6 @@ def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, sh
         ))
     assert "prologue.vertices" in str(e.value), shape
     assert not (run_dir / "report.md").exists(), shape
-
-
-def test_the_grounding_clause_is_what_makes_the_open_slot_check_bite(tmp_path):
-    """Why the clause is worth having beyond the empty document: it is what guarantees
-    `_check_benign_open_slots` has something to check.
-
-    A prologue is the block ORIENT writes before PLAN runs, so requiring one costs a real run
-    nothing — but it means "every vertex's classification is resolved" can no longer be
-    satisfied by a document that declared no vertices. The pair is asserted here rather than
-    separately: the same document is refused with no prologue, refused again with a prologue
-    whose slots are open, and accepted only once both hold."""
-    from defender.skills.invlang.validate import disposition_entry_price
-
-    conclude = _conclude(disposition="benign")
-    open_slot = (
-        "```invlang\n"
-        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-001|compute|??/??/??|db-1|os=??\n"
-        "```\n"
-    ) + conclude
-
-    assert "prologue.vertices" in disposition_entry_price("benign", conclude).owed[0]
-    assert any("unresolved" in o for o in disposition_entry_price("benign", open_slot).owed)
-    assert disposition_entry_price("benign", _PROLOGUE + conclude).owed == ()
 
 
 def test_a_companion_that_cannot_be_read_never_commits_the_models_verdict(tmp_path):

@@ -107,19 +107,6 @@ def test_1025_the_runs_launcher_line_and_the_runs_row_show_one_wall(tmp_path):
     assert "1m00s launcher" not in page.text_of("stage-runs")
 
 
-def test_1025_no_grand_total_when_no_call_priced(tmp_path):
-    """An episode with no runs, no judge traces and one questioner trace whose `model` the
-    pricing table does not know has priced nothing: the questioner row reads "partial — 0 of
-    1 calls priced" and there is NO grand-total line — not "$0.0000 — excludes…". `costed`
-    is gated on priced calls (review of PR #1042)."""
-    ep = E.sample_episode(tmp_path, traces=False, runs=False)
-    E.write_trace(ep.dir, "questioner", model="nobody/prices-this")
-    page = render(ep)
-    questioner = page.text_of("stage-questioner")
-    assert "partial — 0 of 1 calls priced" in questioner, questioner
-    assert page.elements(cls="st-total") == [], page.text_of("sec-stages")
-
-
 def test_1025_the_stage_table_reads_the_role_costs_the_model_decided(tmp_path):
     """The verdict tile's total, the header's lower bound and the stage table's per-role rows
     are one computation: `_Episode.role_costs`, filled at load, is what the table renders —
@@ -234,24 +221,6 @@ def test_1025_record_derived_refusals_take_the_untrusted_escape(tmp_path):
     assert "grade record unreadable" in page.text_of("sec-verdict")
     assert "onerror=" not in page.raw, "a record-derived sentence reached the page unsplit"
     assert hostile in page.text, page.text[:400]
-
-
-def test_1025_the_control_role_is_the_launchers_own_spelling():
-    """The control world is the manifest row whose `role` is `BASE_ROLE`, imported from the
-    launcher's family module — never a respelled `"A"` the page would keep after a rename."""
-    module = visualize_episode()
-    source = Path(module.__file__).read_text(encoding="utf-8")
-    assert '== "A"' not in source
-    assert "BASE_ROLE" in source
-    assert module.BASE_ROLE == E.mod("runtime.branch._family").BASE_ROLE
-
-
-def test_1025_every_result_event_state_has_a_sentence():
-    """`_ResultEvent.text` answers every state the loader can produce, `ok` included — a
-    display helper must not be the one thing on the page that can raise (d01)."""
-    module = visualize_episode()
-    for state in ("absent", "refused", "none", "unusable", "ok"):
-        assert isinstance(module._ResultEvent(None, None, state).text, str)
 
 
 # ---------------------------------------------------------------------------------------

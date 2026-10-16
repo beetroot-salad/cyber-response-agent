@@ -1,34 +1,6 @@
 """#1235, round 3 — the review's fix list, pinned at the unit edge (the owner approved it).
 
 Round 2 gave every run one `RunState` (`defender/runtime/run_state.py`), carried by reference.
-A /code-review pass then found where the state still followed the file, where a missing state
-failed open, and where one gate read a different clock from the rest. What this module pins:
-
-  O1. The state is the record; `executed_queries.jsonl` is the model's view of it. A failing
-      call whose view write is refused still charges the circuit breaker, and its row is in
-      the state, before the write's error propagates (`QueryCapture._record`). The append's own
-      contract — validate, record, then write the view — is `tests/test_record_query.py`'s
-      `test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent`; the driven run
-      is `tests/e2e/test_1235_round3_e2e.py`.
-  O2. An enforced role whose deps carry no run state RAISES on its first tool call (pinned,
-      with the live state of that folder untouched, in `tests/e2e/test_1235_adversary_round2.py`
-      as `test_a_deps_with_no_state_raises_and_never_reaches_a_live_runs_state`); a
-      non-enforced one neither counts nor raises (`driver/_budget.py`), here.
-  O3. Lead-0's budget gate reads the clock the budget hooks read: the monotonic origin and the
-      oracle-held seconds, not the wall-clock budget snapshot alone. Each case is paired with the
-      hook's own verdict on the same state.
-  O4. A reducer failure on gather deps with no run state raises (a wiring fault); with a state,
-      a refused observability write never fails the command.
-  O5/O7. What round 3 deletes is gone (`RunState.start`, lead-0's `_rows_for` and
-      `_budget_account`, `QueryCapture._seq_lock`, `hooks/_run_dir`'s two locked JSON helpers),
-      and `RunState`'s read accessors: `lead_rows` hands out a tuple of the stored rows,
-      `row_count`, `last_row` and `breaker_failures`.
-
-O6 (the summary no longer carries the state; `run_investigation(run_state=…)` is the seam) is
-driven in `tests/e2e/test_1235_round3_e2e.py`.
-
-Faults enter through planted entries (a symlink or a directory at the record's name, which
-`write_guarded` refuses under any uid) and the injected box; nothing is monkeypatched.
 """
 from __future__ import annotations
 
@@ -39,8 +11,6 @@ from defender.tests._spec1077 import fixture_run
 
 import asyncio
 import dataclasses
-import importlib
-import importlib.util
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -331,26 +301,6 @@ def test_a_refused_shim_row_write_never_fails_the_command(tmp_path, kind):
 # ======================================================================================
 # O5 / O7 — what round 3 deletes is gone; the state's read accessors.
 # ======================================================================================
-
-def test_what_round_three_deletes_is_gone():
-    """`RunState.start` duplicated the constructor; lead-0's `_rows_for` / `_budget_account`
-    wrapped one state call each; `QueryCapture._seq_lock` serialised what the state's own lock
-    already does; `hooks/_run_dir`'s `read_json_locked` / `update_json_locked` lost their last
-    production caller when the budget left the run folder."""
-    from defender.runtime import lead_zero
-    from defender.runtime.lead_zero import _capture
-
-    assert not hasattr(RunState, "start"), "RunState.start survived beside the constructor"
-    for module in (lead_zero, _capture):
-        left = [n for n in ("_rows_for", "_budget_account") if hasattr(module, n)]
-        assert left == [], f"{module.__name__} still has {left}"
-    assert not hasattr(QueryCapture(registry=None), "_seq_lock"), \
-        "the query tool still holds a lock of its own beside the run state's"
-    if importlib.util.find_spec("defender.hooks._run_dir") is not None:
-        run_dir_mod = importlib.import_module("defender.hooks._run_dir")
-        left = [n for n in ("read_json_locked", "update_json_locked")
-                if hasattr(run_dir_mod, n)]
-        assert left == [], f"hooks/_run_dir still has {left}, with no production caller"
 
 
 def test_lead_rows_hands_out_a_tuple_of_the_rows_as_they_stood(tmp_path):

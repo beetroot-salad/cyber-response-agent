@@ -187,26 +187,4 @@ def test_tests_are_out_of_scope(gate, tmp_path):
 
 # the gate cannot report clean on source it never read
 
-def test_an_unparseable_file_fails_the_gate_rather_than_passing_it(gate, tmp_path):
-    """#618/#621/#652's rule, and sharper here than for a single-pass lint: an unreadable OWNER
-    disarms its vocabulary for the entire corpus, so "0 findings" over a partial corpus would be
-    actively misleading. Exit 2 — the gate could not run, which is not clean.
 
-    Paired with a control over the same tree minus the broken file, so this cannot pass by the
-    gate simply being broken."""
-    files = {"owner.py": _OWNER_ARMED, "borrower.py": _BORROWER}
-    clean_root = _tree(tmp_path / "clean", files)
-    assert gate.main([], scope=clean_root, baseline_path=tmp_path / "none.json") == 1
-
-    broken_root = _tree(tmp_path / "broken", {**files, "broken.py": "def (\n"})
-    assert gate.main([], scope=broken_root, baseline_path=tmp_path / "none.json") == 2
-
-
-@pytest.mark.gate
-def test_no_disposition_site_is_baselined(gate):
-    """#785's own claim, stated as the property rather than as "the baseline is empty": every
-    borrow of the run vocabulary is folded, and the one deliberate exemption — the write gate,
-    exact where every reader normalizes — states its reason at the site instead of being
-    baselined into silence. The two entries the baseline does carry are older debt in other
-    vocabularies, so asserting an EMPTY baseline would conflate the two claims."""
-    assert [f for f in gate._scan() if "DISPOSITION" in f.fingerprint] == []

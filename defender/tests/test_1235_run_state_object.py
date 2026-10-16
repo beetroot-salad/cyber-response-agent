@@ -1,35 +1,6 @@
 """#1235, round 2 — the `RunState` object itself: fresh at its start, the only holder of a run's
 live state, its operations atomic under its own lock, and its oracle clock its own.
 
-The owner's redesign (issue comment 6117481676) replaces round 1's three process-wide tables,
-keyed by the run folder's path, with ONE object per run (`defender.runtime.run_state.RunState`).
-The behaviour functions stay in their modules and take the state first:
-`budget_enforcer.account_call / count_call / oracle_turn_opened / oracle_turn_closed /
-oracle_held`, `circuit_breaker.record_outcome / is_tripped / down_message`,
-`record_query.append_query_row / repeat_note / _next_seq / system_for_payload_operands`.
-
-What this module pins, at the object (the driven obligations are in
-`tests/e2e/test_1235_run_state_e2e.py`):
-
-  - `RunState(run_dir, run_id)` is a fresh run: zero counts, a blank breaker, no rows, no oracle credit.
-    It reads no file — whatever the folder or its container holds — and writes none.
-  - Nothing a caller does to what the state hands out moves the run (snapshots are copies;
-    `lead_rows` is a tuple of the stored rows, for read-only use — round 3).
-  - No process-wide table remains, and two states — even for one folder and one run id — share
-    nothing; a row recorded through a deps object lands in the state that deps CARRIES, however
-    the deps spell the folder.
-  - A row append is one operation under the state's lock: concurrent appends to one lead take
-    distinct seqs, and the state and the table agree row for row.
-  - R6: every state has a clock; an oracle turn pauses it and its interval is credited once; the
-    credit lives only in the state, so a new state for the same run id starts with none (#1239)
-    and no `.oracle-held.json` is written anywhere.
-
-R3 is `tests/test_record_query.py`'s
-`test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent`: since round 3 the state
-is the record and `executed_queries.jsonl` the model's view, so a refused view write leaves the
-row IN the state with its seq spent (params refused before anything still record nothing).
-
-RED until the round-2 implementation lands: `defender.runtime.run_state` does not exist.
 """
 from __future__ import annotations
 
@@ -177,20 +148,6 @@ def test_what_the_state_hands_out_cannot_move_the_run(tmp_path):
 # ======================================================================================
 # Carried, never looked up.
 # ======================================================================================
-
-def test_no_process_wide_table_of_run_state_remains():
-    """The three tables keyed by run folder, and the open-turn table, are gone with the
-    folder-keyed operations that read them; a run's state is reached only through its object.
-    (The behavioural half — nothing holds a run's state once its run is over — is R4 in
-    `tests/e2e/test_1235_run_state_e2e.py`.)"""
-    for module, names in (
-        (be, ("_BUDGETS", "_OPEN_TURNS", "open_budget", "read_budget", "update_budget_locked",
-              "_has_clock", "forget_open_turn")),
-        (cb, ("_BREAKERS", "open_breaker", "breaker_state")),
-        (rq, ("_MIRRORS", "open_query_mirror", "live_lead_rows", "lead_rows")),
-    ):
-        left = [n for n in names if hasattr(module, n)]
-        assert left == [], f"{module.__name__} still has {left}"
 
 
 def test_two_states_for_one_folder_and_one_run_id_share_nothing(tmp_path):

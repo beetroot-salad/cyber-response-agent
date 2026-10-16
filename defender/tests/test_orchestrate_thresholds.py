@@ -36,11 +36,7 @@ def test_has_curator_work_raises_on_bad_threshold(tmp_path, monkeypatch):
 def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queued(
     tmp_path, monkeypatch
 ):
-    """The markers-present path: a queued run marker must NOT let a non-numeric
-    LEARNING_PITFALLS_THRESHOLD slip past the gate. If the gate short-circuited to True
-    on the marker before reading the threshold, the FatalConfigError would only surface
-    later inside run_pitfalls, where _drain_pitfalls' broad `except Exception` swallows it
-    (exit 0, not the contracted exit 2). The gate reads the threshold up front (#435)."""
+    """The markers-present path: a queued run marker must NOT let a non-numeric LEARNING_PITFALLS_THRESHOLD slip past the gate."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-x")
@@ -51,10 +47,7 @@ def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queue
 
 
 def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeypatch):
-    """LEAD_AUTHOR_MAX_RETRIES is read inside the lead-author drain (past the wake gate,
-    before the per-marker loop). A non-numeric value must fail loud as FatalConfigError —
-    enrolled alongside StageAbort so _run_stage maps it to the contracted exit 2 — not a
-    raw ValueError that escapes the catch as an uncontracted exit-1 traceback (#435)."""
+    """LEAD_AUTHOR_MAX_RETRIES is read inside the lead-author drain (past the wake gate, before the per-marker loop)."""
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "high")
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-x")
@@ -159,10 +152,7 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
 
 
 def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, monkeypatch):
-    """A _LeadAuthorRetry must reach the drain's retry handler via `propagate=`, NOT the
-    dead-letter branch: the marker stays queued with a bumped attempt count. This is the
-    regression guard for the `propagate=(_LeadAuthorRetry,)` wiring — drop that argument and
-    the transient is silently quarantined instead of retried."""
+    """A _LeadAuthorRetry must reach the drain's retry handler via `propagate=`, NOT the"""
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-transient")
@@ -233,12 +223,7 @@ def test_run_or_dead_letter_dead_letters_a_run_unprocessable():
 
 
 def test_run_or_dead_letter_reraises_systemic_faults():
-    """The systemic family is NEVER dead-lettered — it re-raises past the guard so it
-    reaches _run_stage as the contracted exit 2. The callback must not fire. Both a bare
-    StageAbort (the learning base — catching it covers any future learning-internal
-    systemic type for free) and the enrolled FatalConfigError (the shared misconfig
-    condition, named explicitly in the reraise set since it is not a StageAbort) must
-    escape — #443/#445."""
+    """The systemic family is NEVER dead-lettered — it re-raises past the guard so it reaches _run_stage as the contracted exit 2."""
     for exc in (StageAbort("systemic fault"), FatalConfigError("non-numeric threshold")):
         calls: list[Exception] = []
 
@@ -432,33 +417,7 @@ _UNRECOGNISED_HOLD = _HELD_REASONS[-1]
 
 
 def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
-    """#881/O2: `_pending_queue_counts` counts what a tick could take, not file lines.
-
-    Six cases on one address, so no single mis-reading satisfies it:
-
-    * five HELD rows count as zero — the defect. Each carries `held_reason`, which is the
-      PERMANENT hold's field, so the count needs no second rule about what held means.
-    * five otherwise identical rows WITHOUT the field count as five. This is the control that
-      makes the first case mean something: a counter that answered 0 for every queue would
-      pass the first assertion and pin the drain shut instead of open.
-    * A ROW HELD FOR A REASON NO GATE IN THIS TREE SPELLS counts as zero too. The count keys
-      on the FIELD, never on the reason's prose: a reader matching the three strings the tree
-      writes today answers "pending" for a hold written by a gate since reworded or deleted,
-      which is precisely the row this defect strands — the design's corrected premise says
-      the trigger is legacy rows left in a deployed queue by a writer that is gone.
-    * A ROW HELD WITH NO WORDING AT ALL — `held_reason: ""`, or `null` — counts as zero too.
-      This is the same demand one step sharper, and the step a truthiness test fails: "the
-      field is the contract, its value is the holder's prose" is not satisfied by a reader
-      that asks whether the prose is non-empty. A legacy or hand-edited row stamped by a
-      writer that had no sentence to give is exactly the row this defect strands, and it
-      would have pinned the gate open on every tick.
-    * a blank line still counts as nothing (the behaviour that is already right).
-    * A LINE THAT IS NOT A ROW still counts as ONE, and there are two kinds of those: one
-      that is not JSON, and one that is JSON but not an object. Both are work — the drain's
-      unkeyable path retires exactly such a line — and the second is the sharper: a reader
-      that only guarded `json.loads` greens here and then raises `AttributeError` on
-      `row.get(...)` on every tick, a class no drain guard names.
-    """
+    """#881/O2: `_pending_queue_counts` counts what a tick could take, not file lines."""
     paths = _paths(tmp_path)
     held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
 
@@ -506,20 +465,7 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
 
 
 def test_881_a_deferred_row_still_counts_as_work(tmp_path, monkeypatch):
-    """#881/O2, carried into #773's replacement for the retryable forward-check hold.
-
-    #773 M1/M6/M7 retire the old `held_forward_bad` bucket outright: a lesson the drain's own
-    check refuses is now either TERMINAL (`consumed_forward_bad`, rotated off the queue
-    entirely — no longer a "held" row at all) or DEFERRED (M7's own bounded `deferrals`
-    counter, re-queued with no `held_reason` stamped). Only the second shape is still a
-    queued row the wake gate must count as work — `test_773_deferral.py`'s own
-    `test_drain_ticks_own_loop_continuation_is_unaffected_by_the_new_row_fields_773` pins
-    this through the real drain tick; this is the wake-gate-only version of the same claim,
-    driven directly against `_pending_queue_counts`/`_has_curator_work`.
-
-    The PAIRED CONTROL is a permanent hold on the same address in the same queue: it must
-    still count zero, or "count everything" would satisfy the first half.
-    """
+    """#881/O2, carried into #773's replacement for the retryable forward-check hold."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     paths = _paths(tmp_path)
 
@@ -544,24 +490,7 @@ def test_881_a_deferred_row_still_counts_as_work(tmp_path, monkeypatch):
 def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_again(
     tmp_path, monkeypatch
 ):
-    """#881/O2: `_has_curator_work` answers for rows that can be AUTHORED.
-
-    Four positions, each with its complement on the same address:
-
-    * five held rows do NOT trip a threshold of five — today they do, and the drain spins up
-      every tick, takes the repo lock, re-holds the same five rows and writes nothing.
-    * five UNHELD rows DO trip it, so the gate is not simply wedged shut.
-    * one clean row beside those five held ones does not trip it either. This is the sharper
-      half: a gate that merely subtracted "some" held rows, or that special-cased an
-      all-held queue, still answers True for 5+1 while only ONE row is authorable. Adding
-      four more clean rows trips it, which is the arithmetic stated in the other direction.
-    * five rows held for a reason no gate in this tree spells do not trip it either — the
-      legacy queue this defect actually strands, whose holder's wording the gate cannot be
-      allowed to depend on. See `_HELD_REASONS`.
-
-    The threshold is set explicitly rather than left to `env_int`'s default so the test says
-    what number the counts are being judged against.
-    """
+    """#881/O2: `_has_curator_work` answers for rows that can be AUTHORED."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     paths = _paths(tmp_path)
     held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]

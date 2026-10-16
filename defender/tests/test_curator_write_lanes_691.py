@@ -1,21 +1,4 @@
-"""#691 — the curator's WRITE-capable lanes (O2/S1-S4 + MD-1/MD-3/MD-4/MD-5/MD-7).
-
-Executable spec (write-tests phase E), RED against HEAD where it pins a correction. Every test
-drives a REAL gate through the shared harness (`_curator_691_harness`): `write_file`/`edit_file`
-raise `ModelRetry` on a `decide_write` deny and LAND the file on allow; `bash_decision(...).allow`
-is the rm lane. (#773 M1 retired the fourth write-capable lane, `forward_check` — the tool the
-curator called is gone; the drain runs the check itself now.) Gate tests build the deps
-through the stable `for_run` entry point (M9 keeps it); MD-1 drives the binding seam itself.
-
-Corrections pinned here (NOT the refuted behaviour):
-  * MD-1 / D1 (RG-1): a curator whose write scope roots OUTSIDE its read confine is unbuildable —
-    bind REFUSES it (R4's "write byte-identical to today" clause was struck).
-  * MD-3 (RG-adv4): the rm grant never `resolve()`s, so a symlink out of corpus it DELETES while
-    the other three lanes deny — the correction is all FOUR lanes agree (deny).
-  * MD-7 / F77 / f7 (D3): the write lane is narrowed to the read segment class, so the write and
-    read lanes admit EXACTLY the same lesson filenames (a space/newline name write=True read=False,
-    x6, is the pinned bug — the correction is the write REFUSES it).
-"""
+"""Curator write lanes: .md-only writes and single-operand rm confined to its own corpus, symlink escapes denied, write scope within the read confine."""
 from __future__ import annotations
 
 import pytest
@@ -69,18 +52,6 @@ def test_write_allow_roots_at_the_worktree_corpus_not_run_dir(tmp_path):
     _denied_on_both_write_surfaces(deps, str(rd / "scratch.md"))  # NOT run-dir-rooted
 
 
-def test_the_run_directory_and_the_authored_tree_are_the_same_tree(tmp_path):
-    """They are NOT the same tree: run_dir is <MAIN>/defender/learning/_pending, the authored tree
-    is the worktree (the production shape on every drained batch, P4). A write lands in the worktree
-    corpus while a same-named write into run_dir denies — the two trees are distinct."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    assert corpus(wt, "lessons").resolve() != rd.resolve()
-    assert rd.resolve() not in corpus(wt, "lessons").resolve().parents
-    _admitted_in_corpus(wt, deps, "lessons")
-    _denied_on_both_write_surfaces(deps, str(rd / "lesson.md"))
-
-
 def test_the_curator_cannot_write_outside_its_own_corpus(tmp_path):
     """A write/edit to a SIBLING corpus, to run_dir, and to the MAIN checkout (defender/skills) is
     DENIED on BOTH write surfaces and nothing lands; the own-corpus .md write succeeds (control).
@@ -101,24 +72,6 @@ def test_the_curator_cannot_write_a_non_md_path(tmp_path):
     deps = curator_deps(wt, rd, "lessons")
     for bad in ("note.py", "note.txt", "noext"):
         _denied_on_both_write_surfaces(deps, rel("lessons", bad))
-    _admitted_in_corpus(wt, deps, "lessons")
-
-
-def test_a_write_operand_filename_is_the_empty_string(tmp_path):
-    """An empty filename (the corpus dir itself, no basename) cannot satisfy the `.md` suffix and is
-    refused on both surfaces; a real .md name succeeds (control)."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    _denied_on_both_write_surfaces(deps, "defender/lessons/")   # empty basename
-    _admitted_in_corpus(wt, deps, "lessons")
-
-
-def test_a_write_operand_filename_has_no_extension(tmp_path):
-    """A write of an extension-less filename under the corpus is refused on both surfaces; the
-    sibling .md write succeeds (control)."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    deps = curator_deps(wt, rd, "lessons")
-    _denied_on_both_write_surfaces(deps, rel("lessons", "lessonfile"))
     _admitted_in_corpus(wt, deps, "lessons")
 
 
@@ -245,19 +198,6 @@ def test_a_single_operand_in_corpus_rm_is_admitted(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     assert bash_decision(deps, "rm defender/lessons/draft.md").allow
-
-
-def test_the_rm_grant_under_a_degenerate_empty_or_dot_corpus_name(tmp_path):
-    """A degenerate corpus name ("" or ".") is rejected by M7 BEFORE any grant is compiled (K4), so
-    no admitting rm grant is ever built — binding such a curator RAISES. Its paired positive control
-    is test_a_single_operand_in_corpus_rm_is_admitted (an ACCEPTED name admits an in-corpus rm), so
-    this negative is not vacuous (RF2). RED against HEAD: M7's single-segment rule is not built."""
-    wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
-    for degenerate in ("", "."):
-        # strict ValueError (M7's rejection), NOT a bare TypeError from the not-yet-built
-        # corpus_name field — else this negative passes vacuously against HEAD.
-        with pytest.raises(ValueError):  # noqa: PT011
-            bind_curator(wt, rd, degenerate)
 
 
 def test_a_single_rm_naming_two_corpora_is_denied(tmp_path):

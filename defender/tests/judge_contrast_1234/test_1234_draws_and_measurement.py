@@ -1,33 +1,4 @@
-"""#1234 slice 7 — draws and measurement: how a world's completed draws combine (A7, unanimity)
-into its row's outcome, systems, measured state, doubt mark and named gaps, and what that lets
-each queue carry (A13: findings route per draw under their own ids; withholding stops only
-defender rows).
-
-Every scenario is a HAND-BUILT archived family (`S.family`, the control `a` plus planted worlds)
-graded through the judge's one entry point (`S.grade` -> `grade_episode`) with a routed,
-recording judge (`S.RoutedJudge`, keyed `(label, draw[, attempt])`). Every A7/A13 scenario asks
-for more than one draw (45-dispositions-final I-7: A7 is inert at the default of one); d05m pins
-that default itself.
-
-Faults, per the hierarchy:
-  * a MALFORMED reply is real text through the real `validate_reply` (`MALFORMED` is not YAML,
-    so any reply validator refuses it and the draw asks again within `_REPLY_ATTEMPTS`, N22);
-    s_AM23's repeated system and case variant, and s_A47's unserved lead-set systems, are real
-    replies the design rules refused at validation (A5, X12, K12, M20=A);
-  * a FAILED draw is `RoutedJudge(fail=...)` raising `RunUnprocessable` — #921's P9 claim
-    (`spec_graph_921-family-judge.yaml`), carried by the shared fake, not re-observed here;
-  * a non-positive `JUDGE_DRAWS` is the real knob, set in the environment (s_A50).
-
-Every "queues no defender row" assertion stands beside a world in the SAME pass whose
-investigator findings do queue, so an empty queue is never the only evidence. Coined row keys
-come from `S.COINED` / `S.RULED`; nothing here spells one.
-
-None of this exists at base 463833df: the amended reply shape (three filed lists, no
-`episode_outcome`) is refused by main's validator, so most tests are red there on their first
-row assertion (`completed_draws` is 0). The exceptions: s_A50 fails on its refusal assertion
-(main grades a non-positive knob), d05m on its one-ask assertion (main re-asks the refused
-reply), and s_L15 on its found-gaps assertion (main has no user section).
-"""
+"""#1234 judge contrast: multi-draw agreement and world measurement predicates."""
 from __future__ import annotations
 
 from collections import Counter

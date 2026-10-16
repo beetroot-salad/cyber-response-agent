@@ -1,27 +1,4 @@
-"""The text-IO encoding contract (#589, and #588's read/write pair).
-
-`defender/skills/invlang/corpus.py` guarded its `read_text()` with `except OSError`. A
-`UnicodeDecodeError` is a **`ValueError`, not an `OSError`**, so it escaped `_load_one`, escaped
-`load_corpus` (which has no `try`), and took down `defender-invlang` — an allowed main-loop shim —
-on one undecodable byte in one past run's `investigation.md`. `defender/_corpus.py` already had
-this guard right, with a docstring spelling out the exact trap; invlang was a hand-rolled copy of
-it that dropped half.
-
-Two halves, and they need different tests:
-
-- **The guard** is locale-INDEPENDENT. Any undecodable byte — a truncated write, a binary blob —
-  escapes today, on any machine, under any locale. `test_an_undecodable_*` drive it in-process
-  with no locale games at all; that is the point, and a test that reached for a C locale to drive
-  it would be testing the wrong half.
-- **The pin** is locale-dependent: it needs an ambient encoding that isn't UTF-8. Those tests use
-  the subprocess + `C_LOCALE_ENV` idiom from `test_corpus_fold_584.py::test_d5`, because the
-  locale is process-wide and a *bare* `LC_ALL=C` does NOT reproduce (PEP 538 coerces it to
-  C.UTF-8) — hence `PYTHONCOERCECLOCALE=0` + `PYTHONUTF8=0`.
-
-The last test is the one a read-only suite structurally cannot catch: a pinned READ beside an
-ambient WRITE (#588) does not fail loudly, it loses data — the lesson is written as latin-1,
-committed, and then warn-skipped as "malformed" by every walk that reads it back.
-"""
+"""Text-IO encoding contract: undecodable files are skipped or retried not raised, utf-8 pins hold under a C locale, vendor bytes are replaced."""
 from __future__ import annotations
 
 import os

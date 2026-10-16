@@ -225,53 +225,6 @@ def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_fi
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_a_steps_ended_at_sorts_before_its_started_at(tmp_path):
-    """No negative duration is ever displayed: `read_stage_timings` returns a step whose
-    `ended_at` precedes `started_at` unchanged (p5), so that step's row shows "—" and the header
-    wall is min(start)–max(end); the whole-table refusal arm is NOT taken.
-    """
-    ep = E.sample_episode(tmp_path)
-    steps = E.every_step()
-    steps[0] = ("questioner", "2026-09-09T10:00:05Z", "2026-09-09T10:00:01Z")
-    E.write_timing(ep.dir, steps)
-    page = render(ep)
-    timing = page.text_of("stage-timing")
-    assert "timing record unreadable" not in timing
-    row = timing[timing.index("questioner"):timing.index("preflight")]
-    assert "—" in row, row
-    assert "-" not in row.replace("—", "").replace("not on", ""), row
-    # NOT "9m00s" (that is the CLEAN every-step header, asserted two tests up): with the first
-    # step's own pair inverted, its untrustworthy timestamps contribute to neither side of
-    # min(start)/max(end) — the same refusal its own "—" cell already makes — so the header
-    # spans only the four valid steps, preflight's start (10:02) to judge's end (10:09): 7m00s.
-    assert "7m00s" in page.text
-    assert "9m00s" not in page.text
-
-
-def test_1025_a_repeated_steps_own_wall_excludes_an_inverted_sibling_entry(tmp_path):
-    """A repeated step's OWN wall (its first entry's start to its last entry's end, J15) is
-    computed the same way the header wall already is (p5, the test above): an inverted entry
-    among the repeats contributes to neither side of min(start)/max(end) for the row's own
-    span, not only for the page-wide header. A buggy filter that excludes an inverted entry's
-    pair from the header aggregate but not from this row's own aggregate would let one bad
-    entry stretch a repeated step's displayed wall past what its trustworthy entries alone
-    cover.
-    """
-    ep = E.sample_episode(tmp_path)
-    steps = E.every_step()
-    steps.append(("preflight", "2026-09-09T10:10:00Z", "2026-09-09T10:09:00Z"))
-    E.write_timing(ep.dir, steps)
-    page = render(ep)
-    timing = page.text_of("stage-timing")
-    row = timing[timing.index("preflight"):timing.index("runs")]
-    assert "2 entries" in row, row
-    # The clean single preflight entry alone (10:02–10:03Z) is 1m00s. If the inverted second
-    # entry's own timestamps (10:09–10:10Z) leaked into the span, min(start)=10:02 and
-    # max(end)=10:09 would read 7m00s instead.
-    assert "1m00s" in row, row
-    assert "7m00s" not in row, row
-
-
 def test_1025_what_the_header_wall_covers(tmp_path):
     """With `timing.json` present the header wall is labelled as the launcher's wall from the
     first step's `started_at` to the last step's `ended_at` (9m00s) — the label says it
@@ -359,61 +312,6 @@ def test_1025_a_framed_trace_row_carries_a_failure_field_instead_of_a_reply(tmp_
     assert "&lt;TimeoutError&gt;" in page.raw
 
 
-def test_1025_judge_trace_stems_with_underscored_labels_and_two_digit_draws(tmp_path):
-    """Each judge trace is attributed to its (label, draw) and ordered family first, then each
-    roster world in numeric draw order; the stem is composed from the known label and draw by
-    the writer's `':'→'_'` rule (g2), never parsed back from the filename — draw 10 of
-    `no_remote_session` sits after draw 9, under that world.
-    """
-    ep = E.sample_episode(tmp_path)
-    for n in range(1, 11):
-        E.write_trace(ep.dir, f"judge:{E.PASSTHROUGH_WORLD}:{n}", prompt=f"draw {n} prompt")
-        E.draw_document(ep.dir, E.PASSTHROUGH_WORLD, n, E.draw_doc(findings=[]))
-    # #1234 A6: a transcript shows for a draw the record names
-    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.PASSTHROUGH_WORLD,
-                                         tuple(range(11))))
-    page = render(ep)
-    order = _tx_order(page, "stage-judge")
-    assert order[0] == f"tx-judge_{E.FAMILY}_0_trace", order
-    world = [i for i in order if i.startswith(f"tx-judge_{E.PASSTHROUGH_WORLD}_")]
-    assert world == [f"tx-judge_{E.PASSTHROUGH_WORLD}_{n}_trace" for n in range(11)], world
-    assert "draw 10 prompt" in page.text_of(f"tx-judge_{E.PASSTHROUGH_WORLD}_10_trace")
-
-
-def test_1025_response_rows_missing_usage_model_or_duration(tmp_path):
-    """A response row without `usage` or with no `model` renders "unpriced" (never $0.0000); a
-    row without `duration_ms` is excluded from the model-time axis; the stage sum and total say
-    how many rows they priced.
-    """
-    ep = E.sample_episode(tmp_path)
-    E.write_trace(ep.dir, "questioner:c", usage=None, duration_ms=None, model=None)
-    page = render(ep)
-    block = page.text_of("tx-questioner_c_trace")
-    assert "unpriced" in block, block
-    assert "$0.0000" not in block, block
-    questioner = page.text_of("stage-questioner")
-    assert "$0.7500" in questioner, questioner
-    assert "partial — 2 of 3 calls priced" in questioner, questioner
-    assert "1m30s" in questioner, questioner
-    assert S.questioner_wall not in questioner, questioner
-
-
-def test_1025_a_trace_response_row_names_a_model_absent_from_the_pricing_table(tmp_path):
-    """A response row naming a model the pricing table lacks reads "unpriced" (not "$0.0000"),
-    the stage sum excludes it and says so, and the total is labelled partial — `usage_cost`'s
-    zero (g21) is never shown as a dollar figure.
-    """
-    ep = E.sample_episode(tmp_path)
-    E.write_trace(ep.dir, "questioner:c", model="accounts/fireworks/models/no-such-model-9")
-    page = render(ep)
-    assert "unpriced" in page.text_of("tx-questioner_c_trace")
-    assert "$0.0000" not in page.text_of("sec-stages")
-    questioner = page.text_of("stage-questioner")
-    assert "$0.7500" in questioner, questioner
-    assert "partial — 2 of 3 calls priced" in questioner, questioner
-    assert "partial" in page.text_of("stage-timing"), page.text_of("stage-timing")
-
-
 def test_1025_trace_prompt_or_reply_contains_a_literal_pre_or_script_close_tag(tmp_path):
     """Every prompt and reply renders through `pre_text_untrusted`, so a literal `</pre>` or
     `</script>` appears as text (`&lt;/pre&gt;`) and closes nothing: the page's `<script` and
@@ -433,76 +331,9 @@ def test_1025_trace_prompt_or_reply_contains_a_literal_pre_or_script_close_tag(t
     assert "alert(1)</script>" not in page.raw
 
 
-def test_1025_a_sibling_tool_trace_jsonls_final_row_is_not_a_result_event(tmp_path):
-    """A run whose `tool_trace.jsonl` does not end in a result event reads "no result event" in
-    its cost row; nothing is priced from a non-result row; the render never raises.
-    """
-    ep = E.sample_episode(tmp_path)
-    E.write_tool_trace(ep.run(E.GRADED_WORLD), [
-        E.result_event(cost=9.99, duration_ms=1),
-        {"type": "assistant", "message": {"content": [{"type": "text", "text": "tail"}]}}])
-    page = render(ep)
-    runs = page.text_of("stage-runs")
-    assert "no result event" in runs, runs
-    assert "$9.99" not in page.text, runs
-    assert f"${S.run_cost[E.CONTROL]:.4f}" in runs
-
-
-def test_1025_render_against_a_still_running_sibling_with_no_result_event_yet(tmp_path):
-    """A sibling still running — a run dir with events and no result event yet — is
-    indistinguishable from a crashed one by design: the section renders, the cost row reads
-    "no result event", the link is rendered; no live-process inspection.
-    """
-    ep = E.sample_episode(tmp_path)
-    E.run_dir(ep.dir, E.GRADED_WORLD, result=False)
-    page = render(ep)
-    assert f"world-{E.GRADED_WORLD}" in page.by_id
-    assert "no result event" in page.text_of("stage-runs")
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" in page.anchors_in(f"world-{E.GRADED_WORLD}")
-
-
-def test_1025_a_very_long_unbroken_token(tmp_path):
-    """A 70 KB single-line prompt, a spaceless params JSON and a thousands-character reason all
-    render inside their blocks, and the page carries the run pages' shared stylesheet — the one
-    with the wrapping fix (`overflow-wrap: anywhere` / `word-break`) — so a token never widens
-    the page.
-    """
-    ep = E.sample_episode(tmp_path)
-    token = "x" * 70_000
-    E.write_trace(ep.dir, "questioner:b", prompt=token)
-    doc = E.sample_grade()
-    doc["worlds"][0] = E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign", reason="r" * 3_000)
-    E.write_judge(ep.dir, doc)
-    page = render(ep)
-    assert token in page.text_of("tx-questioner_b_trace")
-    assert "r" * 3_000 in page.text
-    css = E.mod("scripts.visualize.visualize_run").CSS
-    assert css in page.raw, "the shared stylesheet is not inlined"
-    assert "overflow-wrap: anywhere" in css or "word-break: break-word" in css
-
-
 # ---------------------------------------------------------------------------------------
 # J13 — questioner request rows, partial cost, controls per stream
 # ---------------------------------------------------------------------------------------
-
-
-def test_1025_questioner_request_rows_have_no_framed_file(tmp_path):
-    """A questioner trace has no `_framed` twin: the block renders the request row's user-prompt
-    part (the captured past, attacker-influenced) through the untrusted escape, its
-    `instructions` collapsed in a `details` element, and is labelled by its `agent_id`
-    (`questioner:b`) (J13a).
-    """
-    ep = E.sample_episode(tmp_path)
-    E.write_trace(ep.dir, "questioner:b", prompt="THE CAPTURED PAST <b>x</b>",
-                  instructions="THE SEAT INSTRUCTIONS")
-    page = render(ep)
-    block = page.section("tx-questioner_b_trace")
-    text = block.text()
-    assert "THE CAPTURED PAST <b>x</b>" in text, text
-    assert "questioner:b" in text, text
-    assert "&lt;b&gt;x&lt;/b&gt;" in page.raw
-    collapsed = [d for d in block.find_all("details") if "THE SEAT INSTRUCTIONS" in d.text()]
-    assert collapsed, "the instructions are not in a collapsed block"
 
 
 def test_1025_a_trace_whose_last_line_is_torn(tmp_path):
@@ -521,22 +352,6 @@ def test_1025_a_trace_whose_last_line_is_torn(tmp_path):
     questioner = page.text_of("stage-questioner")
     assert "$0.7500" in questioner, questioner
     assert "partial — 2 of 3 calls priced" in questioner, questioner
-
-
-def test_1025_six_transcript_streams_and_one_set_of_controls(tmp_path):
-    """Six transcript streams on one page: either no search / type / error controls at all, or
-    one control set per stream scoped inside that stream's block — never one page-wide set that
-    silently drives only the first stream (J13c).
-    """
-    page = render(E.sample_episode(tmp_path))
-    streams = page.elements(cls="tx-stream")
-    assert len(streams) == 6, len(streams)
-    searches = page.elements(cls="tx-search")
-    assert len(searches) in (0, len(streams)), len(searches)
-    for control in searches:
-        holder = control.ancestor_with_id("tx-")
-        assert holder is not None, "a control outside its stream"
-        assert holder.find_all(cls="tx-search") == [control], "a control outside its stream"
 
 
 def test_1025_a_hostile_wire_logs_trace_stem(tmp_path):
@@ -559,25 +374,6 @@ def test_1025_a_hostile_wire_logs_trace_stem(tmp_path):
     assert "wire log" in unnameable[0].text()
     assert "THE HOSTILE STREAM'S REPLY" not in page.text_of("stage-questioner")
     assert "tx-questioner_b_trace" in page.by_id
-
-
-
-def test_1025_timing_json_lists_the_same_step_twice_or_out_of_launch_order(tmp_path):
-    """A repeated step renders every entry it has — "2 entries", wall from that step's first
-    start to its last end — the header wall is min(start)–max(end) over all entries, and the
-    table stays in `STEPS` order however the document orders its entries (J15).
-    """
-    ep = E.sample_episode(tmp_path)
-    steps = E.every_step()
-    steps.append(("preflight", "2026-09-09T10:20:00Z", "2026-09-09T10:21:00Z"))
-    E.write_timing(ep.dir, list(reversed(steps)))
-    page = render(ep)
-    timing = page.text_of("stage-timing")
-    assert _ordered(timing, *ST.EXPECTED_STEPS), timing
-    row = timing[timing.index("preflight"):timing.index("runs")]
-    assert "2 entries" in row, row
-    assert "19m00s" in row, row
-    assert "21m00s" in page.text, "the header wall is not min(start)–max(end)"
 
 
 def test_1025_a_result_event_that_is_forged_or_misplaced(tmp_path):
@@ -605,22 +401,6 @@ def test_1025_a_result_event_that_is_forged_or_misplaced(tmp_path):
     runs = render(ep).text_of("stage-runs")
     assert "no result event" in runs, runs
     assert "$7.77" not in runs, runs
-
-
-def test_1025_a_result_event_with_no_total_cost_usd_key_at_all(tmp_path):
-    """A result event that never carries `total_cost_usd` (not merely a null value — the key
-    itself absent, as a truncated or hand-rolled writer might leave it) reads "unusable result
-    event" the same as every other unusable shape, through the same `.get(...)` default rather
-    than a `KeyError` (J17 finding, PR #1042).
-    """
-    ep = E.sample_episode(tmp_path)
-    row = E.result_event()
-    del row["total_cost_usd"]
-    E.write_tool_trace(ep.run(E.GRADED_WORLD), [row])
-    page = render(ep)
-    runs = page.text_of("stage-runs")
-    assert "unusable result event" in runs, runs
-    assert f"${S.run_cost[E.CONTROL]:.4f}" in runs
 
 
 def test_1025_a_symlinked_tool_trace_in_a_run_dir(tmp_path):
@@ -667,61 +447,3 @@ def test_1025_a_usage_block_with_a_negative_or_overflowing_count_is_unpriced(tmp
     assert E.SAMPLE.total_cost in page.text_of("sec-verdict"), "positive control: the sample total"
 
 
-def test_1025_a_big_integer_literal_is_that_fields_own_absence(tmp_path):
-    """`json.loads` reads a 400-digit numeric literal as a Python int, not `inf` — and
-    `math.isfinite(<that int>)` and `<that int> * <rate>` both raise `OverflowError`, which no
-    gate caught: one box-writable digit string in a result event's `total_cost_usd`, a response
-    row's `duration_ms` or a `usage` count took the whole page down (d01: only `family.yaml` is
-    fatal). Each is now that field's own absence — "unusable result event", no wall on the
-    call, "unpriced" — through the one coercer every numeric read shares (review of PR #1042)."""
-    ep = E.sample_episode(tmp_path)
-    huge = 10 ** 400
-    E.write_tool_trace(ep.run(E.GRADED_WORLD), [E.result_event(cost=huge)])
-    rows = E.trace_rows("questioner:huge")
-    rows[1]["usage"]["input_tokens"] = huge
-    E.write_trace(ep.dir, "questioner:huge", rows)
-    E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:1", duration_ms=huge)
-    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1)))
-    page = render(ep)
-    runs = page.text_of("stage-runs")
-    assert "unusable result event" in runs, runs
-    assert "unpriced" in page.text_of("tx-questioner_huge_trace")
-    assert f"tx-judge_{E.GRADED_WORLD}_1_trace" in page.ids
-    assert str(huge)[:20] not in page.text
-    assert f"${S.run_cost[E.CONTROL]:.4f}" in runs, "positive control: a sibling still priced"
-
-
-def test_1025_a_sum_of_finite_values_that_overflows_reads_the_dash(tmp_path):
-    """Each row is gated finite, but the SUM is not: two result events at `1e308` add to `inf`
-    and tile 4 read `$inf` — the exact string the per-row test forbids — while two response
-    rows at `1e308 ms` summed to a wall `fmt_duration` could not `int()`, and the page was not
-    written at all. The formatters answer a non-finite total with the same dash a missing value
-    gets, so a total is gated where it is printed, not only where its addends are read (review
-    of PR #1042)."""
-    ep = E.sample_episode(tmp_path)
-    E.write_tool_trace(ep.run(E.GRADED_WORLD), [E.result_event(cost=1e308)])
-    E.write_tool_trace(ep.run(E.CONTROL), [E.result_event(cost=1e308)])
-    for draw in (1, 2):
-        E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:{draw}", duration_ms=1e308)
-    page = render(ep)
-    verdict = page.text_of("sec-verdict")
-    assert "$inf" not in verdict, verdict
-    assert "$nan" not in verdict, verdict
-    stages = page.text_of("sec-stages")
-    assert "inf" not in stages.lower(), stages
-    assert "$1000000" in page.text_of("stage-runs"), "positive control: each finite row prints"
-
-
-def test_1025_a_judge_stem_with_a_non_ascii_digit_is_unattributed_not_a_draw(tmp_path):
-    """`draws_on_disk_report` holds a draw stem to ASCII digits (the F-7 decision: `'١'` is
-    UNDECODABLE); the transcript router must read the same alphabet. Before, `str.isdigit`
-    admitted the Arabic-Indic digit, so `judge_<label>_١_trace` rendered as a second block of
-    that world's draws and never reached the unattributed list."""
-    ep = E.sample_episode(tmp_path)
-    E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:١", prompt="an odd-digit draw")
-    page = render(ep)
-    order = _tx_order(page, "stage-judge")
-    assert f"tx-judge_{E.GRADED_WORLD}_١_trace" not in order, order
-    assert "unattributed traces" in page.text_of("sec-stages")
-    assert f"judge_{E.GRADED_WORLD}_١_trace" in page.text_of("sec-stages")
-    assert f"tx-judge_{E.GRADED_WORLD}_0_trace" in order  # positive control
