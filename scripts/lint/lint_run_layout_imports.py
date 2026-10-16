@@ -14,11 +14,11 @@ What is gated:
   `run_repository/_layout.py` (its public module-level bindings, of every form), minus the
   eight `HELPERS`. A new export is gated until it is listed. Exempt in the layout-exempt
   categories below;
-* the episode-runs names: `EpisodePaths.runs` / `.sibling_run_dir`, `EpisodeLayout.runs` /
-  `.run` / `.run_page` / `.sibling_run_dir`, `Episode.runs` and `RUNS_DIRNAME`;
+* the episode-runs names: `EpisodePaths.runs`, `EpisodeLayout.runs` / `.run` / `.run_page`,
+  `Episode.runs` and `RUNS_DIRNAME`;
 * `Tenant.runs`;
 * the handle constructors: a call `Run(...)` / `ArchivedWorld(...)`, and any reference to
-  `Run.at`, `Run.for_tenant`, `Run.under` or `ArchivedWorld.at`; and the repository's own
+  `Run.at`, `Run.under` or `ArchivedWorld.at`; and the repository's own
   constructors, a call `RunsRepository(...)` / `EpisodeRuns(...)` (#1105 PR 2: the accepted
   `Tenant` hands the repository out, and the repository the episode view). Importing any of
   them for a type is not gated.
@@ -85,7 +85,7 @@ _VE = "scripts/visualize/visualize_episode.py"
 CATEGORIES: Mapping[str, Sequence[str]] = {
     "owners": (
         "run_repository/__init__.py", "run_repository/_layout.py", "run_repository/_handle.py",
-        "run_repository/_lookup.py", "run_repository/_record.py", "run_repository/_held.py",
+        "run_repository/_lookup.py", "run_repository/_held.py",
         "run_repository/_id.py",
         "run_repository/_errors.py", "_episode_paths.py", "_episode_handle.py", "_tenant.py",
     ),
@@ -165,10 +165,10 @@ _REPOSITORY = f"{_DOOR}.RunsRepository"
 _EPISODE_VIEW = f"{_DOOR}.EpisodeRuns"
 _GATED_MEMBERS: dict[str, frozenset[str]] = {
     _EPISODE: frozenset({"runs"}),
-    _EPISODE_PATHS: frozenset({"runs", "sibling_run_dir"}),
-    _EPISODE_LAYOUT: frozenset({"runs", "run", "run_page", "sibling_run_dir"}),
+    _EPISODE_PATHS: frozenset({"runs"}),
+    _EPISODE_LAYOUT: frozenset({"runs", "run", "run_page"}),
     _TENANT: frozenset({"runs"}),
-    _RUN: frozenset({"at", "for_tenant", "under"}),
+    _RUN: frozenset({"at", "under"}),
     _ARCHIVED: frozenset({"at"}),
     _REPOSITORY: frozenset(),
     _EPISODE_VIEW: frozenset(),

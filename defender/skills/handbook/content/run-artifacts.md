@@ -32,7 +32,7 @@ writable scratch space.
     {lead_id}/{seq}.json  # raw query payloads, by-ref (record_query.py)
 ```
 
-A branched episode (`$DEFENDER_EPISODES_BASE/<episode_id>/`, see the Learning
+A branched episode (`$DEFENDER_DATA_ROOT/<tenant>/episodes/<episode uuid>/`, see the Learning
 loop page) is a different tree with its own artifacts — `judge.yaml`, written
 last, and `timing.json`, the launcher's per-step clock — and its own one-page
 view, `learning.html` (#1025), rendered right after `judge.yaml` from the
@@ -46,8 +46,9 @@ episode dir alone.
   `disposition` is an answer key and the run dir is inside the agent's readable
   workspace, so labels stay beside their fixture
   (`defender/fixtures/held-out/{slug}/ground_truth.yaml`) and are read there by
-  `evals/held_out.py`. The eval walks fixtures and locates runs by run-id
-  convention; the run dir carries no pointer back to a fixture and no label.
+  `evals/held_out.py`. The eval walks fixtures and finds each one's run through
+  the held-out index its launch appended to (by run id, never a folder name); the
+  run dir carries no pointer back to a fixture and no label.
   Contamination is stopped upstream instead: the one automatic lane, the
   catalog-curation enqueue, refuses a held-out fixture run at the investigation
   boundary — by path containment and by content digest, so a copy of a fixture

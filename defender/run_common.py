@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime as _dt
 import logging
 import os
 import sys
@@ -72,25 +73,25 @@ def materialize_run(
     `tenant` is the request's tenant, accepted by the entry point (`_tenant.accept_tenant`);
     nothing here resolves the data root or re-accepts it. The run's handle comes from the
     tenant's runs repository (#1105 PR 2, D-create (a)): a natural run's from
-    `tenant.runs_repository().create`, which makes the runs folder when absent with its record
-    (a record naming another tenant is refused rather than stamped); a fork's from
-    `episode_runs.create` — the sibling's episode view, whose container the launcher made for
-    the tenant before any arm and which is never made here.
+    `tenant.runs_repository().create`, which walks to `<T>/runs` no-follow and makes it when
+    absent; a fork's from `episode_runs.create` — the sibling's episode view, whose container
+    and arm roster the launcher made at RUNS, and which only an id the roster holds passes.
 
     Every write is a guarded write-once verb (written when absent, kept when equal, refused
     when different), so resuming needs no ordering of checks and follows no planted link.
     `world` is a fork's `ResumeWorld`, handed in by the launcher — never derived from paths.
 
-    Order (#1105 D3.7): the run id is admitted (the `_tenant.json` collision guard, then
-    `RunId`, then the sidecar clause); then the repository's create: the container held
-    no-follow (a link or non-directory refused before anything is created in it), its tenant
-    record, for a pinned id outside a fork the claimed-id check, and the handle's record
-    compare as the race backstop.
+    Order (#1105 D3.7): the run id is admitted (`RunId`: minted, or a pinned id that is
+    canonical UUID text; then the sidecar clause); then the repository's create: the container
+    walked no-follow (a link or non-directory refused before anything is created in it). The
+    stamp carries the run's display facts — when setup started it and the alert's label
+    (#1187 O7) — which its opaque id no longer spells; a natural run stamps no world.
     """
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
+    started_at = _started_at()
     pinned = run_id is not None
-    admitted = _admit_run_id(alert, run_id)
+    admitted = _admit_run_id(run_id)
     front_door = _admit_input(alert, tenant=tenant, world=world)
     try:
         if world is not None:
@@ -99,12 +100,11 @@ def materialize_run(
                                 "(`episode_runs=`): an arm is made only in its episode's "
                                 "container")
             run = episode_runs.create(admitted)
-            world_id = world.world_id
+            world_id: str | None = world.world_id
         else:
-            runs = tenant.runs_repository()
-            run = runs.create(admitted, pinned=pinned)
-            world_id = runs.base_world_id()
-    except RunRefused as refused:
+            run = tenant.runs_repository().create(admitted, pinned=pinned)
+            world_id = None
+    except (RunRefused, _tenant.TenantRefused) as refused:
         sys.exit(str(refused))
     run_dir = run.run_dir
     paths = RunPaths(run_dir)
@@ -133,23 +133,23 @@ def materialize_run(
         world_id=world_id,
         parent_run_id=world.family.source_run_id if world is not None else None,
         fork_turn=world.family.branch_message_id if world is not None else None,
+        started_at=started_at, alert_label=_alert_label(alert),
     )
     return run
 
 
-def _admit_run_id(alert: Path, run_id: str | None) -> RunId:
-    """The run id this call will materialise, or the refusal — minted from the alert when the
-    operator pinned none."""
-    # The explicit collision guard first; the run-id grammar refusing `_` is a coincidence.
-    if run_id is not None:
-        collision = _tenant.refuse_colliding_run_id(run_id)
-        if collision is not None:
-            sys.exit(str(collision))
-    # `RunId` is the admission rule for minted and pinned ids alike: the handle's grammar and
-    # case stability, plus the 206-byte bound every sidecar write beside the run needs.
+def _started_at() -> str:
+    """When run setup started this run, as ISO-8601 UTC text to the second (#1187 O7)."""
+    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _admit_run_id(run_id: str | None) -> RunId:
+    """The run id this call will materialise, or the refusal — a fresh one when the operator
+    pinned none. An id carries no meaning (#1187 O1): it is minted from nothing."""
+    # `RunId` is the admission rule for minted and pinned ids alike: canonical lowercase UUID
+    # text, nothing else.
     try:
-        admitted = (RunId.mint(_alert_label(alert)) if run_id is None
-                    else RunId.parse(run_id))
+        admitted = RunId.mint() if run_id is None else RunId.parse(run_id)
     except RunRefused as bad:
         sys.exit(f"invalid run id: {bad}")
     # The sidecar clause (D2.1): the repository's one answer to "may this text name a run?".
@@ -283,10 +283,11 @@ def _seal(input_dir: Path) -> None:
         input_dir.chmod(0o555)
 
 
-def _stamp(
+def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
     run: Run, *, knowledge_dir: Path, model: str | None = None,
     tenant_id: str | None = None, world_id: str | None = None,
     parent_run_id: str | None = None, fork_turn: int | None = None,
+    started_at: str | None = None, alert_label: str | None = None,
 ) -> None:
     """Write the run's stamp, never taking the run down doing it (ENOSPC, read-only remount,
     a planted alias). Unlike a missing alert, a missing stamp only means the run's code cannot
@@ -299,10 +300,11 @@ def _stamp(
         # Set in the single pre-box write; a later write would land in the box's rw bind.
         if model is not None:
             record = _dataclasses.replace(record, model=model)
-        # Tenant fields equal the tenant record's values; a fork's lineage rides beside them.
+        # The request's tenant and the world, a fork's lineage, and the display facts.
         record = _dataclasses.replace(
             record, tenant_id=tenant_id, world_id=world_id,
-            parent_run_id=parent_run_id, fork_turn=fork_turn)
+            parent_run_id=parent_run_id, fork_turn=fork_turn,
+            started_at=started_at, alert_label=alert_label)
         run.facts.provenance.write(record.as_json())
     except OSError as e:
         _logger.error(f"could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "

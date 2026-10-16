@@ -4,10 +4,13 @@
 (`--tenant T <episode_id>`). The launcher (`branch/cli.py::_render_page`) calls `render_episode`
 after the judge frame closes, under its own non-fatal boundary.
 
-The episode view judges the siblings' container record before anything else is read (G20): a
-record naming another tenant, or none, refuses the page. The arm roster is the manifest's (and
-the grade record's) labels, each arm opened by id through the view; an entry in `runs/` that is
-no roster label is never shown. An unreadable container reads as absent.
+The episode is reached only through its tenant's walk, so another tenant's episode, a link at
+any level and an id that is not a UUID (`latest` included) are refused before anything is read.
+The manifest must name the episode it was read from (#1187 R5). The arms are the arm roster's
+(`arms.json`, `view.arm_ids()`), each opened by its roster id; an entry in `runs/` the roster
+does not name is never shown. No roster means the episode never reached RUNS: no world
+sections and no arm links. A roster the reader refuses is the arms' `refused` state, with its
+reason; the rest of the page renders. An unreadable container reads as absent.
 
 Two phases. `load_episode` reads every record the page shows exactly once, through the package
 readers, into a typed model (`_Episode`), and runs the findings walk once over it. Section
@@ -23,7 +26,6 @@ edges the page exists to explain. If a decision is not recorded, fix the writer.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import math
 import re
 import sys
@@ -85,7 +87,7 @@ from defender.learning.judge.run import (
     WORLD_FINDINGS,
 )
 from defender.runtime.branch._family import (
-    BASE_ROLE, ManifestPredatesOracle, episode_token_for,
+    BASE_ROLE, FamilyError, ManifestPredatesOracle, episode_token_for,
 )
 from defender._pricing import UnknownModel, model_key, usage_cost
 from defender.scripts.visualize.visualize_primitives import (
@@ -249,13 +251,24 @@ def _read_family_stamp(bound: Bound) -> _Record:
     return _Record(doc, present=doc is not None)
 
 
-def _read_grade(episode_dir: Path) -> _Record:
+def _read_grade(episode: Episode) -> _Record:
     # `read_grade`'s refusal never quotes the root, so no scrub is needed.
     try:
-        grade = read_grade(episode_dir)
+        grade = read_grade(episode)
     except JudgeRefused as bad:
         return _Record(present=True, error=f"grade record unreadable: {bad}")
     return _Record(grade, present=grade is not None)
+
+
+def _read_roster(view: EpisodeRuns) -> _Record:
+    """The arm roster (`view.arm_ids()`, `{label: RunId}`): absent when the episode never
+    reached RUNS; a roster the reader refuses — or a manifest its label check cannot load — is
+    present with the refusal as its error, the arms' `refused` state."""
+    try:
+        arms = view.arm_ids()
+    except (RunRefused, FamilyError) as refused:
+        return _Record(present=True, error=f"refused — {refused}")
+    return _Record(arms, present=arms is not None)
 
 
 # =========================================================================================
@@ -622,6 +635,8 @@ class _Episode:
         self.samples_rec = _Record()
         self.stamp_rec = _Record()
         self.timing_rec = _Record()
+        #: The arm roster (`_read_roster`): absent before RUNS, its error the arms' `refused`.
+        self.roster_rec = _Record()
         self.entries: dict[str, WorldEntry] = {}
         #: Every roster line in section order, classified — what the worlds and leads sections
         #: render, and what their headings count.
@@ -679,16 +694,17 @@ class _Episode:
 
 def load_episode(view: EpisodeRuns) -> _Episode:
     """Every record the page shows, read once, through `view` — the episode's view in its
-    tenant's repository, whose container record was judged when it opened. Raises
-    `JudgeRefused` for the manifest alone; every other refusal is a slot on the model."""
+    tenant's repository, reached by the tenant's walk. Raises `JudgeRefused` for the manifest
+    alone; every other refusal is a slot on the model."""
     episode = view.episode
     return _load_episode(Path(episode.dir), episode.view(), view)
 
 
 def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episode:
-    ep = _Episode(episode_dir, family.read_manifest(bound))
+    ep = _Episode(episode_dir, family.read_manifest(bound, expected_episode_id=view.episode_id))
 
-    ep.grade_rec = _read_grade(episode_dir)
+    ep.grade_rec = _read_grade(view.episode)
+    ep.roster_rec = _read_roster(view)
     ep.outcome_rec = _read_outcome(bound)
     ep.samples_rec = _read_samples(bound)
     ep.stamp_rec = _read_family_stamp(bound)
@@ -702,8 +718,7 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
         name for name in bound.under(LAYOUT.worlds).entries().dirs()
         if name != _FAMILY_LABEL]
     ep.entries, ep.roster, ep.off_roster = _build_roster(
-        ep, [r["world"] for r in grade_rows], grade_present=ep.grade_rec.present,
-        reached_container=view.present)
+        ep, [r["world"] for r in grade_rows], reached_runs=ep.roster_rec.present)
     for row in grade_rows:
         w = ep.entries.get(row["world"])
         if w is not None:
@@ -720,8 +735,8 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
         recorded = recorded_draws(grade, label)
         ep.draws[label] = ({n: d for n, d in docs.items() if n in recorded}, skipped)
     nameable_worlds = [w for w in ep.entries.values() if w.nameable]
-    if view.present:
-        _load_arms(nameable_worlds, view, episode_dir, ep.episode_id)
+    if ep.roster_rec.ok and ep.roster_rec.value is not None:
+        _load_arms(nameable_worlds, view, episode_dir, ep.roster_rec.value)
     for w in nameable_worlds:
         w.archive = _load_world_archive(bound, w.label)
     for item in ep.sectioned:
@@ -736,21 +751,14 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
 
 
 def _load_arms(worlds: list[WorldEntry], view: EpisodeRuns, episode_dir: Path,
-               episode_id: str) -> None:
-    """Every world's arm, from ONE hold of the episode's container (`view.arms`, its
-    `_tenant.json` judged once for all of them), each opened by id (`<episode_id>-<label>`,
-    whose entry rule takes only a real directory): its run folder's name, its run page's link
-    relative to the episode page, and its result event, read through a no-follow reader walked
-    from that same hold. Anything refused for an arm — nothing at the id, a link or a file
-    there, a label no run id can carry, a container gone since the view opened — leaves that
-    arm absent.
-
-    The arm id is composed from `episode_id`, the manifest's own (as before): a page requested
-    through a link name (`episodes/latest`, J4) names the same arms."""
-    ids: dict[str, RunId] = {}
-    for w in worlds:
-        with contextlib.suppress(RunRefused):
-            ids[w.label] = view.arm_id(w.label, episode_id=episode_id)
+               arm_ids: dict[str, RunId]) -> None:
+    """Every world's arm, from ONE hold of the episode's container (`view.arms`), each opened
+    by its roster id (`arm_ids`, never a name composed from the label; an entry rule that
+    takes only a real directory): its run folder's name, its run page's link relative to the
+    episode page, and its result event, read through a no-follow reader walked from that same
+    hold. Anything refused for an arm — nothing at the id, a link or a file there, a container
+    gone since the view opened — leaves that arm absent."""
+    ids = {w.label: arm_ids[w.label] for w in worlds if w.label in arm_ids}
     with view.arms(list(ids.values())) as handout:
         for w in worlds:
             if w.label not in ids:
@@ -796,11 +804,13 @@ def _finite(value: Any) -> float | None:
     return as_float if math.isfinite(as_float) else None
 
 
-def _build_roster(ep: _Episode, grade_row_labels: list[str], *, grade_present: bool,
-                  reached_container: bool) -> tuple[dict[str, WorldEntry], list[RosterItem], int]:
-    """Every world label that gets a section: manifest worlds ∪ `judge.yaml` rows. Each one's
-    arm is opened by id later (`_load_arms`); an entry in `runs/` that is neither is never shown
-    (#1105 J3: the roster is the manifest's, not a listing of the container).
+def _build_roster(ep: _Episode, grade_row_labels: list[str], *,
+                  reached_runs: bool) -> tuple[dict[str, WorldEntry], list[RosterItem], int]:
+    """Every world label that gets a section: manifest worlds — once the episode reached RUNS,
+    which the arm roster's presence is (`reached_runs`; a refused roster was still written) —
+    ∪ `judge.yaml` rows. Each one's arm is opened by its roster id later (`_load_arms`); an
+    entry in `runs/` that is neither is never shown (#1105 J3: the worlds are the manifest's,
+    not a listing of the container).
 
     Returns the entries by label (manifest order first), the classified roster, and the count
     of `worlds/` dirs on neither the manifest nor the record (reported on one line, never
@@ -811,14 +821,13 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str], *, grade_present: b
     def entry(label: str) -> WorldEntry:
         if label not in entries:
             entries[label] = WorldEntry(label)
-            entries[label].nameable = family.world_label_names_directory(ep.episode_id, label)
+            entries[label].nameable = family.world_label_names_directory(label)
             order.append(label)
         return entries[label]
 
     # A manifest world with no grade row gets a section only once the episode reached RUNS:
-    # its container is there, a grade record landed, or a world was archived. An episode
-    # rejected or aborted before then has no world to show.
-    reached_runs = reached_container or grade_present or bool(ep.archived_world_dirs)
+    # its arm roster is written (#1187 R2). `runs/` alone is not RUNS — `start_runs` makes it
+    # before the roster — and an episode rejected or aborted before then has no world to show.
     # `family` is not a world: it is the reserved label for the family-level draws. The judge
     # refuses such a manifest, but the page reads whatever tree it is given, and treating it as
     # a world would walk its draws twice under duplicate ids.
@@ -1232,9 +1241,9 @@ def _write_page(episode: Episode, html_text: str) -> Path:
 
 def render_episode(runs: RunsRepository, episode_id: str) -> Path:
     """Render episode `episode_id` of `runs`'s tenant into its own folder. The door is the
-    episode view (`open_episode_view`): a missing episode, a bad id, an unusable episodes root
-    or a file at the name is `JudgeRefused`, never made, and a container record naming another
-    tenant, or none, refuses before anything else is read."""
+    episode view (`open_episode_view`): a missing episode, an id that is not a UUID, a link or
+    a file at any level of the walk is `JudgeRefused` before anything else is read, and
+    nothing is made."""
     with open_episode_view(runs, episode_id) as view:
         try:
             html_text = build_page(view)
@@ -1248,10 +1257,9 @@ def render_episode(runs: RunsRepository, episode_id: str) -> Path:
 
 
 def open_episode_view(runs: RunsRepository, episode_id: str) -> EpisodeRuns:
-    """`runs.episode(episode_id)`, every refusal of its door as the page's `JudgeRefused`:
-    the episode owner's (a bad id, an unusable root, a missing episode, a file at the name;
-    nothing is created) and the container record's (another tenant's, or none — an episode
-    launched before #1078 is not supported). The caller closes the view."""
+    """`runs.episode(episode_id)`, every refusal of its door as the page's `JudgeRefused`: an
+    id that is not a UUID (`latest` included), a missing episode, a link or a file at any
+    level of the tenant's walk; nothing is created. The caller closes the view."""
     try:
         return runs.episode(episode_id)
     except FileNotFoundError as missing:
@@ -1612,7 +1620,12 @@ def _render_worlds(ep: _Episode) -> str:
     # line and are not counted.
     sections = [_render_roster_item(ep, item) for item in ep.roster]
 
-    body = f'<div class="vd-guide">{"".join(guide_rows)}</div>{"".join(sections)}'
+    # The arm roster refused: the arms' one state, with the reader's reason (it names
+    # `arms.json`); no arm is linked through it.
+    arms_state = (f'<div class="w-roster-refused">arms: {_uv(ep.roster_rec.error)}</div>'
+                  if ep.roster_rec.error else "")
+    body = (f'<div class="vd-guide">{"".join(guide_rows)}</div>{arms_state}'
+            f'{"".join(sections)}')
     return _page_section("sec-worlds", f"Worlds ({len(ep.sectioned)})", body)
 
 
@@ -1704,6 +1717,8 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
                 bits.append(f'<span class="w-wall">{fmt_duration(result.wall_ms)}</span>')
         else:
             bits.append(f'<span class="w-cost">{esc(result.text)}</span>')
+    elif ep.roster_rec.error:
+        bits.append('<div class="w-archive">arm refused — the arm roster is refused</div>')
     else:
         bits.append('<div class="w-archive">run directory absent</div>')
 
@@ -2315,6 +2330,8 @@ def _diagnostics(ep: _Episode) -> list[str]:
                       ("provenance", ep.stamp_rec)):
         if rec.error:
             lines.append(f"{name} record unreadable")
+    if ep.roster_rec.error:
+        lines.append("arm roster refused")
     if ep.grade_rec.ok and ep.grade is None:
         lines.append("no grade record")
     return lines
@@ -2322,7 +2339,7 @@ def _diagnostics(ep: _Episode) -> list[str]:
 
 def _parse_page_args(argv: list[str]) -> argparse.Namespace:
     """`--tenant T <episode_id>` (#1105 declared change 4, J8): the tenant is required, with
-    no default, and the episode is named by its id under the configured episodes root."""
+    no default, and the episode is named by its UUID under that tenant's `episodes/`."""
     p = UsageParser(prog="visualize_episode.py", description=__doc__)
     p.add_argument("--tenant", required=True,
                    help="the tenant whose episode is rendered; required, with no default")

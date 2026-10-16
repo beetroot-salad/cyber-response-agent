@@ -38,7 +38,7 @@ import asyncio  # noqa: E402
 import contextlib  # noqa: E402
 import functools  # noqa: E402
 import inspect  # noqa: E402
-from collections.abc import Callable  # noqa: E402
+from collections.abc import Callable, Mapping  # noqa: E402
 from typing import Any, Protocol  # noqa: E402
 
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
@@ -85,13 +85,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="Path to alert.json fixture (illegal with --episode)")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     p.add_argument("--episode", default=None,
                    help="the episode this process is a sibling arm of, by id (under the "
-                        "configured DEFENDER_EPISODES_BASE)")
+                        "tenant's own episodes folder)")
     p.add_argument("--world", default=None,
                    help="which world of --episode's manifest this process is")
     p.add_argument("--run-id", default=None,
                    help="Pin the run id for a named A/B or live run (learning-loop "
-                        "commits reference it) instead of the auto timestamp id. Lower case "
-                        "only. An existing run dir under this id is RESUMED (setup finishes "
+                        "commits reference it) instead of a freshly minted one: canonical "
+                        "lowercase UUID text only. An existing run dir under this id is "
+                        "RESUMED (setup finishes "
                         "what an interrupted attempt left undone and re-stamps) — for the same "
                         "alert; a different alert under a used id is refused")
     p.add_argument("--no-learn", action="store_true",
@@ -104,8 +105,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
     p.add_argument("--tenant", default=None,
                    help="the tenant this run belongs to; required on every run, --episode "
-                        "included (there is no default). On --episode the episode's container "
-                        "record must name it")
+                        "included (there is no default). On --episode the episode is looked "
+                        "up under this tenant's folder, and its arm roster must name --world")
     ns = p.parse_args(argv)
     if ns.episode is not None and ns.alert is not None:
         p.error(
@@ -451,8 +452,11 @@ def _announce_provenance(run_dir: Path) -> None:
     _logger.info(f"commit={rec.commit[:12]}{mark}{detail}")
 
 
-def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any]) -> Any:
-    """The world this process is, from `episode`'s manifest alone.
+def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any],
+                 arm_ids: Mapping[str, Any] | None = None) -> Any:
+    """The world this process is, from `episode`'s manifest alone — read through the one
+    loader, held to the episode folder's own name (R5) — and the episode's arm roster
+    (`arm_ids`), when the caller read it.
 
     The episode dir is the manifest's own, so the world ledger sits beside the family's
     primed recording and depends on nothing the manifest does not say. The manifest records
@@ -461,8 +465,8 @@ def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any
     from defender.runtime.branch import _family
 
     del tenant  # the manifest is the whole record; see the docstring
-    return _family.resume_world_from(
-        _family.load_family(episode.view()), world_label, episode.dir)
+    family = _family.load_family(episode.view(), expected_episode_id=episode.dir.name)
+    return _family.resume_world_from(family, world_label, episode.dir, arm_ids=arm_ids)
 
 
 def _screened_source_alert(episode: Episode) -> Path:
@@ -497,20 +501,24 @@ def _open_world_source(runs: Any, world: Any) -> Run:
         sys.exit(f"[run.py] the episode's source run cannot be opened: {refused}")
 
 
-def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
+def _resume_target(ns: argparse.Namespace, *, episode_runs: Any,
                    tenant: Callable[[], Any]) -> Any:
-    """The world this process is, or `None` for an ordinary run — plus the sibling's two
+    """The world this process is, or `None` for an ordinary run — plus the sibling's
     refusals, before anything is spent.
 
     `--update-ticket` is refused outright rather than ignored: the two ticket calls are paired
-    around the curation marker. An undeclared world label is refused before a run dir exists.
+    around the curation marker. The manifest is read here, right after the roster gate, held to
+    the episode's id (R5); an undeclared world label, a manifest the loader refuses and an arm
+    roster its full reader refuses (`arm_ids`: an id off the rule, two labels on one id, a label
+    set other than the manifest's worlds) are each refused before a run dir exists.
     """
     if ns.episode is None:
         return None
-    if episode is None:
-        # A sibling is only ever resumed through its held episode; without one it must not
+    if episode_runs is None:
+        # A sibling is only ever resumed through its episode's view; without one it must not
         # run on as an ordinary investigation.
         sys.exit(f"[run.py] --episode {ns.episode}: no episode is held for it")
+    from defender.run_repository import RunRefused
     from defender.runtime.branch._family import FamilyError
 
     if ns.update_ticket:
@@ -519,9 +527,10 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
             "continuation of someone else's case, and a ticket row for it would enter the "
             "case history as a real investigation of a real alert")
     try:
-        return resume_world(episode, ns.world, tenant=tenant)
-    except FamilyError as refusal:
-        sys.exit(f"[run.py] {refusal}")
+        return resume_world(episode_runs.episode, ns.world, tenant=tenant,
+                            arm_ids=episode_runs.arm_ids())
+    except (FamilyError, RunRefused) as refusal:
+        sys.exit(f"[run.py] --episode {ns.episode}: {refusal}")
 
 
 def _materialize_run(
@@ -562,9 +571,9 @@ def _accept_request_tenant(
     the acting user's authentication context), never from a record or a stamp, and there is no
     default. It is accepted under `data_root` (`_request_data_root`) through
     `_tenant.accept_tenant` — the one acceptance every entry point shares; a sibling's
-    tenant is then held to its episode's container record (`_open_episode_runs`).
-    `box_mounted` is what the run's box mounts besides the checkout — a sibling's container,
-    inside its held episode — and the tenant's settings must sit under none of it."""
+    episode is then looked up under that tenant's own folder (`_open_episode_runs`).
+    `box_mounted` is what the run's box mounts besides the checkout — a sibling's arm
+    container — and the tenant's settings must sit under none of it."""
     try:
         tenant_id = _tenant.requested_tenant_id(ns.tenant)
         return _tenant.accept_tenant(
@@ -573,44 +582,53 @@ def _accept_request_tenant(
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
-def _sibling_episode_dir(ns: argparse.Namespace, data_root: Path) -> Path | None:
-    """Where the episode `--episode` names lives, as the episode owner composes it under the
-    configured episodes root (`DEFENDER_EPISODES_BASE`) for `data_root` — `None` for an
-    ordinary run. A bad id or an unusable root is refused here, before anything is opened."""
+def _sibling_box_mounted(ns: argparse.Namespace, data_root: Path) -> tuple[Path, ...]:
+    """What a sibling's box mounts besides the checkout — its arm container,
+    `<data root>/<T>/episodes/<episode id>/runs`, named before the tenant is accepted, so
+    acceptance holds the tenant's settings out of it — or nothing for an ordinary run. The
+    episode id is judged first (canonical UUID text, before any path is built); nothing is
+    read."""
     if ns.episode is None:
-        return None
-    from defender._episode_handle import EpisodeRefused, episode_dir
+        return ()
+    from defender._episode_handle import EpisodeRefused
 
     try:
-        return episode_dir(data_root, ns.episode)
-    except EpisodeRefused as refused:
+        return (_tenant.box_mounted_arm_container(data_root, ns.tenant, ns.episode),)
+    except (EpisodeRefused, _tenant.TenantRefused) as refused:
         sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
 
 
-def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant,
-                       episode: Episode | None) -> Any:
-    """The sibling's episode view, adopting the episode `main` already holds, with the
-    container REQUIRED: one that is absent, unreadable, recordless or whose `_tenant.json`
-    names another tenant is refused here — right after acceptance, before the manifest is
-    read (G19) — so an arm is never made in a container its tenant's launcher did not bind
-    (G5). `None` for an ordinary run."""
-    if episode is None:
+def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
+    """The sibling's episode view, in its sibling form (`roster_label=`, O4b): the episode is
+    walked from the accepted tenant's own folder, no link followed at any level, and its arm
+    roster must name `--world` — an episode that never reached RUNS, a roster that does not
+    name the world, a missing episode (another tenant's included) or a link anywhere is refused
+    here, right after acceptance and before the manifest is read (G5/G19). `None` for an
+    ordinary run."""
+    if ns.episode is None:
         return None
+    from defender._episode_handle import EpisodeRefused
+    from defender.run_repository import RunRefused
+
     try:
-        return accepted.runs_repository().episode(
-            ns.episode, held=episode, container_required=True)
-    except _tenant.TenantRefused as refused:
+        return accepted.runs_repository().episode(ns.episode, roster_label=ns.world)
+    except (_tenant.TenantRefused, RunRefused, EpisodeRefused, OSError) as refused:
         sys.exit(f"[run.py] --episode {ns.episode} for tenant {accepted.id!r}: {refused}")
 
 
 def _case_input(ns: argparse.Namespace, world: Any,
-                episode: Episode | None) -> tuple[Path, str | None]:
+                episode_runs: Any) -> tuple[Path, str | None]:
     """The alert this run investigates and its run id: a sibling's from its world (the source
-    run's alert, screened before the preflight like other argument errors), else the
-    operator's."""
+    run's alert, screened before the preflight like other argument errors) and the arm id its
+    episode's roster holds for it, else the operator's."""
     if world is not None:
-        assert episode is not None  # a sibling is only ever resumed through its held episode
-        return _screened_source_alert(episode), world.run_id
+        from defender.run_repository import RunRefused
+
+        try:
+            arm_id = episode_runs.arm_id(world.label)
+        except RunRefused as refused:
+            sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
+        return _screened_source_alert(episode_runs.episode), str(arm_id)
     return ns.alert.resolve(), ns.run_id
 
 
@@ -654,30 +672,25 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
     # The request's tenant id, then the data root, resolved once; nothing below resolves either
     # again.
     data_root = _request_data_root(ns)
-    # A sibling's door: the episode it is an arm of, opened by the episode owner before
-    # acceptance and held for the whole run. The handle serves the manifest read and the world
-    # ledger's writes; nothing below reopens the episode by name.
-    episode_dir = _sibling_episode_dir(ns, data_root)
-    try:
-        door: contextlib.AbstractContextManager[Episode | None] = (
-            contextlib.nullcontext() if episode_dir is None else Episode.open(episode_dir))
-    except OSError as missing:
-        sys.exit(f"[run.py] --episode {ns.episode}: its episode dir cannot be held ({missing})")
-    with door as episode:
-        # The tenant, from the request, accepted under the data root before anything is spent.
-        # A sibling's container is its episode's, which the box mounts and the tenant's
-        # settings must not sit under.
-        accepted = _accept_request_tenant(
-            ns, data_root=data_root,
-            box_mounted=() if episode is None else (episode.box_mounted_container,))
-        # The sibling's view judges its container's record before anything else of the episode
-        # is read: another tenant's episode is refused here, the manifest unread.
-        episode_runs = _open_episode_runs(ns, accepted, episode)
+    # The tenant, from the request, accepted under the data root before anything is spent. A
+    # sibling's arm container is mounted by its box, so the tenant's settings must not sit
+    # under it; its path is named here, before acceptance, and nothing is opened by it.
+    accepted = _accept_request_tenant(
+        ns, data_root=data_root, box_mounted=_sibling_box_mounted(ns, data_root))
+    # A sibling's door, right after acceptance: its episode walked from the tenant's own
+    # folder and its roster checked for this world, before anything else of the episode is
+    # read. The view's episode handle is held for the whole run; it serves the manifest read
+    # and the world ledger's writes, and nothing below reopens the episode by name.
+    episode_runs = _open_episode_runs(ns, accepted)
+    door: contextlib.AbstractContextManager[Any] = (
+        contextlib.nullcontext() if episode_runs is None else episode_runs)
+    with door:
+        episode = None if episode_runs is None else episode_runs.episode
         # One readiness check, shared by the old-manifest judge (only for a manifest recording
         # no corpus patterns) and the run.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
             accepted, defender_dir=DEFENDER_DIR, dispatches_lead_zero=ns.episode is None))
-        world = _resume_target(ns, episode=episode, tenant=tenant_of)
+        world = _resume_target(ns, episode_runs=episode_runs, tenant=tenant_of)
         source = (None if world is None
                   else _open_world_source(accepted.runs_repository(), world))
 
@@ -695,7 +708,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
 
         # The input is read after the tenant check and the role preflight: a tenant the check
         # refuses is told so before anything about its input is.
-        alert, run_id = _case_input(ns, world, episode)
+        alert, run_id = _case_input(ns, world, episode_runs)
 
         # The handle, not just its directory: the post-run step saves the run page through it.
         run = (materialize(alert, run_id, tenant=accepted, model=model) if world is None

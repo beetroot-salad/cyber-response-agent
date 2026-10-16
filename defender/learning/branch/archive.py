@@ -3,12 +3,10 @@
 After archiving, `delta_o`, `verdicts` and the grader answer from `episodes/<id>/` alone, with no
 re-run and no path outside it. That self-containment requires a complete copy: the report, the
 investigation document, the two tables, the run's provenance stamp, the scrub verdict, the
-run-end record, the lessons-loaded table, the alert, the gather summaries, and a text pointer
-naming the source run dir.
+run-end record, the lessons-loaded table, the alert and the gather summaries.
 
-None is sourced from another. The pointer is a text file, never a symlink, and nothing follows
-it: sibling run dirs are disposable, and resolving it would make the episode self-contained only
-while the runs base still holds the run.
+None is sourced from another. No pointer back to the arm's folder is written (#1187 R8): the
+episode's arm roster names every arm by id, and nothing read the pointer.
 
 The scrub verdict and run-end record are sidecars beside the run dir (`scrub.verdict_path`,
 `run_end.sidecar_path`), written outside the tree they describe because a file inside a
@@ -257,8 +255,6 @@ def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Pa
             _logger.warning(f"world {world}: {len(refused)} non-artifact entr"
                             f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
                             f"{', '.join(str(p) for p in refused)}")
-        # The pointer last, as text, through the episode handle.
-        handle.run_dir_pointer.write(f"{run_dir}\n")
         archived[world] = world_dir
     return archived
 

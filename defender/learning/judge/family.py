@@ -16,7 +16,7 @@ absent inputs (tier 1) and malformed ones (tier 2) both mark it `ungradable` wit
 and a malformed world also carries `malformed: true`, so "not there" and "there and wrong" stay
 distinguishable on the record.
 
-This module is also the one home of the episode archive's record readers (`raw_manifest`,
+This module is also the one home of the episode archive's record readers (`read_manifest`,
 `read_samples_record`, `read_world_facts`, `screened_yaml_mapping`) and the accessors in
 `__all__`, shared by the judge's input builder (`render.py`) and the episode page. The world's
 leads and queries come off `lead_repository.joined`.
@@ -34,7 +34,7 @@ from pydantic import SkipValidation
 
 from pathlib import Path, PurePath
 
-from defender._io import Bound, bind
+from defender._io import Bound
 from defender._report import ReportRead, parse_report_text
 from defender._run_id import is_valid_run_id
 from defender._text import unwritable_value
@@ -133,29 +133,21 @@ def read_samples_record(bound: Bound, *, reader: Any = None) -> dict[str, Any]:
     return read(bound, LAYOUT.samples)
 
 
-def raw_manifest(episode_dir: Path) -> dict[str, Any]:
-    """The manifest as a mapping, or `JudgeRefused`.
-
-    Screened like the launcher's own read: the episode dir is box-reachable, and a link the
-    launcher refuses must not be one the grader honours. Absent is a refusal too."""
-    with bind(Path(episode_dir)) as bound:
-        return read_manifest(bound)
-
-
-def read_manifest(bound: Bound) -> dict[str, Any]:
-    """`raw_manifest` through the pass's own bound reader: the runtime loader's own gate
-    (`_family.load_manifest_document`), so a manifest the sibling refuses — one predating the
-    oracle, a label off the world-token rule, a hostile system name — is refused here too,
-    before any of it reaches a prompt or a page. A repeated key is refused as well: YAML keeps
-    the last spelling silently, and the judge and the page must not read a document whose
-    meaning depends on which copy won.
+def read_manifest(bound: Bound, *, expected_episode_id: str) -> dict[str, Any]:
+    """The manifest as a mapping, or `JudgeRefused`, through the pass's own bound reader (the
+    walked episode's view): the runtime loader's own gate (`_family.load_manifest_document`),
+    so a manifest the sibling refuses — one predating the oracle, a label off the world-token
+    rule, a hostile system name, an `episode_id` other than `expected_episode_id` (the folder
+    it was read from, #1187 R5) — is refused here too, before any of it reaches a prompt or a
+    page. A repeated key is refused as well: YAML keeps the last spelling silently, and the
+    judge and the page must not read a document whose meaning depends on which copy won.
 
     The refusal is `JudgeRefused` raised FROM the loader's `FamilyError`, so a caller can tell
     an archive of the old design (`ManifestPredatesOracle` as the cause) from a damaged one."""
     from defender._yaml import duplicate_key_paths
 
     try:
-        doc = load_manifest_document(bound)
+        doc = load_manifest_document(bound, expected_episode_id=expected_episode_id)
     except ManifestPredatesOracle as old:
         raise JudgeRefused(str(old)) from old
     except FamilyError as refused:
@@ -369,17 +361,15 @@ def _non_control_worlds(doc: dict[str, Any]) -> list[dict[str, Any]]:
     return [w for w in entries if w.get("role") != BASE_ROLE]
 
 
-def world_label_names_directory(episode_id: str, label: str) -> bool:
-    """Whether `label` may be joined into a per-world path (`worlds/<label>/…`,
-    `runs/<episode_id>-<label>/`); shared by the grading pass and the episode page.
-
-    Both spellings are checked: the launcher checks only the concatenation, whose first
-    character is the episode id's, so `..` would pass it and turn `worlds/<label>` into the
-    episode dir."""
-    return is_valid_run_id(label) and is_valid_run_id(f"{episode_id}-{label}")
+def world_label_names_directory(label: str) -> bool:
+    """Whether `label` may be joined into a per-world path (`worlds/<label>/…`); shared by the
+    grading pass and the episode page. An arm's folder is named by its own UUID (#1187), never
+    by the label, so the label's own spelling is the one checked: `..` would turn
+    `worlds/<label>` into the episode dir."""
+    return is_valid_run_id(label)
 
 
-def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
+def _check_world_labels(worlds: list[dict[str, Any]]) -> None:
     """Refuse a world label that cannot be used as a name, before any path is built from it.
 
     - Reserved labels (`base`, `family`, `family_<n>`): re-checked here because `grade_episode`
@@ -398,12 +388,11 @@ def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
                 "family-level judge call, or one of that call's own `family_<n>` draws — a "
                 "graded world claiming it would collide with the family call's own agent id "
                 "and archive path (M5)")
-        if isinstance(label, str) and not world_label_names_directory(episode_id, label):
+        if isinstance(label, str) and not world_label_names_directory(label):
             raise JudgeRefused(
-                f"world label {label!r} cannot name a directory of its own, or this episode's "
-                f"sibling run ({episode_id}-{label}) — the label is joined straight into every "
-                "per-world path this pass reads and writes, so a label off that grammar reads "
-                "and writes outside the world it names")
+                f"world label {label!r} cannot name a directory of its own — the label is "
+                "joined straight into every per-world path this pass reads and writes, so a "
+                "label off that grammar reads and writes outside the world it names")
 
 
 def mapping_key(mapping: Mapping[str, Any]) -> str:
@@ -1022,7 +1011,7 @@ def control_world(doc: dict[str, Any]) -> dict[str, Any]:
     if len(controls) != 1:
         raise JudgeRefused(f"the manifest declares {len(controls)} control worlds, not one")
     label = controls[0].get("world_id")
-    if not isinstance(label, str) or not world_label_names_directory(episode_id_of(doc), label):
+    if not isinstance(label, str) or not world_label_names_directory(label):
         raise JudgeRefused(f"the control's label {label!r} cannot name a directory")
     return controls[0]
 
@@ -1031,7 +1020,7 @@ def non_control_worlds(doc: dict[str, Any]) -> list[dict[str, Any]]:
     """The manifest's non-control world entries, each label checked usable as a name
     (`_check_world_labels`) before any path is built from it."""
     worlds = _non_control_worlds(doc)
-    _check_world_labels(episode_id_of(doc), worlds)
+    _check_world_labels(worlds)
     return worlds
 
 
@@ -1059,7 +1048,7 @@ __all__ = [
     "read_query_table", "read_served_ledger",
     "discriminator_of", "episode_id_of",
     "is_gradable_row", "json_mapping", "json_mapping_of", "lead_chain", "leads_by_id", "mapping_key",
-    "names_one_file", "non_control_worlds", "raw_manifest", "read_manifest",
+    "names_one_file", "non_control_worlds", "read_manifest",
     "refused_entries", "has_refusals", "render_refused", "is_external_refusal",
     "read_archived_report", "read_investigation_facts", "read_samples_record", "read_world",
     "read_world_facts", "read_world_ledger", "scope_params",

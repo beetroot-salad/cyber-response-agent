@@ -1,26 +1,28 @@
-"""The held runs folder (#1105 H1–H4): the one object every lookup and tenant-keyed record
-function works through, and the argument checks they share.
+"""The walk below a tenant's folder, and the runs folder's entries (#1105 H1–H4, #1187 S-iso):
+the bottom layer every lookup works through, and the argument checks the lookups share.
 
-`hold_runs(tenant, io, folder=...)` opens `tenant.runs` — or the folder the repository's episode
-view names, an episode's container — ONCE, no-follow, and yields a `HeldRuns` for the block,
-closing the handle when it ends. The object is the call's whole view of the folder:
+`walk_from_tenant(tenant, io, names)` holds `<data root>/<T>` no-follow (the data root itself is
+followed, as configuration), then each folder of `names` OFF ITS PARENT'S HANDLE, never followed
+(`_io.hold_under`), and hands back the last one held. So a link at `<T>`, `<T>/runs`,
+`<T>/episodes`, `<ep>` or `<ep>/runs` is refused at its own level, naming it, and nothing of
+another tenant's is reached through one (#1187 R1: where a folder is says whose it is, so no
+record restates it). Every refusal of a level is `TenantRefused`; an absent level is
+`FileNotFoundError`, which each caller reads as its own expected state.
 
-* `absent` — the folder's one expected state other than present (empty answers);
-* `view` — the held folder, handed out only after `_tenant.json` has been judged through it
-  (H3) and found to name the tenant, so a caller cannot list or read before the tenant check
-  (NF-8: another tenant's folder is refused on its record, never on its entries);
-* `listing()` — every entry judged from its directory entry, never followed (H4), once.
+`listing(view, folder, tenant_id, io=)` judges every entry of a natural runs folder from its
+directory entry, never followed (H4): a UUID run folder and a known sidecar file of one are the
+only entries it serves. Anything else — a pre-#1187 run, an old sidecar, `_tenant.json`,
+`_episodes`, a link, a stray file — refuses the whole listing with `RunRefused` naming the entry
+and the one-time command that moves such entries aside (#1187 O6).
 
-This module is the package's bottom layer: `_record` (the episode records) and `_lookup` (the
-lookups) import it, and it imports neither. A fault of the folder or of its `_tenant.json` is
-`TenantRefused` (P2), which escapes its own message to one line, as `RunRefused` does.
+This module is the package's bottom layer: `_lookup` imports it, and it imports nothing of the
+package's but its errors and `RunId`.
 """
 from __future__ import annotations
 
+import errno
 import os
 import stat
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,17 +30,14 @@ from typing import Any
 from defender import _io
 from defender._run_id import run_id_fault
 from defender._shown import quoted, shown
-from defender._tenant import (
-    TENANT_RECORD_NAME, Tenant, TenantRecord, TenantRecordMismatch, TenantRefused, read_tenant,
-    record_path,
-)
+from defender._tenant import Tenant, TenantRefused
 from defender.run_repository._errors import RunRefused
 from defender.run_repository._id import RunId
 from defender.run_repository._layout import _SIDECAR_SUFFIXES, _STAGED_TAIL
 
-#: The episode-record folder, directly in the tenant's runs folder. A leading `_` is never a
-#: run id (`RunId.parse` refuses it), so no run folder can share its name.
-EPISODES_DIRNAME = "_episodes"
+#: The one-time command every refusal of a pre-#1187 entry sends the operator to (#1187 O6,
+#: Flow 7), as the operator runs it from the checkout's root.
+RETIRE_COMMAND = "defender/ops/retire_legacy_runs.py"
 
 # -- the arguments ----------------------------------------------------------------------------
 
@@ -76,12 +75,11 @@ def sidecar_owner(name: str) -> str | None:
 
 
 def run_name_fault(text: str) -> str | None:
-    """Why `text` cannot name a run folder, or `None`: the run-id rule (`run_id_fault`: grammar,
-    case stability, the 206-byte bound) and the sidecar clause (D2.1, MF-21: a name shaped like
-    a host-only sidecar file, or the staged file a sidecar write makes first, never names a
-    run). Judged on the name alone, before anything is read. The one answer to "may this text
-    name a run?": run setup admits a run id by it, the family model's gate judges each
-    `<episode_id>-<label>` by it, and the record writer each arm."""
+    """Why `text` cannot name a run folder, or `None`: the run-id rule (`run_id_fault`: canonical
+    lowercase UUID text) and the sidecar clause (D2.1, MF-21: a name shaped like a host-only
+    sidecar file, or the staged file a sidecar write makes first, never names a run). Judged on
+    the name alone, before anything is read. The one answer to "may this text name a run?": run
+    setup admits a run id by it, and the one-time command keeps a run folder by it."""
     if (why := run_id_fault(text)) is not None:
         return why
     if sidecar_owner(text) is not None:
@@ -113,13 +111,6 @@ class Listing:
     sidecars: frozenset[str]
     sidecar_ids: frozenset[RunId]
 
-    def holds(self, run_id: RunId) -> bool:
-        """Whether `run_id` is taken in this folder: a run stands there, a sidecar file owned by
-        that id stands beside it (a new run there would meet that file), or a sidecar file is
-        named exactly `run_id`. The one definition `run_exists` and the record writer share."""
-        return (run_id in self.runs or run_id in self.sidecar_ids
-                or str(run_id) in self.sidecars)
-
 
 def _parses(text: str) -> RunId | None:
     try:
@@ -128,13 +119,42 @@ def _parses(text: str) -> RunId | None:
         return None
 
 
-def _list_entries(view: _io.Bound, folder: Path, *, io: Any) -> Listing:
-    """Every entry of the held runs folder, judged from its directory entry and never followed
-    (D2.4, H4). Accepted: a run (a real directory whose name `RunId.parse` admits and the
-    sidecar clause passes), `_tenant.json` and `_episodes` (each judged where it is read), and a
-    known sidecar file — a REGULAR file `<id><suffix>` whose `<id>` `RunId.parse` admits. Any
-    other entry is `RunRefused` naming it, a legacy run folder off the id rules included; a
-    folder that cannot be listed is `TenantRefused`."""
+def retire_remedy(tenant_id: str) -> str:
+    """What a refusal of a pre-#1187 entry tells the operator to do: run the one-time command
+    for the tenant (no run, fork or drain in flight on the data root; its help says so)."""
+    return (f"run {RETIRE_COMMAND} --tenant {tenant_id} to move pre-#1187 entries aside "
+            "(nothing is deleted)")
+
+
+def _as_run(name: str, kind: str, io: Any) -> RunId | None:
+    """The run a runs-folder entry is: a real directory whose name `RunId.parse` admits and the
+    sidecar clause passes."""
+    return _parses(name) if kind == io.ENTRY_DIR and sidecar_owner(name) is None else None
+
+
+def _as_sidecar(name: str, kind: str, io: Any) -> RunId | None:
+    """The run a runs-folder entry is a known sidecar file of: a REGULAR file `<id><suffix>`
+    (or its staged twin) whose `<id>` `RunId.parse` admits."""
+    owner = sidecar_owner(name)
+    return _parses(owner) if kind == io.ENTRY_FILE and owner is not None else None
+
+
+def served_entry(name: str, kind: str, *, io: Any) -> bool:
+    """Whether the natural runs folder's entry `name`, of `kind` (an `ENTRY_*`, judged from its
+    directory entry and never followed), is one the listing serves: a run folder or a known
+    sidecar file of one. The one rule both ways (#1187 Flow 6, Flow 7): `listing` refuses every
+    other entry, naming the one-time command, and that command moves every other entry aside."""
+    return _as_run(name, kind, io) is not None or _as_sidecar(name, kind, io) is not None
+
+
+def listing(view: _io.Bound, folder: Path, tenant_id: str, *, io: Any) -> Listing:
+    """Every entry of the held natural runs folder, judged from its directory entry and never
+    followed (D2.4, H4). Served (`served_entry`): a run (a real directory whose name
+    `RunId.parse` admits and the sidecar clause passes) and a known sidecar file — a REGULAR
+    file `<id><suffix>` whose `<id>` `RunId.parse` admits. Nothing else is: any other entry — a
+    pre-#1187 run folder or sidecar, `_tenant.json`, `_episodes`, a link, a stray file — is
+    `RunRefused` naming it and the one-time command (#1187 O6, O10). A folder that cannot be
+    listed is `TenantRefused`."""
     answer = view.entries()
     if answer.entries is None:
         why = "it is gone" if answer.absent else answer.reason
@@ -144,28 +164,84 @@ def _list_entries(view: _io.Bound, folder: Path, *, io: Any) -> Listing:
     sidecar_ids: set[RunId] = set()
     for name in sorted(answer.entries):
         kind = answer.entries[name]
-        if name in (TENANT_RECORD_NAME, EPISODES_DIRNAME):
-            continue
-        owner = sidecar_owner(name)
-        if kind == io.ENTRY_DIR:
-            run_id = _parses(name) if owner is None else None
-            if run_id is None:
-                raise RunRefused(
-                    f"{entry_path(folder, name)} is a directory that is not a run: its name is "
-                    "off the run-id rules or shaped like a sidecar file — rename or move it")
+        if (run_id := _as_run(name, kind, io)) is not None:
             runs.append(run_id)
-        elif kind == io.ENTRY_FILE and owner is not None and (owned := _parses(owner)):
+        elif (owned := _as_sidecar(name, kind, io)) is not None:
             sidecars.add(name)
             sidecar_ids.add(owned)
         else:
             raise RunRefused(
-                f"{entry_path(folder, name)} is not a run, a known sidecar file, "
-                f"{TENANT_RECORD_NAME} or {EPISODES_DIRNAME} (a link, a stray file or another "
-                "entry) — move it out of the runs folder")
+                f"{entry_path(folder, name)} is not a run folder or a sidecar file of one (a "
+                "run id is canonical lowercase UUID text; a link or any other entry is never "
+                f"followed) — {retire_remedy(tenant_id)}")
     return Listing(tuple(runs), frozenset(sidecars), frozenset(sidecar_ids))
 
 
-# -- the held folder (H1–H3) ---------------------------------------------------------------------
+# -- the walk below the tenant (#1187 S-iso) -----------------------------------------------------
+
+
+def level_fault(exc: OSError) -> str:
+    """Why one level of a walk could not be held, from the step's own refusal: the step opened
+    that level alone, off its parent's handle, so its errno is the level's."""
+    if exc.errno == errno.ELOOP:
+        return "is a link, which is never followed"
+    if exc.errno == errno.ENOTDIR:
+        return "is not a directory"
+    return f"cannot be opened ({exc.strerror or exc})"
+
+
+def hold_tenant_folder(tenant: Tenant, io: Any) -> _io.Held:
+    """`<data root>/<T>` held no-follow — the top of every walk (#1187 S-iso): its ancestors are
+    the data root, followed as configuration; `<T>` itself never is. A link there (one swapped
+    in after acceptance), something other than a directory, or a folder that is gone is
+    `TenantRefused` naming `<T>`. Held afresh by every call: no descriptor outlives a lookup."""
+    folder = Path(tenant.dir)
+    try:
+        return io.hold(folder, follow=False)
+    except OSError as exc:
+        raise TenantRefused(f"the tenant folder {folder} {level_fault(exc)}") from None
+
+
+def hold_level(parent: _io.Held, name: str, where: Path, *, io: Any, create: bool = False,
+               what: str = "the folder") -> _io.Held:
+    """`name`, one folder below `parent`, held off its handle and never followed
+    (`_io.hold_under`; made first when `create`). Absent is `FileNotFoundError`; a link, a
+    non-directory or a folder that cannot be opened is `TenantRefused` naming `where`."""
+    try:
+        return io.hold_under(parent, name, create=create)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise TenantRefused(f"{what} {where} {level_fault(exc)}") from None
+
+
+def walk_from_tenant(tenant: Tenant, io: Any, names: tuple[str, ...], *,
+                     create: bool = False) -> _io.Held:
+    """`<T>/<names...>` held, every level off its parent's handle and no-follow (see the module
+    docstring); each parent is closed once its child is held, and the caller closes what this
+    returns. `create` makes each missing level. An absent level is `FileNotFoundError`; any
+    other fault of a level is `TenantRefused` naming it."""
+    held = hold_tenant_folder(tenant, io)
+    where = Path(tenant.dir)
+    try:
+        for name in names:
+            where = where / name
+            child = hold_level(held, name, where, io=io, create=create)
+            held.close()
+            held = child
+    except BaseException:
+        held.close()
+        raise
+    return held
+
+
+def tenant_levels(tenant: Tenant, folder: Path) -> tuple[str, ...]:
+    """`folder`'s names below `<T>` (`tenant.runs` is `("runs",)`), so a walk takes every name
+    from the tenant's own layout and spells none."""
+    return Path(folder).relative_to(tenant.dir).parts
+
+
+# -- a runs folder held by its path (#1105 H1) ---------------------------------------------------
 
 
 def _hold_fault(folder: Path, exc: OSError) -> str:
@@ -182,90 +258,6 @@ def _hold_fault(folder: Path, exc: OSError) -> str:
     if st is not None and not stat.S_ISDIR(st.st_mode):
         return "is not a directory"
     return f"cannot be opened ({exc.strerror or exc})"
-
-
-class _HeldRecordIO:
-    """`read_tenant`'s `io=` seam served through the held view (H3): the record is read off
-    the held handle, never by path, so its verdict is about the folder this call holds."""
-
-    def __init__(self, view: _io.Bound) -> None:
-        self._view = view
-
-    def read_guarded(self, _path: Path, **_kwargs: Any) -> tuple[str | None, str | None]:
-        answer = self._view.read(TENANT_RECORD_NAME)
-        if answer.text is not None:
-            return answer.text, None
-        return None, "absent" if answer.absent else answer.reason
-
-
-class HeldRuns:
-    """One call's hold of a runs folder of the tenant's — `tenant.runs`, or an episode's
-    container through the repository's episode view (see the module docstring). Built only by
-    `hold_runs`; valid for its block."""
-
-    def __init__(self, tenant: Tenant, held: _io.Held | None, io: Any, *,
-                 folder: Path) -> None:
-        self.tenant = tenant
-        self.folder = Path(folder)
-        self.absent = held is None
-        self._held = held
-        self.io = io
-        self._checked: _io.Bound | None = None
-        self._record: TenantRecord | None = None
-        self._listing: Listing | None = None
-
-    def require_present(self) -> HeldRuns:
-        """This hold, when the folder exists; else `TenantRefused` (a function that needs the
-        folder — `open_run`, the writer — never creates it: run setup does, with its record)."""
-        if self.absent:
-            raise TenantRefused(f"the runs folder {self.folder} is absent — run setup creates "
-                                 "it, with its tenant record")
-        return self
-
-    @property
-    def view(self) -> _io.Bound:
-        """`judged()`: the held folder, its tenant record judged."""
-        return self.judged()
-
-    def judged(self) -> _io.Bound:
-        """The held folder, once its `_tenant.json` is judged (once per hold): `read_tenant`'s
-        verdict read through the held handle, then an exact compare with `tenant.id`. Every
-        failure is `TenantRefused` naming the record — `TenantRecordMismatch` for another
-        tenant's, as `Run.for_tenant` raises — never a raw error, never carrying a run id of the
-        folder (NF-8)."""
-        if self._checked is None:
-            self.require_present()
-            assert self._held is not None
-            view = self._held.view()
-            path = record_path(self.folder)
-            try:
-                record = read_tenant(self.folder, io=_HeldRecordIO(view))
-            except (RecursionError, ValueError, TypeError, OSError) as exc:
-                raise TenantRefused(f"{path} could not be judged: {exc}") from None
-            if record.tenant_id != self.tenant.id:
-                raise TenantRecordMismatch(f"{path} names the tenant {quoted(record.tenant_id)}, "
-                                           f"not {quoted(self.tenant.id)}")
-            self._checked, self._record = view, record
-        return self._checked
-
-    def record(self) -> TenantRecord:
-        """The folder's tenant record, as `judged()` read and judged it through the held
-        handle (the episode view's `base_world_id` reads it here, never by path)."""
-        self.judged()
-        assert self._record is not None
-        return self._record
-
-    def listing(self) -> Listing:
-        """Every entry of the folder, judged once per hold (after the tenant record)."""
-        if self._listing is None:
-            self._listing = _list_entries(self.view, self.folder, io=self.io)
-        return self._listing
-
-    def write(self, name: str, text: str, *, mode: str) -> None:
-        """`Held.write` on the checked folder (the record writer's create lane)."""
-        self.judged()
-        assert self._held is not None
-        self._held.write(name, text, mode=mode)
 
 
 def hold_runs_folder(folder: Path, *, create: bool = False, io: Any = _io) -> _io.Held:
@@ -289,23 +281,3 @@ def hold_runs_folder(folder: Path, *, create: bool = False, io: Any = _io) -> _i
     except OSError as exc:
         raise TenantRefused(f"the runs folder {folder} could not be created and held: "
                             f"{_hold_fault(folder, exc)}") from None
-
-
-@contextmanager
-def hold_runs(tenant: Tenant, io: Any, *, folder: Path) -> Iterator[HeldRuns]:
-    """`folder` — a runs folder of `tenant`'s, which every caller names: `tenant.runs`, or an
-    episode's container that the repository's episode view hands — held open no-follow for the
-    block (`absent` when it does not exist, the one expected state of the folder itself) by
-    `hold_runs_folder`; the handle is closed when the block ends, however it ends."""
-    folder = Path(folder)
-    try:
-        held = hold_runs_folder(folder, io=io)
-    except FileNotFoundError:
-        held = None
-    if held is None:
-        yield HeldRuns(tenant, None, io, folder=folder)
-        return
-    try:
-        yield HeldRuns(tenant, held, io, folder=folder)
-    finally:
-        held.close()

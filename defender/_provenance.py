@@ -152,9 +152,10 @@ class RunProvenance:
     #: The model this run resolved (per process), so a family comparison can check it is
     #: constant like the commit. `None` means the record does not say.
     model: str | None = None
-    #: The tenant that owns this run and the world it was stamped into (a bare world id for an
-    #: unforked run, `<episode>.<label>` for a forked sibling). `materialize_run` always writes
-    #: both; on read, absent or wrong-typed values fold to `None`, as `scope`/`model` do.
+    #: The tenant that owns this run and the world it was stamped into: a forked sibling's world
+    #: token `<episode token>.<label>`, `None` for a natural run (#1187 R1b retired the base
+    #: world a natural run used to copy from its tenant record). On read, absent or
+    #: wrong-typed values fold to `None`, as `scope`/`model` do.
     tenant_id: str | None = None
     world_id: str | None = None
     #: A forked sibling's lineage (source run, branch point), from the launcher's manifest;
@@ -164,6 +165,12 @@ class RunProvenance:
     #: The tenant knowledge revision the run started with (`capture_knowledge`); `None` means
     #: the record does not say (a stamp written before #1204, or a malformed value read back).
     knowledge: KnowledgeRevision | None = None
+    #: Display facts (#1187 O7): when run setup started the run (ISO-8601 UTC text) and the
+    #: alert's label, which the opaque run id no longer spells. The file sits in the box's rw
+    #: bind, so no decision reads them (N5): the run page shows them, escaped. Absent or
+    #: wrong-typed on read, each folds to `None` without voiding the record.
+    started_at: str | None = None
+    alert_label: str | None = None
 
     def __post_init__(self) -> None:
         """Refuse a record no capture could have produced, so both the writer and `from_obj`
@@ -205,6 +212,8 @@ class RunProvenance:
                 "parent_run_id": self.parent_run_id,
                 "fork_turn": self.fork_turn,
                 "knowledge": None if self.knowledge is None else self.knowledge.as_wire(),
+                "started_at": self.started_at,
+                "alert_label": self.alert_label,
             },
             indent=2,
             sort_keys=True,
@@ -238,6 +247,8 @@ class RunProvenance:
         world_id = obj.get("world_id")
         parent_run_id = obj.get("parent_run_id")
         fork_turn = obj.get("fork_turn")
+        started_at = obj.get("started_at")
+        alert_label = obj.get("alert_label")
         # Coherence is `__post_init__`'s job; this only types each field.
         try:
             return cls(
@@ -258,6 +269,8 @@ class RunProvenance:
                     else None),
                 # Folded here, before the record is built, so a bad value never voids the rest.
                 knowledge=KnowledgeRevision.from_wire(obj.get("knowledge")),
+                started_at=(started_at if isinstance(started_at, str) else None),
+                alert_label=(alert_label if isinstance(alert_label, str) else None),
             )
         except ValueError:
             return None

@@ -4,10 +4,11 @@
 questions did a world's observation differ, and was it the difference that world declared".
 Both are derived on read; nothing is stored.
 
-Both read the episode directory and nothing else. Sibling run dirs are disposable and may be
-gone by grading time, so `verdicts` reads the archived report, `delta_o` pairs the archived
-`served/` ledgers, and the archived `run_dir` pointer is informational only — never opened or
-followed.
+Both read the episode directory and nothing else, through the WALKED view the tenant's runs
+repository hands out (`runs.episode(episode_id)`, #1187 S-iso): a bare path carries no tenant,
+so it cannot go through the tenant's walk, and neither reader takes one. Sibling run dirs are
+disposable and may be gone by grading time, so `verdicts` reads the archived report and
+`delta_o` pairs the archived `served/` ledgers.
 
 Both refuse an episode whose outcome record (`outcome.yaml`, written once by the launcher's
 pre-flight) says anything but exactly `accepted`: an `unusable` or `refused` family measured
@@ -24,14 +25,13 @@ only because the recorded outcome distinguishes it from "the worlds ran and agre
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import yaml
 
 from defender import _yaml
 from defender._frontmatter import parse_frontmatter_or_none
-from defender._io import Bound, bind
+from defender._io import Bound
 from defender._report import repeats_disposition
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender._episode_paths import LAYOUT
@@ -41,6 +41,7 @@ from defender.learning.branch.ledger import (
     LedgerError,
     correlation_key_of,
 )
+from defender.run_repository import EpisodeRuns
 from defender.runtime.branch._family import (
     BASE_ROLE,
     episode_token_for,
@@ -145,8 +146,18 @@ def _declared_disposition(text: str) -> Any:
     return frontmatter.get("disposition")
 
 
-def verdicts(episode_dir: Path) -> dict[str, str]:
-    """Each archived world's disposition, keyed by world label.
+def _walked(view: EpisodeRuns) -> Bound:
+    """The no-follow reader over the episode folder `view` holds — the walked handle, never a
+    path re-bound by its spelling. Anything but an episode view is a `TypeError`."""
+    if not isinstance(view, EpisodeRuns):
+        raise TypeError(f"the episode readers take the episode's walked view "
+                        f"(`runs.episode(episode_id)`), not {type(view).__name__}")
+    return view.episode.view()
+
+
+def verdicts(view: EpisodeRuns) -> dict[str, str]:
+    """Each archived world's disposition, keyed by world label, read through the episode's
+    walked view.
 
     Read from each world's own archived `report.md`, never a run dir. Judged by
     `_vocab.normalized_disposition`, which owns the vocabulary including zero-width stripping
@@ -155,8 +166,7 @@ def verdicts(episode_dir: Path) -> dict[str, str]:
     A value outside the vocabulary refuses, naming it: a headline that cannot be read is not the
     same as no headline.
     """
-    with bind(Path(episode_dir)) as bound:
-        return _verdicts(bound)
+    return _verdicts(_walked(view))
 
 
 def _verdicts(bound: Bound) -> dict[str, str]:
@@ -275,7 +285,7 @@ def _wrong_seat(key: str, verdict: Verdict) -> str:
         f"{sorted(v.value for v in DELTA_SEAT)}")
 
 
-def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dict[str, str]]:
+def delta_o(view: EpisodeRuns, *, invoke: Invoke | None = None) -> dict[str, dict[str, str]]:
     """Per world, per shared correlation key: one member of the comparator's delta seat.
 
     `same`, `formatting`, `mutation` or `undeclared`, as the comparator answers it
@@ -290,18 +300,27 @@ def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dic
 
     Every archived world gets an entry, the control included; an empty entry means the world
     served nothing.
+
+    `view` is the episode's walked view: every read below is a no-follow walk off the folder
+    it holds, the manifest is held to the view's episode id (R5), and the arm ids every prompt
+    is cleaned of are the view's own roster (`view.arm_ids()`), so no caller hands them in or
+    forgets them (#1187 S-red).
     """
-    # One bind for the pass: every read below is a no-follow walk off the same held folder.
-    with bind(Path(episode_dir)) as bound:
-        return _delta_o(bound, invoke)
+    return _delta_o(_walked(view), view, invoke)
 
 
-def _delta_o(bound: Bound, invoke: Invoke | None) -> dict[str, dict[str, str]]:
+def _delta_o(bound: Bound, view: EpisodeRuns,
+             invoke: Invoke | None) -> dict[str, dict[str, str]]:
     _refuse_incomplete(bound)
     labels = _archived_labels(bound)
     if not labels:
         return {}
-    family = load_family(bound)
+    family = load_family(bound, expected_episode_id=view.episode_id)
+    arm_ids = view.arm_ids()
+    if arm_ids is None:
+        raise EpisodeError(
+            f"episode {view.episode_id} has archived worlds but no arm roster — it never "
+            "reached RUNS, so its worlds' arms cannot be named or kept out of a prompt")
     token = episode_token_for(family.episode_id)
     control = next((w.world_id for w in family.worlds if w.role == BASE_ROLE), None)
 
@@ -338,7 +357,7 @@ def _delta_o(bound: Bound, invoke: Invoke | None) -> dict[str, dict[str, str]]:
                  if key in base and base[key] != answer}
 
     # The family's identities, removed from every prompt the comparator sends.
-    known_ids = family_identities(family)
+    known_ids = family_identities(family, arm_ids)
     out: dict[str, dict[str, str]] = {}
     for label in labels:
         world = served[label]

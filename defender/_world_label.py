@@ -2,9 +2,7 @@
 
 The family model judges a world label (a label must not claim a reserved name, and must be in
 the world-token alphabet). The rules and their words live here once, so a reader that holds no
-model stack (the runs repository's episode-record writer, #1105) judges a label the same way.
-That writer also still holds a label to the index-name rule (`world_view_fault`), which the
-retired world-view staging used to name a view (#1224 deleted the staging, not the rule). Each
+model stack (the runs repository's arm-roster reader, #1187) judges a label the same way. Each
 `*_fault` function returns the refusal's sentence, or `None` when the label passes; a label is
 shown `quoted`, so a model-authored megabyte cannot flood the refusal.
 """
@@ -24,11 +22,6 @@ RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base", "family"})
 #: injective across `judge:<world>:<n>` and `judge:family:<n>`, so the whole near-miss shape is
 #: refused.
 _RESERVED_FAMILY_DRAW_LABEL = re.compile(r"\Afamily_\d+\Z", re.IGNORECASE)
-
-#: Punctuation an index or alias name cannot carry (whitespace is checked separately). `:` is
-#: absent: legal in the cross-cluster expression `remote:logs-*`.
-_ILLEGAL_IN_NAME = frozenset('\\/*?"<>|,')
-
 
 def is_reserved_world_label(label: str) -> bool:
     """The membership test for the reserved namespace (the set, case-folded, and the
@@ -55,10 +48,12 @@ def reserved_label_fault(label: str, *, at: str = "") -> str | None:
 
 
 #: The world-token rule's alphabet: lower-case ASCII letters, digits and `_`, starting with a
-#: letter or digit. No `-`: a sibling's run id is `<episode id>-<label>` and the launcher reads
-#: the label back after the last `-`. No `.`: the world token is `<episode token>.<label>`. Lower
-#: case only: a label names a run dir, a ledger file and an oracle-side store, and two labels one
-#: case fold apart would be one file wherever the filesystem folds case.
+#: letter or digit. No `-` and no `.`: the world token is `<episode token>.<label>`, and the
+#: episode token is the episode's UUID with its hyphens rendered as dots, so a label holding
+#: either would blur where the token's label begins. (An arm's run folder is named by its roster
+#: UUID since #1187, never by the label.) Lower case only: a label names an archived world, a
+#: ledger file and an oracle-side store, and two labels one case fold apart would be one file
+#: wherever the filesystem folds case.
 _WORLD_LABEL = re.compile(r"\A[a-z0-9][a-z0-9_]*\Z")
 
 
@@ -72,40 +67,6 @@ def world_label_fault(label: object, *, at: str = "") -> str | None:
     if not isinstance(label, str) or not _WORLD_LABEL.match(label):
         return (f"{where}world label {quoted(label)} is outside the world-token alphabet (lower-"
                 "case ASCII letters, digits and '_', starting with a letter or digit) — a label "
-                "names a run dir, a ledger file and an oracle-side store, and is read back out "
-                "of `<episode id>-<label>` after the last '-'")
+                "names an archived world, a ledger file and an oracle-side store, and ends the "
+                "world token `<episode token>.<label>`")
     return reserved_label_fault(label, at=at)
-
-
-def view_name_fault(part: str, origin: str) -> str | None:
-    """Why `part` cannot name an index or alias, or `None`; `origin` says what it came from."""
-    if not part:
-        return (f"{origin} reduces to nothing an alias can be named by — a world view is built "
-                "from the corpus it stages, and a bare wildcard leaves no corpus to name")
-    illegal = sorted({c for c in part if c in _ILLEGAL_IN_NAME or c.isspace()})
-    if illegal:
-        return (f"{origin} carries {illegal}, which an index or alias name cannot hold — the "
-                "view is written back unquoted, so the retargeted query would not parse as the "
-                "one command it replaced")
-    # Lower case only. The search backend does not refuse an upper-case alias here: `_search` uses
-    # `ignore_unavailable=true`, so it silently returns zero hits.
-    if part != part.lower():
-        return (f"{origin} carries upper case, which an index or alias name cannot hold — a "
-                "view named above the case rule is not refused by the cluster, it is answered "
-                "with an empty result, so the world would read as one that changed nothing")
-    return None
-
-
-def world_view_fault(world_id: str) -> str | None:
-    """Why `world_id` cannot name a world view, or `None`: the alias name rule plus no `-`.
-
-    `-` delimits `wv-{id}-{stem}`, so an id containing it makes one world's view name parse as
-    another's (`a-logs-nginx`'s view of `logs-*` reads as world `a`'s view of
-    `logs-nginx-logs-*`)."""
-    if (why := view_name_fault(world_id, f"world id {quoted(world_id)}")) is not None:
-        return why
-    if "-" in world_id:
-        return (f"world id {quoted(world_id)} carries '-', which a view name uses to separate the id "
-                "from the corpus it stages — an id holding the delimiter makes one view name "
-                "readable as another world's, so the boundary between siblings stops holding")
-    return None

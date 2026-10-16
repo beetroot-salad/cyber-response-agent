@@ -1,11 +1,11 @@
 """The file-backed `Run` handle: five sub-collections, a `RunRecord` value object, and a
 per-kind `RecordHandle` every record accessor answers.
 
-`Run.for_tenant(tenant_id, run_id, *, runs_base, io=)` is the constructor the repository's
-creates use; it refuses a runs folder with no tenant record. `Run.at(directory)` is the
-eval/fixture/tooling escape hatch with no runs base. `Run.under` builds the handle with no I/O:
-`for_tenant` uses it after judging the record, and so does the repository's `open`, which
-judged the record through its own held runs folder. Outside the package every constructor is
+`Run.under(container, run_id, *, io=, tenant_id=)` builds the handle with no I/O: the
+repository's opens and creates use it once they have walked the container from the tenant
+folder without following a link (#1187 S-iso; the container holds no tenant record).
+`Run.at(directory)` is the eval/fixture/tooling escape hatch with no runs base. Outside the
+package every constructor is
 gated by `scripts/lint/lint_run_layout_imports.py`; application code gets a `Run` from its
 tenant's repository (`tenant.runs_repository().open(run_id)`, `.create`, or an episode view's).
 
@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, Any
 
 from defender import _alert_input, _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
-from defender import _tenant
 from defender.run_repository import _layout
 from defender.run_repository._id import RunId
 from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths
@@ -343,8 +342,8 @@ class Run:
     observability: _RecordHandleGroup
     session: _RecordHandleGroup
     #: The address (frozen, `_ADDRESS`): the run folder and the runs base holding it (`None`
-    #: on a `Run.at` handle), and the tenant half — present on a `for_tenant`/`under` handle,
-    #: absent on `at`.
+    #: on a `Run.at` handle), and the tenant half — present on an `under` handle, absent on
+    #: `at`.
     run_dir: Path
     runs_base: Path | None
     tenant_id: str
@@ -356,8 +355,8 @@ class Run:
         # The address is frozen once built (#1105 O5.13): `__setattr__` refuses these names.
         object.__setattr__(self, "run_dir", Path(run_dir))
         object.__setattr__(self, "runs_base", Path(runs_base) if runs_base is not None else None)
-        # The address's tenant, not the stamp's (that is `run.record.tenant_id`; `for_tenant`
-        # ensures they agree). A `Run.at` handle has no address and no such attribute.
+        # The address's tenant, not the stamp's (that is `run.record.tenant_id`). A `Run.at`
+        # handle has no address and no such attribute.
         if tenant_id is not None:
             object.__setattr__(self, "tenant_id", tenant_id)
         self._io = io
@@ -461,36 +460,14 @@ class Run:
     # -- constructors --------------------------------------------------------------------------
 
     @classmethod
-    def for_tenant(
-        cls, tenant_id: str, run_id: str | RunId, *, runs_base: Path, io: Any = _real_io,
-    ) -> Run:
-        """The constructor run setup uses, once the tenant record exists. Refuses when
-        `runs_base` holds no tenant record (`TenantRefused`, #1105 NH-3), and when `tenant_id`
-        disagrees with the record stored there, rather than silently trusting either."""
-        runs_base = Path(runs_base)
-        path = _tenant.record_path(runs_base)
-        if not io.entry_present(path):
-            raise _tenant.TenantRefused(
-                f"{path} is absent — a run is built only under a runs folder whose tenant "
-                "record names its tenant")
-        record = _tenant.read_tenant(runs_base, io=io)
-        if record.tenant_id != tenant_id:
-            raise _tenant.TenantRecordMismatch(
-                f"tenant_id {tenant_id!r} disagrees with the tenant record at "
-                f"{runs_base} ({record.tenant_id!r}) — for_tenant is an enforcement "
-                "point, not a migration"
-            )
-        return cls.under(runs_base, run_id, io=io, tenant_id=tenant_id)
-
-    @classmethod
     def under(
         cls, runs_base: Path, run_id: str | RunId, *, io: Any = _real_io,
         tenant_id: str | None = None,
     ) -> Run:
-        """The no-I/O builder `for_tenant` and the repository's `open` share — not a public front door. The
-        id is a `RunId`, or text `RunId.parse` admits (`RunRefused` otherwise): the repository
-        has one admission rule, its 206-byte bound included, so no handle is built for a run
-        whose sidecar files could not be named."""
+        """The no-I/O builder the repository's opens and creates share — not a public front
+        door. The id is a `RunId`, or text `RunId.parse` admits (`RunRefused` otherwise): the
+        repository has one admission rule, so no handle is built for a run whose sidecar files
+        could not be named."""
         name = str(run_id if isinstance(run_id, RunId) else RunId.parse(run_id))
         runs_base = Path(runs_base)
         return cls(runs_base / name, runs_base=runs_base, io=io, tenant_id=tenant_id)
@@ -499,7 +476,7 @@ class Run:
     def at(cls, directory: Path) -> Run:
         """The eval/fixture/tooling escape hatch — directory walkers, test fixtures, and the
         archive/branch machinery. Accepts any existing directory without inspecting it; not the
-        live investigation path (use `for_tenant`)."""
+        live investigation path (that is the tenant's repository)."""
         directory = Path(directory)
         if not directory.is_dir():
             raise ValueError(f"{directory} is not an existing directory")
@@ -616,7 +593,7 @@ def case_ref(alert_bytes: bytes) -> str:
 # ---------------------------------------------------------------------------------------
 
 #: The copied set, each name from its owner: run-dir names from `_layout`, the archive's
-#: re-homed sidecar names and run-dir pointer from `_episode_paths`.
+#: re-homed sidecar names from `_episode_paths`.
 _ARCHIVED_WORLD_NAMES: dict[str, str] = {
     "report": _layout.REPORT, "investigation": _layout.INVESTIGATION,
     "provenance": _layout.PROVENANCE,
@@ -625,7 +602,7 @@ _ARCHIVED_WORLD_NAMES: dict[str, str] = {
     "lessons_loaded": _layout.LESSONS_LOADED, "alert": _layout.ALERT,
     "gather_summaries": _layout.GATHER_SUMMARIES_DIRNAME,
     "executed_queries": _layout.EXECUTED_QUERIES,
-    "gather_raw": _layout.RAW_MARKER, "run_dir_pointer": _episode_paths.RUN_DIR_POINTER_NAME,
+    "gather_raw": _layout.RAW_MARKER,
 }
 
 

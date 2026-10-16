@@ -363,8 +363,9 @@ findings whose source case has a ground truth.
 ## Artifacts
 
 ```text
-$DEFENDER_EPISODES_BASE/<episode_id>/
+$DEFENDER_DATA_ROOT/<tenant>/episodes/<episode uuid>/
   family.yaml                 # the questioner's manifest — every sibling re-parses it
+  arms.json                   # the arm roster {label: arm uuid}, written once by the host at the start of RUNS
   samples.yaml                # real example answers per served system, for the questioner and judge
   outcome.yaml                # pre-flight's write-once outcome: accepted | unusable | refused
   world_records/<label>.yaml  # a world's own post-launch record (unservable, budget, did not finish, not archived)
@@ -376,9 +377,9 @@ $DEFENDER_EPISODES_BASE/<episode_id>/
   worlds/<label>/
     report.md  investigation.md  alert.json  provenance.json
     executed_queries.jsonl  gather_raw/  gather_summaries/
-    lessons_loaded.jsonl  scrub_verdict.json  run_dir   # a text pointer, not a link
+    lessons_loaded.jsonl  scrub_verdict.json
     judge/<n>.yaml            # one per judge draw
-  runs/                       # the siblings' live run dirs (disposable)
+  runs/<arm uuid>/            # the siblings' live run dirs, named by their roster ids (disposable)
   judge.yaml                  # written last; its presence certifies the pass
   learning.html               # the episode page (#1025) — rendered after judge.yaml, from the episode dir alone
 

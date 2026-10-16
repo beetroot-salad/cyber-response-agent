@@ -185,6 +185,8 @@
   font-size: 12px; color: var(--text-dim); padding: 2px 0; overflow-wrap: anywhere;
 }
 .episode .rc-teardown-fail { font-size: 12px; color: var(--bad); padding: 2px 0 2px 12px; overflow-wrap: anywhere; }
+/* #1187: the arm roster refused — the arms' one state, with the reader's reason. */
+.episode .w-roster-refused { font-size: 12px; color: var(--bad); padding: 2px 0; overflow-wrap: anywhere; }
 
 /* #1224: a world's facts and its served calls; pre-flight's outcome record, world records and
    the per-system samples record. */

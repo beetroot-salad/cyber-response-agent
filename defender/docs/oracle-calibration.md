@@ -204,8 +204,11 @@ estimate invites the point estimate to be read.
 
    ```bash
    experiments/oracle-telemetry-fidelity/extract_alert.py <rule_id> <since-iso> <out.json>
-   python3 defender/run.py <out.json> --tenant playground --run-id <slug> --no-learn
+   python3 defender/run.py <out.json> --tenant playground --no-learn
    ```
+
+   The run is named by a minted UUID (`--run-id` takes only a UUID since #1187); note the
+   run id it reports to find the run under `$DEFENDER_DATA_ROOT/playground/runs/`.
 
    The run's leads + queries become the oracle-visible envelope. Prefer this over
    authoring leads: the calibration premise is *the envelope production actually

@@ -1,6 +1,6 @@
 """The runs repository (#1105): the one owner of run-folder layout, the run handle, the
-tenant-scoped repository (`Tenant.runs_repository()`, PR 2) and the episode -> runs record.
-This module is its door.
+tenant-scoped repository (`Tenant.runs_repository()`, PR 2), whose episode view owns the arm
+roster (#1187). This module is its door.
 
 The door serves the public surface lazily (PEP 562 `__getattr__`): reading a name imports the
 one submodule that defines it, and nothing else. That is load-bearing twice over (R4-6):
@@ -45,9 +45,6 @@ if TYPE_CHECKING:
     from defender.run_repository._lookup import (
         RunsRepository, EpisodeRuns, Listed, RunAddress, open_requested_run,
     )
-    from defender.run_repository._record import (
-        record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids,
-    )
     from defender.run_repository._errors import (
         RunRefused, RunAbsent, RunUnreachable,
     )
@@ -77,7 +74,6 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("RunId",), "_id"),
     **dict.fromkeys(("RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
                      "open_requested_run",), "_lookup"),
-    **dict.fromkeys(("record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids",), "_record"),
     **dict.fromkeys(("RunRefused", "RunAbsent", "RunUnreachable",), "_errors"),
     **dict.fromkeys(("hold_runs_folder", "run_name_fault",), "_held"),
 }
@@ -97,8 +93,7 @@ __all__ = [
     "is_case_answer_key", "gather_summaries_shape", "alert_input_shape", "artifact_file", "plain_file", "artifact_dir",
     "contained_payload", "Run", "RunRecord", "ArchivedWorld",
     "RecordHandle", "case_ref", "case_ref_of_digest", "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
-    "open_requested_run", "record_episode_runs", "episode_runs", "sibling_run_ids",
-    "episode_sibling_ids", "RunRefused", "RunAbsent", "RunUnreachable", "hold_runs_folder",
+    "open_requested_run", "RunRefused", "RunAbsent", "RunUnreachable", "hold_runs_folder",
     "run_name_fault",
 ]
 

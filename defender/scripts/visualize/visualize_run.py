@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _env
+from defender import _env, _provenance
 from defender._io import load_json_artifact, read_guarded, read_jsonl_rows, read_text_utf8
 from defender._report import ReportRead
 from defender.run_repository import RunPaths
@@ -491,6 +491,22 @@ def render_ticket_line(run_dir: Path) -> str:
     return f'<p class="ticket-line {cls}">{" — ".join(parts)}</p>'
 
 
+def _display_facts(run_dir: Path) -> list[str]:
+    """The run's DISPLAY facts off its provenance stamp (#1187 O7): the alert's label and the
+    moment run setup stamped, each shown escaped and only when it is text — the stamp sits in a
+    folder the box can write, so a value is shown, never trusted, and a missing or unusable one
+    is simply not shown."""
+    prov = _provenance.read(RunPaths(run_dir).provenance)
+    if prov is None:
+        return []
+    parts = []
+    if prov.alert_label:
+        parts.append(f"alert {esc(prov.alert_label)}")
+    if prov.started_at:
+        parts.append(f"stamped {esc(prov.started_at)}")
+    return parts
+
+
 def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
     """The run's page. `update_ticket` is run.py's own `--update-ticket`, handed in as an argument
     and read from no file in the run dir (the box can write every one of them): only a run that
@@ -583,7 +599,7 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
         f'<span class="ts-wall">{fmt_duration(wall_ms)}</span>'
     )
 
-    byline_parts = []
+    byline_parts = [*_display_facts(run_dir)]
     if md["started"]:
         byline_parts.append(f'started {esc(md["started"][:19].replace("T", " "))}')
     if md["models"]:

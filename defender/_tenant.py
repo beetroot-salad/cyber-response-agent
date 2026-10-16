@@ -1,4 +1,4 @@
-"""Tenants: the tenant id, the one acceptance of a tenant, its row, and the runs-base record.
+"""Tenants: the tenant id, the one acceptance of a tenant, and its row.
 
 Every run names its tenant on the request; there is no default. `TenantId` is the one check
 of an id. A tenant's tree is `<data root>/<T>/`: its row `tenant.json` (`create_tenant`,
@@ -6,16 +6,15 @@ of an id. A tenant's tree is `<data root>/<T>/`: its row `tenant.json` (`create_
 settings and agent halves the operator placed there (`_tenants`). `accept_tenant` is the ONE
 function that accepts a tenant, and the only constructor of `Tenant`, the value every entry
 point hands inward; `resolve_data_root` reads the required `DEFENDER_DATA_ROOT`, once per entry
-point. Each runs base records the tenant it serves at `<runs_base>/_tenant.json`
-(`ensure_runs_base_record`): created once, never overwritten, and a run for another tenant is
-refused rather than stamped.
+point. A runs folder records no tenant (#1187 R1): the folder's place under `<T>` is its
+tenant, and the repository reaches it from the accepted tenant's folder without following a
+link.
 
-Both files are created complete-or-absent — the runs-base record through
-`write_guarded(mode="create")`, the row off its held folder (`_io.hold_new`, `Held.write`) — so
-a reader sees them absent or complete. Every refusal is a `TenantRefused` naming the refused
-value — an id, or the content of an `agent/.tenant-id`, escaped and bounded (`_shown`); a path,
-operator-set, as it is — which entry points catch and print verbatim; a corrupt record refuses
-the run rather than reading as `None`. `refuse_colliding_run_id` keeps run ids off the record's filename.
+The row is created complete-or-absent, off its held folder (`_io.hold_new`, `Held.write`), so a
+reader sees it absent or complete. Every refusal is a `TenantRefused` naming the refused value —
+an id, or the content of an `agent/.tenant-id`, escaped and bounded (`_shown`); a path,
+operator-set, as it is — which entry points catch and print verbatim; a corrupt row refuses the
+run rather than reading as `None`.
 
 Acceptance is a point-in-time check: a `Tenant` says the tree passed when it was accepted, not
 that it still does.
@@ -27,7 +26,6 @@ import json
 import os
 import re
 import stat
-import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,13 +52,9 @@ if TYPE_CHECKING:
 
 _R = TypeVar("_R")
 
-#: Lives under the runs base beside the run sidecars, at their trust level.
-TENANT_RECORD_NAME = "_tenant.json"
-
 #: The tenant's row, inside its own folder under the data root.
 ROW_NAME = "tenant.json"
 
-TENANT_FIELDS = ("tenant_id", "base_world_id", "created_at")
 _ROW_FIELDS = ("tenant_id", "created_at")
 
 #: The data-root knob (D2). Private: the design exports no public string constant from this
@@ -117,18 +111,6 @@ class TenantId(str):
 
 
 @model(frozen=True)
-class TenantRecord:
-    tenant_id: TenantId
-    base_world_id: str
-    created_at: str
-
-
-class TenantRecordCorrupt(TenantRefused):
-    """The runs-base record fails to parse, lacks a required field, has one of the wrong type,
-    or names an off-grammar tenant. Refuses the whole run rather than degrading."""
-
-
-@model(frozen=True)
 class TenantRow:
     tenant_id: TenantId
     created_at: str
@@ -142,21 +124,12 @@ def is_valid_tenant_id(tenant_id: object) -> bool:
     return True
 
 
-class TenantRecordMismatch(TenantRefused):
-    """A runs base's record names another tenant than the one a run is for. The run refuses
-    rather than stamp a record its settings did not come from."""
-
-
-def record_path(runs_base: Path) -> Path:
-    return Path(runs_base) / TENANT_RECORD_NAME
-
-
 def _parse_json_record(
     text: str, record: type[_R], fields: tuple[str, ...], *, source: Path,
     refusal: type[TenantRefused],
 ) -> _R:
-    """`text` as a `record` (the runs-base record or the tenant row), or `refusal` naming
-    `source`. Keys beyond `fields` are ignored; `TenantId` checks the id as the field is set."""
+    """`text` as a `record` (the tenant row), or `refusal` naming `source`. Keys beyond
+    `fields` are ignored; `TenantId` checks the id as the field is set."""
     # The nesting-checked decoder, not `json.loads`: a deeply nested record is refused as
     # corrupt, naming it, rather than escaping as a `RecursionError` (#1105, P2).
     obj, bad_json = _real_io.load_json_artifact(text)
@@ -172,76 +145,6 @@ def _parse_json_record(
         raise refusal(f"{source}: {detail}") from bad
     except TenantRefused as bad:
         raise refusal(f"{source}: {bad}") from bad
-
-
-def _parse_record(text: str, *, source: Path) -> TenantRecord:
-    return _parse_json_record(
-        text, TenantRecord, TENANT_FIELDS, source=source, refusal=TenantRecordCorrupt)
-
-
-def _record_doc(record: TenantRecord) -> dict[str, Any]:
-    return {
-        "tenant_id": record.tenant_id, "base_world_id": record.base_world_id,
-        "created_at": record.created_at,
-    }
-
-
-def read_tenant(runs_base: Path, *, io: Any = _real_io) -> TenantRecord:
-    """The tenant record at `runs_base`; absent or corrupt raises `TenantRecordCorrupt`."""
-    path = record_path(runs_base)
-    text, reason = io.read_guarded(path)
-    if text is None:
-        raise TenantRecordCorrupt(f"{path} could not be read: {reason}")
-    return _parse_record(text, source=path)
-
-
-def refuse_colliding_run_id(run_id: str) -> Exception | None:
-    """Explicit guard against a run id equal to the tenant record's filename. Without it only
-    coincidences keep them apart (the leading underscore, the sidecar clear's keying, the
-    runs-base walkers' `is_dir()` filter). Returns the refusal rather than raising; the caller
-    (`materialize_run`) decides how to surface it."""
-    if run_id == TENANT_RECORD_NAME:
-        return ValueError(
-            f"run id {run_id!r} collides with the tenant record's own filename "
-            f"({TENANT_RECORD_NAME}) — refused before anything is created")
-    return None
-
-
-def ensure_runs_base_record(
-    runs_base: Path, tenant_id: TenantId, *, io: Any = _real_io,
-) -> TenantRecord:
-    """Mint the runs-base record naming `tenant_id` when absent; read it back and hand it over
-    when present and naming `tenant_id`; refuse when present and naming another tenant —
-    never overwrite (D1, O6; §7 J16/J63's complete-or-absent creator).
-
-    READ FIRST: every run after a base's first, and every sibling, finds the record there.
-    The create is EXCLUSIVE, so a lost race re-reads the winner's record rather than trusting
-    or overwriting ours; a name this process cannot read (an alias planted at it, a directory
-    squatting it) refuses rather than being minted over."""
-    tenant_id = TenantId(tenant_id)
-    runs_base = Path(runs_base)
-    path = record_path(runs_base)
-    existing, _reason = io.read_guarded(path)
-    if existing is not None:
-        record = _parse_record(existing, source=path)
-    else:
-        record = TenantRecord(
-            tenant_id=tenant_id, base_world_id=uuid.uuid4().hex, created_at=_now())
-        body = json.dumps(_record_doc(record), indent=2, sort_keys=True) + "\n"
-        try:
-            io.write_guarded(path, body, mode="create")
-        except FileExistsError:
-            # Lost the race: the winner's record is the identity; ours is discarded unwritten.
-            record = read_tenant(runs_base, io=io)
-        except OSError as blocked:
-            # An alias or a directory at the name, or this call's own failure (ENOSPC, EACCES):
-            # the record cannot be created, and the run is refused naming it — never retried.
-            raise TenantRefused(f"{path} could not be created: {blocked}") from blocked
-    if record.tenant_id != tenant_id:
-        raise TenantRefused(
-            f"{path} names {record.tenant_id!r}, not {tenant_id!r} — ensure_runs_base_record "
-            "never overwrites a disagreeing record")
-    return record
 
 
 # ==========================================================================================
@@ -473,6 +376,28 @@ def accept_tenant(
     row = _read_row(paths)
     _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted)
     return Tenant(id=tenant_id, data_root=Path(data_root), row=row, _token=_ACCEPTED)
+
+
+def box_mounted_episodes(data_root: Path, raw_id: object) -> Path:
+    """The tenant's episodes folder, `<data root>/<T>/episodes` — every arm container a box of
+    its episodes mounts lies inside it, so the launcher names it as `box_mounted` (#1187 S-acc;
+    no environment names it). Judged as every pre-acceptance site judges the root and the id
+    (`TenantRefused`). A join: nothing is read or made."""
+    return _TenantPaths(data_root, TenantId(raw_id)).episodes
+
+
+def box_mounted_arm_container(data_root: Path, raw_id: object, episode_id: str) -> Path:
+    """The arm container a sibling's box mounts — `<data root>/<T>/episodes/<episode id>/runs`
+    — named BEFORE the tenant is accepted, so the sibling hands it to acceptance as
+    `box_mounted` (step 7 holds the settings half out of it, judging it by where it leads, so a
+    link planted there is seen). The episode id is judged first (`EpisodeRefused`), the root and
+    the id as every pre-acceptance site judges them (`TenantRefused`). A join: nothing is read
+    or made."""
+    from defender._episode_handle import refuse_bad_episode_id
+    from defender._episode_paths import LAYOUT
+
+    episode_id = refuse_bad_episode_id(episode_id)
+    return box_mounted_episodes(data_root, raw_id) / episode_id / LAYOUT.runs
 
 
 def requested_tenant(data_root: Path, raw: object) -> Tenant:

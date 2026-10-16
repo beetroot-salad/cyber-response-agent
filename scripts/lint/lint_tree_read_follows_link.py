@@ -96,11 +96,10 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "learning/judge/render.py",
     # The episode page, rendered from the episode tree through package readers.
     "scripts/visualize/visualize_episode.py",
-    # The runs repository's own readers (#1105 D7): the lookups, the episode record and
-    # `RunId`. Their reads must not follow a link. The moved layout and handle are not listed,
-    # as neither was before the move (`Run.at`'s link-following `is_dir()` is today's).
+    # The runs repository's own readers (#1105 D7): the lookups, the held walks and `RunId`.
+    # Their reads must not follow a link. The moved layout and handle are not listed, as
+    # neither was before the move (`Run.at`'s link-following `is_dir()` is today's).
     "run_repository/_lookup.py",
-    "run_repository/_record.py",
     "run_repository/_held.py",
     "run_repository/_id.py",
 })

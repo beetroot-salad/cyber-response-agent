@@ -2,8 +2,8 @@
 rule, shared with the tenant owner.
 
 `RunRefused` is every refusal the repository makes that is not the tenant's (#1105 OP-5):
-`RunId`'s, the lookups' and the episode record's. A fault of the tenant's runs folder or its
-`_tenant.json` is `_tenant.TenantRefused` instead (P2) — except where a run is opened, which
+`RunId`'s, the lookups' and the arm roster's. A fault of a folder on the tenant's walk (a
+link, a non-directory) is `_tenant.TenantRefused` instead (P2) — except where a run is opened, which
 answers one family: `RunAbsent` (the run is gone: nothing at its name, or no container at all)
 and `RunUnreachable` (the container that holds it cannot be trusted or read right now), each a
 `RunRefused`, the second raised `from` the container's `TenantRefused` (#1105 PR 2 review). It
@@ -18,7 +18,7 @@ from defender._shown import escaped
 
 class RunRefused(Exception):  # noqa: N818 — the design's name (#1105 OP-5), as `TenantRefused`
     """The repository refused: a bad run id, an unexpected entry in a runs folder, a corrupt
-    episode record, or a write it will not make. The message names the path and the fault.
+    arm roster, or a write it will not make. The message names the path and the fault.
 
     The message is `escaped` when the refusal is built, so no path or name spliced into it —
     the runs folder's own path included — can break its one line, whichever site raised it
@@ -38,6 +38,6 @@ class RunAbsent(RunRefused):
 
 class RunUnreachable(RunRefused):
     """The repository refused to open a run because the container that holds it cannot be
-    trusted or read right now: a link or a non-directory where it stands, or a `_tenant.json`
-    missing, corrupt or naming another tenant. Raised `from` the container's `TenantRefused`
+    trusted or read right now: a link or a non-directory where it stands, or one that cannot
+    be listed. Raised `from` the container's `TenantRefused`
     (#1105 PR 2 review), so an open answers one refusal family; the run may well be there."""

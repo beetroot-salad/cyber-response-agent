@@ -23,6 +23,9 @@ from defender.run_repository._layout import (
 #: The episode-layout names — the only place they are spelled. Other modules must not re-bind
 #: them under local aliases (`scripts/lint/lint_run_records.py` refuses that).
 FAMILY_NAME = "family.yaml"
+#: The host-written arm roster (#1187): `{label: arm run id}` for every world the manifest
+#: declares, written once when the episode reaches RUNS and never by a sibling.
+ARM_ROSTER_NAME = "arms.json"
 REVIEW_NAME = "review.yaml"
 SAMPLES_NAME = "samples.yaml"
 JUDGE_NAME = "judge.yaml"
@@ -52,7 +55,6 @@ SERVED_DIRNAME = SERVED_PREFIX.rstrip("/")
 JUDGE_DRAWS_DIRNAME = "judge"
 BASE_FILENAME = "base.jsonl"
 PRIMING_LOCK_NAME = f"{SERVED_PREFIX}.priming"
-RUN_DIR_POINTER_NAME = "run_dir"
 
 #: The archive's names for the two sidecars, which live beside a run dir keyed by run id and
 #: are re-homed under the world as a bare `<kind>.json`. Other archived names are the run
@@ -162,11 +164,6 @@ class ArchivedWorldLeaves:
         return self.draws / f"{_check_index(n, what='n')}.yaml"
 
     @property
-    def run_dir_pointer(self) -> PurePosixPath:
-        """`run_dir` — a text pointer, never a link."""
-        return PurePosixPath(RUN_DIR_POINTER_NAME)
-
-    @property
     def review(self) -> PurePosixPath:
         return PurePosixPath(REVIEW_NAME)
 
@@ -246,10 +243,6 @@ class WorldLayout:
         return self.dir / WORLD_LEAVES.draw(n)
 
     @property
-    def run_dir_pointer(self) -> PurePosixPath:
-        return self.dir / WORLD_LEAVES.run_dir_pointer
-
-    @property
     def review(self) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.review
 
@@ -275,6 +268,12 @@ class EpisodeLayout:
     @property
     def family_stamp(self) -> PurePosixPath:
         return PurePosixPath(PROVENANCE)
+
+    @property
+    def arm_roster(self) -> PurePosixPath:
+        """`arms.json` — the episode's arm roster (#1187), present once the episode reached
+        RUNS."""
+        return PurePosixPath(ARM_ROSTER_NAME)
 
     @property
     def review(self) -> PurePosixPath:
@@ -352,8 +351,8 @@ class EpisodeLayout:
     # -- composing ------------------------------------------------------------------------------
 
     def run(self, run_dir_name: str) -> PurePosixPath:
-        """`runs/<run dir name>` — an existing sibling run dir, by its on-disk name. Shape check
-        only; the minting rules live on `sibling_run_dir`.
+        """`runs/<run dir name>` — a sibling run dir, by its on-disk name: the arm id the roster
+        holds (#1187). Shape check only; the id rule is `RunId`'s.
         """
         return self.runs / _check_component(run_dir_name, what="run_dir_name")
 
@@ -367,7 +366,7 @@ class EpisodeLayout:
 
         Shape check only: readers must be able to open an existing directory whose label is not
         case-stable. Case stability is enforced where a label is minted (`EpisodePaths.world`,
-        `world_dir`, `sibling_run_dir`).
+        `world_dir`).
         """
         return WorldLayout(_check_component(label, what="label"))
 
@@ -386,17 +385,6 @@ class EpisodeLayout:
         """`wire_logs/<name>` — an episode-root wire log by its full file name (the judge's
         framed trace, named by `WIRE_LOG_NAMES`). One component."""
         return PurePosixPath(WIRE_LOG_DIR) / _check_component(name, what="wire log name")
-
-    def sibling_run_dir(self, episode_id: str, label: str) -> PurePosixPath:
-        """`runs/<episode_id>-<label>`. The label must be case-stable and `-`-free: episode ids
-        always contain `-`, so a `-`-free label keeps `ep-a-b` unambiguously `(ep-a, b)`."""
-        episode_id = _check_component(episode_id, what="episode_id")
-        if "-" in str(label):
-            raise ValueError(
-                f"label {label!r} carries '-', the sibling run id's own delimiter — two "
-                "distinct (episode, label) pairs would compose to one run directory")
-        label = _check_label(label)
-        return self.runs / f"{episode_id}-{label}"
 
 
 #: The layout, as one value. Stateless, so one instance serves every caller.
@@ -455,7 +443,7 @@ class OracleStorePaths:
 class EpisodePaths:
     """One episode's directories and accessors, rooted at ``episode_dir`` with a containment
     check on every composed path. The relative form is ``.rel`` / ``LAYOUT``. Locating the
-    episodes root is `learning/branch/cli.episodes_root`'s job, not this module's.
+    episodes folder (`<T>/episodes/`) is `run_repository`'s job, not this module's.
     """
 
     episode_dir: Path
@@ -488,6 +476,10 @@ class EpisodePaths:
     def family_stamp(self) -> Path:
         """The family stamp: `_layout.PROVENANCE`'s file name, different shape."""
         return self.episode_dir / LAYOUT.family_stamp
+
+    @property
+    def arm_roster(self) -> Path:
+        return self.episode_dir / LAYOUT.arm_roster
 
     @property
     def review(self) -> Path:
@@ -569,16 +561,9 @@ class EpisodePaths:
     def stage_trace(self, stage: str) -> Path:
         return self._at(LAYOUT.stage_trace(stage), what="stage_trace")
 
-    def sibling_run_dir(self, episode_id: str, label: str) -> Path:
-        return self._at(LAYOUT.sibling_run_dir(episode_id, label), what="sibling_run_dir")
-
     def world_dir(self, label: str) -> Path:
         """`worlds/<label>`."""
         return self._at(LAYOUT.world(_check_label(label)).dir, what="world_dir")
-
-    def run_dir_pointer(self, label: str) -> Path:
-        return self._at(LAYOUT.world(_check_label(label)).run_dir_pointer,
-                        what="run_dir_pointer")
 
     # -- the archive projection's flat spellings, per label ------------------------------------
 
@@ -660,10 +645,6 @@ class WorldPaths:
 
     def draw(self, n: int) -> Path:
         return self._at(self.rel.draw(n), what="judge_draw")
-
-    @property
-    def run_dir_pointer(self) -> Path:
-        return self._at(self.rel.run_dir_pointer, what="run_dir_pointer")
 
     @property
     def review(self) -> Path:

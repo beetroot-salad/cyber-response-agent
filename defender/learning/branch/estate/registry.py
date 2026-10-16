@@ -356,8 +356,14 @@ class WorldRegistry(ModuleVerbRegistry):
 
     def branch_identities(self) -> frozenset[str]:
         """The whole family this world belongs to (`family_identities`), from the manifest the
-        sibling was resumed from: what the query tool removes from model-visible fault text."""
-        return family_identities(self.world.family)
+        sibling was resumed from and its episode's arm roster (#1187 S-red): what the query
+        tool removes from model-visible fault text. A world resumed without the roster has no
+        arm ids to name, and is refused rather than answering a set that leaves them out."""
+        if self.world.arm_ids is None:
+            raise EstateError(
+                f"world {self.world.label!r} was resumed without its episode's arm roster, so "
+                "its family's arm ids cannot be kept out of model-visible text")
+        return family_identities(self.world.family, self.world.arm_ids)
 
     # -- the grant door -------------------------------------------------------------------------
 
