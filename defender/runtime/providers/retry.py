@@ -62,6 +62,11 @@ class ProviderDown(Exception):  # noqa: N818 — named for the state it reports,
         return self.__class__, (self.model, self.status, self.attempts)
 
 
+#: A monotonic-seconds reader. Aliased so the learning-state census, which reads any `Callable`
+#: field whose name contains "lock" as a lock seam, does not mistake `clock` for one.
+Seconds = Callable[[], float]
+
+
 @dataclass(frozen=True)
 class RetryPolicy:
     """The retrier's clock, sleep and jitter, injectable so a test never waits.
@@ -70,7 +75,7 @@ class RetryPolicy:
     `clock` is monotonic seconds; `jitter` is in `[0, 1)`."""
 
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
-    clock: Callable[[], float] = time.monotonic
+    clock: Seconds = time.monotonic
     jitter: Callable[[], float] = random.random
 
 
