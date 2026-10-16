@@ -466,6 +466,14 @@ ALLOW: tuple[Allowed, ...] = (
             "subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='surrogateescape', timeout=timeout, input=input, env=None if env is None else dict(env), pass_fds=tuple(pass_fds))",
             N_A, _GIT + " (`pass_fds`: descriptors a caller hands the git child, the tenant "
             "credential's pipe of #1108 P3; no path is opened here)"),
+    Allowed(GIT, "git_network", "call",
+            "subprocess.Popen(['git', *args], cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=tuple(pass_fds), start_new_session=True)",
+            N_A, _GIT + " (network git, #1108 P3 amendment 3 C4: in its own session so its "
+            "whole process group is killed on any way out of the call; no path is opened here)"),
+    Allowed(GIT, "git_network", "load", "subprocess.DEVNULL", N_A,
+            "network git's stdin: nothing to read; opens no path"),
+    Allowed(GIT, "git_network", "load", "subprocess.PIPE", N_A,
+            "network git's stdout and stderr, read back as its answer; opens no path", 2),
     Allowed(GIT, "_run_bytes", "call",
             "subprocess.run(['git', *args], cwd=cwd, capture_output=True, input=input, check=False, env=None if env is None else dict(env), timeout=timeout)",
             N_A, _GIT + " (raw bytes: the before-state's `ls-tree` / `cat-file --batch`, the "
@@ -504,7 +512,7 @@ KNOWN_GAPS: tuple[Gap, ...] = ()
 
 #: The allow-list's size by reason at this base — a guard against an entry slipping in
 #: unannounced (update it with the table, and say why in the commit).
-ALLOW_COUNT_BY_REASON = {N_E: 5, D3: 22, N_D: 13, N_H: 9, B2: 17, N_A: 4}
+ALLOW_COUNT_BY_REASON = {N_E: 5, D3: 22, N_D: 13, N_H: 9, B2: 17, N_A: 8}
 
 
 def judge(

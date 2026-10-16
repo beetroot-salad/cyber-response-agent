@@ -6,6 +6,8 @@ import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from defender._process_group import kill_group
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: The variables that decide WHICH repository git acts on whatever `cwd=` says: an exported
@@ -100,6 +102,35 @@ def git(
     `subprocess.run` passes them."""
     return _run(args, cwd=cwd, check=check, timeout=timeout, input=input, env=env,
                 pass_fds=pass_fds).stdout.strip()
+
+
+def git_network(
+    args: Sequence[str], *, cwd: Path, env: Mapping[str, str], timeout: float,
+    pass_fds: Sequence[int] = (),
+) -> str:
+    """`git <args>` for a call that talks to a remote (a fetch, `ls-remote`, a push), its
+    trimmed output. Git runs in a session of its own, so it and every process it starts (its
+    `git-remote-http`, a credential helper) form one process group; the call is bounded by a
+    wall `timeout`, and on any way out of it (git's exit, the timeout, or an exception or
+    interrupt raised into the wait) that whole group is killed before anything surfaces. A
+    kill of git alone (`subprocess.run(timeout=)`) leaves its helper running, orphaned, still
+    talking to the remote (#1108 amendment 3, C4). A non-zero exit raises `GitError`; the
+    timeout, `GitTimeout`. `pass_fds` are descriptors git and its children inherit."""
+    with subprocess.Popen(  # noqa: S603 — fixed argv
+            ["git", *args], cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=tuple(pass_fds),
+            start_new_session=True) as proc:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        finally:
+            # The group is git's own session (`start_new_session`), its id git's pid. On a
+            # timeout, exception or interrupt git is not yet reaped, so the id is still its
+            # own; after git's exit (reaped) it is held by any member still alive, and with
+            # none the kill finds no group.
+            kill_group(proc.pid)
+    if proc.returncode != 0:
+        raise GitError(args, proc.returncode, err.decode("utf-8", "surrogateescape"))
+    return out.decode("utf-8", "surrogateescape").strip()
 
 
 def git_ok(
@@ -236,15 +267,39 @@ def _regular_blobs(
     listing = _run_bytes(["--literal-pathspecs", "ls-tree", "-r", "-z", "--full-name", rev,
                           "--", pathspec], cwd=cwd, env=committed_view_env(rev),
                          timeout=timeout)
-    wanted: list[tuple[str, str]] = []
+    return [(oid, path) for mode, kind, oid, path in tree_records(listing)
+            if kind == "blob" and mode in _REGULAR_BLOB_MODES]
+
+
+def tree_records(listing: bytes, *, errors: str = "surrogateescape") -> list[tuple[str, str, str, str]]:
+    """`(mode, kind, oid, path)` of every record of a NUL-framed `ls-tree -z` listing, in its
+    order: no path is quoted or trimmed, and each is decoded as UTF-8 under `errors` (`strict`
+    for a caller that refuses a name git cannot be given as text)."""
+    records = []
     for record in listing.split(b"\0"):
         if not record:
             continue
         meta, _tab, raw_path = record.partition(b"\t")
         mode, kind, oid = meta.decode("ascii").split(" ")
-        if kind == "blob" and mode in _REGULAR_BLOB_MODES:
-            wanted.append((oid, raw_path.decode("utf-8", "surrogateescape")))
-    return wanted
+        records.append((mode, kind, oid, raw_path.decode("utf-8", errors)))
+    return records
+
+
+def blob_batch(args: Sequence[str], out: bytes, oids: Sequence[str]) -> list[bytes]:
+    """Each blob's exact bytes from the output `out` of `git <args>` (a `cat-file --batch` that
+    was asked for `oids`, in that order). An answer that is not that blob (missing, another
+    object, another kind) raises `GitError` naming it."""
+    blobs = []
+    pos = 0
+    for oid in oids:
+        end = out.find(b"\n", pos)
+        header = out[pos:end].decode("ascii", "replace").split(" ") if end >= 0 else []
+        if len(header) != 3 or header[0] != oid or header[1] != "blob":
+            raise GitError(args, 0, f"{oid}: {' '.join(header[1:]) or 'no answer'}")
+        size = int(header[2])
+        blobs.append(out[end + 1:end + 1 + size])
+        pos = end + 1 + size + 1
+    return blobs
 
 
 def git_tree_blobs(
@@ -263,17 +318,8 @@ def git_tree_blobs(
     batch_args = ["cat-file", "--batch"]
     out = _run_bytes(batch_args, cwd=cwd, input="".join(f"{oid}\n" for oid, _ in wanted).encode(),
                      env=committed_view_env(rev), timeout=timeout)
-    blobs: dict[str, bytes] = {}
-    pos = 0
-    for oid, path in wanted:
-        end = out.index(b"\n", pos)
-        header = out[pos:end].decode("ascii").split(" ")
-        if len(header) != 3 or header[0] != oid:
-            raise GitError(batch_args, 0, f"{oid}: {' '.join(header[1:]) or 'no answer'}")
-        size = int(header[2])
-        blobs[path] = out[end + 1:end + 1 + size]
-        pos = end + 1 + size + 1
-    return blobs
+    blobs = blob_batch(batch_args, out, [oid for oid, _ in wanted])
+    return {path: blob for (_oid, path), blob in zip(wanted, blobs, strict=True)}
 
 
 #: `git diff`'s options for a comparison of raw bytes: the executable bit ignored (a mode-only
