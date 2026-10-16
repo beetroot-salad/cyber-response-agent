@@ -96,9 +96,14 @@ PLANTED_OUTSIDE = ("devdep", "devtool", "rtlib")
 #: list — on purpose: it is the review point for what enters the boundary. The last three are
 #: pydantic's `email` extra — nothing asks for it and the image does not install them, but
 #: amendment 2 walks every optional list of a reached entry, so they are hashed (the superset).
+#: #1255 K3 (owner decision, 2026-10-16) adds the box's clock library, the PyPI `libfaketime`
+#: wheel (3.0.1), and what its metadata requires: `python-dateutil>=1.3` and `pytz` (already
+#: in), and python-dateutil's own `six>=1.5` — a deliberate, owner-approved widening of the box
+#: boundary (read from PyPI's metadata for those releases, before the relock that pins them).
 REAL_CLOSURE_NAMES = sorted([
     "annotated-types", "duckdb", "pydantic", "pydantic-core", "pytz", "pyyaml", "typing-extensions",
     "typing-inspection",
+    "libfaketime", "python-dateutil", "six",
     "dnspython", "email-validator", "idna",
 ])
 
@@ -372,9 +377,9 @@ def test_a_string_extra_on_a_link_walks_exactly_like_no_extra_and_is_no_fault(tm
 
 def test_box_closure_of_this_checkouts_lock_is_exactly_the_core_and_box_closure_and_no_dev_or_runtime_package():
     """Over THIS checkout's `uv.lock`, with the root that `pyproject.toml`'s `[project].name`
-    names, `box_closure` returns exactly the eight packages the image installs —
-    annotated-types, duckdb, pydantic, pydantic-core, pytz, pyyaml, typing-extensions and
-    typing-inspection — PLUS email-validator, dnspython and idna, which only pydantic's `email`
+    names, `box_closure` returns exactly the eleven packages the image installs —
+    annotated-types, duckdb, pydantic, pydantic-core, pytz, pyyaml, typing-extensions,
+    typing-inspection and (#1255 K3) libfaketime, python-dateutil and six — PLUS email-validator, dnspython and idna, which only pydantic's `email`
     extra reaches (nothing asks for it; amendment 2 walks every optional list of a reached
     entry, the superset cost it records), each at its locked version — and none of the packages
     the `dev` or `runtime` extras reach directly (pytest, ruff, mypy, pydantic-ai-slim, toons,

@@ -149,6 +149,10 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "outcome": ("create",),
     # PR #1232 round 7: why `verify_family` withheld the family stamp, replaced like the stamp.
     "not_comparable": ("write",),
+    # #1255 D6 (owner decision, 2026-10-16): the primer's skip record — the source's pre-fork
+    # calls that left no recording (the call failed, the payload was unreadable) — created
+    # once beside the capture.
+    "served_unrecorded": ("create",),
 }
 
 #: D1's folders (kept by D2'): `served`, `runs`, `worlds`, `world(label).dir`,
@@ -238,6 +242,7 @@ def expected_record_rel(key: str) -> PurePosixPath:
         "world_record": lambda: LAYOUT.world_record(LABEL),
         "outcome": lambda: LAYOUT.outcome,
         "not_comparable": lambda: LAYOUT.not_comparable,
+        "served_unrecorded": lambda: LAYOUT.served_unrecorded,
     }[key]()
 
 

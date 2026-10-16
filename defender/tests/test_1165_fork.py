@@ -9,14 +9,34 @@ from defender.runtime.run_state import RunState
 from defender.tests._1165_flows import RecordIO, drive_run, run_handle
 from defender.tests._alert_plant import plant_alert
 from defender.tests._branch_947 import GOLDEN_INVESTIGATION, planted_source, spec_at
+from defender.tests._session_store_705 import runs_base
 from defender.tests.e2e._replay_harness import ReplayFn, Turn
 
 
-def source_and_sibling(tmp_path, *, document=None):
+#: The source's run folder name — `planted_source`'s, passed to it explicitly so `plant` can be
+#: handed the same folder before the source is built.
+SOURCE_RUN = "run-source-001"
+
+
+def source_and_sibling(tmp_path, *, document=None, plant=None):
+    """The planted source, its sibling, and the spec the sibling forks the source by.
+
+    `plant(source)` writes the source's own evidence (or the alias a test plants at one of its
+    names) BEFORE the source is built: #1255 P2 snapshots a source when its branch response
+    arrives — counters, appended lengths, the document's content, and a HASH of every
+    write-once file already there (gather summaries, raw payloads, lead claims) — and for a
+    hand-built source that point is at or after `planted_source` returns (the fixture-only
+    planting helper is applied to what it returns). A file written after that is one the snapshot never
+    recorded, so the fork would be judged against evidence the source did not have when it
+    branched. `planted_source` makes its folder with `exist_ok`, so what `plant` wrote stays."""
     text = document if document is not None else GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
-    store, directory, _session, ids = planted_source(tmp_path, investigation=text)
     source_io, target_io = RecordIO(), RecordIO()
-    source, target = run_handle(directory, source_io), run_handle(directory.parent / "run-sibling", target_io)
+    source = run_handle(runs_base(tmp_path) / SOURCE_RUN, source_io)
+    if plant is not None:
+        plant(source)
+    store, directory, _session, ids = planted_source(tmp_path, investigation=text, name=SOURCE_RUN)
+    assert directory == source.run_dir, (directory, source.run_dir)
+    target = run_handle(directory.parent / "run-sibling", target_io)
     spec = spec_at(store, directory, ids[-1])
     state = RunState(target.run_dir, str(target.id))
     return store, spec, source, target, state, source_io, target_io
@@ -61,22 +81,20 @@ def test_missing_alert_fallback_replaces_a_stale_record_through_target_run(tmp_p
 
 
 def test_fork_copies_only_canonical_owner_names_as_opaque_bytes(tmp_path):
-    """O7: canonical payload/claim/summary bytes survive even when they are not UTF-8."""
-    store, spec, source, target, state, source_io, target_io = source_and_sibling(tmp_path)
+    """O7: canonical payload/claim/summary bytes survive even when they are not UTF-8.
+
+    #1255 P2: every file — the canonical ones and the unknown shapes alike — is planted before
+    the source is built (`source_and_sibling(plant=…)`), so the source's fork snapshot is taken
+    over a folder that already holds them: the canonical bytes are evidence the source held at
+    its branch point, and the unknown shapes were already there beside them."""
     canonical = {
         "gather_raw/l-001/0.json": b'\xff\x00payload\xfe',
         "gather_raw/l-001/12.json": b'opaque 12',
         "gather_raw/l-001.lead.json": b'\xfeclaim\xff',
         "gather_summaries/l-001.md": b'\xffsummary\xfe',
     }
-    for name, data in canonical.items():
-        path = source.run_dir / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
     # Unknown shapes point outside, so even trying to read/copy them is observably wrong.
     outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "secret").write_bytes(b"must never inherit")
     unexpected = [
         "gather_raw/l-001/01.json", "gather_raw/l-001/+1.json",
         "gather_raw/l-001/-1.json", "gather_raw/l-001/notes.txt",
@@ -84,8 +102,19 @@ def test_fork_copies_only_canonical_owner_names_as_opaque_bytes(tmp_path):
         "gather_raw/l-001.evil", "gather_summaries/l-001.md.bak",
         "gather_summaries/l-001.extra", "gather_raw/l-001/unknown-dir",
     ]
-    for name in unexpected:
-        (source.run_dir / name).symlink_to(outside, target_is_directory=True)
+
+    def plant(source):
+        for name, data in canonical.items():
+            path = source.run_dir / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        outside.mkdir()
+        (outside / "secret").write_bytes(b"must never inherit")
+        for name in unexpected:
+            (source.run_dir / name).symlink_to(outside, target_is_directory=True)
+
+    store, spec, source, target, state, source_io, target_io = source_and_sibling(
+        tmp_path, plant=plant)
     seed(store, spec, source, target, state)
     for name, data in canonical.items():
         assert (target.run_dir / name).read_bytes() == data
@@ -100,16 +129,25 @@ def test_fork_copies_only_canonical_owner_names_as_opaque_bytes(tmp_path):
 
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_recognized_source_payload_refusal_still_fails_fork(tmp_path, kind):
-    """O4/O7: selecting a recognized artifact never turns a refused read into absence."""
-    store, spec, source, target, state, _source_io, _target_io = source_and_sibling(tmp_path)
-    path = source.tables.payloads("l-001", 0).path
-    path.parent.mkdir(parents=True)
-    if kind == "symlink":
-        outside = tmp_path / "secret"
-        outside.write_bytes(b"outside")
-        path.symlink_to(outside)
-    else:
-        path.mkdir()
+    """O4/O7: selecting a recognized artifact never turns a refused read into absence.
+
+    #1255 P2: the alias is planted before the source is built (`source_and_sibling(plant=…)`),
+    so it already sits at the payload's name when the source's fork snapshot is taken — the
+    refusal is about a recognized artifact the source held at its branch point, not about a
+    file that appeared after the snapshot and that the snapshot never recorded."""
+
+    def plant(source):
+        path = source.tables.payloads("l-001", 0).path
+        path.parent.mkdir(parents=True)
+        if kind == "symlink":
+            outside = tmp_path / "secret"
+            outside.write_bytes(b"outside")
+            path.symlink_to(outside)
+        else:
+            path.mkdir()
+
+    store, spec, source, target, state, _source_io, _target_io = source_and_sibling(
+        tmp_path, plant=plant)
     with pytest.raises(branch.BranchError):
         seed(store, spec, source, target, state)
     assert not target.tables.payloads("l-001", 0).path.exists()
@@ -207,4 +245,6 @@ def test_resumed_driver_threads_source_run_through_validation_seeding_and_lookup
 # factory tests above branch `_branch_947.planted_source` (not the N4 fixture) at a tool RETURN.
 # After #1255 they need the implementer's fixture-only snapshot planting on that source, and a
 # D1 branch point (`LEGACY_BRANCH_CALL`) once the restore's entry point replaces
-# `seed_investigation`.
+# `seed_investigation`. The opaque-bytes and payload-refusal tests plant their files through
+# `source_and_sibling(plant=…)`, BEFORE `planted_source` builds the source, so whatever
+# snapshots it (at or after `planted_source` returns, on what it returns) sees them.

@@ -25,8 +25,12 @@ No run is driven here; these are fast and deterministic.
 """
 from __future__ import annotations
 
+import base64
 import copy
 import datetime as dt
+import hashlib
+import json
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
@@ -442,6 +446,53 @@ def test_1255_twin_identity_tokens_name_every_scannable_arm_identity():
         "episode token": "20261015t150031z.input.n10",
         "world token": "20261015t150031z.input.n10.a",
         "sibling world token": "20261015t150031z.input.n10.r"}
+
+
+#: A layout's arm identities (`identity_tokens(…, "arm")` over the pair the test above spells).
+ARM_PAIR = {"natural": {"run_id": "20261015t150031z-input"},
+            "arm": {"run_id": "20261015t150031z-input-n10-a"},
+            "sibling": {"run_id": "20261015t150031z-input-n10-r"},
+            "episode_id": "20261015t150031z-input-n10",
+            "episode_token": "20261015t150031z.input.n10",
+            "world_token": "20261015t150031z.input.n10.a",
+            "sibling_world_token": "20261015t150031z.input.n10.r"}
+_WORLD_TOKEN = ARM_PAIR["world_token"]
+_MD5_OF_WORLD = hashlib.md5(_WORLD_TOKEN.encode("utf-8")).hexdigest()
+_UUID5_OF_WORLD = str(uuid.uuid5(uuid.NAMESPACE_URL, _WORLD_TOKEN))
+_B64_RECORD = base64.b64encode(json.dumps(
+    {"lead_id": "l-001", "seq": 0, "w": _WORLD_TOKEN}).encode("utf-8")).decode("ascii")
+
+
+@pytest.mark.parametrize(("planted", "surface_kw", "forgiven", "how"), [
+    ("an md5 of the world token as a 32-hex id in a readable file",
+     {"files": {"executed_queries.jsonl": f'{{"lead_id": "l-001", "seq": 0, "case": '
+                                          f'"{_MD5_OF_WORLD}"}}\n'}},
+     _MD5_OF_WORLD, "md5 hex"),
+    ("a uuid5 over the world token in a tool result",
+     {"tool_out": f"exit=0\ncase {_UUID5_OF_WORLD} opened\n"}, _UUID5_OF_WORLD, "uuid5(url)"),
+    ("the world token base64-encoded inside a record in a readable file",
+     {"files": {"report.md": f"ref: {_B64_RECORD}\n"}}, None, "inside an encoded run"),
+], ids=["md5", "uuid5", "base64-record"])
+def test_1255_twin_identity_scan_finds_a_derived_identity_the_comparison_forgives(
+        planted, surface_kw, forgiven, how):
+    """O2, R-2: the comparison forgives any bare 32-hex or uuid as an O4 fresh id, and a literal
+    scan cannot see an identity written as a digest, a uuid over it, or inside base64 — so an
+    arm that names its world that way passed both. The O2 identity scan (`encoded=True`, what
+    the twin check runs) finds each and names the encoding.
+
+    Shown on the same surface: the planted id IS forgiven by the O4 normaliser (it becomes
+    `<IDn>`), the literal scan finds nothing, and the encoded scan finds nothing on the clean
+    surface (its positive and negative halves)."""
+    tokens = W.identity_tokens(ARM_PAIR, "arm")
+    assert tokens["world token"] == _WORLD_TOKEN
+    assert W.scan(_surface(), tokens, encoded=True) == [], "the encoded scan flags a clean surface"
+    if forgiven is not None:
+        assert W.normalize_o4(f"case {forgiven}") == "case <ID1>", (
+            f"fixture: {planted} is not one the comparison forgives")
+    rec = _surface(**surface_kw)
+    assert W.scan(rec, tokens) == [], f"fixture: the literal scan already finds {planted}"
+    found = W.scan(rec, tokens, encoded=True)
+    assert f"world token ({how})" in {f.what for f in found}, (planted, [str(f) for f in found])
 
 
 @pytest.mark.parametrize(("rel", "main", "gather"), [

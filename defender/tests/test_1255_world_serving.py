@@ -99,6 +99,16 @@ CLOSING_SIDE = S24.query_params("comment_id:c-2")
 
 _LEDGER = "learning.branch.ledger"
 
+#: The ledger's decision vocabulary before #1255 — `ledger.SOURCES` at base 4b3628ed plus the
+#: two retired staging words an archived row may carry — as a LITERAL, never read off the module
+#: under test. D5's word is "a distinct decision word": a word the judge already reads as
+#: something else would satisfy "neither `oracle` nor `passthrough`" while the judge lists the
+#: reconstructed call as an outage (`real-error` lands in `errored_calls`), a blocked call
+#: (`refused`, `fault`) or a family-tier read (`base`, `captured`) — contract-repair finding
+#: F-C2.
+_PRE_1255_DECISIONS = frozenset({"base", "passthrough", "refused", "fault", "captured", "oracle",
+                                 "real-error", "staged", "patched"})
+
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -154,13 +164,18 @@ def _removing_closing_comment() -> Any:
 def _assert_reconstructed(decision: Any, where: str) -> None:
     """D5: the decision a control world records for an oracle answer that differs from its base
     is a word of the ledger's own decision vocabulary (`ledger.normalized_source` keeps it) and
-    is neither `oracle` (a world shown its facts) nor `passthrough` (the base, unchanged). The
-    word itself is the implementation's."""
+    is neither `oracle` (a world shown its facts) nor `passthrough` (the base, unchanged) — nor
+    any other word the vocabulary held before #1255 (`_PRE_1255_DECISIONS`): "a distinct
+    decision word". The word itself is the implementation's."""
     oracle_word = S24.sym(_LEDGER, "ORACLE")
     passthrough = S24.sym(_LEDGER, "PASSTHROUGH")
     assert decision not in (oracle_word, passthrough), (
         f"{where}: the control world's changed answer was recorded {decision!r} (D5: a decision "
         f"of its own, neither {oracle_word!r} nor {passthrough!r})")
+    assert decision not in _PRE_1255_DECISIONS, (
+        f"{where}: the control world's changed answer was recorded {decision!r}, a decision word "
+        f"the ledger already had (D5: a distinct word of its own; the judge reads every existing "
+        f"word as something else — {sorted(_PRE_1255_DECISIONS)})")
     assert S24.sym(_LEDGER, "normalized_source")(decision) == decision, (
         f"{where}: {decision!r} is not a decision word of the ledger's own vocabulary")
 
@@ -555,10 +570,15 @@ def test_1255_the_judge_reads_a_control_worlds_reconstructed_answer_as_baseline(
     call is joined to its ledger row (its entry carries that decision; nothing is unserved or
     unmapped).
 
+    Nor is it an outage or a blocked call (F-C2): the control's contrast row lists no errored
+    call (`real-error` is how the judge spells "the live system answered with an error") and no
+    blocked call (`refused` / `fault`).
+
     Positive control in the same family: world b's oracle alters the post-branch call, and
     b's contrast row IS shown its facts with a first altered call — so the flags this test
-    demands false can be true here. Today the control takes no turn and records the live base
-    `passthrough`."""
+    demands false can be true here; and b's withheld call (the default triad's third) is in its
+    blocked list, so that list can be non-empty. Today the control takes no turn and records the
+    live base `passthrough`."""
     carol_live = {"rows": [{"user": "carol", "event_id": "e-300", "action": "logon",
                             "host": "web-live-1255", "ts": "2026-07-28T15:40:00Z"}]}
     carol_at_fork = {"rows": [{"user": "carol", "event_id": "e-300", "action": "logon",
@@ -588,7 +608,13 @@ def test_1255_the_judge_reads_a_control_worlds_reconstructed_answer_as_baseline(
     assert b[S34.COINED["contrast.shown"]] is True, "positive control: b was shown its facts"
     assert isinstance(b[S34.COINED["contrast.first_altered"]], int), (
         "positive control: b's altered call is numbered")
+    assert list(b[S34.COINED["contrast.blocked"]]), (
+        "positive control: b's withheld call is not in its blocked list")
 
+    assert list(a[S34.COINED["contrast.errored"]]) == [], (
+        "the judge reads the control's reconstructed answer as an outage (an errored call)")
+    assert list(a[S34.COINED["contrast.blocked"]]) == [], (
+        "the judge reads the control's reconstructed answer as a blocked call")
     assert a[S34.COINED["contrast.shown"]] is False, (
         "the judge reads the control's reconstructed answer as shown facts")
     assert a[S34.COINED["contrast.first_altered"]] is None, (
@@ -603,31 +629,73 @@ def test_1255_the_judge_reads_a_control_worlds_reconstructed_answer_as_baseline(
         "the judge's call list does not carry the control call's own decision")
 
 
-def test_1255_a_control_world_whose_oracle_cannot_serve_never_falls_back_to_a_live_read(
-        tmp_path: Path) -> None:
-    """O6 ("never by a raw live read"), D3 — when the control world's oracle cannot serve (its
-    budget is zero), a question the source never asked is NOT answered with the live read: the
-    call ends the world unservable (reason `budget`), as it does in a world with facts, and no
-    ledger row records an answer for it.
+#: The oracle's own side query in the `fault` case below: a declared read verb of the system.
+_SIDE_LOOKUP = {"entity": "bob"}
 
-    Positive control in the same registry: the recorded call is still served from the recording
-    — a zero budget costs nothing where no oracle turn is needed. Today the new question is
-    served the live answer, `passthrough`."""
+
+def _broken_verb_lookup(_system: str) -> Any:
+    raise TypeError("the oracle door's verb lookup broke")
+
+
+#: Every way an oracle turn ends with nothing to serve, as `Oracle.serve` names it (its
+#: `OracleUnservable.reason`): the world's budget spent (`budget`); `retry_cap` attempts that
+#: end without a usable submission (`retries` — here an oracle that only ever replies in text,
+#: #1224's "returns nothing usable" input, so the verifier is never what decides it); and the
+#: serving machinery itself breaking (`fault` — the oracle door's verb lookup raising, the input
+#: #1224's own regression `test_a_broken_serving_machine_makes_the_world_unservable_not_a_fault_row`
+#: plants). Contract-repair finding F-C1: a control world that fell back to its live base on
+#: every reason but `budget` passed the budget-only version of this test.
+_UNSERVABLE_CAUSES = ("budget", "retries", "fault")
+
+
+@pytest.mark.parametrize("cause", _UNSERVABLE_CAUSES)
+def test_1255_a_control_world_whose_oracle_cannot_serve_never_falls_back_to_a_live_read(
+        tmp_path: Path, cause: str) -> None:
+    """O6 ("never by a raw live read"), D3 — when the control world's oracle cannot serve, for
+    ANY reason (its budget is zero; it never produces a usable submission within the retry cap;
+    its serving machinery breaks), a question the source never asked is NOT answered with the
+    live read: the call ends the world unservable with that reason, as it does in a world with
+    facts, and no ledger row records an answer for it.
+
+    Positive controls in the same registry: the recorded call is still served from the recording
+    — no oracle turn is needed there, so nothing the cause breaks is reached; and outside the
+    budget case the oracle WAS asked (the turn ran and failed; the fallback was not a skipped
+    turn). Today the new question is served the live answer, `passthrough`, whatever the
+    cause."""
     est = S24.estate(tmp_path)
     est.answer("idp", "query", BOB, BOB_ANSWER)
+    est.answer("idp", "lookup", _SIDE_LOOKUP, {"user": "bob", "status": "active"})
     ep = S24.episode_v2(tmp_path, base_rows=[S24.captured("idp", "query", ALICE, ALICE_ANSWER)])
-    oracle = S24.oracle(then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
+    knobs: dict[str, Any] = {}
+    if cause == "budget":
+        oracle = S24.oracle(then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
+        knobs["budget"] = 0
+    elif cause == "retries":
+        oracle = S24.oracle(then=S24.text_only("I could not reconstruct this answer."))
+        knobs["retry_cap"] = 2
+    else:
+        oracle = S24.oracle(S24.run_query("idp", "lookup", _SIDE_LOOKUP),
+                            then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
     control = S24.sandboxed_registry(ep, "a", est, oracle=oracle,
-                                     verifier=S24.passing_verifier(), budget=0)
+                                     verifier=S24.passing_verifier(), **knobs)
+    if cause == "fault":
+        door = getattr(getattr(control, "oracle", None), "door", None)
+        assert hasattr(door, "real_verbs"), (
+            "fixture: the registry's oracle door (the seam #1224's broken-machine regression "
+            "breaks) is not where that regression finds it")
+        door.real_verbs = _broken_verb_lookup
     ctx = est.ctx(tmp_path / "run")
 
     assert S24.call(control, "idp", "query", ctx, **ALICE) == ALICE_ANSWER
     with pytest.raises(S24.unservable_cls()) as raised:
         S24.call(control, "idp", "query", ctx, **BOB)
-    assert raised.value.reason == S24.REASON_BUDGET
+    assert raised.value.reason == cause, (
+        f"the control world's call ended unservable for {raised.value.reason!r}, not {cause!r}")
+    if cause != "budget":
+        assert oracle.requests >= 1, "fixture: the control world's oracle was never asked"
     rows = S24.ledger_rows(ep, "a")
     assert [S24.canonical(r["params"]) for r in rows] == [S24.canonical(ALICE)], (
-        "the unservable call left a ledger row: something was served for it")
+        f"the unservable call ({cause}) left a ledger row: something was served for it")
 
 
 @pytest.mark.parametrize("label", ["a", "b"], ids=["control-world", "world-with-facts"])
@@ -676,6 +744,62 @@ def test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment(
     assert W.FORK_TIME in inbound, "the oracle was not told the fork time"
     assert tag in inbound, "the oracle was not told the source's post-fork comment (its tag)"
     assert marker in inbound, "the oracle was not told what the source's closing comment says"
+
+
+@pytest.mark.parametrize("post", ["post-failed", "never-posted"])
+@pytest.mark.parametrize("label", ["a", "b"], ids=["control-world", "world-with-facts"])
+def test_1255_a_worlds_oracle_is_not_told_a_closing_comment_the_source_never_posted(
+        tmp_path: Path, label: str, post: str) -> None:
+    """O6 negative control (contract-repair finding F-C3) — what the oracle is given is "the
+    source's own writes to the world after the fork", read from "the host-only ticket-write
+    receipt" (design rev 4): what the source WROTE to the ticket, not what its run folder holds.
+    A source whose comment POST failed (the store answered 500: the receipt records the attempt
+    `ok: false`) or that never recorded one (no receipt at all: `--update-ticket` off, or the run
+    ended before the record step) wrote nothing to the world, and the oracle serving a new
+    question in any world is handed no closing comment: neither the agent tag line naming the
+    source run nor the report's narrative.
+
+    Positive controls: the source's `report.md` carries the narrative marker (a world that
+    builds the "comment" from the folder, whatever the receipt says, hands it over); for
+    `post-failed` the store did receive exactly one comment POST and the receipt says it failed;
+    and the oracle took its turn and was told the fork time — the channel the posted comment
+    arrives on in `test_1255_a_worlds_oracle_is_given_the_sources_own_closing_ticket_comment`."""
+    from defender.runtime import case_ticket
+    from defender.tests import _spec767 as S767
+    from defender.tests._spec1077 import fixture_run
+
+    marker = "CLOSING-NOTE-1255: alice's db-1 logon was the TGT abuse; account disabled"
+    source_dir = S767.make_run(tmp_path / "runs", name=S24.SOURCE_RUN_ID,
+                               disposition="malicious", body=marker)
+    assert marker in (source_dir / "report.md").read_text(encoding="utf-8"), (
+        "fixture: the source's report does not carry the narrative marker")
+    if post == "post-failed":
+        store = S767.FakeStore(status_by_suffix={S767.COMMENTS_SUFFIX: "500"})
+        S767.record(source_dir, store)
+        assert len(store.comment_payloads) == 1, "fixture: the source never attempted its comment"
+        assert S767.receipt(source_dir).get("ok") is False, (
+            f"fixture: the receipt does not record a failed post: {S767.receipt(source_dir)}")
+    else:
+        assert not S767.receipt_path(source_dir).exists(), "fixture: a receipt is already there"
+    tag = case_ticket.agent_comment_tag(S24.SOURCE_RUN_ID)
+
+    est = S24.estate(tmp_path)
+    est.answer("idp", "query", BOB, BOB_ANSWER)
+    ep = S24.episode_v2(tmp_path, base_rows=[S24.captured("idp", "query", ALICE, ALICE_ANSWER)])
+    oracle = S24.oracle(then=S24.submit(_resorted(BOB_ANSWER), S24.EMPTY_CLAIM))
+    world = W.world_registry_with_source(ep, label, est, source_run=fixture_run(source_dir),
+                                         oracle=oracle, verifier=S24.passing_verifier())
+    S24.call(world, "idp", "query", est.ctx(tmp_path / "run"), **BOB)
+
+    assert oracle.requests >= 1, f"fixture: world {label}'s new question took no oracle turn"
+    inbound = oracle.all_seen()
+    assert W.FORK_TIME in inbound, "positive control: the oracle was not told the fork time"
+    assert tag not in inbound, (
+        f"the oracle was handed a closing comment ({post}): the source's tag line, though the "
+        "source wrote nothing to the ticket")
+    assert marker not in inbound, (
+        f"the oracle was handed the source's report narrative as its closing comment ({post}), "
+        "though the source wrote nothing to the ticket")
 
 
 # ======================================================================================

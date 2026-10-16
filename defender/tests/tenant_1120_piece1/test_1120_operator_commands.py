@@ -21,6 +21,7 @@ for the coined names.
 from __future__ import annotations
 
 import functools
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -481,6 +482,11 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
                          box_mod.DEFAULT_SPEC, mounts, tenant_agent=H.agent_dir(on_mount))
 
 
+#: #1255 K3's preload/clock env keys — `test_1255_clock_box._PRELOAD_KEY`'s pattern, kept in step
+#: as `test_1092_box_mark_env._CLOCK_KEY` keeps it.
+_CLOCK_KEY = re.compile(r"PRELOAD|FAKETIME|CLOCK", re.IGNORECASE)
+
+
 def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> None:
     """No key of BOX_ENV_ALLOWLIST names the tenant or the data root: no DEFENDER_DATA_ROOT and
     no key containing TENANT (C13 — a child learns its tenant from --tenant and the data root
@@ -488,7 +494,12 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
     that carries DEFENDER_DATA_ROOT and a tenant key drops both, and the docker run argv's
     --env keys are the required allowlist keys; optional DEFENDER_AGENT_DIR is absent in
     this tenant-free fixture. The positive control: the allowlist carries DEFENDER_DIR,
-    and the rendered env keeps it."""
+    and the rendered env keeps it.
+
+    #1255 K3 (owner decision, 2026-10-16): the run clock's time-faking preload and clock
+    variables (`LD_PRELOAD`, `FAKETIME_*`) may ride the create command; they are exempted from
+    the key-set equality the way `test_1092_box_mark_env` exempts them (`test_1255_clock_box`
+    asserts their shape), and are still held to the no-tenant, no-data-root rule."""
     allow = box_codec.BOX_ENV_ALLOWLIST
     assert "DEFENDER_DIR" in allow
     assert H.DATA_ROOT_ENV not in allow, allow
@@ -506,7 +517,10 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
         "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
         box_mod.DEFAULT_SPEC, ()).argv
     env_keys = {v.partition("=")[0] for f, v in zip(argv, argv[1:], strict=False) if f == "--env"}
-    assert env_keys == set(allow) - {"DEFENDER_AGENT_DIR"}, env_keys
+    assert H.DATA_ROOT_ENV not in env_keys, env_keys
+    assert not [k for k in env_keys if "TENANT" in k.upper()], env_keys
+    clock = {k for k in env_keys | set(allow) if _CLOCK_KEY.search(k)}
+    assert env_keys - clock == set(allow) - {"DEFENDER_AGENT_DIR"} - clock, env_keys
     assert "DEFENDER_AGENT_DIR" not in env_keys
 
 

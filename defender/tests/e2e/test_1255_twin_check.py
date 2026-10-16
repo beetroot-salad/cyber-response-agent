@@ -265,8 +265,10 @@ def test_1255_twin_arm_surfaces_carry_no_arm_identity(twin, layout):
     """O2: nothing the arm's model reads — its requests, the files in its read scope at each
     request, the corpus — carries the arm's identity: its run id, its source run's id, its
     sibling's run id (the replicate launched first into the same container), the episode id or
-    token, or either world token. (The fork turn and the one-letter world labels cannot be
-    scanned for; equality with the natural continuation covers them.)"""
+    token, or either world token — literally or under an obvious encoding (a digest or
+    uuid3/uuid5 of it, its bytes in hex or base64, inside a base64/hex run), which the
+    comparison's fresh-id rule would otherwise forgive (R-2). (The fork turn and the one-letter
+    world labels cannot be scanned for; equality with the natural continuation covers them.)"""
     pair = _pair(twin, layout)
     arm = _arm_reached_the_model(pair, layout)
     tokens = W.identity_tokens(pair, "arm")
@@ -276,7 +278,7 @@ def test_1255_twin_arm_surfaces_carry_no_arm_identity(twin, layout):
     assert W.scan(arm, {"the lead's own summary": W.LEAD_SUMMARY}), (
         "the arm's surfaces do not carry the re-run lead's summary — the scan below would be "
         "over nothing")
-    findings = W.scan(arm, tokens)
+    findings = W.scan(arm, tokens, encoded=True)
     assert not findings, (
         f"layout {layout}: arm identity reaches the arm's model:\n"
         + "\n".join(f"  - {f}" for f in findings))

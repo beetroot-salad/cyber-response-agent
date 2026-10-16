@@ -15,10 +15,10 @@ comes from — each row is a channel below or a named exclusion:
   * `lessons_loaded.jsonl` `ts` (run root, in MAIN's and gather's read scope) — `now_iso()`,
     the wall clock (`runtime/tools/_deps.py` `_record_lesson_load`).            -> N1, N6
   * `policy_denials.jsonl` `ts` (run root, in read scope) — `now_iso()`
-    (`runtime/observe.py` `log_policy_denial`).                                  -> N2
+    (`runtime/observe.py` `log_policy_denial`).                                  -> N2, N6
   * a host-state payload's `captured_at` (the tool result and its `gather_raw` payload) —
     the wall clock on a natural run, `ctx.as_of` on an arm
-    (`scripts/adapters/host_state_adapter.py` `_captured_at`).                   -> N3
+    (`scripts/adapters/host_state_adapter.py` `_captured_at`).                   -> N3, N6
   * the budget's wall-clock limb, which decides whether the model is shown the budget refusal
     (and names `wall-clock` in it) — `max(wall delta, monotonic delta)` from `RunState`'s own
     origins (`hooks/budget_enforcer.py` `_elapsed`).                             -> N4, N5
@@ -46,6 +46,7 @@ behaviour there (class c).
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
@@ -210,6 +211,92 @@ def test_n3_every_host_state_capture_on_a_natural_run_is_stamped_with_the_run_cl
     assert stamps == expected, (
         "a host-state capture is not stamped with the run clock's reading at its call — "
         f"expected {expected}, got {stamps}")
+
+
+# ---------------------------------------------------------------------------------------
+# N6 over every channel — no visible time runs backwards, within a channel or across them
+# ---------------------------------------------------------------------------------------
+
+
+def _channel_stamps(run_dir: Path, channel: str) -> list[dt.datetime | None]:
+    """The stamps a channel left, in call order: the denials log's `ts` for the denied
+    `elastic.esql` calls, or each host-state capture's `captured_at` in the payload the query
+    row names."""
+    if channel == "denials":
+        return [C.instant(r.get("ts")) for r in C.denial_rows(run_dir) if r.get("verb") == "esql"]
+    from defender._io import read_jsonl_rows
+
+    stamps: list[dt.datetime | None] = []
+    for row in read_jsonl_rows(run_dir / "executed_queries.jsonl"):
+        if row.get("lead_id") != "l-001":
+            continue
+        assert row.get("exit_code") == 0 and row.get("payload_path"), f"a capture failed: {row}"
+        payload = json.loads((run_dir / row["payload_path"]).read_text(encoding="utf-8"))
+        stamps.append(C.instant(payload.get("captured_at")))
+    return stamps
+
+
+@pytest.mark.parametrize("channel", ["denials", "capture"])
+def test_n6_a_step_back_never_makes_a_denial_or_capture_stamp_run_backwards(
+        tmp_path, monkeypatch, channel):
+    """O4 over EVERY channel, not just the lessons log: "every time the model can see agrees
+    with every other one and never runs earlier than the history's last timestamp". MAIN reads
+    L1 after 10 s (a lessons-log row: the run clock's START+10, as N1), then dispatches a lead.
+    The source then steps BACK an hour before the lead's first call, forward 20 s before its
+    second, and back an hour again before its third. Each call leaves a stamp the model can
+    read — a denials-log row (`elastic.esql` withheld by the grant, N2's registry) or a
+    host-state capture's `captured_at` (the real adapter through the real registry, N3's
+    transport) — and the sequence lessons row, then the channel's three stamps, never decreases.
+
+    The violations it rejects (contract-repair finding F-D1, the handoff's own deferred
+    "writer-only clamp" mutant): only the lessons writer absorbs a step back while the denial or
+    capture writer reads the source raw (the first channel stamp an hour before the lessons
+    row); or each writer clamps against its own last stamp only (the first channel stamp, the
+    writer's first, still behind the lessons row the model already holds).
+
+    Positive controls: the lessons row is START+10 (the channel follows the clock), and each
+    channel left three stamps. Exact readings after a step back are not asserted (O4 asks
+    order, and C10's "absorbed" is stated for elapsed time)."""
+    clock = C.FakeClock(START)
+    run_dir = _run_dir(tmp_path)
+    kw: dict = {}
+    if channel == "denials":
+        from defender.tests._verb_authorization_632 import (
+            ScopedFakeVerbs,
+            grant_of,
+            recording_table,
+        )
+        from defender.tests.e2e._replay_harness import VerbRecorder
+
+        kw["verbs"] = ScopedFakeVerbs(
+            recording_table(VerbRecorder(), {"elastic": ("query", "esql")}),
+            grant_of("gather", (("elastic", "query"),)))
+        system = "elastic"
+        calls = [C.query("elastic", "esql")] * 3
+    else:
+        from defender.tests.test_947_clock import DOCKER_LOG, fake_docker
+
+        monkeypatch.setenv("PATH", f"{fake_docker(tmp_path)}{os.pathsep}{os.environ['PATH']}")
+        monkeypatch.setenv("DOCKER_CALL_LOG", str(tmp_path / DOCKER_LOG))
+        system = "host-state"
+        calls = [C.query("host-state", verb, params) for verb, params in STAMPING_VERBS[:3]]
+    main = C.script(clock, (10, C.read_lesson(L1)), (0, C.gather_turn("l-001", system)),
+                    (0, C.DONE))
+    gather = C.script(clock, (-3600, calls[0]), (20, calls[1]), (-3600, calls[2]),
+                      (0, C.H.Turn(text="Summary: measured the lead.")))
+
+    C.drive_clocked(run_dir, clock=clock, main=main, gather=gather, **kw)
+
+    lesson = C.lesson_reads(run_dir, L1)
+    assert lesson == [C.at(START, 10)], (
+        f"positive control: the lessons row is not the run clock's reading (START+10): {lesson}")
+    stamps = _channel_stamps(run_dir, channel)
+    assert len(stamps) == 3, f"the lead's three {channel} calls left {len(stamps)} stamps"
+    assert None not in stamps, f"a {channel} stamp does not read as a time: {stamps}"
+    seen = [*lesson, *stamps]
+    assert seen == sorted(seen), (
+        f"a visible time ran backwards across the lessons log and the {channel} channel: the "
+        f"model was shown, in order, {[s.isoformat() for s in seen]}")
 
 
 # ---------------------------------------------------------------------------------------

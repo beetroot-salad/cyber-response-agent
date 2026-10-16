@@ -40,6 +40,7 @@ from defender.tests import _data_root_1078 as D
 from defender.tests import _session_store_705 as SS
 from defender.tests import _tenants1106 as T6
 from defender.tests import _1255_snapshot as S1255
+from defender.tests import _1255_view as V
 from defender.tests._branch_947 import spec_at
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
@@ -873,8 +874,13 @@ def test_r1_every_harness_slot_of_mains_opening_message_is_bound(tmp_path):
     assert "R-1001" in S.harness_text(parts["vocabulary"]), (
         "the vocabulary section does not name the signature it was looked up by")
     assert d.run_dir is not None
-    assert str(d.run_dir) in S.harness_text(parts["workspace"]), (
-        "the workspace section does not name this run's folder")
+    # #1255 (design rev 4, P1 Outbound; O3): the workspace map names the run folder by its model
+    # path, and never by its host folder.
+    workspace = S.harness_text(parts["workspace"])
+    assert V.MODEL_RUN in workspace, (
+        f"the workspace section does not name this run's folder ({V.MODEL_RUN})")
+    assert str(d.run_dir) not in workspace, (
+        "the workspace section names this run's HOST folder, not its model path")
 
 
 def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):

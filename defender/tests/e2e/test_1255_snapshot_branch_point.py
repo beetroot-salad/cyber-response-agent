@@ -78,6 +78,14 @@ def _replace(*runs: S.Driven) -> dict[str, str]:
     return {str(r.run_dir): "<RUN_DIR>" for r in runs}
 
 
+def _returns(request: list) -> list[str]:
+    """The tool answers (`ToolReturnPart` contents) the request's last message carries, as
+    `S.project` renders them — O4's fresh frame salts normalised, nothing else (no host-path
+    mask: these answers name no run folder)."""
+    (*_head, parts), = S.project([request[-1]])
+    return [part[3] for part in parts if part[0] == "return"]
+
+
 def _arm_launched(arm: S.Driven) -> None:
     refused = S.refused_at_launch(arm)
     assert refused is None, (
@@ -165,9 +173,13 @@ def test_d1_the_branch_responses_own_writes_are_rerun_once_not_inherited(tmp_pat
     assert arm.document == final, (
         "the arm's document after re-running R3's append is not the source's document after "
         "the same append")
-    answer = [p for p in arm.main.requests[0][-1].parts if isinstance(p, ToolReturnPart)]
-    natural = [p for p in source.main.requests[3][-1].parts if isinstance(p, ToolReturnPart)]
-    assert [p.content for p in answer] == [p.content for p in natural], (
+    # Compared through the module's own request projection (`S.project`): the append's answer
+    # carries the lessons recall inside a `wrap_fresh` frame, whose salt is a fresh random id
+    # per frame (O4) — equal answers differ on it alone. Nothing else is normalised.
+    answer = _returns(arm.main.requests[0])
+    natural = _returns(source.main.requests[3])
+    assert natural, "the source's request after R3 carries no tool answer"
+    assert answer == natural, (
         "the arm's answer to R3's append is not the one the source received")
 
 

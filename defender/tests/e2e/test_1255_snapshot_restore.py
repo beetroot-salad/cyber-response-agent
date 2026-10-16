@@ -573,6 +573,59 @@ def test_p2_a_restore_that_does_not_match_refuses_the_arm_at_launch(tmp_path, ta
     assert len(S.child_sessions(source.store)) == forked, "the refused arm still forked a session"
 
 
+def _halve(path: Path) -> None:
+    data = S.read_bytes(path)
+    assert len(data) > 1, f"{path.name} holds nothing to cut"
+    path.write_bytes(data[: len(data) // 2])
+
+
+#: The review records are append-only snapshot-covered files too (design rev 4: "for
+#: append-only files in the model's read scope, their length (query table, lessons log, denials
+#: log, review records)") — each way the source's first review record can stop matching what
+#: was recorded at a branch point after it (contract-repair finding R-3: the tamper set above
+#: had no review record, so a restore that copied whatever the source folder now holds passed).
+REVIEW_TAMPERS = {
+    "review record shorter than recorded": lambda p: _halve(p.review_record(1)),
+    "review record missing": lambda p: p.review_record(1).unlink(),
+}
+
+
+@pytest.mark.parametrize("tamper", sorted(REVIEW_TAMPERS))
+def test_p2_a_review_record_that_does_not_match_refuses_the_arm_at_launch(tmp_path, tamper):
+    """P2: "A restore that does not match refuses the arm at launch" — for the review record
+    as for every other covered file. The source closes, the review challenges it (round 1:
+    `review_record.1.json`), it appends a fence (the branch point) and closes again — the
+    `test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored` source. Its first review
+    record is then cut short or removed, and the arm is refused before its model is asked for
+    anything and before anything is forked.
+
+    Positive controls in the same test: the source's first close left a review record, and the
+    same branch point of the same source, untampered, launches."""
+    bounds = challenge_gate.Bounds(extra_turns=1)
+    stages = _gap_on("v-001")
+    source = S.drive_source(
+        tmp_path, (S.append(CHUNKS[0] + CHUNKS[1]), S.close(), S.append(CHUNKS[2]), S.close(),
+                   S.done()),
+        review_stages=stages, bounds=bounds)
+    assert S.read_bytes(source.paths.review_record(1)), (
+        "fixture: the source's first close left no review record")
+    point = S.tool_calling_responses(source.store)[2]  # the fence appended after the challenge
+    spec = S.spec_for(source, point)
+    control = S.drive_arm(tmp_path, spec, S.Recorder([S.close(), S.done()]),
+                          review_stages=stages, bounds=bounds, name="control",
+                          run_id="control-1255")
+    _arm_launched(control)
+    forked = len(S.child_sessions(source.store))
+
+    REVIEW_TAMPERS[tamper](source.paths)
+    arm = S.drive_arm(tmp_path, spec, S.Recorder([S.close(), S.done()]),
+                      review_stages=stages, bounds=bounds)
+
+    assert not S.launched(arm), f"an arm launched over a source whose {tamper}"
+    assert arm.summary.get("exit_reason") == "BranchError", arm.summary
+    assert len(S.child_sessions(source.store)) == forked, "the refused arm still forked a session"
+
+
 def test_n4_a_source_with_no_fork_snapshot_is_refused_at_launch(tmp_path, caplog):
     """N4: a source recorded before this change has no fork snapshot, and forking it is refused
     — at a branch point D1 admits (its trailing `bash` CALL, after its document landed:
@@ -612,9 +665,19 @@ def test_n4_a_source_with_no_fork_snapshot_is_refused_at_launch(tmp_path, caplog
 
 def _model_readable_records(paths: RunPaths) -> set[Path]:
     """The source's files an arm restores from — the model-readable records the snapshot
-    describes — plus the case input. Everything else in the run folder is host bookkeeping."""
+    describes — plus the case input. Under the gather folders that is EXACTLY what the queries
+    table accounts for: each payload a row names (`payload_path`) and each table lead's claim
+    and summary — not the folders whole (contract-repair finding R-1: a snapshot kept under any
+    name in `gather_raw/`, say `gather_raw/.fork/<message>.json`, survived a prune that kept
+    both folders entire). Everything else in the run folder is host bookkeeping."""
     keep = {paths.investigation, paths.executed_queries, paths.lessons_loaded,
             paths.policy_denials, paths.alert, paths.alert_record}
+    rows = [json.loads(line) for line in _lines(paths.executed_queries) if line.strip()]
+    leads = {str(r["lead_id"]) for r in rows if r.get("lead_id")}
+    keep |= {paths.lead_claim(lead) for lead in leads} | {paths.gather_summary(lead)
+                                                          for lead in leads}
+    keep |= {paths.executed_queries.parent / str(r["payload_path"]) for r in rows
+             if r.get("payload_path")}
     return {p.resolve() for p in keep}
 
 
@@ -626,8 +689,9 @@ def test_p3_the_fork_snapshot_is_not_kept_in_the_run_folder_or_the_tenant_agent_
     """P3: the snapshot is host bookkeeping, kept where no box mount reaches. Observed by what
     still restores: after the source finishes, EVERY entry of its run folder that is not one of
     the model-readable records an arm restores from (the documents, the logs, the queries table,
-    the gather folders, the case input) is deleted — today that is the wire-log folder and the
-    tool trace; after #1255 it is also whatever else the run left there. The arm still launches
+    the payloads it names and each of its leads' claim and summary, the case input) is deleted —
+    today that is the wire-log folder and the tool trace; after #1255 it is also whatever else
+    the run left there, `gather_raw/` and `gather_summaries/` included. The arm still launches
     and restores exactly (a snapshot kept in the run folder under any other name would be
     gone, and the arm refused as N4 — so a refusal HERE, unlike in the other tests, is the
     violation). And neither the source run nor the arm wrote into the tenant's agent half —
@@ -646,11 +710,15 @@ def test_p3_the_fork_snapshot_is_not_kept_in_the_run_folder_or_the_tenant_agent_
     spec = S.spec_for(source, point)
     queries = S.read_bytes(source.paths.executed_queries)
     keep = _model_readable_records(source.paths)
-    gather_dirs = {source.paths.gather_raw.resolve(), source.paths.gather_summaries.resolve()}
+    payload = source.paths.payload(S.CORRELATION_LEAD, 0).resolve()
+    assert payload.is_file(), "fixture: the source has no correlation-lead payload"
+    assert payload in keep, (
+        "fixture: the correlation lead's payload is not among the records kept — the prune "
+        "would take evidence the arm restores")
     removed = []
     for entry in sorted(source.run_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
         resolved = entry.resolve()
-        if resolved in keep or any(d == resolved or d in resolved.parents for d in gather_dirs):
+        if resolved in keep:
             continue
         if any(resolved in k.parents for k in keep):
             continue  # a folder holding a kept record (the input folder)

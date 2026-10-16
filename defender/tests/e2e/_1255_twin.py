@@ -1212,9 +1212,16 @@ def identity_tokens(pair: Mapping[str, Any], which: str) -> dict[str, str]:
     return out
 
 
-def scan(recording: Mapping[str, Any], tokens: Mapping[str, str]) -> list[Finding]:
+def scan(recording: Mapping[str, Any], tokens: Mapping[str, str], *,
+         encoded: bool = False) -> list[Finding]:
     """Every request (as sent) and every read-scope file at it, and the corpus, searched for
-    each token. One finding per (surface, token)."""
+    each token. One finding per (surface, token).
+
+    `encoded=True` (the O2 identity scan) also finds a token under its obvious encodings — a
+    digest or uuid3/uuid5 of it, its bytes in hex or base64, or the token inside a base64/hex
+    run (contract-repair finding R-2: the O4 normaliser forgives any bare 32-hex or uuid as a
+    fresh id, so an md5 of the world token, or a uuid5 over it, passed both the comparison and a
+    literal scan). The finding's `what` then names the encoding."""
     patterns = {label: (tok, _token_pattern(tok)) for label, tok in tokens.items() if tok}
     # (channel, the surface a finding is reported once for, text): a request stream's
     # requests are one surface; a file is one surface whichever request snapshot shows it.
@@ -1227,14 +1234,27 @@ def scan(recording: Mapping[str, Any], tokens: Mapping[str, str]) -> list[Findin
                          for name, text in r["files"].items()]
     surfaces += [(f"corpus:{name}", f"corpus {name}", text)
                  for name, text in recording.get("corpus", {}).items()]
+    from defender.tests import _1255_identity as IDN
+
     found: list[Finding] = []
     seen: set[tuple[str, str]] = set()
     for channel, surface, text in surfaces:
+        views: list[str] | None = None
         for label, (tok, pat) in patterns.items():
+            if (surface, label) in seen:
+                continue
             m = pat.search(text)
-            if m and (surface, label) not in seen:
+            if m:
                 seen.add((surface, label))
                 found.append(Finding(channel, label, tok, _snip(text, m.start(), 120)))
+            elif encoded:
+                if views is None:
+                    views = IDN.decoded_views(text)
+                hit = IDN.encoded_form(text, tok, views=views)
+                if hit is not None:
+                    seen.add((surface, label))
+                    found.append(Finding(channel, f"{label} ({hit[0]})", tok,
+                                         _snip(text, hit[1], 120)))
     return found
 
 

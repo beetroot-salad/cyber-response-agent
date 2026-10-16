@@ -42,6 +42,7 @@ import pytest
 from defender import _episode_handle as EH
 from defender import _yaml
 from defender.tests import _episode_1025 as E
+from defender.tests import _1255_world as W
 from defender.tests import _judge_921 as J
 from defender.tests import _state1135
 from defender.tests.live_oracle_1224 import _spec1224 as S
@@ -335,21 +336,24 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
 
 def _launch(tmp_path: Path, est: S.Estate, *, calls: Iterable[S.Call] | None = None,
             after_source: Callable[[Path], None] | None = None, **kw: Any) -> S.Launch:
-    """`S.launch`, plus `after_source(src)` run between the source run and the launch."""
-    _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls)
-    if after_source is not None:
-        after_source(src)
+    """`S.launch`, plus `after_source(src)` run between the source run and the launch — inside
+    `S.source_run`, once the source's calls landed and before its session is seeded (#1255: the
+    fork snapshot holds the source's table as it stood at the branch point, so a row appended
+    after it would leave the source unrestorable and the launch refused for that instead)."""
+    _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls,
+                              after_source=after_source)
     return _main(src, est, **kw)
 
 
 def _capture_row(src: Path, *, system: str, verb: str, params: Mapping[str, Any], seq: int,
                  query_id: str | None = None, exit_code: int = 0,
                  payload: Any = None) -> None:
-    """Append one row to the source run's queries table in the writer's own column set
-    (`record_query.QUERY_ROW_COLUMNS`, its sidecar persisted, `error_class` and
-    `payload_status` from the writer's own rules): a sentinel (`query_id` under the reserved
-    prefix — nothing was sent) or a captured failure (`exit_code` non-zero). `T.capture_call`
-    writes only successful captures."""
+    """Append one row to the source run's queries table in the writer's own column set (the
+    fourteen columns in writer order, `_1255_world.ROW_COLUMNS`; #1255 G4: no `call_id` — the
+    source's own call ids are in its host-only call-join record, which no scenario here reads),
+    its sidecar persisted, `error_class` and `payload_status` from the writer's own rules: a
+    sentinel (`query_id` under the reserved prefix — nothing was sent) or a captured failure
+    (`exit_code` non-zero). `T.capture_call` writes only successful captures."""
     rq = S.mod("scripts.gather_tools.record_query")
     breaker = S.mod("runtime.circuit_breaker")
     body = payload if payload is not None else {"error": "never reached a system"}
@@ -363,10 +367,8 @@ def _capture_row(src: Path, *, system: str, verb: str, params: Mapping[str, Any]
            "raw_command": f"{system} {verb}", "payload_path": rel, "exit_code": exit_code,
            "error_class": breaker.error_class_for_exit(exit_code),
            "payload_status": rq.payload_status(exit_code, body), "payload_digest": "",
-           "payload_sha256": rq.payload_sha256(text), "system_key": "",
-           # The source run's own call id (#1234 A12), as its writer would have named it.
-           "call_id": f"{Path(src).name}/{seq}"}
-    assert tuple(row) == rq.QUERY_ROW_COLUMNS
+           "payload_sha256": rq.payload_sha256(text), "system_key": ""}
+    assert tuple(row) == W.ROW_COLUMNS
     with (Path(src) / "executed_queries.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row) + "\n")
 

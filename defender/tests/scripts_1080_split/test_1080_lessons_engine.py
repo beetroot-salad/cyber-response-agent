@@ -1012,7 +1012,11 @@ def test_lessons_corpus_folder_is_missing_empty_or_a_link_when_tags_are_listed(t
     base's: the recorded argv, the section text, and whether the vocabulary section shows (since #1222
     it names its failure rather than vanishing, and only an unsigned run has none). Pinned as the base answers it: an alert with no
     signature gets no Lessons section when the `--tags` call fails too, and a section holding only
-    `### Viable tags` when that call answered."""
+    `### Viable tags` when that call answered.
+
+    #1255 (design rev 4, P1): the Lessons section is model-bound text, so its Hits name each
+    lesson by its model path (`/defender/lessons/<name>.md`), the checkout at `/defender` —
+    `goldens/lessons.json` `s062.orient`, respelled from the base's host paths."""
     engine_home()
     seen = observe_s062(tmp_path, monkeypatch.setenv)
     assert seen == golden("s062")
@@ -1242,7 +1246,10 @@ def test_1080_the_lessons_pushes_reach_the_moved_frontier_with_todays_block(tmp_
     The compaction fold's row (`compose_fold`) and the write return (`_frontier_recall`) over the
     #919 two-vertex document and a three-lesson corpus, against the base's text; then the moved
     library's own `match_loaded` / `render` with each lead reproduce the pushed blocks, and its
-    hits are its `Hit`."""
+    hits are its `Hit`.
+
+    #1255: the pushed blocks name each lesson by its model path (`/defender/lessons/<name>.md`,
+    `goldens/lessons.json` `pushes`, respelled)."""
     from defender._corpus import iter_lessons
     from defender.skills.invlang.frontier import frontier_from_text
 
@@ -1251,13 +1258,29 @@ def test_1080_the_lessons_pushes_reach_the_moved_frontier_with_todays_block(tmp_
     assert seen == golden("pushes")
 
     lf = S.moved_module("WRITE_RETURN_LEAD")
-    corpus = tmp_path / "defender" / "lessons"
+    checkout = tmp_path / "defender"
+    corpus = checkout / "lessons"
     hits = lf.match_loaded(frontier_from_text(TWO_VERTEX_DOC), list(iter_lessons(corpus)))
     assert hits
     assert all(isinstance(h, lf.Hit) for h in hits)
-    assert seen["fold"] == "RECORD ROW\n\n" + norm(lf.render(hits, lead=lf.FOLD_LEAD), tmp_path)
-    assert seen["write return"] == "\n\n" + norm(lf.render(hits, lead=lf.WRITE_RETURN_LEAD),
-                                                  tmp_path)
+    # #1255 (design rev 4, P1): the pushes hand the model each lesson by its model path, the
+    # checkout at `/defender`; `render(hits)` called bare knows no run, so its block is put in
+    # the model view here, through the design's table (lexical: the checkout's host spelling,
+    # as handed and resolved, becomes `/defender`) — never by asking production for the view.
+    assert seen["fold"] == "RECORD ROW\n\n" + norm(
+        _in_model_view(lf.render(hits, lead=lf.FOLD_LEAD), checkout), tmp_path)
+    assert seen["write return"] == "\n\n" + norm(
+        _in_model_view(lf.render(hits, lead=lf.WRITE_RETURN_LEAD), checkout), tmp_path)
+
+
+def _in_model_view(text: str, checkout: Path) -> str:
+    """`text` with the checkout's host path (as handed and resolved) spelled as its model path,
+    `/defender` (#1255 design rev 4, the model view's table)."""
+    from defender.tests._1255_view import MODEL_DEFENDER
+
+    for host in sorted({str(checkout.resolve()), str(checkout)}, key=len, reverse=True):
+        text = text.replace(host + "/", MODEL_DEFENDER + "/")
+    return text
 
 
 # ======================================================================================
