@@ -17,6 +17,7 @@ from defender import _clock
 from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_utf8
+from defender.runtime.model_view import ModelView
 
 _logger = logging.getLogger(__name__)
 
@@ -59,16 +60,14 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
         run_dir, defender_dir, alert_path, systems=systems,
         lead_zero_section=correlation_section, shim=orient_shim, tenant_agent=tenant_agent,
     )
-    return f"Begin the investigation.\n\n{_coordinates(run_dir, alert_path)}\n{orientation}"
+    view = ModelView(Path(run_dir), Path(defender_dir), tenant_agent)
+    return f"Begin the investigation.\n\n{_coordinates(view, alert_path)}\n{orientation}"
 
 
-def _coordinates(run_dir: Path, alert_path: Path) -> str:
-    """The two lines telling MAIN where this run's tree is; shared by fresh and resumed runs.
-
-    A resumed run needs them most: its inherited paths name the source run's dir, which
-    `permission.decide_read` denies.
-    """
-    return f"run_dir: {run_dir}\nalert: {alert_path}\n"
+def _coordinates(view: ModelView, alert_path: Path) -> str:
+    """The two lines telling MAIN where this run's tree is, in the model view (#1255 P1): the
+    run folder is `/runs/current` on every run, and the alert its model path."""
+    return f"run_dir: {view.to_model(view.run_dir)}\nalert: {view.to_model(alert_path)}\n"
 
 
 def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
@@ -95,7 +94,8 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
         )
     return (
         f"{resume.continuation_prompt}\n\n"
-        f"{_coordinates(run_dir, alert_path)}{_branch_clock(resume)}")
+        f"{_coordinates(ModelView(Path(run_dir), Path(defender_dir), tenant_agent), alert_path)}"
+        f"{_branch_clock(resume)}")
 
 
 def _branch_clock(resume: Any) -> str:

@@ -5,6 +5,7 @@ import dataclasses
 import re
 from defender._model import model
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from defender.runtime import bash_exec
 
@@ -13,6 +14,9 @@ from .decision import Decision
 from .files import RESOLVE_ERRORS, denylisted, names_run_provenance, names_wire_log_dir
 from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, rm_target_files
 from .policy import AgentPolicy
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.model_view import ModelView
 
 
 ADAPTER_RETIRED_REASON = (
@@ -165,7 +169,9 @@ def _strip_unquoted(text: str, target: str, replacement: str) -> str:
     return "".join(out)
 
 
-def _core_decide(command: str, policy: AgentPolicy, run_dir: Path | None) -> BashDecision:
+def _core_decide(
+    command: str, policy: AgentPolicy, run_dir: Path | None, view: ModelView | None = None,
+) -> BashDecision:
     """The whole decision ladder. The invisible-character counterfactual reruns this same
     function on an edited command, so both sides of the comparison always agree on everything
     but the edit."""
@@ -179,7 +185,7 @@ def _core_decide(command: str, policy: AgentPolicy, run_dir: Path | None) -> Bas
         return BashDecision(False, UNTOKENIZABLE_REASON)
     if pipelines is None:
         return BashDecision(False, policy.deny_reason)
-    reader = _decide_readers(pipelines, policy, run_dir=run_dir)
+    reader = _decide_readers(pipelines, policy, run_dir=run_dir, view=view)
     if reader is not None:
         return reader
     if command_shape.has_adapter(pipelines):
@@ -213,6 +219,7 @@ def _blanks_removed(command: str, chars: str) -> str:
 
 def _name_responsible_divergent_char(
     command: str, policy: AgentPolicy, run_dir: Path | None, decision: BashDecision,
+    view: ModelView | None = None,
 ) -> str | None:
     """A reason naming, by codepoint, the invisible character(s) that cause `command`'s
     refusal, or `None` if none is responsible.
@@ -228,11 +235,11 @@ def _name_responsible_divergent_char(
     responsible = [
         c for c in candidates
         if (variant := _blanks_removed(command, c)) != command
-        and _decision_key(_core_decide(variant, policy, run_dir)) != current
+        and _decision_key(_core_decide(variant, policy, run_dir, view)) != current
     ]
     if not responsible and len(candidates) > 1:
         joint = _blanks_removed(command, "".join(candidates))
-        if joint != command and _decision_key(_core_decide(joint, policy, run_dir)) != current:
+        if joint != command and _decision_key(_core_decide(joint, policy, run_dir, view)) != current:
             # Name only what the joint edit actually removed: a blank inside a word is data.
             # Counted, not re-probed, since some are reachable only jointly
             # (`<VT><NBSP>cat P`).
@@ -279,7 +286,20 @@ def _claim(argv: list[str], policy: AgentPolicy) -> Grant | None:
     return None
 
 
-def _in_scope(argv: list[str], grant: Grant, *, run_dir: Path | None) -> bool:
+def _operand_host(operand: str, cwd: Path, view: ModelView | None) -> Path | None:
+    """The host path a file operand names. With the model view (#1255 P1 inbound) the operand
+    is a model path — a relative one anchored on the model's working directory, the run folder
+    — and one outside the view's trees names nothing the model can reach (`None`). Without it,
+    a relative operand is rebased on `cwd`."""
+    if view is not None:
+        return view.to_host(operand)
+    p = Path(operand)
+    return p if p.is_absolute() else cwd / p
+
+
+def _in_scope(
+    argv: list[str], grant: Grant, *, run_dir: Path | None, view: ModelView | None = None,
+) -> bool:
     extract = PROGRAMS[grant.program]
     if extract is OPENS_NOTHING and not grant.resolve_operand:
         return True
@@ -292,11 +312,12 @@ def _in_scope(argv: list[str], grant: Grant, *, run_dir: Path | None) -> bool:
         return False
     if run_dir is None:
         return False
-    cwd = run_dir
     for f in files:
+        host = _operand_host(f, run_dir, view)
+        if host is None:
+            return False
         try:
-            p = Path(f)
-            rp = (p if p.is_absolute() else cwd / p).resolve()
+            rp = host.resolve()
         except RESOLVE_ERRORS:
             return False
         # Mirrors `decide_read`: the judge's `cat` scope `under(run, TREE)` would otherwise
@@ -310,6 +331,7 @@ def _in_scope(argv: list[str], grant: Grant, *, run_dir: Path | None) -> bool:
 
 def _decide_readers(
     pipelines: list[bash_exec.Pipeline], policy: AgentPolicy, *, run_dir: Path | None,
+    view: ModelView | None = None,
 ) -> BashDecision | None:
     stages = command_shape.flat_stages(pipelines)
     if not stages:
@@ -323,7 +345,7 @@ def _decide_readers(
     if any(_stage_unsafe(s) for s in stages):
         return BashDecision(False, policy.deny_reason)
     pairs = zip(stages, claimed, strict=True)
-    if not all(_in_scope(st, g, run_dir=run_dir) for st, g in pairs):
+    if not all(_in_scope(st, g, run_dir=run_dir, view=view) for st, g in pairs):
         return BashDecision(False, policy.deny_reason)
     return _allow(pipelines, grants=tuple(claimed))
 
@@ -331,16 +353,19 @@ def _decide_readers(
 def decide_bash(
     command: str, *, policy: AgentPolicy,
     run_dir: Path | None = None, defender_dir: Path | None = None,
-    cwd_anchor: Path | None = None,
+    cwd_anchor: Path | None = None, view: ModelView | None = None,
 ) -> BashDecision:
+    """`view` (#1255 P1, C11): the run's model view, when the command comes from a role that
+    sees one — its file operands are model paths, each mapped to the host path the gate judges.
+    The decision's pipelines stay the command's own parse, which is what the box runs."""
     # No trim: the parser gets the model's text byte for byte, so the argv checked is the argv
     # run. A Unicode trim would strip characters the scanner keeps inside a word.
     effective_run_dir = cwd_anchor if cwd_anchor is not None else run_dir
 
-    decision = _core_decide(command, policy, effective_run_dir)
+    decision = _core_decide(command, policy, effective_run_dir, view)
     if decision.allow or decision.reason == EMBEDDED_NUL_REASON:
         # The NUL reason already names its character, and no counterfactual removes a NUL.
         return decision
 
-    named = _name_responsible_divergent_char(command, policy, effective_run_dir, decision)
+    named = _name_responsible_divergent_char(command, policy, effective_run_dir, decision, view)
     return decision if named is None else dataclasses.replace(decision, reason=named)

@@ -36,6 +36,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     write_did_not_run,
 )
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
+from defender.runtime.model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
 from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._clock import CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
@@ -97,11 +98,16 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
             raise _uncovered_fault(subject, path, mounts, remedy)
     # Resolved here, not at BoxSpec construction, which reads nothing off the tree.
     rootfs = resolve_rootfs(spec.rootfs, defender_dir)
-    env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV, **_BOX_MARK_ENV}
+    # #1255 P1: inside the box every tree sits at its model path, so the working directory and
+    # the environment are the model view's constants — the same for every run on every host.
+    # Only the bind SOURCES name host paths; the daemon needs them, and the box never sees them.
+    env_pairs = {**infra_env(Path(MODEL_DEFENDER), Path(MODEL_RUN)), **_LOCALE_ENV,
+                 **_BOX_MARK_ENV}
     if tenant_agent is not None:
-        env_pairs["DEFENDER_AGENT_DIR"] = str(tenant_agent)
+        env_pairs["DEFENDER_AGENT_DIR"] = str(MODEL_AGENT)
     run_src = _daemon_source(run_dir, mounts)
     input_dir = _input_dir_source(run_dir)
+    model_input_dir = MODEL_RUN / RUN_LAYOUT.alert_input_dir.as_posix()
     defender_src = _daemon_source(defender_dir, mounts)
     argv = [
         "docker", "run", "--detach", "--name", name,
@@ -112,11 +118,12 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         *_BOX_ULIMITS,
-        "--mount", f"type=bind,source={run_src},target={run_dir}",
+        "--mount", f"type=bind,source={run_src},target={MODEL_RUN}",
         # Over the writable run folder, a directory of its own: a file bind is undone by a host
         # rename, a directory bind is not (#1222 A1).
-        "--mount", f"type=bind,source={_daemon_source(input_dir, mounts)},target={input_dir},readonly",
-        "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
+        "--mount",
+        f"type=bind,source={_daemon_source(input_dir, mounts)},target={model_input_dir},readonly",
+        "--mount", f"type=bind,source={defender_src},target={MODEL_DEFENDER},readonly",
     ]
     if tenant_agent is not None:
         # Never plant a sentinel here: it would dirty the tenant clone. Its existing
@@ -124,7 +131,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         argv += [
             "--mount",
             f"type=bind,source={_daemon_source(tenant_agent, mounts)},"
-            f"target={tenant_agent},readonly",
+            f"target={MODEL_AGENT},readonly",
         ]
     # The run clock's own read-only mount (#1255 "Into the box"): the file the image's
     # time-faking preload reads, outside every tree the model view shows.
@@ -135,7 +142,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     ]
     argv += [
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
-        "--workdir", str(run_dir),
+        "--workdir", str(MODEL_RUN),
     ]
     for key in BOX_ENV_ALLOWLIST:
         if key in env_pairs:
@@ -180,7 +187,8 @@ def _probe_sentinel(
 
 
 def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
-    _probe_sentinel(run_dir, run_dir, docker, name, RUN_LAYOUT.box_sentinel.name,
+    """Planted in the host run folder, read back where the box mounts it (`/runs/current`)."""
+    _probe_sentinel(run_dir, Path(MODEL_RUN), docker, name, RUN_LAYOUT.box_sentinel.name,
                     unlink_on_fault=False)
 
 
@@ -270,8 +278,9 @@ def _start_boxed(
         _plant_sentinel(run_dir, docker, name)
         if tenant_agent is not None:
             assert tenant_id is not None
-            _check_tenant_identity(tenant_agent / ".tenant-id", tenant_id, docker, name)
-        _probe_alias_ban(docker, name, run_dir, spec.runtime)
+            # Read through the bind, where the box sees the agent half (`/agent`).
+            _check_tenant_identity(Path(MODEL_AGENT) / ".tenant-id", tenant_id, docker, name)
+        _probe_alias_ban(docker, name, Path(MODEL_RUN), spec.runtime)
     except BaseException as e:
         # The box is ours (create succeeded); the reap is best-effort so it cannot skip the
         # marker or replace `e`.
@@ -488,13 +497,15 @@ def _start_run_box(
                             write_verdict=write_verdict)
     except BoxFault as e:
         _opt_out_or_raise(e)
-    from defender import run_common
     if tenant_agent is not None:
         assert tenant_id is not None
         path = tenant_agent / ".tenant-id"
         _require_tenant_identity(path, read_tenant_id_file(path), tenant_id)
-    return unboxed_executor(
-        spec, env=run_common.run_env(defender_dir, run_dir, tenant_agent=tenant_agent))
+    # The host runs the bash lane in the model view too (#1255 "Every mode"): over a per-run
+    # staging tree, never the real runs folder.
+    from ._stage import staged_executor
+    return staged_executor(spec, run_dir, defender_dir, tenant_agent,
+                           unmirrored=frozenset({RUN_LAYOUT.wire_log_dir.name}))
 
 
 def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
