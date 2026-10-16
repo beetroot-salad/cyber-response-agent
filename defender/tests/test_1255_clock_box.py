@@ -386,6 +386,16 @@ def test_k1_a_natural_runs_clock_file_follows_the_run_clock_between_commands(tmp
     command, on every reading, or continuously all pass — only "after the second command the
     file holds the run clock as it is then".
 
+    Why this is not a CI artifact of the injected clock: the move here grows the gap between
+    the run clock and the box's own wall clock by `_MOVE` between two commands. On a natural
+    run in production that gap grows the same way when the host's wall clock steps back: rev 5
+    C10 "A step back in the source is absorbed" (the run clock holds), while the box's wall
+    clock steps back with the host's. A file left as it was then puts in-box `now()` earlier
+    than times the model has already seen — rev 4 O4 "Every time the model can see agrees with
+    every other one and never runs earlier than the history's last timestamp". So a writer
+    that refreshes only at box start, or only when an oracle pause ends, is wrong in
+    production too.
+
     A file written once (at box start or at the first command) decodes to `START` here and
     fails; `test_k1_a_natural_runs_clock_file_holds_the_run_clocks_reading` cannot see it, since
     it reads the file before the run clock has moved. An oracle-paused turn adds nothing in CI:

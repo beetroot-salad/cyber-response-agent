@@ -399,6 +399,33 @@ class _ReportsUsage:
         return response
 
 
+def _answers_to_unprocessable_paths(tmp_path, monkeypatch) -> tuple[list[tuple], list[str]]:
+    """One natural run whose MAIN hands each `UNPROCESSABLE` model path to `read_file` and to
+    `bash cat`, then reads the alert by its run-relative path (the positive control: same run,
+    same lanes, the loop reached the closing turn and the alert read back). Returns each
+    unprocessable step's `(tool, args, kind, text)` answer, and the host tokens no answer may
+    carry. An exception out of the tool fails the calling test here, naming it."""
+    layout = V.make_layout(tmp_path / "a", V.TENANT_A)
+    run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-nul")
+    steps = [*(("read_file", {"path": p}) for p in UNPROCESSABLE),
+             *(("bash", {"command": f"cat {p}"}) for p in UNPROCESSABLE),
+             # Relative to the run folder: the same file before and after the change.
+             ("read_file", {"path": f"{RUN_LAYOUT.alert_input_dir}/alert.json"})]
+    main = V.Recorder([Turn(tool_calls=[call]) for call in steps] + [Turn(text="done")])
+    try:
+        _drive(layout, run_dir, _ReportsUsage(main), monkeypatch)
+    except Exception as e:  # noqa: BLE001 — the failure the b2 test exists to name
+        pytest.fail(f"an unprocessable model path escaped the tool as {type(e).__name__}: {e!r} "
+                    f"(after {main.calls} model requests)")
+
+    assert main.calls == len(steps) + 1, f"the loop stopped early ({main.calls} requests)"
+    kind, text = main.answer_to(len(steps))
+    assert (kind, RULE_ID in text) == ("return", True), (
+        f"positive control: the alert by its run-relative path did not read back: {kind} {text[:300]}")
+    answers = [(tool, args, *main.answer_to(i)) for i, (tool, args) in enumerate(steps[:-1], 1)]
+    return answers, V.host_tokens(layout, extra=[run_dir])
+
+
 def test_b2_an_unprocessable_model_path_is_refused_at_the_tool_never_raised(
     tmp_path, monkeypatch,
 ):
@@ -410,35 +437,32 @@ def test_b2_an_unprocessable_model_path_is_refused_at_the_tool_never_raised(
     REFUSAL it can retry — never an exception out of the tool (DECK #677: a value that makes the
     measurement call raise escapes as an exception, not a refusal). The mapper is new code that
     sits before the gate (C11); the gate-direct NUL/surrogate suites (`test_grant_gate_575`,
-    `test_permission_report_629`) never reach it. Each refusal names no host layout (outbound:
-    "refusals and error text … rebuilt from the typed path"). Positive control, same run, same
-    lanes: the alert read by its run-relative path comes back with its content, and the loop
-    reached the closing turn. Passes today, where these are unmapped paths the gate fails
-    closed on; it pins that the mapping keeps them refusals."""
-    layout = V.make_layout(tmp_path / "a", V.TENANT_A)
-    run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-nul")
-    steps = [*(("read_file", {"path": p}) for p in UNPROCESSABLE),
-             *(("bash", {"command": f"cat {p}"}) for p in UNPROCESSABLE),
-             # Relative to the run folder: the same file before and after the change.
-             ("read_file", {"path": f"{RUN_LAYOUT.alert_input_dir}/alert.json"})]
-    main = V.Recorder([Turn(tool_calls=[call]) for call in steps] + [Turn(text="done")])
-    try:
-        _drive(layout, run_dir, _ReportsUsage(main), monkeypatch)
-    except Exception as e:  # noqa: BLE001 — the failure this test exists to name
-        pytest.fail(f"an unprocessable model path escaped the tool as {type(e).__name__}: {e!r} "
-                    f"(after {main.calls} model requests)")
+    `test_permission_report_629`) never reach it. What the refusal SAYS is
+    `test_b3_the_refusal_of_an_unprocessable_model_path_names_no_host_layout`'s. Positive
+    control (`_answers_to_unprocessable_paths`): the alert read by its run-relative path in the
+    same run comes back with its content. Passes today, where these are unmapped paths the gate
+    fails closed on; it pins that the mapping keeps them refusals."""
+    answers, _tokens = _answers_to_unprocessable_paths(tmp_path, monkeypatch)
 
-    assert main.calls == len(steps) + 1, f"the loop stopped early ({main.calls} requests)"
-    kind, text = main.answer_to(len(steps))
-    assert (kind, RULE_ID in text) == ("return", True), (
-        f"positive control: the alert by its run-relative path did not read back: {kind} {text[:300]}")
-    answers = [(tool, args, *main.answer_to(i)) for i, (tool, args) in enumerate(steps[:-1], 1)]
     for tool, args, kind, text in answers:
         assert kind == "retry", f"{tool} {args!r} was not refused: {kind}: {text[:400]!r}"
-    tokens = V.host_tokens(layout, extra=[run_dir])
+
+
+def test_b3_the_refusal_of_an_unprocessable_model_path_names_no_host_layout(
+    tmp_path, monkeypatch,
+):
+    """P1 outbound ("refusals and error text … rebuilt from the typed path"), over the same
+    run as the b2 case above: whatever the answer to a NUL-byte or lone-surrogate model path
+    says, it names no host layout — a mapper that refuses such a path by echoing the HOST
+    spelling it built (or the exception text of the host-side call) shows the model the layout
+    P1 hides. Separate from the b2 case so a red here reads as an outbound leak, not as a
+    raise. Positive control as there. Passes today, where the gate refuses the unmapped
+    operand by what the model typed."""
+    answers, tokens = _answers_to_unprocessable_paths(tmp_path, monkeypatch)
+
     for tool, args, _kind, text in answers:
         hits = V.scan(text, tokens)
-        assert not hits, f"the refusal of {tool} {args!r} shows host layout:\n" + "\n".join(hits)
+        assert not hits, f"the answer to {tool} {args!r} shows host layout:\n" + "\n".join(hits)
 
 
 def test_b2_g10_proc_stays_outside_read_scope(tmp_path, monkeypatch):
