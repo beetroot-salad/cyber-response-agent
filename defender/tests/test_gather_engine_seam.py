@@ -380,8 +380,11 @@ def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path)
             raise UsageLimitExceeded("far enough — the prompt was captured")
 
     class _HandedIndex:
-        """A stand-in for the index run start builds and hands down: it renders to `text`,
-        whatever down map it is rendered against, and records each rendering."""
+        """A stand-in for the index run start builds and hands down: it lists the systems its
+        lines name (`systems`, read by the dispatch to mark those that are down), renders to
+        `text`, whatever down map it is rendered against, and records each rendering."""
+
+        systems = ("elastic",)
 
         def __init__(self, text: str) -> None:
             self.text = text
