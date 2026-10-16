@@ -244,13 +244,17 @@ def preflight_role_models(  # noqa: C901 — one fail-fast check per role, plus 
 class _Investigate(Protocol):
     """The investigation seam's exact shape, so both the call site and `_drive_investigation`
     stay type-checked (tests inject the seam, so only a real run would catch a renamed keyword).
+
+    The adapters roster is not part of it: the lifecycle binds the roster `main` judged at run
+    start into the production drive (`_drive_investigation(roster=…)`); an injected seam reads
+    whatever roster it owns.
     """
 
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
         self, *, alert_path: Path, run: Run, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
-        source: Run | None = None, roster: RosterRead | None = None,
+        source: Run | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -378,10 +382,12 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     serving: Any = None,
     #: The opened source run a world forks, threaded beside `world`.
     source: Run | None = None,
-    #: The adapters roster `main` read once and judged run start over (#1256), threaded to the
-    #: investigation so the run reads that same roster.
+    #: The adapters roster `main` read once and judged run start over (#1256), bound into the
+    #: production drive so the run reads that same roster (`None`: the drive reads
+    #: `defender_dir`'s, as a direct caller with no `main` before it does).
     roster: RosterRead | None = None,
-    investigate: _Investigate = _drive_investigation,
+    #: The investigation; `None` is the production drive (`_drive_investigation`) over `roster`.
+    investigate: _Investigate | None = None,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
     scrub: Callable[..., None] = box_mod.scrub,
@@ -400,9 +406,11 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
 
     box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id,
                     write_verdict=write_verdict)
+    drive: _Investigate = (investigate if investigate is not None
+                           else functools.partial(_drive_investigation, roster=roster))
     investigation_ok = False
     try:
-        summary = investigate(
+        summary = drive(
             alert_path=RunPaths(run_dir).alert,
             run=run,
             defender_dir=defender_dir,
@@ -414,7 +422,6 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             episode=episode,
             serving=serving,
             source=source,
-            roster=roster,
         )
         investigation_ok = True
     finally:
