@@ -105,13 +105,3 @@ def _descriptor_line(registry: ModuleVerbRegistry, system: str, skills_dir: Path
         return None
     desc = read_description(system, skills_dir)
     return f"- `{system}`: {desc}" if desc else None
-
-
-def descriptor_catalog(
-    skills_dir: Path, roster: RosterRead, grant: VerbGrant,
-    *, down: Mapping[str, str] = NONE_DOWN,
-) -> str | None:
-    """Gather's system index over `grant`, built and rendered at once (`descriptor_index`, then
-    `SystemIndex.render`): one line per system the grant reaches — its skill's description, or,
-    for a system in `down`, that it is DOWN and why (#1256 O-3)."""
-    return descriptor_index(skills_dir, roster, grant, unloaded=down).render(down)
