@@ -469,8 +469,9 @@ ALLOW: tuple[Allowed, ...] = (
             "the class a bounded git call raises, named `GitTimeout` for the facade's callers; "
             "opens nothing"),
     Allowed(GIT, "_run", "call",
-            "subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='surrogateescape', timeout=timeout, input=input, env=None if env is None else dict(env))",
-            N_A, _GIT),
+            "subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, encoding='utf-8', errors='surrogateescape', timeout=timeout, input=input, env=None if env is None else dict(env), pass_fds=tuple(pass_fds))",
+            N_A, _GIT + " (`pass_fds`: descriptors a caller hands the git child, the tenant "
+            "credential's pipe of #1108 P3; no path is opened here)"),
     Allowed(GIT, "_run_bytes", "call",
             "subprocess.run(['git', *args], cwd=cwd, capture_output=True, input=input, check=False, env=None if env is None else dict(env), timeout=timeout)",
             N_A, _GIT + " (raw bytes: the before-state's `ls-tree` / `cat-file --batch`, the "

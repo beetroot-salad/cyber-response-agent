@@ -341,7 +341,7 @@ def _create_new_at(dir_fd: int, name: str, data: bytes) -> None:
 #: The pointer file in `<T>/exports/` naming the latest published export.
 _POINTER = "current"
 #: The name an export is written under before it is renamed into place.
-_STAGING_PREFIX = ".publishing-"
+_PUBLISHING_PREFIX = ".publishing-"
 
 
 def _sweep_staging(exports: Path) -> None:
@@ -354,7 +354,7 @@ def _sweep_staging(exports: Path) -> None:
     try:
         with os.scandir(fd) as entries:
             stale = [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in entries
-                     if entry.name.startswith(_STAGING_PREFIX)]
+                     if entry.name.startswith(_PUBLISHING_PREFIX)]
         for name, is_folder in stale:
             if is_folder:
                 shutil.rmtree(name, dir_fd=fd)
@@ -811,7 +811,7 @@ class TenantDelivery:
             if not stat.S_ISDIR(final.lstat().st_mode):
                 raise DeliveryRefused(f"{final} is not an export folder")
             return TenantExport(commit=commit, path=final)
-        staging = f"{_STAGING_PREFIX}{commit}-{secrets.token_hex(4)}"
+        staging = f"{_PUBLISHING_PREFIX}{commit}-{secrets.token_hex(4)}"
         try:
             with _io.hold_new(exports, staging, exclusive=True) as folder:
                 for path, data in files.items():
