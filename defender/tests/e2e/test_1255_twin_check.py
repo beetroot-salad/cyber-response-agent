@@ -246,15 +246,18 @@ def test_1255_twin_control_arm_is_the_natural_continuation(twin, layout, which):
     driven with the same script, an arm makes the same model requests as its source did after
     that point — MAIN's, the re-run gather lead's (D1: re-run, never inherited) and the three
     review stages' — each carrying the same messages, tool results and tool definitions, with
-    the same gate-admitted files in its run folder at each request. Only the O4 list is
-    normalised — run-clock times inside the natural run's branch window, never running
-    backwards; every other difference is named with its channel and first differing content.
-    Both arms: the null replicate, launched before any sibling exists, and the control arm,
-    launched with the replicate beside it — so a difference only one shows is a sibling's."""
+    the same gate-admitted files in its run folder at each request, and the same read-only
+    corpus in its read scope (the checkout's and the tenant agent half's lessons, skills and
+    examples). Only the O4 list is normalised — run-clock times inside the natural run's branch
+    window, never running backwards; durations under their named keys, never equal to the fork
+    turn; fresh ids only from a named producer and in its shape (`_1255_twin.fresh_ids`); every
+    other difference is named with its channel and first differing content. Both arms: the
+    null replicate, launched before any sibling exists, and the control arm, launched with the
+    replicate beside it — so a difference only one shows is a sibling's."""
     pair = _pair(twin, layout)
     arm = _arm_reached_the_model(pair, layout, which)
     _clocked(pair, layout)
-    diffs = W.compare(pair["natural"], arm)
+    diffs = W.compare(pair["natural"], arm, fork_turn=pair["branch_message_id"])
     assert not diffs, (
         f"layout {layout}: the {ARMS[which]} differs from the natural continuation on "
         f"{len(diffs)} channel(s) after the fork:\n" + "\n".join(f"  - {d}" for d in diffs))
@@ -266,14 +269,18 @@ def test_1255_twin_arm_surfaces_carry_no_arm_identity(twin, layout):
     request, the corpus — carries the arm's identity: its run id, its source run's id, its
     sibling's run id (the replicate launched first into the same container), the episode id or
     token, or either world token — literally or under an obvious encoding (a digest or
-    uuid3/uuid5 of it, its bytes in hex or base64, inside a base64/hex run), which the
-    comparison's fresh-id rule would otherwise forgive (R-2). (The fork turn and the one-letter
-    world labels cannot be scanned for; equality with the natural continuation covers them.)"""
+    uuid3/uuid5 of it, its bytes in hex or base64, inside a base64/hex run, or forced into the
+    shape of a fresh id the comparison forgives; R-2, F2-T) — nor the fork turn or a world
+    label written as an id (`UUID(int=k)`, the label's byte folded under it). Their short
+    spellings (`59`, `a`) are everywhere and are not scanned for: no value the comparison
+    forgives can hold them (`_1255_twin.identity_tokens`), so equality with the natural
+    continuation covers them."""
     pair = _pair(twin, layout)
     arm = _arm_reached_the_model(pair, layout)
     tokens = W.identity_tokens(pair, "arm")
     assert {"source run id", "arm run id", "sibling run id", "episode id",
-            "episode token"} <= set(tokens), tokens
+            "episode token", "fork turn (uuid int)",
+            f"world label {W.CONTROL} with the fork turn (uuid int)"} <= set(tokens), tokens
     # positive control on the same surfaces: the scan reads the arm's real content
     assert W.scan(arm, {"the lead's own summary": W.LEAD_SUMMARY}), (
         "the arm's surfaces do not carry the re-run lead's summary — the scan below would be "

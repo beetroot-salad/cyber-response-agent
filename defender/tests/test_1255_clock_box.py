@@ -61,7 +61,9 @@ reading there: an ISO-8601 time, epoch seconds or milliseconds, or a signed offs
 seconds (or `s`/`m`/`h`/`d` units) from the wall clock — the offset the box's own wall clock
 needs to read the run clock, which is what K4 then asserts live. Contract-repair finding F-K1:
 an empty file mounted at `/clock` and a preload named only in a Dockerfile comment passed every
-static check here.
+static check here. Finding F2-K1: a file written once passed that read too, so a second natural
+case moves the run clock between two box commands and reads the file after the second — still
+no schedule fixed, only that the file then holds the run clock as it is at that point.
 
 Slice B owns every other assertion about the box's mounts and environment; nothing here names
 a model path.
@@ -78,7 +80,7 @@ from typing import Any
 
 import pytest
 
-from defender.run_repository import RunPaths
+from defender.run_repository import RUN_LAYOUT, RunPaths
 from defender.runtime import box as box_mod
 from defender.tests import _1255_clock as C
 from defender.tests import _1255_view as V
@@ -275,15 +277,19 @@ def _clock_file_probe(docker: RecordingDocker, seen: dict[str, Any]) -> Any:
     return probe
 
 
-def _clock_file_after_a_command(argv: list[str], clock: C.FakeClock,
+def _clock_file_after_a_command(argv: list[str], clock: C.FakeClock, *,
+                                seconds_before: tuple[float, ...] = (0,),
+                                command: str = f"cat {V.MODEL_ALERT}",
                                 ) -> tuple[dict[str, Any], C.Launched, RecordingDocker]:
     """`run.main(argv)` through the dossier's composition over the recording docker, its MAIN a
-    two-step script that takes no run-clock time: a `cat` of the run's alert at its model path
-    (a command that reaches the box — K2's positive control), then `_clock_file_probe`."""
+    script of one box `command` per entry of `seconds_before` — the model taking that many
+    run-clock seconds before it — then `_clock_file_probe`, which takes none. By default one
+    `cat` of the run's alert at its model path (a command that reaches the box — K2's positive
+    control) after no time at all."""
     docker = RecordingDocker()
     seen: dict[str, Any] = {}
     out = C.run_main(argv, clock=clock,
-                     main=C.script(clock, (0, C.bash(f"cat {V.MODEL_ALERT}")),
+                     main=C.script(clock, *((s, C.bash(command)) for s in seconds_before),
                                    (0, _clock_file_probe(docker, seen))),
                      start_box=functools.partial(box_mod.start_box, docker=docker,
                                                  spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS)))
@@ -354,6 +360,96 @@ def test_k1_an_arms_clock_file_holds_its_run_clocks_reading_not_its_sources(tmp_
         C.arm_argv(tenant_id, ep.name, "a"), C.FakeClock(C.ARM_START))
 
     _assert_clock_file_reads(seen, out, C.BRANCH_READING, not_reading=C.ARM_START)
+
+
+#: How far the run clock moves between two box commands in the moving-clock K1 case: five times
+#: the file check's slack, half the default wall-clock limit (no budget warning on the way).
+_MOVE = 600
+#: The run's alert by its run-relative path — the same file through the run folder before and
+#: after slice B's mapping, so the moving-clock case asks nothing of the model view.
+_RELATIVE_CAT = f"cat {RUN_LAYOUT.alert_input_dir}/alert.json"
+
+
+def test_k1_a_natural_runs_clock_file_follows_the_run_clock_between_commands(tmp_path,
+                                                                            monkeypatch):
+    """Into the box, every run (F2-K1): the clock file follows the run clock — it is not written
+    once. MAIN runs a box command at `START`, then takes `_MOVE` seconds of run-clock time and
+    runs a second; read after the second, the mount's source decodes to `START + _MOVE` (the
+    spellings and slack of `_assert_clock_file_reads`), not to `START`.
+
+    Why the design asks it: rev 4 "Time": the run clock is the source "every time the model can
+    see comes from … the SQL engine's `now()`, times in prompts and tool output"; "Into the
+    box": "The SQL engine runs in the box and evaluates time itself", the preload "reading the
+    run clock from a small read-only file in its own mount"; rev 5 C4: "The run clock governs
+    model-visible times." So a command the box runs after the run clock moved must read the
+    moved clock, and the file is the box's channel for it. No rewrite schedule is fixed: per
+    command, on every reading, or continuously all pass — only "after the second command the
+    file holds the run clock as it is then".
+
+    Why this is not a CI artifact of the injected clock: the move here grows the gap between
+    the run clock and the box's own wall clock by `_MOVE` between two commands. On a natural
+    run in production that gap grows the same way when the host's wall clock steps back: rev 5
+    C10 "A step back in the source is absorbed" (the run clock holds), while the box's wall
+    clock steps back with the host's. A file left as it was then puts in-box `now()` earlier
+    than times the model has already seen — rev 4 O4 "Every time the model can see agrees with
+    every other one and never runs earlier than the history's last timestamp". So a writer
+    that refreshes only at box start, or only when an oracle pause ends, is wrong in
+    production too.
+
+    A file written once (at box start or at the first command) decodes to `START` here and
+    fails; `test_k1_a_natural_runs_clock_file_holds_the_run_clocks_reading` cannot see it, since
+    it reads the file before the run clock has moved. An oracle-paused turn adds nothing in CI:
+    on an injected clock the run clock does not move during a pause, so a written-once file
+    and one that follows the clock read the same afterwards (K4 is live-only).
+
+    Positive control: the script's move ran (the clock source advanced by `_MOVE`). Red (class
+    a) until `run_investigation` accepts `clock=`."""
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
+    base, seed = T.runs_base(tmp_path)
+    tenant_id = T.mod("_tenant").read_tenant(base).tenant_id
+    clock = C.FakeClock(START)
+
+    seen, out, _docker = _clock_file_after_a_command(
+        C.natural_argv(RunPaths(seed).alert, tenant_id), clock,
+        seconds_before=(0, _MOVE), command=_RELATIVE_CAT)
+
+    assert _MOVE in clock.advances, (
+        f"control: the model's {_MOVE} s between the two commands never ran: {clock.advances} "
+        f"(exit={out.exit} refusal={out.refusal})")
+    _assert_clock_file_reads(seen, out, C.at(START, _MOVE))
+
+
+def _file_written(reading: dt.datetime, spelling: str) -> str:
+    """The clock file's text for `reading` in one spelling the K1 file check accepts, written now
+    (an offset is from the wall clock at the write)."""
+    return {"iso": reading.isoformat(),
+            "libfaketime absolute": "@" + reading.strftime("%Y-%m-%d %H:%M:%S"),
+            "epoch seconds": f"{reading.timestamp():.0f}",
+            "offset": f"{(reading - dt.datetime.now(dt.UTC)).total_seconds():+.0f}"}[spelling]
+
+
+@pytest.mark.parametrize("spelling", ["iso", "libfaketime absolute", "epoch seconds", "offset"])
+def test_k1_the_file_check_tells_a_clock_written_once_from_one_that_follows(spelling):
+    """The instrument behind the moving-clock K1 case, over a fake writer and no run: a box
+    command at `START`, the run clock moving `_MOVE` seconds, a second command, then the read.
+    A writer that rewrites the file at each command passes `_assert_clock_file_reads` for
+    `START + _MOVE`; one that wrote it only at the first command is refused — in every spelling
+    the check decodes. Green today: it is the check's own discrimination."""
+    clock = C.FakeClock(START)
+    once = _file_written(clock(), spelling)        # both writers, at the first command
+    clock.advance(_MOVE)
+    follows = _file_written(clock(), spelling)     # only the one that follows, at the second
+    mount = [{"source": "<clock file>", "target": "/clock", "readonly": True}]
+
+    def check(text: str) -> None:
+        seen = {"mounts": mount, "files": ["<clock file>"], "text": text,
+                "wall": dt.datetime.now(dt.UTC)}
+        _assert_clock_file_reads(seen, C.Launched(), clock())
+
+    check(follows)
+    with pytest.raises(AssertionError, match="does not hold the run clock's reading"):
+        check(once)
 
 
 def _role(name: str) -> tuple[Any, str]:

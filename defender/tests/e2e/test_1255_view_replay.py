@@ -209,6 +209,82 @@ def test_b4_an_alert_carrying_a_host_path_is_shown_byte_for_byte(tmp_path, monke
     assert f"cat {evidence}" in text, "the alert read back with its bytes rewritten"
 
 
+def _own_tree_evidence(layout: V.Layout, run_dir: Path | str) -> dict[str, str]:
+    """Host paths of THIS run's own three trees, as evidence would carry them: a file in the run
+    folder, a checkout skill, an agent-half page — exactly the prefixes a renderer maps (run
+    folder → /runs/current, checkout → /defender, agent half → /agent), so a pass that rewrote
+    those three roots in model-bound text after it was built would alter each one."""
+    return {"run folder": f"{run_dir}/{RUN_LAYOUT.investigation}",
+            "checkout": f"{layout.checkout}/skills/invlang/SKILL.md",
+            "agent half": f"{layout.agent}/examples/{PROBE_NAME}"}
+
+
+def _outside(text: str, evidence: list[str]) -> str:
+    """`text` with each evidence string (exactly as planted) masked, so a host-layout scan sees
+    only what the run itself wrote around the evidence."""
+    for item in sorted(evidence, key=len, reverse=True):
+        text = text.replace(item, "<EVIDENCE>")
+    return text
+
+
+def test_b4_evidence_naming_this_runs_own_trees_is_shown_byte_for_byte(tmp_path, monkeypatch):
+    """P1 evidence rule ("Evidence bytes (payloads, alert content) are never rewritten, even when
+    they contain a host-like path") + rev 3 ("paths are rendered where text is built, not
+    rewritten afterwards"), F2-B4: an alert naming the host paths of THIS run's own folder, of
+    the checkout the run is handed and of the tenant agent half — the three roots the model view
+    maps — is inlined into message 0 with every one of them untouched, and reads back through
+    the model path untouched; while in the SAME message the run's coordinates and the workspace
+    map's roots are model paths and nothing outside the evidence names the host. A pass that
+    rewrote the three host roots in model-bound text after building it fails the evidence half
+    (the old run's path `test_b4_an_alert_carrying_a_host_path_is_shown_byte_for_byte` plants is
+    under none of the three roots, so such a pass leaves it alone); a renderer that leaves host
+    paths in the coordinates fails the model-path half (today).
+
+    The run folder's host path is known before the run starts: `natural_run` pins the run id,
+    and a natural run's folder is `<tenant runs>/<run id>` (fixture control below)."""
+    layout = V.make_layout(tmp_path / "a", V.TENANT_A)
+    run_id = "20261015t120000z-view-evid-own"
+    old = f"{layout.data_root}/{layout.tenant_id}/runs/20250101t000000z-old/investigation.md"
+    own = _own_tree_evidence(layout, Path(layout.tenant.runs) / run_id)
+    planted = [f"cat {p}" for p in (old, *own.values())]
+    doc = json.loads(ALERT)
+    for i, line in enumerate(planted):
+        doc[f"process_args_evidence_{i}"] = line
+    run_dir = V.natural_run(layout, json.dumps(doc, indent=2).encode("utf-8"), run_id)
+    assert run_dir == Path(layout.tenant.runs) / run_id, (
+        f"fixture: the run folder is not where the evidence named it ({run_dir})")
+    main = V.Recorder([
+        Turn(tool_calls=[("read_file", {"path": V.MODEL_ALERT})]),
+        Turn(text="done"),
+    ])
+    _drive(layout, run_dir, main, monkeypatch)
+    tokens = V.host_tokens(layout, extra=[run_dir])
+
+    m0 = main.first_user_text()
+    # Evidence first (holds today): every planted line in message 0 byte for byte.
+    assert RULE_ID in m0, "control: message 0 carries the alert"
+    for (name, path), line in zip(own.items(), planted[1:], strict=True):
+        assert line in m0, (
+            f"the alert's own bytes naming this run's {name} ({path}) were rewritten in "
+            "message 0")
+    assert planted[0] in m0, "the alert's own bytes naming an older run were rewritten"
+    # The model view (red today): coordinates and roots are model paths, and nothing outside
+    # the evidence names the host.
+    assert _value(m0, "run_dir") == V.MODEL_RUN
+    assert _value(m0, "alert") == V.MODEL_ALERT
+    assert _map_root(m0, "RUN_DIR") == V.MODEL_RUN
+    assert _map_root(m0, "DEFENDER_DIR") == V.MODEL_DEFENDER
+    hits = V.scan(_outside(m0, planted), tokens)
+    assert not hits, "message 0 shows host layout outside the evidence:\n" + "\n".join(hits)
+    # The alert reads back by its model path, every planted line intact.
+    kind, text = main.answer_to(1)
+    assert kind == "return", f"the alert was not read through its model path: {text[:400]}"
+    missing = [line for line in planted if line not in text]
+    assert not missing, f"the alert read back with its evidence rewritten: {missing}"
+    hits = V.scan(_outside(text, planted), tokens)
+    assert not hits, "the alert's read-back shows host layout outside the evidence:\n" + "\n".join(hits)
+
+
 # ---------------------------------------------------------------------------------------------
 # B2 — inbound: every tree by its model path, never by a host path
 # ---------------------------------------------------------------------------------------------
@@ -291,6 +367,104 @@ def test_b3_refusals_and_errors_name_the_model_path_never_the_host(tmp_path, mon
     assert not V.scan(miss, tokens), miss
 
 
+#: Model paths no filesystem call can take: an embedded NUL (`ValueError` from every path
+#: syscall) and a lone HIGH surrogate (`UnicodeEncodeError` — a low one such as `\udc80`
+#: round-trips through surrogateescape to a real byte and is merely not found). One under each
+#: model root, so a mapper that handles one root apart from the others is reached too.
+UNPROCESSABLE = (
+    f"{V.MODEL_RUN}/inv\x00.md",
+    f"{V.MODEL_RUN}/\ud800.md",
+    f"{V.MODEL_DEFENDER}/skills/\x00/SKILL.md",
+    f"{V.MODEL_AGENT}/examples/\ud800.md",
+)
+
+
+class _ReportsUsage:
+    """A replay double that reports its own token usage, as every real provider does. Without
+    it `FunctionModel` ESTIMATES usage by JSON-encoding each tool call's arguments, which raises
+    on a lone surrogate inside the test double — before the tool is ever called. A provider that
+    hands back parsed arguments (the Anthropic client decodes its JSON with Python's `json`,
+    which keeps a `\\ud800` escape as a lone surrogate) delivers such a string to the tool."""
+
+    __name__ = "_ReportsUsage"
+
+    def __init__(self, inner: V.Recorder) -> None:
+        self.inner = inner
+
+    def __call__(self, messages, info):
+        from pydantic_ai.usage import RequestUsage
+
+        response = self.inner(messages, info)
+        response.usage = RequestUsage(input_tokens=1, output_tokens=1)
+        return response
+
+
+def _answers_to_unprocessable_paths(tmp_path, monkeypatch) -> tuple[list[tuple], list[str]]:
+    """One natural run whose MAIN hands each `UNPROCESSABLE` model path to `read_file` and to
+    `bash cat`, then reads the alert by its run-relative path (the positive control: same run,
+    same lanes, the loop reached the closing turn and the alert read back). Returns each
+    unprocessable step's `(tool, args, kind, text)` answer, and the host tokens no answer may
+    carry. An exception out of the tool fails the calling test here, naming it."""
+    layout = V.make_layout(tmp_path / "a", V.TENANT_A)
+    run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-nul")
+    steps = [*(("read_file", {"path": p}) for p in UNPROCESSABLE),
+             *(("bash", {"command": f"cat {p}"}) for p in UNPROCESSABLE),
+             # Relative to the run folder: the same file before and after the change.
+             ("read_file", {"path": f"{RUN_LAYOUT.alert_input_dir}/alert.json"})]
+    main = V.Recorder([Turn(tool_calls=[call]) for call in steps] + [Turn(text="done")])
+    try:
+        _drive(layout, run_dir, _ReportsUsage(main), monkeypatch)
+    except Exception as e:  # noqa: BLE001 — the failure the b2 test exists to name
+        pytest.fail(f"an unprocessable model path escaped the tool as {type(e).__name__}: {e!r} "
+                    f"(after {main.calls} model requests)")
+
+    assert main.calls == len(steps) + 1, f"the loop stopped early ({main.calls} requests)"
+    kind, text = main.answer_to(len(steps))
+    assert (kind, RULE_ID in text) == ("return", True), (
+        f"positive control: the alert by its run-relative path did not read back: {kind} {text[:300]}")
+    answers = [(tool, args, *main.answer_to(i)) for i, (tool, args) in enumerate(steps[:-1], 1)]
+    return answers, V.host_tokens(layout, extra=[run_dir])
+
+
+def test_b2_an_unprocessable_model_path_is_refused_at_the_tool_never_raised(
+    tmp_path, monkeypatch,
+):
+    """P1 inbound ("Every path the model hands back is mapped model → host at one point …
+    before the permission gate checks it or a file tool opens it … A path outside the three
+    trees is refused, as today") + the gate's standing fail-closed contract
+    (`permission.files.RESOLVE_ERRORS`): a model path carrying a NUL byte or a lone surrogate,
+    under each model root, handed to `read_file` and to `bash cat`, comes back to the model as a
+    REFUSAL it can retry — never an exception out of the tool (DECK #677: a value that makes the
+    measurement call raise escapes as an exception, not a refusal). The mapper is new code that
+    sits before the gate (C11); the gate-direct NUL/surrogate suites (`test_grant_gate_575`,
+    `test_permission_report_629`) never reach it. What the refusal SAYS is
+    `test_b3_the_refusal_of_an_unprocessable_model_path_names_no_host_layout`'s. Positive
+    control (`_answers_to_unprocessable_paths`): the alert read by its run-relative path in the
+    same run comes back with its content. Passes today, where these are unmapped paths the gate
+    fails closed on; it pins that the mapping keeps them refusals."""
+    answers, _tokens = _answers_to_unprocessable_paths(tmp_path, monkeypatch)
+
+    for tool, args, kind, text in answers:
+        assert kind == "retry", f"{tool} {args!r} was not refused: {kind}: {text[:400]!r}"
+
+
+def test_b3_the_refusal_of_an_unprocessable_model_path_names_no_host_layout(
+    tmp_path, monkeypatch,
+):
+    """P1 outbound ("refusals and error text … rebuilt from the typed path"), over the same
+    run as the b2 case above: whatever the answer to a NUL-byte or lone-surrogate model path
+    says, it names no host layout — a mapper that refuses such a path by echoing the HOST
+    spelling it built (or the exception text of the host-side call) shows the model the layout
+    P1 hides. Separate from the b2 case so a red here reads as an outbound leak, not as a
+    raise. Positive control as there. Passes today, where the gate refuses the unmapped
+    operand by what the model typed."""
+    answers, tokens = _answers_to_unprocessable_paths(tmp_path, monkeypatch)
+
+    for tool, args, _kind, text in answers:
+        hits = V.scan(text, tokens)
+        assert not hits, f"the answer to {tool} {args!r} shows host layout:\n" + "\n".join(hits)
+
+
 def test_b2_g10_proc_stays_outside_read_scope(tmp_path, monkeypatch):
     """Holding control for the `/proc/self/mountinfo` residual (U1, G10): whatever the box's
     mount table shows, MAIN cannot read it — `read_file` and `cat` of `/proc/self/mountinfo` are
@@ -334,12 +508,22 @@ def test_b3_gather_is_dispatched_and_answered_in_the_model_view(tmp_path, monkey
     `/defender` and `/runs/current` and every absolute path it names is under a model root; the
     query's answer carries the payload view (control) and `raw payload:
     /runs/current/gather_raw/l-001/0.json`; reading that path returns the payload. No host layout
-    in anything gather received. H1 control: the queries table still records the payload
-    run-relative (`gather_raw/l-001/0.json`), as today."""
+    in anything gather received outside the payload's own bytes. H1 control: the queries table
+    still records the payload run-relative (`gather_raw/l-001/0.json`), as today.
+
+    F2-B4: the payload's evidence also names the host paths of THIS run's own folder, of its
+    checkout and of its agent half — the three roots the model view maps — and each reaches gather
+    byte for byte in the query's payload view and in the payload read back. A pass that rewrote
+    those three roots in model-bound text after building it would alter them; one host-LIKE path
+    that is none of the three (`FOREIGN_HOST_PATH`) cannot tell such a pass from a renderer."""
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     run_dir = V.natural_run(layout, ALERT, "20261015t120000z-view-gather")
+    own = _own_tree_evidence(layout, run_dir)
+    planted = [f"cat {p}" for p in (FOREIGN_HOST_PATH, *own.values())]
     payload = [{"@timestamp": "2026-05-25T13:50:00Z", "user.name": "dev.dana",
-                "process.command_line": f"cat {FOREIGN_HOST_PATH}"}]
+                "process.command_line": planted[0],
+                **{f"process.parent{i}.command_line": line
+                   for i, line in enumerate(planted[1:], start=1)}}]
     main = V.Recorder([
         Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "elastic",
                                      "goal": "measure this lead",
@@ -363,6 +547,10 @@ def test_b3_gather_is_dispatched_and_answered_in_the_model_view(tmp_path, monkey
     assert q_kind == "return", answer[:400]
     assert "dev.dana" in answer, "control: the query's answer carries the payload view"
     assert FOREIGN_HOST_PATH in answer, "the payload's own bytes were rewritten in the view"
+    for (name, path), line in zip(own.items(), planted[1:], strict=True):
+        assert line in answer, (
+            f"the payload's own bytes naming this run's {name} ({path}) were rewritten in the "
+            f"view:\n{answer[:1200]}")
     rows = [r for r in read_jsonl_rows(run_dir / RUN_LAYOUT.executed_queries)
             if r.get("lead_id") == LEAD]
     assert [r.get("payload_path") for r in rows] == [f"{RUN_LAYOUT.gather_raw.name}/{LEAD}/0.json"], rows
@@ -379,9 +567,11 @@ def test_b3_gather_is_dispatched_and_answered_in_the_model_view(tmp_path, monkey
     kind, raw = gather.answer_to(2)
     assert kind == "return", f"the payload is not readable at the path the line gave: {raw[:400]}"
     assert FOREIGN_HOST_PATH in raw and "dev.dana" in raw, raw[:400]
+    missing = [line for line in planted if line not in raw]
+    assert not missing, f"the payload read back with its evidence rewritten: {missing}"
 
-    hits = V.scan(gather.all_text(), V.host_tokens(layout))
-    assert not hits, "gather was shown host layout:\n" + "\n".join(hits)
+    hits = V.scan(_outside(gather.all_text(), planted), V.host_tokens(layout))
+    assert not hits, "gather was shown host layout outside the evidence:\n" + "\n".join(hits)
 
 
 # ---------------------------------------------------------------------------------------------

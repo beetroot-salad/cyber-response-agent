@@ -27,8 +27,9 @@ the implementer); the join is observed only through the judge.
 from __future__ import annotations
 
 import base64
+import gzip
 import json
-import re
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.tests import _1255_identity as IDN  # noqa: E402
+from defender.tests import _1255_run_records as RR  # noqa: E402
 from defender.tests import _1255_world as W  # noqa: E402
 from defender.tests.judge_contrast_1234 import _spec1234 as S34  # noqa: E402
 from defender.tests.live_oracle_1224 import _spec1224 as S24  # noqa: E402
@@ -58,55 +60,15 @@ def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return W.configure_roots(tmp_path, monkeypatch)
 
 
-#: What a run folder holds after a drive, by role — `run_repository._layout`'s record names at
-#: base 4b3628ed, as LITERALS (never read off the layout under test): the stamp, the documents
-#: and logs the model reads, the host's observability streams, and the box sentinel.
-_ROOT_RECORDS = frozenset({
-    "provenance.json", "investigation.md", "report.md", "executed_queries.jsonl",
-    "source_refs.yaml", "tool_trace.jsonl", "policy_denials.jsonl", "lessons_loaded.jsonl",
-    "runtime.html", ".box-sentinel"})
-#: Record shapes keyed by something other than a lead: the case input (one folder, one level)
-#: and the review gate's records.
-_ROOT_SHAPES = (re.compile(r"alert_input/[^/]+"), re.compile(r"review_record\.[0-9]+\.json"),
-                re.compile(r"wire_logs/[^/]+\.jsonl"))
-
-
-def _unlisted(rel_paths: list[str], rows: list[dict]) -> list[str]:
-    """The run-folder files (relative POSIX paths) that are none of the records a run holds
-    (P3, contract-repair finding F-Q1): beyond `_ROOT_RECORDS` / `_ROOT_SHAPES`, the only
-    lead-keyed files are each table lead's claim (`gather_raw/<lead>.lead.json`) and summary
-    (`gather_summaries/<lead>.md`), and the payloads the table's rows name (`payload_path`) —
-    so `gather_raw/` holds nothing the queries table does not account for. Anything else is a
-    new file in the box's own mount: a new channel (O5), and where host-only bookkeeping such as
-    the query join would hide; it fails until it is named here and argued in review."""
-    leads = {str(r.get("lead_id")) for r in rows if r.get("lead_id")}
-    payloads = {str(r["payload_path"]) for r in rows if r.get("payload_path")}
-    keyed = ({f"gather_raw/{lead}.lead.json" for lead in leads}
-             | {f"gather_summaries/{lead}.md" for lead in leads})
-    return sorted(rel for rel in rel_paths
-                  if rel not in _ROOT_RECORDS and rel not in payloads and rel not in keyed
-                  and not any(shape.fullmatch(rel) for shape in _ROOT_SHAPES))
-
-
-def _folder_files(run_dir: Path) -> list[str]:
-    return sorted(p.relative_to(run_dir).as_posix() for p in Path(run_dir).rglob("*")
-                  if p.is_file())
-
-
 def _assert_only_listed_files(run_dir: Path, where: str) -> None:
-    """Every file under `run_dir` is one of the records a run holds (`_unlisted`); positive
-    control on the same listing: it does flag a planted join record under `gather_raw/` and at
-    the root, so an empty answer is the folder's."""
-    rel_paths, rows = _folder_files(run_dir), W.table_rows(run_dir)
+    """Every file under `run_dir` is one of the records a run holds, BY NAME
+    (`_1255_run_records.unlisted`: the layout's named records, each table row's lead claim,
+    summary and own payload, the numbered review records — no `wire_logs/*` or other wildcard;
+    contract-repair findings F-Q1 and F2-Q), with its positive control on planted join
+    records under `gather_raw/`, at the root and under `wire_logs/`."""
+    rows = W.table_rows(run_dir)
     assert rows, f"fixture: {where} left no query table"
-    assert rel_paths, f"fixture: {where} left no files"
-    planted = ["gather_raw/.calls", ".query_join.jsonl", "gather_raw/l-001/.join.json"]
-    assert set(planted) <= set(_unlisted([*rel_paths, *planted], rows)), (
-        "positive control: the listing does not flag a planted join record")
-    extra = _unlisted(rel_paths, rows)
-    assert not extra, (
-        f"{where}: the run folder (the box's own mount) holds files that are none of a run's "
-        f"records — host bookkeeping such as the query join belongs outside it (P3): {extra}")
+    RR.assert_only_run_records(run_dir, where, rows)
 
 
 def _assert_no_call_id(rows: list[dict], where: str) -> None:
@@ -216,37 +178,47 @@ def test_1255_no_file_in_an_arms_run_folder_names_the_arm_or_its_calls(tmp_path:
     call id the ledger carries — wherever the implementation keeps the join, it is not there.
 
     Held two ways, because a substring scan is lexical (contract-repair finding F-Q1: a join
-    record base64-encoded into `gather_raw/.calls` passed it):
+    record base64-encoded into `gather_raw/.calls` passed it; F2-Q: one zlib-compressed into
+    `wire_logs/call_join.jsonl` passed both scans of the first repair):
 
+      * by STRUCTURE, first: the folder holds no file that is not one of a run's records, by
+        name (`_1255_run_records.unlisted`: the table, each row's own payload, each lead's
+        claim and summary, the documents, logs and observability streams, and the layout's
+        named wire logs — never a `wire_logs/*` shape) — so the join cannot sit there under a
+        name of its own, in any encoding;
       * by ENCODING: each identity and call id is also looked for as a derived form (its hex
         and base64 bytes, its digests, uuid3/uuid5 over it) and inside every base64/hex run of
-        every file, decoded (`_1255_identity.encoded_hits`);
-      * by STRUCTURE: the folder holds no file that is not one of a run's records
-        (`_unlisted`: the table, the payloads it names, each lead's claim and summary, the
-        documents, logs and observability streams) — so the join cannot sit there under any
-        name or in any encoding.
+        every file, decoded and, where compressed (zlib, gzip, raw deflate), inflated
+        (`_1255_identity.encoded_hits`) — for a join appended inside a record the run does
+        hold.
 
     Positive controls on the same scans: they read every file of the folder (the arm's own call
     params are found in it), the ledger they are compared against does carry the identities,
-    the encoded scan finds a call id written base64-encoded inside a JSON record, and the
-    listing flags a planted join record. Today the only file that names the arm is the query
-    table (its `call_id` column)."""
+    the encoded scan finds a call id written base64-encoded inside a JSON record — plain, and
+    zlib-, gzip- or raw-deflate-compressed, base64 or hex — and the listing flags planted join
+    records. Today the only file that names the arm is the query table (its `call_id`
+    column)."""
     ep, run_dir = _arm_drive(tmp_path, "b")
     identities = _positive_control_host_names_the_arm(ep, "b")
     call_ids = [str(r[W.CALL_ID]) for r in S24.ledger_rows(ep, "b")]
+    _assert_only_listed_files(run_dir, "the arm")
     files = [(p.relative_to(run_dir).as_posix(), p.read_bytes())
              for p in sorted(run_dir.rglob("*")) if p.is_file()]
     texts = {rel: data.decode("utf-8", "replace") for rel, data in files}
     assert any("user:bob" in t for t in texts.values()), "positive control: the scan reads files"
     tokens = {**{f"identity {i}": ident for i, ident in enumerate(identities)},
               **{f"call id {cid}": cid for cid in call_ids}}
-    encoded = base64.b64encode(json.dumps(
-        {"lead_id": "l-001", "seq": 0, "call_id": call_ids[0]}).encode("utf-8")).decode("ascii")
-    assert IDN.encoded_hits(json.dumps({"k": encoded}), tokens), (
-        "positive control: the encoded scan does not find a call id base64-encoded in a record")
+    record = json.dumps({"lead_id": "l-001", "seq": 0, "call_id": call_ids[0]}).encode("utf-8")
+    deflate = zlib.compressobj(wbits=-15)
+    for how, blob in (("base64", base64.b64encode(record).decode("ascii")),
+                      ("base64 zlib", base64.b64encode(zlib.compress(record)).decode("ascii")),
+                      ("hex gzip", gzip.compress(record).hex()),
+                      ("base64 raw deflate", base64.b64encode(
+                          deflate.compress(record) + deflate.flush()).decode("ascii"))):
+        assert IDN.encoded_hits(json.dumps({"z": blob}), tokens), (
+            f"positive control: the encoded scan does not find a call id in a record ({how})")
     named = IDN.files_carrying(files, tokens)
     assert not named, f"files in the arm's run folder name the arm or its calls: {named}"
-    _assert_only_listed_files(run_dir, "the arm")
 
 
 def test_1255_every_siblings_table_seeded_and_own_carries_no_call_id_or_arm_identity(

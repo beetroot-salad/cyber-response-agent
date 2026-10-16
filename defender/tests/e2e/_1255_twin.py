@@ -68,7 +68,8 @@ import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+import uuid
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -841,45 +842,137 @@ def branch_window(natural: Mapping[str, Any], branch_turn: int = BRANCH_TURN,
     if not readings or len(mains) <= branch_turn:
         return None
     return _window_from(readings, int(mains[branch_turn].get("clock_reads", 0)) - 1)
-#: O4 "durations": a number under a key that names an elapsed measure.
+
+
+#: O4 "durations": a number under a key that NAMES an elapsed measure — the closed list of
+#: production's own (`runtime/observe.py`'s result row), matched as a JSON key whether bare or
+#: inside an escaped JSON string (a row quoted in a tool result). Never a key that merely
+#: contains `ms`, `wall`, `seconds` or `elapsed` (finding F2-T: `"wall_ms": <fork turn>` was
+#: forgiven): a limit (`wall_clock_timeout`, `grace_seconds` — D2, an arm inherits its
+#: source's limits), a count, or any other number is compared exactly. On an arm, a duration
+#: equal to its fork turn is not forgiven either (`normalize_o4(fork_turn=)`).
+DURATION_KEYS = ("duration_ms", "duration_api_ms")
 _DURATION = re.compile(
-    r'("(?:[a-z_]*_)?(?:ms|seconds|secs|duration|elapsed|wall)(?:_[a-z_]*)?"\s*:\s*)'
-    r"-?\d+(?:\.\d+)?")
-#: O4 "fresh random ids", each minted per occurrence by its own owner:
-#:   a frame delimiter's salt (`_untrusted.wrap_fresh`, one per frame),
-#:   the framework's tool-call id (`pyd_ai_<uuid hex>`),
-#:   a bare uuid4 hex or hyphenated uuid (case ids, start tokens).
-#: Replaced by first appearance WITHIN one compared value (`<ID1>`, `<ID2>`, …), so a value that
-#: reuses one id twice still has to reuse it twice. A content digest (64 hex) is NOT an id: two
-#: digests differ exactly when the bytes they digest do.
+    r'(\\?"(?:' + "|".join(DURATION_KEYS) + r')\\?"\s*:\s*)(-?\d+(?:\.\d+)?)')
+
+#: O4 "fresh random ids" — ONLY the ones whose producer is named, where that producer's id
+#: shows, and in the shape it mints (finding F2-T: a rule forgiving ANY 32-hex, uuid or salt let
+#: a fork turn written as `UUID(int=k)`, a world label folded into one, a constant marker, a
+#: uuid1 and a salt carrying the fork turn all pass the comparison). The run roles' minting
+#: sites (MAIN, gather, review — C12), from a grep of production for uuid4 / secrets /
+#: token_hex at this tree:
+#:
+#: * the framework's tool-call id, `pydantic_ai._utils.generate_tool_call_id`:
+#:   `pyd_ai_` + `uuid4().hex`, wherever it shows (a call, the return or retry answering it);
+#: * a frame delimiter's salt, inside `<run-SALT-tag>` / `</run-SALT-tag>`:
+#:   `defender._untrusted.wrap_fresh` / `message_salt` mint `secrets.token_hex(8)` — 16
+#:   lowercase hex, one per frame (`runtime/toon_gate`: "always 16 hex chars"); a review stage's
+#:   prompt is framed on the per-call salt `runtime.challenge_gate._fresh_stage_request` mints,
+#:   `uuid4().hex`;
+#: * the session store's session ids (`session_store.new_session`, and `fork` for an arm's
+#:   lineage child) and the driver's case id (`driver.run_investigation`), each `uuid4().hex`:
+#:   as the session half of the prompt-cache affinity key a request is SENT with
+#:   (`driver._build._affinity_key` -> `providers.openai_compat.cache_affinity`:
+#:   `model_settings.openai_prompt_cache_key = "<session_id>:<agent_id>"` — measured on a
+#:   recorded natural pair, where it is the one fresh id outside a frame or a call), and under
+#:   the key that names one (`SESSION_KEYS`; none is in a read-scope file at this tree — the
+#:   run -> case link left the run folder in #1235 — listed so a correct implementation that
+#:   shows one keeps it forgiven, and only in its producer's shape).
+#:
+#: A uuid4 has version nibble 4 and variant bits 10. Everything else is compared exactly: any
+#: other hex run or uuid (another version — a uuid1's time and host node, a uuid3/uuid5 over a
+#: name, `UUID(int=k)` —, a hyphenated uuid, a content digest), any other salt length or charset,
+#: any other key. Run ids are not on the list: at this tree a run id is `<UTC stamp>-<label>`
+#: (`RunId.mint`) — identity the O2/O3 scans find, never a fresh random id — and pydantic-ai's
+#: own run and conversation ids (uuid7, which carries the wall-clock time) are message fields
+#: the provider is never sent (`wire_request` leaves them out).
+#:
+#: Replaced by first appearance WITHIN one compared value, numbered per producer (`<SALT1>`,
+#: `<ID1>` for a tool-call id, `<SESSION1>`), so a value that reuses one id twice still has to
+#: reuse it twice — and a constant marker standing where the run mints two fresh ones (two
+#: frames, two calls) shows as one id where the natural run has two, at the place it repeats.
+SESSION_KEYS = ("session_id", "parent_session_id", "case_id")
+_UUID4_HEX = re.compile(r"[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}")
+_WRAP_FRESH_SALT = re.compile(r"[0-9a-f]{16}")
 _FRAME_SALT = re.compile(r"(</?run-)([0-9a-f]+)(-[a-z_-]+>)")
-_FRESH_ID = re.compile(
-    r"pyd_ai_[0-9a-f]{32}|(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
-    r"[0-9a-f]{12}(?![0-9a-f])|(?<![0-9a-f])[0-9a-f]{32}(?![0-9a-f])")
+_TOOL_CALL_ID = re.compile(r"(?<![0-9A-Za-z_])(pyd_ai_)([0-9a-f]{32})(?![0-9A-Za-z_])")
+#: The session store's ids where they show: the value of a `SESSION_KEYS` key, and the session
+#: half of the prompt-cache key (`<session_id>:<agent_id>`). Group 1 is what precedes the id.
+_SESSION_IDS = (
+    re.compile(r'(\\?"(?:' + "|".join(SESSION_KEYS) + r')\\?"\s*:\s*\\?")([0-9a-f]{32})(?=\\?")'),
+    re.compile(r'(\\?"openai_prompt_cache_key\\?"\s*:\s*\\?")([0-9a-f]{32})(?=:)'),
+)
 
 
-def normalize_o4(text: str, window: ClockWindow | None = None) -> str:
+def is_uuid4_hex(value: str) -> bool:
+    """`value` is a `uuid.uuid4().hex`: 32 lowercase hex, version 4, variant 10."""
+    return _UUID4_HEX.fullmatch(value) is not None
+
+
+def is_fresh_salt(value: str) -> bool:
+    """`value` is a salt a run role's frame is minted on: `wrap_fresh`'s 16 hex, or a review
+    stage's `uuid4().hex`."""
+    return _WRAP_FRESH_SALT.fullmatch(value) is not None or is_uuid4_hex(value)
+
+
+def fresh_ids(text: str) -> list[tuple[str, str, int]]:
+    """Every fresh random id `normalize_o4` forgives in `text`, as `(producer, value, offset)` —
+    the frame salts, the framework's tool-call ids and the session store's ids, each in its
+    producer's shape. The O2 scan reads these (`scan`): a value the comparison forgives must
+    not be derived from an identity either."""
+    out = [("frame salt", m.group(2), m.start(2)) for m in _FRAME_SALT.finditer(text)
+           if is_fresh_salt(m.group(2))]
+    out += [("tool-call id", m.group(2), m.start(2)) for m in _TOOL_CALL_ID.finditer(text)
+            if is_uuid4_hex(m.group(2))]
+    out += [("session id", m.group(2), m.start(2)) for pattern in _SESSION_IDS
+            for m in pattern.finditer(text) if is_uuid4_hex(m.group(2))]
+    return out
+
+
+def normalize_o4(text: str, window: ClockWindow | None = None, *,
+                 fork_turn: int | None = None) -> str:
     """`text` with the O4 classes replaced by placeholders and nothing else touched. A time is
-    replaced only when `window` holds it; with no window, every time stays as it is."""
-    ids: dict[str, str] = {}
+    replaced only when `window` holds it; with no window, every time stays as it is. A
+    duration equal to `fork_turn` (an arm's, when known) stays as it is."""
+    ids: dict[str, dict[str, str]] = {}
 
-    def fresh(token: str) -> str:
-        return ids.setdefault(token, f"<ID{len(ids) + 1}>")
+    def fresh(kind: str, token: str) -> str:
+        seen = ids.setdefault(kind, {})
+        return seen.setdefault(token, f"<{kind}{len(seen) + 1}>")
 
-    out = _FRAME_SALT.sub(lambda m: f"{m.group(1)}{fresh('salt:' + m.group(2))}{m.group(3)}",
-                          text)
-    out = _FRESH_ID.sub(lambda m: fresh(m.group(0)), out)
+    def salt(m: re.Match[str]) -> str:
+        if not is_fresh_salt(m.group(2)):
+            return m.group(0)
+        return f"{m.group(1)}{fresh('SALT', m.group(2))}{m.group(3)}"
+
+    def call_id(m: re.Match[str]) -> str:
+        return fresh("ID", m.group(2)) if is_uuid4_hex(m.group(2)) else m.group(0)
+
+    def session_id(m: re.Match[str]) -> str:
+        return (m.group(1) + fresh("SESSION", m.group(2)) if is_uuid4_hex(m.group(2))
+                else m.group(0))
+
+    def duration(m: re.Match[str]) -> str:
+        if fork_turn is not None and float(m.group(2)) == fork_turn:
+            return m.group(0)
+        # quoted where the key is bare JSON, so a request's JSON still parses
+        return f"{m.group(1)}<DUR>" if m.group(1).startswith("\\") else f'{m.group(1)}"<DUR>"'
+
+    out = _FRAME_SALT.sub(salt, text)
+    out = _TOOL_CALL_ID.sub(call_id, out)
+    for pattern in _SESSION_IDS:
+        out = pattern.sub(session_id, out)
     out = _TIMESTAMP.sub(
         lambda m: RUN_CLOCK if window is not None and window.holds(m.group(0)) else m.group(0),
         out)
-    return _DURATION.sub(r"\1<DUR>", out)
+    return _DURATION.sub(duration, out)
 
 
-def _normalized(value: Any, window: ClockWindow | None) -> Any:
+def _normalized(value: Any, window: ClockWindow | None, fork_turn: int | None = None) -> Any:
     """Every string leaf of a JSON value through `normalize_o4`, and the ids renumbered over the
     WHOLE value (one request), so a call id and the return that answers it stay paired."""
     blob = json.dumps(value, sort_keys=True, ensure_ascii=False)
-    return json.loads(normalize_o4(blob, window))
+    return json.loads(normalize_o4(blob, window, fork_turn=fork_turn))
 
 
 # --------------------------------------------------------------------------------------
@@ -1054,11 +1147,14 @@ def _compare_streams(first: dict[tuple[str, str | None], list[dict]],
                      second: dict[tuple[str, str | None], list[dict]],
                      scope: str, sides: tuple[str, str],
                      windows: tuple[ClockWindow | None, ClockWindow | None],
+                     forks: tuple[int | None, int | None] = (None, None),
                      ) -> list[Difference]:
     """Each role/lead stream of `first` against `second`, request by request: the count, each
-    request's channels (O4-normalised, each side's run-clock times by its own window), and the
-    read-scope files at that request."""
+    request's channels (O4-normalised, each side's run-clock times by its own window, each
+    side's durations never forgiven at its own fork turn), and the read-scope files at that
+    request."""
     wa, wb = windows
+    fa, fb = forks
     diffs: list[Difference] = []
     for key in sorted(set(first) | set(second), key=lambda k: (k[0], k[1] or "")):
         a, b = first.get(key, []), second.get(key, [])
@@ -1067,8 +1163,8 @@ def _compare_streams(first: dict[tuple[str, str | None], list[dict]],
             diffs.append(Difference(f"{name} request count", scope,
                                     f"{len(a)} request(s)", f"{len(b)} request(s)", sides))
         for i, (x, y) in enumerate(zip(a, b, strict=False)):
-            for where, na, nb in _request_differences(_normalized(x["wire"], wa),
-                                                      _normalized(y["wire"], wb)):
+            for where, na, nb in _request_differences(_normalized(x["wire"], wa, fa),
+                                                      _normalized(y["wire"], wb, fb)):
                 diffs.append(Difference(f"{name}#{i} request", where, na, nb, sides))
             for fname in sorted(set(x["files"]) | set(y["files"])):
                 if (fname in x["files"]) != (fname in y["files"]):
@@ -1077,8 +1173,8 @@ def _compare_streams(first: dict[tuple[str, str | None], list[dict]],
                         "present" if fname in x["files"] else "absent",
                         "present" if fname in y["files"] else "absent", sides))
                     continue
-                ta = normalize_o4(x["files"][fname], wa)
-                tb = normalize_o4(y["files"][fname], wb)
+                ta = normalize_o4(x["files"][fname], wa, fork_turn=fa)
+                tb = normalize_o4(y["files"][fname], wb, fork_turn=fb)
                 if ta != tb:
                     na, nb = _first_text_difference(ta, tb)
                     diffs.append(Difference(f"{name}#{i} files", fname, na, nb, sides))
@@ -1114,17 +1210,40 @@ def clock_order_faults(recording: Mapping[str, Any], window: ClockWindow | None,
     return faults
 
 
+def corpus_differences(first: Mapping[str, Any], second: Mapping[str, Any],
+                       sides: tuple[str, str]) -> list[Difference]:
+    """The read-only half of the read scope (`Recording.corpus`: every `lessons|skills|examples`
+    page of the checkout and the tenant's agent half that MAIN's gate admits), page by page: a
+    page only one side has, or whose text differs, is named. Compared as recorded — it is the
+    trees' own text, which no O4 value enters."""
+    pa, pb = first.get("corpus") or {}, second.get("corpus") or {}
+    diffs: list[Difference] = []
+    for name in sorted(set(pa) | set(pb)):
+        if (name in pa) != (name in pb):
+            diffs.append(Difference("corpus", name, "present" if name in pa else "absent",
+                                    "present" if name in pb else "absent", sides))
+        elif pa[name] != pb[name]:
+            na, nb = _first_text_difference(pa[name], pb[name])
+            diffs.append(Difference("corpus", name, na, nb, sides))
+    return diffs
+
+
 def compare(natural: Mapping[str, Any], arm: Mapping[str, Any], *,
-            branch_turn: int = BRANCH_TURN) -> list[Difference]:
+            branch_turn: int = BRANCH_TURN, fork_turn: int | None = None) -> list[Difference]:
     """O1: every difference between the arm and the natural continuation of its source after
     the fork — per role and lead, the request count, each request's channels and the
-    read-scope files at it — and every run-clock time of the arm's that runs backwards. Only
-    the O4 list is normalised; run-clock times by the natural run's branch window
-    (`branch_window`), on both sides."""
+    read-scope files at it; the read-only corpus in the arm's read scope (design, "Twin check"
+    step 3: "every file in read scope"; finding F2-T2: an arm-only page was invisible here);
+    and every run-clock time of the arm's that runs backwards. Only the O4 list is normalised;
+    run-clock times by the natural run's branch window (`branch_window`), on both sides; and
+    no duration of the arm's that equals its `fork_turn` (the branch message id, when the
+    caller knows it) is forgiven."""
     window = branch_window(natural, branch_turn)
+    sides = ("natural", "arm")
     return [*_compare_streams(streams(after_fork(natural, branch_turn)),
                               streams(list(arm["requests"])), "after the fork",
-                              ("natural", "arm"), (window, window)),
+                              sides, (window, window), (None, fork_turn)),
+            *corpus_differences(natural, arm, sides),
             *clock_order_faults(arm, window, label="arm")]
 
 
@@ -1134,14 +1253,9 @@ def compare_layouts(first: Mapping[str, Any], second: Mapping[str, Any], *,
     """O3: one run kind recorded under two host layouts — every request and read-scope file
     from the first request on, and the read-only corpus. `windows` are each side's own run-clock
     window: a natural run's `start_window`, an arm's natural run's `branch_window`."""
-    diffs = _compare_streams(streams(list(first["requests"])), streams(list(second["requests"])),
-                             "whole run", sides, windows)
-    for name in sorted(set(first["corpus"]) | set(second["corpus"])):
-        a, b = first["corpus"].get(name), second["corpus"].get(name)
-        if a != b:
-            na, nb = _first_text_difference(a or "<absent>", b or "<absent>")
-            diffs.append(Difference("corpus", name, na, nb, sides))
-    return diffs
+    return [*_compare_streams(streams(list(first["requests"])),
+                              streams(list(second["requests"])), "whole run", sides, windows),
+            *corpus_differences(first, second, sides)]
 
 
 # --------------------------------------------------------------------------------------
@@ -1164,9 +1278,18 @@ class Finding:
         return f"{self.channel}: {self.what} {self.token!r} in …{self.context}…"
 
 
+#: A token spelled as an id (a uuid, hyphenated or not, or a salt-length hex run): matched as a
+#: whole hex run, either case.
+_HEX_ID_TOKEN = re.compile(r"[0-9a-f]{32}|[0-9a-f]{16}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+
+
 def _token_pattern(token: str) -> re.Pattern[str]:
     """`token` as a whole path or name: not glued to a longer name on either side. A path token
-    may be followed by `/` (anything under it is still that host path)."""
+    may be followed by `/` (anything under it is still that host path). A token spelled as an
+    id is a whole hex run instead — glued to a prefix (`pyd_ai_`, `case-`) it is still that id."""
+    if _HEX_ID_TOKEN.fullmatch(token):
+        return re.compile(r"(?<![0-9A-Fa-f])" + re.escape(token) + r"(?![0-9A-Fa-f])",
+                          re.IGNORECASE)
     return re.compile(r"(?<![\w.-])" + re.escape(token) + r"(?![\w.-])")
 
 
@@ -1191,9 +1314,20 @@ def host_tokens(meta: Mapping[str, Any]) -> dict[str, str]:
 def identity_tokens(pair: Mapping[str, Any], which: str) -> dict[str, str]:
     """O2's list (and P1's fixed names). A natural run shows no run id of its own (its folder's
     name; `/runs/current` hides it); an arm shows none of: its own run id, its source run's id,
-    its sibling's run id, the episode id, the episode token, the world token. The tokens are
-    the ones production composed (`_child` records them). (The fork turn is a bare integer and
-    the world label a single letter: neither can be scanned for; equality covers them.)"""
+    its sibling's run id, the episode id, the episode token, the world token — nor, once the
+    pair names its branch message (`branch_message_id`), the fork turn or a world label in an
+    id's spelling (`fork_tokens`). The tokens are the ones production composed (`_child`
+    records them).
+
+    The fork turn's and the labels' SHORT spellings (`59`, `3b`, `a`) are not scanned for:
+    they occur everywhere (a `15:59:00`, any hex digest). Equality covers them — a value the
+    comparison does not forgive is compared exactly — and the comparison forgives them in no
+    spelling: a fresh id or salt only in its producer's shape (`fresh_ids`: a `UUID(int=k)` is
+    version 0, a salt `3b00ff` the wrong length), a duration only under its named keys and
+    never equal to the arm's fork turn (finding F2-T). What no comparison of one pair can see
+    is a value fresh in shape but not random (a salt whose first byte is `k`): that is the
+    producers' own contract (`_untrusted.message_salt` mints `secrets.token_hex`), held where
+    they are tested, not here."""
     natural_id = str(pair["natural"]["run_id"])
     if which == "natural":
         return {"natural run id": natural_id}
@@ -1209,22 +1343,57 @@ def identity_tokens(pair: Mapping[str, Any], which: str) -> dict[str, str]:
                       ("sibling_world_token", "sibling world token")):
         if pair.get(key):
             out[name] = str(pair[key])
+    if pair.get("branch_message_id") is not None:
+        labels = [label for key, label in (("arm", CONTROL), ("sibling", REPLICATE))
+                  if pair.get(key)]
+        out.update(fork_tokens(int(pair["branch_message_id"]), labels))
     return out
 
 
-def scan(recording: Mapping[str, Any], tokens: Mapping[str, str], *,
-         encoded: bool = False) -> list[Finding]:
-    """Every request (as sent) and every read-scope file at it, and the corpus, searched for
-    each token. One finding per (surface, token).
+def fork_tokens(fork_turn: int, labels: Iterable[str]) -> dict[str, str]:
+    """The fork turn (the branch message id `k`) and each world label written as an id: `k`,
+    the label's ordinal, and the two folded into one (`(k << 8) | ord(label)`, the label's byte
+    under the turn) as uuid integers, bare hex and hyphenated, and as a salt-length (16-hex)
+    integer — what an implementation reaches for to carry them in a value the comparison might
+    take for a fresh id or a frame salt (finding F2-T)."""
+    numbers = {"fork turn": fork_turn}
+    for label in labels:
+        numbers[f"world label {label}"] = ord(label)
+        numbers[f"world label {label} with the fork turn"] = (fork_turn << 8) | ord(label)
+    out: dict[str, str] = {}
+    for name, number in numbers.items():
+        made = uuid.UUID(int=number)
+        out[f"{name} (uuid int)"] = made.hex
+        out[f"{name} (uuid int, hyphenated)"] = str(made)
+        out[f"{name} (16-hex int)"] = f"{number:016x}"
+    return out
 
-    `encoded=True` (the O2 identity scan) also finds a token under its obvious encodings — a
-    digest or uuid3/uuid5 of it, its bytes in hex or base64, or the token inside a base64/hex
-    run (contract-repair finding R-2: the O4 normaliser forgives any bare 32-hex or uuid as a
-    fresh id, so an md5 of the world token, or a uuid5 over it, passed both the comparison and a
-    literal scan). The finding's `what` then names the encoding."""
-    patterns = {label: (tok, _token_pattern(tok)) for label, tok in tokens.items() if tok}
-    # (channel, the surface a finding is reported once for, text): a request stream's
-    # requests are one surface; a file is one surface whichever request snapshot shows it.
+
+def _unversioned(hex32: str) -> str:
+    """A 32-hex id without its uuid version and variant nibbles — what stays of a derived value
+    once it is forced into a uuid4's shape."""
+    return hex32[:12] + hex32[13:16] + hex32[17:]
+
+
+def _id_shaped_forms(token: str) -> dict[str, str]:
+    """`token`'s 32-hex spellings — itself when it is one, and every derived form that is one
+    (`_1255_identity.derived_forms`: md5, the 32-character digest prefixes, uuid3/uuid5) —
+    keyed by `_unversioned`, valued by how each is made. A forgiven id equal to one of these
+    outside the version and variant nibbles is that identity forced into a fresh id's shape."""
+    from defender.tests import _1255_identity as IDN
+
+    out: dict[str, str] = {}
+    for how, form in {"itself": token, **IDN.derived_forms(token)}.items():
+        bare = form.replace("-", "").lower()
+        if re.fullmatch(r"[0-9a-f]{32}", bare):
+            out.setdefault(_unversioned(bare), how)
+    return out
+
+
+def _surfaces(recording: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+    """`(channel, the surface a finding is reported once for, text)` for everything a
+    recording's model reads: a request stream's requests are one surface; a file is one surface
+    whichever request snapshot shows it; each corpus page is one."""
     surfaces: list[tuple[str, str, str]] = []
     for key, reqs in streams(list(recording["requests"])).items():
         for i, r in enumerate(reqs):
@@ -1234,27 +1403,56 @@ def scan(recording: Mapping[str, Any], tokens: Mapping[str, str], *,
                          for name, text in r["files"].items()]
     surfaces += [(f"corpus:{name}", f"corpus {name}", text)
                  for name, text in recording.get("corpus", {}).items()]
+    return surfaces
+
+
+def _as_fresh_id(forgiven: list[tuple[str, int]], id_shaped: Mapping[str, str],
+                 ) -> tuple[str, int] | None:
+    """`(how, where)` for the first forgiven 32-hex id equal, outside the uuid version and
+    variant nibbles, to one of a token's 32-hex spellings (`_id_shaped_forms`)."""
+    return next(((f"{id_shaped[_unversioned(v)]} as a fresh id", at)
+                 for v, at in forgiven if _unversioned(v) in id_shaped), None)
+
+
+def scan(recording: Mapping[str, Any], tokens: Mapping[str, str], *,
+         encoded: bool = False) -> list[Finding]:
+    """Every request (as sent) and every read-scope file at it, and the corpus, searched for
+    each token. One finding per (surface, token).
+
+    `encoded=True` (the O2 identity scan) also finds a token under its obvious encodings — a
+    digest or uuid3/uuid5 of it, its bytes in hex or base64, or the token inside a base64/hex
+    run (contract-repair finding R-2: an identity written as a digest or a uuid over it passed
+    a literal scan) — and in every fresh id the comparison forgives (`fresh_ids`): one equal,
+    outside the uuid version and variant nibbles, to a 32-hex spelling of the token (a digest
+    or uuid of it forced into a uuid4's shape, which the producer-shape rule alone would
+    forgive; finding F2-T). The finding's `what` then names the encoding."""
     from defender.tests import _1255_identity as IDN
 
+    patterns = {label: (tok, _token_pattern(tok)) for label, tok in tokens.items() if tok}
+    id_shaped = ({label: _id_shaped_forms(tok) for label, (tok, _) in patterns.items()}
+                 if encoded else {})
     found: list[Finding] = []
     seen: set[tuple[str, str]] = set()
-    for channel, surface, text in surfaces:
+    for channel, surface, text in _surfaces(recording):
         views: list[str] | None = None
+        forgiven = [(v, at) for _, v, at in fresh_ids(text) if len(v) == 32] if encoded else []
         for label, (tok, pat) in patterns.items():
             if (surface, label) in seen:
                 continue
             m = pat.search(text)
+            hit: tuple[str, int] | None = None
             if m:
-                seen.add((surface, label))
                 found.append(Finding(channel, label, tok, _snip(text, m.start(), 120)))
             elif encoded:
                 if views is None:
                     views = IDN.decoded_views(text)
-                hit = IDN.encoded_form(text, tok, views=views)
+                hit = (IDN.encoded_form(text, tok, views=views)
+                       or _as_fresh_id(forgiven, id_shaped[label]))
                 if hit is not None:
-                    seen.add((surface, label))
                     found.append(Finding(channel, f"{label} ({hit[0]})", tok,
                                          _snip(text, hit[1], 120)))
+            if m or hit is not None:
+                seen.add((surface, label))
     return found
 
 

@@ -535,6 +535,23 @@ def _rewrite(path: Path) -> None:
     path.write_bytes(path.read_bytes() + b"\n(rewritten after the run)\n")
 
 
+def _rewrite_in_place(path: Path, old: bytes | None = None, new: bytes = b"") -> None:
+    """Rewrite a write-once file IN PLACE at the SAME LENGTH (adversary pass 2, F2-A1: every
+    other rewrite above changes the size, so a snapshot that recorded sizes alone refused them
+    all; the design records a content hash for these files). The first `old` becomes `new`, of
+    its own length — or, with no `old`, the first ASCII letter is flipped to another one."""
+    data = S.read_bytes(path)
+    assert data, f"{path} is not there to rewrite"
+    if old is None:
+        i = next(i for i, c in enumerate(data) if chr(c).isascii() and chr(c).isalpha())
+        old, new = data[i:i + 1], b"Q" if data[i:i + 1] != b"Q" else b"R"
+    assert old in data, f"{path.name} does not hold {old!r}"
+    changed = data.replace(old, new, 1)
+    assert len(changed) == len(data), f"fixture: {old!r} -> {new!r} changes {path.name}'s length"
+    assert changed != data, f"fixture: {old!r} -> {new!r} leaves {path.name}'s content as it was"
+    path.write_bytes(changed)
+
+
 #: Each way a source's files can stop matching what was recorded at the branch point, applied to
 #: a file the branch point's snapshot covers (each exists, with content, before the cut).
 TAMPERS = {
@@ -543,6 +560,12 @@ TAMPERS = {
     "denials log shorter than recorded": lambda p: _truncate_last_line(p.policy_denials),
     "gather summary rewritten": lambda p: _rewrite(p.gather_summary(S.CORRELATION_LEAD)),
     "raw payload rewritten": lambda p: _rewrite(p.payload(S.CORRELATION_LEAD, 0)),
+    # Same length, other content: the payload's user (the probe's own tamper) and one byte of
+    # the summary. Only a content hash tells these apart from what was recorded.
+    "gather summary rewritten at the same length": lambda p: _rewrite_in_place(
+        p.gather_summary(S.CORRELATION_LEAD)),
+    "raw payload rewritten at the same length": lambda p: _rewrite_in_place(
+        p.payload(S.CORRELATION_LEAD, 0), b"dev.dana", b"eve.evil"),
 }
 
 
@@ -550,9 +573,10 @@ TAMPERS = {
 def test_p2_a_restore_that_does_not_match_refuses_the_arm_at_launch(tmp_path, tamper):
     """P2: "A restore that does not match refuses the arm at launch." The source finishes, one
     file its branch point's snapshot covers is changed (an append-only file left SHORTER than
-    recorded, a write-once file rewritten), and the arm is refused before its model is asked
-    for anything and before anything is forked. Positive control in the same test: the same
-    branch point of the same source, untampered, launches."""
+    recorded, a write-once file rewritten — grown, or changed in place at the same length, which
+    only the content hash the design records can tell), and the arm is refused before its model
+    is asked for anything and before anything is forked. Positive control in the same test: the
+    same branch point of the same source, untampered, launches."""
     tree = _planted_tree(tmp_path)
     source = S.drive_source(
         tmp_path, (S.append(CHUNKS[0]), S.dispatch("l-001"), S.echo("x"), S.done()),

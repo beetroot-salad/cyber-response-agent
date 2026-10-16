@@ -194,7 +194,12 @@ def test_b1_o2_an_arm_and_a_natural_run_get_the_same_create_command(tmp_path, mo
     runs folder) get the same create command once O4's fresh ids and the daemon-only tokens are
     masked — and no episode id or arm label appears in it. Positive control: the arm's unmasked
     argv does carry the episode id (its bind source sits under the episode), so the channel can
-    show arm identity and the masked equality is a finding about what reaches the box."""
+    show arm identity and the masked equality is a finding about what reaches the box.
+
+    The masked sources are then held host-side (O1's "files in read scope"; F2-T2): the arm's
+    box binds the same checkout and the same tenant agent half as the natural run's, and its
+    own run folder where the natural run's is bound — so an arm-specific tree (a staged copy of
+    the agent half carrying an arm notice) cannot hide behind the mask."""
     from defender import run_common
 
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
@@ -207,10 +212,27 @@ def test_b1_o2_an_arm_and_a_natural_run_get_the_same_create_command(tmp_path, mo
     ca = _lifecycle_create(arm, layout)
 
     assert V.scan(" ".join(ca.argv), [EPISODE_ID]), "control: the arm's sources name its episode"
+    # Host side (finding F2-T2): the masked comparison below hides every bind SOURCE, so alone it
+    # cannot tell an arm handed its own copy of a tree from one handed the tree itself. Under
+    # one layout, what the arm's box binds where the natural run's binds the checkout and the
+    # tenant's agent half is that same checkout and agent half (P1's table: `/defender` is the
+    # checkout, `/agent` the tenant's agent half) — and, once the masked commands agree, each
+    # run's own folder is bound where the other's is.
+    for tree, source in (("checkout", layout.checkout), ("tenant's agent half", layout.agent)):
+        target = cn.target_of(source)
+        assert target is not None, (
+            f"control: the natural run's box does not bind the {tree} {source}: {cn.mounts}")
+        arm_sources = [s for s, t, _ in ca.mounts if t == target]
+        assert arm_sources == [str(source)], (
+            f"the arm's box binds {arm_sources} where the natural run's binds the {tree} "
+            f"({source}) at {target}: an arm-specific tree")
     mn, ma = V.masked_create(cn.argv), V.masked_create(ca.argv)
     assert mn == ma, (
         "an arm's box differs from a natural run's:\n"
         + "\n".join(f"  natural: {x}\n  arm:     {y}" for x, y in zip(mn, ma) if x != y))
+    assert cn.target_of(Path(natural.run_dir)) is not None, cn.mounts
+    assert ca.target_of(Path(arm.run_dir)) == cn.target_of(Path(natural.run_dir)), (
+        "the arm's own run folder is not bound where the natural run's is", ca.mounts, cn.mounts)
     hits = V.scan(" ".join(ma), [EPISODE_ID])
     assert not hits, "arm identity reaches the box:\n" + "\n".join(hits)
 

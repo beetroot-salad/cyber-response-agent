@@ -126,18 +126,25 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
     natural shape. A world id that merely avoids spelling the episode token (contract-repair
     finding F-P3b: the lineage base64-encoded into `world_id`) is neither.
 
-    And "no file carries the token" is held under ENCODING, not just as a substring: each of
-    the arm's lineage identities (world token, episode token, episode id) is also looked for as
-    a derived form and inside every base64/hex run of every file, decoded
+    And "no file carries the lineage" is held by STRUCTURE, then under ENCODING. The folder
+    holds only a run's records, by name (`_1255_run_records.assert_only_run_records`: the
+    layout's named records, each table row's lead claim, summary and own payload — no
+    `wire_logs/*` or other wildcard; positive control: it flags planted records), since a
+    lineage record under a name of its own passed an encoded scan zlib-compressed
+    (contract-repair finding F2-P3b: `wire_logs/lineage.jsonl`). And each of the arm's lineage
+    identities (world token, episode token, episode id) is also looked for as a derived form
+    and inside every base64/hex run of every file, decoded and, where compressed, inflated
     (`_1255_identity.encoded_hits`; positive control: it finds the world token in an encoded
-    lineage record).
+    lineage record, plain and zlib-compressed).
 
     The lineage is not lost, it is host-side: the episode's own record still names the source
     run and the branch point (the positive control — the facts exist, just not in the box)."""
     import base64
     import json
+    import zlib
 
     from defender.tests import _1255_identity as IDN
+    from defender.tests import _1255_run_records as RR
 
     arm, ep, base = _launch_arm(tmp_path, world)
     token = T.world_token(world)
@@ -154,10 +161,14 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
         assert getattr(stamp, "world_id", None) in (None, natural_world), (
             f"the arm's stamp carries a world id {stamp.world_id!r} that is neither absent nor "
             f"a natural run's ({natural_world!r}) — the world id moves out of the run folder")
+    RR.assert_only_run_records(arm, f"world {world}'s arm")
     lineage = {"world token": token, "episode token": T.EPISODE_TOKEN, "episode id": ep.name}
-    planted = base64.b64encode(json.dumps([token, T.SOURCE_RUN_ID]).encode()).decode("ascii")
-    assert IDN.encoded_hits(f"w-{planted}", lineage), (
-        "positive control: the encoded scan does not find a base64-encoded lineage record")
+    record = json.dumps([token, T.SOURCE_RUN_ID]).encode()
+    for how, raw in (("plain", record), ("zlib", zlib.compress(record))):
+        planted = base64.b64encode(raw).decode("ascii")
+        assert IDN.encoded_hits(f"w-{planted}", lineage), (
+            f"positive control: the encoded scan does not find a base64-encoded lineage record "
+            f"({how})")
     files = [(str(p.relative_to(arm)), p.read_bytes()) for p in sorted(arm.rglob("*"))
              if p.is_file()]
     assert files, "fixture: the arm's run folder holds no file to scan"

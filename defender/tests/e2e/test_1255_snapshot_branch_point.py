@@ -331,27 +331,54 @@ def test_d1_only_a_tool_calling_main_response_is_a_branch_point(tmp_path, point)
 #: refusal reaches the model as a retry prompt for `bash`.
 REFUSED_BASH = Turn(tool_calls=[("bash", {"command": "curl http://example.invalid/x"})])
 
+#: A `read_file` of a file no tree holds: refused, and the refusal reaches the model as a retry
+#: prompt for `read_file` (a bare relative name, so no host or model path is spelled; wherever
+#: the model view resolves it, no such file exists).
+REFUSED_READ = Turn(tool_calls=[("read_file", {"path": "no-such-notes-1255.md"})])
+
+#: An `append_block` the write gate refuses (a ```yaml block: the on-disk surface is ```invlang),
+#: so nothing lands, and the refusal reaches the model as a retry prompt for `append_block`.
+REFUSED_APPEND = S.append("```yaml\nverdict: benign\n```\n")
+
 
 #: Each retry-streak scenario: the source's MAIN script, which of its tool-calling responses is
-#: the branch point, and whether rev 4 + rev 5 C1 refuse it. One refused `curl` (a RETRY of
-#: `bash`) is in every script; what differs is what ran between it and the branch point.
+#: the branch point, whether rev 4 + rev 5 C1 refuse it, and the tool that carries the retry. One
+#: refused call — the source's SECOND tool-calling response — is in every script; what differs
+#: is which tool was refused and what ran between it and the branch point.
 STREAKS = {
     # The response right after the refusal, on the same tool.
     "previous bash call refused": (
-        (S.append(CHUNKS[0]), REFUSED_BASH, S.echo("two"), S.echo("three"), S.done()), 2, True),
+        (S.append(CHUNKS[0]), REFUSED_BASH, S.echo("two"), S.echo("three"), S.done()), 2, True,
+        "bash"),
     # C1, non-adjacent: `bash` still carries its retry count two steps later, because the call
     # between was another tool's (`append_block`), and a count clears only when ITS tool succeeds.
     "bash refused two steps back": (
-        (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3, True),
+        (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3, True,
+        "bash"),
     # C1, other tool: ANY tool's carried count refuses — the branch response calls
     # `append_block`, whose own count is clear, while `bash`'s is not.
     "another tool carries a retry": (
         (S.append(CHUNKS[0]), REFUSED_BASH, S.append(CHUNKS[1]), S.append(CHUNKS[2]), S.done()),
-        3, True),
+        3, True, "bash"),
     # The clean-history control: `bash` ran (`echo two`) after its refusal, so nothing is carried
     # at `echo three`.
     "previous bash call ran": (
-        (S.append(CHUNKS[0]), REFUSED_BASH, S.echo("two"), S.echo("three"), S.done()), 3, False),
+        (S.append(CHUNKS[0]), REFUSED_BASH, S.echo("two"), S.echo("three"), S.done()), 3, False,
+        "bash"),
+    # C1, a carrier that is not `bash` (F2-C1: "any tool" is wider than `bash`). `read_file` was
+    # refused, then `bash` RAN at the branch point: `bash`'s count is clear, `read_file`'s is not.
+    "read_file refused, bash at the branch point": (
+        (S.append(CHUNKS[0]), REFUSED_READ, S.echo("x"), S.done()), 2, True, "read_file"),
+    # The same, two steps later: `append_block` was refused and `bash` ran twice since — neither
+    # success is `append_block`'s, so its count is still carried at `echo y`.
+    "append_block refused, bash ran twice since": (
+        (S.append(CHUNKS[0]), REFUSED_APPEND, S.echo("x"), S.echo("y"), S.done()), 3, True,
+        "append_block"),
+    # Its control: `append_block` itself landed a fence after its refusal, so nothing is carried
+    # at `echo x` — a refusal anywhere in the history is not a carried count.
+    "append_block refused, then an append landed": (
+        (S.append(CHUNKS[0]), REFUSED_APPEND, S.append(CHUNKS[1]), S.echo("x"), S.done()), 3,
+        False, "append_block"),
 }
 
 
@@ -364,19 +391,27 @@ def test_d2_a_branch_point_inside_a_retry_streak_is_refused_at_launch(tmp_path, 
     each after the same refused `bash` call (`curl`): right after it (refused); two steps later
     with an `append_block` between (refused: `bash` still carries it); at an `append_block`
     response after a successful append (refused: another tool carries it); and after `bash`
-    itself ran again (admitted — the control on the same tool and source shape). The refusal
-    names the retry streak (a refusal names its reason; today's refusal at these points is for
-    D1's reason, which is not this one).
+    itself ran again (admitted — the control on the same tool and source shape). Three more
+    whose carrier is NOT `bash` (adversary pass 2, F2-C1 — a streak tracked for `bash` alone
+    passed all four): a refused `read_file`, then `bash` runs at the branch point (refused); a
+    refused `append_block`, then `bash` runs twice (refused); and the control, a refused
+    `append_block` followed by an append that lands (admitted). The refusal names the retry
+    streak (a refusal names its reason; today's refusal at these points is for D1's reason,
+    which is not this one).
 
     Regression over the new branch point (D1) and the retry rule; not evidence for the fork
     snapshot (P2) — it passes once D1 and C1 land, snapshot or not."""
-    script, index, refused = STREAKS[point]
+    script, index, refused, carrier = STREAKS[point]
     source = S.drive_source(tmp_path, script)
     responses = S.tool_calling_responses(source.store)
     rows = dict(S.main_rows(source.store))
+    (refused_call,) = S.calls_of(S.message_at(source.store, responses[1]))
+    assert refused_call.tool_name == carrier, f"the fixture's refused call moved: {refused_call}"
     answered = rows[_row_after(source, responses[1])]
-    assert any(isinstance(p, RetryPromptPart) for p in answered.parts), (
-        "the fixture's `curl` was not refused for retry — the streak arm would be vacuous")
+    assert any(isinstance(p, RetryPromptPart) and p.tool_name == carrier
+               for p in answered.parts), (
+        f"the fixture's `{carrier}` call was not refused for retry — the streak arm would be "
+        f"vacuous: {[(type(p).__name__, getattr(p, 'tool_name', None)) for p in answered.parts]}")
     for between in responses[2:index]:
         reply = rows[_row_after(source, between)]
         assert not any(isinstance(p, RetryPromptPart) for p in reply.parts), (
