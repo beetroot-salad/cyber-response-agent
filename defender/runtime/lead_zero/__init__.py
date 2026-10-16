@@ -108,15 +108,15 @@ def correlation_deadline(limits: dict) -> float:
 class CorrelationOutcome:
     """How the correlation lead ended: exactly one of `summary` (the lead's framed result) and
     `ending` (a member of A2's closed list, named to MAIN as one fixed sentence). A summary kept
-    from a lead whose system went down while it ran carries that cause in `down` (D5)."""
+    from a lead whose system went down while it ran carries that cause in `down` (D5, D5a)."""
 
     summary: str | None = None
     ending: str | None = None
     #: The system the lead was dispatched on (names the one marked down, for `tripped_breaker`).
     system: str | None = None
     #: Why that system is down (#1256): for the two endings that name a cause the breaker does
-    #: not count (`down_at_start`, `down_mid_lead`), and for a summary the lead wrote before
-    #: its system went down mid-lead (D5), which MAIN gets with a note naming the cause.
+    #: not count (`down_at_start`, `down_mid_lead`), and for the final text of a lead whose
+    #: system went down mid-lead (D5, D5a), which MAIN gets with a note naming the cause.
     down: system_status.StartCause | None = None
 
 
@@ -195,8 +195,8 @@ def _went_down_note(system: str | None) -> str:
         f"Note from the harness: {system} went down while the correlation lead ran — one of its "
         f"calls showed that {system} is not configured for this run (its settings lack "
         f"something its adapter needs), so {system} is down for the rest of the run and every "
-        "later dispatch or call to it is refused. The summary above is the lead's own, written "
-        f"before or as {system} went down; what it did not measure there is a visibility gap.")
+        "later dispatch or call to it is refused. The summary above is the lead's own final "
+        f"report; what it did not measure on {system} is a visibility gap.")
 
 
 def render_correlation_section(outcome: CorrelationOutcome, *, grant_home: str) -> str:
@@ -225,9 +225,11 @@ def _classify_end(end: LeadEnd, run_state: RunState, system: str) -> str | None:
     """The ending of a lead that ran to its own end, or `None` for a usable summary. Decided
     from what the lead did (the harness's stops, the lead's call results), in a fixed order:
     a refused call names the breaker before any count of failures. A lead whose system went
-    down while it ran (an escaped `ConfigFault`, O-5b) keeps a usable summary (D5, the caller
-    notes the cause beside it); without one it ends `down_mid_lead` — never "tripped breaker"
-    nor "every call failed", which the escaped call would otherwise read as."""
+    down while it ran (an escaped `ConfigFault`, O-5b) runs on, and keeps a usable summary —
+    its FINAL text, the lead's output; text beside the escaping call is narration, never the
+    summary (D5, D5a) — the caller noting the cause beside it; a lead whose last turn is empty
+    ends `down_mid_lead` — never "tripped breaker" nor "every call failed", which the escaped
+    call would otherwise read as."""
     ending = _breaker_ending(end)
     if ending is not None:
         return ending
@@ -347,8 +349,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     path = RunPaths(run_dir).gather_summary(L3)
     if read_text_utf8(path) != wrapped:
         raise OSError("the correlation lead's summary could not be persisted in the run folder")
-    # Kept even when its system went down while the lead ran (D5): MAIN gets the summary and a
-    # note naming the cause.
+    # Kept even when its system went down while the lead ran (D5): MAIN gets the lead's final
+    # text (D5a) and a note naming the cause.
     return CorrelationOutcome(summary=wrapped, system=system, down=_went_down(run_state, system))
 
 
