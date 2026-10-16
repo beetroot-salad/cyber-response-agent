@@ -1137,6 +1137,13 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "writes_by": "seed", "via": (), "failed_write": "refuses the seed",
         "call_id": "none of this run's (seeded)",
         "driven_by": "test_1234_every_query_table_writer_writes_this_runs_call_id"},
+    # #1255 P2: an arm's queries table is restored from the source's fork snapshot (the table
+    # cut to the length it held when the branch response arrived) — the production seeder of a
+    # sibling's table. Its rows are the source's, so none carries this run's call id.
+    "runtime/branch/_snapshot.py::ForkSnapshot.restore_files": {
+        "writes_by": "seed", "via": (), "failed_write": "refuses the restore",
+        "call_id": "none of this run's (restored from the source's snapshot)",
+        "driven_by": "test_1234_every_query_table_writer_writes_this_runs_call_id"},
     # The archive's verbatim copy of the run's finished table into `worlds/<X>/`.
     "learning/lead_repository.py::stage_tables": {
         "writes_by": "copy2", "via": (), "failed_write": "raises out of the archive",

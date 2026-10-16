@@ -894,9 +894,13 @@ def test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_clos
         "a dnspython version (pydantic's email extra)": {"lock_bytes": version_line("dnspython", "99.0.0")},
         "an idna version (pydantic's email extra)": {"lock_bytes": version_line("idna", "99.0.0")},
         "a duckdb sdist hash byte": {"lock_bytes": hash_byte("duckdb", "sdist")},
+        # #1255 K3: the lock's `box` list is duckdb, libfaketime, pytz (`test_1092_dockerfile`).
         "a second box edge": {"lock_bytes": _replace_once(
-            lock_text, 'box = [\n    { name = "duckdb" },\n    { name = "pytz" },\n]',
-            'box = [\n    { name = "duckdb" },\n    { name = "pytz" },\n    { name = "pyyaml" },\n]')},
+            lock_text,
+            'box = [\n    { name = "duckdb" },\n    { name = "libfaketime" },\n'
+            '    { name = "pytz" },\n]',
+            'box = [\n    { name = "duckdb" },\n    { name = "libfaketime" },\n'
+            '    { name = "pytz" },\n    { name = "pyyaml" },\n]')},
         "[tool.uv] package": {"manifest": _replace_once(pyproject_text, "package = false", "package = true")},
         "a core requirement, unlocked": {"manifest": _replace_once(
             pyproject_text, 'dependencies = [\n', 'dependencies = [\n    "planted-1097",\n')},

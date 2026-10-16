@@ -70,6 +70,7 @@ from defender.tests._branch_947 import (  # noqa: E402
     planted_source,
     spec_at,
 )
+from defender.tests._session_store_705 import runs_base  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
@@ -163,18 +164,29 @@ def _real_rows(root: Path, gather_turns: list[Turn]) -> tuple[list[dict], dict[s
     return rows, payloads
 
 
+#: The planted source's run folder name (`_branch_947.planted_source`'s `name=`), so its files
+#: can be written into it before the source is built.
+SOURCE_RUN = "run-source-001"
+
+
 class Branched:
     """A legal source holding `rows` for `l-001`, and a fresh sibling folder to resume it in."""
 
     def __init__(self, tmp_path: Path, rows: list[dict], payloads: dict[str, bytes]) -> None:
         assert rows, "the source run wrote no l-001 rows — nothing below is inherited"
         self.rows, self.payloads = rows, payloads
-        store, source, _session, path_ids = planted_source(
-            tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"),
-            queries="".join(json.dumps(r) + "\n" for r in rows))
+        # #1255 P2: the payload files land BEFORE `planted_source` builds the source (its
+        # folder is made with `exist_ok`), so a fork snapshot of the source records them as
+        # what it held at its branch point; written after, the snapshot holds no such file and
+        # the sibling's restore has nothing to copy.
+        source = runs_base(tmp_path) / SOURCE_RUN
         for rel, data in payloads.items():
             (source / rel).parent.mkdir(parents=True, exist_ok=True)
             (source / rel).write_bytes(data)
+        store, planted, _session, path_ids = planted_source(
+            tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"),
+            queries="".join(json.dumps(r) + "\n" for r in rows), name=SOURCE_RUN)
+        assert planted == source, (planted, source)
         assert not (source / "gather_raw" / f"{LEAD}.lead.json").exists(), (
             "the legal source carries a claim for l-001, so the sibling could not re-dispatch it")
         # #1255 (D1): a tool-calling MAIN response after the document landed, not the RETURN

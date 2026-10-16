@@ -36,6 +36,7 @@ from defender.learning.leads import lead_author, pitfalls_curator
 from defender.runtime.agent_definition import RunScope, bind
 from defender.runtime.box import BoxResult
 from defender.runtime.tools import _tool_bash, _tool_read_file
+from defender.tests._1255_view import model_path
 from defender.tests._curator1134 import corpus_view, open_state
 from defender.tests._repo import seed_adapter_stubs
 
@@ -360,7 +361,9 @@ def _main_bash(tmp_path, payload):
     deps = _deps(tmp_path, MAIN_DEF, box=fake)
     artifact = deps.run_dir / "report.md"
     artifact.write_text("admitted main read")
-    return _tool_bash(deps, f"cat {artifact}")
+    # #1255 C9/C11: MAIN's deps from `bind` carry the model view, so the operand is the path the
+    # model holds (`/runs/current/report.md`) — d15's spelling; the host path is refused.
+    return _tool_bash(deps, f"cat {model_path(artifact, run_dir=deps.run_dir)}")
 
 
 # Original demand owners, consolidated so every producer driver is ownership-local.

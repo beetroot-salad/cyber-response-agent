@@ -40,6 +40,7 @@ from defender.scripts import tenant as tenant_py
 from defender.scripts.adapters import _stub_transport, elastic_adapter
 from defender.skills.connect import validate_scaffold
 from defender.tests import _tenants1106 as T1106
+from defender.tests._1255_view import MODEL_AGENT
 from defender.tests._alert_plant import plant_alert as plant_alert_with_record
 from defender.tests import _triplet_947 as T947
 from defender.tests.tenant_1078_pass_a import _spec1078 as H78
@@ -405,9 +406,10 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         data_root: Path, tmp_path: Path) -> None:
     """run.py calls start_box with the accepted tenant's agent half,
     <root>/acme/knowledge/agent (the tenant's knowledge a local git clone here, so its .git
-    exists). The docker run argv composed for that call binds that source read-only at
-    /tenant/agent, the target that stays in piece 1 (RF5), and no mount source equals, or is an
-    ancestor of, the tenant's settings/, its knowledge/.git, or its knowledge/ folder."""
+    exists). The docker run argv composed for that call binds that source read-only at the
+    model view's /agent (#1255 P1: the box mounts each tree at its model path), and no mount
+    source equals, or is an ancestor of, the tenant's settings/, its knowledge/.git, or its
+    knowledge/ folder."""
     H.cloned_tenant(tmp_path, data_root)
     H.plant_row(data_root)
     started: list[tuple[tuple, dict]] = []
@@ -437,7 +439,7 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
         box_mod.DEFAULT_SPEC, (), tenant_agent=agent).argv
     mounts = _mount_specs(argv)
-    agent_mounts = [m for m in mounts if m.get("target") == str(agent)]
+    agent_mounts = [m for m in mounts if m.get("target") == MODEL_AGENT]
     assert len(agent_mounts) == 1, mounts
     assert Path(agent_mounts[0]["source"]).resolve() == H.agent_dir(data_root).resolve()
     assert "readonly" in agent_mounts[0], agent_mounts
@@ -460,13 +462,20 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
     agent half now lives under the data root, beside the run dir whose remedy is already "Set
     DEFENDER_DATA_ROOT to a path", so moving it means moving the data root. The positive
     control: the same tenant with its data root under the shared mount composes (no refusal),
-    so the refusal was the agent half's coverage."""
+    so the refusal was the agent half's coverage.
+
+    The run folder sits where production puts it, `<root>/acme/runs/<run>` under the shared data
+    root (`_tenant`'s `runs`), not directly under the shared mount: the box's run clock directory
+    (#1255) is a sibling of the runs folder under the tenant's folder, so only a run folder at
+    that depth keeps it on the shared mount, as a real deployment's shared data root does."""
     shared = tmp_path / "shared"
     mounts = ((shared, tmp_path / "daemon-side"), (H.DEFENDER, H.DEFENDER))
+    on_mount = shared / "data"
+    run_dir = H.tenant_folder(on_mount) / "runs" / "run"
     off_mount = tmp_path / "data"
     agent = H.agent_dir(off_mount)
     with pytest.raises(box_mod.BoxFault) as refused:
-        box_mod._create_argv("defender-run-spec1120", shared / "run", H.DEFENDER,
+        box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER,
                              box_mod.DEFAULT_SPEC, mounts, tenant_agent=agent)
     text = str(refused.value)
     assert str(agent) in text, f"the refusal does not name the agent half {agent}:\n{text}"
@@ -476,9 +485,8 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
         f"the remedy does not tell the operator to move {H.DATA_ROOT_ENV}, under which the "
         f"agent half now lives:\n{text}")
 
-    on_mount = shared / "data"
-    plant_alert_with_record(shared / "run", {})
-    box_mod._create_argv("defender-run-spec1120", shared / "run", H.DEFENDER,
+    plant_alert_with_record(run_dir, {})
+    box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER,
                          box_mod.DEFAULT_SPEC, mounts, tenant_agent=H.agent_dir(on_mount))
 
 

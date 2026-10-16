@@ -281,6 +281,11 @@ def _run(
     return _Res(run_dir, main, gather, summary)
 
 
+#: The planted source's run folder name (`_branch_947.planted_source`'s `name=`), so the table
+#: can be written into it before the source is built.
+SOURCE_RUN = "run-source-001"
+
+
 def _run_inherited(
     root: Path, *, table: bytes, rows: list[dict], verbs, turns: list[Turn], run_id: str,
     system: str = "elastic", lead: str = LEAD,
@@ -295,15 +300,25 @@ def _run_inherited(
     from defender.tests._branch_947 import (
         GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
     )
+    from defender.tests._session_store_705 import runs_base
 
-    store, source, _session, path_ids = planted_source(
-        root, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None)
+    # #1255 P2/C7: the source's table and sidecars are written BEFORE `planted_source` builds
+    # it, so a fork snapshot of the source holds them: what the source held when its branch
+    # response arrived. Written after, the snapshot would record an empty table and the branch
+    # point would be refused as capturing no query. `planted_source` makes its folder with
+    # `exist_ok` and, with `queries=None`, leaves the table as written here.
+    source = runs_base(root) / SOURCE_RUN
+    RunPaths(source).executed_queries.parent.mkdir(parents=True, exist_ok=True)
     RunPaths(source).executed_queries.write_bytes(table)
     for row in rows:
         rel = row.get("payload_path")
         if rel:
             (source / rel).parent.mkdir(parents=True, exist_ok=True)
             (source / rel).write_text("" if row.get("exit_code") else "[]", encoding="utf-8")
+    store, planted, _session, path_ids = planted_source(
+        root, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None,
+        name=SOURCE_RUN)
+    assert planted == source, (planted, source)
     # #1255 (D1): a tool-calling MAIN response after the document landed, not the RETURN the
     # pre-#1255 shape branched at. The source is hand-planted (`planted_source`, not N4's).
     spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
