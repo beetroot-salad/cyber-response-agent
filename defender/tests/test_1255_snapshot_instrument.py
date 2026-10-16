@@ -161,7 +161,7 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
         assert getattr(stamp, "world_id", None) in (None, natural_world), (
             f"the arm's stamp carries a world id {stamp.world_id!r} that is neither absent nor "
             f"a natural run's ({natural_world!r}) — the world id moves out of the run folder")
-    RR.assert_only_run_records(arm, f"world {world}'s arm")
+    RR.assert_only_run_records(arm, f"world {world}'s arm", RR.table_rows(arm))
     lineage = {"world token": token, "episode token": T.EPISODE_TOKEN, "episode id": ep.name}
     record = json.dumps([token, T.SOURCE_RUN_ID]).encode()
     for how, raw in (("plain", record), ("zlib", zlib.compress(record))):

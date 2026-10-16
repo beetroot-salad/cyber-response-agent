@@ -96,14 +96,12 @@ def table_rows(run_dir: Path) -> list[dict]:
     return read_jsonl_rows(Path(run_dir) / "executed_queries.jsonl")
 
 
-def assert_only_run_records(run_dir: Path, where: str,
-                            rows: list[dict] | None = None) -> None:
+def assert_only_run_records(run_dir: Path, where: str, rows: list[dict]) -> None:
     """Every file under `run_dir` is one of the records a run holds (`unlisted`; `rows`, the
-    run's query table, read off the folder when left out). Positive control on the same
+    run's query table, from `table_rows`). Positive control on the same
     listing: it does flag each of `PLANTED` beside the folder's own files, so an empty answer
     is the folder's."""
     rel_paths = folder_files(run_dir)
-    rows = table_rows(run_dir) if rows is None else rows
     assert rel_paths, f"fixture: {where} left no files"
     missed = set(PLANTED) - set(unlisted([*rel_paths, *PLANTED], rows))
     assert not missed, f"positive control: the listing does not flag a planted record: {missed}"
