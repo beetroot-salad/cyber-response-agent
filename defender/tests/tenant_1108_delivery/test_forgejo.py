@@ -1,5 +1,7 @@
-"""A5/C19/C21 and amendment 2's O-G: the observed Forgejo wire format, one parsed forge address,
-pagination compared against it, fork exclusion, and fail-closed protection."""
+"""A5/C19/C21, amendment 2's O-G and amendment 3's C4: the observed Forgejo wire format, one
+parsed forge address that every request goes to (pages asked for by number, Forgejo's `Link`
+never followed), repository identity by id (forks, namesakes and rows without a head
+repository are not ours), and fail-closed protection."""
 from __future__ import annotations
 
 import importlib
@@ -8,7 +10,17 @@ import json
 import httpx
 import pytest
 
-from ._support import FORK, ORIGIN, SIBLING_FORK, TOKEN, ForgeHTTP, pr_row
+from ._support import (
+    FORK,
+    NAMESAKE,
+    ORIGIN,
+    RENAMED,
+    SIBLING_FORK,
+    TOKEN,
+    ForgeHTTP,
+    bounded,
+    pr_row,
+)
 
 
 def _forge_module():
@@ -27,15 +39,29 @@ def normalized(number, head):
     return {"number": number, "headRefName": head, "url": row(number, head)["html_url"]}
 
 
+def _pages_asked(http):
+    """The page numbers the listing requests asked for, in order (every one must name a page
+    and a limit)."""
+    listed = http.listed()
+    assert all(page is not None and limit is not None and int(limit) > 0 for _, page, limit in listed), listed
+    return [int(page) for _, page, _ in listed]
+
+
+def _all_ours(http):
+    """Every request went to our repository at our address, with the token."""
+    assert http.foreign == [], [str(r.url) for r in http.foreign]
+    assert all(TOKEN in r.headers["Authorization"] for r in http.requests)
+
+
 def test_open_pr_listing_traverses_pages_and_filters_head_prefix():
     http = ForgeHTTP()
     http.pages = {1: [row(1, "unrelated"), row(2, "lessons/a")],
                   2: [row(3, "lessons/b"), row(4, "lead-author/c")]}
     result = forge(http).list_open_prs("lessons/")
     assert result == [normalized(2, "lessons/a"), normalized(3, "lessons/b")]
-    assert len(http.requests) == 2
-    assert all(r.url.params["state"] == "open" for r in http.requests)
-    assert all(TOKEN in r.headers["Authorization"] for r in http.requests)
+    assert _pages_asked(http)[:2] == [1, 2]
+    assert all(state == "open" for state, _, _ in http.listed())
+    _all_ours(http)
 
 
 def test_exact_head_lookup_does_not_accept_prefix_match():
@@ -47,12 +73,12 @@ def test_exact_head_lookup_does_not_accept_prefix_match():
 def test_create_sends_all_pr_fields_to_origin_repository():
     http = ForgeHTTP()
     url = forge(http).open_pr(base="main", head="lessons/a", title="tenant change", body="agent/lessons/a.md")
-    request = http.requests[0]
-    assert request.method == "POST"
+    [request] = [r for r in http.requests if r.method == "POST"]
     assert request.url == "http://forge.invalid:3000/api/v1/repos/tenants/blue/pulls"
     assert json.loads(request.content) == {"base": "main", "head": "lessons/a",
                                           "title": "tenant change", "body": "agent/lessons/a.md"}
     assert url.endswith("/tenants/blue/pulls/7")
+    _all_ours(http)
 
 
 #: Every forge call, as the host makes it.
@@ -92,14 +118,14 @@ def test_protection_read_failure_or_unknown_push_permission_refuses(response):
     client = httpx.Client(transport=httpx.MockTransport(reply))
     with pytest.raises(_forge_module().ForgeError, match="protect|push|403|JSON|main"):
         _forge_module().ForgejoForge(origin=ORIGIN, token=TOKEN, client=client).verify_main_protection()
-    assert calls[0].url.path.endswith("/branches/main")
+    assert any(call.url.path.endswith("/branches/main") for call in calls)
 
 
 def test_protection_verification_reads_branch_but_never_changes_rules():
     http = ForgeHTTP()
     forge(http).verify_main_protection()
-    assert [(r.method, r.url.path) for r in http.requests] == [
-        ("GET", "/api/v1/repos/tenants/blue/branches/main")]
+    assert ("GET", "/api/v1/repos/tenants/blue/branches/main") in [(r.method, r.url.path) for r in http.requests]
+    assert {r.method for r in http.requests} == {"GET"}
 
 
 # ---------------------------------------------------------------------------------------
@@ -130,28 +156,21 @@ def test_the_origin_is_parsed_once_into_one_forge_address():
 
 def test_owner_and_repository_compare_without_case():
     """O-G, orchestrator decision (README): Forgejo resolves owner and repository names
-    without regard to case, so an origin or a Link spelling them in another case is the same
-    address: equal once parsed, its next page followed with the token, and the forge's own
-    canonical rows counted as ours under a cased origin. A fork stays excluded."""
+    without regard to case, so an origin spelling them in another case is the same address:
+    equal once parsed, and under a cased origin the forge's own rows are counted as ours,
+    every page asked of our address. A fork stays excluded."""
     address = _forge_module().ForgeAddress
     cased = "http://forge.invalid:3000/Tenants/Blue.git"
     assert address.parse(cased) == address.parse(ORIGIN)
     assert address.parse("HTTP://FORGE.INVALID:3000/TENANTS/BLUE") == address.parse(ORIGIN)
     assert address.parse("http://forge.invalid:3000/Tenants/Red.git") != address.parse(ORIGIN)
-    for origin, next_url in [
-            (ORIGIN, "http://forge.invalid:3000/api/v1/repos/Tenants/Blue/pulls?state=open&page=2"),
-            (cased, "http://forge.invalid:3000/api/v1/repos/tenants/blue/pulls?state=open&page=2")]:
-        calls, client = _paged([row(1, "lessons/ab")], next_url, [row(2, "lessons/a")])
-        found = _forge_module().ForgejoForge(origin=origin, token=TOKEN, client=client).list_prs_for_head("lessons/a")
-        assert found == [normalized(2, "lessons/a")], (origin, next_url)
-        assert len(calls) == 2
-        assert all(TOKEN in call.headers["Authorization"] for call in calls)
-    http = ForgeHTTP()
-    http.pages = {1: [pr_row(1, "lessons/a", repo=FORK), pr_row(2, "lessons/a"),
-                      pr_row(3, "lessons/b", repo=SIBLING_FORK), pr_row(4, "lessons/b")]}
+    http = ForgeHTTP(origin=cased)
+    http.pages = {1: [pr_row(1, "lessons/a", repo=FORK), pr_row(2, "lessons/a")],
+                  2: [pr_row(3, "lessons/b", repo=SIBLING_FORK), pr_row(4, "lessons/b")]}
     assert forge(http, origin=cased).list_open_prs("lessons/") == [normalized(2, "lessons/a"),
                                                                    normalized(4, "lessons/b")]
     assert forge(http, origin=cased).list_prs_for_head("lessons/a") == [normalized(2, "lessons/a")]
+    _all_ours(http)
 
 
 @pytest.mark.parametrize("origin", ["ssh://git@forge.invalid/tenants/blue.git", "/srv/tenants/blue.git",
@@ -169,78 +188,126 @@ def test_an_origin_that_is_not_one_forge_repository_is_refused(origin):
     assert http.requests == []
 
 
-def _paged(first_rows, next_url, second_rows):
-    calls = []
+# ---------------------------------------------------------------------------------------
+# C4: pages asked for by number on our own address; Forgejo's Link never followed
+# ---------------------------------------------------------------------------------------
 
-    def reply(request):
-        calls.append(request)
-        if len(calls) == 1:
-            return httpx.Response(200, json=first_rows, headers={"Link": f'<{next_url}>; rel="next"'})
-        return httpx.Response(200, json=second_rows)
-    return calls, httpx.Client(transport=httpx.MockTransport(reply))
+#: What Forgejo may put in `Link` (built from its `ROOT_URL`, not our address: review finding
+#: #6), and worse: another host, scheme or port, another repository (one whose name begins
+#: with ours, one reached through dot-segments), a URL that does not parse.
+_LINKS = {
+    "internal-root-url": None,
+    "other-host": "http://other.invalid:3000/api/v1/repos/tenants/blue/pulls?page=2",
+    "other-scheme": "https://forge.invalid:3000/api/v1/repos/tenants/blue/pulls?page=2",
+    "other-port": "http://forge.invalid:3001/api/v1/repos/tenants/blue/pulls?page=2",
+    "other-repository": "http://forge.invalid:3000/api/v1/repos/mallory/blue/pulls?page=2",
+    "prefix-repository": "http://forge.invalid:3000/api/v1/repos/tenants/blue-fork/pulls?page=2",
+    "dot-segments": "http://forge.invalid:3000/api/v1/repos/tenants/blue/../../mallory/blue/pulls?page=2",
+    "bad-port": "http://forge.invalid:bad/api/v1/repos/tenants/blue/pulls?state=open&page=2",
+    "bad-ipv6": "http://[invalid]/api/v1/repos/tenants/blue/pulls?page=2",
+}
 
 
-@pytest.mark.parametrize("next_url", [
-    "http://other.invalid:3000/api/v1/repos/tenants/blue/pulls?page=2",
-    "https://forge.invalid:3000/api/v1/repos/tenants/blue/pulls?page=2",
-    "http://forge.invalid:3001/api/v1/repos/tenants/blue/pulls?page=2",
-    "http://forge.invalid:3000/api/v1/repos/tenants/red/pulls?page=2",
-    "http://forge.invalid:3000/api/v1/repos/mallory/blue/pulls?page=2",
-    "http://forge.invalid:3000/api/v1/repos/tenants/blue-fork/pulls?page=2",
-    "http://forge.invalid:3000/api/v1/repos/tenants/blue/../../mallory/blue/pulls?page=2",
-    "http://forge.invalid:bad/api/v1/repos/tenants/blue/pulls?state=open&page=2",
-    "http://[invalid]/api/v1/repos/tenants/blue/pulls?page=2",
+def _stored(http, heads):
+    for number, head in enumerate(heads, start=1):
+        http.add_pr(row(number, head))
+
+
+@pytest.mark.parametrize("link", sorted(_LINKS))
+@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
+def test_listings_ask_our_address_for_each_page_and_never_follow_link(link, method):
+    """C4 / O-G (R6): a listing asks for `?page=N&limit=L` on the parsed address, pages 1, 2,
+    3 in turn, and never follows or compares Forgejo's `Link`, whatever it names: no request
+    goes anywhere but our repository at our address, every one carries the token, and every
+    row past page 1 is found."""
+    http = ForgeHTTP()
+    http.page_size = 2
+    http.link = _LINKS[link]
+    _stored(http, ["lessons/ab", "unrelated", "lessons/b", "lessons/a", "lessons/a"])
+    found = getattr(forge(http), method)("lessons/a")
+    expected = [normalized(4, "lessons/a"), normalized(5, "lessons/a")]
+    if method == "list_open_prs":
+        expected = [normalized(1, "lessons/ab"), *expected]
+    assert found == expected
+    assert _pages_asked(http)[:3] == [1, 2, 3]
+    _all_ours(http)
+
+
+@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
+def test_a_listing_goes_on_past_a_page_the_server_clamped(method):
+    """C4 (R6): the server clamps `limit` to its `max_response_items`, so a page shorter than
+    the limit asked for is not the end: the listing goes on until the rows seen reach
+    `X-Total-Count`, or a page comes back empty."""
+    http = ForgeHTTP()
+    http.page_size = 1
+    _stored(http, ["lessons/b", "unrelated", "lessons/a"])
+    if method == "list_open_prs":
+        assert forge(http).list_open_prs("lessons/") == [normalized(1, "lessons/b"), normalized(3, "lessons/a")]
+    else:
+        assert forge(http).list_prs_for_head("lessons/a") == [normalized(3, "lessons/a")]
+    assert _pages_asked(http)[:3] == [1, 2, 3]
+    _all_ours(http)
+
+
+@pytest.mark.parametrize("total", [True, False], ids=["with-total-count", "without-total-count"])
+def test_a_short_page_before_the_end_is_not_the_end(total):
+    """C4 (R6): a page shorter than the others is not the end. With `X-Total-Count` the
+    listing goes on until the rows seen reach it; without the header it stops only at an
+    empty page, which it must then ask for."""
+    http = ForgeHTTP()
+    http.total_count = total
+    http.pages = {1: [row(1, "lessons/a"), row(2, "lessons/b")], 2: [row(3, "lessons/c")],
+                  3: [row(4, "lessons/d"), row(5, "lessons/e")]}
+    found = forge(http).list_open_prs("lessons/")
+    assert found == [normalized(n, f"lessons/{c}") for n, c in zip(range(1, 6), "abcde", strict=True)]
+    pages = _pages_asked(http)
+    assert pages[:3] == [1, 2, 3]
+    if not total:
+        assert pages == [1, 2, 3, 4], "without X-Total-Count only an empty page ends the listing"
+
+
+@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
+def test_a_server_that_ignores_the_page_is_read_once_by_its_total_count(method):
+    """C4: the rows seen are counted raw, before any fork or D-fork skip, against
+    `X-Total-Count`. A server that answers every page with the same rows (here a fork's and
+    ours: two rows, `X-Total-Count: 2`) is read once: one listing request, no row twice. A
+    count of the kept rows only would ask again and find ours twice."""
+    http = ForgeHTTP()
+    http.every_page = [pr_row(1, "lessons/a", repo=FORK), pr_row(2, "lessons/a")]
+    query = "lessons/" if method == "list_open_prs" else "lessons/a"
+    found, error, hung = bounded(lambda: getattr(forge(http), method)(query))
+    assert not hung, "the listing never stopped"
+    assert error is None, error
+    assert found == [normalized(2, "lessons/a")]
+    assert _pages_asked(http) == [1]
+
+
+@pytest.mark.parametrize(("origin", "address"), [
+    ("http://FORGE.INVALID:3000/tenants/blue.git", ("http", "forge.invalid", 3000)),
+    ("HTTP://forge.invalid:3000/tenants/blue.git", ("http", "forge.invalid", 3000)),
+    ("http://forge.invalid/tenants/blue.git", ("http", "forge.invalid", 80)),
+    ("http://forge.invalid:80/tenants/blue.git", ("http", "forge.invalid", 80)),
+    ("https://forge.invalid/tenants/blue.git", ("https", "forge.invalid", 443)),
 ])
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_pagination_refuses_outside_origin_repository_before_request(next_url, method):
-    """O8/A5, O-G: an untrusted next-page Link that parses to another address, or does not
-    parse, cannot redirect the bot token. The repository is compared exactly, on the parsed
-    address: one whose name only begins with ours (`blue-fork`), or whose path reaches
-    another repository through dot-segments while its text begins with ours, is not ours."""
-    calls, client = _paged([row(1, "lessons/ab")], next_url, [])
-    with pytest.raises(_forge_module().ForgeError, match="origin|host|repo|page|credential|[Ll]ink|URL|[Ii]nvalid (port|IPv6)"):
-        getattr(_forge_module().ForgejoForge(origin=ORIGIN, token=TOKEN, client=client), method)("lessons/a")
-    assert len(calls) == 1, "refuse the foreign Link before contacting its target"
-    assert TOKEN in calls[0].headers["Authorization"]
-
-
-@pytest.mark.parametrize(("origin", "next_url"), [
-    (ORIGIN, "http://FORGE.INVALID:3000/api/v1/repos/tenants/blue/pulls?state=open&page=2"),
-    (ORIGIN, "HTTP://forge.invalid:3000/api/v1/repos/tenants/blue/pulls?state=open&page=2"),
-    ("http://forge.invalid/tenants/blue.git",
-     "http://forge.invalid:80/api/v1/repos/tenants/blue/pulls?state=open&page=2"),
-    ("http://forge.invalid:80/tenants/blue.git",
-     "http://forge.invalid/api/v1/repos/tenants/blue/pulls?state=open&page=2"),
-    ("https://forge.invalid/tenants/blue.git",
-     "https://forge.invalid:443/api/v1/repos/tenants/blue/pulls?state=open&page=2"),
-])
-@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_pagination_follows_an_equivalent_spelling_of_the_origin(origin, next_url, method):
-    """O-G (review finding #6): a Link spelling the same parsed address (host case, explicit
-    or implicit default port, scheme case) is ours: the second page is fetched with the token
-    and its rows count."""
-    calls, client = _paged([row(1, "lessons/ab")], next_url, [row(2, "lessons/a")])
-    result = getattr(_forge_module().ForgejoForge(origin=origin, token=TOKEN, client=client), method)("lessons/a")
-    assert len(calls) == 2
-    assert all(TOKEN in call.headers["Authorization"] for call in calls)
-    assert calls[1].url.host == "forge.invalid"
+def test_every_page_is_asked_of_the_parsed_address(origin, address, method):
+    """O-G (review finding #6): whatever the origin's spelling (host or scheme case, a default
+    port explicit or not), every request goes to the one parsed address, with the token, and
+    page 2's rows count."""
+    http = ForgeHTTP(origin=origin)
+    http.pages = {1: [row(1, "lessons/ab")], 2: [row(2, "lessons/a")]}
+    result = getattr(forge(http, origin=origin), method)("lessons/a")
     expected = [normalized(2, "lessons/a")]
     if method == "list_open_prs":
         expected = [normalized(1, "lessons/ab"), *expected]
     assert result == expected
-
-
-def test_exact_head_lookup_traverses_same_origin_next_page_with_credentials():
-    """O8/A5 positive control: accepted pagination still authenticates to the origin."""
-    http = ForgeHTTP()
-    http.pages = {1: [row(1, "lessons/ab")], 2: [row(2, "lessons/a")]}
-    assert forge(http).list_prs_for_head("lessons/a") == [normalized(2, "lessons/a")]
-    assert len(http.requests) == 2
-    assert all(TOKEN in request.headers["Authorization"] for request in http.requests)
+    assert {(r.url.scheme, r.url.host, r.url.port or {"http": 80, "https": 443}[r.url.scheme])
+            for r in http.requests} == {address}
+    _all_ours(http)
 
 
 # ---------------------------------------------------------------------------------------
-# O-G: only PRs whose head repository is the base repository are ours
+# C1 / O-G: only PRs whose head repository id is the base repository's are ours (R10)
 # ---------------------------------------------------------------------------------------
 
 def test_prefix_listing_counts_only_prs_whose_head_is_the_base_repository():
@@ -262,24 +329,39 @@ def test_exact_head_lookup_ignores_a_fork_with_the_same_branch_name(fork):
     assert forge(http).list_prs_for_head("lessons/a") == []
 
 
+@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
+def test_repository_identity_is_the_repository_id(method):
+    """C1: a head repository is ours by its id, which a rename or a transfer keeps, not by its
+    full name: our repository under another name is ours, and another repository that took
+    our full name is not."""
+    http = ForgeHTTP()
+    http.pages = {1: [pr_row(1, "lessons/a", repo=NAMESAKE), pr_row(2, "lessons/a", repo=RENAMED)]}
+    assert getattr(forge(http), method)("lessons/a" if method == "list_prs_for_head" else "lessons/") == \
+        [normalized(2, "lessons/a")]
+
+
 def test_the_writer_lease_is_not_held_by_a_fork_pr(tmp_path):
     """O-G on the prefix lease (`AuthorBranch.open_pr_exists`, the drain's writer lease): an
-    open fork PR under the lessons prefix does not hold it; our own open PR does (control)."""
+    open fork PR under the lessons prefix does not hold it, nor does a namesake's or a row
+    with no head repository (D-fork); our own open PR does (control)."""
     from defender.learning.author.branch import AuthorBranch
     http = ForgeHTTP()
     branch = AuthorBranch(forge=forge(http), repo_root=tmp_path, branch_prefix="lessons/")
-    http.pages = {1: [pr_row(1, "lessons/x", repo=FORK), pr_row(2, "lessons/y", repo=SIBLING_FORK)]}
+    others = [pr_row(1, "lessons/x", repo=FORK), pr_row(2, "lessons/y", repo=SIBLING_FORK),
+              pr_row(5, "lessons/v", repo=NAMESAKE), pr_row(6, "lessons/w", repo=None)]
+    http.pages = {1: others}
     assert branch.open_pr_exists() is False
-    http.pages = {1: [pr_row(1, "lessons/x", repo=FORK), pr_row(3, "lessons/z")]}
+    http.pages = {1: [*others, pr_row(3, "lessons/z")]}
     assert branch.open_pr_exists() is True
 
 
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
-def test_a_pr_row_without_its_head_repository_is_a_forge_error(method):
-    """PENDING A USER DECISION (README, choice 9). Fail closed: a row whose head repository
-    is missing cannot be shown to be ours, and excluding it would release the lease; it is a
-    `ForgeError`. Kept alone so the decision can change this case alone."""
+def test_a_pr_row_without_its_head_repository_is_skipped(method):
+    """R10 (D-fork, the user's decision; it replaces choice 9's `ForgeError`): a row whose
+    head repository is gone (Forgejo's listing of a deleted fork's PR) is skipped like any
+    fork, in every listing, on any page; our own rows around it are found."""
     http = ForgeHTTP()
-    http.pages = {1: [pr_row(1, "lessons/a", repo=None)]}
-    with pytest.raises(_forge_module().ForgeError):
-        getattr(forge(http), method)("lessons/a")
+    http.pages = {1: [pr_row(1, "lessons/a", repo=None), pr_row(2, "lessons/a")],
+                  2: [pr_row(3, "lessons/a", repo=None)]}
+    assert getattr(forge(http), method)("lessons/a" if method == "list_prs_for_head" else "lessons/") == \
+        [normalized(2, "lessons/a")]

@@ -5,15 +5,18 @@ invariant as the oracle.
 failure names its seed and round, and replays exactly. Each round lays random lane edits
 (adds at any depth, changes, deletions, random bytes); every other round adds one entry no
 claim may carry, at a random place. The oracle: such a claim is refused whole; otherwise the change set is exactly the
-draft against the worktree, and every `AgentChange` is in a lane, never a forbidden name, and
-a regular file in the draft holding exactly its bytes (or gone, for a deletion). No link is
-followed: the host folder links point at keeps its bytes and no change carries them. Some
-rounds commit; every round resets, after which the draft equals the worktree."""
+draft against the batch's base (git's blobs at the branch's tip, or at the export commit
+before the first commit; amendment 3 has no worktree), and every `AgentChange` is in a lane,
+never a forbidden name, and a regular file in the draft holding exactly its bytes (or gone,
+for a deletion). No link is followed: the host folder links point at keeps its bytes and no
+change carries them. Some rounds commit; every round resets, after which the draft equals the
+base's blobs. The clone itself never changes."""
 from __future__ import annotations
 
 import os
 import random
 import shutil
+from pathlib import PurePosixPath
 
 import pytest
 
@@ -22,6 +25,8 @@ from defender import _io
 from ._support import (
     LANES,
     ForgeHTTP,
+    agent_blobs,
+    batch_base,
     bounded,
     delivery,
     files_under,
@@ -42,11 +47,11 @@ FORBIDDEN = (".gitattributes", ".gitignore", ".gitmodules")
 class _Box:
     """Writes random box output into one batch's draft; names it plants are fresh."""
 
-    def __init__(self, rng, batch, outside):
+    def __init__(self, rng, batch, clone, outside):
         self.rng, self.outside = rng, outside
+        self.batch, self.clone = batch, clone
         self.agent = batch.draft_root / "agent"
         self.lane = batch.draft_root / LANE
-        self.base = batch.worktree / LANE
         self.count = 0
         self.fifos = []
 
@@ -65,10 +70,11 @@ class _Box:
         return self.lane / self.rng.choice(files) if files else None
 
     def in_base(self, *, dirs=False):
-        """A place in the draft's lane where the worktree holds a file (or, with `dirs`, a
-        real subdirectory), so a reset must put the worktree's entry back there."""
-        found = sorted(p.relative_to(self.base) for p in self.base.rglob("*")
-                       if not p.is_symlink() and (p.is_dir() if dirs else p.is_file()))
+        """A place in the draft's lane where the batch's base holds a file (or, with `dirs`, a
+        subdirectory), so a reset must put the base's entry back there."""
+        files = sorted(_base_lane(self.batch, self.clone))
+        found = sorted({str(parent) for rel in files for parent in PurePosixPath(rel).parents
+                        if str(parent) != "."}) if dirs else files
         return self.lane / self.rng.choice(found) if found else None
 
     @staticmethod
@@ -161,13 +167,18 @@ _REFUSED = ("file_link", "relative_link", "replace_with_link", "dir_link", "fifo
             "out_of_lane", "prefix_sibling", "forbidden_name", "tenant_id")
 
 
-def _expected(batch):
-    """The change set the draft must yield: every lane file that differs from the worktree's,
-    with its bytes, and every worktree lane file the draft lacks, as `None`."""
+def _base_lane(batch, clone):
+    """The lane's blobs at the batch's base, by path below the lane."""
+    return agent_blobs(clone, batch_base(clone, batch), prefix=LANE)
+
+
+def _expected(batch, clone):
+    """The change set the draft must yield: every lane file that differs from the base's blob,
+    with its bytes, and every base lane file the draft lacks, as `None`."""
     draft = files_under(batch.draft_root / LANE)
-    worktree = files_under(batch.worktree / LANE)
-    changed = {f"{LANE}/{rel}": data for rel, data in draft.items() if worktree.get(rel) != data}
-    gone = {f"{LANE}/{rel}": None for rel in worktree if rel not in draft}
+    base = _base_lane(batch, clone)
+    changed = {f"{LANE}/{rel}": data for rel, data in draft.items() if base.get(rel) != data}
+    gone = {f"{LANE}/{rel}": None for rel in base if rel not in draft}
     return changed | gone
 
 
@@ -202,7 +213,8 @@ def test_derivation_keeps_its_invariant_on_random_box_output(repo, tmp_path, see
     outside = tmp_path / "host-folder"
     outside.mkdir()
     (outside / "secret.md").write_bytes(SECRET)
-    box = _Box(rng, batch, outside)
+    clone = repo[0].knowledge
+    box = _Box(rng, batch, clone, outside)
     for round_ in range(ROUNDS):
         for _ in range(rng.randint(1, 4)):
             getattr(box, rng.choice(_CARRIED))()
@@ -211,8 +223,8 @@ def test_derivation_keeps_its_invariant_on_random_box_output(repo, tmp_path, see
         refused = _REFUSED[(round_ // 2 + seed * 3) % len(_REFUSED)] if round_ % 2 else None
         planted = getattr(box, refused)() if refused else None
         where = f"seed {seed}, round {round_}, refused entry {refused}: {planted}"
-        expected = None if refused else _expected(batch)
-        head = git(batch.worktree, "rev-parse", "HEAD")
+        expected = None if refused else _expected(batch, clone)
+        head = batch_base(clone, batch)
 
         change_set, error, hung = bounded(batch.change_set, fifos=box.fifos)
         assert not hung, f"{where}: deriving blocked on box output"
@@ -223,19 +235,19 @@ def test_derivation_keeps_its_invariant_on_random_box_output(repo, tmp_path, see
             _check_carried(batch, change_set, expected, where)
             if expected and rng.random() < 0.5:
                 sha = batch.commit(change_set, f"fuzz {seed}.{round_}")
-                assert git(batch.worktree, "rev-parse", f"{sha}^") == head, where
-                rows = git(batch.worktree, "diff-tree", "--no-commit-id", "-r", sha).splitlines()
+                assert git(clone, "rev-parse", f"{sha}^") == head, where
+                rows = git(clone, "diff-tree", "--no-commit-id", "-r", sha).splitlines()
                 assert {row.split("\t", 1)[1] for row in rows} == set(expected), where
                 assert {row.split()[1] for row in rows} <= {"100644", "000000"}, where
                 head = sha
-        assert git(batch.worktree, "rev-parse", "HEAD") == head, where
-        assert git(batch.worktree, "status", "--porcelain") == "", where
+        assert batch_base(clone, batch) == head, where
+        assert git(clone, "status", "--porcelain") == "", where
         assert files_under(outside) == {"secret.md": SECRET}, f"{where}: a link was followed"
 
         _, error, hung = bounded(batch.reset, fifos=box.fifos)
         assert not hung, f"{where}: the reset blocked on box output"
         assert error is None, f"{where}: reset {error!r}"
         assert odd_entries(batch.draft_root) == [], where
-        assert files_under(batch.draft_root / "agent") == files_under(batch.worktree / "agent"), where
+        assert files_under(batch.draft_root / "agent") == agent_blobs(clone, head), where
         assert files_under(outside) == {"secret.md": SECRET}, f"{where}: the reset followed a link"
         box.fifos.clear()
