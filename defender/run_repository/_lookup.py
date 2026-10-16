@@ -521,10 +521,10 @@ class EpisodeRuns:
 
     def _roster_document(self) -> dict[str, str] | None:
         """The roster as `{label: id text}`, or `None` when there is none (the episode never
-        reached RUNS). The text (`_roster_text`) must be one strict JSON object, nested no
+        reached RUNS). The text (`_read_roster_text`) must be one strict JSON object, nested no
         deeper than the decoder's limit, no label twice, every value text. Any other shape is
         `RunRefused` naming the roster."""
-        text = self._roster_text()
+        text = self._read_roster_text()
         if text is None:
             return None
         doc, reason = _io.load_json_artifact(text, object_pairs_hook=_no_duplicate_keys)
@@ -537,7 +537,7 @@ class EpisodeRuns:
                 raise self._roster_refused(f"the arm id of {quoted(label)} is not text")
         return cast(dict[str, str], doc)
 
-    def _roster_text(self) -> str | None:
+    def _read_roster_text(self) -> str | None:
         """The roster's strict UTF-8 text, or `None` when it is absent. Read through the held
         episode, never followed: a link, or anything but a regular file, is refused, and so is
         a file over `_ROSTER_CAP` (judged on its size before anything is read, and read no
