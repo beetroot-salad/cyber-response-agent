@@ -148,6 +148,72 @@ def opaque_api_error(model: str = "fake") -> BaseException:
 Fault = Callable[[], BaseException]
 
 
+# =================================================================================================
+# Faults inside exception groups (D6: the human's ruling after code review)
+# =================================================================================================
+
+#: The message every group this suite builds carries — the words pydantic-ai/anyio-style bundling
+#: of concurrent tool-task failures would use; nothing reads it.
+GROUP_MESSAGE = "unhandled errors in a task group"
+
+
+def exception_group(*members: Fault) -> Fault:
+    """A fault raising ONE `ExceptionGroup` around `members()`, each built when it is raised (a
+    member may itself be an `exception_group(...)`, which nests)."""
+    return lambda: ExceptionGroup(GROUP_MESSAGE, [m() for m in members])
+
+
+def ordinary_error(detail: str = "a sibling tool task broke") -> Fault:
+    """A non-provider failure for a group's other member (O2: never a provider end)."""
+    return lambda: RuntimeError(detail)
+
+
+#: The grouped shapes a `ProviderDown` can arrive in, keyed by test id. `flat`: the group holds
+#: it alone; `nested`: a group inside a group holds it (a one-level unwrap misses it); `mixed`:
+#: a group holding an ordinary error FIRST and it second (a reader of `exceptions[0]`, or an
+#: unwrap of one-member groups only, misses it). A group with NO `ProviderDown` is the control
+#: (`GROUPED_WITHOUT_PROVIDER_DOWN`).
+GROUPED_PROVIDER_DOWN: dict[str, Callable[[Fault], Fault]] = {
+    "flat": lambda down: exception_group(down),
+    "nested": lambda down: exception_group(exception_group(down)),
+    "mixed": lambda down: exception_group(ordinary_error(), down),
+}
+GROUPED_WITHOUT_PROVIDER_DOWN: dict[str, Fault] = {
+    "flat": exception_group(ordinary_error()),
+    "nested": exception_group(exception_group(ordinary_error(), lambda: ValueError("another"))),
+}
+
+
+class Recorded:
+    """A fault that keeps every exception it put on the model's path (`raised`), so a test can
+    assert the fault actually fired, in the shape it claims, and compare identity with what
+    escaped. A fault that could not even be built (a coined class missing) is recorded as the
+    error building it raised, which is then what the model raises."""
+
+    def __init__(self, fault: Fault) -> None:
+        self.fault = fault
+        self.raised: list[BaseException] = []
+        self._lock = threading.Lock()
+
+    def __call__(self) -> BaseException:
+        try:
+            exc = self.fault()
+        except Exception as build_error:
+            with self._lock:
+                self.raised.append(build_error)
+            raise
+        with self._lock:
+            self.raised.append(exc)
+        return exc
+
+
+def carries(exc: BaseException | None, cls: type[BaseException]) -> bool:
+    """`exc` is a `cls`, or an exception group holding one at any depth."""
+    if isinstance(exc, cls):
+        return True
+    return isinstance(exc, BaseExceptionGroup) and exc.subgroup(cls) is not None
+
+
 @dataclass(frozen=True)
 class Plan:
     """Which ATTEMPTS fail, and with what, as data: `fail` lists the 1-based attempts that
