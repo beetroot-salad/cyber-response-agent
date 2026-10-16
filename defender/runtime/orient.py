@@ -116,11 +116,15 @@ def _hits_in_view(hits: str | None, view: ModelView) -> str | None:
 
 
 def _build_lessons_section(
-    env: dict[str, str], sig: str | None, shim: ShimRunner, view: ModelView,
+    env: dict[str, str], sig: str | None, shim: ShimRunner, view: ModelView | None = None,
 ) -> str | None:
+    """The Lessons section. `view` is the run's model view the hits' paths are rendered in
+    (`orientation` always passes it); without one the hits are shown as the shim printed them."""
     tags = shim(["defender-lessons", "--tags"], env)
     # An exact, case-sensitive lookup of the whole entry: the signature is a key, not a pattern.
-    hits = _hits_in_view(shim(["defender-lessons", "--signature", sig], env), view) if sig else ""
+    hits = shim(["defender-lessons", "--signature", sig], env) if sig else ""
+    if view is not None:
+        hits = _hits_in_view(hits, view)
     lesson_lines = []
     if sig:
         # The key is alert-derived text: it is only ever printed inside an untrusted frame, so
