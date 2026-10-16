@@ -181,18 +181,31 @@ def test_r5_the_loader_reads_a_manifest_whose_episode_id_is_its_folders(tmp_path
     assert document["episode_id"] == episode_id
 
 
-@pytest.mark.parametrize("named", ["another_uuid", "old_id"])
+#: The manifest's `episode_id` for each mismatch case, from the folder's id: a fresh UUID, an
+#: old id, and the folder's own id with ONE hex digit changed — the first, one in the middle
+#: group, the last (adversary F11: a comparison of the first group alone passes the last two).
+_MISMATCHES = {
+    "another_uuid": lambda folder_id: R.new_id(),
+    "old_id": lambda folder_id: R.OLD_MINTED_ID,
+    "near_miss_first_digit": lambda folder_id: R.near_miss_id(folder_id, 0),
+    "near_miss_middle_digit": lambda folder_id: R.near_miss_id(folder_id, 14),
+    "near_miss_last_digit": lambda folder_id: R.near_miss_id(folder_id, -1),
+}
+
+
+@pytest.mark.parametrize("named", sorted(_MISMATCHES))
 @pytest.mark.parametrize("which", ["triplet_947", "spec1224"])
 def test_r5_the_loader_refuses_a_manifest_naming_another_episode(tmp_path, which, named):
     """R5 / declared change 10 (manifest half): the folder is `<A>`, the manifest says
-    `episode_id: <B>` — another UUID, or an old id. Both loader doors refuse (`FamilyError`),
-    naming both ids; neither hands back a document. Positive control:
-    `test_r5_the_loader_reads_a_manifest_whose_episode_id_is_its_folders`."""
+    `episode_id: <B>` — another UUID, an old id, or `<A>` itself with one hex digit changed
+    (first, middle, last: a mismatch only a whole-id comparison sees, adversary F11). Both
+    loader doors refuse (`FamilyError`), naming both ids; neither hands back a document.
+    Positive control: `test_r5_the_loader_reads_a_manifest_whose_episode_id_is_its_folders`."""
     from defender._io import bind
     from defender.runtime.branch._family import FamilyError, load_family, load_manifest_document
 
     folder_id = R.new_id()
-    manifest_id = R.new_id() if named == "another_uuid" else R.OLD_MINTED_ID
+    manifest_id = _MISMATCHES[named](folder_id)
     ep = tmp_path / "episodes" / folder_id
     T.write_family(ep, _loadable(which, manifest_id))
     for door in (load_family, load_manifest_document):
@@ -202,6 +215,31 @@ def test_r5_the_loader_refuses_a_manifest_naming_another_episode(tmp_path, which
         text = R.message(err)
         assert manifest_id in text, f"{door.__name__}'s refusal does not name {manifest_id}: {text}"
         assert folder_id in text, f"{door.__name__}'s refusal does not name {folder_id}: {text}"
+
+
+@pytest.mark.parametrize("which", ["triplet_947", "spec1224"])
+def test_r5_the_loader_refuses_a_one_digit_near_miss_at_every_position(tmp_path, which):
+    """R5 (adversary F11), the sweep: for EACH of the 32 hex digits of the folder's id, a
+    manifest naming the folder's id with just that digit changed is refused by both loader doors
+    (`FamilyError`). A comparison of any proper part of the id — a prefix, a group, a suffix, a
+    sample of positions — skips some digit, and the manifest differing there loads. Positive
+    control: `test_r5_the_loader_reads_a_manifest_whose_episode_id_is_its_folders`."""
+    from defender._io import bind
+    from defender.runtime.branch._family import FamilyError, load_family, load_manifest_document
+
+    folder_id = R.new_id()
+    ep = tmp_path / "episodes" / folder_id
+    loaded = []
+    for digit in range(R.UUID_HEX_DIGITS):
+        manifest_id = R.near_miss_id(folder_id, digit)
+        T.write_family(ep, _loadable(which, manifest_id))
+        for door in (load_family, load_manifest_document):
+            with bind(ep) as view:
+                err = R.raised(door, view, expected_episode_id=folder_id)
+            if not R.is_a(err, FamilyError):
+                loaded.append(f"digit {digit} ({manifest_id}) via {door.__name__}: {err!r}")
+    assert loaded == [], "a manifest naming a near-miss id was not refused:\n  " + (
+        "\n  ".join(loaded))
 
 
 def test_r5_the_expected_episode_id_is_a_required_keyword(tmp_path):
@@ -225,12 +263,68 @@ def test_r5_the_expected_episode_id_is_a_required_keyword(tmp_path):
         assert keyword is None, f"{door.__name__}(view, expected_episode_id=) refused: {keyword!r}"
 
 
+def test_r5_pre_flight_refuses_a_manifest_naming_another_episode(tmp_path, monkeypatch,
+                                                                  data_root):
+    """R5 / declared change 10 ("Every manifest reader refuses that mismatch") at PRE-FLIGHT,
+    the one manifest reader the design's R5 list does not name (adversary deck #1042b replay:
+    a policy pinned on one surface only — pre-flight loads the family with `load_family`, so a
+    caller passing the manifest's own id as the expected one skips the check here unseen).
+    `cli.preflight_replay(view.episode, ...)`, handed the walked view of `<A>` whose manifest
+    names `<A>` with its last hex digit changed, refuses naming both ids before its oracle is
+    asked, and writes no outcome record. Positive control, same call: the manifest naming its
+    own folder is calibrated (the oracle asked, `outcome.yaml` written). RED at base: the
+    episode is looked up under the episodes variable."""
+    from defender.learning.branch import cli
+
+    P.roots(tmp_path, monkeypatch)
+    monkeypatch.delenv(R.EPISODES_BASE_ENV, raising=False)
+    est, src = P.launch_source(tmp_path, source_run_id=R.new_id())
+    source = T.open_source(src)
+    (src.parent / "_tenant.json").unlink(missing_ok=True)
+    rows = [S.captured(c.system, c.verb, c.params, c.payload) for c in P.source_calls()]
+    episode_id = R.new_id()
+    other = R.near_miss_id(episode_id)
+
+    def doc(named: str) -> dict:
+        return S.family_v2(episode_id=named, source_run_id=src.name, source_run_dir=str(src))
+
+    ep = S.episode_v2(tmp_path, doc=doc(episode_id), root=R.episodes_dir(data_root,
+                                                                          P.LAUNCH_TENANT),
+                      episode_id=episode_id, base_rows=rows)
+    T.write_family(ep, doc(other))
+    runs = R.tenant(data_root, P.LAUNCH_TENANT).runs_repository()
+
+    def preflight(oracle) -> BaseException | None:
+        with runs.episode(episode_id) as view:
+            return R.raised(cli.preflight_replay, view.episode, source=source,
+                            roster=est.roster(), tenant=est.run_tenant(), oracle=oracle.model,
+                            verifier=S.passing_verifier().model)
+
+    unasked = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
+    err = preflight(unasked)
+    assert err is not None, "pre-flight calibrated an episode whose manifest names another"
+    assert not isinstance(err, (TypeError, AttributeError, NameError)), f"machinery: {err!r}"
+    text = R.message(err)
+    assert other in text, f"the refusal does not name the manifest's id {other}: {text}"
+    assert episode_id in text, f"the refusal does not name the folder's id {episode_id}: {text}"
+    assert unasked.requests == 0, "pre-flight asked its oracle over a mismatched manifest"
+    assert not (ep / "outcome.yaml").exists(), "pre-flight recorded an outcome for it"
+
+    T.write_family(ep, doc(episode_id))
+    asked = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
+    assert preflight(asked) is None, "control: pre-flight over its own manifest refused"
+    assert asked.requests > 0, "control: pre-flight never asked its oracle"
+    assert (ep / "outcome.yaml").is_file(), "control: pre-flight wrote no outcome record"
+
+
 def test_r5_the_episode_page_refuses_a_manifest_naming_another_episode(data_root):
     """R5 through a real reader: the page over folder `<A>` whose manifest says `<B>` exits 1,
-    names the mismatch, and writes no page. Positive control on the same channel: the manifest
-    rewritten to `<A>` renders."""
-    other = R.new_id()
+    names the mismatch, and writes no page. `<B>` is `<A>` with its LAST hex digit changed
+    (adversary F11: a reader comparing a prefix or a group passes a random second UUID's
+    mismatch only by luck, and this one never). Positive control on the same channel: the
+    manifest rewritten to `<A>` renders."""
     ep, episode_id, _roster = _episode(data_root)
+    other = R.near_miss_id(episode_id)
     T.write_family(ep, _doc(other))
     refused = _page(episode_id)
     assert refused.rc == 1, f"the page rendered over a mismatched manifest: {refused.said}"
@@ -475,14 +569,15 @@ def test_verify_refuses_a_manifest_naming_another_episode(data_root):
     whose labels are checked against the manifest's worlds — read through the one loader, which
     is handed the folder's id. Over an episode whose manifest names ANOTHER uuid, opening the
     finished arms refuses, naming both ids (the arm `a` sits at its roster id, so nothing else
-    is wrong). Positive control, same view and channel: the manifest rewritten to name its own
-    folder opens `a` by its roster id."""
+    is wrong). The other uuid differs from the folder's only in its last hex digit (adversary
+    F11). Positive control, same view and channel: the manifest rewritten to name its own folder
+    opens `a` by its roster id."""
     from defender.learning.branch import cli
     from defender.run_repository import Run
 
     ep, episode_id, roster = _episode(data_root)
     _arm(ep, roster["a"])
-    other = R.new_id()
+    other = R.near_miss_id(episode_id)
     T.write_family(ep, _doc(other))
     runs = R.tenant(data_root).runs_repository()
 
@@ -959,7 +1054,8 @@ def test_the_judge_door_opens_an_episode_whose_arm_container_has_no_record(data_
 def test_the_judge_refuses_a_manifest_naming_another_episode(tmp_path, data_root):
     """R5 / declared change 10 at the judge (review F8): `grade_episode(runs, <ep>)` — the
     judge's one entry, whose door is `runs.episode_files` — over an episode whose manifest names
-    ANOTHER uuid refuses (`JudgeRefused`), naming both ids; the judge model is asked nothing and
+    ANOTHER uuid — the folder's own with its last hex digit changed (adversary F11) — refuses
+    (`JudgeRefused`), naming both ids; the judge model is asked nothing and
     no `judge.yaml` is written. Positive control on the same entry: the manifest naming its own
     folder gets past the manifest read — with no outcome record the pass records the episode as
     not graded (`judge.yaml` written), still asking the model nothing."""
@@ -967,7 +1063,7 @@ def test_the_judge_refuses_a_manifest_naming_another_episode(tmp_path, data_root
     from defender.tests import _state1135
 
     ep, episode_id, _roster = _episode(data_root)
-    other = R.new_id()
+    other = R.near_miss_id(episode_id)
     T.write_family(ep, _doc(other))
     runs = R.tenant(data_root).runs_repository()
     judge = P.quiet_judge()
@@ -1054,8 +1150,8 @@ def test_the_comparator_prompt_never_carries_a_roster_arm_id(data_root):
     World `b` served a payload naming sibling `c`'s roster arm id (a random UUID nothing but the
     roster spells) and an unrelated UUID. The prompt the comparator sent carries the marker, not
     the arm id, and the unrelated UUID survives (the payload did reach the prompt). R5 on the
-    same reader: the manifest rewritten to name another episode refuses before the comparator is
-    asked."""
+    same reader: the manifest rewritten to name another episode (the folder's id with its last
+    hex digit changed, adversary F11) refuses before the comparator is asked."""
     from defender.runtime.branch._family import FamilyError
 
     ep, episode_id, roster = _episode(data_root)
@@ -1079,7 +1175,7 @@ def test_the_comparator_prompt_never_carries_a_roster_arm_id(data_root):
     assert MARK in agent.prompts[0]
     assert UNRELATED_UUID in agent.prompts[0], "the payload never reached the prompt"
 
-    T.write_family(ep, _doc(R.new_id()))
+    T.write_family(ep, _doc(R.near_miss_id(episode_id)))
     unasked = T.FakeAgent("mutation")
     with runs.episode(episode_id) as view:
         err = R.raised(delta_o, view, invoke=unasked)
