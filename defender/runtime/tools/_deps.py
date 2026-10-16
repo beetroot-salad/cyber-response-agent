@@ -23,6 +23,7 @@ from ..run_state import RunState
 from .. import permission
 from ..agent_definition import ResolvedRoots
 from ..agent_role import AgentRole
+from ..model_view import ModelView
 
 from defender._env import env_int
 from defender._knowledge import KnowledgePaths
@@ -35,6 +36,10 @@ from defender.hooks.record_lesson_load import (
     lesson_name as _lesson_name,
 )
 
+
+#: The roles that see their workspace through the model view (#1255 C12): a run's own roles
+#: that hold path-taking tools.
+_VIEW_ROLES = frozenset({AgentRole.MAIN, AgentRole.GATHER})
 
 #: The queries table's infra exit code (a member of `circuit_breaker.INFRA_EXIT_CODES`).
 _INFRA_EXIT_CODE = 2
@@ -143,6 +148,21 @@ class AgentDeps:
     run_state: Annotated[RunState | None, SkipValidation] = field(kw_only=True, default=None)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
+
+    @property
+    def view(self) -> ModelView | None:
+        """The run's model view (#1255 P1, C9): the one mapping every path the model hands
+        this role is read through, and every path it is told is rendered through. Derived from
+        the deps' own roots, so deps built by `bind`, by a `replace` copy or directly all map
+        the same way. `None` for a role outside a run's own roles (C12: the learning stages
+        keep host spelling; the review stages hold no tool)."""
+        if self.role not in _VIEW_ROLES:
+            return None
+        if self.roots is not None:
+            agent = self.roots.tenant_agent
+        else:
+            agent = self.tenant.agent if self.tenant is not None else None
+        return ModelView(Path(self.run_dir), Path(self.defender_dir), agent)
 
     @property
     def knowledge(self) -> KnowledgePaths:

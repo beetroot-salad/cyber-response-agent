@@ -70,14 +70,23 @@ def _write_operand(deps: AgentDeps, p: Path, path: str, text: str) -> None:
 
 def _check_alert_digest(deps: AgentDeps, p: Path) -> None:
     """A read of the run's stored alert re-checks its bytes against the digest the run's record
-    carries (RG1's second line) and refuses a mismatch with a fixed reason naming the run."""
+    carries (RG1's second line) and refuses a mismatch with a fixed reason. A role in the model
+    view is told about "this run", never the run folder's name (#1255 C5: the folder's name is
+    an arm's identity); any other role's reason names the run."""
     paths = RunPaths(deps.run_dir)
     if p != paths.alert.resolve():
         return
+    run_name = None if deps.view is not None else Path(deps.run_dir).name
     try:
-        _alert_input.verified_alert(paths.alert, paths.alert_record, run_name=Path(deps.run_dir).name)
+        _alert_input.verified_alert(paths.alert, paths.alert_record, run_name=run_name)
     except _alert_input.AlertReplaced as e:
         raise ModelRetry(str(e)) from None
+
+
+def _shown(deps: AgentDeps, path: str) -> str | None:
+    """How a gate refusal names the operand: as the model typed it for a role in the model
+    view (#1255 P1), else as the host path it resolved to (today's spelling)."""
+    return path if deps.view is not None else None
 
 
 def _gated_read(
@@ -86,7 +95,7 @@ def _gated_read(
     p = _resolve_operand(deps, path)
     decision = permission.decide_read(
         p, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
-        policy=deps.policy,
+        policy=deps.policy, shown=_shown(deps, path),
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
@@ -163,6 +172,7 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
         )
     decision = permission.decide_write(
         p, content, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
+        shown=_shown(deps, path),
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
@@ -180,7 +190,8 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
             "move it. The case is closed."
         )
     read_decision = permission.decide_read(
-        p, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy
+        p, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
+        shown=_shown(deps, path),
     )
     if not read_decision.allow:
         raise ModelRetry(read_decision.reason)
@@ -204,6 +215,7 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     new_text = current.replace(old_string, new_string, 1) if old_string else new_string
     decision = permission.decide_write(
         p, new_text, run_dir=deps.run_dir, defender_dir=deps.defender_dir, policy=deps.policy,
+        shown=_shown(deps, path),
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)

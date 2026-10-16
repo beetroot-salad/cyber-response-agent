@@ -5,14 +5,18 @@ from __future__ import annotations
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
-from defender._knowledge import CHECKOUT_KNOWLEDGE  # noqa: E402
+from defender._knowledge import CHECKOUT_KNOWLEDGE, KnowledgePaths  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
 from defender.run_repository import RUN_LAYOUT  # noqa: E402
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.model_view import ModelView
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
@@ -52,10 +56,28 @@ def _list_dir(d: Path) -> list[str]:
     ]
 
 
-def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
+def workspace_map(
+    run_dir: Path, *, systems: Sequence[str], view: ModelView | None = None,
+) -> str:
     """The model's directory view of the run. `systems` (the Adapters section) is the run's
     roster (`read_roster(...).accepted`), never a directory listing, so the map cannot name a
-    system that `query` would reject as unknown."""
+    system that `query` would reject as unknown.
+
+    `view` is the run's model view (#1255 P1): every root and tree the map names is the model
+    path of the run's own checkout and run folder, and no host root (the repo root is the
+    host's) is named. Without one — the operator's command line — the map names this host's
+    paths, as it always has."""
+    if view is not None:
+        defender_dir = Path(view.defender_dir)
+        knowledge = KnowledgePaths.of_defender_dir(defender_dir)
+
+        def shown(p: Path) -> str:
+            return view.to_model(p)
+        roots = [("DEFENDER_DIR", shown(defender_dir)), ("RUN_DIR", shown(run_dir))]
+    else:
+        defender_dir, knowledge, shown = DEFENDER_DIR, CHECKOUT_KNOWLEDGE, _rel
+        roots = [("DEFENDER_DIR", str(DEFENDER_DIR)), ("REPO_ROOT", str(REPO_ROOT)),
+                 ("RUN_DIR", str(run_dir))]
     lines: list[str] = []
     lines.append("# Workspace map")
     lines.append("")
@@ -65,12 +87,10 @@ def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
     )
     lines.append("")
     lines.append("## Absolute roots")
-    lines.append(f"- DEFENDER_DIR: `{DEFENDER_DIR}`")
-    lines.append(f"- REPO_ROOT: `{REPO_ROOT}`")
-    lines.append(f"- RUN_DIR: `{run_dir}`")
+    lines.extend(f"- {name}: `{value}`" for name, value in roots)
     lines.append("")
 
-    lines.append(f"## Run dir — `{run_dir}`")
+    lines.append(f"## Run dir — `{shown(run_dir) if view is not None else run_dir}`")
     if run_dir.is_dir():
         for child in sorted(run_dir.iterdir()):
             if child.name in _unlisted():
@@ -81,15 +101,15 @@ def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
         lines.append("- (not yet materialized)")
     lines.append("")
 
-    skills_dir = CHECKOUT_KNOWLEDGE.skills_dir
-    lines.append(f"## System skills — `{_rel(skills_dir)}/`")
+    skills_dir = knowledge.skills_dir
+    lines.append(f"## System skills — `{shown(skills_dir)}/`")
     for name in _list_dir(skills_dir):
         sk = skills_dir / name / "SKILL.md"
         marker = " (SKILL.md)" if sk.is_file() else ""
         lines.append(f"- {name}{marker}")
     lines.append("")
 
-    lines.append(f"## Adapters — `{_rel(adapters_under(DEFENDER_DIR))}/`")
+    lines.append(f"## Adapters — `{shown(adapters_under(defender_dir))}/`")
     if systems:
         for name in sorted(systems):
             lines.append(f"- {name}  (a system dispatched via the query tool; do not Read the adapter source)")
@@ -97,8 +117,8 @@ def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
         lines.append("- (none declared)")
     lines.append("")
 
-    queries_dir = CHECKOUT_KNOWLEDGE.catalog_dir
-    lines.append(f"## Gather query templates — `{_rel(queries_dir)}/`")
+    queries_dir = knowledge.catalog_dir
+    lines.append(f"## Gather query templates — `{shown(queries_dir)}/`")
     lines.extend(_template_counts(queries_dir))
     lines.append("")
 

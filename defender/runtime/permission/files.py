@@ -8,7 +8,7 @@ attacker-influenced data the caller must tag-wrap."""
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from defender import _artifact_schema
 from defender._io import bind
@@ -124,7 +124,8 @@ def read_allowed_path(
 
 
 def decide_read(
-    path: Path, *, run_dir: Path, defender_dir: Path, policy: AgentPolicy
+    path: Path, *, run_dir: Path, defender_dir: Path, policy: AgentPolicy,
+    shown: str | None = None,
 ) -> Decision:
     """Allow/deny a file read: a deny-by-default allowlist over the resolved path.
 
@@ -135,20 +136,25 @@ def decide_read(
 
     Holding a root is not permission to see every file under it: `gather_raw/`, the case's
     answer-key artifacts (confined agents), `wire_logs/` and the provenance stamp get their own
-    denies below. The secret/ground-truth denylist applies last. Resolve errors fail closed."""
+    denies below. The secret/ground-truth denylist applies last. Resolve errors fail closed.
+
+    `shown` is how a refusal names the operand: the path the model typed, for a role that sees
+    the model view (#1255 P1 — a refusal never names the host path it was mapped to); omitted,
+    the host path is named."""
     p = Path(path)
+    named = repr(shown) if shown is not None else repr(p)
     try:
         rp = p.resolve()
         rd = Path(run_dir).resolve()
         roots = _resolved_read_roots(policy, run_dir, defender_dir)
     except RESOLVE_ERRORS:
-        return Decision(False, f"Blocked: {p!r} could not be resolved (failing closed).")
+        return Decision(False, f"Blocked: {named} could not be resolved (failing closed).")
     if not any(_is_within(rp, root) for root in roots):
         return Decision(
             False,
             "Blocked: reads are limited to the run dir, the defender corpus (or "
             "this agent's read confine), and its declared roots; "
-            f"{p} is outside them.",
+            f"{shown if shown is not None else p} is outside them.",
         )
     admitted = any(shape.fullmatch(str(rp)) for shape in policy.read_allow)
     # Raw payloads are opt-in for every agent, including one with no shapes: the learning loop
@@ -169,16 +175,17 @@ def decide_read(
     # needs no twin: no confined agent holds a file-opening grant spanning its run dir.
     if policy.read_confine and not admitted and names_case_answer_key(rp, rd):
         return Decision(False, ANSWER_KEY_DENY_REASON)
+    leaf = PurePosixPath(shown).name if shown is not None else rp.name
     if policy.read_allow and not admitted:
         return Decision(
             False,
-            f"Blocked: {rp.name} is not a readable path for this agent — its reads are the "
+            f"Blocked: {leaf} is not a readable path for this agent — its reads are the "
             "paths it declares (its own run dir + the corpus `.md` under "
             "lessons/skills/examples), and this is not one of them.",
         )
     # A secret / ground-truth file inside an allowed shape is still denied.
     if denylisted(rp):
-        return Decision(False, f"Blocked: {rp.name} is a denied read (secrets / ground truth).")
+        return Decision(False, f"Blocked: {leaf} is a denied read (secrets / ground truth).")
     return Decision(True)
 
 
@@ -299,7 +306,7 @@ def is_captured_payload(path: Path) -> bool:
 def decide_write(
     path: Path, proposed_text: str = "", *,
     run_dir: Path, defender_dir: Path,
-    policy: AgentPolicy,
+    policy: AgentPolicy, shown: str | None = None,
 ) -> Decision:
     """Allow/deny a write of `proposed_text` to `path`: the resolved path must `fullmatch` one
     of `policy.write_allow` (empty denies all) and lie within the agent's read containment
@@ -308,23 +315,26 @@ def decide_write(
     The roots are required, not optional, because the artifact gate keys on
     `<run_dir>/<name>`; an omitted `run_dir` would silently skip it. Every allowed write is
     checked for UTF-8 encodability; the two model-authored artifacts are validated against
-    `defender._artifact_schema`, whose reason text is returned so the model can fix its output."""
+    `defender._artifact_schema`, whose reason text is returned so the model can fix its output.
+    `shown` names the operand in a refusal, as `decide_read`'s does."""
     path = Path(path)
+    named = shown if shown is not None else str(path)
     try:
         rp = path.resolve()
     except RESOLVE_ERRORS:
-        return Decision(False, f"Blocked: {path!r} could not be resolved (failing closed).")
+        unresolved = repr(shown) if shown is not None else repr(path)
+        return Decision(False, f"Blocked: {unresolved} could not be resolved (failing closed).")
     if not any(pat.fullmatch(str(rp)) for pat in policy.write_allow):
         return Decision(
             False,
             "Blocked: writes are limited to this agent's declared paths "
-            f"(its write allowlist); {path} is not one of them.",
+            f"(its write allowlist); {named} is not one of them.",
         )
     # Defense-in-depth: catches a write_allow that escapes the agent's read roots.
     if not read_allowed_path(rp, run_dir=run_dir, defender_dir=defender_dir, policy=policy):
         return Decision(
             False,
-            f"Blocked: {path} is outside this agent's read roots — a write must land within the "
+            f"Blocked: {named} is outside this agent's read roots — a write must land within the "
             "agent's read containment (write ⊆ read roots).",
         )
 
@@ -338,7 +348,7 @@ def decide_write(
         # A lone surrogate from a model tool-call arg would otherwise raise
         # `UnicodeEncodeError` out of `write_guarded` instead of returning a refusal. The
         # artifact branch gets the same check inside `validate_artifact`.
-        reason = _artifact_schema.encodable_or_reason(proposed_text, str(path))
+        reason = _artifact_schema.encodable_or_reason(proposed_text, named)
         return Decision(True) if reason is None else Decision(False, reason)
     # The append-only baseline is read here so the schema module stays filesystem-free. A read
     # fault denies: falling back to `current=None` would let the write replace the document.
