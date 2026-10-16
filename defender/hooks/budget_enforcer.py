@@ -131,7 +131,9 @@ def enforcement_state(state: RunState) -> dict:
 
     The one builder of that view: the budget hooks (`driver._budget`) and lead-0's gate both
     read it, so on the same state they answer "is the tail spent?" from one clock."""
-    return {**state.budget_snapshot(), _ELAPSED: state.elapsed}
+    return {**state.budget_snapshot(), _ELAPSED: state.elapsed,
+            # Informational: the seconds the reader above already excludes.
+            "oracle_held": oracle_held(state)}
 
 
 def _wall_origin(state: dict) -> datetime | None:
