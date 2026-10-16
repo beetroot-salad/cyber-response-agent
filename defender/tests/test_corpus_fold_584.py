@@ -67,18 +67,17 @@ TID = H1105.T_ID
 
 
 def _tenant_runs() -> Path:
-    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105
-    PR 2 (J8, declared change 10): the tracer takes a required `--tenant` and walks that
-    tenant's runs (`--runs-dir` is gone). The data root is conftest's autouse per-test one; the
-    tenant is set up here, on request, so tests that never trace keep a tenant-free root."""
-    from defender import _tenant
+    """The tenant's natural runs folder `<data root>/<T>/runs` — #1105 PR 2 (J8, declared
+    change 10): the tracer takes a required `--tenant` and walks that tenant's runs
+    (`--runs-dir` is gone). The data root is conftest's autouse per-test one; the tenant is set
+    up here, on request, so tests that never trace keep a tenant-free root. #1187 (R1): the
+    folder holds run folders (UUID-named, `test_trace_lesson._mk_run`) only — no `_tenant.json`."""
     from defender.tests._data_root_1078 import current_data_root
 
     root = current_data_root()
     H1105.tenant(root, TID)
     runs = root / TID / "runs"
     runs.mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, TID)
     return runs
 
 
@@ -652,7 +651,7 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
 
     rc = tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
     captured = capsys.readouterr()
-    assert rc == 0
+    assert rc == 0, captured.err
 
     lines = [ln for ln in captured.out.splitlines() if ln.strip()]
     assert [ln.split("\t")[0] for ln in lines] == ["alpha", "beta", "undecodable", "unfenced"]
@@ -709,7 +708,8 @@ def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
     oracle = record_lesson_load.lesson_name(str(lesson_path))
     assert oracle == "foo-bar"
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0  # #1105 PR 2 (J8, declared change 10)
+    # #1105 PR 2 (J8, declared change 10)
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
     first_column = capsys.readouterr().out.splitlines()[0].split("\t")[0]
     assert first_column == oracle
 
@@ -737,7 +737,7 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
     _mk_run(runs, "case-a", disposition="malicious",
             loads=[{"lesson_name": "foo-bar", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
     assert capsys.readouterr().out.splitlines() == ["foo-bar\td\t1\t0"]
 
 

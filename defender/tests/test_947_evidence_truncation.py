@@ -63,6 +63,7 @@ from defender.tests._branch_947 import (  # noqa: E402
 )
 from defender.tests._session_store_705 import store_mod  # noqa: E402
 from defender.tests._alert_plant import plant_alert
+from defender.tests._fixture_uuid import fixture_uuid
 
 #: The tool a lead is dispatched through. The design calls it `gather_dispatch`; the runtime
 #: registers it as `gather` (`tools_gather.register_gather_tool`, and `driver.py`'s own comment
@@ -175,7 +176,8 @@ def gathering_source(tmp_path, *, spelling: str = "dict"):
 
 
 def sibling_dir(tmp_path, name: str = "run-sibling") -> Path:
-    target = tmp_path / "defender-runs" / name
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(name)
+    target = tmp_path / "defender-runs" / fixture_uuid(name)
     (target / "gather_raw").mkdir(parents=True, exist_ok=True)
     return target
 

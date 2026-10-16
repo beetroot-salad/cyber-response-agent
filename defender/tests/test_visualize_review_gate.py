@@ -26,6 +26,7 @@ from defender.runtime.challenge_gate import REVIEW_ROLES
 from defender.scripts.visualize import visualize_data as d
 from defender.scripts.visualize.visualize_primitives import parse_report
 from defender.scripts.visualize.visualize_runtime import render_review_gate
+from defender.tests._fixture_uuid import fixture_uuid
 
 _SALT = "deadbeef"
 
@@ -57,7 +58,8 @@ def _trace_row(run: Path, role: str, round_no: int, row: dict, reply: str | None
 
 def _challenged_then_stands(tmp_path: Path) -> Path:
     """A run challenged once, then committed: records 1 and 2, trace rounds 0 and 1."""
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _write_report(
         run, disposition="malicious", outcome="stands",
@@ -131,7 +133,8 @@ def test_prose_reply_survives_the_row_reader(tmp_path):
 
 
 def test_forced_inconclusive_shows_the_disposition_the_gate_moved(tmp_path):
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _write_report(
         run, disposition="inconclusive", outcome="forced-inconclusive",
@@ -152,7 +155,8 @@ def test_forced_inconclusive_shows_the_disposition_the_gate_moved(tmp_path):
 
 
 def test_failed_review_is_named_as_machinery_not_a_finding(tmp_path):
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _write_report(
         run, disposition="inconclusive", outcome="forced-inconclusive",
@@ -175,7 +179,8 @@ def test_skipped_ablation_is_not_reported_as_ok(tmp_path):
     """`ok: true` means a stage ANSWERED. An ablation with no load-bearing edge to withhold
     was never dispatched and its row carries `skipped` and no `ok` — the panel must keep
     those apart, exactly as the gate's own writer does."""
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _write_report(run, disposition="benign", outcome="stands",
                   cause="the challenge review ran and left nothing about the finding unsettled")
@@ -196,7 +201,8 @@ def test_pre_change_inconclusive_close_says_it_was_never_reviewed(tmp_path):
     survived" — so for a record with no `reviewed` field the split falls back to the bypass set
     of its day, where `inconclusive` was a member. A post-change reviewed `inconclusive` shares
     the `reviewed_disposition` value but carries `reviewed: true`, and renders apart."""
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _write_report(run, disposition="inconclusive", outcome="stands",
                   cause="the disposition was recorded without a challenge review")
@@ -239,7 +245,8 @@ def test_a_bypassed_attempt_beside_a_reviewed_one_is_not_reported_as_stands(tmp_
     The bypassed one carries `verdict: stands` — the close tool's word for "committed
     unchanged" — and rendering that verbatim says a review ran and the disposition survived,
     which is the same claim the all-bypassed guard exists to refuse."""
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _write_report(run, disposition="inconclusive", outcome="stands",
                   cause="the disposition was recorded without a challenge review")
@@ -273,7 +280,8 @@ def test_the_headline_badge_does_not_claim_a_review_that_never_ran(tmp_path):
     `inconclusive` close writes `outcome: stands` with the not-reviewed cause."""
     from defender.scripts.visualize.visualize_run import _gate_badge_html
 
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _write_report(run, disposition="inconclusive", outcome="stands",
                   cause="the disposition was recorded without a challenge review")
@@ -285,7 +293,8 @@ def test_the_headline_badge_does_not_claim_a_review_that_never_ran(tmp_path):
 def test_a_framed_reply_keeps_its_paragraph_breaks(tmp_path):
     """A blank line inside a framed reply is the model's own; dropping it reflows a
     multi-paragraph reading into one run-on block on the surface that exists to show it."""
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _write_report(run, disposition="benign", outcome="stands", cause="x")
     (run / RunPaths(run).review_record(1).name).write_text(json.dumps({
@@ -298,7 +307,8 @@ def test_a_framed_reply_keeps_its_paragraph_breaks(tmp_path):
 
 
 def test_no_records_is_an_unfinished_run_not_a_clean_one(tmp_path):
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _write_report(run, disposition="benign", outcome="stands", cause="x")
     html, n = render_review_gate(run, parse_report(run))

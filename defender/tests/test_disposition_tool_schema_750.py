@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from dataclasses import replace as _with_fixture_run_1165
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 
@@ -69,7 +70,8 @@ NEAR_MISSES = ("Benign", "benign ", LACED, "totally-benign", "")
 
 def _deps(tmp_path: Path):
     """MAIN's deps through the REAL `bind` seam — the real compiled policy, the real gate."""
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     (run_dir / "alert.json").write_bytes((GOLDEN / "alert.json").read_bytes())
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())

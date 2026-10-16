@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import replace as _with_fixture_run_1165
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+from defender.tests._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 
 import ast
 import inspect
@@ -81,7 +82,9 @@ class ScriptedModel:
 
 
 def _run_dir(tmp_path: Path, name: str = "run") -> Path:
-    rd = tmp_path / name
+    """A run folder under `tmp_path`, `name` its label (or its id, when already a UUID)."""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    rd = tmp_path / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     (rd / "gather_raw").mkdir(parents=True)
     (rd / "alert.json").write_text(json.dumps({"rule": {"name": "probe"}}))
     return rd

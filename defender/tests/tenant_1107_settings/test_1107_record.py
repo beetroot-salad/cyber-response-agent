@@ -33,6 +33,7 @@ import pytest
 
 from defender.runtime import run_tenant
 from defender.scripts.adapters import _stub_transport as transport
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests import _tenants1106 as T1106
 from defender.tests._by_path import load_module
 from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
@@ -155,7 +156,7 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
     unconfigured = tmp_path / "unconfigured"
     bare = S.plant(unconfigured, marker="d0u")
     S.config_path(bare, "case-history").unlink()
-    run_dir = tmp_path / "runs" / "r-d0"
+    run_dir = tmp_path / "runs" / fixture_uuid("r-d0")  # #1187 (declared change 1)
     run_dir.mkdir(parents=True)
     env = shim.env({"PATH": os.environ.get("PATH", "")})
     assert S.open_step(run_dir, _resolve(unconfigured), env=env) is None
@@ -169,7 +170,7 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
     assert isinstance(failure["reason"], str), failure
     assert failure["reason"].strip(), failure
 
-    ok_dir = tmp_path / "runs" / "r-d0ok"
+    ok_dir = tmp_path / "runs" / fixture_uuid("r-d0ok")  # #1187 (declared change 1)
     ok_dir.mkdir(parents=True)
     shim.respond(*S.store_answers_ok(ok_dir.name))
     # `aborted`: the escalation note, the one arm that posts without a report in the run dir.

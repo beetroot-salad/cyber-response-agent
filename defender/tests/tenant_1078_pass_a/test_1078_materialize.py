@@ -310,8 +310,10 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
     alert = RunPaths(src).alert
     argv = H.sibling_argv(ep / "family.yaml", "b", "--tenant", T_ID)
     with Episode.open(ep) as episode:
+        # #1187 (O4b): the sibling's form names its roster label (`roster_label=`, replacing
+        # PR 2's `container_required`).
         view = H.accept(tenant_root, T_ID).runs_repository().episode(
-            ep.name, held=episode, container_required=True)
+            ep.name, held=episode, roster_label="b")
         for n, learning in enumerate((tenant_root, tenant_root / T_ID / "learning", tmp_path)):
             monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
             widened = H.owner_refusal(H.resolve_data_root)

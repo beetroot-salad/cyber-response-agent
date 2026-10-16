@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
 from defender.tests._spec1077 import fixture_run as _live_run_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 import ast
 import json
@@ -84,7 +85,8 @@ def _main_deps(tmp_path: Path):
     from defender.agents import MAIN_DEF
     from defender.runtime.agent_definition import bind
 
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     (run_dir / "alert.json").write_bytes((GOLDEN / "alert.json").read_bytes())
     dfn = tmp_path / "defender"

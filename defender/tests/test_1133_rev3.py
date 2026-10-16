@@ -414,7 +414,7 @@ def test_r1_delta_o_with_no_archived_worlds_is_empty_before_the_base_is_read(tmp
     fifo = None
     if base != "absent":
         fifo = S.plant_leaf(at, base, host=host).fifo
-    assert S.in_time(lambda: episode_mod().delta_o(ep), fifo=fifo) == {}
+    assert S.in_time(lambda: J.through_view(ep, episode_mod().delta_o), fifo=fifo) == {}
 
 
 @pytest.mark.parametrize("kind", ["absent", "symlink", "dangling", "hardlink", "fifo",
@@ -433,7 +433,7 @@ def test_r1_delta_o_refuses_an_absent_or_refused_base_as_no_primed_base(tmp_path
     planted = None if kind == "absent" else S.plant_leaf(at, kind, host=host, body=good)
     before = S.census(ep)
 
-    raised = S.raised_by(lambda: episode_mod().delta_o(ep),
+    raised = S.raised_by(lambda: J.through_view(ep, episode_mod().delta_o),
                          fifo=planted.fifo if planted else None)
     assert isinstance(raised, ledger.LedgerError), f"delta_o over a {kind} base: {raised!r}"
     assert "no primed base" in str(raised), raised
@@ -442,7 +442,7 @@ def test_r1_delta_o_refuses_an_absent_or_refused_base_as_no_primed_base(tmp_path
     if planted is not None:
         planted.remove()
     at.write_bytes(good)
-    out = episode_mod().delta_o(ep)
+    out = J.through_view(ep, episode_mod().delta_o)
     assert out["b"]["k1"] == "same", out
     assert "k2" in out["b"], out
 
@@ -459,7 +459,7 @@ def test_r1_delta_o_refuses_a_refused_world_file_naming_it(tmp_path, host, kind)
     at.unlink()
     planted = S.plant_leaf(at, kind, host=host, body=good)
 
-    raised = S.raised_by(lambda: episode_mod().delta_o(ep), fifo=planted.fifo)
+    raised = S.raised_by(lambda: J.through_view(ep, episode_mod().delta_o), fifo=planted.fifo)
     assert isinstance(raised, episode_mod().EpisodeError), (
         f"delta_o over a {kind} world file: {raised!r}")
     assert at.name in str(raised), f"the refusal does not name {at.name}: {raised}"
@@ -477,7 +477,7 @@ def test_r1_delta_o_reads_an_absent_world_file_as_serving_nothing(tmp_path, stat
     elif state == "undecodable":
         at.write_bytes(b"\xff\xfe not a row\n" + json.dumps(T.captured_row(key="k1")).encode()
                        + b"\n")
-    out = episode_mod().delta_o(ep)
+    out = J.through_view(ep, episode_mod().delta_o)
     if state == "absent":
         assert out["b"] == {}, out
     else:
@@ -496,19 +496,19 @@ def test_r1_delta_os_outcome_gate_refuses_a_refused_outcome_record(tmp_path, hos
     record.unlink()
     planted = plant_record(record, kind, host=host)
 
-    raised = S.raised_by(lambda: episode_mod().delta_o(ep), fifo=planted.fifo)
+    raised = S.raised_by(lambda: J.through_view(ep, episode_mod().delta_o), fifo=planted.fifo)
     assert isinstance(raised, episode_mod().EpisodeError), (
         f"delta_o past a {kind} outcome record: {raised!r}")
 
     planted.remove()
     record.write_bytes(good)
-    assert episode_mod().delta_o(ep)["b"]["k1"] == "same"
+    assert J.through_view(ep, episode_mod().delta_o)["b"]["k1"] == "same"
     record.write_text("outcome: [unclosed\n", encoding="utf-8")
     with pytest.raises(episode_mod().EpisodeError):
-        episode_mod().delta_o(ep)
+        J.through_view(ep, episode_mod().delta_o)
     J.outcome_record(ep, "unusable", reason="r")
     with pytest.raises(episode_mod().EpisodeError):
-        episode_mod().delta_o(ep)
+        J.through_view(ep, episode_mod().delta_o)
 
 
 @pytest.mark.parametrize("via", ["bind", "episode-view", "delta_o"])
@@ -528,12 +528,14 @@ def test_r1_load_family_through_a_view_names_family_yaml_never_a_path(tmp_path, 
 
     def load() -> Any:
         if via == "delta_o":
-            return episode_mod().delta_o(ep)
+            return J.through_view(ep, episode_mod().delta_o)
+        # #1187 (R5, declared change 10): the loader is told the episode's id (its folder's
+        # name) and refuses a manifest naming another; `expected_episode_id=` is required.
         if via == "bind":
             with _io.bind(ep) as view:
-                return fam.load_family(view)
+                return fam.load_family(view, expected_episode_id=ep.name)
         with S.open_episode(ep) as episode:
-            return fam.load_family(episode.view())
+            return fam.load_family(episode.view(), expected_episode_id=ep.name)
 
     raised = S.raised_by(load)
     assert isinstance(raised, fam.FamilyError), f"{via} over a {state} manifest: {raised!r}"

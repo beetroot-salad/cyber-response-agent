@@ -43,8 +43,9 @@ pytestmark = pytest.mark.e2e
 #: The later run — the one gathering — and so the key of its own case: a run id, so a UUID
 #: (#1187 declared change 1; the replay harness names the run's folder by it).
 SELF = fixture_uuid("1221-later-run")
-#: The earlier run whose recorded investigation is on an open case.
-PRIOR = "20261001t090000z-1221-prior-run"
+#: The earlier run whose recorded investigation is on an open case — a run id too, so a UUID:
+#: #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>).
+PRIOR = fixture_uuid("20261001t090000z-1221-prior-run")
 LEAD = "l-001"
 ENRICHMENT = "OWN-CASE-ENRICHMENT-1221: the host is a CI runner owned by build-infra"
 PRIOR_NOTES = "PRIOR-RUN-NOTES-1221: the binary is the fleet's packaged metrics shipper"

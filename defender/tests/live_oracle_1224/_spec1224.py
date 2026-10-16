@@ -1253,14 +1253,15 @@ def load_world(ep: Path, label: str) -> Any:
     after its roster check (#1187): the manifest loaded with the episode's own folder name as the
     expected id (R5, `expected_episode_id=`), and the world handed the episode's ARM ROSTER
     (`arm_ids=`, `{label: RunId}`) — its own run id and the redaction set's arm ids come from
-    the roster, never composed (O4, S-red). A hand-built episode with no roster yet gets one
-    here, as RUNS would have written it (`_triplet_947.roster_arm_id`)."""
+    the roster, never composed (O4, S-red). A hand-built episode with no roster yet takes the
+    fixture's explicit RUNS step here (`_triplet_947.plant_roster`: `runs/`, then a roster
+    naming every manifest world); the roster reader itself never writes one (review-3 F33)."""
     from defender.run_repository import RunId
 
     fam = mod(FAMILY)
     ep = Path(ep)
     if not (ep / T.ROSTER_NAME).is_file():
-        T.roster_arm_id(ep, label)
+        T.plant_roster(ep)
     arm_ids = {name: RunId.parse(arm) for name, arm in T.read_roster(ep).items()}
     with mod("_episode_handle").Episode.create(ep) as handle:
         family = fam.load_family(handle.view(), expected_episode_id=ep.name)

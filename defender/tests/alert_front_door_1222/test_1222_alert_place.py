@@ -40,6 +40,7 @@ No `monkeypatch.setattr` anywhere; `setenv`/`delenv` only.
 """
 from __future__ import annotations
 
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 import contextlib
@@ -142,7 +143,8 @@ def _run(tmp_path: Path, *, alert: Mapping[str, Any] | bytes | None = None,  # n
         tmp_path, alert=alert if alert is not None else _alert(),
         tenant=tenant if tenant is not None else _tenant(),
         # Unique per run: a scenario that drives two runs under one tenant must not collide.
-        run_id=run_id or f"s08-{uuid.uuid4().hex[:10]}",
+        # #1187 (declared change 1): a run id is a canonical UUID.
+        run_id=run_id or str(uuid.uuid4()),
         main=main if main is not None else _MAIN_TWO_REQUESTS, leads=leads,
         backend=S.Backend(answer=_resolving), **kw)
 
@@ -260,7 +262,7 @@ def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PL
         return around(prod, kw) if around is not None else prod(**kw)
 
     argv = [str(src / "alert.json"), "--tenant", planted.tenant_id,
-            "--run-id", run_id or f"s08-{uuid.uuid4().hex[:10]}"]
+            "--run-id", run_id or str(uuid.uuid4())]  # #1187 (declared change 1): a UUID
     if enqueue is None:
         argv.append("--no-learn")
     return S.sym("run", "main")(
@@ -926,7 +928,7 @@ def test_p149_agents_read_permission_and_the_one_directory_dow(tmp_path):
     refused read names the file it refused."""
     rel, rec = S.alert_rel(), S.record_rel()
     planted = _tenant()
-    run_id = "s08-p149"
+    run_id = fixture_uuid("s08-p149")  # #1187 (declared change 1): a UUID
     run_dir = planted.runs / run_id
     reads = [S.call("read_file", path=rel), S.call("bash", command=f"cat {rel}"),
              S.call("read_file", path=str(run_dir / rel)),
@@ -1132,7 +1134,8 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     assert fresh_binds, "a fresh run's box mounts nothing read-only inside its run folder"
     assert [b["target"] for b in fresh_binds] == [str(S.input_dir(src))]
     # The launcher's copy in the episode (A1; launch itself is S11's), then a sibling resumed.
-    ep = T.episode(tmp_path, root=Path(os.environ[T.EPISODES_BASE_ENV]),
+    # #1187 (O9, declared change 5): the episode lives under its tenant, `<T>/episodes/<uuid>/`.
+    ep = T.episode(tmp_path, root=planted.root / planted.tenant_id / "episodes",
                    doc=T.family_doc(source_run_dir=str(src), source_run_id=src.name))
     from defender._episode_handle import Episode
     with Episode.open(ep) as episode:

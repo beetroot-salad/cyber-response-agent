@@ -25,6 +25,7 @@ shared `S.Backend` through the real `search_envelope`.
 """
 from __future__ import annotations
 
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 import json
@@ -237,13 +238,13 @@ def test_opening_message_holds_one_correlation_section(tmp_path):
     (scripted marker) and a dispatch that raised (PR-12's provider refusal)."""
     marker = "CORR-SUMMARY-S04-ONE"
     planted = S.plant_tenant("acme")
-    told = S.run_alert(tmp_path / "summary", tenant=planted, run_id="s04-one-summary",
+    told = S.run_alert(tmp_path / "summary", tenant=planted, run_id=fixture_uuid("s04-one-summary"),
                        leads={S.L3: [S.text(f"{marker}: 2 scoped, 9 unscoped.")]})
     _run_with_turns(told)
     _assert_summary_in_opening(told, marker)
     _assert_nothing_later(told, marker)
 
-    raised = S.run_alert(tmp_path / "raised", tenant=planted, run_id="s04-one-raised",
+    raised = S.run_alert(tmp_path / "raised", tenant=planted, run_id=fixture_uuid("s04-one-raised"),
                          leads={S.L3: [S.text(f"{marker}: never sent")]},
                          lead_faults={S.L3: S.LeadFault(raise_on=1, exc=S.provider_refusal)})
     _run_with_turns(raised)
@@ -274,7 +275,7 @@ def test_slim_heading_names_l00c_reserved(tmp_path):
     Observed on a run whose lead summarised and on one whose table withholds the lead."""
     for label, table in (("granted", S.TABLE_ELASTIC), ("withheld", S.TABLE_WITHHELD)):
         planted = S.plant_tenant(f"slim-{label}", table=table)
-        d = S.run_alert(tmp_path / label, tenant=planted, run_id=f"s04-slim-{label}")
+        d = S.run_alert(tmp_path / label, tenant=planted, run_id=fixture_uuid(f"s04-slim-{label}"))
         _run_with_turns(d)
         opening = d.opening_message
         assert S.L0 not in opening, (
@@ -295,7 +296,7 @@ def test_o3_opening_prompt_carries_no_ancestor_section(tmp_path):
     planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
     alert = S.fixture_alert()
     d = S.run_alert(tmp_path, alert=alert, tenant=planted, backend=_resolving_backend(),
-                    run_id="s04-o3-prompt")
+                    run_id=fixture_uuid("s04-o3-prompt"))
     _run_with_turns(d)
     opening = d.opening_message
     assert ANCESTOR_DOC_MARK not in opening, (
@@ -327,7 +328,7 @@ def test_o1_non_elastic_tenant_gets_correlation_without_kibana_fields(tmp_path):
     alert = S.generic_alert()
     assert not set(S.KIBANA_KEYS) & set(alert), "the O1 alert must carry no Kibana field"
     planted = S.plant_tenant("acme", table=S.TABLE_NON_ELASTIC, omit_systems=("elastic",))
-    d = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="s04-o1",
+    d = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id=fixture_uuid("s04-o1"),
                     leads={S.L3: [S.query("cmdb", "list-hosts", {}),
                                   S.text(f"{marker}: 3 hosts share the role.")]})
     _run_with_turns(d)
@@ -354,7 +355,7 @@ def test_correlation_dispatches_with_no_or_unparseable_timestamp(tmp_path):
     }
     contracts: dict[str, tuple[str, str, str]] = {}
     for label, alert in alerts.items():
-        d = S.run_alert(tmp_path / label, alert=alert, tenant=planted, run_id=f"s04-ts-{label}")
+        d = S.run_alert(tmp_path / label, alert=alert, tenant=planted, run_id=fixture_uuid(f"s04-ts-{label}"))
         _run_with_turns(d)
         assert d.router.dispatched(S.L3), f"[{label}] l-00c was not dispatched"
         assert d.has_sidecar(S.L3), f"[{label}] l-00c owns no leads row"
@@ -383,7 +384,7 @@ def test_tenant_without_elastic_folder_runs_to_close(tmp_path):
     leads = {S.L3: [S.query("cmdb", "list-hosts", {}), S.text(f"{marker}: nothing related.")]}
     bare = S.plant_tenant("tbare1222", table=S.TABLE_NON_ELASTIC, omit_systems=("elastic",))
     assert not (bare.settings / "systems" / "elastic").exists()
-    d = S.run_alert(tmp_path / "bare", tenant=bare, run_id="s04-noelastic",
+    d = S.run_alert(tmp_path / "bare", tenant=bare, run_id=fixture_uuid("s04-noelastic"),
                     main=S.closing_main_turns(), leads=leads)
     _run_with_turns(d)
     assert d.router.dispatched(S.L3), "l-00c was not dispatched on a tenant without elastic"
@@ -395,7 +396,7 @@ def test_tenant_without_elastic_folder_runs_to_close(tmp_path):
 
     full = S.plant_tenant("tfull1222", table=S.TABLE_NON_ELASTIC)
     assert (full.settings / "systems" / "elastic").is_dir()
-    ctl = S.run_alert(tmp_path / "full", tenant=full, run_id="s04-noelastic",
+    ctl = S.run_alert(tmp_path / "full", tenant=full, run_id=fixture_uuid("s04-noelastic"),
                       main=S.closing_main_turns(), leads=leads)
     _run_with_turns(ctl)
     assert _opening(d, bare.tenant_id) == _opening(ctl, full.tenant_id), (
@@ -420,7 +421,7 @@ def test_o2_kibana_fixture_alert_still_gets_its_correlation_summary(tmp_path):
             main = [S.gather("l-001", "elastic", "fetch the alert's constituent events"),
                     S.text(S.DONE)]
         d = S.run_alert(tmp_path / slug, alert=S.fixture_alert(slug), tenant=planted,
-                        run_id=f"s04-o2-{i}", main=main,
+                        run_id=fixture_uuid(f"s04-o2-{i}"), main=main,
                         leads={S.L3: [S.text(f"{marker}: 1 scoped, 4 unscoped.")],
                                "l-001": [S.query("elastic", "query",
                                                  {"native_query": '_id: "AZ5fuw9rEmDJyXFcPn5t"',
@@ -448,7 +449,7 @@ def test_o3_only_l00c_backend_calls_precede_mains_first_request(tmp_path):
     main = _AtFirstRequest([S.gather("l-001", "elastic", "measure the host"), S.text(S.DONE)],
                            backend)
     d = S.run_alert(tmp_path, alert=S.fixture_alert(), tenant=planted, backend=backend,
-                    main=main, before=main.bind, run_id="s04-o3-calls",
+                    main=main, before=main.bind, run_id=fixture_uuid("s04-o3-calls"),
                     leads={S.L3: [S.query("elastic", "alerts", {"native_query": corr_q}),
                                   S.text("CORR-O3: 1 scoped.")],
                            "l-001": [S.query("elastic", "query", {"native_query": "l001:probe"}),
@@ -504,7 +505,7 @@ def test_p013_mains_first_turn_dispatches_leads_while_correlat(tmp_path):
         if corr:
             leads[S.L3] = corr
         d = S.run_alert(tmp_path / label, alert=S.fixture_alert(), tenant=planted,
-                        backend=backend, main=main, before=main.bind, run_id=f"s04-p013-{label}",
+                        backend=backend, main=main, before=main.bind, run_id=fixture_uuid(f"s04-p013-{label}"),
                         leads=leads)
         _run_with_turns(d)
         assert main.rows is not None
@@ -537,7 +538,7 @@ def test_l000_is_claimed_like_any_lead_on_a_new_run(tmp_path):
                     "what_to_summarize": ["what the system says"]}),
         ("gather", {"lead_id": "l-001", "system": "elastic", "goal": "lead one, ordinary",
                     "what_to_summarize": ["what the system says"]})))
-    d = S.run_alert(tmp_path, tenant=planted, run_id="s04-l000", main=[first, S.text(S.DONE)],
+    d = S.run_alert(tmp_path, tenant=planted, run_id=fixture_uuid("s04-l000"), main=[first, S.text(S.DONE)],
                     leads={S.L0: [S.query("elastic", "query", {"native_query": "l000:probe"}),
                                   S.text("L0-ORDINARY-SUMMARY")],
                            "l-001": [S.query("elastic", "query", {"native_query": "l001:probe"}),
@@ -582,7 +583,7 @@ def test_o4_agent_fetches_constituent_events_through_a_gather_lead(tmp_path):
 
     native = "_id: (" + " OR ".join(f'"{i}"' for i in ids) + ")"
     d = S.run_alert(tmp_path, alert=alert, tenant=planted, backend=S.Backend(answer=answer),
-                    run_id="s04-o4-fetch",
+                    run_id=fixture_uuid("s04-o4-fetch"),
                     main=[S.gather("l-001", "elastic", "fetch the alert's constituent events"),
                           S.text(S.DONE)],
                     leads={"l-001": [S.query("elastic", "query",
@@ -615,7 +616,7 @@ def test_o4_backing_index_bound_verbatim_is_refused_naming_patterns(tmp_path):
     backend = S.Backend()
     native = f'_id: "{alert["ancestor_events"][0]["id"]}"'
     d = S.run_alert(tmp_path, alert=alert, tenant=planted, backend=backend,
-                    verbs=_registry_with_real_elastic(backend, "query"), run_id="s04-o4-refuse",
+                    verbs=_registry_with_real_elastic(backend, "query"), run_id=fixture_uuid("s04-o4-refuse"),
                     main=[S.gather("l-001", "elastic", "fetch the alert's constituent events"),
                           S.text(S.DONE)],
                     leads={"l-001": [S.query("elastic", "query",
@@ -666,7 +667,7 @@ def test_p132_sequence_alert_whose_constituents_are_building_b(tmp_path):
     backend = S.Backend(answer=answer)
     native = '_id: ("bb-0001" OR "bb-0002")'
     d = S.run_alert(tmp_path, alert=alert, tenant=planted, backend=backend,
-                    verbs=_registry_with_real_elastic(backend, "alerts"), run_id="s04-p132",
+                    verbs=_registry_with_real_elastic(backend, "alerts"), run_id=fixture_uuid("s04-p132"),
                     main=[S.gather("l-001", "elastic", "fetch the sequence's building blocks"),
                           S.text(S.DONE)],
                     leads={"l-001": [S.query("elastic", "query",
@@ -700,7 +701,7 @@ def test_p133_ancestor_index_with_no_configured_pattern(tmp_path):
     backend = S.Backend()  # its `alerts` answers the real envelope with zero hits
     outside = "remote-cluster:logs-system.auth-*"
     d = S.run_alert(tmp_path, alert=S.fixture_alert(), tenant=planted, backend=backend,
-                    verbs=_registry_with_real_elastic(backend, "query"), run_id="s04-p133",
+                    verbs=_registry_with_real_elastic(backend, "query"), run_id=fixture_uuid("s04-p133"),
                     main=[S.gather("l-001", "elastic", "fetch the constituents"), S.text(S.DONE)],
                     leads={"l-001": [S.query("elastic", "query",
                                              {"native_query": '_id: "gone-1"', "index": outside}),
@@ -758,7 +759,7 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path):
         runs[tenant_id] = S.run_alert(tmp_path / tenant_id, alert=alert,
                                       tenant=planted, backend=backend,
                                       verbs=_registry_with_real_elastic(backend, "query"),
-                                      run_id="s04-p134", main=main, leads=leads)
+                                      run_id=fixture_uuid("s04-p134"), main=main, leads=leads)
         _run_with_turns(runs[tenant_id])
     faulted, healthy = runs["tfault1222"], runs["tgood1222"]
     assert _opening(faulted, "tfault1222") == _opening(healthy, "tgood1222"), (
@@ -781,13 +782,13 @@ def test_p135_tenant_with_no_siem_and_correlation_withheld(tmp_path):
     A tenant with no elastic folder whose table withholds the lead; the control is the same
     tenant with an elastic folder."""
     bare = S.plant_tenant("tbare1222", table=S.TABLE_WITHHELD, omit_systems=("elastic",))
-    d = S.run_alert(tmp_path / "bare", tenant=bare, run_id="s04-p135")
+    d = S.run_alert(tmp_path / "bare", tenant=bare, run_id=fixture_uuid("s04-p135"))
     _run_with_turns(d)
     prose = S.harness_text(d.opening_message)
     assert BASE_ANCESTOR_WORD not in prose.lower(), (
         "MAIN's opening message on a tenant with no SIEM still speaks of ancestors")
     full = S.plant_tenant("tfull1222", table=S.TABLE_WITHHELD)
-    ctl = S.run_alert(tmp_path / "full", tenant=full, run_id="s04-p135")
+    ctl = S.run_alert(tmp_path / "full", tenant=full, run_id=fixture_uuid("s04-p135"))
     _run_with_turns(ctl)
     assert _opening(d, bare.tenant_id) == _opening(ctl, full.tenant_id), (
         "the opening message on a tenant with no elastic folder differs from one with — it "
@@ -826,7 +827,7 @@ def test_r1_every_harness_slot_of_mains_opening_message_is_bound(tmp_path):
     alert = S.generic_alert(rule={"id": "R-1001", "name": "Beacon",
                                   "description": "Beacon every {interval}s to {dest}"})
     shim = S.RecordingShim(real=_canned_shim)
-    d = S.run_alert(tmp_path, alert=alert, tenant=S.plant_tenant("acme"), run_id="s04-r1",
+    d = S.run_alert(tmp_path, alert=alert, tenant=S.plant_tenant("acme"), run_id=fixture_uuid("s04-r1"),
                     orient_shim=shim,
                     leads={S.L3: [S.text(f"{marker}: window {{start}}..{{end}} on detected_at")]})
     _run_with_turns(d)
@@ -890,7 +891,7 @@ def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):
                     "what_to_summarize": ["one count"]}) for lead in ("l-001", "l-002")))
     d = S.run_alert(
         tmp_path, alert=S.fixture_alert(), backend=_resolving_backend(),
-        tenant=S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING), run_id="s04-r2",
+        tenant=S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING), run_id=fixture_uuid("s04-r2"),
         store_factory=S.store_factory(tmp_path / "db", sink=sink),
         main=[first, S.text(S.DONE)],
         leads={S.L3: [S.query("elastic", "alerts", {"native_query": "r2:corr"}),
@@ -1054,7 +1055,7 @@ def test_p012_run_ends_at_mains_first_answer_with_correlation(tmp_path):
     backend = S.Backend()
     main = _AtFirstRequest([S.text(S.DONE)], backend)
     d = S.run_alert(tmp_path, tenant=S.plant_tenant("acme"), backend=backend, main=main,
-                    before=main.bind, run_id="s04-p012",
+                    before=main.bind, run_id=fixture_uuid("s04-p012"),
                     leads={S.L3: [S.query("elastic", "alerts", {"native_query": "p012:corr"}),
                                   S.text(f"{marker}: 4 scoped.")]})
     _run_with_turns(d)
@@ -1083,7 +1084,7 @@ def test_p033_mains_first_request_retried_before_correlation_i(tmp_path):
     marker = "CORR-P033-RETRY"
     d = S.run_alert(tmp_path, alert=S.fixture_alert(), backend=_resolving_backend(),
                     tenant=S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING),
-                    run_id="s04-p033",
+                    run_id=fixture_uuid("s04-p033"),
                     main=[S.gather("not a lead id", "elastic", "bad id"), S.text(S.DONE)],
                     leads={S.L3: [S.text(f"{marker}: 3 scoped.")]})
     _run_with_turns(d)
@@ -1106,7 +1107,7 @@ def test_p173_run_request_count_now_includes_the_leads_request(tmp_path):
 
     The count is the run summary's; the wire log the run is priced from carries the lead's
     requests under its own agent id."""
-    d = S.run_alert(tmp_path, tenant=S.plant_tenant("acme"), run_id="s04-p173",
+    d = S.run_alert(tmp_path, tenant=S.plant_tenant("acme"), run_id=fixture_uuid("s04-p173"),
                     leads={S.L3: [S.query("elastic", "alerts", {"native_query": "p173:corr"}),
                                   S.text("CORR-P173: 2 scoped.")]})
     _run_with_turns(d)
@@ -1181,7 +1182,7 @@ def test_p034_sibling_branched_before_the_correlation_entry_la(tmp_path):
     marker = "CORR-P034-INHERIT"
     planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
     src, sib = _source_then_sibling(
-        tmp_path, planted=planted, run_id="s04-p034",
+        tmp_path, planted=planted, run_id=fixture_uuid("s04-p034"),
         corr=[S.text(f"{marker}: 2 scoped.")],
         capture=("elastic", "query", {"native_query": "p034:capture"}),
         sibling_turns=[S.text("Resumed and stopping.")])
@@ -1206,7 +1207,7 @@ def test_p037_ancestor_heading_asserts_a_claim_that_then_fails(tmp_path):
     marker = "CORR-P037-NEVER"
     planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
     control = S.run_alert(tmp_path / "control", alert=S.fixture_alert(), tenant=planted,
-                          backend=_resolving_backend(), run_id="s04-p037-control",
+                          backend=_resolving_backend(), run_id=fixture_uuid("s04-p037-control"),
                           leads={S.L3: [S.text(f"{marker}: 2 scoped.")]})
     _run_with_turns(control)
     _assert_summary_in_opening(control, marker)
@@ -1219,7 +1220,7 @@ def test_p037_ancestor_heading_asserts_a_claim_that_then_fails(tmp_path):
              "provenance": "harness"}), encoding="utf-8")
 
     src, sib = _source_then_sibling(
-        tmp_path, planted=planted, run_id="s04-p037",
+        tmp_path, planted=planted, run_id=fixture_uuid("s04-p037"),
         corr=[S.text(f"{marker}: 2 scoped.")],
         capture=("elastic", "query", {"native_query": "p037:capture"}),
         sibling_turns=[S.text("Resumed and stopping.")], before=pre_claim)
@@ -1264,7 +1265,7 @@ def test_p040_resumed_sibling_of_a_post_change_source_cites_l0(tmp_path):
     }
     for label, (planted, capture) in arms.items():
         src, sib = _source_then_sibling(
-            tmp_path / label, planted=planted, run_id=f"s04-p040-{label}",
+            tmp_path / label, planted=planted, run_id=fixture_uuid(f"s04-p040-{label}"),
             corr=[S.text("CORR-P040: 1 scoped.")], capture=capture,
             sibling_turns=[S.call("append_block", text=CITE_L00C), S.text(S.DONE)])
         source_doc = src.investigation

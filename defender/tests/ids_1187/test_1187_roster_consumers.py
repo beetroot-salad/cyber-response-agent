@@ -35,6 +35,9 @@ Seams coined here (not on the interface sheet), reported to the orchestrator:
 - `episode.delta_o(view, *, invoke=)` — the comparator reads the episode through the WALKED
   view (`runs.episode(ep)`, an `EpisodeRuns`) and takes the arm ids from that view's roster; no
   path re-binds the folder (recheck S2) and no caller hands the ids in (repair round 1, F7).
+- `episode.verdicts(view)` — the archived worlds' dispositions, read through the same walked
+  view (review-3 F32 ruling: the view forms are the only forms; no `Path` overload of
+  `verdicts`, `delta_o` or `cli.preflight_replay(view.episode, ...)`).
 - The manifest loader's refusal of a mismatched `episode_id` is `_family.FamilyError` (every
   manifest refusal of the loader is one today), and its message names both ids.
 - A refused roster's reason names the roster's file name (`arms.json`), on the page and in
@@ -1082,6 +1085,38 @@ def test_the_comparator_prompt_never_carries_a_roster_arm_id(data_root):
         err = R.raised(delta_o, view, invoke=unasked)
     assert R.is_a(err, FamilyError), f"delta_o over a mismatched manifest: {err!r}"
     assert unasked.prompts == [], "the comparator was asked over a mismatched manifest"
+
+
+def test_the_episode_readers_take_the_walked_view_and_no_path(data_root):
+    """Ruling (review-3 F32, orchestrator): the episode's readers take the WALKED view only —
+    `episode.verdicts(view)` (coined here, the shape of `delta_o(view, *, invoke=)`) answers
+    each archived world's disposition keyed by label, read through the view
+    `runs.episode(<ep>)` handed out; there is no `Path` overload of `verdicts`, `delta_o` or
+    `cli.preflight_replay` (a bare path carries no tenant, so it cannot go through the tenant's
+    walk — S-iso, recheck S2). Positive control: the same episode through its view answers
+    every world. The path form is refused (any exception: no answer is read through a path),
+    and the comparator is never asked through one.
+
+    RED at base: `verdicts` and `delta_o` take the episode folder's path (`bind(Path(...))`)."""
+    ep, episode_id, _roster = _episode(data_root)
+    _outcome(ep)
+    J.comparable_family_stamp(ep)
+    want = {"a": "benign", "b": "malicious", "c": "false-positive"}
+    for label, disposition in want.items():
+        T.archived_world(ep, label, disposition=disposition)
+    T.base_capture(ep, [T.captured_row(key="k1")])
+    episode_mod = T.mod("learning.branch.episode")
+    runs = R.tenant(data_root).runs_repository()
+
+    with runs.episode(episode_id) as view:
+        got = episode_mod.verdicts(view)
+    assert got == want, f"verdicts through the walked view: {got!r}"
+
+    assert R.raised(episode_mod.verdicts, ep) is not None, "verdicts answered through a bare path"
+    asked = T.FakeAgent("mutation")
+    assert R.raised(episode_mod.delta_o, ep, invoke=asked) is not None, (
+        "delta_o answered through a bare path")
+    assert asked.prompts == [], "the comparator was asked through a bare path"
 
 
 class RegistryProbe:

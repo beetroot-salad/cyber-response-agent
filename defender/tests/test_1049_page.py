@@ -62,8 +62,10 @@ def _ledger_name(label: str) -> str:
     return f"served/{T.world_token(label)}.jsonl"
 
 
-#: The two spare worlds the every-arm fixture rosters through their run dirs alone, so a
-#: symlinked and a dangling `worlds/<w>` each get a section and a leads block.
+#: The two spare worlds the every-arm fixture names through judge rows of their own (no
+#: manifest entry), so a symlinked and a dangling `worlds/<w>` each get a section and a leads
+#: block. Their arms are STRAY arms, `runs/<uuid4>` no roster entry names (review-3 F33: the
+#: roster stays exactly the manifest's worlds, so the page reads a valid roster).
 LINKED_WORLD = "spare_link"
 DANGLING_WORLD = "spare_dangle"
 
@@ -84,7 +86,7 @@ def _plant_shared_arms(built: E.Episode) -> None:
     E.plant_link(passthrough_summaries, built.world(E.PASSTHROUGH_WORLD) / "summaries-real")
     E.plant_link(built.world(E.CONTROL) / "gather_summaries" / "l-001.md", built.dir / "family.yaml")
     for label in (LINKED_WORLD, DANGLING_WORLD):
-        E.run_dir(built.dir, label)
+        E.run_dir(built.dir, label, arm_id=str(uuid.uuid4()))
 
 
 def _plant_per_copy_arms(copy: E.Episode) -> None:

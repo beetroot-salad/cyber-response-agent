@@ -53,18 +53,17 @@ TID = H1105.T_ID
 
 
 def _tenant_runs() -> Path:
-    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105
-    PR 2 (J8, declared change 10): the tracer takes a required `--tenant` and walks that
-    tenant's runs (`--runs-dir` is gone). The data root is conftest's autouse per-test one; the
-    tenant is set up here, on request, so tests that never trace keep a tenant-free root."""
-    from defender import _tenant
+    """The tenant's natural runs folder `<data root>/<T>/runs` — #1105 PR 2 (J8, declared
+    change 10): the tracer takes a required `--tenant` and walks that tenant's runs
+    (`--runs-dir` is gone). The data root is conftest's autouse per-test one; the tenant is set
+    up here, on request, so tests that never trace keep a tenant-free root. #1187 (R1): the
+    folder holds run folders (UUID-named, `test_trace_lesson._mk_run`) only — no `_tenant.json`."""
     from defender.tests._data_root_1078 import current_data_root
 
     root = current_data_root()
     H1105.tenant(root, TID)
     runs = root / TID / "runs"
     runs.mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, TID)
     return runs
 
 
@@ -246,6 +245,6 @@ def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
     _mk_run(runs, "case-new", disposition="malicious",
             loads=[{"lesson_name": "rewritten", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
 
     assert capsys.readouterr().out.splitlines() == ["rewritten\td\t1\t0"]

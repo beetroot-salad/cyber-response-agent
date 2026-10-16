@@ -16,6 +16,7 @@ still owns (`_next_seq` and the truncated in-context view), which the `read_file
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run
+from defender.tests._fixture_uuid import fixture_uuid
 
 import json
 
@@ -55,12 +56,15 @@ def test_a_small_payload_reaches_the_lead_whole(tmp_path):
 
 
 def test_claim_lead_claims_then_rejects_reuse(tmp_path):
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
     dispatch = {
-        "run_dir": str(tmp_path), "lead_id": "l-001",
+        "run_dir": str(run_dir), "lead_id": "l-001",
         "goal": "did the IP resolve?", "what_to_summarize": ["a", "b"],
     }
-    assert claim_lead(dispatch, run=fixture_run(tmp_path)) == CLAIMED
-    sidecar = tmp_path / "gather_raw" / "l-001.lead.json"
+    assert claim_lead(dispatch, run=fixture_run(run_dir)) == CLAIMED
+    sidecar = run_dir / "gather_raw" / "l-001.lead.json"
     assert json.loads(sidecar.read_text()) == {
         "goal": "did the IP resolve?", "what_to_summarize": ["a", "b"]}
-    assert claim_lead(dispatch, run=fixture_run(tmp_path)) == ALREADY_CLAIMED
+    assert claim_lead(dispatch, run=fixture_run(run_dir)) == ALREADY_CLAIMED

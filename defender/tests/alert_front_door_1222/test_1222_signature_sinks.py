@@ -31,6 +31,7 @@ so an escaped regex cannot pass for it verbatim), and the two never contain each
 """
 from __future__ import annotations
 
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 import html
@@ -529,7 +530,7 @@ def _fixture_tickets(tmp_path: Path) -> list[tuple[str, S.Drive, dict[str, Any]]
     for i, slug in enumerate(S.FIXTURE_SLUGS):
         store = S.TicketStore()
         d = S.run_alert(tmp_path / slug, alert=S.fixture_alert_bytes(slug), tenant=tenant,
-                        tickets=S.ticket_writer(store), update_ticket=True, run_id=f"o9-{i}")
+                        tickets=S.ticket_writer(store), update_ticket=True, run_id=fixture_uuid(f"o9-{i}"))
         _completed(d)
         out.append((slug, d, store.only_open()))
     return out
@@ -572,11 +573,11 @@ def test_o10_orientation_names_the_missing_signature(tmp_path: Path) -> None:
     R1001`)."""
     planted = S.plant_tenant(alert_mapping=MAPPING)
     signed = S.run_alert(tmp_path / "signed", alert=_alert(), tenant=planted,
-                         orient_shim=S.RecordingShim(fail=("--tags",)), run_id="o10-signed")
+                         orient_shim=S.RecordingShim(fail=("--tags",)), run_id=fixture_uuid("o10-signed"))
     S.remap(planted, NO_SIG_MAPPING)
     shim = S.RecordingShim(fail=("--tags",))
     d = S.run_alert(tmp_path / "unsigned", alert=_alert(), orient_shim=shim, tenant=planted,
-                    run_id="o10-unsigned")
+                    run_id=fixture_uuid("o10-unsigned"))
     section = S.lessons_section(d.opening_message)
     assert S.missing_signature_lines(d.opening_message, signed.opening_message), (
         f"the Lessons section names no missing signature the signed run's did not: {section!r}")
@@ -755,8 +756,8 @@ def test_r6_event_time_text_lands_only_in_its_own_label(tmp_path: Path) -> None:
     hostile = "2026-09-30 08:15 UTC\nsig:OTHER-9 evt:1970-01-01 {case_id} {signature} <b>x</b>"
     mapping = S.DEFAULT_MAPPING_GENERIC
     _d, control = _ticketed(tmp_path / "iso", alert=S.generic_alert(rule_id=RULE_ID),
-                            mapping=mapping, run_id="r6-iso")
-    _d2, store = _ticketed(tmp_path / "hostile", mapping=mapping, run_id="r6-hostile",
+                            mapping=mapping, run_id=fixture_uuid("r6-iso"))
+    _d2, store = _ticketed(tmp_path / "hostile", mapping=mapping, run_id=fixture_uuid("r6-hostile"),
                            alert=S.generic_alert(rule_id=RULE_ID, detected_at=hostile))
     iso_payload, payload = control.only_open(), store.only_open()
     assert iso_payload["labels"] == [f"sig:{RULE_ID}", f"evt:{DETECTED_AT}"], \
@@ -764,8 +765,8 @@ def test_r6_event_time_text_lands_only_in_its_own_label(tmp_path: Path) -> None:
     assert payload["labels"] == [f"sig:{RULE_ID}", f"evt:{hostile}"]
     for key in ("status", "summary"):
         assert payload.get(key) == iso_payload.get(key), f"event_time moved the ticket's {key}"
-    assert payload.get("description", "").replace("r6-hostile", "<id>") == \
-        iso_payload.get("description", "").replace("r6-iso", "<id>"), "event_time moved the description"
+    assert payload.get("description", "").replace(fixture_uuid("r6-hostile"), "<id>") == \
+        iso_payload.get("description", "").replace(fixture_uuid("r6-iso"), "<id>"), "event_time moved the description"
 
 
 # =================================================================================================
@@ -901,7 +902,7 @@ def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -
     arm: mapped to `rule.name` (spaces, a comma, a colon)."""
     holding = S.HoldingTicketStore()
     signed, _ = _ticketed(tmp_path / "signed", alert=S.generic_alert(rule_id=RULE_ID),
-                          mapping=S.DEFAULT_MAPPING_GENERIC, store=holding, run_id="p082-signed")
+                          mapping=S.DEFAULT_MAPPING_GENERIC, store=holding, run_id=fixture_uuid("p082-signed"))
     opened = holding.only_open()
     assert _sig_label(opened) == RULE_ID, "the sig: label is not the recorded signature verbatim"
     assert _labels(opened, "evt:") == [f"evt:{DETECTED_AT}"], (
@@ -914,7 +915,7 @@ def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -
     alert = S.generic_alert(rule={"id": RULE_ID, "name": name, "description": DESCRIPTION})
     d, store = _ticketed(tmp_path / "unsigned", alert=alert,
                          mapping={**S.DEFAULT_MAPPING_GENERIC, "signature": "rule.name"},
-                         run_id="p082-unsigned")
+                         run_id=fixture_uuid("p082-unsigned"))
     payload = store.only_open()
     assert _sig_label(payload) == S.CASE_FALLBACK_SIGNATURE
     assert _labels(payload, "evt:") == [f"evt:{DETECTED_AT}"]
@@ -945,7 +946,7 @@ def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
 
     accepting = S.HoldingTicketStore(refuse_label=S.LABEL_WITH_WHITESPACE)
     ok, _ = _ticketed(tmp_path / "accepted", alert=S.generic_alert(rule_id=RULE_ID),
-                      mapping=S.DEFAULT_MAPPING_GENERIC, store=accepting, run_id="b1-accepted")
+                      mapping=S.DEFAULT_MAPPING_GENERIC, store=accepting, run_id=fixture_uuid("b1-accepted"))
     assert accepting.refused == [], f"the control's ticket was refused: {accepting.refused}"
     assert accepting.find(f"sig:{RULE_ID}") == [str(accepting.only_open().get("key"))], (
         "the control's case is not found by its sig: label")
@@ -955,7 +956,7 @@ def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
     refusing = S.HoldingTicketStore(refuse_label=S.LABEL_WITH_WHITESPACE)
     d, _ = _ticketed(tmp_path / "refused",
                      alert=S.generic_alert(rule_id=RULE_ID, detected_at=SPACED_EVENT_TIME),
-                     mapping=S.DEFAULT_MAPPING_GENERIC, store=refusing, run_id="b1-refused")
+                     mapping=S.DEFAULT_MAPPING_GENERIC, store=refusing, run_id=fixture_uuid("b1-refused"))
     label = f"evt:{SPACED_EVENT_TIME}"
     assert refusing.refused == [label], (
         "the store never refused the create: the evt: label did not carry the event time "
@@ -1021,13 +1022,13 @@ def test_p089_signatures_that_look_identical_but_differ_in_cod(tmp_path: Path) -
         shim = S.RecordingShim()
         d, store = _ticketed(tmp_path / value, alert=S.generic_alert(rule_id=value),
                              mapping=S.DEFAULT_MAPPING_GENERIC, shim=shim, lessons=lessons,
-                             run_id=f"p089-{value.lower()}-{1 if value == upper else 2}")
+                             run_id=fixture_uuid(f"p089-{value.lower()}-{1 if value == upper else 2}"))
         assert _sig_label(store.only_open()) == value
         assert _listed(d.opening_message, lessons) == {f"fd1222-p089-{'upper' if value == upper else 'lower'}"}, (
             f"the lessons lookup for {value!r} folded case into {other!r}")
     for i, value in enumerate((LOOKALIKE, "Ré", "Ré", "R-1 ")):
         d, store = _ticketed(tmp_path / f"nonkey-{i}", alert=S.generic_alert(rule_id=value),
-                             mapping=S.DEFAULT_MAPPING_GENERIC, run_id=f"p089-nonkey-{i}")
+                             mapping=S.DEFAULT_MAPPING_GENERIC, run_id=fixture_uuid(f"p089-nonkey-{i}"))
         assert _sig_label(store.only_open()) == S.CASE_FALLBACK_SIGNATURE, (
             f"{value!r} (not a key under A6) became a ticket label")
         assert d.recorded("signature") is None
@@ -1073,11 +1074,11 @@ def test_p109_tickets_already_in_the_vendor_system_under_the_o(tmp_path: Path,
     nothing in its ticket calls or its log names the old label value."""
     planted = S.plant_tenant(alert_mapping={**MAPPING, "signature": "rule.id"},
                              case_mapping=_signed_case_mapping())
-    _d1, before = _ticketed(tmp_path / "first", alert=_alert(), tenant=planted, run_id="p109-a")
+    _d1, before = _ticketed(tmp_path / "first", alert=_alert(), tenant=planted, run_id=fixture_uuid("p109-a"))
     assert _sig_label(before.only_open()) == RULE_ID
     S.remap(planted, MAPPING)
     caplog.clear()
-    d2, after = _ticketed(tmp_path / "second", alert=_alert(), tenant=planted, run_id="p109-b")
+    d2, after = _ticketed(tmp_path / "second", alert=_alert(), tenant=planted, run_id=fixture_uuid("p109-b"))
     assert d2.rc == 0, "the remapped run was not accepted"
     assert _sig_label(after.only_open()) == MAPPED
     assert RULE_ID not in json.dumps(after.calls), "the second ticket notes the old label"

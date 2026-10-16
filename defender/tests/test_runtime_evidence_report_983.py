@@ -52,6 +52,7 @@ renderer for both" comment exists to hold.
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 import dataclasses
 import datetime as dt
@@ -285,7 +286,8 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
     )
     assert "1500 occurrences" in _body(report), "fixture control: the body carries the baseline"
 
-    run_dir = tmp_path / "case-983"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("case-983")
     (run_dir / "gather_raw").mkdir(parents=True)
     (run_dir / "alert.json").write_text(
         json.dumps({"rule": {"id": "5710", "key": "spec.rule"},

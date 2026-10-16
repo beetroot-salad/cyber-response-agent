@@ -41,6 +41,7 @@ and — for the asks O7 names — the words the demand itself uses (window, anch
 """
 from __future__ import annotations
 
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 import functools
@@ -203,7 +204,7 @@ def _run(  # noqa: PLR0913 — one scenario's inputs, each defaulted
     scripts = dict(leads or {})
     scripts[S.L3] = list(l3) if l3 is not None else _l3_turns()
     d = S.run_alert(tmp_path / sub, alert=alert if alert is not None else _alert(),
-                    tenant=tenant if tenant is not None else _tenant(), run_id=f"gr-{sub}",
+                    tenant=tenant if tenant is not None else _tenant(), run_id=fixture_uuid(f"gr-{sub}"),
                     main=main, leads=scripts, lead_faults=faults,
                     backend=S.Backend(answer=_answer), defender_dir=defender_dir)
     assert d.raised is None, f"the run raised: {d.raised!r}"

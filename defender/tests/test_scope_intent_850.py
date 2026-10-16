@@ -38,6 +38,7 @@ from __future__ import annotations
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
 
 from defender.tests._spec1077 import fixture_run
+from defender.tests._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -69,7 +70,8 @@ NUMERIC = "l-001"
 def env(tmp_path):
     """A run dir and a defender tree, both real on disk — `decide_read` resolves, so symlink and
     parent comparisons need files that exist."""
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     (run / "gather_summaries").mkdir(parents=True)
     for name in ("alert.json", "investigation.md", "report.md", "executed_queries.jsonl",
                  "source_refs.yaml"):

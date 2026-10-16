@@ -70,7 +70,11 @@ def _tenant_paths():
 def _verify(ep: Path, plant: Any = T.arm_run_dir, **kw: Any) -> dict:
     """`cli.verify_family` over episode `ep`'s arms (#1105 PR 2): `plant(ep, world)` makes each
     world's finished arm in `ep`'s own container (default `T.arm_run_dir(ep, world)`), and each
-    is opened by id through the episode's view (`T.family_arms`)."""
+    is opened by id through the episode's view (`T.family_arms`). The scene takes its explicit
+    RUNS step first (`T.plant_roster`): the planter reads the roster and never writes one
+    (review-3 F33)."""
+    if not (ep / T.ROSTER_NAME).exists():  # once per episode (a loop may re-verify one)
+        T.plant_roster(ep)
     for world in T.WORLDS:
         plant(ep, world)
     with Episode.open(ep) as episode:
@@ -778,6 +782,7 @@ def test_976_verify_family_requires_the_source_anchor(tmp_path):
     this a default of `None` would let the launcher (or a future caller) skip M3 silently."""
     T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
+    T.plant_roster(ep)  # the scene's explicit RUNS step (review-3 F33)
     for w in T.WORLDS:
         T.arm_run_dir(ep, w)
     with Episode.open(ep) as episode, pytest.raises(TypeError):

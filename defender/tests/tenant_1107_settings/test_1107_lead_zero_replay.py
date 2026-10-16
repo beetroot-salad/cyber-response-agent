@@ -34,6 +34,7 @@ from defender.scripts.adapters import (  # noqa: E402
 )
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.tests._data_root_1078 import current_data_root  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests import _triplet_947 as T  # noqa: E402
 from defender.tests.e2e import _lead_zero_808 as LZ  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -93,20 +94,26 @@ def _identity_worlds() -> list[dict]:
 
 def _resume_argv(manifest: Path) -> list[str]:
     """The sibling's command line (#1105 PR 2, declared change 6: `--tenant T --episode <id>
-    --world b`); its episode is opened under the episodes base `_sibling_episode` configures."""
+    --world b`); its episode is opened by id under the tenant's `<T>/episodes/`
+    (`_sibling_episode`)."""
     return H.sibling_argv(manifest, "b", "--tenant", S.PLAYGROUND_ID)
 
 
-def _sibling_episode(tmp_path: Path, doc: dict, *, root: Path, monkeypatch: Any) -> Path:
-    """The episode a sibling opens by id (#1105 PR 2): under `root`, the configured episodes
-    base the sibling is pointed at, with its container made for the playground tenant as the
-    launcher's `EpisodeRuns.create_container` leaves it before the first sibling."""
-    from defender import _tenant
+def _sibling_episode(tmp_path: Path, doc: dict, *, label: str) -> Path:
+    """The episode a sibling opens by id (#1105 PR 2). #1187 (R1, R2, O9, declared changes 5
+    and 6): at `<data root>/<playground>/episodes/<uuid>` — its tenant's, the id
+    `fixture_uuid(label)` (so two scenes in one test are two episodes) — with no container
+    record and no episodes variable; the launcher's RUNS step (`start_runs`, through
+    `T.episode_view`) makes `runs/` and writes the arm roster the sibling reads its arm id from
+    (O4b)."""
+    from defender._episode_handle import Episode
 
-    episode = T.episode(tmp_path, doc=doc, episode_id=T.EPISODE_ID, root=root)
-    (episode / "runs").mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(episode / "runs", S.PLAYGROUND_ID)
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(root))
+    root = current_data_root()
+    episode_id = fixture_uuid(f"1107-{label}")
+    episode = T.episode(tmp_path, doc={**doc, "episode_id": episode_id}, episode_id=episode_id,
+                        root=root / S.PLAYGROUND_ID / "episodes")
+    with Episode.open(episode) as held:
+        T.episode_view(held, tenant=S.tenant_folder_of(root)).close()
     return episode
 
 
@@ -238,7 +245,7 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
 
     episode = _sibling_episode(tmp_path, T.family_doc(source_run_dir=str(source),
                                                       worlds=_identity_worlds()),
-                               root=tmp_path / "episodes", monkeypatch=monkeypatch)
+                               label="mf16")
     sibling = S.RunRecorder(tmp_path / "sibling", before_lifecycle=edit_within)
     rc, refused = S.drive_run(_resume_argv(episode / "family.yaml"), sibling,
                               visualize=sibling.visualize)
@@ -283,8 +290,7 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root, monk
             S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
         doc = T.family_doc(source_run_dir=str(source), worlds=_identity_worlds())
         assert "configured_patterns" not in doc, sorted(doc)
-        episode = _sibling_episode(tmp_path, doc, root=tmp_path / f"episodes-{arm}",
-                                   monkeypatch=monkeypatch)
+        episode = _sibling_episode(tmp_path, doc, label=f"mf7e-{arm}")
         sibling = S.RunRecorder(tmp_path / f"sibling-{arm}")
 
         rc, refused = S.drive_run(_resume_argv(episode / "family.yaml"), sibling,

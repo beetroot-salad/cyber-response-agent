@@ -41,9 +41,20 @@ from defender.tests.tenant_1105_run_repository import _spec1105 as H
 
 #: D1.1's pinned file names (owner sets, baselines and path-keyed tests name them): the seven
 #: it named plus `_held.py`, the held runs folder `_lookup` and `_record` both build on (owner
-#: ruling, #1105 PR 1 review: it replaced their import cycle).
-PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
+#: ruling, #1105 PR 1 review: it replaced their import cycle) — less `_record.py`, which
+#: #1187 R6 (declared change 13) empties with the runs-base record it held, so it is no longer
+#: pinned to EXIST (review-3 F35): `PACKAGE_FILES_OPTIONAL` below.
+PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py",
                  "_held.py", "_id.py", "_errors.py")
+#: Package files that may be present or absent (#1187 R6, declared change 13): `_record.py`
+#: may stay as a vestige or go. Present, it is judged like every pinned file; no other extra
+#: entry is admitted (MF-18's stray `lookup.py` still fails).
+PACKAGE_FILES_OPTIONAL = ("_record.py",)
+
+
+def _package_files_on_disk() -> tuple[str, ...]:
+    """`PACKAGE_FILES` plus each optional file the package holds on disk (#1187 R6)."""
+    return (*PACKAGE_FILES, *(n for n in PACKAGE_FILES_OPTIONAL if (H.PACKAGE / n).is_file()))
 #: The 53 public names `defender/_run_paths.py` defines at module level at 80888efb (R4-42),
 #: minus `resolve_run_bundle` (deleted by #1105 PR 2, F-13), minus BUDGET and CIRCUIT_BREAKER
 #: (#1235: the counters and the breaker are in-memory state, so neither names a run record any
@@ -335,7 +346,7 @@ def test_1105_the_resolve_data_root_census_scans_the_package_and_finds_no_call_i
     from defender.tests.tenant_1120_piece1 import test_1120_censuses as census
 
     walked = {p.resolve() for p in census._production_files()}
-    package = [(H.PACKAGE / name).resolve() for name in PACKAGE_FILES]
+    package = [(H.PACKAGE / name).resolve() for name in _package_files_on_disk()]
     assert not [p for p in package if p not in walked], (
         f"the F39 census walk misses package files: "
         f"{[p.name for p in package if p not in walked]}")
@@ -353,8 +364,10 @@ def test_1105_the_resolve_data_root_census_scans_the_package_and_finds_no_call_i
 
 def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name kept: the spec graph cites it; eight files since the owner's _held.py ruling
     """defender/run_repository/ holds exactly __init__.py, _layout.py, _handle.py, _lookup.py,
-    _record.py, _held.py, _id.py and _errors.py: the entries of the directory on disk equal those
-    names, caches ignored, so a stray lookup.py fails (MF-18); each submodule imports by its
+    _held.py, _id.py and _errors.py, and may hold _record.py (#1187 R6, declared change 13: the
+    runs-base record it held is retired, so it is no longer pinned to exist — review-3 F35): the
+    entries of the directory on disk are those names, caches ignored, so a stray lookup.py fails
+    (MF-18); each submodule imports by its
     dotted name; _handle defines Run, RunRecord, RecordHandle, ArchivedWorld and case_ref, and
     _layout defines the 53 public names defender/_run_paths.py defined. The directory is read
     on disk, not through git's index, so an uncommitted package is judged by its files."""
@@ -364,12 +377,12 @@ def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name k
 
     assert H.PACKAGE.is_dir(), f"{H.PACKAGE} is not a directory on disk"
     held = {entry.name for entry in H.PACKAGE.iterdir() if entry.name != "__pycache__"}
-    assert held == set(PACKAGE_FILES), (
+    assert set(PACKAGE_FILES) <= held <= set(PACKAGE_FILES) | set(PACKAGE_FILES_OPTIONAL), (
         f"defender/run_repository/ holds {sorted(held)}, not D1.1's pinned "
-        f"{sorted(PACKAGE_FILES)}")
+        f"{sorted(PACKAGE_FILES)} (plus, optionally, {sorted(PACKAGE_FILES_OPTIONAL)})")
     assert Path(run_repository.__file__).resolve() == H.PACKAGE / "__init__.py", (
         "the door is defender/run_repository/__init__.py")
-    for name in PACKAGE_FILES:
+    for name in _package_files_on_disk():
         dotted = _DOOR if name == "__init__.py" else f"{_DOOR}.{name.removesuffix('.py')}"
         module = importlib.import_module(dotted)
         assert Path(module.__file__).resolve() == H.PACKAGE / name, f"{dotted} imported elsewhere"
@@ -649,7 +662,7 @@ def test_1105_the_package_is_not_ignored_and_run_data_still_is():
     rule. Neither half reads git's index."""
     from defender import run_repository
 
-    expected = {f"defender/run_repository/{name}" for name in PACKAGE_FILES}
+    expected = {f"defender/run_repository/{name}" for name in _package_files_on_disk()}
     absent = sorted(rel for rel in expected if not (H.WORKTREE / rel).is_file())
     assert not absent, f"package files are not on disk: {absent}"
     assert Path(run_repository.__file__).resolve() == H.PACKAGE / "__init__.py", (
@@ -743,7 +756,7 @@ def test_1105_run_records_owners_are_matched_by_path_so_a_same_named_file_is_not
 
     lint_run_records = load_lint_gate("lint_run_records")
     owners = set(lint_run_records.OWNER_MODULES)
-    package = {f"run_repository/{name}" for name in PACKAGE_FILES}
+    package = {f"run_repository/{name}" for name in _package_files_on_disk()}
     assert package <= owners, (
         f"OWNER_MODULES does not name the package's files by path: {sorted(package - owners)}")
     assert owners == set(_spec1077.OWNER_MODULE_FILES), (

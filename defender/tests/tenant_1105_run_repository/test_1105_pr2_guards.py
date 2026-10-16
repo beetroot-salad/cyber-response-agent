@@ -8,9 +8,12 @@ row, or sub-clause, that has none — or whose only pin goes through a helper or
 PR 2 deletes (`tenant_of_run_dir`, `_sibling_tenant_agrees`, `episodes_root`/`episode_dir_for`
 called directly, `Run.at`, `--resume`, a path positional).
 
-EVERY TEST HERE IS GREEN AT BASE `301f196c` AND STAYS GREEN AFTER PR 2. Each drives the real
-entry point through `_spec1105_pr2`'s argument builders (TODAY's shape; PR 2 re-points the
-builders, never these tests) and asserts the refusal's observable — exit, nothing spent (the
+At PR 2 every test here was green at base `301f196c` and stayed green after PR 2. #1187's
+contract flips the tests that name a #1187 declared change in their own docstring (G4, G9,
+G11, G15 (ii)/(iii), G19, G23 — red until #1187 is implemented); the rest stay green. Each
+drives the real entry point through `_spec1105_pr2`'s argument builders (TODAY's shape; PR 2
+re-points the builders, never these tests) and asserts the refusal's observable — exit,
+nothing spent (the
 questioner / preflight / lifecycle seams never called), nothing written (a tree census) — beside
 a positive control on the same address.
 
@@ -19,7 +22,8 @@ a positive control on the same address.
 | G1  | test_1120_entry_points::…refuses_a_relative_or_defender_tree_data_root…;          | — (#1187 R1: no record; O8 pins below) |
 |     | test_1120_entry_points::…refuses_what_accept_tenant_refuses[branch.cli.main]     |      |
 | G2  | test_1106_sibling_seed::test_a_source_stamp_disagreeing_with_its_runs_base_…     | —    |
-| G3  | test_1107_branch::test_s7_mf13_launcher_refuses_box_mounted_tenants_root         | —    |
+| G3  | #1187 S-acc: ids_1187/test_1187_roster_consumers.py::test_the_launcher_refuses_a_ | —    |
+|     | settings_half_inside_its_episodes_folder (test_1107_branch's test_s7_mf13_* went) |      |
 | G4  | test_947_triplet_launcher::…screens_the_source_alert_before_the_questioner…      | sibling screen (pinned only via `--resume`) |
 | G5  | test_1078_run_main::test_o5_disagreeing_tenant_refused (via `--resume`);         | — (#1187 O4b: the roster; see below) |
 |     | test_947_triplet_sibling::…runs_base_names_another_tenant…  (+c recordless)      |      |
@@ -56,17 +60,24 @@ a positive control on the same address.
 | G24 | test_1133_entry_points::test_o3_the_judge_pass_reads_and_writes_through_one_…    | —    |
 | G25 | test_1133_entry_points::test_h1_start_family_refuses_a_linked_runs_base_…        | —    |
 
-Expected at base 301f196c: every test in this module PASSES.
+Expected at base 301f196c (PR 2): every test in this module PASSED. Under the #1187 contract
+the flipped tests above are red until #1187 is implemented; the others pass.
 
-#1187 (design rev 2) changes four rows. G1(ii) and G5 judged a container record, which R1
+#1187 (design rev 2) changes the rows G1, G3, G5, G6, G7, G13 and G15 of the table (and flips
+the tests named above). G1(ii) and G5 judged a container record, which R1
 retires: the guards become the per-level no-follow walk from `<T>` and the arm roster
 (`ids_1187/test_1187_layout_isolation.py::test_another_tenants_episode_is_absent_to_this_tenants_repository`,
 `ids_1187/test_1187_roster_sibling.py::test_the_sibling_is_refused_before_the_manifest_unless_its_roster_names_it`).
 G6's scenario — a data root inside an episode container under a configured episodes base —
 cannot be built once the base is retired (declared change 5: an episode is `<T>/episodes/<uuid>`,
-inside the data root), so `test_g6_…` is retired with no replacement (S-acc's box-mounted
-check itself stands, unpinned here). G15(i), the unusable-base refusals, are gone with the
-variable (O9). Each flipped test names its declared change in its own docstring.
+inside the data root), so `test_g6_…` is retired with no replacement here. S-acc's box-mounted
+check itself stands and is pinned at both doors: the launcher by
+`ids_1187/test_1187_roster_consumers.py::test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder`,
+the sibling by
+`ids_1187/test_1187_roster_sibling.py::test_the_sibling_refuses_a_settings_half_inside_its_arm_container`.
+G7's record-mismatch pin is retired with the record (R1); G13's bound and composed id are gone
+(declared changes 1 and 4). G15(i), the unusable-base refusals, are gone with the variable
+(O9). Each flipped test names its declared change in its own docstring.
 """
 from __future__ import annotations
 

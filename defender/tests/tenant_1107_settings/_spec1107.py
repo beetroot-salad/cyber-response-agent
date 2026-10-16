@@ -66,6 +66,7 @@ from typing import Any
 
 from defender.tests import _tenants1106 as T1106
 from defender.tests._by_path import LINT_DIR, load_module
+from defender.tests._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 from defender.run_repository import SessionPaths
 
 REPO_ROOT = T1106.REPO_ROOT
@@ -556,13 +557,15 @@ def run_py() -> Any:
 def run_argv(alert: Path, data_root: Path, *, tenant_id: str = PLAYGROUND_ID,
              update_ticket: bool = False, run_id: str | None = None,
              extra: Iterable[str] = ()) -> list[str]:
-    """`run.py`'s argv for `tenant_id`, planted under `data_root` (this test's)."""
+    """`run.py`'s argv for `tenant_id`, planted under `data_root` (this test's). `run_id` is a
+    LABEL or a UUID: #1187 (declared change 1) — `--run-id` admits only a canonical UUID, so a
+    label is passed as `fixture_uuid(<label>)` (the same label, the same id in every test)."""
     _require_data_root(data_root)
     argv = [str(alert), "--tenant", tenant_id]
     if update_ticket:
         argv.append("--update-ticket")
     if run_id is not None:
-        argv += ["--run-id", run_id]
+        argv += ["--run-id", run_id if is_fixture_uuid_shape(run_id) else fixture_uuid(run_id)]
     return [*argv, *extra]
 
 
@@ -587,7 +590,14 @@ class RunRecorder:
 
     def __init__(self, run_dir_at: Path, *, summary: Mapping[str, Any] | None = None,
                  before_lifecycle: Any = None) -> None:
-        self.run_dir_at = Path(run_dir_at)
+        # #1187 (declared change 1): a run id is a canonical UUID — the folder's name is the
+        # run's id, so a readable last segment is a LABEL and the folder is
+        # `fixture_uuid(<label>)` beside it (a UUID passes as it is). Read the folder back off
+        # `run_dir_at`, never off the label.
+        run_dir_at = Path(run_dir_at)
+        if not is_fixture_uuid_shape(run_dir_at.name):
+            run_dir_at = run_dir_at.parent / fixture_uuid(run_dir_at.name)
+        self.run_dir_at = run_dir_at
         self.summary = dict(summary or {"output": "spec1107", "requests": 0,
                                         "truncated_by": None})
         self.before_lifecycle = before_lifecycle

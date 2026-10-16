@@ -35,6 +35,7 @@ pytest.importorskip("pydantic_ai")
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import branch, session_store  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3, ReplayFn, Turn, VerbRecorder, drive, materialize,
 )
@@ -54,7 +55,8 @@ pytestmark = pytest.mark.e2e
 # before #1235.
 def test_1235_a_hand_copied_folder_has_no_link_at_any_reader(tmp_path):
     run_dir = _finished_run(tmp_path / "a", "k-x2")
-    copy = tmp_path / "elsewhere" / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    copy = tmp_path / "elsewhere" / fixture_uuid("run")
     shutil.copytree(run_dir, copy)
     with pytest.raises(FileNotFoundError):
         session_store.resolve_store_path(_run_handle_1165(copy))
@@ -87,7 +89,8 @@ def test_1235_the_query_tool_never_makes_a_state_of_its_own(tmp_path):
     from defender.tests import _tenants1106
     from defender.tests.e2e._spec771 import DEFENDER
 
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     deps = replace(_with_live_run_1165(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
                    lead_id="l-001")
@@ -169,7 +172,8 @@ def test_1235_payload_attribution_reads_the_runs_state(tmp_path):
     from defender.runtime.run_state import RunState
     from defender.scripts.gather_tools import record_query as rq
 
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "k-x5")
     row = rq.append_query_row(

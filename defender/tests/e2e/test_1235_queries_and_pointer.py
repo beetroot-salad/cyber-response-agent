@@ -45,6 +45,7 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import branch, session_store  # noqa: E402
 from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN,
     GOLDEN_AB3,
@@ -341,7 +342,8 @@ def test_a_hand_copied_run_folder_carries_no_case_link(tmp_path):
 
     Observed failing by: the copy opening the original's store through a link inside the folder."""
     run_dir = _finished_run(tmp_path / "a", "o3-copied")
-    copy = tmp_path / "elsewhere" / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    copy = tmp_path / "elsewhere" / fixture_uuid("run")
     shutil.copytree(run_dir, copy)
 
     assert branch.source_store_if_any(copy, source_run=_run_handle_1165(copy)) is None, \

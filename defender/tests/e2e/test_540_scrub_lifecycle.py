@@ -45,6 +45,7 @@ from __future__ import annotations
 from defender.tests._spec1077 import fixture_run
 
 import ast
+import contextlib
 import dataclasses
 import json
 import os
@@ -81,6 +82,7 @@ from defender.runtime.box import (  # noqa: E402
 from defender.scripts import workspace_map as workspace_map_mod  # noqa: E402
 from defender.tests import _tenants1106  # noqa: E402
 from defender.tests._alert_plant import plant_alert  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._box665 import (  # noqa: E402
     BoxLifecycleRecorder,
     drive_worktree_batch,
@@ -112,7 +114,8 @@ GATHER_ONLY = REPO_ROOT / "scripts" / "testing" / "gather_only.py"
 def _clean_run_dir(tmp_path: Path) -> Path:
     """A realistic FROZEN run dir: the artifacts `materialize_run` + a real run leave
     behind. Regular files and real directories only — the shape the scrub must pass."""
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     plant_alert(run, {"id": "a-1"})
     (run / "investigation.md").write_text(":L l-001 look here\n", encoding="utf-8")
@@ -694,7 +697,10 @@ def test_scrub_raises_on_a_fifo_socket_or_device_node(tmp_path):
     sock_path = run / "gather_raw" / "l-001" / "s.sock"
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        srv.bind(str(sock_path))
+        # Bound by its name from inside its folder: AF_UNIX caps a bound path at 108 bytes, and
+        # the run folder is a 36-character UUID since #1187 (declared change 1).
+        with contextlib.chdir(sock_path.parent):
+            srv.bind(sock_path.name)
         assert stat.S_ISSOCK(os.lstat(sock_path).st_mode)
         with pytest.raises(RunTainted) as e:
             scrub(run)

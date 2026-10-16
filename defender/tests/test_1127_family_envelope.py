@@ -76,13 +76,19 @@ def family_text(facts_yaml: str) -> str:
 
 
 def load(path: Path):
-    """`load_family` over the episode whose manifest is at `path` (`<episode>/family.yaml`)."""
+    """`load_family` over the episode whose manifest is at `path` (`<episode>/family.yaml`).
+    #1187 (R5, declared change 10): the loader is told the episode's id — its folder's name —
+    and refuses a manifest naming another (`expected_episode_id=`, required)."""
     with Episode.open(path.parent) as episode:
-        return load_family(episode.view())
+        return load_family(episode.view(), expected_episode_id=path.parent.name)
 
 
 def write_manifest(tmp_path: Path, text: str) -> Path:
-    path = tmp_path / "family.yaml"
+    """The manifest `text` as an episode's `family.yaml`, the episode folder named by the id
+    the shared fixture's document carries (`T.EPISODE_ID`), so the #1187 R5 id check passes
+    and only the envelope under test can refuse."""
+    path = tmp_path / T.EPISODE_ID / "family.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -267,7 +273,7 @@ from defender.runtime.branch._family import FamilyError, load_family
 start = time.monotonic()
 try:
     with Episode.open(Path(sys.argv[1]).parent) as episode:
-        load_family(episode.view())
+        load_family(episode.view(), expected_episode_id=Path(sys.argv[1]).parent.name)
     outcome, yaml_cause = "loaded", False
 except FamilyError as e:
     outcome, yaml_cause = "FamilyError", isinstance(e.__cause__, yaml.YAMLError)

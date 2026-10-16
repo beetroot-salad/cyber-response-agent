@@ -288,17 +288,16 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
     """`(T, run_dir)` with the driven run moved to where the run page's repository opens it.
 
     #1105 PR 2 (declared change 7): the standalone re-render is `--tenant T <run_id>` and opens
-    the run by id through T's repository, so the run moves to `<data root>/<T>/runs/<run_id>`,
-    the runs folder carrying `_tenant.json` naming T (the real writer). The store stays where
-    the drive put it: the run's pointer names it by its absolute path. (Not driven there in
-    place: `_driven_run` puts the store under the same folder it puts the run in.)"""
-    from defender import _tenant
+    the run by id through T's repository, so the run moves to `<data root>/<T>/runs/<run_id>`
+    (#1187 R1, declared change 6: the runs folder carries no `_tenant.json`; the tenant's folder
+    holding it is the owner). The store stays where the drive put it: the run's pointer names
+    it by its absolute path. (Not driven there in place: `_driven_run` puts the store under the
+    same folder it puts the run in.)"""
     from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 
     tenant = ensure_d9_tenant()
     runs = current_data_root() / tenant / "runs"
     runs.mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, _tenant.TenantId(tenant))
     # #1235 F2: the run -> case link is a sidecar beside the run folder, so the move carries it.
     from defender.run_repository import RunPaths
     moved = runs / run_dir.name
@@ -306,7 +305,7 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
     return tenant, Path(shutil.move(run_dir, moved))
 
 
-def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
+def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path, capsys):
     """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two
     drivers: the standalone re-render (`visualize_run.main`, #1110 O8) and the post-run step
     `run_common.visualize(run)`. Driven in turn over one run dir, the second render does not
@@ -335,7 +334,8 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
                 for name in ("runtime.html",)}
 
     # driver A — the standalone re-render, in-process
-    assert visualize_run.main(["visualize_run.py", "--tenant", tenant, run_dir.name]) == 0
+    assert visualize_run.main(["visualize_run.py", "--tenant", tenant, run_dir.name]) == 0, (
+        capsys.readouterr().err)
     after_a = pages()
     for name, page in after_a.items():
         assert marker in page, (

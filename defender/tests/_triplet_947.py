@@ -53,6 +53,7 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 from __future__ import annotations
 
 
+import hashlib
 import importlib
 import json
 import os
@@ -685,8 +686,32 @@ def source_case_id(src: Path) -> str:
     case of its own for any other source id. The store is per case (`<sessions>/<case>.db`), and
     its row ids are the STORE's, so a second source seeded into the first source's case starts
     its session past `BRANCH_MESSAGE_ID` and the branch point can never land on its main path —
-    each source run gets its own case, as each real investigation does."""
-    return SOURCE_CASE_ID if src.name == SOURCE_RUN_ID else f"{SOURCE_CASE_ID}-{src.name}"
+    each source run gets its own case, as each real investigation does.
+
+    The other source's case is named by a short digest of its id, not the id itself: a case id
+    is bounded (128 characters), and a test about an over-long source id (`test_1105_pr2_guards`
+    g15) must reach the launcher, not stop in this fixture's store."""
+    if src.name == SOURCE_RUN_ID:
+        return SOURCE_CASE_ID
+    digest = hashlib.sha256(src.name.encode("utf-8")).hexdigest()[:16]
+    return f"{SOURCE_CASE_ID}-{digest}"
+
+
+def _source_handle(src: Path) -> Any:
+    """The source run's handle, for writing its case pointer. A canonical-UUID folder (every
+    run after #1187) through `_spec1077.fixture_run`, production's own rule. A source a test
+    plants under an OLD-shaped or hostile id ON PURPOSE (to see the launcher refuse it before
+    anything is spent, #1187 declared change 1) is a folder production can no longer name, so
+    its handle is built at that folder directly — the fixture still seeds the session such a
+    run had, and the refusal under test is the launcher's, not this fixture's."""
+    from defender.run_repository import Run
+    from defender.tests._fixture_uuid import is_fixture_uuid_shape
+    from defender.tests._spec1077 import fixture_run
+
+    src = Path(src)
+    if is_fixture_uuid_shape(src.name):
+        return fixture_run(src)
+    return Run(src, runs_base=src.parent)
 
 
 def seed_source_session(base: Path, src: Path) -> None:
@@ -706,7 +731,6 @@ def seed_source_session(base: Path, src: Path) -> None:
     Idempotent: `runs_base` is called more than once in some scenarios, and a second session
     under one case id would make "the run's own main session" ambiguous.
     """
-    from defender.tests._spec1077 import fixture_run as _run_handle_1165
     from defender.run_repository import RunPaths, SessionPaths
 
     ss = mod("runtime.session_store")
@@ -719,7 +743,7 @@ def seed_source_session(base: Path, src: Path) -> None:
     case_id = source_case_id(src)
     store = ss.open_store(case_id=case_id, sessions=SessionPaths(base))
     try:
-        ss.write_case_pointer(_run_handle_1165(src), case_id=case_id, store_path=store.path)
+        ss.write_case_pointer(_source_handle(src), case_id=case_id, store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [S.user_request("investigate the alert")], agent_id="main")
         # BOUNDED: a complete pair adds two rows, so the branch point is on the path within
@@ -992,22 +1016,48 @@ def _manifest_labels(episode_dir: Path) -> list[str]:
     return [str(w["world_id"]) for w in worlds or [] if isinstance(w, dict) and "world_id" in w]
 
 
-def roster_arm_id(episode_dir: Path, world_id: str) -> str:
-    """The arm id the episode's roster holds for `world_id` — the fixture's own RUNS step for a
-    hand-built scene (no launcher ran): when there is no roster yet, one is written with a fresh
-    uuid4 for EVERY manifest world (a roster names exactly the manifest's worlds, R2), and a
-    label the roster lacks is added with a fresh id. A launched scene's roster is the
-    launcher's; the spawn double (`_judge_921.FakeSibling`) reads it and never adds to it."""
+def plant_roster(episode_dir: Path) -> dict[str, str]:
+    """The fixture's EXPLICIT RUNS step for a hand-built scene (no launcher ran): makes
+    `<episode_dir>/runs/` and then writes the arm roster once, a fresh uuid4 for EVERY manifest
+    world (#1187 R2: `start_runs` makes `runs/`, then writes a roster naming exactly the
+    manifest's worlds). Returns the roster. Refuses loudly (AssertionError) when a roster is
+    already there (it is written once) or the manifest names no world. A scene that wants a
+    stray arm no roster names plants `runs/<uuid4>` directly; it never extends the roster
+    (review-3 F33)."""
     import uuid
 
     episode_dir = Path(episode_dir)
-    roster = read_roster(episode_dir)
-    if not (episode_dir / ROSTER_NAME).is_file():
-        roster = {label: str(uuid.uuid4()) for label in _manifest_labels(episode_dir)}
-    if world_id not in roster:
-        roster[world_id] = str(uuid.uuid4())
-    episode_dir.mkdir(parents=True, exist_ok=True)
+    if not episode_dir.is_dir():
+        raise AssertionError(f"plant_roster: no episode at {episode_dir} (a launch that made "
+                             "none?) — there is no scene to take the RUNS step for")
+    if (episode_dir / ROSTER_NAME).exists():
+        raise AssertionError(f"plant_roster: {episode_dir / ROSTER_NAME} already exists — the "
+                             "RUNS step writes the roster once")
+    labels = _manifest_labels(episode_dir)
+    if not labels:
+        raise AssertionError(f"plant_roster: {episode_dir / 'family.yaml'} names no world — a "
+                             "roster names exactly the manifest's worlds (#1187 R2)")
+    (episode_dir / "runs").mkdir(parents=True, exist_ok=True)
+    roster = {label: str(uuid.uuid4()) for label in labels}
     write_roster(episode_dir, roster)
+    return roster
+
+
+def roster_arm_id(episode_dir: Path, world_id: str) -> str:
+    """The arm id the episode's roster holds for `world_id`. READ-ONLY (review-3 F33): it never
+    writes or extends a roster, so a scene whose launcher (or explicit RUNS step,
+    `plant_roster` / `episode_view`) wrote none fails here loudly, and so does a label the
+    roster does not name (a roster names exactly the manifest's worlds, #1187 R2)."""
+    episode_dir = Path(episode_dir)
+    if not (episode_dir / ROSTER_NAME).is_file():
+        raise AssertionError(
+            f"roster_arm_id: no arm roster at {episode_dir / ROSTER_NAME} — take the RUNS step "
+            "first (the launcher, `plant_roster` or `episode_view`); this reader never writes one")
+    roster = read_roster(episode_dir)
+    if world_id not in roster:
+        raise AssertionError(
+            f"roster_arm_id: the roster at {episode_dir / ROSTER_NAME} names {sorted(roster)}, "
+            f"not {world_id!r} — a stray arm is planted at `runs/<uuid4>` directly")
     return roster[world_id]
 
 
@@ -1023,10 +1073,10 @@ def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario
     (§7 FORK-13), never the operator's runs base. #1187: the arm folder is named by its ARM ID,
     a uuid4 holding neither the label nor the episode id (O3) — `arm_id` when given (the spawn
     double passes the roster's); else, under an episode (`<base>/..` holds a manifest or a
-    roster), the id that episode's roster holds for `world_id` (`roster_arm_id`: a hand-built
-    scene's roster is written on first use); else (a bare folder a test hands straight to the
-    function under test) `fixture_uuid` of the folder and the label, so a second call for one
-    label names the same folder.
+    roster), the id that episode's roster holds for `world_id` (`roster_arm_id`, read-only: the
+    scene's RUNS step — the launcher, `plant_roster` or `episode_view` — must have written it);
+    else (a bare folder a test hands straight to the function under test) `fixture_uuid` of the
+    folder and the label, so a second call for one label names the same folder.
 
     The verdict is written at `scrub.verdict_path(run_dir)` — `tree.parent /
     f"{tree.name}.scrub-verdict.json"` — because G17 REFUTED the design's "inside the run dir"
@@ -1277,7 +1327,7 @@ __all__ = [
     "UNTRUSTED_FRAME", "assert_wrapped_untrusted", "outside_untrusted_frames", "untrusted_frames",
     "Fault", "base_capture", "captured_row",
     "archived_world", "base_world", "capture_call", "configured_layout", "ROSTER_NAME",
-    "read_roster", "write_roster", "roster_arm_id",
+    "read_roster", "write_roster", "roster_arm_id", "plant_roster",
     "report_text",
     "corpus_document",
     "episode", "episode_view", "fact", "family_arms", "family_doc", "open_source",

@@ -187,7 +187,12 @@ def test_a_runs_folder_that_cannot_be_opened_is_not_called_a_link(tmp_path):
 
 def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words(tmp_path):
     """Run setup holds its runs folder with the repository's own opener, so one state has one
-    message wherever it is met."""
+    message wherever it is met.
+
+    #1187 (declared change 1): the pinned id is a canonical UUID, so run setup reaches its runs
+    folder (an old `pinned-1` is refused for its shape first, with a different message)."""
+    import uuid
+
     from defender import run_common
     from defender._tenant import TenantRefused
     t = H.tenant(tmp_path / "data")
@@ -198,7 +203,7 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
     alert.parent.mkdir()
     alert.write_text('{"alert": 1}', encoding="utf-8")
     with pytest.raises(TenantRefused) as setup:
-        run_common.materialize_run(alert, "pinned-1", tenant=t)
+        run_common.materialize_run(alert, str(uuid.uuid4()), tenant=t)
     with pytest.raises(TenantRefused) as lookup:
         t.runs_repository().list()
     assert str(setup.value) == str(lookup.value), (str(setup.value), str(lookup.value))

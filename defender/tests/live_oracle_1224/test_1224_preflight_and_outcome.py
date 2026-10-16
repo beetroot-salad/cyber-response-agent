@@ -279,6 +279,9 @@ class _Spawn(S.FakeSpawn):
         self.outcome_at_start: list[str | None] = []
         self.probed: list[Any] = []
         self.eps: list[Path] = []
+        #: A planted arm with no launcher roster to read its id from (review-3 F33): `_main`
+        #: fails the test on any.
+        self.faults: list[str] = []
         self._mine = threading.Lock()
 
     def _ep(self, argv: list[str]) -> Path:
@@ -303,7 +306,15 @@ class _Spawn(S.FakeSpawn):
             S.world_record(ep, world, spec["reason"], call=spec.get("call"),
                            detail=spec.get("detail", ""))
         if self.plant and world:
-            S.T.sibling_run_dir(ep / "runs", world, tenant_id=S.FIXTURE_TENANT)
+            # The arm id the LAUNCHER's roster holds, read as `_judge_921.FakeSibling` reads it;
+            # the double never writes or extends a roster (review-3 F33), so a launcher that
+            # wrote none is a fault here, not a roster the double made for it.
+            arm_id = S.T.read_roster(ep).get(world) if (ep / S.T.ROSTER_NAME).is_file() else None
+            if arm_id is None:
+                with self._mine:
+                    self.faults.append(f"sibling {world}: no roster entry at {ep / S.T.ROSTER_NAME}")
+                return 97
+            S.T.sibling_run_dir(ep / "runs", world, arm_id=arm_id, tenant_id=S.FIXTURE_TENANT)
         if self.hook is not None and world:
             self.hook(world)
         return super().__call__(argv, env=env, **kw)
@@ -339,6 +350,8 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
             rc, message = 2, str(stop.code)
     ep = S.new_episode(root, already)
     S.log_refusal(rc, message)
+    faults = getattr(spawn, "faults", None)
+    assert not faults, f"a planted arm found no launcher roster to read its id from: {faults}"
     eps = getattr(spawn, "eps", None)
     if ep.name == S.NO_EPISODE and eps:
         # A second launch nested inside this one's siblings (conc_36) made a second new

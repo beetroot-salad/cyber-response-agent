@@ -70,6 +70,7 @@ from defender.tests import _tenants1106 as T6
 from defender.tests import _triplet_947 as T
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 from defender.tests.tenant_1120_piece1 import _spec1120 as G
+from defender.tests._fixture_uuid import fixture_uuid
 
 # =================================================================================================
 # Names
@@ -144,8 +145,10 @@ class World:
         return self.tmp / "mapping-scratch"
 
     def next_id(self, what: str) -> str:
+        """A fresh run id for this world's `what`-th drive: #1187 (declared change 1) — a
+        canonical UUID (`run.py --run-id` refuses any other), derived from a readable label."""
         self.n += 1
-        return f"{what}-{self.n}"
+        return fixture_uuid(f"1222-tenant-check-{what}-{self.n}")
 
     def alert_shape(self, shape: str) -> Path:
         """Put the alert mapping into one of `alert_mapping.domain.distinguished`'s shapes."""
@@ -187,7 +190,9 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
     if launchable:
         _base, src = T.runs_base(w.tmp, tenant_id=w.planted.tenant_id)
         w.source_run = src
-        w.episode = T.episode(w.tmp, root=Path(os.environ["DEFENDER_EPISODES_BASE"]),
+        # #1187 (O9, declared change 5): an episode lives at `<data root>/<T>/episodes/<uuid>/`,
+        # derived from its tenant; nothing sets or reads `DEFENDER_EPISODES_BASE`.
+        w.episode = T.episode(w.tmp, root=w.planted.root / w.planted.tenant_id / "episodes",
                               doc=T.family_doc(source_run_dir=str(src)))
         with S.sym("_episode_handle", "Episode").open(w.episode) as episode:
             T.episode_view(episode, tenant=w.planted.accept())
@@ -648,7 +653,7 @@ def test_fixture_and_template_tenants_ship_an_alert_mapping(tmp_path: Path, caps
     alert = S.fixture_alert(S.FIXTURE_SLUGS[0])
     for planted in (_committed_fixture_tenant(), _carrying(T6.TEMPLATE_DIR, "template-copy")):
         d = S.run_alert(tmp_path / planted.tenant_id, alert=alert, tenant=planted,
-                        run_id=f"ship-{planted.tenant_id}")
+                        run_id=fixture_uuid(f"ship-{planted.tenant_id}"))
         assert d.refusal is None, d.refusal
         assert d.raised is None, d.raised
         assert d.recorded("signature") == alert["rule"]["id"]
@@ -1026,7 +1031,7 @@ def test_p099_fixture_and_template_tenants_after_the_edit(
             alert = S.fixture_alert(slug)
             store = S.TicketStore()
             d = S.run_alert(tmp_path / f"{label}-{slug}", alert=alert, tenant=planted,
-                            run_id=f"{label}-{slug}", tickets=S.ticket_writer(store),
+                            run_id=fixture_uuid(f"{label}-{slug}"), tickets=S.ticket_writer(store),
                             update_ticket=True)
             assert d.refusal is None, (label, slug, d.refusal)
             assert d.raised is None, (label, slug, d.raised)

@@ -10,6 +10,9 @@ writer once asked; the agent tag the writer adds is `test_1221_agent_tag.py`'s).
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
+# #1187 (declared change 1): a run id is a canonical UUID — every run folder below is
+# fixture_uuid(<label>)
+from defender.tests._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 
@@ -40,7 +43,7 @@ NO_FACTS = AlertFacts(signature=None, event_time=None, summary=None)
 
 def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Routine.",
                confidence: str = "high", with_alert: bool = True) -> Path:
-    run_dir = tmp_path / "20260620t000000z-sshd"
+    run_dir = tmp_path / fixture_uuid("20260620t000000z-sshd")
     run_dir.mkdir()
     run_dir.joinpath("report.md").write_text(
         f"---\ncase_id: {run_dir.name}\ndisposition: {disposition}\n"
@@ -78,7 +81,7 @@ def test_read_case_record_parses_internal_model(tmp_path: Path):
 
 
 def test_read_case_record_case_id_is_run_dir_not_frontmatter(tmp_path: Path):
-    run_dir = tmp_path / "20260620t000000z-sshd"
+    run_dir = tmp_path / fixture_uuid("20260620t000000z-sshd")
     run_dir.mkdir()
     run_dir.joinpath("report.md").write_text(
         "---\ncase_id: SOMETHING-ELSE\ndisposition: benign\n"
@@ -95,7 +98,7 @@ def test_read_case_record_signature_unknown_without_alert(tmp_path: Path):
 
 
 def test_read_case_record_missing_report_raises(tmp_path: Path):
-    run_dir = tmp_path / "empty"
+    run_dir = tmp_path / fixture_uuid("empty")
     run_dir.mkdir()
     with pytest.raises(case_ticket.CaseTicketError):
         case_ticket.read_case_record(_run_handle_1165(run_dir), mapping=SHIPPED)
@@ -108,7 +111,7 @@ def test_read_case_record_bad_disposition_raises(tmp_path: Path):
 
 
 def test_read_case_record_no_frontmatter_raises(tmp_path: Path):
-    run_dir = tmp_path / "nofm"
+    run_dir = tmp_path / fixture_uuid("nofm")
     run_dir.mkdir()
     run_dir.joinpath("report.md").write_text("just prose, no fence\n")
     with pytest.raises(case_ticket.CaseTicketError):

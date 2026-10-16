@@ -64,7 +64,10 @@ def _main_deps(tmp_path: Path):
     from defender.agents import MAIN_DEF
     from defender.runtime.agent_definition import bind
 
-    run = tmp_path / "run"
+    from defender.tests._fixture_uuid import fixture_uuid
+
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     dfn = tmp_path / "defender"
     dfn.mkdir()

@@ -46,6 +46,7 @@ import os
 import pytest
 
 from defender._episode_handle import Episode
+from defender.tests import _judge_921 as J
 from defender.tests import _tenants1106 as T1106
 from defender.run_repository import RunPaths
 from defender.tests import _triplet_947 as T
@@ -160,12 +161,12 @@ def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
         _archive().archive_episode(episode, dirs)
     pointer = ep / "worlds" / "b" / "run_dir"
     assert not os.path.lexists(pointer), "the archive wrote the run_dir pointer"
-    before = _episode().verdicts(ep)
+    before = J.through_view(ep, _episode().verdicts)
     import shutil
 
     for d in dirs.values():
         shutil.rmtree(d)
-    assert _episode().verdicts(ep) == before
+    assert J.through_view(ep, _episode().verdicts) == before
 
 
 def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path):
@@ -183,10 +184,10 @@ def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path
     (ep / "served" / f"{T.world_token('b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1", payload={"hits": [{"_id": "planted"}]})) + "\n",
         encoding="utf-8")
-    before = (_episode().delta_o(ep), _episode().verdicts(ep))
+    before = (J.through_view(ep, _episode().delta_o), J.through_view(ep, _episode().verdicts))
     for d in dirs.values():
         shutil.rmtree(d)
-    assert (_episode().delta_o(ep), _episode().verdicts(ep)) == before
+    assert (J.through_view(ep, _episode().delta_o), J.through_view(ep, _episode().verdicts)) == before
 
 
 def test_947_no_episode_reader_opens_a_siblings_run_dir(tmp_path):
@@ -199,8 +200,8 @@ def test_947_no_episode_reader_opens_a_siblings_run_dir(tmp_path):
         (T.DEFENDER / "learning" / "branch" / "episode.py").read_text(encoding="utf-8"))
     assert "runs_base" not in src_text
     assert "resolve_runs_base" not in src_text
-    assert _episode().verdicts(ep)
-    assert _episode().delta_o(ep) is not None
+    assert J.through_view(ep, _episode().verdicts)
+    assert J.through_view(ep, _episode().delta_o) is not None
 
 
 # ---------------------------------------------------------------------------------------
@@ -218,7 +219,7 @@ def test_947_delta_o_returns_class_per_shared_correlation_key(tmp_path):
         json.dumps(T.captured_row(key="k1")) + "\n" +
         json.dumps(T.captured_row(key="k2", payload={"hits": [{"_id": "planted"}]})) + "\n",
         encoding="utf-8")
-    out = _episode().delta_o(ep, invoke=T.FakeAgent("mutation"))
+    out = J.through_view(ep, _episode().delta_o, invoke=T.FakeAgent("mutation"))
     assert out["b"]["k1"] == "same"
     assert out["b"]["k2"] in {"mutation", "undeclared"}
 
@@ -233,7 +234,7 @@ def test_947_delta_o_subtracts_the_controls_drift_keys(tmp_path):
     for world in ("a", "b"):
         (ep / "served" / f"{T.world_token(world)}.jsonl").write_text(
             drifted + "\n" + json.dumps(T.captured_row(key="k2")) + "\n", encoding="utf-8")
-    out = _episode().delta_o(ep, invoke=T.FakeAgent(*["mutation"] * 6))
+    out = J.through_view(ep, _episode().delta_o, invoke=T.FakeAgent(*["mutation"] * 6))
     assert "k1" not in out.get("b", {})
 
 
@@ -243,7 +244,7 @@ def test_947_verdicts_returns_disposition_per_world(tmp_path):
     ep = _accepted(tmp_path)
     T.archived_world(ep, "a", disposition="benign")
     T.archived_world(ep, "b", disposition="malicious")
-    assert _episode().verdicts(ep) == {"a": "benign", "b": "malicious"}
+    assert J.through_view(ep, _episode().verdicts) == {"a": "benign", "b": "malicious"}
 
 
 def test_947_verdicts_refuses_disposition_outside_enum(tmp_path):
@@ -252,7 +253,7 @@ def test_947_verdicts_refuses_disposition_outside_enum(tmp_path):
     ep = _accepted(tmp_path)
     T.archived_world(ep, "a", disposition="probably-bad")
     with pytest.raises(T.refusals()) as bad:
-        _episode().verdicts(ep)
+        J.through_view(ep, _episode().verdicts)
     assert "probably-bad" in str(bad.value)
 
 
@@ -262,8 +263,8 @@ def test_947_readers_over_an_episode_with_no_archived_worlds_return_empty(tmp_pa
     episode's own recorded outcome is what tells "no worlds" apart from "no differences"."""
     ep = _accepted(tmp_path)
     (ep / "worlds").mkdir(exist_ok=True)
-    assert _episode().verdicts(ep) == {}
-    assert _episode().delta_o(ep) == {}
+    assert J.through_view(ep, _episode().verdicts) == {}
+    assert J.through_view(ep, _episode().delta_o) == {}
 
 
 @pytest.mark.parametrize("outcome", ["unusable", "refused", None])
@@ -280,7 +281,7 @@ def test_947_the_derived_readers_refuse_to_compare_an_incomplete_episode(tmp_pat
         T.archived_world(ep, w)
     for reader in (_episode().delta_o, _episode().verdicts):
         with pytest.raises(T.refusals()) as bad:
-            reader(ep)
+            J.through_view(ep, reader)
         assert (outcome or "no outcome record") in str(bad.value), reader.__name__
 
 
@@ -424,7 +425,7 @@ def test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base(tmp_
     assert base not in (episodes / before).parents, "the episode was claimed inside the runs base"
     elsewhere = tmp_path / "somewhere-else"
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(elsewhere))
-    monkeypatch.delenv(T.EPISODES_BASE_ENV)
+    monkeypatch.delenv(T.EPISODES_BASE_ENV, raising=False)  # review-3 F35: nothing need set it (#1187 O9)
     with tenant.runs_repository().create_episode() as view:
         after = view.episode_id
     assert sorted(os.listdir(episodes)) == sorted([before, after]), (

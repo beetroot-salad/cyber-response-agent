@@ -515,6 +515,24 @@ def episode_runs_for(episode_dir: Path) -> Any:
     return judge_runs(tenant_id, data_root=data_root)
 
 
+def through_view(episode_dir: Path, reader: Any, *args: Any, **kw: Any) -> Any:
+    """`reader(view, *args, **kw)` over the episode's WALKED view — `runs.episode(<id>)` of the
+    tenant whose `<T>/episodes/` holds `episode_dir` (`episode_runs_for`) — the view closed
+    after. Review-3 F32 ruling (#1187 S-iso, recheck S2): the episode's readers
+    (`episode.delta_o(view, *, invoke=)`, `episode.verdicts(view)`) take the walked view and no
+    `Path`; a bare path carries no tenant, so it cannot go through the tenant's walk."""
+    with walked_view(episode_dir) as view:
+        return reader(view, *args, **kw)
+
+
+def walked_view(episode_dir: Path) -> Any:
+    """The episode's WALKED view (`runs.episode(<id>)` of the tenant whose `<T>/episodes/`
+    holds `episode_dir`), to use as a context manager — for a door that takes the view's held
+    episode (`cli.preflight_replay(view.episode, ...)`, review-3 F32 ruling)."""
+    episode_dir = Path(episode_dir)
+    return episode_runs_for(episode_dir).episode(episode_dir.name)
+
+
 def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
     """`learning.judge.grade_episode(runs, episode_dir.name, **kw)` — the judge's one entry
     point, by id: `runs` (default: the repository of the tenant whose `<T>/episodes/` holds

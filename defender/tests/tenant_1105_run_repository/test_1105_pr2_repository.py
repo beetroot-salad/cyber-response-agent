@@ -607,7 +607,7 @@ def test_a_bad_episode_id_or_an_unset_episodes_base_is_refused_before_anything_i
 
     # #1187 declared change 5 (O9): the variable is read by nothing. With it unset, the
     # tenant's own `<T>/episodes/<uuid>` opens.
-    monkeypatch.delenv("DEFENDER_EPISODES_BASE")
+    monkeypatch.delenv("DEFENDER_EPISODES_BASE", raising=False)
     episode_id, ep, _ = _new_episode(root, roster=True)
     view = runs.episode(episode_id)
     assert view.present

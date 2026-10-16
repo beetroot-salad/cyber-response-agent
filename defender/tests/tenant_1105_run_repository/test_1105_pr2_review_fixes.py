@@ -47,6 +47,7 @@ from typing import Any
 import pytest
 
 from defender import _tenant
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.tenant_1105_run_repository import _spec1105_pr2 as P
 
@@ -60,6 +61,12 @@ def _rid(text: str):
     from defender.run_repository import RunId
 
     return RunId.parse(text)
+
+
+#: A natural run's id in the drain scenes (#1187, declared change 1: a run id is a canonical
+#: UUID — a row naming an old `r1` is off grammar and quarantined before the tick's own refusal
+#: or the drain's rehydration is reached).
+RID_R1 = fixture_uuid("pr2-rf-r1")
 
 
 def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
@@ -441,10 +448,10 @@ def test_c_a_tick_with_rows_and_no_data_root_refuses_before_any_box(tmp_path, mo
     comes from inside the batch."""
     from defender.learning.core.config import FatalConfigError
 
-    t = _good(tmp_path, "r1")
+    t = _good(tmp_path, RID_R1)
     root = os.environ[P.DATA_ROOT_ENV]
     paths = P.loop_paths(tmp_path)
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": "r1"})
+    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     box = _Box()
     lane = P.Lane()
@@ -458,7 +465,7 @@ def test_c_a_tick_with_rows_and_no_data_root_refuses_before_any_box(tmp_path, mo
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     assert _tick(paths, lane=lane, pitfalls=[], box=box) == 0
     assert box.started, "the control never started its box"
-    assert lane.run_dirs == [Path(t.runs) / "r1"]
+    assert lane.run_dirs == [Path(t.runs) / RID_R1]
 
 
 # ==========================================================================================

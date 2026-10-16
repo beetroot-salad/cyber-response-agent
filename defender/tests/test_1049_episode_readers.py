@@ -534,12 +534,12 @@ def test_1049_branch_episode_verdicts_decides_absent_vs_refused_by_the_open(tmp_
     """
     ep = _episode(tmp_path, labels=("b", "c"))
     episode = R.mod("learning.branch.episode")
-    assert episode.verdicts(ep) == {"a": "benign", "b": "malicious", "c": "malicious"}
+    assert J.through_view(ep, episode.verdicts) == {"a": "benign", "b": "malicious", "c": "malicious"}
     (ep / "worlds" / "c" / "report.md").unlink()
-    assert episode.verdicts(ep) == {"a": "benign", "b": "malicious"}
+    assert J.through_view(ep, episode.verdicts) == {"a": "benign", "b": "malicious"}
     R.plant_link(ep / "worlds" / "b" / "report.md", ep / "family.yaml")
     with pytest.raises(episode.EpisodeError, match="'b'"):
-        episode.verdicts(ep)
+        J.through_view(ep, episode.verdicts)
     tree = R.parsed(episode.verdicts)
     assert not (R.called_names(tree) & {"exists", "is_symlink", "is_file", "lstat", "stat",
                                         "entry_present", "artifact_file", "read_guarded"}), \

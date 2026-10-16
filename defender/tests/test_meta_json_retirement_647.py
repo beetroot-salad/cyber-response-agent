@@ -27,6 +27,7 @@ blind to the misses — `pyrefly-refs` is rooted at `configDir: defender` and si
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_lifecycle_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 import ast
 import functools
@@ -224,7 +225,8 @@ def test_run_py_binds_the_run_dir_and_threads_it_onward(tmp_path):
         arrived.update({**kwargs, "run_dir": kwargs["run"].run_dir})
         return {"output": "", "requests": 0}
 
-    run_dir = tmp_path / "r-647"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("r-647")
     run_dir.mkdir()
     _run_investigation_lifecycle(
         run=_run_handle_lifecycle_1165(run_dir), model="m-647", model_override=None, defender_dir=DEFENDER,

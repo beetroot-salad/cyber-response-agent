@@ -18,9 +18,11 @@ every negative has a positive control on the same address.
   construction, before anything is written — every id the owner's minting check refuses (a
   newline, a NUL, an over-long name among them), not only the ones a hand-rolled check sees;
   since rev 3 the WHOLE token must be case-stable (a dot-less `Control`, an upper-case head).
-- O4.5 the priming claim, through `cli.prepare_episode`, which now returns the `Episode` (and
-  closes it on its own exception); the `prime=` seam is handed `(source_run_dir, episode)`. An
-  occupied claim is reached through `cli._prime_once`: a launch never adopts a taken directory.
+- O4.5 the priming claim, through `cli._prime_once` (`prepare_episode`'s priming step) over the
+  episode the walk created, `runs.create_episode()` (#1187 declared change 3, review-3 F31(f):
+  the guards' stated destination; `prepare_episode`'s `Episode.create` is gone); the `prime=`
+  seam is handed `(source_run_dir, episode)`, the view's own held episode. A launch never
+  adopts a taken directory.
 - O4.6 / S1 the judge's draw removal: a non-plain draw (the core's leaf refusal, rev 3's
   `NotPlainEntry`) is refused, logged and left, and the pass goes on; any OTHER `OSError` from
   the removal (EACCES, EPERM, EROFS, and equally EIO or ENOTDIR, injected through the
@@ -45,8 +47,6 @@ upper-case-head O4.8.1 rows, and every leaf-plant row checked with `assert_refus
 """
 from __future__ import annotations
 
-from defender.run_repository import Run
-
 import errno
 import json
 import logging
@@ -58,7 +58,6 @@ from typing import Any
 import pytest
 import yaml
 
-from defender import _episode_handle as EH
 from defender import _io
 from defender._episode_paths import LAYOUT
 from defender._io import read_jsonl_rows
@@ -279,7 +278,7 @@ def test_o4_8_1_a_bad_world_id_is_a_ledger_error_at_construction(tmp_path, world
 
 
 # =======================================================================================
-# O4.5 — the priming claim; prepare_episode returns the Episode
+# O4.5 — the priming claim, over the episode the walk created
 # =======================================================================================
 
 class Primed:
@@ -301,35 +300,46 @@ class Primed:
         return T.mod("learning.branch.capture").PrimeReport(primed=1)
 
 
-def _prime_setup(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
+def _prime_setup(tmp_path: Path) -> tuple[Any, Path, Any]:
+    """`(cli, the source run dir, T's runs repository)` — the O4.5 claim guards' STATED
+    DESTINATION (review-3 F30(a) / F31(f)). #1187 declared change 3: the launcher no longer
+    creates its episode (`prepare_episode`'s `Episode.create` and its `-r<n>` loop go); the walk
+    does, `runs.create_episode()`, a fresh UUID under `<T>/episodes/` held by the view. The
+    claim these guards pin is taken by `cli._prime_once` — `prepare_episode`'s priming step,
+    whatever its new signature — over THAT view's held episode, so each guard is driven
+    through `with runs.create_episode() as view: cli._prime_once(view.episode, ...)`: the
+    claim's mode and single link, its release, the primer handed the walk's own held episode,
+    a refused release never masking the primer's error, and no descriptor left once the view
+    closes."""
     cli = T.mod("learning.branch.cli")
     _base, src = T.runs_base(tmp_path)
-    tenant = T.current_tenant()
-    return cli, src, tenant, EH.episode_dir(tenant.data_root, T.EPISODE_ID)
+    return cli, src, T.current_tenant().runs_repository()
 
 
 def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released(
         tmp_path, roots):
-    """`prepare_episode` creates the episode (`Episode.create`), claims with
-    `priming_lock.create("")` — a plain, single-linked regular file of mode 0644 while the
-    primer runs — hands the primer the source run and THE SAME `Episode` it returns, releases
-    the claim, and returns that `Episode` still open (it holds the episode dir until the
-    caller's `with` ends)."""
-    cli, src, tenant, ep = _prime_setup(tmp_path)
+    """The priming step over the walk's fresh episode (`_prime_setup`: #1187 declared change 3)
+    claims with `priming_lock.create("")` — a plain, single-linked regular file of mode 0644
+    while the primer runs — hands the primer the source run and THE SAME held `Episode` the
+    view holds, and releases the claim; the view holds the episode dir until its `with` ends.
+    (The name is kept for the spec graph's history; `prepare_episode`'s own return moves with
+    its new signature, the claim it runs does not.)"""
+    cli, src, runs = _prime_setup(tmp_path)
     prime = Primed()
-    with umask(0o022):
-        got = cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root, prime=prime)
-    with got as episode:
-        assert isinstance(episode, S.Episode()), f"prepare_episode returned {got!r}"
-        assert Path(episode.dir) == ep
+    with umask(0o022), runs.create_episode() as view:
+        episode = view.episode
+        ep = Path(episode.dir)
+        cli._prime_once(episode, view.episode_id, src, prime)
+        assert isinstance(episode, S.Episode()), f"the view holds {episode!r}"
+        assert ep.name == view.episode_id
         assert prime.seen["episode"] is episode, "the primer was handed another episode"
         assert prime.seen["source"] == src
         assert prime.seen["regular"]
         assert prime.seen["nlink"] == 1
         assert prime.seen["mode"] == 0o644, f"the claim's mode is {oct(prime.seen['mode'])}"
         assert not os.path.lexists(ep / "served" / ".priming"), "the claim was not released"
-        assert S.open_fds_on(ep), "the returned episode does not hold the episode dir"
-    assert S.open_fds_on(ep) == [], "leaving the caller's `with` did not release the episode"
+        assert S.open_fds_on(ep), "the view does not hold the episode dir"
+    assert S.open_fds_on(ep) == [], "leaving the view's `with` did not release the episode"
 
 
 @pytest.mark.parametrize("kind", ["plain", "symlink", "dangling", "hardlink"])
@@ -337,28 +347,31 @@ def test_o4_5_an_occupied_or_aliased_claim_is_the_same_ledger_error_and_primes_n
         tmp_path, roots, kind):
     """An occupied claim (a plain file: another launcher) and an alias at the claim are the one
     `LedgerError` naming another launcher; the primer never runs and the claim is left exactly
-    as it was. Driven through `_prime_once` on an `Episode` held over the planted directory:
-    since #1224 `prepare_episode` never adopts an existing directory (a taken name mints
-    `-r<n>`), so only the claim stands between two primers of one episode."""
-    cli, src, _tenant, ep = _prime_setup(tmp_path)
+    as it was. Driven through `_prime_once` on the walk's held episode (`_prime_setup`), the
+    claim planted in it: a launch never adopts an existing directory (#1187 declared change 3:
+    `create_episode()` mints a fresh UUID), so only the claim stands between two primers of
+    one episode."""
+    cli, src, runs = _prime_setup(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
-    claim = ep / "served" / ".priming"
-    if kind == "plain":
-        claim.parent.mkdir(parents=True)
-        claim.write_text("", encoding="utf-8")
-    else:
-        S.plant_leaf(claim, kind, host=host)
-    before = S.census(tmp_path)
 
     def never(*_a: Any, **_kw: Any) -> Any:
         pytest.fail("the primer ran past an occupied or aliased claim")
 
-    with S.open_episode(ep) as episode, pytest.raises(
-            T.mod("learning.branch.ledger").LedgerError,
-            match="another launcher is priming") as refused:
-        cli._prime_once(episode, T.EPISODE_ID, src, never)
-    assert S.census(tmp_path) == before
+    with runs.create_episode() as view:
+        ep = Path(view.episode.dir)
+        claim = ep / "served" / ".priming"
+        if kind == "plain":
+            claim.parent.mkdir(parents=True, exist_ok=True)
+            claim.write_text("", encoding="utf-8")
+        else:
+            S.plant_leaf(claim, kind, host=host)
+        # The episode lives under the data root, outside `tmp_path`: both trees are counted.
+        before = (S.census(ep), S.census(tmp_path))
+        with pytest.raises(T.mod("learning.branch.ledger").LedgerError,
+                           match="another launcher is priming") as refused:
+            cli._prime_once(view.episode, view.episode_id, src, never)
+        assert (S.census(ep), S.census(tmp_path)) == before
     assert refused.value is not None
     assert S.open_fds_on(ep) == [], "the refused claim left a descriptor open on the episode dir"
 
@@ -409,34 +422,41 @@ def _swap_claim(kind: str, claim: Path, host: Path) -> Any:
                                   "served-link"])
 def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_exception(
         tmp_path, roots, caplog, kind):
-    """The claim's `delete()` in `prepare_episode`'s `finally` suppresses EVERY refusal it can
+    """The claim's `delete()` in the priming step's `finally` suppresses EVERY refusal it can
     raise: the primer swaps the claim for a plant and fails; the refusal is logged, the
-    primer's own exception propagates, the plant is left as planted, and the episode is closed
-    before the exception leaves `prepare_episode`."""
-    cli, src, tenant, ep = _prime_setup(tmp_path)
+    primer's own exception propagates, the plant is left as planted, and the walk's view
+    (`_prime_setup`) closes its episode as the exception leaves it."""
+    cli, src, runs = _prime_setup(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
     still_planted: dict[str, Any] = {}
+    held: dict[str, Path] = {}
 
     def swap_then_fail(claim: Path) -> None:
         still_planted["check"] = _swap_claim(kind, claim, host)
         raise PrimerFailed("the primer failed")
 
+    def launch() -> None:
+        with runs.create_episode() as view:
+            held["ep"] = Path(view.episode.dir)
+            cli._prime_once(view.episode, view.episode_id, src, Primed(swap_then_fail))
+
     caplog.set_level(logging.WARNING)
     with pytest.raises(PrimerFailed) as failed:
-        cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root, prime=Primed(swap_then_fail))
+        launch()
     assert still_planted["check"](), f"the {kind} plant was changed by the claim's release"
     assert S.warned(caplog, ".priming"), "the refused release was not logged"
     assert failed.value is not None
-    assert S.open_fds_on(ep) == [], "prepare_episode left its episode open on the primer's error"
+    assert S.open_fds_on(held["ep"]) == [], "the view left its episode open on the primer's error"
 
 
 def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
         tmp_path, roots, caplog):
     """The primer swaps the claim for a symlink to a host file and succeeds: the release in
     `finally` refuses the link (marked) and leaves it for the reap scan; the refusal is logged
-    and suppressed, so priming still returns the episode. The link's target is untouched."""
-    cli, src, tenant, ep = _prime_setup(tmp_path)
+    and suppressed, so priming still completes over the walk's episode (`_prime_setup`). The
+    link's target is untouched."""
+    cli, src, runs = _prime_setup(tmp_path)
     target = tmp_path / "host-claim-target"
     target.write_bytes(S.HOST_BYTES)
 
@@ -445,8 +465,9 @@ def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
         claim.symlink_to(target)
 
     caplog.set_level(logging.WARNING)
-    with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root, prime=Primed(swap)) as got:
-        assert Path(got.dir) == ep
+    with runs.create_episode() as view:
+        ep = Path(view.episode.dir)
+        cli._prime_once(view.episode, view.episode_id, src, Primed(swap))
     claim = ep / "served" / ".priming"
     assert claim.is_symlink(), "the link planted at the claim was removed"
     assert os.readlink(claim) == str(target), "the link planted at the claim was repointed"
@@ -789,21 +810,22 @@ def _no_preflight(*_a: Any, **_kw: Any) -> int:
 
 def _sibling_argv(episode_id: str) -> list[str]:
     """The sibling's door (#1105 PR 2, declared change 6): `--tenant T --episode <id> --world
-    b`, the episode opened by id under the configured episodes base."""
+    b`, the episode opened by id among T's episodes (#1187 O9: `<T>/episodes/`, no configured
+    base)."""
     return ["--tenant", T.SOURCE_TENANT, "--episode", episode_id, "--world", "b"]
 
 
-def _sibling_episode(tmp_path: Path, monkeypatch: Any, src: Path) -> Path:
-    """The episode a sibling opens by id: under the configured episodes base (pointed here),
-    its manifest naming `src`, its container made for the source's tenant as the launcher's
-    `EpisodeRuns.create_container` leaves it before the first sibling (#1105 PR 2)."""
-    from defender import _tenant
+def _sibling_episode(tmp_path: Path, src: Path) -> Path:
+    """The episode a sibling opens by id, its manifest naming `src`. #1187 (R1, R2, O9,
+    declared changes 5 and 6): at the source tenant's `<T>/episodes/<uuid>` (`T.episode`'s
+    default), with no container record and no episodes variable; the launcher's RUNS step
+    (`T.episode_view`) has made `runs/` and the arm roster the sibling reads world b's arm id
+    from (O4b)."""
+    from defender._episode_handle import Episode
 
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
-                   root=tmp_path / "episodes-root")
-    (ep / "runs").mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(ep / "runs", T.SOURCE_TENANT)
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ep.parent))
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    with Episode.open(ep) as held:
+        T.episode_view(held).close()
     return ep
 
 
@@ -821,7 +843,7 @@ def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
     Control on the same episode: its own id runs to completion."""
     run = T.mod("run")
     _base, src = T.runs_base(tmp_path)
-    ep = _sibling_episode(tmp_path, monkeypatch, src)
+    ep = _sibling_episode(tmp_path, src)
     bad = {"path": str(ep / LAYOUT.family), "case": ep.name.upper(),
            "separator": f"{ep.name}/{LAYOUT.family}"}[spelling]
     lifecycle = Recorder()
@@ -855,7 +877,7 @@ def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(
     lifecycle (its `.dir` the manifest's parent) — no second root held beside it by name."""
     run = T.mod("run")
     _base, src = T.runs_base(tmp_path)
-    ep = _sibling_episode(tmp_path, monkeypatch, src)
+    ep = _sibling_episode(tmp_path, src)
     seen: dict[str, Any] = {}
 
     class Holding(Recorder):

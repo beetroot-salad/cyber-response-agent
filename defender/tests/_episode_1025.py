@@ -370,16 +370,17 @@ def cli_argv(episode_dir: Path) -> list[str]:
     return ["--tenant", J.episode_tenant_of(Path(episode_dir)), Path(episode_dir).name]
 
 
-def run_dir(episode_dir: Path, label: str, *, cost: float | Any = 0.25,
+def run_dir(episode_dir: Path, label: str, *, cost: float | Any = 0.25,  # noqa: PLR0913 — one switch per record a page scenario varies
             duration_ms: int | Any = 180_000, result: bool = True, runtime_html: bool = True,
-            events: list[dict[str, Any]] | None = None) -> Path:
+            events: list[dict[str, Any]] | None = None, arm_id: str | None = None) -> Path:
     """`runs/<arm id>/` — the sibling's run dir at the id the episode's arm roster holds for
-    `label` (#1187), plus its scrub sidecar (`_triplet_947.sibling_run_dir`), with
+    `label` (#1187; read-only, review-3 F33), or at `arm_id` when given (a stray arm no roster
+    entry names), plus its scrub sidecar (`_triplet_947.sibling_run_dir`), with
     `tool_trace.jsonl` ending in a result event and the `runtime.html` the run's own visualizer
     leaves (x11)."""
     runs = Path(episode_dir) / "runs"
     runs.mkdir(parents=True, exist_ok=True)
-    rd = T.sibling_run_dir(runs, label)
+    rd = T.sibling_run_dir(runs, label, arm_id=arm_id)
     rows = list(events or [{"type": "assistant", "message": {"content": [{"type": "text",
                                                                          "text": "hello"}]}}])
     if result:
@@ -741,10 +742,10 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
                                            attempts=1)]})
     # the manifest the sample carries: base story, a real axis per sibling, the control's null
     T.write_family(ep, manifest)
-    # #1187 (R2): an archived, judged episode reached RUNS, so its arm roster names every
-    # manifest world (written whether or not the arm folders are kept, `runs=`).
-    for label in WORLDS:
-        T.roster_arm_id(ep, label)
+    # #1187 (R2): an archived, judged episode reached RUNS — `runs/` made, then its arm roster
+    # naming every manifest world — whether or not the arm folders are kept (`runs=`). The
+    # fixture's explicit RUNS step (review-3 F33: no reader writes a roster).
+    T.plant_roster(ep)
     # The family stamp is `stamp`'s alone (`write_stamp` below), so `stamp=False` means absent.
     write_outcome(ep, family_stamp=False)
     # the episode's copy of the source alert names the rule the header shows

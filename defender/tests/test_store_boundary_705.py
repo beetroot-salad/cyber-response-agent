@@ -29,6 +29,7 @@ The probes that govern this file, and what they corrected:
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 import errno as errno_mod
 import json
@@ -84,7 +85,8 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
         assert path.name.endswith(".db")
 
     store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    run_dir = base / "20260718t101500z-alpha"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = base / fixture_uuid("20260718t101500z-alpha")
     run_dir.mkdir(parents=True)
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
     resolved = Path(ss.resolve_store_path(_run_handle_1165(run_dir)))
@@ -381,7 +383,8 @@ def test_two_investigations_of_the_same_case_land_in_one_per_case_database(tmp_p
     base = runs_base(tmp_path)
     sessions = []
     for slug in ("20260718t101500z-one", "20260718t101501z-two"):
-        run_dir = base / slug
+        # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+        run_dir = base / fixture_uuid(slug)
         run_dir.mkdir(parents=True)
         store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
         ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
@@ -406,7 +409,8 @@ def test_run_dir_case_id_and_session_id_deliberately_diverge(tmp_path):
     the wrong one is caught rather than accidentally correct."""
     ss = store_mod()
     base = runs_base(tmp_path)
-    run_dir = base / "20260718t101500z-divergent"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = base / fixture_uuid("20260718t101500z-divergent")
     run_dir.mkdir(parents=True)
     store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)

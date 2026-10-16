@@ -34,6 +34,7 @@ id collides only with a real identifier.
 """
 from __future__ import annotations
 
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -56,6 +57,7 @@ from defender.learning.branch.estate.checks import CheckStore, RealData, check_s
 from defender.runtime.verbs import CALL_DELIVERY, CallDelivery
 from defender.runtime.box._oracle import OracleBox, stop_oracle_box
 from defender.runtime.box._spec import BoxSpec, _DockerTransport
+from defender.tests import _judge_921 as J
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
 ALICE = S.query_params("user:alice")
@@ -1174,9 +1176,11 @@ def _calibration_seen(tmp_path: Path, monkeypatch: Any) -> list[dict]:
     _base, src = S.source_run(tmp_path, est, calls=[S.default_calls()[0]])
     ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
                       base_rows=[S.captured("idp", "query", ALICE, ALICE_ROWS)])
-    with _log.log_context(run_id="launch-run", tenant_id=S.FIXTURE_TENANT):
-        record_ = cli.preflight_replay(ep, source=S.T.open_source(src), roster=est.roster(),
-                                       tenant=est.run_tenant(), rate=1e6)
+    # Review-3 F32 ruling (#1187 S-iso): pre-flight takes the walked view's held episode.
+    with _log.log_context(run_id="launch-run", tenant_id=S.FIXTURE_TENANT), \
+            J.walked_view(ep) as view:
+        record_ = cli.preflight_replay(view.episode, source=S.T.open_source(src),
+                                       roster=est.roster(), tenant=est.run_tenant(), rate=1e6)
     assert record_["outcome"] == "accepted", record_
     return seen
 
@@ -1398,7 +1402,6 @@ def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_pa
     #1234: read off the prompts the real pass hands the judge (`render` returns a
     `JudgeContext`; the prompt is the M3 layout), world c and the family call alike. World c
     gets an (empty) oracle store: a planted world without one is malformed (A24)."""
-    from defender.tests import _judge_921 as J
 
     ep = S.judged_episode(tmp_path / "judged", labels=("a", "c"))
     S.oracle_dir(ep, "c").mkdir(parents=True, exist_ok=True)
@@ -1524,8 +1527,12 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM), S.submit(BOB_ROWS, S.EMPTY_CLAIM),
                  fault=S.Fault(delay=1.5))
 
-    with pytest.raises(OSError, match=re.escape(str(ep / "oracle" / "b"))):
-        cli.preflight_replay(ep, source=S.T.open_source(src), roster=est.roster(),
+    # Review-3 F32 ruling (#1187 S-iso): pre-flight takes the walked view's held episode.
+    # The view is opened OUTSIDE the raises block: its own open failure (an OSError too) must
+    # propagate as itself, not be read against the match below.
+    with J.walked_view(ep) as view, \
+            pytest.raises(OSError, match=re.escape(str(ep / "oracle" / "b"))):
+        cli.preflight_replay(view.episode, source=S.T.open_source(src), roster=est.roster(),
                              tenant=est.run_tenant(), oracle=o.model,
                              verifier=S.passing_verifier().model, rate=1e6)
 
@@ -1657,7 +1664,7 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
     seen: dict = {}
     from defender._episode_handle import Episode
     run._drive_investigation(
-        alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / 'sib'),
+        alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / fixture_uuid("sib")),  # #1187 (declared change 1)
         defender_dir=est.defender_dir, model_name="m", model_override=None, box=None,
         tenant=est.run_tenant(), world=S.load_world(ep, "b"), episode=Episode.open(ep),
         serving=S.serving(), source=S.T.open_source(src),

@@ -119,6 +119,9 @@ def _verify(tmp_path: Path, name: str, *, source: dict,
     planted in that episode's container and handed over as arms opened by id through the
     episode's view (`T.family_arms`), in `T.WORLDS` order or reversed."""
     ep = T.episode(tmp_path, root=tmp_path / "episodes" / name)
+    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
+    # the arm planter reads the roster and never writes one (review-3 F33).
+    T.plant_roster(ep)
     for w in T.WORLDS:
         T.sibling_run_dir(ep / "runs", w, **(siblings or {}).get(w, {}))
     labels = list(reversed(T.WORLDS)) if reverse else list(T.WORLDS)
@@ -674,6 +677,9 @@ def _verify_with(cli: Any, tmp_path: Path, name: str, docs: dict[str, dict]) -> 
     (by label), against the default source — planted in the container of an episode of its own
     (`name`) and handed over as arms opened through its view (#1105 PR 2)."""
     ep = T.episode(tmp_path, root=tmp_path / "episodes" / name)
+    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
+    # the arm planter reads the roster and never writes one (review-3 F33).
+    T.plant_roster(ep)
     # #1187: an arm's folder is its roster uuid, so the label is the world it was made for.
     for w in T.WORLDS:
         d = T.sibling_run_dir(ep / "runs", w)
@@ -721,6 +727,9 @@ def test_1204_fields_expected_to_differ_or_informational_are_not_compared(tmp_pa
     under `--allow-dirty`, which waives the dirt and nothing else. Without this a table-driven
     loop that compared every field would refuse every real family."""
     ep = T.episode(tmp_path, root=tmp_path / "episodes" / "lineage")
+    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
+    # the arm planter reads the roster and never writes one (review-3 F33).
+    T.plant_roster(ep)
     # #1187: an arm's folder is its roster uuid; its world id is the world token of its label.
     for turn, w in enumerate(T.WORLDS, start=1):
         d = T.sibling_run_dir(ep / "runs", w)

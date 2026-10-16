@@ -43,6 +43,7 @@ from __future__ import annotations
 
 from dataclasses import replace as _with_fixture_run_1165
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 
@@ -287,7 +288,8 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
 
     from defender.runtime.run_state import RunState
 
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
     # the dispatch's breaker screen reads it.

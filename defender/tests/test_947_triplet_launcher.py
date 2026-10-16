@@ -61,7 +61,10 @@ def _verify_family(ep_dir, plant=T.arm_run_dir, **kw):
     episode dir (#1133 rev 2), and the finished arms by label (#1105 PR 2): `plant(ep_dir,
     world)` makes each world's arm in the episode's own container (default
     `T.arm_run_dir(ep_dir, world)`), and each is opened by id through the episode's view
-    (`T.family_arms`)."""
+    (`T.family_arms`). The scene takes its explicit RUNS step first (`T.plant_roster`): the
+    planter reads the roster and never writes one (review-3 F33)."""
+    if not (ep_dir / T.ROSTER_NAME).exists():  # once per episode (a loop may re-verify one)
+        T.plant_roster(ep_dir)
     for world in T.WORLDS:
         plant(ep_dir, world)
     with Episode.open(ep_dir) as episode:

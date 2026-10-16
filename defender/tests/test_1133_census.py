@@ -72,12 +72,17 @@ call `hold` and `hold_new`, so the check is not vacuous.
 * *Calls.* `EpisodePaths(`, `base_file(` and `staged_path(` are called only in `NB_READERS`:
   the root-binding readers and path-typed functions D3' names, and the O5 carve-outs.
 * *Doors.* `Episode.open` / `Episode.create` are used — called, or referenced any other way
-  (a module-level alias's right-hand side, an argument, a local alias) — only in the doors D3'
-  names (`DOORS`, #1224's pre-flight `preflight_replay` among them). The scan resolves import
-  aliases, module attributes and module-level assignment aliases of the class or of a door
-  (`module_aliases`, keyed by the door scan's own resolver), counts a door verb on a value's
-  class (`type(ep).open`), and keys any `getattr` / `vars` reach into the class as a hit of
-  its own. Each door in `DOORS_REQUIRED` does call its verb, so the scan is not vacuous; and
+  (a module-level alias's right-hand side, an argument, a local alias) — in NONE of the O5
+  modules: #1187 S-iso (declared change 8) makes the tenant's runs repository the only opener
+  (its walk, `run_repository/`), so the launcher, the sibling and pre-flight hold the episode
+  the walk handed them (`runs.create_episode()`, `runs.episode(<id>, roster_label=<label>)`,
+  `preflight_replay(view.episode, ...)`). The scan resolves import aliases, module attributes
+  and module-level assignment aliases of the class or of a door (`module_aliases`, keyed by
+  the door scan's own resolver), counts a door verb on a value's class (`type(ep).open`), and
+  keys any `getattr` / `vars` reach into the class as a hit of its own. So the scan is not
+  vacuous, the walk owner does call both verbs (`WALK_DOORS_REQUIRED`, the same scan over
+  `run_repository/`), and the former doors reach the walk instead (`WALK_CALLS_REQUIRED`: the
+  launcher calls `create_episode`, the sibling calls `episode(..., roster_label=...)`); and
   the `Episode`'s public class/static methods are exactly `open` and `create`, with no public
   function in `_episode_handle`, so there is no third door the scan does not look for.
 
@@ -1011,33 +1016,31 @@ NB_READERS = frozenset({
 })
 _O5_CALLS = frozenset({"EpisodePaths", "base_file", "staged_path"})
 
-#: The doors D3' names, and #1224's pre-flight: where `Episode.open` / `Episode.create` may be
-#: called. `grade_episode`'s one orchestration body `_grade_episode` (where its `bind` is today)
-#: counts as the door.
-DOORS = frozenset({
-    ("learning.branch.cli", "prepare_episode"),
-    ("run", "main"),
-    ("learning.judge", "grade_episode"),
-    ("learning.judge", "_grade_episode"),
-    ("scripts.visualize.visualize_episode", "render_episode"),
-    ("learning.branch.cli", "preflight_replay"),
-})
-#: Callers D3' does not place but whose callees take the `Episode`: the page script's `main`
-#: hands one to `_write_page`, and may open its own. Rev 3 (R1) removes `delta_o`: it opens no
-#: `Episode`, reading the manifest as `load_family(bound)` through its one `bind`.
-DOORS_TOLERATED = frozenset({
-    ("scripts.visualize.visualize_episode", "main"),
-})
-#: What the doors must call, so the scan is not vacuous: `(module, function-or-alternatives,
-#: verb)`.
-DOORS_REQUIRED = (
-    ("learning.branch.cli", ("prepare_episode",), "create"),
-    ("run", ("main",), "open"),
-    ("learning.branch.cli", ("preflight_replay",), "open"),
-    # #1105 PR 2 (decision C, declared changes 3 and 4): the judge's and the page's doors take an
-    # episode id and hold their `Episode` through the tenant's runs repository
-    # (`runs.episode_files(ep)`, `runs.episode(ep)`), which opens it by id — so neither calls
-    # `Episode.open` itself any more.
+#: The doors the O5 modules may hold: none. #1187 S-iso (declared change 8): the doors D3' named
+#: (the launcher's `prepare_episode` create, the sibling's `run.main` open, #1224's pre-flight
+#: `preflight_replay` open, the judge's and the page's opens) all moved behind the tenant's runs
+#: repository, whose walk (`run_repository/`, outside these modules) is the one opener —
+#: `test_1187_openers` forbids `Episode.open` / `Episode.create` anywhere else. Kept as names so
+#: the scan's own controls and a later carve-out read the same way.
+DOORS: frozenset[tuple[str, str]] = frozenset()
+#: Callers D3' did not place: none either (the page script's `main` opens nothing of its own;
+#: its episode comes from `runs.episode(<id>)`).
+DOORS_TOLERATED: frozenset[tuple[str, str]] = frozenset()
+#: The walk owner (#1187 S-iso), the only package that may call the doors: scanned with the same
+#: door scan, it must call each verb somewhere, so `DOORS` being empty is not met by an opener
+#: the scans cannot see. `(verb,)` over every module under `run_repository/`.
+WALK_OWNER_DIR = "run_repository"
+WALK_DOORS_REQUIRED = ("create", "open")
+#: The former doors reach the walk instead of a door, so the O5 half is not vacuous: `(module,
+#: method called on a receiver, keyword the call must pass or None)`. The launcher claims its
+#: fresh episode with `runs.create_episode()` (interface: "New episode"; #1187 declared change 3,
+#: replacing `prepare_episode`'s `Episode.create` and its `-r<n>` loop), and the sibling opens its
+#: episode through `runs.episode(<id>, roster_label=<label>)` (interface: "sibling form";
+#: replacing `run.main`'s pre-acceptance `Episode.open(episode_dir)`). Pre-flight takes the
+#: launcher's `view.episode` and opens nothing (no row: `DOORS` above refuses any open it keeps).
+WALK_CALLS_REQUIRED = (
+    ("learning.branch.cli", "create_episode", None),
+    ("run", "episode", "roster_label"),
 )
 
 
@@ -1467,21 +1470,70 @@ def test_o5_episode_paths_base_file_and_staged_path_are_called_only_by_root_read
         "record, or a view):\n" + "".join(f"  {e}\n" for e in extra))
 
 
+def _method_calls(module: str, tree: ast.Module) -> set[tuple[str, str, frozenset[str]]]:
+    """Every `(module, method, keywords)` call of a method on any receiver (`runs.episode(...)`,
+    `x.create_episode()`): the attribute's name and the keyword names the call passes."""
+    out = set()
+    for _where, call in _scoped_calls(tree):
+        if isinstance(call.func, ast.Attribute):
+            out.add((module, call.func.attr,
+                     frozenset(k.arg for k in call.keywords if k.arg is not None)))
+    return out
+
+
+def _walk_calls_missing(found: set[tuple[str, str, frozenset[str]]]) -> list[tuple[str, str, Any]]:
+    return [(module, method, keyword) for module, method, keyword in WALK_CALLS_REQUIRED
+            if not any(m == module and name == method and (keyword is None or keyword in kws)
+                       for m, name, kws in found)]
+
+
 def test_o5_only_the_doors_open_or_create_an_episode():
-    """O5 / D3' / D6' (doors): `Episode.open` / `Episode.create` are called only in the doors
-    (plus the tolerated callers D3' does not place); and `cli.prepare_episode` creates, and
-    `run.main`, `grade_episode`, `render_episode` and `cli.preflight_replay` open, so the scan
-    is not vacuous."""
+    """O5 / D3' / D6' (doors), flipped by #1187 S-iso (declared change 8): `Episode.open` /
+    `Episode.create` are called in NONE of the O5 modules (the doors D3' named moved behind the
+    runs repository's walk); the walk owner (`run_repository/`) calls both verbs, so the empty
+    door set is not met by an opener the scan misses; and the former doors reach the walk — the
+    launcher calls `create_episode`, the sibling calls `episode(..., roster_label=...)` — so the
+    O5 half is not vacuous. #1187 declared change 8.
+
+    RED at base: `cli.prepare_episode` creates and `run.main` / `cli.preflight_replay` open an
+    `Episode` themselves; `run_repository/` calls `Episode.open` only (no `create`); no
+    `create_episode` / `roster_label=` call exists."""
     found = _o5_collect(o5_doors)
     extra = sorted(hit for hit in found if not _allowed(hit, DOORS | DOORS_TOLERATED))
-    missing = [
-        (module, fns, verb) for module, fns, verb in DOORS_REQUIRED
-        if not any(hit[0] == module and hit[2] == verb and any(_within(hit[1], fn) for fn in fns)
-                   for hit in found)]
+    owner: set[tuple[str, str, str]] = set()
+    for path in sorted((PACKAGE / WALK_OWNER_DIR).glob("*.py")):
+        owner |= o5_doors(_module_name(f"{WALK_OWNER_DIR}/{path.name}"), _parse(path))
+    owner_missing = [verb for verb in WALK_DOORS_REQUIRED if not any(h[2] == verb for h in owner)]
+    calls: set[tuple[str, str, frozenset[str]]] = set()
+    for rel in O5_MODULES:
+        calls |= _method_calls(_module_name(rel), _parse(PACKAGE / rel))
+    missing = _walk_calls_missing(calls)
     assert not extra, (
-        "opens or creates an Episode outside a door (take the door's Episode instead):\n"
-        + "".join(f"  {e}\n" for e in extra))
-    assert not missing, f"a door that must open or create its Episode does not: {missing}"
+        "opens or creates an Episode outside the runs repository's walk (take the walked "
+        "view's episode instead):\n" + "".join(f"  {e}\n" for e in extra))
+    assert not owner_missing, (
+        f"the walk owner ({WALK_OWNER_DIR}/) does not call Episode.{owner_missing} — the episode "
+        f"is opened or created somewhere the door scans do not look: {sorted(owner)}")
+    assert not missing, f"a former door does not reach the runs repository's walk: {missing}"
+
+
+def test_o5_the_walk_call_census_finds_what_it_is_meant_to_find():
+    """Positive control for `WALK_CALLS_REQUIRED`'s scan, on synthetic source through the same
+    collector: a launcher module calling `runs.create_episode()` and a sibling module calling
+    `runs.episode(ep, roster_label=label)` meet both rows; the sibling form without the keyword,
+    a bare reference to `create_episode` (no call), or a call in another module, does not."""
+    good_cli = ast.parse("def launch(runs):\n    return runs.create_episode()\n")
+    good_run = ast.parse("def main(runs, ep, label):\n"
+                         "    return runs.episode(ep, roster_label=label)\n")
+    assert _walk_calls_missing(_method_calls("learning.branch.cli", good_cli)
+                               | _method_calls("run", good_run)) == []
+    bare_ref = ast.parse("def launch(runs):\n    door = runs.create_episode\n    return door\n")
+    no_kw = ast.parse("def main(runs, ep):\n    return runs.episode(ep)\n")
+    assert _walk_calls_missing(_method_calls("learning.branch.cli", bare_ref)
+                               | _method_calls("run", no_kw)) == [
+        ("learning.branch.cli", "create_episode", None), ("run", "episode", "roster_label")]
+    elsewhere = _method_calls("learning.judge", good_cli) | _method_calls("learning.judge", good_run)
+    assert len(_walk_calls_missing(elsewhere)) == 2
 
 
 def test_o5_the_episodes_only_constructors_are_its_two_doors():

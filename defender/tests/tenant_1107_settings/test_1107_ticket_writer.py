@@ -44,6 +44,7 @@ from defender.run_repository import Run
 from defender.run_repository import RunPaths
 from defender.runtime import run_end, run_tenant
 from defender.scripts.case_history import ticket_writer
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
@@ -608,7 +609,9 @@ def test_s7_nf24_receipt_write_failure_is_harmless(tmp_path, monkeypatch, caplog
 
     # (b) The last attempt wins: a successful record, then a second record step in the SAME run
     # dir after the case-history config went missing, whose error receipt (MF-9) replaces it.
-    run_id = "r-twice"
+    # #1187 (declared change 1): the run folder is rebuilt below from this id, so the id is
+    # the canonical UUID `run_argv` and the recorder use.
+    run_id = fixture_uuid("r-twice")
     _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id), name="docker-twice")
     _run(tmp_path, root, alert, run_id=run_id)
     first = S.receipt(tmp_path / "runs" / run_id)
@@ -699,7 +702,9 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
     partially-written file, and an interrupted write leaves either the old content or the new
     content, never a torn mix."""
     root, folder, alert = _world(tmp_path)
-    run_id = "r-atomic"
+    # #1187 (declared change 1): the run folder is rebuilt below from this id, so the id is
+    # the canonical UUID `run_argv` and the recorder use.
+    run_id = fixture_uuid("r-atomic")
     _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
     _run(tmp_path, root, alert, run_id=run_id)
     run_dir = tmp_path / "runs" / run_id
@@ -730,7 +735,9 @@ def test_s60_ticket_write_path_stable_for_path_helpers(tmp_path, monkeypatch):
     the third #1156 review; it was <run_dir>/ticket_write.json). the layout and the handle
     resolve this same path, and the record step's receipt lands there."""
     root, _folder, alert = _world(tmp_path)
-    run_id = "r-path"
+    # #1187 (declared change 1): the run folder is rebuilt below from this id, so the id is
+    # the canonical UUID `run_argv` and the recorder use.
+    run_id = fixture_uuid("r-path")
     _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
     _run(tmp_path, root, alert, run_id=run_id)
     run_dir = tmp_path / "runs" / run_id
@@ -798,7 +805,7 @@ def test_s7_f6_run_env_handed_to_the_correlation_lead(tmp_path, monkeypatch):
     # forks is handed.
     from defender.tests.alert_front_door_1222 import _spec1222 as FD
 
-    lead = FD.run_alert(tmp_path / "lz-run", tenant=FD.plant_tenant(), run_id="lz1107-f6",
+    lead = FD.run_alert(tmp_path / "lz-run", tenant=FD.plant_tenant(), run_id=fixture_uuid("lz1107-f6"),
                         leads={FD.L3: [FD.query("elastic", "alerts", {"native_query": "*"}),
                                        FD.text(FD.DEFAULT_CORRELATION_SUMMARY)]})
     assert lead.backend.rec.calls, "the correlation lead issued no backend call"

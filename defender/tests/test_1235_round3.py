@@ -61,6 +61,7 @@ from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.tools import _tool_bash  # noqa: E402
 from defender.scripts.gather_tools import record_query as rq  # noqa: E402
 from defender.tests import _tenants1106  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid, is_fixture_uuid_shape  # noqa: E402
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 from defender.tests.test_959_downstream import Box, _gather_scene  # noqa: E402
 from defender.tests.test_budget_seams_631 import _run_dir, drive_agent  # noqa: E402
@@ -70,9 +71,10 @@ _PAYLOAD = '{"total": 1, "hits": ["web-1"]}'
 
 
 def _bare_run(root: Path, name: str = "run") -> tuple[Path, RunState]:
-    run_dir = root / name
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(name)
+    run_dir = root / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
-    return run_dir, RunState(run_dir, name)
+    return run_dir, RunState(run_dir, run_dir.name)
 
 
 def _append(state: RunState, *, params: dict, lead: str = LEAD) -> dict:
@@ -128,7 +130,8 @@ def test_a_failing_call_whose_view_write_is_refused_is_still_charged_and_recorde
     Observed failing by: round 2's `_record`, which charged the breaker only after the append
     returned — a refused view write cost the breaker its charge and the state its row, so a
     system failing every call while its view is blocked never trips."""
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "r3-o1")
     deps = _gather_deps(run_dir, state)
@@ -165,7 +168,8 @@ def test_a_succeeding_call_whose_view_write_is_refused_charges_nothing(tmp_path)
     """The charge O1 keeps is the failure's, not a side effect of the refused write: a call that
     SUCCEEDED (exit 0) while the view is squatted is in the state, the write's error propagates,
     and the breaker is untouched."""
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "r3-o1-ok")
     deps = _gather_deps(run_dir, state)

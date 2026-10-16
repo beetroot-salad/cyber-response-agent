@@ -65,8 +65,10 @@ def _sibling_run(tmp_path: Path, root: Path) -> tuple[Path, Path]:
     with Episode.open(manifest.parent) as episode:
         world = H.run_py().resume_world(
             episode, "b", tenant=lambda: H.T1106.run_tenant(tenant))
+        # #1187 (O4b): the sibling's form names its roster label (`roster_label=`, replacing
+        # PR 2's `container_required`).
         view = tenant.runs_repository().episode(episode.dir.name, held=episode,
-                                                container_required=True)
+                                                roster_label="b")
         run_dir = H.run_common().materialize_run(
             RunPaths(src).alert, world.run_id, tenant=tenant, world=world,
             episode_runs=view).run_dir

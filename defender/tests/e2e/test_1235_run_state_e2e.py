@@ -64,6 +64,7 @@ from defender.runtime import branch, session_store  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
@@ -172,7 +173,8 @@ class Branched:
             "the legal source carries a claim for l-001, so the sibling could not re-dispatch it")
         self.spec = spec_at(store, source, path_ids[-1])
         store.close()
-        self.sibling = tmp_path / "defender-runs" / "run-sibling-1235"
+        # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+        self.sibling = tmp_path / "defender-runs" / fixture_uuid("run-sibling-1235")
         RunPaths(self.sibling).gather_raw.mkdir(parents=True)
         from defender.tests._alert_plant import plant_alert
         plant_alert(self.sibling, RunPaths(source).alert.read_bytes())

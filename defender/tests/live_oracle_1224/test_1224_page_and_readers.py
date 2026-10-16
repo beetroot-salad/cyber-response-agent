@@ -438,21 +438,22 @@ def test_1224_episode_reader_reads_the_outcome_record(tmp_path):
     with io.bind(ep) as bound:
         assert recorded(bound) == ("unusable", "worlds b and c were unservable")
     with pytest.raises(refusal) as refused:
-        verdicts(ep)
+        J.through_view(ep, verdicts)
     assert "worlds b and c were unservable" in str(refused.value)
 
     accepted = S.judged_episode(tmp_path / "accepted")
     J.review_record(accepted, outcome="rejected", reason="a stale pre-oracle record")
     with io.bind(accepted) as bound:
         assert recorded(bound)[0] == "accepted"
-    assert set(verdicts(accepted)) == {"a", "b", "c"}
+    assert set(J.through_view(accepted, verdicts)) == {"a", "b", "c"}
 
 
 def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
     """pco01_episode_readers_refuse_new_words — verdicts and delta_o refuse `unusable`,
     `refused`, an absent record and a torn record, each naming the word; `accepted` reads.
 
-    (PCO-01, GR-01, M05=A.)"""
+    (PCO-01, GR-01, M05=A.) Review-3 F32 ruling (#1187): each reader takes the episode's
+    walked view (`J.through_view`), never a path."""
     verdicts = S.sym(S.EPISODE, "verdicts")
     delta_o = S.sym(S.EPISODE, "delta_o")
     refusal = S.sym(S.EPISODE, "EpisodeError")
@@ -462,7 +463,7 @@ def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
         S.outcome_record(ep, word, reason=f"the family is {word}")
         for reader in (verdicts, delta_o):
             with pytest.raises(refusal) as refused:
-                reader(ep)
+                J.through_view(ep, reader)
             assert word in str(refused.value), f"{reader.__name__} did not name {word!r}"
 
     absent = S.judged_episode(tmp_path / "absent", outcome=None)
@@ -471,13 +472,13 @@ def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
     for ep in (absent, torn):
         for reader in (verdicts, delta_o):
             with pytest.raises(refusal) as refused:
-                reader(ep)
+                J.through_view(ep, reader)
             assert "no record" in str(refused.value).lower() or S.OUTCOME_NAME in str(
                 refused.value), f"{reader.__name__} did not report the missing record"
 
     accepted = S.judged_episode(tmp_path / "accepted")
-    assert set(verdicts(accepted)) == {"a", "b", "c"}
-    delta_o(accepted)
+    assert set(J.through_view(accepted, verdicts)) == {"a", "b", "c"}
+    J.through_view(accepted, delta_o)
 
 
 # --------------------------------------------------------------------------------------

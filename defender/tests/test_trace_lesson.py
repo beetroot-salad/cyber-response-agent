@@ -9,6 +9,7 @@ import pytest
 
 from defender.tests._by_path import load_trace_lesson
 from defender.tests._alert_plant import plant_alert
+from defender.tests._fixture_uuid import fixture_uuid as C
 from defender.tests.tenant_1105_run_repository import _spec1105 as H1105
 
 #: The tenant whose natural runs the tracer walks (#1105 PR 2, J8: `--tenant` is required and
@@ -30,12 +31,10 @@ def _load():
 
 
 def _tenant_runs_dir(tmp_path: Path) -> Path:
-    """The tenant's natural runs folder, made with its tenant record (what run setup makes)."""
-    from defender import _tenant
-
+    """The tenant's natural runs folder, as run setup makes it. #1187 (R1): it holds run folders
+    and their sidecars only — no `_tenant.json` is written or read."""
     runs = tmp_path / "data" / TID / "runs"
     runs.mkdir(parents=True, exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, TID)
     return runs
 
 
@@ -46,7 +45,10 @@ def _opened(tl) -> list:
 
 
 def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]):
-    rd = runs / name
+    """A finished run of case `name` (a LABEL): its folder, and so its case id, is
+    `fixture_uuid(name)` — #1187 (declared changes 1, 7): a run id is a canonical UUID and the
+    tracer refuses any other entry in `<T>/runs`. Assertions spell the id as `C(<label>)`."""
+    rd = runs / C(name)
     rd.mkdir(parents=True)
     plant_alert(rd)
     (rd / "report.md").write_text(f"---\ndisposition: {disposition}\n---\nbody\n")
@@ -67,7 +69,7 @@ def test_in_context_cases_windows_on_created_at(tmp_path):
     _mk_run(runs, "case-c", disposition="benign",
             loads=[{"lesson_name": "OTHER", "ts": "2026-06-06T00:00:00+00:00"}])
     hits = tl.in_context_cases("L", created, _opened(tl))
-    assert [(h.case_id, h.disposition) for h in hits] == [("case-a", "benign")]
+    assert [(h.case_id, h.disposition) for h in hits] == [(C("case-a"), "benign")]
 
 
 def test_in_context_cases_dedups_per_case_keeps_earliest(tmp_path):
@@ -106,7 +108,7 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
     _tenant_runs_dir(tmp_path)
 
     rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
-    assert rc == 0
+    assert rc == 0, capsys.readouterr().err
     lines = capsys.readouterr().out.splitlines()
     assert lines == ["L\ta b c\t0\t0"]
 
@@ -121,7 +123,7 @@ def test_all_drops_terminal_controls_from_the_description(tmp_path, capsys):
     _tenant_runs_dir(tmp_path)
 
     rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
-    assert rc == 0
+    assert rc == 0, capsys.readouterr().err
     assert capsys.readouterr().out.splitlines() == ["L\ta[2Kbc\t0\t0"]
 
 
@@ -165,7 +167,7 @@ def _case_ids(out: str) -> list[str]:
         ("naive-created-at-does-not-crash",
          "L", "name: L\ndescription: d\ncreated_at: 2026-06-04T00:00:00",
          [("case-a", "benign", "2026-06-05T00:00:00+00:00")],
-         ["case-a"], (None, "case-a\tbenign")),
+         ["case-a"], (None, ("case-a", "benign"))),
 
         # `created_at: 2026-06-04` (PyYAML → date) is promoted to UTC midnight, not silently
         # dropped — so a load BEFORE it stays excluded and one after it is kept.
@@ -202,14 +204,16 @@ def test_trace_reports_the_cases_a_lesson_was_loaded_into(
 
     rc = tl.main([stem, "--lessons-dir", str(tmp_path / "lessons"),
                   "--tenant", TID])
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert _case_ids(out) == expected
+    cap = capsys.readouterr()
+    out = cap.out
+    assert rc == 0, cap.err
+    assert _case_ids(out) == [C(label) for label in expected]
     expect_header, expect_row = expect
     if expect_header is not None:
         assert out.startswith(expect_header)
     if expect_row is not None:
-        assert expect_row in out
+        label, disposition = expect_row
+        assert f"{C(label)}\t{disposition}" in out
 
 
 
@@ -229,8 +233,10 @@ def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, capsys):
 
     hits = tl.in_context_cases("L", None, _opened(tl))
     err = capsys.readouterr().err
-    assert [(h.case_id, h.disposition) for h in hits] == [("case-a", "?"), ("case-b", "malicious")]
-    assert "case-a/report.md" in err
+    # The runs are walked in id order (`all_runs`), so the expected rows are in id order too.
+    assert [(h.case_id, h.disposition) for h in hits] == sorted(
+        [(C("case-a"), "?"), (C("case-b"), "malicious")])
+    assert f"{C('case-a')}/report.md" in err
 
 
 def test_all_survives_undecodable_report(tmp_path, capsys):
@@ -245,7 +251,7 @@ def test_all_survives_undecodable_report(tmp_path, capsys):
     (rd / "report.md").write_bytes(b"---\ndisposition: benign\n---\n\xff")
 
     rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
-    assert rc == 0
+    assert rc == 0, capsys.readouterr().err
     assert "L\td\t1\t0" in capsys.readouterr().out.splitlines()
 
 
@@ -268,7 +274,7 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
 
     rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", TID])
     cap = capsys.readouterr()
-    assert rc == 0
+    assert rc == 0, cap.err
     lines = cap.out.splitlines()
     assert "ok\tfine\t1\t0" in lines
     assert "broken\t(malformed lesson — unwindowed count)\t1\t0" in lines
@@ -285,7 +291,7 @@ def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
     _tenant_runs_dir(tmp_path)
 
     rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", TID])
-    assert rc == 0
+    assert rc == 0, capsys.readouterr().err
     assert capsys.readouterr().out.splitlines() == ["ok\tfine\t0\t0"]
 
 
@@ -303,8 +309,8 @@ def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsy
 
     rc = tl.main(["broken", "--lessons-dir", str(lessons), "--tenant", TID])
     cap = capsys.readouterr()
-    assert rc == 0
-    assert _case_ids(cap.out) == ["case-a"]
+    assert rc == 0, cap.err
+    assert _case_ids(cap.out) == [C("case-a")]
     assert "trace is unwindowed" in cap.err
 
 
@@ -322,8 +328,8 @@ def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, capsys)
 
     rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     cap = capsys.readouterr()
-    assert rc == 0
-    assert _case_ids(cap.out) == ["case-a"]
+    assert rc == 0, cap.err
+    assert _case_ids(cap.out) == [C("case-a")]
     assert "trace is unwindowed" in cap.err
 
 

@@ -81,6 +81,7 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 
 import json
 import re
@@ -482,8 +483,12 @@ def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bo
     unless `report=False`.
 
     `report=False` is the shape the three no-report exit classes leave (claim h1) and the shape
-    F-K's unreachable sub-case has: a forced-close-set exit whose own forced close failed."""
-    run_dir = Path(tmp_path) / name
+    F-K's unreachable sub-case has: a forced-close-set exit whose own forced close failed.
+
+    `name` is a LABEL for the run, or its id: a canonical UUID names the folder as it is, any
+    other text names it `fixture_uuid(name)`, so a test reads the run's id as `run_dir.name`."""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = Path(tmp_path) / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     run_dir.mkdir(parents=True, exist_ok=True)
     from defender.tests._alert_plant import plant_alert
 

@@ -41,6 +41,7 @@ from defender.runtime import run_tenant
 from defender.tests import _spec767 as M
 from defender.tests import _tenants1106 as T1106
 from defender.tests._alert_plant import plant_alert as plant_with_record
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests import _triplet_947 as T
 from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.e2e._replay_harness import (
@@ -69,8 +70,10 @@ TICKET_TABLE = """dispositions:
 # ======================================================================================
 
 def _seeded_run(tmp_path: Path, name: str) -> Path:
-    """A run dir the renderer accepts: the alert and a real session store behind its pointer."""
-    run_dir = tmp_path / "runs" / name
+    """A run dir the renderer accepts: the alert and a real session store behind its pointer.
+    `name` is a LABEL: #1187 (declared change 1) — the folder, the run's id, is
+    `fixture_uuid(name)`."""
+    run_dir = tmp_path / "runs" / fixture_uuid(name)
     run_dir.mkdir(parents=True, exist_ok=True)
     plant_with_record(run_dir, {"alert_id": "a-1107", "rule": {"id": "r-1107",
                                                                "description": "spec 1107"},
@@ -610,13 +613,14 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
         T.world_doc("b", facts=note("SOC-1", "closed")),
         T.world_doc("c", facts=note("SOC-2", "done-edited-1107")),
     ]))
-    # #1105 PR 2: the sibling opens its episode by id under the configured episodes base, over
-    # the container the launcher made for its tenant before the first sibling.
-    from defender import _tenant
+    # #1105 PR 2: the sibling opens its episode by id. #1187 (R1, R2, O9): under its tenant's
+    # `<T>/episodes/` (`T.episode`'s default root), with no container record and no episodes
+    # variable; the launcher's RUNS step (`start_runs`, through `T.episode_view`) makes `runs/`
+    # and writes the arm roster the sibling reads its arm id from (O4b).
+    from defender._episode_handle import Episode
 
-    (ep / "runs").mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(ep / "runs", S.PLAYGROUND_ID)
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ep.parent))
+    with Episode.open(ep) as held:
+        T.episode_view(held).close()
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     run = S.run_py()

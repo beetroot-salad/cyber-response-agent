@@ -824,8 +824,10 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
             episode, "b", tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))
         # #1105 PR 2: the arm is made through the sibling's episode view, over the container
         # RUNS made for the tenant (`family_for` plants it and the roster, #1187).
+        # #1187 (O4b): the sibling's form names its roster label (`roster_label=`, replacing
+        # PR 2's `container_required`): the view refuses unless the roster names the world.
         view = tenant.runs_repository().episode(episode.dir.name, held=episode,
-                                                container_required=True)
+                                                roster_label="b")
         run_dir = run_common.materialize_run(
             RunPaths(src).alert, world.run_id, tenant=tenant, world=world,
             episode_runs=view).run_dir

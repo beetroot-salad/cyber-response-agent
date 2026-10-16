@@ -29,6 +29,7 @@ import pytest
 
 from defender._episode_handle import Episode
 from defender.tests import _judge_921 as J
+from defender.tests import _triplet_947 as T
 from defender.tests import _state1135
 
 
@@ -277,6 +278,9 @@ def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_comm
     import shutil
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
+    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
+    # the arm planter reads the roster and never writes one (review-3 F33).
+    T.plant_roster(ep)
     runs = ep / "runs"
     J.sibling_run_dir(runs, "b")
     git_show = J.FakeGitShow(bodies={("deadbee", "defender/lessons/L1.md"): "# L1 body\n"})
@@ -300,6 +304,9 @@ def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_p
     """
     archive = J.mod("learning.branch.archive")
     ep = J.episode(tmp_path)
+    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
+    # the arm planter reads the roster and never writes one (review-3 F33).
+    T.plant_roster(ep)
     runs = ep / "runs"
     run_dir = J.sibling_run_dir(runs, "b")
     (run_dir / "gather_summaries").mkdir(parents=True, exist_ok=True)
@@ -350,6 +357,9 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
     """
     archive = J.mod("learning.branch.archive")
     ep = J.episode(tmp_path)
+    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
+    # the arm planter reads the roster and never writes one (review-3 F33).
+    T.plant_roster(ep)
     runs = ep / "runs"
     run_dir = J.sibling_run_dir(runs, "b")
     summaries = run_dir / "gather_summaries"

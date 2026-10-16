@@ -756,22 +756,25 @@ def test_1105_a_run_setup_made_for_t_opens_for_t_and_no_other_tenant_reaches_it(
     """A run materialize_run created for tenant T opens with open_run(T, id); for a second tenant
     U accepted under the same data root (hand-planted row), open_run(U, id) raises RunAbsent
     while U has no runs folder (the run is gone with it), and RunRefused once U has its own
-    folder and record but no run of that id; it never hands out a Run whose run_dir is under
-    T.runs."""
+    folder but no run of that id; it never hands out a Run whose run_dir is under T.runs.
+
+    #1187 (declared change 1): the run's id is a canonical UUID — an old `r1` is refused for its
+    shape before any tenant is consulted, which would leave the isolation half unreached."""
     from defender.run_repository import RunAbsent, RunId, RunRefused
 
     root = tmp_path / "data"
     root.mkdir()
     t = H.tenant(root, H.T_ID)
-    run_common.materialize_run(H.alert_file(tmp_path / "alerts"), "r1", tenant=t)
-    assert t.runs_repository().open(RunId.parse("r1")).run_dir == t.runs / "r1", "T's run opens for T"
+    rid = str(uuid.uuid4())
+    run_common.materialize_run(H.alert_file(tmp_path / "alerts"), rid, tenant=t)
+    assert t.runs_repository().open(RunId.parse(rid)).run_dir == t.runs / rid, "T's run opens for T"
     u = H.tenant(root, H.U_ID)
-    err = H.raised(u.runs_repository().open, RunId.parse("r1"))
+    err = H.raised(u.runs_repository().open, RunId.parse(rid))
     assert H.is_a(err, RunAbsent), f"U with no runs folder gave {err!r}"
     assert str(t.runs) not in H.message(err), "U's refusal names T's runs folder"
     H.runs_folder(u)
-    err = H.raised(u.runs_repository().open, RunId.parse("r1"))
-    assert H.is_a(err, RunRefused), f"U with its own folder and no r1 gave {err!r}"
+    err = H.raised(u.runs_repository().open, RunId.parse(rid))
+    assert H.is_a(err, RunRefused), f"U with its own folder and no {rid} gave {err!r}"
     assert str(t.runs) not in H.message(err), "U's refusal names T's runs folder"
 
 

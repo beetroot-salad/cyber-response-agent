@@ -54,6 +54,7 @@ from typing import Any
 import pytest
 
 from defender import _yaml
+from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests._spec923 import finished_run
 from defender.tests.judge_contrast_1234 import _spec1234 as S
@@ -850,18 +851,18 @@ def test_1234_verdicts_takes_its_refusal_arm_on_a_report_with_two_disposition_ke
     verdicts = S.sym(S.EPISODE_MOD, "verdicts")
     episode_error = S.sym(S.EPISODE_MOD, "EpisodeError")
     clean = _build(tmp_path, "single-keys", S.triad())
-    assert verdicts(clean.ep) == {"a": "benign", "b": "malicious", "c": "malicious"}, (
+    assert J.through_view(clean.ep, verdicts) == {"a": "benign", "b": "malicious", "c": "malicious"}, (
         "control: verdicts cannot read single-key reports")
 
     for first, second in ORDERS:
         built = _build(tmp_path, f"{first}-then-{second}", S.triad())
         S.second_disposition(built.world_dir("b") / "report.md", first, second)
         with pytest.raises(episode_error) as refused:
-            verdicts(built.ep)
+            J.through_view(built.ep, verdicts)
         assert "'b'" in str(refused.value), f"the refusal does not name world b: {refused.value}"
 
     skipped = _build(tmp_path, "no-report", S.triad(c={"reached": None}))
-    assert verdicts(skipped.ep) == {"a": "benign", "b": "malicious"}, (
+    assert J.through_view(skipped.ep, verdicts) == {"a": "benign", "b": "malicious"}, (
         "a world with no report.md is no longer skipped")
 
 
@@ -894,7 +895,7 @@ def test_1234_malformed_planted_report_does_not_refuse_the_episode(tmp_path, dam
     assert _shows(judge.prompt_for("b"), "a"), "b was not graded against the control"
     _assert_no_host_text(built, judge)
     with pytest.raises(S.sym(S.EPISODE_MOD, "EpisodeError")):
-        S.mod(S.EPISODE_MOD).verdicts(built.ep)
+        J.through_view(built.ep, S.mod(S.EPISODE_MOD).verdicts)
 
 
 @pytest.mark.parametrize("case", [

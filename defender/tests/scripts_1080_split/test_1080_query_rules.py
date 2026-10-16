@@ -29,6 +29,7 @@ Underscore helpers here are private to this file; the shared machinery is `_spec
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 import ast
 import datetime as _dt
@@ -655,14 +656,15 @@ def test_request_keys_stored_before_the_move_are_compared_with_keys_computed_aft
     for call, stored in zip(stored_calls(), g["keys"], strict=True):
         assert request_key(call["system"], call["verb"], call["params"]) == stored, call
 
-    run_dir = _materialize(tmp_path / "run", g["files"])
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = _materialize(tmp_path / fixture_uuid("run"), g["files"])
     # The run resumed across the move is a branch sibling: its seeding inherits the stored
     # table's rows onto its state, and the writer allocates the resumed call's seq after them
     # (#1235 round 2 — no file is read into a state any other way).
     from defender.runtime.branch._seed import _inherit_evidence
     from defender.runtime.run_state import RunState
 
-    sibling = tmp_path / "resumed"
+    sibling = tmp_path / fixture_uuid("resumed")
     sibling.mkdir()
     state = RunState(sibling, "r1080-resumed")
     _inherit_evidence(_writer_run_1165(run_dir), state, {c["lead_id"] for c in stored_calls()}, run=_writer_run_1165(state.run_dir))
@@ -842,8 +844,9 @@ def test_same_call_live_and_after_the_row_is_read_back(tmp_path):
     # Never driven: the writer takes the run's state, started as a run's start starts it (#1235).
     from defender.runtime.run_state import RunState
 
-    (tmp_path / "run").mkdir()
-    got = drive_roundtrip(RunState(tmp_path / "run", "r1080-roundtrip"),
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    (tmp_path / fixture_uuid("run")).mkdir()
+    got = drive_roundtrip(RunState(tmp_path / fixture_uuid("run"), "r1080-roundtrip"),
                           request_key=request_key, append=rq.append_query_row,
                           repeat_trip=rq.repeat_trip)
     assert got["live_key"] == got["learning_row_key"] == got["learning_record_key"] \

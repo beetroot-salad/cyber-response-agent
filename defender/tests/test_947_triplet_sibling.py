@@ -60,23 +60,20 @@ def _no_preflight(*_args, **_kw) -> int:
 
 def _sibling_argv(manifest, world="b", tenant=T.SOURCE_TENANT):
     """A sibling's command line — naming its tenant, as every run does (#1078), and its episode
-    by id (#1105 PR 2, declared change 6: the episode whose manifest is `manifest`, opened under
-    the configured episodes base)."""
+    by id (#1105 PR 2, declared change 6: the episode whose manifest is `manifest`, opened by id
+    under the tenant's `<T>/episodes/`, #1187)."""
     return ["--tenant", tenant, "--episode", manifest.parent.name, "--world", world]
 
 
-def _episode(tmp_path, src, *, container=T.SOURCE_TENANT):
-    """The episode a sibling opens by id: under the configured episodes base (`_tmp_roots`),
-    its manifest naming the source run `src`, and its container `<episode>/runs` made with
-    `container`'s record (`None`: left absent) — what the launcher's `create_container` leaves
-    before it starts the first sibling (#1105 PR 2)."""
-    from defender import _tenant
-
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
-                   root=tmp_path / "episodes-root")
-    if container is not None:
-        (ep / "runs").mkdir(exist_ok=True)
-        _tenant.ensure_runs_base_record(ep / "runs", container)
+def _episode(tmp_path, src):
+    """The episode a sibling opens by id, its manifest naming the source run `src`. #1187
+    (Layout A, R1, R2, O9; declared changes 5, 6 and 10): under its tenant's
+    `<T>/episodes/<uuid>` (`T.episode`'s default root), with no container record and no
+    episodes variable; the launcher's RUNS step (`start_runs`, through `T.episode_view`) makes
+    `runs/` and writes the arm roster the sibling reads its arm id from (O4b)."""
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    with Episode.open(ep) as held:
+        T.episode_view(held).close()
     return ep
 
 
@@ -175,17 +172,14 @@ def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
     """The resume path refuses the ticket flag outright rather than accepting and ignoring it:
     the two ticket calls are ordered around the curation marker, so suppressing one of them
     would break the pairing instead of the obligation. (The requested tenant exists, so the
-    refusal is the flag's, not the tenant's — and #1105 PR 2: the episode is under the
-    configured episodes base with its container made for that tenant, so the refusal is not
-    the episode's either.)"""
-    from defender import _tenant
-
-    manifest = T.write_family(tmp_path / "episodes-root" / "ep")
-    (manifest.parent / "runs").mkdir()
-    _tenant.ensure_runs_base_record(manifest.parent / "runs", d9_tenant)
+    refusal is the flag's, not the tenant's — and #1187: the episode is a UUID folder under
+    that tenant's `<T>/episodes/`, past RUNS (its roster written), so the refusal is not the
+    episode's either.)"""
+    _base, src = T.runs_base(tmp_path, tenant_id=d9_tenant)
+    manifest = _episode(tmp_path, src) / "family.yaml"
     assert _run().parse_args(_sibling_argv(manifest)).update_ticket is False
     with pytest.raises(SystemExit) as bad:
-        _run().main([*_sibling_argv(manifest), "--update-ticket"],
+        _run().main([*_sibling_argv(manifest, tenant=d9_tenant), "--update-ticket"],
                     lifecycle=_Recorder([]), visualize=lambda p, **kw: None,
                     preflight=_no_preflight)
     assert "--update-ticket" in str(bad.value)

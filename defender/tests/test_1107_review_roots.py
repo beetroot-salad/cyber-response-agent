@@ -13,6 +13,7 @@ Each test fails on 755177b6 (the PR head these fixes land on).
 """
 from __future__ import annotations
 
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165
 
 import json
@@ -194,7 +195,8 @@ def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_pat
     from defender.scripts.case_history import ticket_writer
     from defender.scripts.visualize import visualize_run
 
-    run_dir = tmp_path / "runs" / "run-1"
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    run_dir = tmp_path / "runs" / fixture_uuid("run-1")
     run_dir.mkdir(parents=True)
     path = S.receipt_path(run_dir)
     assert path.parent == run_dir.parent, f"the receipt is not beside the run dir: {path}"

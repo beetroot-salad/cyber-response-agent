@@ -1196,14 +1196,14 @@ def test_p093_old_review_record_says_accepted_with_no_new_outcome_record(tmp_pat
     assert S.OUTCOME_NAME in str(stamp.get("reason", "")), (
         f"the judge did not report the missing outcome record: {stamp!r}")
     with pytest.raises(EpisodeError) as refused:
-        verdicts(ep)
+        J.through_view(ep, verdicts)  # review-3 F32: the walked view, never a path
     assert S.OUTCOME_NAME in str(refused.value), "the episode reader did not name the missing record"
 
     ok = S.judged_episode(tmp_path / "new")
     judge = _judge({"b": _world_reply()})
     _grade(tmp_path / "new", ok, judge, state=_state1135.state_over(tmp_path / "new" / "state"))
     assert S.judge_called_for(judge, "b"), "the positive control: an accepted outcome record was not graded"
-    assert verdicts(ok), "the positive control: the episode reader refused an accepted episode"
+    assert J.through_view(ok, verdicts), "the positive control: the episode reader refused an accepted episode"
 
 
 # --------------------------------------------------------------------------------------
@@ -1577,7 +1577,7 @@ def test_input_outcome_record_is_inconsistent_or_in_legacy_words(tmp_path):
         assert judge.calls == 0, f"{case}: the gate graded an outcome that is not exactly accepted"
         assert _all_queued(_state1135.state_over(root / "state")) == []
         with pytest.raises(EpisodeError):
-            verdicts(ep)
+            J.through_view(ep, verdicts)  # review-3 F32: the walked view, never a path
 
     # Reader control for the count: ONE unservable world (b, not archived) reads and is graded.
     root = tmp_path / "one-unservable"
@@ -1588,7 +1588,7 @@ def test_input_outcome_record_is_inconsistent_or_in_legacy_words(tmp_path):
     _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
     assert S.judge_called_for(judge, "c"), (
         "the control: an accepted record with one unservable world was not graded on the rest")
-    assert verdicts(ep), "the control: the reader read nothing for an O5 count of one"
+    assert J.through_view(ep, verdicts), "the control: the reader read nothing for an O5 count of one"
 
     # The foreign world: graded under either reading of the fork; "z" is never recorded.
     root = tmp_path / "foreign-world"
@@ -1608,7 +1608,7 @@ def test_input_outcome_record_is_inconsistent_or_in_legacy_words(tmp_path):
     root = tmp_path / "accepted"
     ep, judge = _gate_case(root, "accepted")
     assert S.judge_called_for(judge, "b"), "the positive control: an exactly-accepted episode was not graded"
-    assert verdicts(ep), "the positive control: the episode reader refused an accepted episode"
+    assert J.through_view(ep, verdicts), "the positive control: the episode reader refused an accepted episode"
 
 
 def test_1224_judge_draws_disagree_on_a_worlds_bucket_or_systems(tmp_path):

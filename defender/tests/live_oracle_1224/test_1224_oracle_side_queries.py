@@ -45,6 +45,7 @@ import pytest
 from defender import _yaml
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
 from defender.scripts.adapters import faults
+from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S
 from defender.tests.tenant_1107_settings import _spec1107 as T1107
@@ -798,15 +799,18 @@ def test_1224_preflight_reader_cannot_be_built_without_a_gather_grant(tmp_path):
     preflight_replay = S.sym(S.CLI, S.COINED["fn.preflight"])
     grant_error = S.sym("runtime.verb_grant", "GrantError")
 
-    with pytest.raises(grant_error):
-        preflight_replay(ep, source=T.open_source(src), roster=est.roster(), tenant=grantless,
-                         oracle=S.oracle(then=S.submit(BASE)).model,
+    # Review-3 F32 ruling (#1187 S-iso): pre-flight takes the walked view's held episode
+    # (`preflight_replay(view.episode, ...)`), never a path.
+    with J.walked_view(ep) as view, pytest.raises(grant_error):
+        preflight_replay(view.episode, source=T.open_source(src), roster=est.roster(),
+                         tenant=grantless, oracle=S.oracle(then=S.submit(BASE)).model,
                          verifier=S.passing_verifier().model)
     assert est.calls() == [], "a reader with no gather grant sent a call"
 
-    preflight_replay(ep, source=T.open_source(src), roster=est.roster(), tenant=rt,
-                     oracle=S.oracle(then=S.submit(BASE)).model,
-                     verifier=S.passing_verifier().model)
+    with J.walked_view(ep) as view:
+        preflight_replay(view.episode, source=T.open_source(src), roster=est.roster(), tenant=rt,
+                         oracle=S.oracle(then=S.submit(BASE)).model,
+                         verifier=S.passing_verifier().model)
     assert _hits(est, "idp", "query", ALICE), "positive control: the granted replay was sent"
 
 

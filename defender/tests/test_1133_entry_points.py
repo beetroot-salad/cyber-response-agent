@@ -282,6 +282,9 @@ def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_arch
     Control on the same address: with nothing planted, `worlds/` is a real folder."""
     cli = branch_cli()
     ep = T.episode(tmp_path)
+    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
+    # the arm planter reads the roster and never writes one (review-3 F33).
+    T.plant_roster(ep)
     for w in T.WORLDS:
         T.sibling_run_dir(ep / "runs", w, scrub_ran=scrub_ran)
     planted = link_folder(ep / "worlds", reach=reach, ep=ep, host=host)
@@ -321,6 +324,9 @@ def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_throu
     carrying the agreed commit."""
     cli = branch_cli()
     ep = T.episode(tmp_path)
+    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
+    # the arm planter reads the roster and never writes one (review-3 F33).
+    T.plant_roster(ep)
     for w in T.WORLDS:
         T.sibling_run_dir(ep / "runs", w, commit="cafe1")
     planted = link_file(ep / "provenance.json", kind, reach=reach, ep=ep, host=host)
@@ -364,6 +370,9 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
     folder."""
     archive = T.mod("learning.branch.archive")
     ep = T.episode(tmp_path)
+    # The scene's explicit RUNS step (`runs/`, then the roster naming every manifest world):
+    # the arm planter reads the roster and never writes one (review-3 F33).
+    T.plant_roster(ep)
     run_dir = T.sibling_run_dir(ep / "runs", "b")
     if at == "worlds/b":
         (ep / "worlds").mkdir(exist_ok=True)

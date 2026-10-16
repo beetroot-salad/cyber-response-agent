@@ -10,6 +10,7 @@ from defender.runtime.run_state import RunState
 from defender.tests._1165_flows import RecordIO, drive_run, run_handle
 from defender.tests._alert_plant import plant_alert
 from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.e2e._replay_harness import ReplayFn, Turn
 
 
@@ -17,7 +18,9 @@ def source_and_sibling(tmp_path, *, document=None):
     text = document if document is not None else GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
     store, directory, _session, ids = legal_source(tmp_path, investigation=text)
     source_io, target_io = RecordIO(), RecordIO()
-    source, target = run_handle(directory, source_io), run_handle(directory.parent / "run-sibling", target_io)
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    source, target = run_handle(directory, source_io), run_handle(
+        directory.parent / fixture_uuid("run-sibling"), target_io)
     spec = spec_at(store, directory, ids[-1])
     state = RunState(target.run_dir, str(target.id))
     return store, spec, source, target, state, source_io, target_io
@@ -40,7 +43,8 @@ def test_fork_retains_current_alert_bytes_for_the_same_id_and_inherits_verified_
     assert target.facts.alert.path.read_bytes() == target_bytes
     assert target.facts.alert_record.path.read_bytes() == target_record
 
-    fallback = run_handle(target.run_dir.parent / "run-fallback")
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    fallback = run_handle(target.run_dir.parent / fixture_uuid("run-fallback"))
     seed(store, spec, source, fallback, RunState(fallback.run_dir, str(fallback.id)))
     assert fallback.facts.alert.path.read_bytes() == source_bytes
     assert fallback.facts.alert_record.path.read_bytes() == source.facts.alert_record.path.read_bytes()

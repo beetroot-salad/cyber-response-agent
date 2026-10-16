@@ -263,8 +263,12 @@ def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sib
         tmp_path, capsys, stamp_tenant):
     """The negative on the same launch: only the source stamp's tenant differs from the
     positive above, and no sibling starts and no episode is made under any tenant's
-    `<T>/episodes/` (the positive above leaves one there). The refusal names the stamp.
-    (`default` is a row in the data root with no knowledge folder, as it was before #1120.)
+    `<T>/episodes/` (the positive above leaves one there). A stamp naming NO tenant is refused
+    as the stamp's fault: the refusal names the stamp (or the provenance it is), as the N14
+    test's does — review-3 F34: "tenant" alone is in every launcher refusal ("of tenant 'X'"),
+    so it was satisfied by any refusal of the source, the retired record's among them.
+    (`default` is a row in the data root with no knowledge folder, as it was before #1120; its
+    refusal is that tenant's.)
     #1187 declared change 1: the fixture source's id is a uuid, so the refusal is the stamp's,
     never the id rule's (whose text also says "tenant").
     """
@@ -276,7 +280,11 @@ def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sib
     assert "unrecognized arguments" not in err, f"the launcher never read the stamp: {err}"
     assert "invalid run id" not in said.lower(), f"refused by the id rule, not the stamp: {said}"
     assert spawn.launches == [], spawn.launches
-    assert "tenant" in said.lower(), (outcome, err)
+    if stamp_tenant is None:
+        assert "stamp" in said.lower() or "provenance" in said.lower(), (
+            f"the tenantless stamp was not what was refused: {said}")
+    else:
+        assert "tenant" in said.lower(), (outcome, err)
     assert _episodes_made() == [], _episodes_made()
 
 

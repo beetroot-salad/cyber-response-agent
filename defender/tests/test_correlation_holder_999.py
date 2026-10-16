@@ -25,6 +25,7 @@ is proved by a PLANTED table that violates it beside a positive control that doe
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 
@@ -264,18 +265,21 @@ def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
     in the leads table for a lead that will never run. The dispatch identity is handed in as the
     run-start check resolves it (#1003): `system=None` is the withheld arm. (The claiming arm is
     observed end to end by `alert_front_door_1222/test_1222_correlation_endings`.)"""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
     import asyncio
 
     from defender.runtime.lead_zero import ENDING_WITHHELD, CorrelationDispatch, run_correlation
 
-    lead_file = tmp_path / "gather_raw" / "l-00c.lead.json"
+    lead_file = run_dir / "gather_raw" / "l-00c.lead.json"
     withheld = CorrelationDispatch("alpha.correlate", None, VerbGrant(role=HOLDER, entries=()))
 
     from defender.runtime.run_state import RunState
     outcome = asyncio.run(run_correlation(
-        run_state=RunState(tmp_path, "r"), defender_dir=tmp_path, verbs=None, limits={},
+        run_state=RunState(run_dir, "r"), defender_dir=run_dir, verbs=None, limits={},
         make_model=None, logger=None, box=None, store=None,
-        catalog=None, dispatch=withheld, tenant=None, deadline=1.0, run=_writer_run_1165(tmp_path)))
+        catalog=None, dispatch=withheld, tenant=None, deadline=1.0, run=_writer_run_1165(run_dir)))
 
     assert outcome.ending == ENDING_WITHHELD, outcome
     assert outcome.summary is None, outcome

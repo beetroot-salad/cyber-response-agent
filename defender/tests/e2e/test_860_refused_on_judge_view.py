@@ -29,6 +29,7 @@ Obligation ids (O1–O5), non-obligations (N1–N8) and mechanisms (M1–M6) are
 """
 from __future__ import annotations
 
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
 
 import re
@@ -649,7 +650,8 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     ], run_id="d860-src")
     assert [row["query_id"] for row in r.own_rows] == [DENIED_QUERY_ID, "elastic.query"]
 
-    sibling = tmp_path / "sibling"
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    sibling = tmp_path / fixture_uuid("sibling")
     sibling.mkdir()
     state = RunState(sibling, "d860-sibling")
     _inherit_evidence(_writer_run_1165(r.run_dir), state, {LEAD}, run=_writer_run_1165(state.run_dir))

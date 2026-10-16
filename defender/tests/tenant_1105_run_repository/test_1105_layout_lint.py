@@ -124,8 +124,11 @@ EXPECTED_DEFERRED_LEGACY = frozenset({
     (_LESSONS, "disposition_for"), (_LESSONS, "_has_confident_ground_truth"),
     (_FORWARD, "load_run_context"), (_FORWARD, "expected_disposition")})
 
-_PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
+_PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py",
                   "_held.py", "_id.py", "_errors.py")
+#: `_record.py` is emptied by #1187 R6 (declared change 13: the runs-base record it held is
+#: retired), so the owners row may name it or not (review-3 F35: not pinned to exist).
+_OPTIONAL_OWNERS = frozenset({"run_repository/_record.py"})
 #: D7's categories table (design-rev4.md, "Categories, by module"), every module in exactly one
 #: row: the owners plus the 57 non-owner production importers of the layout (57 at 80888efb;
 #: #1135 took `learning/judge/enqueue.py` off it; #1191 added `api/demo.py`, names-only).
@@ -754,7 +757,8 @@ def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp
     exemption. (The deferred_legacy row exempts only its four readers, keyed by (module,
     function), per the After-the-gate AUTO.)"""
     lint_run_layout_imports = _lint()
-    table = {row: frozenset(mods) for row, mods in dict(lint_run_layout_imports.CATEGORIES).items()}
+    table = {row: frozenset(mods) - (_OPTIONAL_OWNERS if row == "owners" else frozenset())
+             for row, mods in dict(lint_run_layout_imports.CATEGORIES).items()}
     assert table == EXPECTED_CATEGORIES, (
         f"the category table is not D7's: rows {sorted(table)}; differing rows "
         f"{sorted(r for r in EXPECTED_CATEGORIES if table.get(r) != EXPECTED_CATEGORIES[r])}")

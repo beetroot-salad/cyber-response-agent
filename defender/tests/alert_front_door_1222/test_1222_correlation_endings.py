@@ -41,6 +41,7 @@ from typing import Any
 import pytest
 
 from defender.run_repository import RunPaths
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests import _data_root_1078 as D
 from defender.tests import _invlang_warn_836 as W836
 from defender.tests import _triplet_947 as T
@@ -96,7 +97,8 @@ class _Scene:
         sub = self.tmp / f"{self.tenant.tenant_id}-{self._n:02d}-{label}"
         sub.mkdir(parents=True)
         kw.setdefault("tenant", self.tenant)
-        kw.setdefault("run_id", f"fd1222-{self.tenant.tenant_id}-{label}-{self._n:02d}")
+        # #1187 (declared change 1): a run id is a canonical UUID, named after the readable label.
+        kw.setdefault("run_id", fixture_uuid(f"fd1222-{self.tenant.tenant_id}-{label}-{self._n:02d}"))
         return S.run_alert(sub, alert=_alert(), backend=backend if backend is not None
                            else _backend(), **kw)
 
@@ -797,7 +799,7 @@ def test_p036_run_dir_redriven_over_an_earlier_invocation(tmp_path: Path) -> Non
     reference = scene.run("collided-reference", before=_preclaim())
     # An earlier invocation of this run id left only what setup writes (PR-28: such a folder is
     # resumed): l-00c's leads row, claimed by the REAL `claim_lead`, and one raw payload of its.
-    run_id = "fd1222-acme-redriven-00"
+    run_id = fixture_uuid("fd1222-acme-redriven-00")  # #1187 (declared change 1): a UUID
     earlier = scene.tenant.runs / run_id
     earlier.mkdir(parents=True)
     _preclaim(goal="FD1222-EARLIER-GOAL: correlate office-ws-1")(earlier)
@@ -943,7 +945,8 @@ def _plain_gather_run(tmp_path: Path, scene: _Scene, gather_turns: Sequence[H.Tu
     source.parent.mkdir(parents=True)
     source.write_bytes(S.alert_bytes(_alert()))
     d.rc = S.sym("run", "main")(
-        [str(source), "--tenant", scene.tenant.tenant_id, "--run-id", "fd1222-acme-plain-00",
+        [str(source), "--tenant", scene.tenant.tenant_id, "--run-id",
+         fixture_uuid("fd1222-acme-plain-00"),  # #1187 (declared change 1): a run id is a UUID
          "--no-learn"],
         lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
         ticket_writer=S.NoTicket(), enqueue=lambda *_a, **_k: False)

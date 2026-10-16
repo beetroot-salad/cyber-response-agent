@@ -76,8 +76,12 @@ from defender.tests.e2e._box665 import (  # noqa: F401
 )
 from defender.tests._docker import daemon_reachable, docker_runtimes, is_dood
 from defender.run_repository import SessionPaths
+from defender.tests._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[2]
+#: `run_tree`'s run folder. #1187 (declared change 1): a run id is a canonical UUID — the
+#: folder is fixture_uuid(<label>), the label `run-771` it always carried.
+RUN_771 = fixture_uuid("run-771")
 REPO_ROOT = DEFENDER.parent
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 #: The write lint's ratchet baseline. Named once and shared, because two demands read it and a
@@ -455,7 +459,8 @@ def run_tree(tmp_path: Path) -> Path:
 
     Distinct from `test_540_scrub_lifecycle._clean_run_dir`, which is a FROZEN post-run tree
     for the scan to walk. This one carries only what a writer needs to exist beside."""
-    run = tmp_path / "run-771"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid("run-771")
+    run = tmp_path / RUN_771
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     (run / "gather_summaries").mkdir(parents=True)
     (run / "wire_logs").mkdir(parents=True)
@@ -951,7 +956,7 @@ def _invoke_tenant_row_writer(run_dir: Path) -> None:
     """#1078 D1: the tenant ROW's writer, `create_tenant`. Its data root is a fresh subtree of
     the run dir (`tenant-root/`, never touched by `run_tree`) rather than `run_dir.parent`,
     because O10 refuses a data root holding anything beside the tenant it is creating — and
-    `run_tree`'s own sibling (`run-771`) sits directly in `run_dir.parent`. `Writer.artifact`
+    `run_tree`'s own sibling (`RUN_771`) sits directly in `run_dir.parent`. `Writer.artifact`
     names it `tenant-root/census-tenant/tenant.json`."""
     from defender import _tenant
 
@@ -987,9 +992,9 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_denial_logger, "runtime/observe.py", cite="C1,G12"),
     # #1235 F2: the run -> case pointer left the run dir for a host-only sidecar beside it,
     # `<run_id>.session-pointer.json` in the runs base — named relative to the run dir the way
-    # the retired tenant record's row was (`run_tree`'s dir is `run-771`). Still a setup writer, still
-    # required to refuse a planted alias at its own name.
-    Writer("write_case_pointer", "../run-771.session-pointer.json", "write_text", "unmeasured",
+    # the retired tenant record's row was (`run_tree`'s dir is `RUN_771`, #1187). Still a setup
+    # writer, still required to refuse a planted alias at its own name.
+    Writer("write_case_pointer", f"../{RUN_771}.session-pointer.json", "write_text", "unmeasured",
            _invoke_case_pointer, "runtime/session_store.py", cite="C1,R4"),
     # #1235: the `budget_enforcer` and `circuit_breaker` rows retired with their artifacts.
     # The budget counters and the breaker live in the run process's memory; nothing writes

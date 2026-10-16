@@ -44,6 +44,7 @@ new symbol), because today's dump carries the sentinel's params to the prompt. S
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run
+from defender.tests._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 import re
@@ -159,9 +160,12 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     `jl.rows` filtered on the two known tails or on an empty `system`); the lead returned
     with more than one query; the sentinel-only lead absent; a query dict with a key outside
     the nine; a `raw_command` / path marker in the section."""
-    _lead_file(tmp_path, "GOAL_MARKER")
-    _lead_file(tmp_path, "GOAL_ONLY_TRIPS", lead_id="l-002")
-    _table(tmp_path, [
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
+    _lead_file(run_dir, "GOAL_MARKER")
+    _lead_file(run_dir, "GOAL_ONLY_TRIPS", lead_id="l-002")
+    _table(run_dir, [
         _searchable_row(0, params={"native_query": "REAL_PARAMS_MARKER"}),
         _above_guard_row(1, "ABOVEGUARD_PARAMS_MARKER"),
         _above_guard_row(0, "ONLYTRIPS_PARAMS_MARKER", lead_id="l-002"),
@@ -173,8 +177,8 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     from defender._io import read_jsonl_rows
     from defender.runtime.run_state import RunState
 
-    state = RunState(tmp_path, "r1032-questioner")
-    state.inherit_rows(read_jsonl_rows(RunPaths(tmp_path).executed_queries))
+    state = RunState(run_dir, "r1032-questioner")
+    state.inherit_rows(read_jsonl_rows(RunPaths(run_dir).executed_queries))
     append_query_row(
         state, run=fixture_run(state.run_dir), lead_id=LEAD, system="", verb="bash", system_key="",
         query_id=BASH_SHIM_QUERY_ID, params={"command": shell}, raw_command=shell,
@@ -183,7 +187,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     )
     # After the shim took seq 2: the repeat-trip row as the guard writes it — REAL system and
     # verb, the model's params — and a sentinel id nothing spells yet.
-    _table(tmp_path, [
+    _table(run_dir, [
         _searchable_row(3, query_id=REPEAT_TRIP_QUERY_ID, exit_code=64,
                         error_class=AGENT_FIXABLE_ERROR_CLASS, payload_status="error",
                         payload_digest="exit=64; repeated",
@@ -191,7 +195,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
         _searchable_row(4, query_id=f"{RESERVED_QUERY_ID_PREFIX}future-sentinel",
                         params={"native_query": "FUTURESENTINEL_PARAMS_MARKER"}),
     ])
-    by_id = {jl.lead_id: jl for jl in lead_repository.joined(tmp_path)}
+    by_id = {jl.lead_id: jl for jl in lead_repository.joined(run_dir)}
     assert ([q.seq for q in by_id[LEAD].queries], [q.seq for q in by_id[LEAD].sentinels]) == \
         ([0], [1, 2, 3, 4]), "the join no longer partitions the fixture as one query and four sentinels"
     assert [q.system for q in by_id[LEAD].sentinels][2:] == ["elastic", "elastic"], \
@@ -199,7 +203,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
         "filter would no longer be refuted"
     assert (by_id["l-002"].queries, [q.seq for q in by_id["l-002"].sentinels]) == ([], [0])
 
-    text = _section(tmp_path)
+    text = _section(run_dir)
     for kept in ("REAL_PARAMS_MARKER", "GOAL_MARKER", "GOAL_ONLY_TRIPS", "elastic.ad-hoc"):
         assert kept in text, f"the section lost {kept!r} — the negatives below are vacuous"
     for dropped in (
@@ -211,7 +215,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     ):
         assert dropped not in text, f"a sentinel row or an unlisted column reached the questioner: {dropped!r}"
 
-    leads = {lead["lead_id"]: lead for lead in _questioner_leads(tmp_path)}
+    leads = {lead["lead_id"]: lead for lead in _questioner_leads(run_dir)}
     assert set(leads) == {LEAD, "l-002"}, f"the render returned {sorted(leads)}"
     for lead in leads.values():
         assert set(lead) == QUESTIONER_LEAD_KEYS, f"lead {lead['lead_id']!r} carries other keys"

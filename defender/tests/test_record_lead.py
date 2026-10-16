@@ -21,6 +21,9 @@ parser it fed (`extract_dispatch`/`_parse_block`) was deleted with it.
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run
+# #1187 (declared change 1): a run id is a canonical UUID — every run folder below is
+# fixture_uuid(<label>)
+from defender.tests._fixture_uuid import fixture_uuid
 from defender import _io
 from defender.run_repository import Run
 
@@ -47,7 +50,7 @@ def _dispatch(run_dir: Path, lead_id, goal: str, dims: list[str]) -> dict:
 
 
 def test_writes_lead_id_keyed_sidecar(tmp_path):
-    run_dir = tmp_path / "run-a"
+    run_dir = tmp_path / fixture_uuid("run-a")
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = _dispatch(
         run_dir, "l-001", "Did the FIM fire trace to apt?", ["apt history", "checksum"]
@@ -63,13 +66,13 @@ def test_writes_lead_id_keyed_sidecar(tmp_path):
 
 
 def test_creates_gather_raw_dir_if_missing(tmp_path):
-    run_dir = tmp_path / "run-c"
+    run_dir = tmp_path / fixture_uuid("run-c")
     assert claim_lead(_dispatch(run_dir, "l-002", "g", ["d"]), run=fixture_run(run_dir)) == CLAIMED
     assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()
 
 
 def test_distinct_ids_in_a_batch_both_claim(tmp_path):
-    run_dir = tmp_path / "run-batch"
+    run_dir = tmp_path / fixture_uuid("run-batch")
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "l-001", "g1", ["d"]), run=fixture_run(run_dir)) == CLAIMED
     assert claim_lead(_dispatch(run_dir, "l-002", "g2", ["d"]), run=fixture_run(run_dir)) == CLAIMED
@@ -78,7 +81,7 @@ def test_distinct_ids_in_a_batch_both_claim(tmp_path):
 
 
 def test_reused_id_returns_already_claimed_with_remediation(tmp_path, capsys):
-    run_dir = tmp_path / "run-reuse"
+    run_dir = tmp_path / fixture_uuid("run-reuse")
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "l-001", "first", ["d"]), run=fixture_run(run_dir)) == CLAIMED
     assert claim_lead(_dispatch(run_dir, "l-001", "second", ["d"]), run=fixture_run(run_dir)) == ALREADY_CLAIMED
@@ -93,7 +96,7 @@ def test_the_three_codes_are_distinct(tmp_path):
     disk" as a check, and it can only do that if SUCCESS has a code no skip shares. One run
     over the three domains — a good claim, a refused one, a reused one — and the three answers
     are three."""
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     good = claim_lead(_dispatch(run_dir, "l-001", "g", ["d"]), run=fixture_run(run_dir))
     refused = claim_lead(_dispatch(run_dir, "l-002", "", ["d"]), run=fixture_run(run_dir))
     reused = claim_lead(_dispatch(run_dir, "l-001", "again", ["d"]), run=fixture_run(run_dir))
@@ -107,7 +110,7 @@ def test_an_empty_or_whitespace_goal_claims_nothing(tmp_path):
     row whose goal is `""` — the same empty row the falsy arm refuses, reached by a string
     that merely is not falsy. Both spellings now leave the id unclaimed AND unburnt: the
     corrected re-dispatch of the same id must still be able to take it."""
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     for empty in ("", "   ", "\n\t"):
         assert claim_lead(_dispatch(run_dir, "l-001", empty, ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
@@ -120,21 +123,21 @@ def test_an_overlong_lead_id_is_refused_before_os_open(tmp_path):
     ENAMETOOLONG, and "the write failed" is the outcome a caller has the least to say about.
     `LEAD_ID_RE` bounds the body, so the refusal happens at the shape check — and the same
     bound is what `tools_gather`'s own seam check reads."""
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "l-" + "a" * 300, "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
 
 
 def test_malformed_lead_id_silently_skips(tmp_path):
-    run_dir = tmp_path / "run-bad-id"
+    run_dir = tmp_path / fixture_uuid("run-bad-id")
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "0", "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
 
 
 def test_missing_lead_id_silently_skips(tmp_path):
-    run_dir = tmp_path / "run-no-id"
+    run_dir = tmp_path / fixture_uuid("run-no-id")
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = {"run_dir": str(run_dir), "goal": "g", "what_to_summarize": ["d"]}
     assert claim_lead(dispatch, run=fixture_run(run_dir)) == NOT_CLAIMED
@@ -142,7 +145,7 @@ def test_missing_lead_id_silently_skips(tmp_path):
 
 
 def test_missing_required_keys_silently_skips_write(tmp_path):
-    run_dir = tmp_path / "run-d"
+    run_dir = tmp_path / fixture_uuid("run-d")
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead({"run_dir": str(run_dir), "lead_id": "l-001"}, run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not (run_dir / "gather_raw" / "l-001.lead.json").exists()
@@ -152,7 +155,7 @@ def test_non_list_what_to_summarize_silently_skips(tmp_path):
     """The `isinstance(wtc, list)` guard the live caller relies on: `tools_gather`
     unfreezes the request's tuple back to a list at that boundary precisely
     because a non-list is skipped here rather than coerced."""
-    run_dir = tmp_path / "run-tuple"
+    run_dir = tmp_path / fixture_uuid("run-tuple")
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "l-001", "g", ("d",)), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not (run_dir / "gather_raw" / "l-001.lead.json").exists()
@@ -183,7 +186,7 @@ def test_fdopen_failure_removes_empty_sidecar_and_allows_retry(tmp_path, monkeyp
     the hook's own `os.close(fd)` the second close F-36 is about, silently absorbed by
     `contextlib.suppress` and invisible to every assertion here. The fd is captured instead, and
     `os.fstat` on it afterwards is what proves the hook closed the one it still owned."""
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = _dispatch(run_dir, "l-001", "g", ["d"])
 
@@ -231,7 +234,7 @@ def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, mo
     The rest of `failed_payload_write_removes_empty_sidecar_and_allows_retry`'s contract is
     re-asserted on this branch too, because it was only ever driven on the other one: the
     0-byte sidecar is removed, the code is `NOT_CLAIMED`, and the id stays takeable."""
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = _dispatch(run_dir, "l-001", "g", ["d"])
 
@@ -300,7 +303,7 @@ def test_a_planted_alias_refuses_with_the_same_remedy_the_reuse_gate_gives(tmp_p
     `O_EXCL` create, and the new arm answered `ALREADY_CLAIMED` in SILENCE. Both arms tell the
     model the same thing — the id is held — so both owe it the same correctable instruction.
     A refusal carrying only a code is one the model can do nothing with but repeat."""
-    run_dir = tmp_path / "run-alias"
+    run_dir = tmp_path / fixture_uuid("run-alias")
     (run_dir / "gather_raw").mkdir(parents=True)
     outside = tmp_path / "elsewhere.json"
     outside.write_text("{}")
@@ -322,14 +325,14 @@ def test_a_lead_id_that_is_not_a_plain_string_claims_nothing_and_does_not_raise(
 
     NOT_CLAIMED, not ALREADY_CLAIMED: nothing holds the name. This is the caller handing us an
     id we cannot compose, which is a refusal, not a taken id."""
-    run_dir = tmp_path / "run-shape"
+    run_dir = tmp_path / fixture_uuid("run-shape")
     assert claim_lead(_dispatch(run_dir, Path("l-a1"), "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not list((run_dir / "gather_raw").glob("*.lead.json")), "a row was written anyway"
 
 
 def test_parent_alias_is_not_a_taken_lead_and_claim_recovers_when_restored(tmp_path, capsys):
     """#1165: parent preparation failure retains NOT_CLAIMED, unlike a held leaf."""
-    run_dir = tmp_path / "run-parent-alias"
+    run_dir = tmp_path / fixture_uuid("run-parent-alias")
     run_dir.mkdir()
     outside = tmp_path / "outside-claims"
     outside.mkdir()

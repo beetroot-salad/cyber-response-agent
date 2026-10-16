@@ -178,16 +178,22 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
             f"a run without --update-ticket reached the estate anyway (ran {tail.names})"
         )
 
-    # #1105 PR 2 (declared change 6): a sibling names its episode by id under the configured
-    # episodes base, whose container the launcher made for its tenant before any sibling.
-    from defender import _tenant
+    # #1105 PR 2 (declared change 6): a sibling names its episode by id. #1187 (R1, R2, O9,
+    # declared changes 1, 5 and 6): the episode is its tenant's, at
+    # `<data root>/playground/episodes/<uuid>` (no episodes variable, no container record), and
+    # the launcher's RUNS step (`T.episode_view`) has made `runs/` and the arm roster world `b`
+    # is read from (O4b) — so the refusal below is the flag's, not a missing episode's.
+    from defender._episode_handle import Episode
+    from defender.tests import _triplet_947 as T
+    from defender.tests._fixture_uuid import fixture_uuid
 
-    episodes = tmp_path / "episodes-root"
-    (episodes / "ep-767" / "runs").mkdir(parents=True)
-    _tenant.ensure_runs_base_record(episodes / "ep-767" / "runs", "playground")
-    monkeypatch.setenv("DEFENDER_EPISODES_BASE", str(episodes))
+    episode_id = fixture_uuid("767-run-tail-resume")
+    ep = T.episode(tmp_path, episode_id=episode_id,
+                   doc={**T.family_doc(), "episode_id": episode_id})
+    with Episode.open(ep) as held:
+        T.episode_view(held).close()
     with pytest.raises(SystemExit) as refusal:
-        run_py.main(["--episode", "ep-767", "--world", "b",
+        run_py.main(["--episode", episode_id, "--world", "b",
                      "--tenant", "playground", "--update-ticket"])
     assert "--update-ticket" in str(refusal.value), (
         "the resume path accepted the ticket flag: the two ticket calls are ordered around "

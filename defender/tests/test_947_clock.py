@@ -79,6 +79,7 @@ from defender.tests._session_store_705 import (  # noqa: E402
     runs_base,
     store_mod,
 )
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 
 #: The committed elastic catalog's ES|QL bodies: 12 of them. The count is asserted below rather
 #: than merely derived, because a corpus that shrank to one template would make every
@@ -1007,7 +1008,8 @@ def _timed_source(tmp_path, moments):
     """A run whose turns land at `moments`, in that order. Returns `(store, run_dir, path_ids)`."""
     ss = store_mod()
     store = make_store(tmp_path, case_id="case-clock")
-    run_dir = runs_base(tmp_path) / "run-clock-001"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = runs_base(tmp_path) / fixture_uuid("run-clock-001")
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-clock", store_path=store.path)
     session_id = store.new_session(agent_id="main")

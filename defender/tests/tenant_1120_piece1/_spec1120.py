@@ -493,7 +493,15 @@ class RunRecorder:
     has a tree to list; `lifecycle` keeps every keyword (`tenant=` is the `RunTenant`)."""
 
     def __init__(self, run_dir_at: Path) -> None:
-        self.run_dir_at = Path(run_dir_at)
+        # #1187 (declared change 1): a run id is a canonical UUID — the folder is
+        # fixture_uuid(<label>) beside the readable last segment (a UUID passes as it is).
+        # Read the folder back off `run_dir_at`, never off the label.
+        from defender.tests._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
+
+        run_dir_at = Path(run_dir_at)
+        if not is_fixture_uuid_shape(run_dir_at.name):
+            run_dir_at = run_dir_at.parent / fixture_uuid(run_dir_at.name)
+        self.run_dir_at = run_dir_at
         self.order: list[str] = []
         self.materialize_calls: list[dict[str, Any]] = []
         self.lifecycle_calls: list[dict[str, Any]] = []

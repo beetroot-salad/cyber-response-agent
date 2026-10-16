@@ -183,7 +183,8 @@ def test_verify_family_records_why_it_withheld_the_stamp_and_the_judge_names_it(
 def test_the_episode_readers_refuse_a_stampless_family(tmp_path):
     """Seventh round (finding 3): `verdicts` and `delta_o` compare worlds, so the same
     comparability argument holds — an accepted family with no family stamp is refused, naming
-    `not comparable`; with the stamp both answer."""
+    `not comparable`; with the stamp both answer. Review-3 F32 ruling (#1187): each reader
+    takes the episode's walked view (`J.through_view`), never a path."""
     readers = T.mod("learning.branch.episode")
     ep = T.episode(tmp_path)
     with Episode.open(ep) as episode:
@@ -193,13 +194,13 @@ def test_the_episode_readers_refuse_a_stampless_family(tmp_path):
     _withhold(ep)
     for reader in (readers.delta_o, readers.verdicts):
         with pytest.raises(T.refusals()) as bad:
-            reader(ep)
+            J.through_view(ep, reader)
         assert "not comparable" in str(bad.value), reader.__name__
         assert WITHHELD in str(bad.value), reader.__name__
 
     J.comparable_family_stamp(ep)
-    assert set(readers.verdicts(ep)) == {"a", "b"}
-    readers.delta_o(ep)
+    assert set(J.through_view(ep, readers.verdicts)) == {"a", "b"}
+    J.through_view(ep, readers.delta_o)
 
 
 def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_path):

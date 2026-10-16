@@ -15,6 +15,7 @@ alone, while N silent failures are N records and did.
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run
+from defender.tests._fixture_uuid import fixture_uuid
 
 import json
 from pathlib import Path
@@ -371,13 +372,16 @@ def test_the_learning_side_join_still_splits_the_sentinel_row(tmp_path):
     UNATTRIBUTED shim row survives `extract_from_joined`'s raw-ref gate, because the shim
     writer passes `payload_text=""` precisely so the sidecar exists.
     """
-    (tmp_path / "gather_raw").mkdir(parents=True)
-    write(tmp_path / "gather_raw" / "l-001.lead.json",
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
+    (run_dir / "gather_raw").mkdir(parents=True)
+    write(run_dir / "gather_raw" / "l-001.lead.json",
           json.dumps({"goal": "reduce the elastic envelope", "what_to_summarize": []}) + "\n")
     # The writer takes its seq from the run's state, started as a run start starts it (#1235).
     from defender.runtime.run_state import RunState
 
-    state = RunState(tmp_path, "r870-threshold")
+    state = RunState(run_dir, "r870-threshold")
     append_query_row(
         state, run=fixture_run(state.run_dir), lead_id="l-001", system="elastic", verb="query", query_id="elastic.esql",
         params={"native_query": "FROM logs"}, raw_command="elastic query",
@@ -394,7 +398,7 @@ def test_the_learning_side_join_still_splits_the_sentinel_row(tmp_path):
         system_key="",
     )
 
-    joined = [jl for jl in lead_repository.joined(tmp_path) if jl.lead_id == "l-001"]
+    joined = [jl for jl in lead_repository.joined(run_dir) if jl.lead_id == "l-001"]
     assert len(joined) == 1
     lead = joined[0]
     assert [q.query_id for q in lead.queries] == ["elastic.esql"], (
@@ -405,5 +409,5 @@ def test_the_learning_side_join_still_splits_the_sentinel_row(tmp_path):
 
     executed = extract_from_joined(joined)
     assert len(executed) == 2, "the shim row's sidecar did not survive the raw-ref gate"
-    collected = collect_general_failures(executed, tmp_path, catalog=[])
+    collected = collect_general_failures(executed, run_dir, catalog=[])
     assert [(r["query_id"], r["system"]) for r in collected] == [(BASH_SHIM_QUERY_ID, "")]

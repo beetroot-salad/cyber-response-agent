@@ -49,6 +49,7 @@ from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
 from defender.tests._spec1077 import fixture_run as _live_run_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 import ast
 import asyncio
@@ -126,7 +127,8 @@ def _main_deps(tmp_path: Path):
 
     from defender.runtime.run_state import RunState
 
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     return run_dir, replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_live_run_1165(run_dir)),
                             run_state=RunState(run_dir, "r-875"))

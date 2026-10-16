@@ -46,6 +46,7 @@ from typing import Any
 from defender._alert_input import AlertFacts
 from defender.tests import _tenants1106 as T1106
 from defender.tests._alert_plant import plant_alert
+from defender.tests._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 from defender.tests.tenant_1107_settings import _spec1107 as S1107
 
 # --------------------------------------------------------------------------------------
@@ -314,10 +315,19 @@ def write_report(
     return path
 
 
-def make_run(tmp_path: Path, name: str = "20260917t000000z-sshd", *, alert: Any = None,
+#: The default run's id: #1187 (declared change 1) — a run id is a canonical UUID, so the run a
+#: test opens (`record` / `open` reach `_spec1077.fixture_run`) is named by one.
+RUN_ID = fixture_uuid("767-sshd")
+
+
+def make_run(tmp_path: Path, name: str = RUN_ID, *, alert: Any = None,
              **report_kw: Any) -> Path:
-    """A run dir carrying the two files the writer reads: `report.md` and `alert.json`."""
-    run_dir = tmp_path / name
+    """A run dir carrying the two files the writer reads: `report.md` and `alert.json`. `name`
+    is a LABEL for the run, or its id: a canonical UUID is the folder's name as it is, any
+    other text names the folder `fixture_uuid(name)` — so a test reading the run's id back
+    reads `run_dir.name` (or spells `fixture_uuid(<label>)`), never the label."""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     run_dir.mkdir(parents=True, exist_ok=True)
     write_report(run_dir, **report_kw)
     plant_alert(run_dir, ALERT if alert is None else alert, mapping=ALERT_MAPPING)

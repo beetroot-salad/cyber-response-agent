@@ -192,19 +192,23 @@ def _episode_verdicts_reads_the_archived_headline(tmp_path: Path) -> None:
     from defender._episode_handle import Episode
     from defender.learning.branch.episode import verdicts
     from defender.learning.branch.outcome import ACCEPTED, write_outcome
+    from defender.tests import _judge_921 as J
+    from defender.tests import _triplet_947 as T
 
     report = (finished_run(tmp_path, disposition=MEMBER) / "report.md").read_text(encoding="utf-8")
-    world = tmp_path / "episodes" / "ep-923" / "worlds" / "b"
+    # #1187 (Layout A): the episode is a UUID folder under its tenant's `<T>/episodes/`
+    # (`T.episode`'s default root), and the reader takes the episode's WALKED view
+    # (`J.through_view`, review-3 F32 ruling: no `Path` overload).
+    ep = T.episode(tmp_path / "episode-923")
+    world = ep / "worlds" / "b"
     world.mkdir(parents=True)
     (world / "report.md").write_text(report, encoding="utf-8")
     # #1224: the readers compare only an episode pre-flight recorded `accepted` (`outcome.yaml`).
-    with Episode.open(world.parents[1]) as episode:
+    with Episode.open(ep) as episode:
         write_outcome(episode, ACCEPTED, reason="every world calibrated")
     # PR #1232 round 7: ... and carried `verify_family`'s family stamp.
-    from defender.tests._judge_921 import comparable_family_stamp
-
-    comparable_family_stamp(world.parents[1])
-    assert verdicts(world.parents[1]) == {"b": MEMBER}
+    J.comparable_family_stamp(ep)
+    assert J.through_view(ep, verdicts) == {"b": MEMBER}
 
 
 def _visualize_primitives_reads_the_committed_verdict(tmp_path: Path) -> None:

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests._alert_plant import plant_alert
+from defender.tests._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 from defender.tests._session_store_705 import (
     complete_pair,
     make_store,
@@ -126,7 +127,8 @@ def legal_source(
     """
     ss = store_mod()
     store = make_store(tmp_path, case_id=case_id)
-    run_dir = runs_base(tmp_path) / name
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(name)
+    run_dir = runs_base(tmp_path) / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     plant_alert(run_dir, ALERT_DOC.encode("utf-8"))

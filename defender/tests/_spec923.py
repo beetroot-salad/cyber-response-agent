@@ -91,6 +91,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from defender.tests._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
+
 DEFENDER = Path(__file__).resolve().parents[1]
 GOLDEN_AB3 = DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3"
 
@@ -324,7 +326,8 @@ def main_deps(tmp_path: Path, companion: str | None = None) -> tuple[Any, Path]:
     from defender.agents import MAIN_DEF
     from defender.runtime.agent_definition import bind
 
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     if companion is not None:
         (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
@@ -495,8 +498,11 @@ def finished_run(tmp_path: Path, *, disposition: str, name: str = "case-923",
     from an import, a replay or a hand edit — which is exactly the population the shared
     accessor exists for. `cause=None` is that population's own shape and its own lane: the
     ticket bridge falls back to the report BODY for its outbound reason when the key is
-    absent."""
-    run_dir = tmp_path / name
+    absent.
+
+    `name` is a LABEL: #1187 (declared change 1) — a run id is a canonical UUID, so the folder
+    (the run's id) is `fixture_uuid(name)`; a UUID passes as it is. Read the id off the folder."""
+    run_dir = tmp_path / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     run_dir.joinpath("alert.json").write_text(
         json.dumps({"rule": {"id": "5710", "key": "spec.rule"}, "timestamp": "2024-05-01T00:00:00Z"}),

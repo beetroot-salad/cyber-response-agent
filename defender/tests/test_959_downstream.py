@@ -43,6 +43,7 @@ from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.tests import _baseline_959 as base  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 
 CR = base.CR
 NBSP = base.NBSP
@@ -86,7 +87,8 @@ def _argv_of(decision):
 
 def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     """A real gather deps over a real run dir, with the box seam handed a fake."""
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     dfn = tmp_path / "tree" / "defender"
     (run / "gather_raw" / lead_id).mkdir(parents=True)
     dfn.mkdir(parents=True)

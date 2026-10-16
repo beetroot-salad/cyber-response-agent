@@ -257,8 +257,11 @@ def test_dc0_the_door_no_longer_serves_the_tenant_taking_lookups(tmp_path):
     root.mkdir()
     t = H.tenant(root, H.T_ID)
     H.runs_folder(t)
-    H.make_run(t.runs, "r1")
-    assert Path(t.runs_repository().open(door.RunId.parse("r1")).run_dir) == Path(t.runs) / "r1"
+    # #1187 (declared change 1): a run id is a canonical UUID, so the positive control opens
+    # one (an old `r1` would be refused for its shape before the repository answers).
+    rid = fixture_uuid("pr2-dc0-r1")
+    H.make_run(t.runs, rid)
+    assert Path(t.runs_repository().open(door.RunId.parse(rid)).run_dir) == Path(t.runs) / rid
 
 
 # ==========================================================================================
@@ -881,29 +884,39 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
     assert not any(str(run_dir) in str(v) for v in row.values())
 
 
+#: The drain scene's run ids (#1187, declared change 1: a run id is a canonical UUID — a row
+#: naming an old `r1` is off grammar and quarantined before the drain's own-tenant rehydration
+#: is reached). `RID_R1` is held by BOTH tenants, so serving the wrong tenant's folder is visible.
+RID_R1 = fixture_uuid("pr2-dc8-r1")
+R_OLD = fixture_uuid("pr2-dc8-r-old")
+ONLY_IN_U = fixture_uuid("pr2-dc8-only-in-u")
+NOPE = fixture_uuid("pr2-dc8-nope")
+LINKED = fixture_uuid("pr2-dc8-linked")
+
+
 def _drain_scene(tmp_path: Path):
-    """Two real tenants under the data root, each with a natural runs folder holding `r1`, and
+    """Two real tenants under the data root, each with a natural runs folder holding `RID_R1`, and
     the drain's paths (a git work tree and a state root)."""
     root = P.data_root()
     t = H.tenant(root, H.T_ID)
     u = H.tenant(root, H.U_ID)
     for tenant in (t, u):
         H.runs_folder(tenant)
-        H.make_run(tenant.runs, "r1")
+        H.make_run(tenant.runs, RID_R1)
     return t, u, P.loop_paths(tmp_path)
 
 
 def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
     """Declared change 8 / G21: the drain accepts each row's `tenant_id` and opens `run_id` in
     THAT tenant's repository, then serves the lead author that run. Two tenants each hold a run
-    `r1`; the rows for each are served with their own folder, never the other's. RED at base:
+    `RID_R1`; the rows for each are served with their own folder, never the other's. RED at base:
     a row with no `run_dir` is quarantined as "unreadable" and nothing is served."""
     t, u, paths = _drain_scene(tmp_path)
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": "r1"})
-    P.queue_row(paths, "case-u", {"case_id": "case-u", "tenant_id": H.U_ID, "run_id": "r1"})
+    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
+    P.queue_row(paths, "case-u", {"case_id": "case-u", "tenant_id": H.U_ID, "run_id": RID_R1})
     lane = P.Lane()
     P.drain(paths, lane)
-    assert sorted(lane.run_dirs) == sorted([Path(t.runs) / "r1", Path(u.runs) / "r1"]), (
+    assert sorted(lane.run_dirs) == sorted([Path(t.runs) / RID_R1, Path(u.runs) / RID_R1]), (
         f"served {lane.run_dirs}")
     assert P.dead_letter(paths, "case-t") is None
     assert P.dead_letter(paths, "case-u") is None
@@ -917,19 +930,19 @@ def test_dc8_the_claim_admits_only_the_new_row_shape(tmp_path):
     quarantine and are never served. The positive control, a well-formed row in the same
     tick, is served. RED at base: the old row is served and the new one quarantined."""
     t, _u, paths = _drain_scene(tmp_path)
-    old_run = H.make_run(t.runs, "r-old")
-    P.queue_row(paths, "good", {"case_id": "good", "tenant_id": H.T_ID, "run_id": "r1"})
+    old_run = H.make_run(t.runs, R_OLD)
+    P.queue_row(paths, "good", {"case_id": "good", "tenant_id": H.T_ID, "run_id": RID_R1})
     bad = {
-        "no-tenant": {"case_id": "no-tenant", "run_id": "r1"},
-        "bad-run": {"case_id": "bad-run", "tenant_id": H.T_ID, "run_id": "../r1"},
-        "bad-tenant": {"case_id": "bad-tenant", "tenant_id": "Not A Tenant", "run_id": "r1"},
+        "no-tenant": {"case_id": "no-tenant", "run_id": RID_R1},
+        "bad-run": {"case_id": "bad-run", "tenant_id": H.T_ID, "run_id": f"../{RID_R1}"},
+        "bad-tenant": {"case_id": "bad-tenant", "tenant_id": "Not A Tenant", "run_id": RID_R1},
         "old-shape": {"case_id": "old-shape", "run_dir": str(old_run)},
     }
     for case_id, body in bad.items():
         P.queue_row(paths, case_id, body)
     lane = P.Lane()
     P.drain(paths, lane)
-    assert lane.run_dirs == [Path(t.runs) / "r1"], f"served {lane.run_dirs}"
+    assert lane.run_dirs == [Path(t.runs) / RID_R1], f"served {lane.run_dirs}"
     for case_id in bad:
         letter = P.dead_letter(paths, case_id)
         assert letter is not None, f"{case_id}: {letter!r}"
@@ -945,22 +958,22 @@ def test_dc8_a_row_that_cannot_be_reached_is_artifact_missing(tmp_path):
     the retry ceiling). The positive control in the same tick: U's own row is served with U's
     folder. RED at base: such rows have no `run_dir` and take "unreadable" instead."""
     t, u, paths = _drain_scene(tmp_path)
-    H.make_run(u.runs, "only-in-u")
-    os.symlink(Path(t.runs) / "r1", Path(t.runs) / "linked")
+    H.make_run(u.runs, ONLY_IN_U)
+    os.symlink(Path(t.runs) / RID_R1, Path(t.runs) / LINKED)
     gone = {
-        "absent": {"case_id": "absent", "tenant_id": H.T_ID, "run_id": "nope"},
-        "crossed": {"case_id": "crossed", "tenant_id": H.T_ID, "run_id": "only-in-u"},
+        "absent": {"case_id": "absent", "tenant_id": H.T_ID, "run_id": NOPE},
+        "crossed": {"case_id": "crossed", "tenant_id": H.T_ID, "run_id": ONLY_IN_U},
     }
     not_now = {
-        "ghost": {"case_id": "ghost", "tenant_id": "ghost", "run_id": "r1"},
-        "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": "linked"},
+        "ghost": {"case_id": "ghost", "tenant_id": "ghost", "run_id": RID_R1},
+        "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": LINKED},
     }
     for case_id, body in {**gone, **not_now}.items():
         P.queue_row(paths, case_id, body)
-    P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.U_ID, "run_id": "only-in-u"})
+    P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.U_ID, "run_id": ONLY_IN_U})
     lane = P.Lane()
     P.drain(paths, lane)
-    assert lane.run_dirs == [Path(u.runs) / "only-in-u"], f"served {lane.run_dirs}"
+    assert lane.run_dirs == [Path(u.runs) / ONLY_IN_U], f"served {lane.run_dirs}"
     for case_id in gone:
         letter = P.dead_letter(paths, case_id)
         assert letter is not None, f"{case_id}: {letter!r}"
@@ -978,7 +991,7 @@ def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypa
     root and dead-letters the address row as "unreadable"."""
     t, _u, paths = _drain_scene(tmp_path)
     root = os.environ[P.DATA_ROOT_ENV]
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": "r1"})
+    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     lane = P.Lane()
     H.raised(P.drain, paths, lane)
@@ -988,7 +1001,7 @@ def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypa
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     P.drain(paths, lane)
-    assert lane.run_dirs == [Path(t.runs) / "r1"]
+    assert lane.run_dirs == [Path(t.runs) / RID_R1]
 
 
 # ==========================================================================================

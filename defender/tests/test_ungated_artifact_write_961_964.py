@@ -29,6 +29,9 @@ at all, so no write-shaped gate could have caught it.
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
+# #1187 (declared change 1): a run id is a canonical UUID — every run folder below is
+# fixture_uuid(<label>)
+from defender.tests._fixture_uuid import fixture_uuid
 
 import pytest
 
@@ -542,7 +545,7 @@ def test_the_harness_seed_lands_when_it_validates(tmp_path):
     never working at all."""
     from defender.runtime.lead_zero import _declare_l_finding
 
-    run = tmp_path / "run"
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     _declare_l_finding(_writer_run_1165(run), "l-00c", "correlation lead", "elastic")
 
@@ -563,7 +566,7 @@ def test_a_seed_that_would_not_validate_is_not_written(tmp_path, capsys):
     this frame ever looked at it."""
     from defender.runtime.lead_zero import _declare_l_finding
 
-    run = tmp_path / "run"
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     (run / "investigation.md").write_text(_ERROR_DOC, encoding="utf-8")
 
@@ -580,7 +583,7 @@ def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):
     one bug for a worse one."""
     from defender.runtime.lead_zero import _declare_l_finding
 
-    run = tmp_path / "run"
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     (run / "investigation.md").write_text(_ERROR_DOC, encoding="utf-8")
 

@@ -292,6 +292,7 @@ def _run_inherited(
     table's rows for the inherited leads, and each `rows` entry's sidecar, into the sibling and
     records them on the sibling's state (#1235 round 2) before its first turn."""
     from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at
+    from defender.tests._fixture_uuid import fixture_uuid
 
     store, source, _session, path_ids = legal_source(
         root, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None)
@@ -303,7 +304,8 @@ def _run_inherited(
             (source / rel).write_text("" if row.get("exit_code") else "[]", encoding="utf-8")
     spec = spec_at(store, source, path_ids[-1])
     store.close()
-    sibling = root / "defender-runs" / "run-sibling-807"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    sibling = root / "defender-runs" / fixture_uuid("run-sibling-807")
     RunPaths(sibling).gather_raw.mkdir(parents=True)
     from defender.tests._alert_plant import plant_alert
     plant_alert(sibling, RunPaths(source).alert.read_bytes())

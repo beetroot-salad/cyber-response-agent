@@ -809,12 +809,12 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
     os.chmod(base, 0o755)
     try:
         # A natural run where run setup leaves one (#1105 PR 2: run end is handed the `Run`, and
-        # the row it files is the run's address): `<T>/runs/<id>` under its tenant record.
+        # the row it files is the run's address): `<T>/runs/<id>`. #1187 (R1, declared change
+        # 1): the id is a canonical UUID and the container holds no `_tenant.json`.
+        from defender.tests._fixture_uuid import fixture_uuid
 
-        run_dir = base / "acme" / "runs" / "case-a"
+        run_dir = base / "acme" / "runs" / fixture_uuid("1135-everyday-case-a")
         run_dir.mkdir(parents=True)
-        from defender._tenant import ensure_runs_base_record
-        ensure_runs_base_record(run_dir.parent, "acme")
         plant_alert(run_dir, {"rule": {"name": "everyday"}})
         from defender.runtime import scrub as scrub_mod
 

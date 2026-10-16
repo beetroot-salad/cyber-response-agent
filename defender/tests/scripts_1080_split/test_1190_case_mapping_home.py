@@ -44,6 +44,7 @@ from typing import Any
 import pytest
 
 from defender.tests._by_path import load_lint_gate
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.scripts_1080_split import _spec1080 as S
 from defender.tests.scripts_1080_split.test_1080_writeback_tenants_and_views import (
     _children,
@@ -64,6 +65,10 @@ TENANT = "playground"
 #: The receipt's suffix beside the run dir (`run_repository.TICKET_WRITE_SUFFIX`, #1105's door) — used only
 #: to pick receipts out of a runs base listing; where the writer puts one is the golden's.
 RECEIPT_SUFFIX = ".ticket-write.json"
+#: The driven run's label. #1187 (declared change 1): a run id is a canonical UUID — the
+#: run's folder (`T7.RunRecorder`) and so its id are `fixture_uuid(RUN_LABEL)`; the base golden,
+#: captured before, names the run by the label, so an observation reads the id back as it.
+RUN_LABEL = "r1080"
 
 
 # ======================================================================================
@@ -271,10 +276,24 @@ def _drive_run(tmp: Path, mp: Any, *, answers: list[dict[str, Any]],
                          before_lifecycle=lifecycle_tail)
     rc, refused = T7.drive_run(T7.run_argv(alert, root, update_ticket=True), rec,
                                visualize=rec.visualize)
-    calls = _calls(shim, run_id="r1080")
-    return {"rc": rc, "refused": None if refused is None else str(refused.code),
-            "order": rec.order, "calls": calls, "posts": _posts(calls),
-            "receipts": _receipts(tmp / "runs")}
+    run_id = rec.run_dir_at.name
+    calls = _calls(shim, run_id=run_id)
+    return _as_label({"rc": rc, "refused": None if refused is None else str(refused.code),
+                      "order": rec.order, "calls": calls, "posts": _posts(calls),
+                      "receipts": _receipts(tmp / "runs")}, run_id)
+
+
+def _as_label(value: Any, run_id: str) -> Any:
+    """`value` with the run's id read as `RUN_LABEL` inside every string — the id the golden
+    could not know (#1187: it is `fixture_uuid(RUN_LABEL)`, not the label it was captured
+    under). Nothing else is rewritten."""
+    if isinstance(value, str):
+        return value.replace(run_id, RUN_LABEL)
+    if isinstance(value, list):
+        return [_as_label(x, run_id) for x in value]
+    if isinstance(value, dict):
+        return {_as_label(k, run_id): _as_label(x, run_id) for k, x in value.items()}
+    return value
 
 
 # ======================================================================================
@@ -573,7 +592,7 @@ EDITS: dict[str, Callable[[Path], None]] = {
 
 def _observe_edit(case: str, tmp: Path, mp: Any) -> dict[str, Any]:
     edit = EDITS[case]
-    return _norm(_drive_run(tmp, mp, answers=_store_ok("r1080"),
+    return _norm(_drive_run(tmp, mp, answers=_store_ok(fixture_uuid(RUN_LABEL)),
                             before=lambda _run_dir, folder: edit(folder)), tmp)
 
 

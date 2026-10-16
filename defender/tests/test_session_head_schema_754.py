@@ -20,6 +20,7 @@ tables behind, and one that had run the WAL pragma would have left the file in W
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 import sqlite3
 
@@ -261,7 +262,8 @@ def test_the_log_reads_back_identically_from_a_second_process(tmp_path):
     ss = store_mod()
     sel = selection_mod()
     base = runs_base(tmp_path)
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     run_dir.mkdir()
     store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
@@ -642,7 +644,8 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
     """A run dir whose pointer resolves a real store — the only thing the pick is given."""
     ss = store_mod()
     base = runs_base(tmp_path)
-    run_dir = tmp_path / f"run-{case_id}"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid(f"run-{case_id}")
     run_dir.mkdir()
     store = ss.open_store(case_id=case_id, sessions=SessionPaths(base))
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)

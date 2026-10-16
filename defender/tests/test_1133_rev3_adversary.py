@@ -117,7 +117,7 @@ def test_a_linked_served_folder_is_no_primed_base_never_followed(tmp_path):
     (ep / "served").symlink_to(outside, target_is_directory=True)
     # A classification here means delta_o followed the linked served/ outside the episode.
     with pytest.raises(ledger.LedgerError, match="no primed base"):
-        episode.delta_o(ep)
+        J.through_view(ep, episode.delta_o)  # review-3 F32: the walked view, never a path
 
 
 # ---------------------------------------------------------------------------------------

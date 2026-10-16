@@ -432,8 +432,9 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
     assert agent.resolve() == H.agent_dir(data_root).resolve(), (
         f"start_box was handed {agent}, not the data root's {H.agent_dir(data_root)}")
 
+    # #1187: the recorder's run folder is `fixture_uuid("run")` — read it off the recorder.
     argv = box_mod._create_argv(
-        "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
+        "defender-run-spec1120", rec.run_dir_at, H.DEFENDER,
         box_mod.DEFAULT_SPEC, (), tenant_agent=agent).argv
     mounts = _mount_specs(argv)
     agent_mounts = [m for m in mounts if m.get("target") == str(agent)]

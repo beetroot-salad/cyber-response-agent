@@ -80,10 +80,10 @@ def test_1_a_tick_with_rows_and_no_data_root_is_the_stages_configuration_refusal
     from defender.learning.core.cli import _run_stage
     from defender.learning.core.config import FatalConfigError
 
-    t = R1._good(tmp_path, "r1")
+    t = R1._good(tmp_path, R1.RID_R1)
     root = os.environ[P.DATA_ROOT_ENV]
     paths = P.loop_paths(tmp_path)
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": "r1"})
+    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": R1.RID_R1})
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     box = R1._Box()
     lane = P.Lane()
@@ -111,7 +111,7 @@ def test_1_a_tick_with_rows_and_no_data_root_is_the_stages_configuration_refusal
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     assert _run_stage(lambda: R1._tick(paths, lane=lane, pitfalls=[], box=box)) == 0
-    assert lane.run_dirs == [Path(t.runs) / "r1"], "control: the row was not served"
+    assert lane.run_dirs == [Path(t.runs) / R1.RID_R1], "control: the row was not served"
 
 
 class _EnqueueingBox(R1._Box):
@@ -136,13 +136,13 @@ def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(tmp_path, monkeypatch,
     pitfalls step still ran. Positive control: the next tick, the row queued at its start,
     serves it. RED before the fix: the claim loop resolved the root lazily and claimed the row
     (root set: served; root unset: the tick raised `TenantRefused`)."""
-    t = R1._good(tmp_path, "r1")
+    t = R1._good(tmp_path, R1.RID_R1)
     root = os.environ[P.DATA_ROOT_ENV]
     paths = P.loop_paths(tmp_path)
     _pitfall_at_threshold(paths, monkeypatch)
     if not root_set:
         monkeypatch.delenv(P.DATA_ROOT_ENV)
-    row = {"case_id": "late", "tenant_id": H.T_ID, "run_id": "r1"}
+    row = {"case_id": "late", "tenant_id": H.T_ID, "run_id": R1.RID_R1}
     box = _EnqueueingBox(paths, row)
     lane = P.Lane()
     pitfalls: list[str] = []
@@ -157,7 +157,7 @@ def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(tmp_path, monkeypatch,
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     assert R1._tick(paths, lane=lane, pitfalls=[], box=R1._Box()) == 0
-    assert lane.run_dirs == [Path(t.runs) / "r1"], "control: the next tick did not serve it"
+    assert lane.run_dirs == [Path(t.runs) / R1.RID_R1], "control: the next tick did not serve it"
 
 
 # ==========================================================================================

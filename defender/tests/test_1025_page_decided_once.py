@@ -15,6 +15,8 @@ swallowed a misspelled field.
 from __future__ import annotations
 
 
+import uuid
+
 import pytest
 
 from defender.tests import _episode_1025 as E
@@ -213,16 +215,18 @@ def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path
 
 
 def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_path):
-    """A bare `runs/<ep>-x` world — no manifest entry, no grade row — is a section with no
-    findings: the walk never opens its draws. Its `dropped_findings: 4` was still summed
-    into tile 3's "dropped" while its two findings were counted nowhere, so the split did
-    not sum to the total it headed. Now the dropped count is read off the same labels the
-    findings are.
+    """A bare stray arm `runs/<uuid4>` with draws under label `x` — no manifest entry, no
+    roster entry, no grade row — is a section with no findings: the walk never opens its
+    draws. Its `dropped_findings: 4` was still summed into tile 3's "dropped" while its two
+    findings were counted nowhere, so the split did not sum to the total it headed. Now the
+    dropped count is read off the same labels the findings are.
 
     #1105 PR 2 (declared change 4/J3): the bare arm is no manifest arm, so it is no longer a
-    section either; the heading counts the manifest's worlds alone."""
+    section either; the heading counts the manifest's worlds alone. Review-3 F33: the stray arm
+    is planted at a fresh uuid4 directly — the roster is left naming exactly the manifest's
+    worlds, so the page reads a valid roster and the guard, not a refused roster, decides."""
     ep = E.sample_episode(tmp_path)
-    E.run_dir(ep.dir, "x")
+    E.run_dir(ep.dir, "x", arm_id=str(uuid.uuid4()))
     E.draw_document(ep.dir, "x", 0, E.draw_doc(
         findings=[E.finding(claim="one"), E.finding(claim="two")], dropped=4))
     page = render(ep)

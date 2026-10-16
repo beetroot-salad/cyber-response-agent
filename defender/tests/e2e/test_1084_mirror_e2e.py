@@ -58,7 +58,7 @@ from pathlib import Path
 
 import pytest
 
-from defender import _env, _git, _tenant, run_common
+from defender import _env, _git, run_common
 from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, tenant_run
 
@@ -91,14 +91,14 @@ def _under(path: Path, root: Path) -> bool:
 
 def _repository_run() -> tuple[str, Path]:
     """`(T, run_dir)`: a driven run (`driven_run`) where the run page's repository opens it —
-    `<data root>/<T>/runs/run`, the runs folder carrying `_tenant.json` naming T through the
-    real writer (#1105 PR 2, declared change 7: `visualize_run.py --tenant T <run_id>` opens
-    the run by id through `T.runs_repository()`, where it took the run folder's path). The
-    tenant is set up FIRST: `create_tenant` refuses a tenant folder that already holds `runs/`."""
+    `<data root>/<T>/runs/<run id>` (#1105 PR 2, declared change 7: `visualize_run.py --tenant T
+    <run_id>` opens the run by id through `T.runs_repository()`, where it took the run folder's
+    path; #1187 R1, declared change 6: the runs folder carries no `_tenant.json`, the tenant's
+    folder holding it is the owner). The tenant is set up FIRST: `create_tenant` refuses a
+    tenant folder that already holds `runs/`."""
     tenant = ensure_d9_tenant()
     runs = current_data_root() / tenant / "runs"
     run_dir = driven_run(runs)
-    _tenant.ensure_runs_base_record(runs, _tenant.TenantId(tenant))
     return tenant, run_dir
 
 
@@ -493,7 +493,7 @@ def test_1084_a_link_at_the_page_name_is_refused_in_process_and_warned_naming_it
 
 
 def test_1084_an_override_outside_the_checkout_takes_the_copy_at_its_absolute_path(
-        tmp_path, monkeypatch, caplog):
+        tmp_path, monkeypatch, caplog, capsys):
     """With the override OUTSIDE the running checkout, the post-run step lands the copy there
     with no warning (a `dest.relative_to(<repo>)` would raise `ValueError` — a warned, missing
     copy since #1110, where it used to be a failed render), and `mirror_page` answers
@@ -523,7 +523,8 @@ def test_1084_an_override_outside_the_checkout_takes_the_copy_at_its_absolute_pa
     mirrored.unlink()
     assert vr.mirror_page(vr.render_page(_run_handle_1165(run_dir)), run_dir.name) == "copied"
     assert mirrored.read_bytes() == (run_dir / PAGE).read_bytes()
-    assert vr.main(_run_page_argv(tenant, run_dir)) == 0  # #1105 PR 2 (declared change 7)
+    # #1105 PR 2 (declared change 7)
+    assert vr.main(_run_page_argv(tenant, run_dir)) == 0, capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------------------

@@ -37,6 +37,7 @@ re-opened silently):
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -87,7 +88,8 @@ class Env:
 
 @pytest.fixture
 def env(tmp_path):
-    run = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     dfn = tmp_path / "defender"
     dfn.mkdir()

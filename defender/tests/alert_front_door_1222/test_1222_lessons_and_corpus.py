@@ -53,7 +53,7 @@ from typing import Any
 
 import pytest
 
-from defender import _tenant, _yaml
+from defender import _yaml
 from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
@@ -481,13 +481,13 @@ def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
     alert = S.fixture_alert("v2-sshd-success-after-failures")
     alert_id, rule_id = alert["alert_id"], alert["rule"]["id"]
     planted = S.plant_tenant(alert_mapping=S.ALERT_ID_MAPPING)
-    first = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="o8-first",
+    first = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id=fixture_uuid("o8-first"),
                         orient_shim=S.RecordingShim())
     assert first.rc == 0, (first.rc, first.refusal, first.raised)
     S.plant_lesson("fd-o8-mapped", source_signature=[alert_id])
     S.plant_lesson("fd-o8-rule-id", source_signature=[rule_id])
 
-    later = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="o8-later",
+    later = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id=fixture_uuid("o8-later"),
                         orient_shim=S.RecordingShim())
     hits = _listed(_lessons_section(later))
     assert "fd-o8-mapped" in hits, (
@@ -662,8 +662,8 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
             f"iter_lessons skipped the {spelling} lesson")
 
     runs = S.plant_tenant().accept().runs
+    # #1187 (R1): the natural container holds run folders only — no `_tenant.json` is written.
     runs.mkdir(parents=True, exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, "acme")
     alert = S.generic_alert(rule_id="R-R7-TRACE")
     traced_run = fixture_uuid("1222-r7-traced")  # #1187 declared change 1: a run id is a uuid
     S.plant_run(runs, traced_run, alert=alert, record=False,
@@ -673,7 +673,7 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
     traced: dict[str, list[str]] = {}
     for spelling, corpus in corpora.items():
         capsys.readouterr()
-        assert main(["--all", "--lessons-dir", str(corpus), "--tenant", "acme"]) == 0
+        assert main(["--all", "--lessons-dir", str(corpus), "--tenant", "acme"]) == 0, capsys.readouterr().err
         traced[spelling] = [ln for ln in capsys.readouterr().out.splitlines()
                             if ln.startswith(f"{name}\t")]
     assert len(traced["unquoted"]) == 1, f"the tracer did not index the unquoted lesson once: {traced}"
@@ -724,12 +724,12 @@ def test_r8_each_shipped_lesson_is_found_by_exact_lookup_of_its_declared_signatu
     }
     for kind, sig in near.items():
         assert sig not in declared
-        oriented, in_box = lookup(sig, f"r8-near-{kind}")
+        oriented, in_box = lookup(sig, fixture_uuid(f"r8-near-{kind}"))
         assert oriented == [], f"orientation's lookup of the {kind} near miss {sig!r} found {oriented}"
         assert in_box == [], f"MAIN's lookup of the {kind} near miss {sig!r} found {in_box}"
     for i, sig in enumerate(declared):
         want = _declaring(shipped, sig)
-        oriented, in_box = lookup(sig, f"r8-exact-{i}")
+        oriented, in_box = lookup(sig, fixture_uuid(f"r8-exact-{i}"))
         assert want, sig
         assert set(oriented) == want, f"orientation's lookup of {sig!r}: {sorted(oriented)} != {sorted(want)}"
         assert set(in_box) == want, f"MAIN's lookup of {sig!r}: {sorted(in_box)} != {sorted(want)}"
@@ -757,8 +757,8 @@ def test_r7_the_eval_index_and_the_lesson_tracer_skip_a_recordless_run_folder_by
     """
     slug, lesson = "fd-slug", "fd-traced"
     runs, corpus = S.plant_tenant().accept().runs, tmp_path / "lessons"
+    # #1187 (R1): the natural container holds run folders only — no `_tenant.json` is written.
     runs.mkdir(parents=True, exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, "acme")
     corpus.mkdir()
     (corpus / f"{lesson}.md").write_text(S.lesson_text(lesson), encoding="utf-8")
     alert = S.generic_alert(rule_id="R-HELD")
@@ -775,7 +775,7 @@ def test_r7_the_eval_index_and_the_lesson_tracer_skip_a_recordless_run_folder_by
 
     def traced_out() -> str:
         capsys.readouterr()
-        assert trace(["--all", "--lessons-dir", str(corpus), "--tenant", "acme"]) == 0
+        assert trace(["--all", "--lessons-dir", str(corpus), "--tenant", "acme"]) == 0, capsys.readouterr().err
         traced = capsys.readouterr()
         return traced.out + traced.err
 
@@ -891,9 +891,9 @@ def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
     """
     sig = "R-P065"
     planted = S.plant_tenant("acme-a")
-    failed = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id="p065-failed",
+    failed = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid("p065-failed"),
                          orient_shim=S.RecordingShim(fail=("defender-invlang",)))
-    empty = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id="p065-empty",
+    empty = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid("p065-empty"),
                         orient_shim=S.RecordingShim())
     unavailable = _vocab_section(failed)
     assert unavailable is not None, (
@@ -907,7 +907,7 @@ def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
                                                                      "description": "past"}))
     d = S.run_alert(tmp_path, alert=S.generic_alert(rule_id="R-other", rule={"id": "R-other", "uuid": "SIG-P065",
                                                                               "description": "now"}),
-                    tenant=mapped, run_id="p065-recorded", orient_shim=S.RecordingShim())
+                    tenant=mapped, run_id=fixture_uuid("p065-recorded"), orient_shim=S.RecordingShim())
     section = _vocab_section(d) or ""
     assert _probes(section) == {"pc"}, (
         f"the corpus did not attribute the past run by its recorded signature:\n{section}")
@@ -924,9 +924,9 @@ def test_p066_corpus_subprocess_misses_orientations_time_allow(tmp_path):
     """
     sig = "R-P066"
     planted = S.plant_tenant()
-    cut = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id="p066-cut",
+    cut = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid("p066-cut"),
                       orient_shim=S.RecordingShim(fail=("defender-lessons", "defender-invlang")))
-    whole = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id="p066-whole",
+    whole = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid("p066-whole"),
                         orient_shim=S.RecordingShim())
     assert _naming(_lessons_section(cut), sig, cut) != _naming(_lessons_section(whole), sig, whole), (
         "a lessons lookup that did not finish reads exactly as one that matched nothing:\n"
@@ -1211,13 +1211,13 @@ def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
     recorded = [_past_run(planted.runs, f"past-{tag}", tag=tag, rule_id=sig, signature=sig)
                 for tag, sig in (("pr", "R"), ("plonger", "R-1001"), ("plower", "r"))]
 
-    one = S.run_alert(tmp_path, alert=_lesson_alert("R"), tenant=planted, run_id="p080-one",
+    one = S.run_alert(tmp_path, alert=_lesson_alert("R"), tenant=planted, run_id=fixture_uuid("p080-one"),
                       orient_shim=S.RecordingShim())
     hits = sorted(_listed(_lessons_section(one)))
     assert hits == ["fd-p080-r", "fd-p080-second"], f"orientation's lookup of 'R' listed {hits}"
     assert _probes(_vocab_section(one) or "") == {"pr"}, _vocab_section(one)
 
-    blank = S.run_alert(tmp_path, alert=_lesson_alert(" "), tenant=planted, run_id="p080-blank",
+    blank = S.run_alert(tmp_path, alert=_lesson_alert(" "), tenant=planted, run_id=fixture_uuid("p080-blank"),
                         orient_shim=S.RecordingShim())
     assert _listed(_lessons_section(blank)) == [], (
         f"a blank value was looked up as a signature: {_listed(_lessons_section(blank))}")
@@ -1258,7 +1258,7 @@ def test_p084_lessons_authored_before_the_change_under_a_remap(tmp_path):
     planted = S.plant_tenant(alert_mapping=_UUID_MAPPING)
     S.plant_lesson("fd-p084-old", source_signature=[old])
     alert = _lesson_alert(old, uuid=new)
-    before = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="p084-before",
+    before = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id=fixture_uuid("p084-before"),
                          orient_shim=S.RecordingShim())
     section = _lessons_section(before)
     assert _listed(section) == [], f"the lesson under the old value was found: {_listed(section)}"
@@ -1267,7 +1267,7 @@ def test_p084_lessons_authored_before_the_change_under_a_remap(tmp_path):
     assert "fd-p084-old" not in S.harness_text(section), "the host's prose points at the old lesson"
 
     S.plant_lesson("fd-p084-new", source_signature=[new])
-    after = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="p084-after",
+    after = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id=fixture_uuid("p084-after"),
                         orient_shim=S.RecordingShim())
     assert _listed(_lessons_section(after)) == ["fd-p084-new"], (
         f"the lesson under the remapped value is not found: {_listed(_lessons_section(after))}")
@@ -1285,9 +1285,9 @@ def test_p144_first_run_after_upgrade_finds_only_recordless_ru(tmp_path):
     upgraded, fresh = S.plant_tenant("acme-up"), S.plant_tenant("acme-fresh")
     for tag in ("old1", "old2", "old3"):
         _past_run(upgraded.runs, f"pre-{tag}", tag=tag, rule_id=sig, recorded=False)
-    d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=upgraded, run_id="p144-upgraded",
+    d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=upgraded, run_id=fixture_uuid("p144-upgraded"),
                     orient_shim=S.RecordingShim())
-    e = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=fresh, run_id="p144-fresh",
+    e = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=fresh, run_id=fixture_uuid("p144-fresh"),
                     orient_shim=S.RecordingShim())
     section = _vocab_section(d)
     assert section is not None, "the first run after the upgrade carries no vocabulary section"
@@ -1321,7 +1321,7 @@ def test_p182_lesson_signature_entry_that_frontmatter_reads_as(tmp_path):
     assert shown == _WRITTEN_P182, f"the manifest shows {shown}, not the text written"
 
     for i, sig in enumerate(_WRITTEN_P182):
-        d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=f"p182-{i}",
+        d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid(f"p182-{i}"),
                         orient_shim=S.RecordingShim())
         section = _lessons_section(d)
         if i == 0:
@@ -1330,7 +1330,7 @@ def test_p182_lesson_signature_entry_that_frontmatter_reads_as(tmp_path):
         assert _listed(section) == [name], f"orientation's lookup of {sig!r}: {_listed(section)}"
     for i, sig in enumerate(["83", "True"]):
         d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted,
-                        run_id=f"p182-retyped-{i}", orient_shim=S.RecordingShim())
+                        run_id=fixture_uuid(f"p182-retyped-{i}"), orient_shim=S.RecordingShim())
         assert _listed(_lessons_section(d)) == [], (
             f"orientation found the lesson for its retyped value {sig!r}")
 
@@ -1396,8 +1396,8 @@ def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
     committed = _adopt(planted, paths, "fd-p072-a", "fd-p072-b")
     assert committed["fd-p072-a"].lines("source_signature") == [sig_a]
     assert committed["fd-p072-b"].lines("source_signature") == [sig_b]
-    assert _later_hits(tmp_path, planted, sig_a, "p072-later-a") == ["fd-p072-a"]
-    assert _later_hits(tmp_path, planted, sig_b, "p072-later-b") == ["fd-p072-b"]
+    assert _later_hits(tmp_path, planted, sig_a, fixture_uuid("p072-later-a")) == ["fd-p072-a"]
+    assert _later_hits(tmp_path, planted, sig_b, fixture_uuid("p072-later-b")) == ["fd-p072-b"]
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
@@ -1504,7 +1504,7 @@ def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path, sig):
     planted = S.plant_tenant()
     committed = _adopt(planted, paths, "fd-p074")
     assert committed["fd-p074"].lines("source_signature") == [sig]
-    assert _later_hits(tmp_path, planted, sig, "p074-later") == ["fd-p074"]
+    assert _later_hits(tmp_path, planted, sig, fixture_uuid("p074-later")) == ["fd-p074"]
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
@@ -1536,8 +1536,8 @@ def test_p077_signature_carries_frontmatter_significant_charac(tmp_path):
             f"{name}: the saved lesson reads back {committed[name].lines('source_signature')}, "
             f"not the recorded signature {sig!r}")
         assert set(committed[name].fm) == _LESSON_KEYS, sorted(committed[name].fm)
-    assert _later_hits(tmp_path, planted, colon, "p077-later-colon") == ["fd-p077-colon"]
-    assert _later_hits(tmp_path, planted, mixed, "p077-later-mixed") == ["fd-p077-mixed"]
+    assert _later_hits(tmp_path, planted, colon, fixture_uuid("p077-later-colon")) == ["fd-p077-colon"]
+    assert _later_hits(tmp_path, planted, mixed, fixture_uuid("p077-later-mixed")) == ["fd-p077-mixed"]
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
@@ -1568,8 +1568,8 @@ def test_p111_lesson_author_runs_for_a_run_whose_alert_is_unma(tmp_path):
     planted = S.plant_tenant()
     _adopt(planted, paths, "fd-p111")
     S.plant_lesson("fd-p111-control", source_signature=[world])
-    assert _later_hits(tmp_path, planted, world, "p111-later-rule") == ["fd-p111-control"]
-    assert _later_hits(tmp_path, planted, S.UNKEYED, "p111-later-unkeyed") == []
+    assert _later_hits(tmp_path, planted, world, fixture_uuid("p111-later-rule")) == ["fd-p111-control"]
+    assert _later_hits(tmp_path, planted, S.UNKEYED, fixture_uuid("p111-later-unkeyed")) == []
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
@@ -1634,7 +1634,7 @@ def test_p188_fold_between_signed_and_unsigned(tmp_path):
     assert committed[unsigned].lines("source_signature") == [sig_c]
     for i, (sig, want) in enumerate(((sig_a, [signed]), (sig_b, [signed]), (sig_c, [unsigned]),
                                      ("SIG-P188", []))):
-        assert _later_hits(tmp_path, planted, sig, f"p188-later-{i}") == want, sig
+        assert _later_hits(tmp_path, planted, sig, fixture_uuid(f"p188-later-{i}")) == want, sig
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 

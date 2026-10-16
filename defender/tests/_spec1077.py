@@ -489,8 +489,22 @@ def member_args(name: str, *, runs_base: Path | None = None) -> tuple[Any, ...]:
 
 
 def fixture_run(directory: Path) -> Any:
-    """A fixture's real Run, including its sidecar root, built without reading the tree."""
+    """A fixture's real Run, including its sidecar root, built without reading the tree.
+
+    #1187 (declared change 1; review-3 F31): a run folder's name is its canonical UUID run id,
+    so a fixture folder is made at `fixture_uuid(<label>)` by its CREATOR (the replay harness's
+    rule: the label maps where the folder is made). This helper does not map — it is handed a
+    folder its caller made and keeps using by path, so a mapped handle would address a
+    different folder — and refuses a non-UUID name LOUDLY, naming the folder, rather than
+    leaving the RunId refusal to production after implementation (where a refusal test would
+    then pass for the wrong reason)."""
+    from defender.tests._fixture_uuid import is_fixture_uuid_shape
+
     directory = Path(directory)
+    if not is_fixture_uuid_shape(directory.name):
+        raise AssertionError(
+            f"fixture_run({directory}): a run folder's name is its canonical UUID run id "
+            "(#1187) — make the folder at fixture_uuid(<label>) where it is created")
     return Run().under(directory.parent, directory.name)
 
 

@@ -520,7 +520,10 @@ def test_reap_scan_still_refuses_sockets_and_hard_links_under_the_ban(tmp_path):
         sock_path = tree / "parked.sock"
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            s.bind(str(sock_path))
+            # Bound by name from inside its folder: a UUID run folder (#1187) puts the absolute
+            # path past AF_UNIX's 108-byte limit.
+            with contextlib.chdir(sock_path.parent):
+                s.bind(sock_path.name)
         finally:
             s.close()
         with pytest.raises(scrub_mod.RunTainted) as e:

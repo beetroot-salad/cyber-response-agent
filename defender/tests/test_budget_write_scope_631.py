@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
 from defender.tests._spec1077 import fixture_run as _live_run_1165
+from defender.tests._fixture_uuid import fixture_uuid
 
 import asyncio
 import json
@@ -80,7 +81,8 @@ INTEGRITY_SURFACE = (
 
 
 def _run_dir(tmp_path: Path, name: str = "run") -> Path:
-    rd = tmp_path / name
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    rd = tmp_path / fixture_uuid(name)
     (rd / "gather_raw").mkdir(parents=True)
     (rd / "gather_summaries").mkdir(parents=True)
     (rd / "alert.json").write_text(json.dumps({"rule": {"name": "probe"}}))

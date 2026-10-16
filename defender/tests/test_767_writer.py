@@ -44,6 +44,7 @@ from defender._tenant import TenantRefused
 from defender.runtime import case_ticket
 from defender.scripts.case_history import ticket_writer
 from defender.tests._alert_plant import plant_alert
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests._spec767 import (
     ALERT_MAPPING,
     facts_of,
@@ -55,6 +56,7 @@ from defender.tests._spec767 import (
     HOST_CAUSE,
     LEGACY_RELEASED,
     NO_NOTES,
+    RUN_ID,
     TICKETS_PATH,
     TRANSITIONS_SUFFIX,
     WIRE_BOUND_BYTES,
@@ -82,7 +84,7 @@ def _case_record(**kw):
     report body), never the retired single `reason`."""
     cls = require(case_ticket, "CaseRecord", "D3 splits CaseRecord.reason into cause + narrative")
     fields = {
-        "case_id": "20260917t000000z-sshd",
+        "case_id": RUN_ID,
         "signature_id": "5710",
         "disposition": "benign",
         "cause": HOST_CAUSE,
@@ -659,7 +661,8 @@ def test_767_unreadable_report_still_comments(tmp_path, monkeypatch):
     )
 
     # The missing file is the same family, reached without writing a report at all.
-    missing = tmp_path / "run-missing"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    missing = tmp_path / fixture_uuid("run-missing")
     missing.mkdir()
     plant_alert(missing, {}, mapping=ALERT_MAPPING)
     missing_store = FakeStore()

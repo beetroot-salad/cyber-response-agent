@@ -1298,6 +1298,8 @@ def test_1110_a_dev_re_render_whose_copy_failed_exits_1_with_the_record_written(
 
     assert child.returncode == 1, (
         f"a dev re-render whose copy failed exited {child.returncode}: {child.stderr[-800:]!r}")
+    # Exit 1 is also every refusal's code, so the record's absence names the child's stderr.
+    assert record.is_file(), f"the re-render wrote no record: {child.stderr[-800:]!r}"
     assert record.read_text(encoding="utf-8") == _renderer().render_page(_run_handle_1165(run_dir))
     warnings = [line for line in _json_lines(child.stderr) if line.get("severity") == "WARNING"]
     assert len(warnings) == 1, f"expected one WARNING line for the failed copy: {child.stderr!r}"

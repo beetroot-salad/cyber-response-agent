@@ -13,7 +13,9 @@ The consumers, each driven through its REAL entry point:
   `DEFENDER_RUNS_BASE` is the run tenant's runs base (F3; the review replay's successor, #1224);
 * `evals/held_out.py`: the positional runs dir, required, and never resolving the data root
   (§7 J50, human), `--help` never resolving a runs base (C-R17). Its `--tenant` (C27, N9) is
-  gone: an evaluation tool outside the application takes no tenant (human, #1120 / PR #1157);
+  gone: an evaluation tool outside the application takes no tenant (human, #1120 / PR #1157).
+  It scores only the UUID runs an `--index` row names, never a folder by name (#1187 declared
+  change 14);
 * `evals/oracle_golden/generate_case.py` (D4 row 7, §7 J32, C-R16) is removed (human, #1120 /
   PR #1157: "Remove generate_case"); its cells here went with it.
 
@@ -30,6 +32,7 @@ import inspect
 import json
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -104,12 +107,25 @@ def _fixtures(tmp_path: Path, slug: str = "slug-one", disposition: str = "benign
     return fx.parent
 
 
-def _scored_run(runs: Path, disposition: str, slug: str = "slug-one") -> Path:
-    run = runs / slug
+def _scored_run(runs: Path, disposition: str, run_id: str, slug: str = "slug-one") -> Path:
+    """A finished run `<runs>/<run_id>` (its alert, alert record and a report closing
+    `disposition`). #1187 declared change 14: held_out finds it by the id an index row names,
+    never by a folder named after the fixture's slug."""
+    run = runs / run_id
     run.mkdir(parents=True, exist_ok=True)
     plant_alert(run, {"rule": {"id": slug}})
     (run / "report.md").write_text(T.report_text(disposition), encoding="utf-8")
     return run
+
+
+def _held_out_index(tmp_path: Path, run_id: str, slug: str = "slug-one") -> Path:
+    """The operator's held-out index F (#1187 declared change 14), outside every runs tree: JSON
+    Lines, one `{slug, run_id}` row per launch, oldest first — the shape
+    `ids_1187/test_1187_held_out.py` pins, written with plain `json`."""
+    index = tmp_path / "ops" / "held-out-index.jsonl"
+    index.parent.mkdir(parents=True, exist_ok=True)
+    index.write_text(json.dumps({"slug": slug, "run_id": run_id}) + "\n", encoding="utf-8")
+    return index
 
 
 def _drive_held_out(argv: list[str], capsys) -> tuple[Any, str]:
@@ -236,21 +252,25 @@ def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
     an evaluation tool outside the application and takes no tenant, so the `--tenant` branch
     this test once pinned (C27) is now a usage error.
 
-    Which tree was scored is read off the verdict: a fixture's run under a set-up tenant's runs
-    base closes `benign`, the one under a stale retired knob closes `malicious`, and the
-    positional dir's closes `inconclusive` — so only the positional dir may be scored. A
-    refusal prints no scoring report."""
+    #1187 declared change 14: held_out scores only INDEXED runs — a UUID run named by an
+    `--index` row — never a folder named after the fixture. The three trees each hold a run
+    under that ONE id, so the verdict still says which tree was read: the set-up tenant's runs
+    base closes `benign`, the stale retired knob's `malicious`, the positional dir's
+    `inconclusive` — only the positional dir may be scored. Every refused argv carries the
+    same valid `--index`, so the refusal is the tenant's or the missing dir's, not the index's.
+    A refusal prints no scoring report."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, TENANT)
     fixtures = _fixtures(tmp_path)
-    _scored_run(H.runs_dir(root, TENANT), "benign")
+    run_id = str(uuid.uuid4())
+    _scored_run(H.runs_dir(root, TENANT), "benign", run_id)
     stale = tmp_path / "stale-runs"
-    _scored_run(stale, "malicious")
+    _scored_run(stale, "malicious", run_id)
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(stale))
     positional = tmp_path / "given-dir"
-    _scored_run(positional, "inconclusive")
-    fx = ["--fixtures-dir", str(fixtures)]
+    _scored_run(positional, "inconclusive", run_id)
+    fx = ["--index", str(_held_out_index(tmp_path, run_id)), "--fixtures-dir", str(fixtures)]
 
     status, out = _drive_held_out([str(positional), *fx], capsys)
     assert status == 0, out
@@ -266,18 +286,26 @@ def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
 
 def test_s7_j50_held_out_positional_ignores_data_root(tmp_path, monkeypatch, capsys):
     """held_out <runs_dir> scores the directory it is given under DEFENDER_DATA_ROOT=rel/ (and
-    with it unset): the positional branch never resolves the data root or a tenant."""
+    with it unset): the positional branch never resolves the data root or a tenant.
+
+    #1187 declared change 14: the scored run is a UUID run named by an `--index` row (never a
+    folder named after the slug); the stale retired knob holds a run under the same id closing
+    `malicious`, so reading it instead would show."""
     monkeypatch.chdir(tmp_path)
     fixtures = _fixtures(tmp_path)
+    run_id = str(uuid.uuid4())
     given = tmp_path / "given-dir"
-    _scored_run(given, "benign")
+    _scored_run(given, "benign", run_id)
+    _scored_run(tmp_path / "stale-knob", "malicious", run_id)
+    index = _held_out_index(tmp_path, run_id)
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "stale-knob"))
     for value in ("rel/", None):
         if value is None:
             H.set_data_root(monkeypatch, None)
         else:
             monkeypatch.setenv(H.DATA_ROOT_ENV, value)
-        status, out = _drive_held_out([str(given), "--fixtures-dir", str(fixtures)], capsys)
+        status, out = _drive_held_out(
+            [str(given), "--index", str(index), "--fixtures-dir", str(fixtures)], capsys)
         assert status == 0, f"DEFENDER_DATA_ROOT={value!r}: {out}"
         assert "slug-one: predicted='benign'" in out, out
         assert "WRONG" not in out, out

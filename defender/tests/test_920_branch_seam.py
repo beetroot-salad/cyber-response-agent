@@ -57,6 +57,7 @@ pytest.importorskip("pydantic_ai")
 from defender.tests._branch_947 import ALERT_DOC, spec_at  # noqa: E402
 from defender.tests._session_head_754 import message_ids  # noqa: E402
 from defender.tests._alert_plant import plant_alert  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests._session_store_705 import (  # noqa: E402
     DEFENDER,
     complete_pair,
@@ -209,7 +210,8 @@ def _source_run(tmp_path, *, case_id: str = "case-source"):
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path, case_id=case_id)
-    run_dir = runs_base(tmp_path) / "run-source-001"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = runs_base(tmp_path) / fixture_uuid("run-source-001")
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     # Every real run dir holds its alert before anything else happens
@@ -240,7 +242,8 @@ def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
     spec = spec_at(store, run_dir, path_ids[-1])
 
     factory = branch.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-001"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    sibling_dir = tmp_path / "defender-runs" / fixture_uuid("run-sibling-001")
     sibling_dir.mkdir(parents=True, exist_ok=True)
     handle = factory("a-brand-new-case-id", sibling_dir)
 
@@ -422,7 +425,8 @@ def test_a_resumed_run_inherits_the_document_its_history_claims(tmp_path):
         '{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "esql", '
         '"query_id": "elastic.sshd-failed-by-srcip", "params": {}, "payload_status": "ok"}\n',
         encoding="utf-8")
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-doc"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    sibling_dir = tmp_path / "defender-runs" / fixture_uuid("run-sibling-doc")
     sibling_dir.mkdir(parents=True, exist_ok=True)
 
     branch.open_main_session(store, spec_at(store, run_dir, returns[1]),
@@ -469,7 +473,8 @@ def test_a_resumed_run_inherits_the_evidence_its_prefix_names(tmp_path):
         encoding="utf-8")
     (run_dir / "gather_raw" / "l-001").mkdir(parents=True)
     (run_dir / "gather_raw" / "l-001" / "0.json").write_text('{"hits": []}', encoding="utf-8")
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-evidence"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    sibling_dir = tmp_path / "defender-runs" / fixture_uuid("run-sibling-evidence")
     sibling_dir.mkdir(parents=True, exist_ok=True)
     state = _sibling_state(sibling_dir)
 
@@ -506,7 +511,8 @@ def test_a_run_dir_holding_evidence_is_refused_before_anything_forks(tmp_path):
     session_id = ss.main_session_id(store)
     before = len(sql(store, "SELECT session_id FROM session WHERE parent_session_id = ?",
                      (session_id,)))
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-dirty"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    sibling_dir = tmp_path / "defender-runs" / fixture_uuid("run-sibling-dirty")
     (sibling_dir / "gather_raw" / "l-009").mkdir(parents=True)
     (sibling_dir / "gather_raw" / "l-009" / "0.json").write_text("{}", encoding="utf-8")
     spec = spec_at(store, run_dir, path_ids[-1])
@@ -529,7 +535,8 @@ def test_a_fresh_run_seeds_no_document(tmp_path):
     a file that does not exist yet."""
     branch = branch_mod()
     _store, run_dir, _session_id, _ = _source_run(tmp_path)
-    fresh = tmp_path / "defender-runs" / "run-fresh"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    fresh = tmp_path / "defender-runs" / fixture_uuid("run-fresh")
     fresh.mkdir(parents=True, exist_ok=True)
 
     assert branch.seed_investigation(None, None, _sibling_state(fresh), run=fixture_run(fresh), source_run=None) == 0
@@ -549,7 +556,8 @@ def test_a_reused_run_dir_is_refused_rather_than_seeded_over(tmp_path):
     returns = _fence_turns(store, session_id, [1])
     (run_dir / "investigation.md").write_text(
         GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-used"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    sibling_dir = tmp_path / "defender-runs" / fixture_uuid("run-sibling-used")
     sibling_dir.mkdir(parents=True, exist_ok=True)
     (sibling_dir / "investigation.md").write_text("someone else's work\n", encoding="utf-8")
 
@@ -595,7 +603,8 @@ def test_a_prefix_that_would_not_validate_is_refused_rather_than_seeded(tmp_path
     )
     (run_dir / "investigation.md").write_text(source_doc, encoding="utf-8")
 
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-prefix"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    sibling_dir = tmp_path / "defender-runs" / fixture_uuid("run-sibling-prefix")
     sibling_dir.mkdir(parents=True, exist_ok=True)
 
     with pytest.raises(branch.BranchError, match="does not pass validation"):
@@ -615,7 +624,8 @@ def test_a_prefix_that_validates_is_still_seeded(tmp_path):
     returns = _fence_turns(store, session_id, [1, 1])
     (run_dir / "investigation.md").write_text(
         GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-ok"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    sibling_dir = tmp_path / "defender-runs" / fixture_uuid("run-sibling-ok")
     sibling_dir.mkdir(parents=True, exist_ok=True)
 
     # The fence COUNT is a fixture detail (`_source_run`'s own opening turn carries the whole

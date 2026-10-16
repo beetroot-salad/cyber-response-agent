@@ -2072,7 +2072,7 @@ demands:
   form: clause
   status: retired
   outcome:
-    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s episode-id refusal; `test_1105_a_bad_episode_id_is_refused_as_run_refused_before_any_name_is_built`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s episode-id refusal; `test_1105_a_bad_episode_id_is_refused_as_run_refused_before_any_name_is_built`, which discharged this demand, was deleted with it. What replaces the guard (review-3 F35): an episode id is a canonical UUID, refused before any name is built or anything is read — pinned by `defender/tests/ids_1187/test_1187_ids.py::test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id` and `defender/tests/ids_1187/test_1187_roster_sibling.py::test_the_sibling_refuses_an_old_episode_id_before_anything_is_read`; an `_episodes` entry in the natural container refuses the listing (`defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`).'
   binds:
   - refuse_bad_episode_id
   - record_episode_runs
@@ -2262,7 +2262,7 @@ demands:
   form: clause
   status: retired
   outcome:
-    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record reader''s content rules; `test_1105_the_reader_refuses_each_content_rule_breaker_naming_the_file`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record reader''s content rules; `test_1105_the_reader_refuses_each_content_rule_breaker_naming_the_file`, which discharged this demand, was deleted with it. What replaces the guard (review-3 F35): the arm roster''s reader applies the content rules (torn, not an object, duplicate ids or keys, a label set other than the manifest''s, a non-canonical or non-string id, a BOM, deep nesting), pinned by `defender/tests/ids_1187/test_1187_roster_sibling.py::test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused`.'
   binds:
   - sibling_run_ids
   - episode_runs
@@ -2285,7 +2285,7 @@ demands:
   form: clause
   status: retired
   outcome:
-    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the write-once rule; `test_1105_an_episode_record_is_written_once_an_identical_retry_is_a_no_op_and_a_different_one_refused`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the write-once rule; `test_1105_an_episode_record_is_written_once_an_identical_retry_is_a_no_op_and_a_different_one_refused`, which discharged this demand, was deleted with it. What replaces the guard (review-3 F35): the arm roster, the record''s successor, is written once — a second `start_runs` refuses and leaves it byte-identical, pinned by `defender/tests/ids_1187/test_1187_roster_sibling.py::test_a_second_start_runs_refuses_and_leaves_the_roster_byte_identical`; the episode claim is an exclusive create, never a retry name, pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_two_episodes_get_two_fresh_uuid_folders_and_never_a_retry_suffix`.'
   binds:
   - interacts(record_episode_runs->episode_runs_record)
   - write_guarded
@@ -2319,7 +2319,7 @@ demands:
   form: clause
   status: retired
   outcome:
-    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s link refusal at `_episodes`; `test_1105_the_writer_never_writes_through_a_link_at_episodes`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the writer''s link refusal at `_episodes`; `test_1105_the_writer_never_writes_through_a_link_at_episodes`, which discharged this demand, was deleted with it. What replaces the guard (review-3 F35): no link is followed at the episodes folder, an episode folder or an arm container, and the real folder still opens — pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_a_link_at_the_episodes_folder_is_refused_and_the_real_folder_opens`, `::test_a_link_at_an_episode_folder_is_refused_and_the_real_folder_opens` and `::test_a_link_at_an_arm_container_is_refused_and_the_real_folder_opens`; the roster itself is refused as a link by `defender/tests/ids_1187/test_1187_roster_sibling.py::test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused[link]`.'
   binds:
   - interacts(record_episode_runs->episode_runs_record)
   - _episodes.domain.distinguished[symlink]
@@ -2397,7 +2397,7 @@ demands:
   form: clause
   status: retired
   outcome:
-    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record''s 64 KiB cap; `test_1105_a_record_over_64_kib_is_corrupt_and_read_no_further_than_the_cap_plus_one`, which discharged this demand, was deleted with it. The replacement guard (an `_episodes` entry in the natural container refuses the listing, naming the one-time command) is pinned by `defender/tests/ids_1187/test_1187_layout_isolation.py::test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`.'
+    nl: 'RETIRED by #1187 — design item R6 (D-del, declared change 13): PR 1''s `_episodes` record, its writer and its readers are deleted, which removes the record''s 64 KiB cap; `test_1105_a_record_over_64_kib_is_corrupt_and_read_no_further_than_the_cap_plus_one`, which discharged this demand, was deleted with it. What replaces the guard (review-3 F35): the arm roster''s reader refuses a roster one byte past `_io.READ_LIMIT`, pinned by `defender/tests/ids_1187/test_1187_roster_sibling.py::test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused[oversize]`.'
   binds:
   - interacts(sibling_run_ids->episode_runs_record)
   - episode_runs_record.domain.distinguished[at-cap-65536]
