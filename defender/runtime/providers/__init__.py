@@ -6,7 +6,7 @@ from ..agent_role import AgentRole
 from .anthropic import AnthropicProvider
 from .base import BuiltModel, Provider
 from .openai_compat import OpenAICompatProvider
-from .retry import ProviderDown, RetryPolicy, with_retries
+from .retry import DEFAULT_POLICY, ProviderDown, RetryPolicy, with_retries
 
 if TYPE_CHECKING:
     from pydantic_ai.settings import ModelSettings
@@ -77,7 +77,7 @@ def effort_for_role(name: str, role: AgentRole) -> str | None:
     return provider_for(name).effort_for_role(name, role)
 
 
-def build_for_effort(name: str, effort: str | None, *, retry: RetryPolicy | None = None) -> BuiltModel:
+def build_for_effort(name: str, effort: str | None, *, retry: RetryPolicy = DEFAULT_POLICY) -> BuiltModel:
     """The model every agent in the product gets, behind the one retrier (#1243): the provider
     builders switch the client libraries' own retries off, so this wrapper owns them all.
     `retry` is the clock, sleep and jitter the retrier uses; omitted, the real ones."""
@@ -112,6 +112,7 @@ __all__ = [
     "FIREWORKS",
     "PROVIDERS",
     "BuiltModel",
+    "DEFAULT_POLICY",
     "Provider",
     "ProviderDown",
     "RetryPolicy",

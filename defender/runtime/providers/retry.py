@@ -90,15 +90,6 @@ def _temporary(exc: BaseException) -> tuple[bool, int | None]:
     return isinstance(exc, ModelAPIError), None
 
 
-def _retry_after(exc: BaseException) -> float:
-    """The seconds the provider's `Retry-After` asks for; 0 when absent or not a number."""
-    headers = getattr(exc, "headers", None) or {}
-    try:
-        return max(0.0, float(headers.get("retry-after", 0)))
-    except (TypeError, ValueError):
-        return 0.0
-
-
 def _backoff(attempt: int, policy: RetryPolicy) -> float:
     """The wait before the retry that follows failed attempt `attempt` (1-based)."""
     return BACKOFF_BASE_S * BACKOFF_FACTOR ** (attempt - 1) * (0.5 + 0.5 * policy.jitter())
@@ -131,7 +122,8 @@ def _wrapper_class() -> type:
                     temporary, status = _temporary(e)
                     if not temporary:
                         raise
-                    wait = max(_backoff(attempt, policy), _retry_after(e))
+                    # `retry_after` is the framework's own parse of the header (seconds or HTTP-date).
+                    wait = max(_backoff(attempt, policy), getattr(e, "retry_after", None) or 0.0)
                     if attempt >= MAX_ATTEMPTS or policy.clock() + wait - started >= WINDOW_S:
                         raise ProviderDown(self.wrapped.model_name, status, attempt) from e
                     _logger.warning(
@@ -143,6 +135,10 @@ def _wrapper_class() -> type:
     return RetryingModel
 
 
-def with_retries(model: Any, policy: RetryPolicy | None = None) -> Any:
-    """`model` behind the retrier. `policy` defaults to the real clock, sleep and jitter."""
-    return _wrapper_class()(model, policy if policy is not None else RetryPolicy())
+#: The real clock, sleep and jitter: what production uses unless a test injects its own.
+DEFAULT_POLICY = RetryPolicy()
+
+
+def with_retries(model: Any, policy: RetryPolicy = DEFAULT_POLICY) -> Any:
+    """`model` behind the retrier."""
+    return _wrapper_class()(model, policy)
