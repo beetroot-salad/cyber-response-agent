@@ -8,6 +8,11 @@ inside the one mount declared `code`. A `staged` mount is a host-made copy's roo
 plants a fresh random token there before each start and the box reads it back; the root holds
 exactly `agent/` and that token. The `agent` kind is retired (amendment 2): tenant identity is
 checked once, at publish. Every rule holds on both request-lane entries (`_ENTRIES`).
+
+Amendment 3, C3: `box.start_box(request)` is the one entry for a `BoxRequest`; a request with
+`require_sandbox=True` (the tenant drain's, the #1224 oracle's) raises on a start fault, never
+runs unsandboxed, and writes no did-not-run marker; box start and teardown leave nothing under
+`<T>/drafts/` (R5).
 """
 from __future__ import annotations
 
@@ -18,6 +23,7 @@ import secrets
 import shutil
 import stat
 import subprocess
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -161,8 +167,8 @@ def _batch(repo, batch_id="box"):
 
 def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(repo):
     """Amendment 2: the drain box sees product code (`code`), the draft's root read-only
-    (`staged`, never the worktree, the clone, an export, `settings/`, `.git` or `forge/`), and
-    the declared lanes writable inside it. `agent/` is `DEFENDER_AGENT_DIR` and the workdir."""
+    (`staged`, never the clone, an export, `settings/`, `.git` or `forge/`), and the declared
+    lanes writable inside it. `agent/` is `DEFENDER_AGENT_DIR` and the workdir."""
     d, batch = _batch(repo)
     tenant, draft = repo[0], batch.draft_root
     request = batch.box_request()
@@ -172,8 +178,7 @@ def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(
         (DEFENDER, DEFENDER, False, "code"), (draft, draft, False, "staged"),
         (draft / "agent/lessons", draft / "agent/lessons", True, None)}
     assert request.env["DEFENDER_AGENT_DIR"] == str(draft / "agent")
-    host_only = (tenant.knowledge, batch.worktree, tenant.worktrees, tenant.dir / "exports",
-                 tenant.dir / "forge")
+    host_only = (tenant.knowledge, tenant.worktrees, tenant.dir / "exports", tenant.dir / "forge")
     for mount in request.mounts:
         source = Path(mount.source)
         assert not any(source.is_relative_to(h) or h.is_relative_to(source) for h in host_only), source
@@ -199,17 +204,112 @@ def test_explicit_defender_dir_also_owns_host_fallback_environment(tmp_path):
     assert env["PYTHONPATH"].split(":")[0] == str(code.parent)
 
 
-def test_tenant_drain_refuses_unsandboxed_even_when_operator_opted_out(repo, monkeypatch):
+def _refusing(fault, root, tmp_path):
+    """A fake daemon and a `docker=` over it that fails the start as `fault` names: no daemon
+    at all, the create refused, another draft's token read back at the root, or a lane's
+    sentinel not read back."""
+    from defender.tests._box1195 import FakeDaemon
+    daemon = FakeDaemon(tmp_path)
+    if fault == "create-refused":
+        daemon.refuse_create()
+    elif fault == "sentinel-refused":
+        daemon.refuse_sentinel()
+
+    def docker(argv, **kwargs):
+        argv = [str(a) for a in argv]
+        if fault == "daemon-unavailable":
+            raise OSError("daemon unavailable")
+        if fault == "wrong-token" and argv[1:2] == ["exec"] and _at_root(argv[-1], root):
+            return subprocess.CompletedProcess(argv, 0, "another draft's token\n", "")
+        return daemon(argv, **kwargs)
+    return daemon, docker
+
+
+@pytest.mark.parametrize("fault", ["daemon-unavailable", "create-refused", "wrong-token", "sentinel-refused"])
+def test_a_drain_start_fault_raises_and_leaves_nothing_under_the_drafts(repo, tmp_path, monkeypatch, fault):
+    """C3 / R5 / O-D: the tenant drain's start requires a sandbox. With the operator's opt-out
+    set (`DEFENDER_ALLOW_UNSANDBOXED=1`), a start fault (no daemon, the create refused,
+    another draft's token read back, a lane's sentinel not read back) raises `BoxFault`: no
+    executor, sandboxed or not, no box left, and nothing under `<T>/drafts/` changed: no
+    did-not-run marker beside a lane, no token, no sentinel."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     d, batch = _batch(repo, "no-box")
-    request = batch.box_request()
-    calls = []
+    drafts = batch.draft_root.parent
+    request = replace(batch.box_request(), spec=_PINNED)
+    before = _snapshot(drafts)
+    daemon, docker = _refusing(fault, batch.draft_root, tmp_path)
+    with pytest.raises(box.BoxFault):
+        d.start_box(request, docker=docker)
+    assert daemon.names() == []
+    assert _snapshot(drafts) == before, "a start fault left something under drafts/"
+
+
+def test_a_drain_box_started_and_stopped_leaves_the_drafts_as_they_were(repo, tmp_path):
+    """C3 / R5: box start and teardown leave nothing under `<T>/drafts/`. The token and the
+    lane sentinels are planted and removed, and a draft's box is stopped with `stop_box`,
+    which writes no verdict: after a sandboxed start and its stop, the drafts folder is
+    exactly as before the start."""
+    from defender.tests._box1195 import FakeDaemon
+    d, batch = _batch(repo, "started")
+    drafts = batch.draft_root.parent
+    before = _snapshot(drafts)
+    daemon = FakeDaemon(tmp_path)
+    executor = d.start_box(replace(batch.box_request(), spec=_PINNED), docker=daemon)
+    assert executor.sandboxed
+    box.stop_box(executor, docker=daemon)
+    assert daemon.names() == []
+    assert _snapshot(drafts) == before, "start and teardown left something under drafts/"
+
+
+def test_a_request_that_requires_a_sandbox_never_falls_back_and_writes_no_marker(tmp_path, monkeypatch):
+    """C3 / R5: a `BoxRequest` with `require_sandbox=True` started through `box.start_box`
+    raises on a start fault, whatever the operator's opt-out says: never an unsandboxed
+    executor, and no did-not-run marker beside its writable mount (nothing in the tree
+    changes). Control: the same request without it falls back to an unsandboxed executor
+    under the opt-out, so the opt-out is live."""
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    tree = tmp_path / "tree"
+    lane = tree / "lane"
+    lane.mkdir(parents=True)
+    before = _snapshot(tree)
+
     def unavailable(argv, **kwargs):
-        calls.append(argv)
         raise OSError("daemon unavailable")
-    with pytest.raises(box.BoxFault, match="daemon|sandbox|box"):
-        d.start_box(request, docker=unavailable)
-    assert calls
+
+    def request(**extra):
+        return _request("defender-required-1108", lane, box.Mount(source=lane, target=lane, writable=True),
+                        **extra)
+    with pytest.raises(box.BoxFault):
+        box.start_box(request(require_sandbox=True), docker=unavailable)
+    assert _snapshot(tree) == before, "a sandbox-required start fault left a marker"
+    fallback = box.start_box(request(), docker=unavailable)
+    assert fallback.sandboxed is False, "the opt-out is not live: the case is blind"
+
+
+def test_the_oracle_start_requires_a_sandbox_and_leaves_no_stray_marker(tmp_path, monkeypatch):
+    """C3: the #1224 oracle starts through `box.start_box` with `require_sandbox=True`. Under
+    the operator's opt-out a start fault (a lane's sentinel not read back) is still
+    `BoxStartRefused`, no box is left, and no did-not-run marker is left beside its scratch
+    folder (the stray `defender-oracle-*.scrub-verdict.json` in the temporary folder)."""
+    from defender.runtime.box import _oracle
+    from defender.tests._box1195 import FakeDaemon
+
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    wrong = FakeDaemon(tmp_path / "wrong")
+    wrong.install(monkeypatch)
+    wrong.refuse_sentinel()
+    with pytest.raises(_oracle.BoxStartRefused):
+        _oracle.start_oracle_box(env={"PATH": os.environ["PATH"], "DEFENDER_BOX_RUNTIME": "runc"})
+    assert wrong.names() == []
+    creates = [argv for argv in wrong.docker_calls() if argv[1:2] == ["run"]]
+    assert creates, "the refused start never reached the daemon"
+    sources = [part.split("source=", 1)[1].split(",", 1)[0]
+               for part in creates[-1] if part.startswith("type=bind,")]
+    scratch = [source for source in sources
+               if Path(source).name.startswith("defender-oracle-") and Path(source).parent == Path(tempfile.gettempdir())]
+    assert scratch, f"no scratch folder among the binds: {sources}"
+    left = [f"{source}.scrub-verdict.json" for source in sources if Path(f"{source}.scrub-verdict.json").exists()]
+    assert left == [], f"the oracle's refused start left a marker: {left}"
 
 
 #: How the box's reply differs from the host file. Read-backs cross Docker's text channel,
@@ -769,7 +869,8 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
     """The tenant drain's own start: the product check file and the draft root's token are
     read back through the box before an executor is handed out. A box answering another
     draft's token, or a draft root that also holds `settings/` (a run copy's half, never a
-    draft's), refuses and reaps. The worktree and the draft's `agent/` are never touched."""
+    draft's), refuses and reaps. The clone and the draft's `agent/` are never touched, and a
+    refusal leaves the drafts folder as it was."""
     from defender.tests._box1195 import FakeDaemon
     d, batch = _batch(repo, "lifecycle")
     root = batch.draft_root
@@ -780,7 +881,8 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
     daemon = FakeDaemon(tmp_path)
     reads = []
     agent_before = files_under(root / "agent")
-    status_before = git(batch.worktree, "status", "--porcelain")
+    status_before = git(repo[0].knowledge, "status", "--porcelain")
+    drafts_before = _snapshot(root.parent)
 
     def boundary(argv, **kwargs):
         argv = [str(a) for a in argv]
@@ -793,6 +895,7 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
         with pytest.raises(box.BoxFault):
             d.start_box(request, docker=boundary)
         assert daemon.names() == []
+        assert _snapshot(root.parent) == drafts_before, "a refused start left something under drafts/"
     else:
         executor = d.start_box(request, docker=boundary)
         assert executor.sandboxed
@@ -802,7 +905,7 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
     if wrong != "settings-at-root":
         assert [r for r in reads if _at_root(r, root)], "the draft's token was never read back"
     assert not any(r.endswith("/.tenant-id") or r.endswith("/SKILL.md") for r in reads)
-    assert git(batch.worktree, "status", "--porcelain") == status_before
+    assert git(repo[0].knowledge, "status", "--porcelain") == status_before
 
 
 def _with_code_at(request, source: Path):

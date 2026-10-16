@@ -9,7 +9,6 @@ clone never interleave, and the lock is free while the host talks to the network
 runs."""
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import shutil
@@ -29,25 +28,25 @@ from ._support import (
     LockAudit,
     LockHolder,
     advance_remote,
+    agent_blobs,
     bounded,
     build_tenant,
+    configured_origin,
     delivery,
     files_under,
+    forge_pulls,
     fresh_process_env,
     git,
     git_config_home,
-    git_subcommand,
     index_entry,
     lock_probe,
     merge_on_remote,
-    merged_agent_lesson,
+    opened,
     push_to_remote,
+    quiet,
+    running_in,
     target,
 )
-
-#: A lesson path the lock cases write and revert.
-_LESSON = "agent/lessons/cut.md"
-
 
 def _current(tenant):
     export = target().current_export(tenant)
@@ -274,7 +273,7 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
     refuse at once with `LockBusy` (a `DeliveryRefused`) naming the holder's pid, the fastest
     of three attempts taking no more than a second longer than the same publish with the
     lock free (a non-blocking try, not a wait for the holder); nothing is
-    fast-forwarded, published or cut meanwhile. Another tenant's publish is unaffected (one
+    fast-forwarded, published or drafted meanwhile. Another tenant's publish is unaffected (one
     lock per tenant, under its own folder, not under `forge/`). Released, the lock is taken
     again (control)."""
     tenant = repo[0]
@@ -302,11 +301,12 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
         assert git(tenant.knowledge, "rev-parse", "HEAD") == head
         assert _current(tenant) == (first.commit, first.path)
         assert _exports(tenant) == sorted([first.commit, "current"])
-        assert not tenant.worktrees.exists() or not any(tenant.worktrees.iterdir())
-        assert len(git(tenant.knowledge, "worktree", "list", "--porcelain").split("\nworktree ")) == 1, \
-            "a batch worktree was cut under a busy lock"
-        assert not (tenant.dir / "drafts" / "busy").exists()
-        red = mod.TenantDelivery.open(red_tenant, defender_dir=DEFENDER, client=ForgeHTTP().client)
+        drafts = tenant.dir / "drafts"
+        assert not drafts.exists() or not any(drafts.iterdir()), \
+            "a draft or its temporary was made under a busy lock"
+        assert git(tenant.knowledge, "for-each-ref", "--format=%(refname)", "refs/heads") == "refs/heads/main"
+        red_forge = ForgeHTTP(origin=configured_origin(red_tenant.knowledge))
+        red = mod.TenantDelivery.open(red_tenant, defender_dir=DEFENDER, client=red_forge.client)
         assert red.publish().commit == git(red_remote, "rev-parse", "main")
     assert sorted(p.name for p in (tenant.dir / "forge").iterdir()) == ["git-credentials"], \
         "the lock (or anything else) landed in forge/, which stays the credential's alone"
@@ -314,13 +314,14 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
 
 
 def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tmp_path):
-    """Flow 6: the lock is held for fast-forward, export and worktree creation only. Probed
-    from another process at each moment the host waits on something else, on every route:
-    `open()`'s protection read, a publish's fetch, a batch (its fetch and push on a real
-    smart-HTTP remote, its PR request, the box's create
-    and its window), the retained branch's delivery (its PR request and any git it runs) and,
-    once a human has merged that PR, the revert of its lesson (its push, its PR request and
-    any fetch). The probe's own positive control sees a held lock as busy."""
+    """Flow 6: the lock is held for the fast-forward, the export, `info/attributes` and the
+    draft only. Probed from another process at each moment the host waits on something else,
+    on every route: `open()`'s repository and protection reads, a publish's fetch, a batch
+    (its fetch and push on a real smart-HTTP remote, its PR lookup and request, the box's
+    create and its window), the retained branch's delivery (its PR lookup and request and
+    any git it runs) and, once a human has merged that PR, the revert of its lesson (its
+    push, its PR request and any fetch). The probe's own positive control sees a held lock
+    as busy."""
     from defender.runtime import box
     from defender.tests._box1195 import FakeDaemon
 
@@ -330,10 +331,12 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
     server.on_service = lambda service: probes.setdefault((phase[0], service), lock_probe(tenant))
 
     def on_request(request):
-        if request.url.path.endswith("/pulls"):
+        if "/pulls" in request.url.path:
             probes.setdefault((phase[0], f"pr-{request.method.lower()}"), lock_probe(tenant))
         if request.url.path.endswith("/branches/main"):
             probes.setdefault((phase[0], "protection"), lock_probe(tenant))
+        if request.url.path.endswith("/repos/tenants/blue"):
+            probes.setdefault((phase[0], "repository"), lock_probe(tenant))
     http = ForgeHTTP(on_request=on_request)
     with LockHolder(tenant, tmp_path / "holder"):
         assert "busy" in lock_probe(tenant), "the probe must see a held lock"
@@ -371,14 +374,14 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
 
     phase[0] = "deliver"
     server.rearm()
-    assert d.deliver("io").endswith("/pulls/7")
+    opened(d.deliver("io"))
 
     merge_on_remote(http_repo, tmp_path, batch.branch)
     phase[0] = "revert"
     server.rearm()
-    assert d.revert("agent/lessons/io.md", "io").endswith("/pulls/7")
+    assert d.revert("agent/lessons/io.md", "io") == forge_pulls(http_repo[1])[-1]["html_url"]
 
-    required = {("open", "protection"), ("publish", "git-upload-pack"),
+    required = {("open", "repository"), ("open", "protection"), ("publish", "git-upload-pack"),
                 ("batch", "git-upload-pack"), ("batch", "git-receive-pack"), ("batch", "pr-post"),
                 ("batch", "after-start-batch"), ("batch", "box-create"), ("batch", "box-window"),
                 ("deliver", "pr-post"), ("revert", "git-receive-pack"), ("revert", "pr-post")}
@@ -723,59 +726,174 @@ def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_pa
     assert _current(tenant) == (newer, later.path)
 
 
-def test_worktrees_are_cut_only_under_the_tenant_lock(repo, tmp_path):
-    """Flow 6 / O-F: a batch's worktree, and any worktree a revert cuts, is created while this
-    process holds the tenant lock. Probed from another process (`LockAudit`) before every
-    `git worktree add` this process spawns, on a batch finished and merged and on the revert
-    of its lesson; the probe's positive control comes first. Every probe sees the lock busy,
-    and the batch's was among them. Then, with the lock held by another process, a revert
-    either refuses with `LockBusy` naming the holder, pushing nothing and cutting nothing, or
-    goes ahead without cutting a worktree."""
-    tenant = repo[0]
-    phase = ["control"]
+def _named(path, dir_fd=None):
+    """`path` (relative to the folder descriptor `dir_fd`, if any) as an absolute name, or
+    `None` for anything that is not a name."""
+    if not isinstance(path, (str, bytes, os.PathLike)):
+        return None
+    return os.path.abspath(_at(path, dir_fd))
+
+
+def _under_drafts(tenant):
+    """`pick` for `LockAudit`: one probe per kind of change under `<T>/drafts/` (`build`: a
+    folder made or a file opened for writing; `rename`: a rename or link into it; `sweep`: a
+    removal) and for the clone's `$GIT_DIR/info/attributes` (`attributes`: opened for
+    writing, or renamed or linked onto; a file written beside it, a temporary, counts too)."""
+    info = os.path.realpath(tenant.knowledge / ".git" / "info")
+    folder = os.path.join(os.path.realpath(tenant.dir), "drafts")
+    seen = set()
 
     def pick(event, args):
-        if event == "subprocess.Popen":
-            sub, argv = git_subcommand(args[1])
-            if sub == "worktree" and "add" in argv:
-                return phase[0]
-        return None
-    audit = LockAudit(tenant, pick)
-    control = ["git", "-C", str(tenant.knowledge), "worktree", "add", "--p3-no-such-option"]
+        if event == "open" and _writes(args[2]):
+            name, label = _named(args[0]), "build"
+        elif event == "os.mkdir":
+            name, label = _named(args[0], args[2]), "build"
+        elif event in {"os.rename", "os.link"}:
+            name, label = _named(args[1], args[3]), "rename"
+        elif event in {"os.remove", "os.rmdir", "shutil.rmtree"}:
+            name, label = _named(args[0], args[1]), "sweep"
+        else:
+            return None
+        if name is None:
+            return None
+        if os.path.dirname(name) == info and (label != "sweep" or name.endswith("/attributes")):
+            label = "attributes"
+        elif not (name == folder or name.startswith(folder + os.sep)):
+            return None
+        if label in seen:
+            return None
+        seen.add(label)
+        return label
+    return pick
+
+
+def test_the_draft_and_info_attributes_are_written_under_the_tenant_lock(repo, tmp_path):
+    """C2 / O-F: the lock covers the `* -filter` write to the clone's `info/attributes` and
+    the draft's build, rename and sweep (and never a commit: that case is in
+    `test_delivery.py`). Probed from another process (`LockAudit`) before the first write of
+    `info/attributes` in `open()` and the first publish, and, on a batch start with a stale
+    temporary in `drafts/`, before the first build step, removal and rename under
+    `<T>/drafts/` (by name or relative to a folder descriptor); the probe's positive control
+    comes first. Every probe sees the lock busy, and each of the four was among them."""
+    tenant = repo[0]
+    audit = LockAudit(tenant, _under_drafts(tenant))
+    control = tenant.dir / "drafts" / ".p3-control"
+    control.mkdir(parents=True)
     with LockHolder(tenant, tmp_path / "holder"), audit:
-        subprocess.run(control, capture_output=True, check=False)
+        (control / "held").write_bytes(b"")
+    shutil.rmtree(control)
+    assert [next(iter(verdict)) for _, verdict in audit.probes] == ["busy"], \
+        f"the probe must fire on a write under drafts/ and see a held lock: {audit.probes}"
+    audit = LockAudit(tenant, _under_drafts(tenant))
     with audit:
-        subprocess.run(control, capture_output=True, check=False)
-    assert [next(iter(verdict)) for _, verdict in audit.probes] == ["busy", "free"], audit.probes
-    audit.probes.clear()
-
+        d = delivery(repo, ForgeHTTP())
+        d.publish()
+    stale = tenant.dir / "drafts" / ".stale-0a1b2c" / "agent" / "lessons"
+    stale.mkdir(parents=True)
+    (stale / "seed.md").write_bytes(b"left by a build that never finished\n")
+    advance_remote(repo, tmp_path)
     with audit:
-        phase[0] = "batch"
-        merged_agent_lesson(repo, tmp_path, "cut", _LESSON, b"a lesson the batch cut\n")
-        phase[0] = "revert"
-        http = ForgeHTTP()
-        assert delivery(repo, http).revert(_LESSON, "cut").endswith("/pulls/7")
-    assert "batch" in [label for label, _ in audit.probes], audit.probes
+        batch = d.start_batch("drafted", lanes=LANES)
+    labels = [label for label, _ in audit.probes]
+    assert {"attributes", "build", "rename", "sweep"} <= set(labels), audit.probes
     assert all("busy" in verdict for _, verdict in audit.probes), audit.probes
+    assert sorted(p.name for p in (tenant.dir / "drafts").iterdir()) == ["drafted"]
+    assert files_under(batch.draft_root / "agent") == files_under(batch.export.path / "agent")
 
-    audit.probes.clear()
-    merged_agent_lesson(repo, tmp_path, "again", _LESSON, b"a lesson to revert under a held lock\n")
+
+#: A clean and smudge filter driver that logs every run and passes the bytes through, named
+#: by the tenant's own attributes: in the clone's config, `main`'s `.gitattributes`, and the
+#: operator's `$GIT_DIR/info/attributes`.
+_SPY = '#!/bin/sh\necho "$1 $2" >> {log}\ncat\n'
+
+
+def _install_spy_filter(clone, scratch):
+    log = scratch / "p3spy.log"
+    spy = scratch / "p3spy.sh"
+    spy.write_text(_SPY.format(log=log), encoding="utf-8")
+    spy.chmod(0o755)
+    git(clone, "config", "filter.p3spy.clean", f"{spy} clean %f")
+    git(clone, "config", "filter.p3spy.smudge", f"{spy} smudge %f")
+    return log
+
+
+def _operator_attributes(clone, line):
+    """The operator appends `line` to the clone's `$GIT_DIR/info/attributes`."""
+    info = Path(clone) / ".git" / "info" / "attributes"
+    info.parent.mkdir(exist_ok=True)
+    with open(info, "a", encoding="utf-8") as out:
+        out.write(line)
+
+
+def test_no_tenant_named_filter_runs_on_the_host(repo, tmp_path):
+    """R4 / O-C: no filter driver the tenant names runs on the host during any delivery
+    call, the clone's fast-forward included. The clone's config defines a clean and smudge
+    driver that logs each run; `main`'s `.gitattributes` names it for every lesson, and so
+    does the operator's `$GIT_DIR/info/attributes`, before the first call and again (a line
+    after whatever the code wrote there) before the second publish. Across `open`, two
+    publishes that each check new lessons out, a batch start, a claim, a reset, finish and
+    the revert of a merged lesson, the driver never runs; the clone stays clean and each
+    export is exactly its commit's blobs. (Positive control: a checkout by the fixtures'
+    git, with the same attributes, runs it.)"""
+    tenant, remote = repo[0], repo[1]
+    clone = tenant.knowledge
+    log = _install_spy_filter(clone, tmp_path)
+
+    def human(checkout):
+        (checkout / ".gitattributes").write_text("*.md filter=p3spy\n", encoding="utf-8")
+        (checkout / "agent/lessons/filtered.md").write_bytes(b"checked out by the fast-forward\n")
+    push_to_remote(repo, tmp_path, human)
+    control, scratch = tmp_path / "spy-control", tmp_path / "spy-control-log"
+    scratch.mkdir()
+    git(tmp_path, "clone", "-n", remote, control)
+    _install_spy_filter(control, scratch)
+    git(control, "checkout", "-f", "HEAD", "--", ".")
+    assert (scratch / "p3spy.log").exists(), "the spy filter never ran: the probe is blind"
+    _operator_attributes(clone, "*.md filter=p3spy\n")
+
     http = ForgeHTTP()
     d = delivery(repo, http)
-    worktrees = git(tenant.knowledge, "worktree", "list", "--porcelain")
-    branches = git(repo[1], "for-each-ref", "--format=%(refname) %(objectname)")
-    phase[0] = "held"
-    with LockHolder(tenant, tmp_path / "holder-2") as holder, audit:
-        _, error, hung = bounded(lambda: d.revert(_LESSON, "again"), seconds=60)
-    assert not hung
-    if error is None:
-        assert audit.probes == [], "a revert cut a worktree while another process held the lock"
-        return
-    assert isinstance(error, target().LockBusy), error
-    assert str(holder.pid) in str(error), "the refusal must name the holder"
-    assert git(tenant.knowledge, "worktree", "list", "--porcelain") == worktrees
-    assert git(repo[1], "for-each-ref", "--format=%(refname) %(objectname)") == branches
-    assert http.creates == []
+    first = d.publish()
+    assert files_under(first.path / "agent") == agent_blobs(clone, first.commit)
+    _operator_attributes(clone, "*.md filter=p3spy\n")
+    push_to_remote(repo, tmp_path, lambda c: (c / "agent/lessons/later.md").write_bytes(b"a later lesson\n"))
+    second = d.publish()
+    assert files_under(second.path / "agent") == agent_blobs(clone, second.commit)
+    batch = d.start_batch("filtered", lanes=LANES)
+    (batch.draft_root / "agent/lessons/claimed.md").write_bytes(b"a claim\n")
+    batch.commit(batch.change_set(), "claim")
+    batch.reset()
+    opened(d.finish(batch))
+    merge_on_remote(repo, tmp_path, batch.branch)
+    d.revert("agent/lessons/claimed.md", "claimed")
+    assert not log.exists(), f"a tenant-named filter ran on the host: {log.read_text(encoding='utf-8')}"
+    assert git(clone, "status", "--porcelain") == ""
+
+
+def test_a_crlf_operator_clone_still_publishes(repo, tmp_path):
+    """R4: `* -filter` turns filters off and nothing else: git's own `eol` and `ident` keep
+    applying, since operator clones may be CRLF. With `main`'s `.gitattributes` asking for
+    `text eol=crlf ident` on lessons, the clone's checkout is CRLF; it stays clean, publishes,
+    and publishes again after a later human merge, each export exactly its commit's blobs."""
+    tenant = repo[0]
+    clone = tenant.knowledge
+
+    def human(checkout):
+        (checkout / ".gitattributes").write_text("*.md text eol=crlf ident\n", encoding="utf-8")
+        (checkout / "agent/lessons/human.md").write_bytes(b"$Id$\na human's lesson\n")
+    push_to_remote(repo, tmp_path, human)
+    d = delivery(repo, ForgeHTTP())
+    first = d.publish()
+    assert (tenant.agent / "lessons/human.md").read_bytes().endswith(b"a human's lesson\r\n"), \
+        "the clone's checkout is not CRLF: git's own `eol` stopped applying (an attribute source " \
+        "hiding `main`'s `.gitattributes`), or the case is blind"
+    assert files_under(first.path / "agent") == agent_blobs(clone, first.commit)
+    newer = push_to_remote(repo, tmp_path, lambda c: (c / "agent/lessons/later.md").write_bytes(b"later\n"))
+    second = d.publish()
+    assert second.commit == newer
+    assert files_under(second.path / "agent") == agent_blobs(clone, newer)
+    assert (tenant.agent / "lessons/later.md").read_bytes() == b"later\r\n"
+    assert git(clone, "status", "--porcelain") == ""
 
 
 # ---------------------------------------------------------------------------------------
@@ -800,46 +918,10 @@ def _upkeep_locks(checkout):
             if os.path.lexists(p)]
 
 
-def _running_in(*roots):
-    """`(pid, command line)` of every other process at work under `roots`: its working folder,
-    a file it holds open, or a path on its command line is there (a git run with `--git-dir`
-    from elsewhere, say)."""
-    folders = [os.path.realpath(root) for root in roots]
-
-    def under(path):
-        return any(path == folder or path.startswith(folder + os.sep) for folder in folders)
-    found = []
-    for entry in os.listdir("/proc"):
-        if not entry.isdigit() or int(entry) == os.getpid():
-            continue
-        proc = f"/proc/{entry}"
-        try:
-            with open(f"{proc}/cmdline", "rb") as f:
-                argv = f.read(4096).decode("utf-8", "replace")
-            held = [os.readlink(f"{proc}/cwd")]
-            fds = os.listdir(f"{proc}/fd")
-        except OSError:
-            continue
-        for fd in fds:
-            with contextlib.suppress(OSError):
-                held.append(os.readlink(f"{proc}/fd/{fd}"))
-        if any(under(path) for path in held) or any(folder in argv for folder in folders):
-            found.append((int(entry), argv.replace("\0", " ").strip()))
-    return found
-
-
 #: A process the scan's positive controls start: it holds open the file `P3_HOLD` names, if
 #: any, says it is ready, and sleeps.
 _SLEEPER = ("import os, time; hold = os.environ.get('P3_HOLD'); "
             "held = hold and open(hold, 'rb'); print('ready', flush=True); time.sleep(60)")
-
-
-def _quiet(*roots, seconds=60.0):
-    """Wait until no other process runs under `roots`; returns any still running at the end."""
-    deadline = time.monotonic() + seconds
-    while (running := _running_in(*roots)) and time.monotonic() < deadline:
-        time.sleep(0.01)
-    return running
 
 
 def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, monkeypatch):
@@ -872,7 +954,7 @@ def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, 
     # under test inherits it (the fixtures' `git` turns upkeep off).
     subprocess.run(["git", "fetch", "origin"], cwd=control, env=dict(os.environ), check=True,
                    capture_output=True, timeout=60)
-    assert _quiet(control) == []
+    assert quiet(control) == []
     assert _graphs(control), "a plain fetch here must run git's upkeep, or the probe is blind"
     for how, cwd, args, hold in (("working folder", clone, [], {}),
                                  ("open file", "/", [], {"P3_HOLD": str(clone / ".git" / "HEAD")}),
@@ -881,7 +963,7 @@ def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, 
                                    env={**os.environ, **hold}, stdout=subprocess.PIPE)
         try:
             sleeper.stdout.readline()
-            assert sleeper.pid in [pid for pid, _ in _running_in(tenant.dir)], \
+            assert sleeper.pid in [pid for pid, _ in running_in(tenant.dir)], \
                 f"the scan must see a process whose {how} is in the clone"
         finally:
             sleeper.kill()
@@ -894,8 +976,8 @@ def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, 
 
     def probe(call, fn, settle=0.0):
         result = fn()
-        running, locks, during = _running_in(*roots), _upkeep_locks(clone), _graphs(clone)
-        left = _quiet(*roots)
+        running, locks, during = running_in(*roots), _upkeep_locks(clone), _graphs(clone)
+        left = quiet(*roots)
         deadline = time.monotonic() + settle
         while not (late := _graphs(clone)) and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -914,9 +996,9 @@ def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, 
     push_to_remote(repo, tmp_path, lambda checkout: (checkout / "agent/lessons/later.md")
                    .write_text("a later human merge\n", encoding="utf-8"))
     batch = probe("start_batch", lambda: d.start_batch("upkeep", lanes=LANES))
-    roots += [batch.worktree, batch.draft_root]
+    roots += [batch.draft_root]
     (batch.draft_root / "agent/lessons/upkeep.md").write_text("written in the window\n",
                                                               encoding="utf-8")
     probe("commit", lambda: batch.commit(batch.change_set(), "claim"))
     probe("reset", batch.reset)
-    assert probe("finish", lambda: d.finish(batch), settle=2.0).endswith("/pulls/7")
+    opened(probe("finish", lambda: d.finish(batch), settle=2.0))

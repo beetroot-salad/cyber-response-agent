@@ -10,7 +10,10 @@ a developer's real helper. Spies sit wherever git looks for other helpers and fo
 the clone's own config, the isolated global config (`GIT_CONFIG_GLOBAL`, `$HOME/.gitconfig`,
 `$XDG_CONFIG_HOME/git/config`) and system config (`GIT_CONFIG_SYSTEM`),
 `GIT_ASKPASS`/`SSH_ASKPASS` and `core.askPass`. A positive control proves every spy is live
-before delivery runs. A terminal prompt is observed on a real pseudo-terminal."""
+before delivery runs. A terminal prompt is observed on a real pseudo-terminal.
+
+Amendment 3 (C4): the token reaches the helper through a sealed in-memory file, so every
+`get` of one git run is answered (R7), and network git runs no hook of the clone's."""
 from __future__ import annotations
 
 import base64
@@ -36,10 +39,12 @@ from ._support import (
     GitHTTP,
     bounded,
     delivery,
+    forge_pulls,
     fresh_process_env,
     git,
     git_config_home,
     merge_on_remote,
+    opened,
     target,
 )
 
@@ -139,7 +144,7 @@ def test_git_never_stores_erases_prompts_for_or_shares_the_tenant_credential(
             assert git(remote, "for-each-ref", "--format=%(refname)", "refs/heads") == "refs/heads/main"
             assert not http.creates
         else:
-            assert d.finish(batch).endswith("/pulls/7")
+            opened(d.finish(batch))
             assert server.authorized("git-receive-pack")
             assert git(remote, "rev-parse", f"refs/heads/{batch.branch}") == sha
 
@@ -193,10 +198,10 @@ def test_deliver_and_revert_never_store_erase_prompt_for_or_share_the_credential
     with pytest.raises(target().DeliveryRefused):
         d.finish(batch)
     http.fail_create = False
-    assert d.deliver("routes").endswith("/pulls/7")
+    opened(d.deliver("routes"))
     merge_on_remote(http_repo, tmp_path, batch.branch)
     server.seen.clear()
-    assert d.revert("agent/lessons/routes.md", "routes").endswith("/pulls/7")
+    assert d.revert("agent/lessons/routes.md", "routes") == forge_pulls(remote)[-1]["html_url"]
     assert server.authorized("git-receive-pack"), "the revert pushed with the helper's token"
     assert _state(credentials) == before
     assert sorted(p.name for p in credentials.parent.iterdir()) == ["git-credentials"]
@@ -247,9 +252,9 @@ def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, tmp_pat
     with pytest.raises(target().DeliveryRefused):
         d.finish(batch)
     http.fail_create = False
-    assert d.deliver("no-copy").endswith("/pulls/7")
+    opened(d.deliver("no-copy"))
     merge_on_remote(http_repo, tmp_path, batch.branch)
-    assert d.revert("agent/lessons/no-copy.md", "no-copy").endswith("/pulls/7")
+    assert d.revert("agent/lessons/no-copy.md", "no-copy") == forge_pulls(http_repo[1])[-1]["html_url"]
     assert server.authorized("git-receive-pack")
     new_in_tmp = [os.path.join(tmp, name) for name in sorted(set(os.listdir(tmp)) - existing)]
     copies = _holding([*new_in_tmp, tenant.dir, git_config_home(tmp_path).home], token.encode(), started)
@@ -328,10 +333,10 @@ def test_the_credential_never_rides_in_a_process_argument_or_environment(http_re
         with pytest.raises(target().DeliveryRefused):
             d.finish(batch)
         http.fail_create = False
-        assert d.deliver("argv").endswith("/pulls/7")
+        opened(d.deliver("argv"))
     merge_on_remote(http_repo, tmp_path, batch.branch)
     with spawns:
-        assert d.revert("agent/lessons/argv.md", "argv").endswith("/pulls/7")
+        assert d.revert("agent/lessons/argv.md", "argv") == forge_pulls(http_repo[1])[-1]["html_url"]
     assert spawns.seen
     assert spawns.carrying(_secrets(TOKEN)) == []
 
@@ -375,12 +380,13 @@ from pathlib import Path
 os.setsid()
 os.open(sys.argv[1], os.O_RDWR)  # the controlling terminal of this new session
 from defender.tests import _tenants1106 as tenants
-from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, target
+from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, configured_origin, target
 mod = target()
 out = {}
 try:
-    later = mod.TenantDelivery.open(tenants.accept(Path(sys.argv[2]), sys.argv[3]),
-                                    defender_dir=DEFENDER, client=ForgeHTTP().client)
+    tenant = tenants.accept(Path(sys.argv[2]), sys.argv[3])
+    http = ForgeHTTP(origin=configured_origin(tenant.knowledge))
+    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client)
     later.publish()
     out["published"] = True
 except mod.DeliveryRefused as refused:
@@ -435,3 +441,85 @@ def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
     assert child.returncode == 0, err_path.read_bytes()
     verdict = json.loads(out_path.read_bytes().decode().strip().splitlines()[-1])
     assert verdict.get("published") or "refused" in verdict, verdict
+
+
+def test_a_git_run_that_asks_for_the_credential_twice_succeeds(http_repo, spies):
+    """R7 / O-E: every `get` git asks of the one helper is answered, not only the first (a
+    one-shot pipe reads empty the second time; a sealed in-memory file read through
+    `/dev/fd/N` starts at offset 0 on every open). The clone's own config gives `origin` two
+    push URLs, both the forge's repository, so one push asks for the credential twice
+    (probed): finish pushes and opens its PR, every push authenticated, the credential file
+    untouched, no spy run. (An implementation that pushes to an explicit URL rather than to
+    `origin` never asks twice; the case is then vacuous, and the bug unreachable.)"""
+    tenant, remote, credentials, server = http_repo
+    log = _armed(http_repo, spies)
+    before = _state(credentials)
+    url = f"{server.url}/tenants/blue.git"
+    for _ in range(2):
+        git(tenant.knowledge, "config", "--add", "remote.origin.pushurl", url)
+    http = ForgeHTTP()
+    d = delivery(http_repo, http)
+    batch = d.start_batch("twice", lanes=LANES)
+    (batch.draft_root / "agent/lessons/twice.md").write_text("pushed twice\n", encoding="utf-8")
+    sha = batch.commit(batch.change_set(), "claim")
+    result, error, hung = bounded(lambda: d.finish(batch), seconds=90)
+    assert not hung, "git waited on a prompt"
+    assert error is None, f"a second credential get went unanswered: {error!r}"
+    opened(result)
+    assert git(remote, "rev-parse", f"refs/heads/{batch.branch}") == sha
+    assert not server.offered_and_refused("git-receive-pack")
+    assert _state(credentials) == before
+    _silent(log)
+
+
+#: A clone hook that logs whenever the git running it is a fetch or a push (`$PPID` is that
+#: git), and stays quiet for local git (the commit-maker's own `update-ref`, say).
+_NETWORK_HOOK = """#!/bin/sh
+parent=$(tr '\\0' ' ' < /proc/$PPID/cmdline)
+case " $parent " in
+  *" fetch "*|*" push "*|*" ls-remote "*|*" pull "*) echo "{name}: $parent" >> {log} ;;
+esac
+cat > /dev/null
+exit 0
+"""
+
+
+def test_network_git_runs_no_hook_of_the_clones(repo, tmp_path):
+    """C4 / O-E: network git runs with `core.hooksPath=/dev/null`, so no hook of the clone's
+    runs while the token is within reach: `pre-push` never runs, nor `reference-transaction`
+    under a fetch or a push, across publish, a batch, finish, a retained deliver and a
+    revert. Positive control: the clone's own fetch and push run both hooks."""
+    tenant, remote = repo[0], repo[1]
+    clone = tenant.knowledge
+    log = tmp_path / "hooks.log"
+    hooks = clone / ".git" / "hooks"
+    hooks.mkdir(exist_ok=True)
+    for name in ("pre-push", "reference-transaction"):
+        (hooks / name).write_text(_NETWORK_HOOK.format(name=name, log=log), encoding="utf-8")
+        (hooks / name).chmod(0o755)
+    scratch = tmp_path / "control.git"
+    git(tmp_path, "init", "--bare", "-q", scratch)
+    git(clone, "push", "-q", scratch, "HEAD:refs/heads/control")
+    git(clone, "fetch", "-q", scratch, "+refs/heads/control:refs/p3/control")
+    seen = log.read_text(encoding="utf-8") if log.exists() else ""
+    assert "pre-push:" in seen, f"the pre-push hook is not live: {seen!r}"
+    assert "reference-transaction:" in seen, f"the reference-transaction hook is not live: {seen!r}"
+    log.unlink()
+    git(clone, "update-ref", "-d", "refs/p3/control")
+
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    d.publish()
+    batch = d.start_batch("hooked", lanes=LANES)
+    (batch.draft_root / "agent/lessons/hooked.md").write_text("a lesson\n", encoding="utf-8")
+    batch.commit(batch.change_set(), "claim")
+    http.fail_create = True
+    with pytest.raises(target().DeliveryRefused):
+        d.finish(batch)
+    http.fail_create = False
+    opened(d.deliver("hooked"))
+    merge_on_remote(repo, tmp_path, batch.branch)
+    d.revert("agent/lessons/hooked.md", "hooked")
+    assert git(remote, "rev-parse", f"refs/heads/{batch.branch}")
+    seen = log.read_text(encoding="utf-8") if log.exists() else ""
+    assert seen == "", f"a clone hook ran under network git: {seen}"
