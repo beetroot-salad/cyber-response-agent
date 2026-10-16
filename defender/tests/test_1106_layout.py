@@ -1,26 +1,4 @@
-"""#1106 — where the settings live now: the committed layout, the template, the read gate and
-the bridge (O9, M1, D1, C9, O7, D4).
-
-M1 moves the four settings kinds — each system's `config.env`, `verb-grants.yaml`,
-`lead-zero.yaml`, `systems/case-history/mapping.yaml` — out of `defender/knowledge/environment/`
-to the lab tenant's `settings/` at the REPO ROOT, creates an empty `agent/` half
-beside it, and adds `knowledge/tenant-template/` whose table grants NOTHING (D1). Nothing under
-`defender/` holds a settings kind afterwards, and `defender/knowledge/` is gone (O9).
-
-That location is also the whole of O7's discharge: the model's read roots are the run dir and
-`defender_dir`, and `settings/` now sits under neither — so the gate denies every settings file
-by construction rather than by the `.env` substring filter that happened to catch `config.env`
-alone (K9). Pinned through the real gate, `decide_read` and the bash lane's
-`read_allowed_path`, with a corpus file as the positive control.
-
-D4's bridge: the tenant record a fresh runs base mints says `playground`, not `default`, and an
-existing record is read back as written — never remapped.
-
-#1120 (C26, H2): the lab is walked by no gate any more, so the lab-content assertions here are
-made on the committed test fixture (`knowledge/tenant-fixture/`), which holds the same four
-kinds, and "every committed tenant" means the committed knowledge folders the CI census walks —
-the fixture and the template. A tenant is reached only through `accept_tenant`.
-"""
+"""Where tenant settings live: the playground tenant and tenant template resolve through the real resolver, the template grants nothing, and no settings file is readable by the model's read surfaces."""
 from __future__ import annotations
 
 import shutil

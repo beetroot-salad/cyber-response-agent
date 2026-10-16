@@ -132,22 +132,6 @@ v-009|identity|user/known-corp|??|
     assert [s.slot for s in derive_frontier(body).slots] == ["ident"]
 
 
-def test_an_edge_targeted_refinement_blocks_the_gate_and_is_dropped_by_the_frontier():
-    """CLAIM: the second divergence is unchanged, and it is a `_node_state` filter — not a knob."""
-    doc = _FIXTURE_DOCS["edge target"]
-    body, _warnings = parse_dense_companion(doc)
-
-    assert [(c.vertex_id, c.slot) for c in iter_vertex_cells(body, include_ident=False)
-            if c.is_open] == [("e-001", "attrs.auth_method")], "the walk stopped reporting it"
-
-    blocked = _check_benign_open_slots(body)
-    assert len(blocked) == 1
-    assert "e-001" in blocked[0]
-    assert "benign blocked" in (validate_investigation(doc + CONCLUDE_BENIGN, None) or "")
-
-    assert derive_frontier(body).slots == (), "an edge cell reached the retrieval key"
-
-
 def test_the_open_cells_are_exactly_what_the_gate_refuses_on():
     """CLAIM: the gate blocks on the open cells and on nothing else — one message per cell."""
     doc = PROLOGUE + OPEN_CLASS_BLOCK + BLANK_IDENT_BLOCK

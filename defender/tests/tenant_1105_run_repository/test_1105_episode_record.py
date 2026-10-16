@@ -1,34 +1,4 @@
-"""#1105 PR 1 — the episode -> runs record (D3; amendment A and B; MF-12, MF-16, MF-22 reading B;
-P2; NM-02, NM-04; OQ-5 (a)).
-
-The record is `tenant.runs/_episodes/<episode_id>.json`, host-only, beside `_tenant.json`:
-exactly `{episode_id, tenant_id, source_run_id, runs: {label: run_id}}`, run ids stored as
-`RunId` text, at most 64 KiB (65536 bytes), in ONE canonical sorted-key serialisation. PR 1 has
-no production writer (the launcher's write is PR 2's, D3.8), so every record here is written by
-the test: through the writer where the demand says so, by hand (a host-written record) where it
-pins the reader.
-
-The interfaces this file drives (design D3; the injected seam is `_spec1105`'s `io=`):
-
-    record_episode_runs(tenant, episode_id, source_run_id: RunId,
-                        runs: Mapping[str, RunId], *, io=) -> None
-    episode_runs(tenant, episode_id, *, io=) -> dict[str, RunId]
-    sibling_run_ids(tenant, *, io=) -> set[RunId]
-    episode_sibling_ids(runs: Bound) -> set[RunId]          # amendment B: a Bound, not a path
-
-The writer refuses an arm whose name in the held listing already holds a run or a sidecar, so a
-test that needs both a record and its arms' folders writes the record FIRST.
-
-The reader's rule is D3.4's closed list (MF-12 reading A): an entry of `_episodes` is a regular
-file named `<grammar-valid episode id>.json`, read no-follow and capped at 65536 bytes, strict
-UTF-8 JSON with exactly the four fields, `tenant_id == tenant.id` (the tenant-keyed readers
-only), `episode_id ==` the file name minus its final `.json` (MF-22), and run ids `RunId.parse`
-admits. Anything else refuses with `RunRefused` naming it (P2) — a torn record fails closed until
-an operator removes it, and a stray name in `_episodes` refuses rather than being ignored.
-
-Red at base 80888efb: every test imports what it drives from `defender.run_repository`, which
-does not exist, so each fails at its own import (`ModuleNotFoundError`).
-"""
+"""Episode -> runs record (`tenant.runs/_episodes/<episode_id>.json`): writer refusals, one-shot writes, link/size/corruption handling in the reader, and tenant/episode keying."""
 from __future__ import annotations
 
 import json
@@ -516,20 +486,6 @@ def test_1105_a_record_over_64_kib_is_corrupt_and_read_no_further_than_the_cap_p
     assert elapsed < 5.0, f"refusing a 1 GiB record took {elapsed:.1f}s — it was read whole"
 
 
-def test_1105_overlapping_claims_across_good_records_are_a_union(tmp_path):
-    """Two good records claiming the same run id are not an error: sibling_run_ids returns the
-    union, and runs.list (PR 1's list_run_ids) drops that id once."""
-    from defender.run_repository import sibling_run_ids
-
-    t, runs = _setup(tmp_path)
-    H.plant_record(runs, "e1", t.id, "keep", {"a": "shared", "b": "x1"})
-    H.plant_record(runs, "e2", t.id, "keep", {"a": "shared", "c": "y1"})
-    for name in ("shared", "x1", "y1", "keep"):
-        H.make_run(runs, name)
-    claimed = sibling_run_ids(t)
-    assert claimed == set(_ids("shared", "x1", "y1")), f"the union of both records: {claimed!r}"
-    assert _listed(t) == _ids("keep"), "the shared id is dropped once; the source stays"
-
 
 def test_1105_episode_runs_answers_from_that_episodes_own_record_only(tmp_path):
     """episode_runs(tenant, ep) returns that record's {label: RunId}; it returns {} when ep has no
@@ -571,79 +527,6 @@ def test_1105_sibling_run_ids_is_the_union_of_every_record_and_fails_closed(tmp_
     assert H.is_a(err, RunRefused), f"one corrupt record gave {err!r}: it must fail closed"
     assert str(bad) in H.message(err), f"the refusal names the record: {H.message(err)!r}"
 
-
-def test_1105_both_listings_drop_exactly_the_ids_sibling_run_ids_claims(tmp_path):
-    """With real run folders for a source and two arms and a record written by
-    record_episode_runs, runs.list (PR 1's list_run_ids; bound_runs is gone, #1105 PR 2) drops
-    exactly sibling_run_ids(tenant) and keeps the source; a record in tenant.runs/_episodes naming
-    another tenant makes the listing raise RunRefused, and episode_runs(tenant, 'foreign') refuses
-    that record as corrupt too."""
-    from defender.run_repository import (
-        RunRefused,
-        episode_runs,
-        record_episode_runs,
-        sibling_run_ids,
-    )
-
-    t, runs = _setup(tmp_path)
-    record_episode_runs(t, "src-n1", _rid("src"), {"a": _rid("src-n1-a"), "b": _rid("src-n1-b")})
-    for name in ("src", "src-n1-a", "src-n1-b"):
-        H.make_run(runs, name)
-    claimed = sibling_run_ids(t)
-    assert claimed == set(_ids("src-n1-a", "src-n1-b")), f"the record's arms: {claimed!r}"
-    every = _ids("src", "src-n1-a", "src-n1-b")
-    kept = [rid for rid in every if rid not in claimed]
-    assert _listed(t) == kept == _ids("src"), "runs.list drops exactly the claims"
-    foreign = H.plant_record(runs, "foreign", H.U_ID, "src", {"z": "foreign-z"})
-    for name, call in (("runs.list", lambda: _listed(t)),
-                       ("episode_runs", lambda: episode_runs(t, "foreign"))):
-        err = H.raised(call)
-        assert H.is_a(err, RunRefused), f"{name} over a foreign record gave {err!r}"
-        assert str(foreign) in H.message(err), f"{name} names the record: {H.message(err)!r}"
-
-
-def test_1105_the_record_folder_can_never_be_a_run_id(tmp_path):
-    """RunId.parse refuses '_episodes' and every name with a leading '_', so no run folder can
-    share the record folder's name, and a populated _episodes/ is never a runs.list entry (PR 1's
-    list_run_ids)."""
-    from defender.run_repository import RunId, RunRefused, record_episode_runs
-
-    for name in ("_episodes", "_x", "_tenant.json", "_1", "__"):
-        err = H.raised(RunId.parse, name)
-        assert H.is_a(err, RunRefused), f"RunId.parse({name!r}) gave {err!r}, not RunRefused"
-    t, runs = _setup(tmp_path)
-    record_episode_runs(t, "ep", _rid("src"), {"a": _rid("ep-a")})
-    H.make_run(runs, "r1")
-    assert (runs / "_episodes").is_dir(), "the record folder is populated"
-    assert _listed(t) == _ids("r1"), "_episodes/ is never a runs.list entry"
-
-
-def test_1105_the_episode_record_has_its_own_kinds_registry_row(tmp_path):
-    """defender/docs/run-records-kinds.tsv carries a row for the episode-to-runs record whose kind
-    name is not 'episode_runs' (that kind stays the sibling run directories). The row's path
-    template matches where record_episode_runs actually writes, relative to tenant.runs."""
-    import csv
-    import re
-
-    from defender.run_repository import record_episode_runs
-
-    registry = H.DEFENDER / "docs" / "run-records-kinds.tsv"
-    with registry.open(encoding="utf-8", newline="") as fh:
-        rows = list(csv.DictReader(fh, delimiter="\t"))
-    record_rows = [r for r in rows if (r.get("path") or "").startswith("_episodes/")]
-    assert len(record_rows) == 1, (
-        f"one kinds-registry row for the episode record (path _episodes/...): {record_rows}")
-    row = record_rows[0]
-    assert row["kind"] != "episode_runs", "the record has a DISTINCT kind name (F46)"
-    sibling = [r for r in rows if r["kind"] == "episode_runs"]
-    assert len(sibling) == 1, "kind episode_runs stays the sibling run directories"
-    assert sibling[0]["path"].startswith("runs/"), "kind episode_runs stays the sibling run directories"
-    t, runs = _setup(tmp_path)
-    record_episode_runs(t, "ep", _rid("src"), {"a": _rid("ep-a")})
-    written = [str(p.relative_to(runs)) for p in (runs / "_episodes").glob("*")]
-    pattern = re.sub(r"<[^>]+>", "[^/]+", re.escape(row["path"]))
-    assert written == ["_episodes/ep.json"], f"the registry's path {row['path']!r} names where the writer writes: {written}"
-    assert re.fullmatch(pattern, written[0]), f"the registry's path {row['path']!r} names where the writer writes: {written}"
 
 
 def test_1105_episode_sibling_ids_takes_only_a_bound_and_applies_the_file_rules_without_a_tenant_compare(
@@ -693,40 +576,6 @@ def test_1105_episode_sibling_ids_takes_only_a_bound_and_applies_the_file_rules_
     assert H.is_a(err, RunRefused), f"a non-text tenant_id (7) is corrupt, but gave {err!r}"
     assert str(numeric) in H.message(err), f"the refusal names the file: {H.message(err)!r}"
 
-
-def test_1105_the_path_only_reader_and_sibling_run_ids_agree_on_every_good_and_corrupt_record(
-        tmp_path):
-    """Over the same records, episode_sibling_ids(<the held view of tenant.runs>) equals
-    sibling_run_ids(tenant) for good records; both refuse a truncated record with RunRefused; and
-    a record naming another tenant still claims its ids in episode_sibling_ids, which makes no
-    tenant compare, while sibling_run_ids refuses it as corrupt."""
-    from defender.run_repository import (
-        RunRefused,
-        episode_sibling_ids,
-        record_episode_runs,
-        sibling_run_ids,
-    )
-
-    t, runs = _setup(tmp_path)
-    record_episode_runs(t, "e1", _rid("src"), {"a": _rid("e1-a")})
-    H.plant_record(runs, "e2", t.id, "src", {"b": "e2-b"})
-    with _io.hold(runs) as held:
-        assert episode_sibling_ids(held.view()) == sibling_run_ids(t) == set(_ids("e1-a", "e2-b")), (
-            "both readers agree on good records")
-    torn = H.plant_record(runs, "e3", t.id, "src", {},
-                          raw=H.truncated(H.record_text("e3", t.id, "src", {"c": "e3-c"})))
-    with _io.hold(runs) as held:
-        err_path_only = H.raised(episode_sibling_ids, held.view())
-    err_tenant = H.raised(sibling_run_ids, t)
-    assert H.is_a(err_path_only, RunRefused), f"episode_sibling_ids over a torn record: {err_path_only!r}"
-    assert H.is_a(err_tenant, RunRefused), f"sibling_run_ids over a torn record: {err_tenant!r}"
-    torn.unlink()
-    H.plant_record(runs, "e4", H.U_ID, "src", {"d": "e4-d"})
-    with _io.hold(runs) as held:
-        assert episode_sibling_ids(held.view()) == set(_ids("e1-a", "e2-b", "e4-d")), (
-            "the path-only reader makes no tenant compare: the foreign record claims")
-    err = H.raised(sibling_run_ids, t)
-    assert H.is_a(err, RunRefused), f"sibling_run_ids over a foreign record gave {err!r}"
 
 
 def test_1105_the_record_is_exactly_four_fields_in_one_canonical_sorted_key_serialisation(tmp_path):

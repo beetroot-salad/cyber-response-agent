@@ -1,24 +1,4 @@
-"""#1106 — permissions are per run, built from the run's tenant's table (O3, M4).
-
-Before #1106 the verb-disposition table was read ONCE per process, at import, from the checkout
-(`shipped_dispositions()`, an `lru_cache`), and three grants were projected from it into module
-constants: gather's (`driver._build._GATHER_GRANT` → `GATHER_DEF.verb_grant`), the correlation
-lead's (`lead_zero._spec.CORRELATION_GRANT`) and the correlation system
-(`CORRELATION_SYSTEM`). A process could therefore only ever hold ONE tenant's permissions, and
-whichever table the checkout carried was every run's.
-
-After it, a run loads its own tenant's table at start and builds the grants as a VALUE that
-travels with the run: `verb_dispositions.run_grants(settings_dir) -> RunGrants` with `path` (the
-resolved table), `gather`, `correlation` and `correlation_system`.
-
-The O3 demand is the two-tenant test: ONE process builds grants for two tenants whose tables
-differ, and each run's verb registry admits EXACTLY its own tenant's pairs — the same pair
-granted under one and refused under the other. The M4 demand is that nothing reads a table at
-import any more, observed with an audit hook on the real `open`, not by grepping for a name.
-
-The refusal text follows the value: a registry built over a run's grant names THAT run's
-resolved table when it denies (M4: "those messages name the run's resolved path instead").
-"""
+"""Permissions are per run: grants are built from the run's own tenant table, so one process can hold two tenants' grants."""
 from __future__ import annotations
 
 from pathlib import Path

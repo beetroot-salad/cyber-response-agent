@@ -1,26 +1,4 @@
-"""#1106 — the tenant's knowledge folder, as `_tenant.accept_tenant` accepts it (O5, O4, D3).
-
-#1120 removed the `tenant_dir` resolver; its refusals live in the ONE acceptance,
-`accept_tenant(data_root, tenant_id, *, defender_dir) -> Tenant`, which maps (data root, tenant
-id) to the tenant's two halves under `<root>/<id>/knowledge/`: `settings/` (host-only: the four
-settings kinds) and `agent/` (model-facing, mounted read-only into the box). It is the one place
-a tenant id becomes an accepted tenant, so it is where both escapes the design names are closed:
-
-  * the ID — a path separator, `..`, a leading dot, or nothing at all is not a tenant id (O5);
-  * the LINK — the knowledge folder must resolve to `<root>/<id>/knowledge`, and each half must
-    be a real directory resolving under it, which is what catches `A/agent -> ../B/agent` and
-    `A/agent -> ../settings`: both stay INSIDE the root, so a root-containment check alone
-    passes them (O5).
-
-and where D3's "fail loudly" lives: an absent tenant folder or an absent required settings file
-(`verb-grants.yaml`, `lead-zero.yaml`, `systems/case-history/mapping.yaml`) is a
-`TenantRefused` NAMING THE PATH, with no fallback to another tenant, the template, or the
-checkout (O4).
-
-Every fault here is a real one planted through the real primitive — real directories, real
-symlinks, real missing files — and every refusal is paired with the well-formed tenant it
-differs from by exactly that fault.
-"""
+"""accept_tenant: a tenant id and its knowledge folder halves are accepted only as plain, unlinked directories under the data root."""
 from __future__ import annotations
 
 import os

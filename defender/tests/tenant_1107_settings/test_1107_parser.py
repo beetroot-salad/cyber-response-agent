@@ -1,14 +1,4 @@
-"""#1107 — one parse of `config.env` serves every reader (d_one_parser_quote_rule, NF-15).
-
-The parser itself is unplaced (the design names no function for it), so it is pinned THROUGH ITS
-READERS: the record `run_tenant.resolve_tenant` builds (`systems`, `elastic`), a stub system's
-`_stub_transport.load_config` and elastic's `elastic_adapter.load_config`. Every tenant is
-PLANTED under a tmp root through `_spec1107.plant`; each case's bytes are written in the test.
-
-Today there are two parsers (RG4, executed): `_stub_transport._parse_env_file` strips a
-character SET of quotes (C12), `elastic_adapter.config_from` trims one matched pair. Where they
-agree the one parser keeps today's behaviour; where they disagree it takes `config_from`'s.
-"""
+"""The one config.env parser: quote and line rules."""
 from __future__ import annotations
 
 from pathlib import Path

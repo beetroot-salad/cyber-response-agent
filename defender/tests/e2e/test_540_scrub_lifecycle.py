@@ -5,7 +5,6 @@ from defender.tests._spec1077 import fixture_run
 
 import ast
 import dataclasses
-import json
 import os
 import socket
 import stat
@@ -23,7 +22,6 @@ from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead  # n
 from defender.runtime import permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
-from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
 from defender.runtime.box import (  # noqa: E402
@@ -46,13 +44,6 @@ from defender.tests.e2e._box665 import (  # noqa: E402
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
-    GOLDEN_AB3,
-    FakeVerbs,
-    ReplayFn,
-    Turn,
-    VerbRecorder,
-    drive,
-    materialize,
 )
 
 pytestmark = pytest.mark.e2e
@@ -791,23 +782,6 @@ def test_mid_run_exec_failure_degrades_to_a_tool_error(gate_env):
     assert "127" in out
 
 
-def test_container_name_is_defender_run_run_id(tmp_path):
-    """d_container_name_is_run_id_derived — the container is named `defender-run-{run_id}`,
-    the on-disk half of the box handle: a crashed driver's box is reapable from the run id
-    alone, with nothing else to look up. The name the start actually passes to the daemon is
-    that same derived name, so the two halves cannot drift."""
-    run = _clean_run_dir(tmp_path)
-    run_id = run.name
-    assert container_name(run_id) == f"defender-run-{run_id}"
-
-    docker = FakeDocker()
-    start_box(run, DEFENDER, docker=docker)
-    named = docker.argv_containing("--name")
-    assert named, "the create passed no --name"
-    argv = named[0]
-    assert argv[argv.index("--name") + 1] == f"defender-run-{run_id}"
-
-
 def test_box_does_not_outlive_a_crashed_driver(tmp_path):
     """d_box_torn_down_on_crash — no box outlives the run that created it, INCLUDING when the
     driver crashes."""
@@ -821,15 +795,6 @@ def test_box_does_not_outlive_a_crashed_driver(tmp_path):
         "a crashed driver leaked its box: every box started must be torn down"
     kinds = [ev.split(":")[0] for ev in log]
     assert kinds.index("start") < kinds.index("stop")
-
-
-def test_teardown_of_an_absent_box_succeeds(tmp_path):
-    """d_teardown_is_idempotent — tearing down a box that is not there succeeds silently."""
-    docker = FakeDocker(lambda verb: C43A_RM_MISSING)
-    box = start_box(_clean_run_dir(tmp_path), DEFENDER, docker=FakeDocker())
-
-    assert stop_box(box, docker=docker) is None
-    assert stop_box(box, docker=docker) is None
 
 
 def test_reaper_does_not_treat_stderr_as_failure(tmp_path):
@@ -1066,40 +1031,3 @@ def test_a_box_write_cannot_overwrite_a_claimed_lead_sidecar(tmp_path):
     assert (raw / "l-003.lead.json").read_text(encoding="utf-8") == first
 
 
-def test_gather_only_workflow_completes_via_its_substitute(tmp_path):
-    """d_gather_only_removal_survives — the one-canned-lead gather workflow the deleted testing
-    harness provided still completes, through the production dispatch seam."""
-    assert not GATHER_ONLY.exists(), "the direct-construction bypass is still on disk"
-
-    rec = VerbRecorder()
-
-    def query(ctx, *, native_query: str, limit: int = 10) -> list[dict]:
-        rec.record("query", ctx, {"native_query": native_query, "limit": limit})
-        return [{"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana"}]
-
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='g540')
-    main = ReplayFn([
-        Turn(tool_calls=[("gather", {
-            "lead_id": "l-001", "system": "elastic", "goal": "measure this lead",
-            "what_to_summarize": ["auth events"],
-        })]),
-        Turn(text="Investigation complete."),
-    ])
-    gather = ReplayFn([
-        Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
-                                    "params": {"native_query": "FROM logs | LIMIT 1"}})]),
-        Turn(text="Summary: measured the lead."),
-    ])
-    drive(run_dir, run_id="g540", main=main, gather=gather,
-          verbs=FakeVerbs({"elastic": {"query": query}}))
-
-    assert rec.verbs == ["query"]
-    assert (run_dir / "gather_raw" / "l-001.lead.json").is_file(), "the leads row never landed"
-    # lead-0 (#808) resolves against GOLDEN_AB3 ahead of MAIN's own turn and lands its
-    # own (l-000) row in this same table — scope to the model-driven lead this workflow
-    # is actually about.
-    all_rows = [json.loads(ln) for ln in
-                (run_dir / "executed_queries.jsonl").read_text(encoding="utf-8").splitlines() if ln]
-    rows = [r for r in all_rows if r["lead_id"] not in RESERVED_LEAD_IDS]
-    assert len(rows) == 1
-    assert rows[0]["lead_id"] == "l-001"

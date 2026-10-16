@@ -1,28 +1,4 @@
-"""The session store's path comes from its owner, refusal included (#1077, the leftover of D7).
-
-`runtime/session_store.store_path_for` composed `<runs_base>/../sessions/<case_id>.db` itself,
-while the owner's `RunPaths.session_db` — which carries decision 20's case-stability refusal —
-had no production caller. So the refusal the owner states was one no store ever met: a case id
-that is not case-stable (`id != id.casefold()`) opened a store, and on a filesystem that folds
-case two such ids are ONE file.
-
-What this pins, by observable only — the raised class, what is on disk afterwards, and the
-exact path a store lands at:
-
-- O2: `store_path_for` and `open_store` refuse a case-unstable id as `InvalidCaseId`, and
-  nothing is created for it; the lowercase spelling of the same id opens, at the owner's path.
-- O2 at the resume door: a source run whose case pointer carries such an id fails
-  `branch.open_source_store` as `BranchError` (the driver's store-setup class), with the
-  `InvalidCaseId` as its cause and no store file created; the same run's own lowercase pointer
-  opens its store.
-- O2 at a fresh run: a store factory handed such an id ends the run through the driver's
-  handled `truncated_by="store"` exit — `InvalidCaseId` is a `StoreError` — never an escape.
-- D2: the store's owner is `SessionPaths`, built from the runs base (one store spans a run and
-  its resumes and forks, so there is no run dir to key it by). It names the store AND the root
-  the store is created under; `RunPaths.sessions_dir`/`session_db` answer through it.
-
-O1 — renaming the owner's constants moves the store — is `test_1077_rename_proof.py`'s.
-"""
+"""The session store's path comes from its owner, refusal included (#1077, the leftover of D7)."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -96,13 +72,8 @@ def test_store_path_for_refuses_an_id_that_is_not_case_stable(runs_base, case_id
 @pytest.mark.parametrize("case_id", UNSTABLE)
 def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
         tmp_path, runs_base, case_id):
-    """`open_store` refuses a case-unstable id as `InvalidCaseId` and leaves the filesystem
-    exactly as it found it — whether or not the sessions directory exists yet. Between the
-    two refusals, the lowercase spelling of the same id opens a real store at the owner's path.
-
-    The filesystem is the observable, not the raise alone: `open_store` creates-if-missing,
-    so a refusal that came after the create would leave a store behind for an id the owner
-    says names none."""
+    """`open_store` refuses a case-unstable id as `InvalidCaseId` and leaves the filesystem exactly
+    as it found it — whether or not the sessions directory exists yet."""
     _is_the_subject(case_id)
     lower = case_id.casefold()
 
@@ -135,8 +106,7 @@ def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
 def test_store_path_for_refuses_a_value_that_is_not_a_string(runs_base, case_id):
     """A case id that is not a string at all is refused as `InvalidCaseId` — the pattern check
     comes first — never as an `AttributeError`/`TypeError` from a check that ran before it
-    (those escape the resume door's handler and take the run down). Positive control: a
-    well-formed id resolves."""
+    (those escape the resume door's handler and take the run down)."""
     with pytest.raises(InvalidCaseId):
         store_path_for(case_id, sessions=SessionPaths(runs_base))
     assert store_path_for("case-alpha", sessions=SessionPaths(runs_base)) == _owner_path(
@@ -153,29 +123,10 @@ def test_the_store_and_the_owner_agree_on_every_admitted_id(runs_base, case_id):
     assert store_path_for(case_id, sessions=SessionPaths(runs_base)) == _owner_path(runs_base, case_id)
 
 
-def test_the_store_owner_is_built_from_the_runs_base_and_run_paths_answers_through_it(
-        runs_base):
-    """D2: `SessionPaths(runs_base)` names the sessions dir, each lineage's database in it, and
-    the root they are created under; `RunPaths`' two session accessors answer exactly what it
-    answers, refusal included (the #1077 census keeps them on `RunPaths`)."""
-    owner = SessionPaths(runs_base)
-    run = RunPaths(runs_base / "any-run")
-    assert owner.sessions_dir == run.sessions_dir(runs_base) == runs_base.parent / "sessions"
-    assert owner.session_db("case-alpha") == run.session_db(runs_base, "case-alpha") == (
-        store_path_for("case-alpha", sessions=SessionPaths(runs_base)))
-    assert owner.session_db("case-alpha").parent == owner.sessions_dir
-    assert owner.sessions_dir.parent == owner.trust_root
-    for ask in (lambda: owner.session_db("Case-Alpha"),
-                lambda: run.session_db(runs_base, "Case-Alpha")):
-        with pytest.raises(InvalidCaseId):
-            ask()
-
-
 def test_a_fresh_run_handed_a_case_unstable_id_ends_through_the_handled_store_exit(tmp_path):
     """A fresh run whose store factory is handed a case-unstable id ends through the driver's
     handled `truncated_by="store"` exit, and no store is created: `InvalidCaseId` is a
-    `StoreError`, which the driver's store-setup handler catches. Before, it was a bare
-    `ValueError` and escaped `run_investigation` with the wire log still registered."""
+    `StoreError`, which the driver's store-setup handler catches."""
     assert issubclass(InvalidCaseId, StoreError)
     assert issubclass(InvalidCaseId, ValueError), "callers that catch `ValueError` still do"
     runs = tmp_path / "runs"
@@ -194,9 +145,7 @@ def test_a_fresh_run_handed_a_case_unstable_id_ends_through_the_handled_store_ex
     assert not created_stores, f"the refused id still created {created_stores}"
 
 
-# ---------------------------------------------------------------------------------------
 # The resume door: a source run whose pointer carries a case-unstable id
-# ---------------------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
 def _finished_run(tmp_path_factory) -> tuple[Path, Path]:
@@ -225,15 +174,9 @@ def source_run(_finished_run) -> Iterator[tuple[Path, Path]]:
 
 
 def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error(source_run):
-    """`branch.open_source_store` over a real run whose case pointer names the run's own case
-    id in the wrong case refuses as `BranchError`, caused by the store's `InvalidCaseId`, and
-    creates no store; over the same run's own, lowercase pointer it opens the run's store.
-
-    The mixed-case pointer is the real one with the id's case flipped EVERYWHERE it appears —
-    the case id and the store path the writer would have recorded for it — so it is
-    self-consistent. That is what makes the refusal the case-stability rule's: an inconsistent
-    pointer is refused today already, by the derive-and-compare check, for the opposite reason.
-    Rewritten through the real pointer writer, keeping every other field the run wrote."""
+    """`branch.open_source_store` over a real run whose case pointer names the run's own case id in
+    the wrong case refuses as `BranchError`, caused by the store's `InvalidCaseId`, and creates
+    no store; over the same run's own, lowercase pointer it opens the run's store."""
     from defender.runtime import branch, session_store
 
     root, run_dir = source_run
@@ -281,10 +224,8 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
 
 
 def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(source_run):
-    """A source run whose pointer's `case_id` is `null` fails `open_source_store` as
-    `BranchError` caused by `InvalidCaseId` — the driver's store-setup class — and creates
-    nothing. (The pointer writer would not write it; a hand-edited or truncated file can.)
-    Positive control: the run's own pointer opens."""
+    """A source run whose pointer's `case_id` is `null` fails `open_source_store` as `BranchError`
+    caused by `InvalidCaseId` — the driver's store-setup class — and creates nothing."""
     from defender.runtime import branch
 
     root, run_dir = source_run

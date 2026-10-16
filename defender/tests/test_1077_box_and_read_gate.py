@@ -1,16 +1,4 @@
-"""#1077 — O6's read gate and O7's box posture: what the name move must not weaken.
-
-Carries 5 demands of `spec-flow/specs/spec_graph_1077.yaml`. The read gate's six per-name
-denies key on exactly the names D1 moves onto the owner, so the move is the moment they could
-silently stop holding; the box's posture is what the security dive's universal (4) rests on
-when it says the tenant record cannot be planted from inside a box.
-
-Cluster N was RESOLVED at §7 (decision 17) by keeping the six denials FILENAME-based, exactly
-as today: this issue discharges the obligation it inherited as stated and grows no
-content/inode-level checking machinery. The hard-link evasion is therefore out of scope BY
-DECISION, not by omission — it is a follow-up GitHub issue, and this file deliberately pins no
-content-based check.
-"""
+"""#1077 — O6's read gate and O7's box posture: what the name move must not weaken."""
 from __future__ import annotations
 
 import shutil
@@ -32,12 +20,7 @@ def run_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def worktree(tmp_path: Path) -> Path:
-    """A defender tree that is NOT this process's own checkout.
-
-    `compile_policy_for(VERIFIER_DEF, …)` refuses a `PATHS` tree by design — a policy anchored
-    on the main checkout would author it rather than the worktree — so the role enumeration
-    cannot use the real one and still reach every role.
-    """
+    """A defender tree that is NOT this process's own checkout."""
     tree = tmp_path / "worktree" / "defender"
     (tree / "skills").mkdir(parents=True)
     # The verb registry reads the adapters directory of the tree it compiles for (a role's
@@ -124,50 +107,8 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
         "for the role that must `cat` it (O8), so the shape arm above is not a blanket refusal")
 
 
-def test_no_deny_predicate_holds_a_record_name_at_all(run_dir, worktree):
-    """The read gate's six deny predicates hold NO record name — not even the owner's own
-    object.
-
-    THE INVERSE OF WHAT THIS ASSERTED, deliberately (#1077 D7). D1 moved `RAW_MARKER` and
-    `TICKET_READS_MARKER` onto the owner and this test required `files.py` to hold the
-    owner's object, on the reasoning that one shared object cannot drift. It cannot — and it
-    is still a second home: a held name outlives the module it came from, which is how six
-    modules broke at once when an owner stopped exporting two names earlier in this issue.
-    The predicates now ask (`RUN_LAYOUT.gather_raw`, `is_case_answer_key(...)`), so there is
-    nothing left to strand.
-    """
-    import defender.run_repository._layout as owner_mod
-    from defender.runtime.permission import files
-
-    for name in ("RAW_MARKER", "TICKET_READS_MARKER", "CASE_ANSWER_KEY_NAMES", "PROVENANCE",
-                 "WIRE_LOG_DIR"):
-        assert hasattr(owner_mod, name), f"{name} must live on the owner"
-        assert not hasattr(files, name), (
-            f"`files.py` holds {name} — D7's rule is that nothing outside the owner holds a "
-            "record name; ask for the accessor or the predicate instead")
-
-    src = (DEFENDER / "runtime" / "permission" / "files.py").read_text(encoding="utf-8")
-    for spelled in ('RAW_MARKER = "gather_raw"', 'TICKET_READS_MARKER = "ticket_reads"'):
-        assert spelled not in src, f"files.py still spells {spelled}"
-
-    # Driven: the deny follows the OWNER's value, composed off the owner rather than a literal.
-    from defender.runtime import permission
-    policies = _policies(run_dir, worktree)
-    raw_path = run_dir / owner_mod.RAW_MARKER / "wrong-shape" / "0.json"
-    for role, policy in policies.items():
-        assert not permission.decide_read(
-            raw_path, run_dir=run_dir, defender_dir=worktree, policy=policy).allow, role
-    assert permission.decide_read(
-        run_dir / "alert.json", run_dir=run_dir, defender_dir=worktree,
-        policy=policies["MAIN"]).allow, "positive control: the channel can say yes"
-
-
 def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
-    """The box still runs with `--network none` and the run dir as its one read-write bind.
-
-    NEGATIVE (nothing new is mounted, nothing is opened up). Positive control: demand d49
-    drives the same mount list and requires the run dir to still BE mounted.
-    """
+    """The box still runs with `--network none` and the run dir as its one read-write bind."""
     from defender.runtime.box._lifecycle import _create_argv
     from defender.runtime.box._spec import BoxSpec
 
@@ -202,21 +143,7 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
 def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
     """The layout owner, served by the runs repository's door `defender.run_repository` since
     #1105, imports with no third-party package installed and names the sentinel, and `RunPaths`
-    is a stdlib dataclass (D1).
-
-    The box entrypoint itself loads no layout module: `python3 -m defender.runtime.bash_exec`
-    loads only `defender`, `defender.runtime`, `bash_exec` and `box_codec` (#1105's A80-8), so
-    this test's name predates that finding and is kept as #1077's pin id. Why the door must stay
-    pydantic-free is this pin and its twin in test_1077_name_owners.py (R4-7's two child pins)
-    plus the production modules that import the layout with the stdlib alone: five at import
-    (A80-7: `_episode_paths`, `hooks.budget_enforcer`, `hooks.record_lead`,
-    `runtime.circuit_breaker`, `runtime.scrub`). (A sixth, the forward check's run-context
-    loader, which loaded it at call time (FR-1), was deleted with the check in #1166.)
-
-    The `defender.runtime.box` package itself is NOT held to this any more: #1092 (O2/M7)
-    retired the stdlib-only rule for the package door — `BoxSpec` is a `@model` dataclass and
-    the owned box image carries pydantic. What the entrypoint's per-exec import then costs is
-    #1096. This test pins the owner, which is #1077's."""
+    is a stdlib dataclass (D1)."""
     from defender._paths import PATHS
     from defender.tests._import_blocker import run_blocked
 

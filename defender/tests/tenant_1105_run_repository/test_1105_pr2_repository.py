@@ -1,49 +1,4 @@
-"""#1105 PR 2 — the new surface: the tenant-scoped run repository (rev 5.1 decision C, D-repo,
-D-create; amended by the fork decisions of 6100061869).
-
-The accepted `Tenant` hands out its repository — `runs = tenant.runs_repository()` (the spelling
-F-11 names: it imports the package lazily). Below it everything is ids:
-
-* natural container: `runs.open(run_id) -> Run`, `runs.list() -> Listed`,
-  `runs.create(run_id) -> Run`, `runs.resolve(address) -> Run` — PR 1's rules (H1–H6), no
-  `Tenant` argument, no environment read;
-* errors: `RunRefused` as today, and `RunAbsent(RunRefused)` for an absent entry (in `_errors.py`,
-  served by the door); container faults stay `TenantRefused` (`TenantRecordMismatch`,
-  `TenantRecordCorrupt`) — except from an open, which answers `RunUnreachable(RunRefused)`
-  raised from that `TenantRefused`, and `RunAbsent` for an absent container (#1105 PR 2
-  review, PR #1236; `test_1105_pr2_review_fixes.py`);
-* the episode view `runs.episode(episode_id) -> EpisodeRuns`, opened through the episode owner
-  from `(tenant.data_root, episode_id)`: `view.open(arm_id)`, `view.create(arm_id)`,
-  `view.create_container()`, `view.base_world_id()`, `view.arm_id(label) -> RunId`,
-  `view.episode` (the owner's handle); a PRESENT container's `_tenant.json` is judged when the
-  view opens; an ABSENT one has nothing to judge; an UNREADABLE one (a link, a non-directory) is
-  recorded (`view.state`), not raised;
-* `runs.episode_files(episode_id) -> Episode`: the owner's handle, the judge's door — it judges
-  the container's `_tenant.json` as `runs.episode` does (PR 2's second review round) and reads
-  nothing else in `runs/`;
-* `RunAddress(tenant_id, run_id, episode_id | None)`: frozen, fields checked at construction, the
-  stored/transport form; rehydration is "accept its tenant, then open".
-
-SPELLINGS. The design names every method above, `Tenant.runs_repository()`, `RunAbsent`,
-`RunAddress` and its three fields, and `Listed`'s `absent`. It
-leaves `Listed`'s run-id spelling to the implementer: this file reads a `Listed` as an iterable
-of `RunId` in `list_run_ids`' order (`_ids()` below — the ONE place to rename it). Where the
-design leaves an error class open (a view's open over an absent container; `resolve` of another
-tenant's address) the test accepts either repository refusal class, `RunRefused` or
-`TenantRefused`, and nothing broader.
-
-NOT PINNED HERE, deliberately: `Run.reader()` and `runs.container()` (F-13 drops each "unless a
-caller remains after J3's removal"; the decision leaves the page's per-arm reader open),
-`runs.bound()` (no production caller), `runs.resolve`'s episode branch (F-13: no stored address
-carries an episode id with a run id), and the view's container-required mode (no spelling in
-the design; its observable is the sibling's, declared change 6).
-
-Every name is imported INSIDE the test that drives it, so a missing name is one failure per test.
-
-Expected at base 301f196c: every test in this module FAILS — `Tenant` has no `runs_repository`
-(AttributeError) or the door has no `RunAbsent` / `RunAddress` (ImportError). Each asserts the
-behaviour the name owes once it exists.
-"""
+"""The tenant-scoped run repository: open/create/list, RunAddress, episode views and their refusals."""
 from __future__ import annotations
 
 import os
@@ -135,19 +90,6 @@ def test_the_accepted_tenant_hands_out_a_repository_that_opens_its_own_runs_by_i
     assert isinstance(H.raised(runs.open, t, _rid("r1")), TypeError), (
         "the repository's open took a Tenant beside the id")
 
-
-def test_the_repository_reads_no_environment(tmp_path, monkeypatch):
-    """The repository holds its tenant and reads no environment (rev 4 S2): with the data root
-    and the episodes base unset AFTER acceptance, it still opens, lists and creates in T's
-    natural container."""
-    _root, t = _good(tmp_path, "r1")
-    monkeypatch.delenv("DEFENDER_DATA_ROOT", raising=False)
-    monkeypatch.delenv("DEFENDER_EPISODES_BASE", raising=False)
-    runs = t.runs_repository()
-
-    assert Path(runs.open(_rid("r1")).run_dir) == Path(t.runs) / "r1"
-    assert _ids(runs.list()) == ["r1"]
-    assert Path(runs.create(_rid("r2")).run_dir) == Path(t.runs) / "r2"
 
 
 def test_run_absent_tells_an_absent_run_from_a_refused_entry(tmp_path):

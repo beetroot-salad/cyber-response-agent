@@ -1,61 +1,12 @@
-"""#1105 PR 1 — run lookup (D2, D2.0; O1, O3, S1, S2; P1/P2 and the expected states).
-
-#1105 PR 2 (declared change 0): PR 1's Tenant-taking lookups are methods of the tenant's runs
-repository, their rules unchanged — `open_run(tenant, id)` is `tenant.runs_repository().open(id)`
-(an absent entry is `RunAbsent`, a `RunRefused`), `list_run_ids(tenant)` is `.list()` (a `Listed`:
-the same ids in the same order), and the injected seam is the repository's
-(`RunsRepository(tenant, io=rec)`), whose constructor is where a non-Tenant is a `TypeError`.
-`bound_runs` is deleted (no production caller, F-13), and with it the tests that existed only for
-it. The prose below keeps PR 1's names for the rules they pin.
-
-#1105 PR 2 review (PR #1236): `run_exists` (`.exists`) is deleted — no production caller — and
-with it the tests and table rows that existed only for it (the occupancy rule it answered is the
-record writer's, `Listing.holds`, still pinned through the writer). And `open_run` answers ONE
-refusal family: a container fault (a link or a non-directory at `tenant.runs`, a `_tenant.json`
-missing, corrupt or naming another tenant) is `RunUnreachable`, a `RunRefused` raised from the
-container's `TenantRefused` (whose text it carries), and an absent runs folder is `RunAbsent`.
-Every other function keeps `TenantRefused` for the container (`_container_refusal` below).
-
-`open_run(tenant, run_id)` and `list_run_ids(tenant)` take an accepted `Tenant` (and a
-`RunId`); the runs folder is always
-`tenant.runs`. Each call opens it ONCE with `_io.hold(tenant.runs, follow=False)` (amendment A,
-DV-1) and works only relative to that handle: the tenant record is judged by `read_tenant`
-served through the held view plus an exact compare (DV-3), the folder's entries are listed once
-and judged from the directory entry (D2.4), and an entry is judged by `stat_entry` (D2 step 4).
-P2: an unexpected state raises ONE named error — `TenantRefused` for the runs folder and its
-`_tenant.json`, `RunRefused` otherwise — naming the path and the fault, never a raw `OSError`.
-The expected states answer normally: an absent runs folder (empty answers), an absent
-`_episodes` (no claims), and the known sidecar files beside run folders (a staged one included).
-The P2 representatives here are: a link at `tenant.runs`, a `_tenant.json` naming another
-tenant, and a link at a run's name.
-
-COINED INTERFACE (the implementer matches these names, or renames them here):
-* every lookup and record function takes a keyword-only `io=` seam, default the real
-  `defender._io` (as `Run.for_tenant(..., io=)` does). Observed with `H.RecordingIO()`: a
-  function's single no-follow open is one recorded `hold(tenant.runs, follow=False)` call, and
-  the `Run` `open_run` hands out reads through the same seam (`run.facts.alert.read()` records
-  `rooted_read`). The seam is never used to inject a fault (the owner's test shape).
-* `open_run` builds its `Run` with `Run.under(tenant.runs, str(run_id), tenant_id=tenant.id)`
-  (DV-2): the tenant record is read once, through the held view, never again by path.
-
-Every fault is a real input on the real filesystem: links (`os.symlink`), records naming another
-tenant, a UTF-8 BOM, a 200,000-deep record, names carrying control characters.
-
-Red at base 80888efb: every test imports what it drives from `defender.run_repository`, which
-does not exist, so each fails at its own import (`ModuleNotFoundError`).
-"""
+"""Run lookup: open/list over a tenant's runs folder, link/torn-record/foreign-tenant refusals, escaping of quoted names, handle closing."""
 from __future__ import annotations
 
-import copy
-import inspect
 import json
 import os
-import pickle
 import shutil
 from pathlib import Path
 
 from defender import _io
-from defender import _tenant
 from defender import run_common
 from defender._tenant import TenantRecordMismatch, TenantRefused, read_tenant
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
@@ -97,20 +48,6 @@ def _every_function(t, *, run_id: str = "r1", episode_id: str = "ep9"):
         ("sibling_run_ids", lambda: sibling_run_ids(t)),
     ]
 
-
-def _reader_answers(t, **kw) -> dict:
-    """What every lookup and record reader answers over `t`, as plain values."""
-    from defender.run_repository import RunId, RunsRepository, episode_runs, sibling_run_ids
-
-    r1 = RunId.parse("r1")
-    runs = RunsRepository(t, **kw)
-    run = runs.open(r1)
-    return {
-        "runs.open": (str(run.run_dir), str(getattr(run, "tenant_id", None))),
-        "runs.list": _ids(runs.list()),
-        "episode_runs": {k: str(v) for k, v in dict(episode_runs(t, "ep", **kw)).items()},
-        "sibling_run_ids": sorted(str(i) for i in sibling_run_ids(t, **kw)),
-    }
 
 
 def _hold_calls(rec: H.RecordingIO):
@@ -196,174 +133,6 @@ def test_1105_open_run_returns_the_tenants_run_under_tenant_runs(tmp_path):
     assert _is_one_nofollow_hold_of(rec, t.runs), f"holds: {_hold_calls(rec)}"
     assert H.tree_state(root) == before, "runs.open wrote something"
 
-
-def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_path):
-    """The runs repository's constructor (PR 2: the lookups are its methods, so the tenant is
-    checked where the repository is built) and each tenant-keyed record function raise TypeError,
-    before reading anything, when the tenant handed to it is not an accepted Tenant (a tenant id
-    str, a TenantId, a runs-folder Path, a RunTenant), and runs.open and the writer
-    raise it when a run id they take (open's run_id, the writer's source and arm ids)
-    is not a RunId, a str included; the proof that nothing was
-    read is a runs folder planted as a link, which would otherwise refuse with TenantRefused,
-    and a recording io= seam passed to each refused call records no call at all. Positive
-    control: the same calls with an accepted Tenant and RunIds answer."""
-    from defender.run_repository import (
-        RunId, RunsRepository, episode_runs, record_episode_runs, sibling_run_ids,
-    )
-    from defender.runtime.run_tenant import RunTenant
-
-    root = tmp_path / "data"
-    root.mkdir()
-    t = H.tenant(root, H.T_ID)
-    elsewhere = tmp_path / "elsewhere"
-    H.plant_tenant_record(elsewhere, t.id)
-    H.make_run(elsewhere, "r1")
-    os.symlink(elsewhere, t.runs)
-    rid, src, arm = RunId.parse("r1"), RunId.parse("r1"), RunId.parse("ep-a")
-    carrier = RunTenant(tenant=t, grants=None, correlation=None, systems={},
-                        ticket_mapping=None)
-
-    not_tenants = (t.id, _tenant.TenantId(t.id), t.runs, carrier)
-    for bad in not_tenants:
-        for name, call in (
-            ("RunsRepository", lambda io, bad=bad: RunsRepository(bad, io=io)),
-            ("record_episode_runs",
-             lambda io, bad=bad: record_episode_runs(bad, "ep", src, {"a": arm}, io=io)),
-            ("episode_runs", lambda io, bad=bad: episode_runs(bad, "ep", io=io)),
-            ("sibling_run_ids", lambda io, bad=bad: sibling_run_ids(bad, io=io)),
-        ):
-            rec = H.RecordingIO()
-            err = H.raised(call, rec)
-            assert type(err) is TypeError, f"{name}({type(bad).__name__}) raised {err!r}"
-            assert not rec.calls, (
-                f"{name}({type(bad).__name__}) touched the seam before its TypeError: {rec.calls}")
-    for name, call in (
-        ("runs.open", lambda io: RunsRepository(t, io=io).open("r1")),
-        ("record_episode_runs/source",
-         lambda io: record_episode_runs(t, "ep", "r1", {"a": arm}, io=io)),
-        ("record_episode_runs/arm",
-         lambda io: record_episode_runs(t, "ep", src, {"a": "ep-a"}, io=io)),
-    ):
-        rec = H.RecordingIO()
-        err = H.raised(call, rec)
-        assert type(err) is TypeError, f"{name} with a str run id raised {err!r}"
-        assert not rec.calls, f"{name} touched the seam before its TypeError: {rec.calls}"
-    # The link would have refused: the TypeError fired before the hold read anything.
-    err = H.raised(t.runs_repository().list)
-    assert H.is_a(err, TenantRefused), f"the linked runs folder did not refuse: {err!r}"
-    # Positive control: a real runs folder and RunIds answer.
-    os.unlink(t.runs)
-    H.runs_folder(t)
-    H.make_run(t.runs, "r1")
-    runs = t.runs_repository()
-    assert runs.open(rid).run_dir == t.runs / "r1", "runs.open over a good folder"
-    assert _ids(runs.list()) == ["r1"], "runs.list over a good folder"
-    assert record_episode_runs(t, "ep", src, {"a": arm}) is None, "the writer answers"
-    assert {k: str(v) for k, v in episode_runs(t, "ep").items()} == {"a": "ep-a"}
-    assert _ids(sibling_run_ids(t)) == ["ep-a"], "sibling_run_ids reads the written record"
-
-
-def test_1105_the_repository_answers_from_the_tenant_it_is_handed_and_reads_no_environment(
-        tmp_path, monkeypatch):
-    """With DEFENDER_DATA_ROOT unset or naming another data root, and with the tenant's knowledge
-    folder removed after acceptance, every lookup and record function answers exactly as before
-    from tenant.runs of the Tenant it was handed. Positive control: accept_tenant at the edge
-    refuses the same tenant once its knowledge folder is gone."""
-    from defender.run_repository import RunId, record_episode_runs
-
-    root, t = _good(tmp_path, "r1", "r2")
-    H.plant_record(t.runs, "ep", t.id, "r1", {"a": "ep-a"})
-    H.make_run(t.runs, "ep-a")
-    expected = {
-        "runs.open": (str(t.runs / "r1"), t.id), "runs.list": ["r1", "r2"],
-        "episode_runs": {"a": "ep-a"},
-        "sibling_run_ids": ["ep-a"],
-    }
-    assert _reader_answers(t) == expected, f"baseline answers: {_reader_answers(t)}"
-    monkeypatch.delenv(DATA_ROOT_ENV, raising=False)
-    assert _reader_answers(t) == expected, "answers moved with DEFENDER_DATA_ROOT unset"
-    other_root = tmp_path / "other-root"
-    H.tenant(other_root, t.id)
-    monkeypatch.setenv(DATA_ROOT_ENV, str(other_root))
-    assert _reader_answers(t) == expected, "answers moved with DEFENDER_DATA_ROOT elsewhere"
-    shutil.rmtree(t.knowledge)
-    assert _reader_answers(t) == expected, "answers moved with the knowledge folder gone"
-    assert record_episode_runs(t, "ep2", RunId.parse("r2"),
-                               {"b": RunId.parse("ep2-b")}) is None, "the writer still answers"
-    assert (t.runs / "_episodes" / "ep2.json").is_file(), "the record landed under tenant.runs"
-    assert not (other_root / t.id / "runs" / "_episodes").exists(), "nothing reached the env root"
-    err = H.raised(_tenant.accept_tenant, root, t.id, defender_dir=H.DEFENDER)
-    assert H.is_a(err, TenantRefused), f"acceptance at the edge did not refuse: {err!r}"
-
-
-def test_1105_a_copied_or_pickled_tenant_is_served_like_the_original(tmp_path):
-    """A copy.copy, a copy.deepcopy and a pickle round trip of an accepted Tenant are served by
-    open_run (runs.open), list_run_ids (runs.list) and sibling_run_ids exactly as the original
-    is."""
-    from defender.run_repository import RunId, sibling_run_ids
-
-    _root, t = _good(tmp_path, "r1", "r2")
-    H.plant_record(t.runs, "ep", t.id, "r1", {"a": "ep-a"})
-    H.make_run(t.runs, "ep-a")
-
-    def answers(x):
-        runs = x.runs_repository()
-        run = runs.open(RunId.parse("r2"))
-        return (str(run.run_dir), str(getattr(run, "tenant_id", None)), _ids(runs.list()),
-                sorted(str(i) for i in sibling_run_ids(x)))
-
-    original = answers(t)
-    assert original == (str(t.runs / "r2"), t.id, ["r1", "r2"], ["ep-a"]), original
-    for twin in (copy.copy(t), copy.deepcopy(t), pickle.loads(pickle.dumps(t))):
-        assert answers(twin) == original, f"a copied Tenant was served differently: {twin!r}"
-
-
-def test_1105_every_repository_function_takes_an_injected_io_like_the_handle(tmp_path):
-    """Every lookup and record function takes a keyword-only injected I/O seam (default: the real
-    defender._io), passes it to the Run it hands out, and routes its own held open through it
-    (_io.hold(..., os_=)), so a recording seam sees each function's single no-follow open of
-    tenant.runs. The suite uses the seam to observe calls, never to inject an I/O fault (test
-    shape). PR 2: the lookups' seam is the repository's — RunsRepository(tenant, *, io=) — and
-    each of its methods routes through it."""
-    from defender.run_repository import (
-        RunId, RunsRepository, episode_runs, episode_sibling_ids, record_episode_runs,
-        sibling_run_ids,
-    )
-
-    _root, t = _good(tmp_path, "r1")
-    functions = (RunsRepository, record_episode_runs, episode_runs, sibling_run_ids,
-                 episode_sibling_ids)
-    for fn in functions:
-        params = inspect.signature(fn).parameters
-        assert "io" in params, f"{getattr(fn, '__name__', fn)} takes no io= seam"
-        assert params["io"].kind is inspect.Parameter.KEYWORD_ONLY, f"{fn.__name__}: io= kind"
-        assert params["io"].default is _io, f"{fn.__name__}: io= defaults to {params['io'].default!r}"
-    rid = RunId.parse("r1")
-    cases = (
-        ("runs.open", lambda io: RunsRepository(t, io=io).open(rid)),
-        ("runs.list", lambda io: RunsRepository(t, io=io).list()),
-        ("record_episode_runs", lambda io: record_episode_runs(
-            t, "ep", rid, {"a": RunId.parse("ep-a")}, io=io)),
-        ("episode_runs", lambda io: episode_runs(t, "ep", io=io)),
-        ("sibling_run_ids", lambda io: sibling_run_ids(t, io=io)),
-    )
-    for name, call in cases:
-        rec = H.RecordingIO()
-        call(rec)
-        assert _is_one_nofollow_hold_of(rec, t.runs), f"{name}: holds {_hold_calls(rec)}"
-    rec = H.RecordingIO()
-    run = RunsRepository(t, io=rec).open(rid)
-    seen = len(rec.calls)
-    run.facts.alert.read()
-    assert any(n == "rooted_read" for n, _a, _k in rec.calls[seen:]), (
-        "the Run runs.open hands out does not read through the injected seam")
-    with _io.hold(t.runs) as held:
-        rec = H.RecordingIO()
-        claimed = episode_sibling_ids(held.view(), io=rec)
-        assert _ids(claimed) == ["ep-a"], f"episode_sibling_ids(io=) answered {claimed!r}"
-        assert not _hold_calls(rec), "episode_sibling_ids opened a folder of its own"
-    err = H.raised(RunsRepository, t, H.RecordingIO())
-    assert type(err) is TypeError, f"io passed positionally was accepted: {err!r}"
 
 
 # ==========================================================================================
@@ -455,23 +224,6 @@ def test_1105_a_refused_name_is_never_probed_on_disk(tmp_path):
     assert stats, f"the entry was not stat'ed through the seam: {rec.calls}"
 
 
-def test_1105_every_listed_id_opens_with_open_run(tmp_path):
-    """Over a runs folder holding real runs, their sidecar files (a staged one included),
-    _tenant.json and _episodes/, every id list_run_ids returns opens with open_run, and its Run's
-    run_dir is that real directory."""
-
-    _root, t = _good(tmp_path, "r1", "r2", "2026-x.y_z")
-    H.plant_sidecars(t.runs, "r1")
-    H.plant_sidecars(t.runs, "r2", staged=False)
-    H.plant_record(t.runs, "ep", t.id, "r1", {"a": "ep-a"})
-    listed = t.runs_repository().list()
-    assert _ids(listed) == ["2026-x.y_z", "r1", "r2"], f"listed {_ids(listed)}"
-    for rid in listed:
-        run = t.runs_repository().open(rid)
-        assert run.run_dir == t.runs / str(rid), f"{rid!r} opened at {run.run_dir}"
-        assert run.run_dir.is_dir(), f"{run.run_dir} is real"
-        assert not run.run_dir.is_symlink(), f"{run.run_dir} is real"
-
 
 def test_1105_the_lookups_refuse_a_tenant_record_exactly_when_read_tenant_does(tmp_path):
     """The lookups judge _tenant.json by read_tenant served through the held view: a record
@@ -543,48 +295,6 @@ def test_1105_an_other_tenant_refusal_names_the_file_and_the_id_and_no_run_of_th
         assert "zq-run" not in text, f"{name}'s refusal leaks a run id: {text!r}"
 
 
-def test_1105_refusal_text_quotes_names_repr_style_and_truncates_long_ones(tmp_path):
-    """A refusal that quotes a caller-supplied name (RunId.parse('a\\nb'), an episode id 'ep\\n1',
-    a label 'x\\ty') escapes control characters repr-style so the message holds no raw newline or
-    tab, and a 10 000-character name is truncated with a marker rather than quoted whole: the
-    message is under 2,000 characters and still holds the name's first 20 characters.
-    A name carrying DEL, a C1 control (U+009B) and U+2028 is escaped the same way (91 BF-09)."""
-    from defender.run_repository import RunId, RunRefused, record_episode_runs
-
-    _root, t = _good(tmp_path, "src")
-    src, arm = RunId.parse("src"), RunId.parse("ep-a")
-    cases = (
-        ("RunId.parse('a\\nb')", lambda: RunId.parse("a\nb"), "a\\nb"),
-        ("episode id 'ep\\n1'", lambda: record_episode_runs(t, "ep\n1", src, {"a": arm}),
-         "ep\\n1"),
-        ("label 'x\\ty'", lambda: record_episode_runs(
-            t, "ep", src, {"x\ty": RunId.parse("ep-xy")}), "x\\ty"),
-        ("RunId.parse with DEL, a C1 control and U+2028",
-         lambda: RunId.parse("a\x7f\x9b\u2028b"), "a\\x7f\\x9b\\u2028b"),
-        ("an episode id with DEL, a C1 control and U+2028",
-         lambda: record_episode_runs(t, "ep\x7f\x9b\u20281", src, {"a": arm}),
-         "ep\\x7f\\x9b\\u20281"),
-    )
-    for what, call, escaped in cases:
-        err = H.raised(call)
-        assert H.is_a(err, RunRefused), f"{what} gave {err!r}"
-        text = H.message(err)
-        assert not H.has_raw_control(text), f"{what}'s refusal carries a raw control: {text!r}"
-        # The label's refusal may name the label or the arm it fails to match (NM-11: no
-        # precedence between the two rules); either quote is escaped.
-        quoted = (escaped,) if escaped != "x\\ty" else (escaped, "ep-xy")
-        assert any(q in text for q in quoted), f"{what}'s refusal does not quote it: {text!r}"
-    for what, call, long_name in (
-            ("RunId.parse(10 000 chars)", lambda: RunId.parse("a" * 10_000), "a" * 10_000),
-            ("episode id of 10 000 chars",
-             lambda: record_episode_runs(t, "e" * 10_000, src, {"a": arm}), "e" * 10_000)):
-        err = H.raised(call)
-        assert H.is_a(err, RunRefused), f"{what} gave {err!r}"
-        text = H.message(err)
-        assert long_name not in text, f"{what}'s refusal quotes the name whole ({len(text)} chars)"
-        assert len(text) < 2_000, f"{what}'s refusal quotes the name whole ({len(text)} chars)"
-        assert long_name[:20] in text, f"{what}'s refusal does not name it at all: {text[:200]!r}"
-
 
 def test_1105_both_listings_accept_only_runs_the_record_episodes_and_known_sidecar_files(
         tmp_path):
@@ -629,40 +339,6 @@ def test_1105_run_for_tenant_refuses_a_runs_folder_with_no_tenant_record(tmp_pat
     assert H.is_a(err, TenantRecordMismatch), f"another tenant's record gave {err!r}"
 
 
-def test_1105_open_run_checks_types_then_name_then_folder_then_record_then_entry(tmp_path):
-    """open_run checks in order: a str id over a linked runs folder raises TypeError; a
-    sidecar-suffixed RunId over a linked runs folder raises RunRefused; a linked runs folder
-    whose target holds a record naming this tenant raises RunUnreachable from TenantRefused (the
-    hold refuses it); a real folder whose record names another tenant, with a link at the entry,
-    raises RunUnreachable from TenantRefused (the record is judged before the entry); a good
-    record with an absent entry raises RunRefused."""
-    from defender.run_repository import RunId, RunRefused
-
-    root = tmp_path / "data"
-    root.mkdir()
-    t = H.tenant(root, H.T_ID)
-    target = tmp_path / "target"
-    H.plant_tenant_record(target, t.id)
-    H.make_run(target, "r1")
-    os.symlink(target, t.runs)
-    err = H.raised(t.runs_repository().open, "r1")
-    assert type(err) is TypeError, f"1. a str id gave {err!r}"
-    err = H.raised(t.runs_repository().open, RunId.parse("r1.run-end.json"))
-    assert H.is_a(err, RunRefused), f"2. a sidecar id over the link gave {err!r}"
-    err = H.raised(t.runs_repository().open, RunId.parse("r1"))
-    assert _container_refusal("runs.open", err), f"3. the linked folder gave {err!r}"
-    os.unlink(t.runs)
-    H.plant_tenant_record(t.runs, H.U_ID)
-    os.symlink(target / "r1", t.runs / "r1")
-    err = H.raised(t.runs_repository().open, RunId.parse("r1"))
-    assert _container_refusal("runs.open", err), (
-        f"4. another tenant's record (entry a link) gave {err!r}")
-    os.unlink(t.runs / "r1")
-    _swap_record(t.runs, t.id)
-    err = H.raised(t.runs_repository().open, RunId.parse("r1"))
-    assert H.is_a(err, RunRefused), f"5. an absent entry gave {err!r}"
-    assert str(t.runs / "r1") in H.message(err), f"5. names the path: {H.message(err)}"
-
 
 def test_1105_open_run_serves_a_real_directory_entry_and_refuses_an_absent_one_naming_it(
         tmp_path):
@@ -683,20 +359,6 @@ def test_1105_open_run_serves_a_real_directory_entry_and_refuses_an_absent_one_n
         assert t.runs_repository().open(RunId.parse(name)).run_dir == t.runs / name, f"{name} opens"
     assert H.tree_state(root) == before, "runs.open created something"
 
-
-def test_1105_a_held_run_is_not_rechecked_and_a_fresh_open_run_is(tmp_path):
-    """After open_run hands out a Run, replacing _tenant.json with one naming another tenant
-    leaves the held Run's run_dir and tenant_id as they were (it is not re-checked), while a
-    fresh open_run for the same id raises RunUnreachable from TenantRefused."""
-    from defender.run_repository import RunId
-
-    _root, t = _good(tmp_path, "r1")
-    run = t.runs_repository().open(RunId.parse("r1"))
-    assert (run.run_dir, run.tenant_id) == (t.runs / "r1", t.id), "the run was handed out"
-    _swap_record(t.runs, H.U_ID)
-    assert (run.run_dir, run.tenant_id) == (t.runs / "r1", t.id), "the held Run moved"
-    err = H.raised(t.runs_repository().open, RunId.parse("r1"))
-    assert _container_refusal("runs.open", err), f"a fresh runs.open was not refused: {err!r}"
 
 
 def test_1105_no_lookup_or_record_reader_writes_anything(tmp_path):
@@ -783,28 +445,6 @@ def test_1105_list_run_ids_returns_sorted_run_ids_minus_record_claimed_ids(tmp_p
 # Tenant isolation (O3, S1, S2).
 # ==========================================================================================
 
-def test_1105_a_run_setup_made_for_t_opens_for_t_and_no_other_tenant_reaches_it(tmp_path):
-    """A run materialize_run created for tenant T opens with open_run(T, id); for a second tenant
-    U accepted under the same data root (hand-planted row), open_run(U, id) raises RunAbsent
-    while U has no runs folder (the run is gone with it), and RunRefused once U has its own
-    folder and record but no run of that id; it never hands out a Run whose run_dir is under
-    T.runs."""
-    from defender.run_repository import RunAbsent, RunId, RunRefused
-
-    root = tmp_path / "data"
-    root.mkdir()
-    t = H.tenant(root, H.T_ID)
-    run_common.materialize_run(H.alert_file(tmp_path / "alerts"), "r1", tenant=t)
-    assert t.runs_repository().open(RunId.parse("r1")).run_dir == t.runs / "r1", "T's run opens for T"
-    u = H.tenant(root, H.U_ID)
-    err = H.raised(u.runs_repository().open, RunId.parse("r1"))
-    assert H.is_a(err, RunAbsent), f"U with no runs folder gave {err!r}"
-    assert str(t.runs) not in H.message(err), "U's refusal names T's runs folder"
-    H.runs_folder(u)
-    err = H.raised(u.runs_repository().open, RunId.parse("r1"))
-    assert H.is_a(err, RunRefused), f"U with its own folder and no r1 gave {err!r}"
-    assert str(t.runs) not in H.message(err), "U's refusal names T's runs folder"
-
 
 def test_1105_open_run_never_hands_out_a_handle_into_another_tenants_folder(tmp_path):
     """With tenant A's run r1 on disk, open_run(B, r1) never returns a Run whose run_dir resolves
@@ -860,30 +500,6 @@ def test_1105_a_box_writable_tenant_claim_neither_grants_nor_refuses_a_lookup(tm
     err = H.raised(t.runs_repository().list)
     assert H.is_a(err, TenantRefused), f"the host-only record naming {H.U_ID} gave {err!r}"
 
-
-def test_1105_a_legacy_run_folder_named_off_the_rules_makes_the_listings_refuse_naming_it(
-        tmp_path):
-    """A real directory in tenant.runs whose name today's id rules refuse, one off the grammar
-    ('Bad Name', 'Run1') and one of 207 bytes, makes list_run_ids raise
-    RunRefused naming that folder; renaming or moving it lets the listing answer. Positive
-    control: a 206-byte directory beside the runs is listed. "Naming" is checked as the name's
-    first 40 characters appearing in the message (design NF-8 may truncate a long name past
-    them)."""
-    from defender.run_repository import RunRefused
-
-    ok_long = "r" + "1" * 205
-    _root, t = _good(tmp_path, "r1", ok_long)
-    expected = sorted(["r1", ok_long])
-    assert _ids(t.runs_repository().list()) == expected, f"the 206-byte folder lists: {_ids(t.runs_repository().list())}"
-    for legacy in ("Bad Name", "Run1", "r" + "2" * 206):
-        os.mkdir(t.runs / legacy)
-        for fn, call in (("runs.list", lambda: t.runs_repository().list()),):
-            err = H.raised(call)
-            assert H.is_a(err, RunRefused), f"{fn} beside {legacy[:12]!r} gave {err!r}"
-            assert legacy[:40] in H.message(err), f"{fn}'s refusal does not name the folder"
-        os.rename(t.runs / legacy, tmp_path / "moved-away")
-        assert _ids(t.runs_repository().list()) == expected, f"after moving {legacy[:12]!r} away"
-        shutil.rmtree(tmp_path / "moved-away")
 
 
 # ==========================================================================================

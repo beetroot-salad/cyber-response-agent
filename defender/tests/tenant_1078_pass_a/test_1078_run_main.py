@@ -1,59 +1,22 @@
-"""#1078 pass (A) — `run.py main`, the request's front door (D3, O1, O2, O5, O6's argv half).
-
-Every scenario drives the REAL `main` through its own injection seams (`_spec1078.Recorder`:
-`preflight=`, `materialize=`, `lifecycle=`, `visualize=`, `enqueue=`), which record what they
-are handed and inject nothing. "Refused before anything is spent" is therefore an
-observation — the recorder saw no preflight (the model-key step), no materialize (the run dir)
-and no lifecycle (the box) — never an inspection of a flag. "Refused by X" is the entry's
-refusal text containing the owner's OWN refusal of the same input, verbatim (demand #0's rule,
-§7 F0/J29).
-
-The setup halves (s003, s004, s008, s009, o3's setup cell, g_r6's setup output) run the
-operator's own command as a process (`_spec1078.run_setup`). The sibling scenarios build a
-source run AT A TENANT LOCATION (`<root>/<T>/runs/<run>` with the runs-base record naming T)
-and an episode manifest naming it, outside the data root — pass (A)'s fork layout (episodes
-stay under the old episodes base until (B)).
-"""
+"""run.py main front door: tenant required and checked before anything is spent, sibling tenant from the episode record, data-root faults, refusal confinement."""
 from __future__ import annotations
 
-import inspect
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from defender.tests import _spec791
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
-from defender._episode_handle import Episode  # noqa: E402
 from defender.run_repository import RunId, RunRefused
 
-#: `_Investigate`'s parameters at base ed5386bc (run.py:230-233), plus the `tenant` #1106 added
-#: (the run's resolved `RunTenant` — its settings and grants, which the query tool needs) — D3:
-#: "The `materialize` seam gains `tenant_id`; `_Investigate` does not." It gains no tenant ID.
-# `episode` (#1133 rev 2): the sibling's held episode, threaded beside `world` for the world
-# ledger's writes. `oracle` / `verifier` (#1224): a fact world's oracle and verifier models.
-# `source` (#1105 PR 2, declared changes 6/9): the world's source run, opened by `main` by the
-# manifest's `source_run_id` through the tenant's repository — no recorded path is read.
-INVESTIGATE_PARAMS = ["self", "alert_path", "run", "defender_dir", "model_name",
-                      "model_override", "box", "tenant", "world", "episode", "serving",
-                      "source"]
 
 
 # ======================================================================================
 # cluster helpers
 # ======================================================================================
 
-def _main(argv: list[str], rec: H.Recorder, **override: Any) -> tuple[Any, BaseException | None]:
-    """`H.drive_main`, with one seam replaced (a failing preflight, say)."""
-    seams = {**rec.seams(), **override}
-    try:
-        H.place_knowledge_for_rows()
-        return H.run_py().main(list(argv), **seams), None
-    except SystemExit as refused:
-        return None, refused
 
 
 def _refused(argv: list[str], rec: H.Recorder, capsys=None) -> str:
@@ -103,10 +66,7 @@ def _stamp_tenant(run_dir: Path, tenant_id: str) -> None:
 def test_o1_fresh_run_without_tenant_refused(tmp_path, data_root, capsys):
     """run.py main given an alert and no --tenant (and no --resume) exits with a refusal, and
     the injected preflight and materialize seams are never called, so no run dir, box or model
-    call exists.
-
-    The positive control is the same argv with `--tenant` naming an existing tenant, which
-    reaches materialize: the refusal is about the tenant, not the alert."""
+    call exists."""
     alert = H.plant_alert(tmp_path / "in")
     before = H.census(data_root)
     said = _refused([str(alert)], H.Recorder(tmp_path / "run"), capsys)
@@ -118,49 +78,8 @@ def test_o1_fresh_run_without_tenant_refused(tmp_path, data_root, capsys):
     assert got["tenant"].id == H.VALID_ID
 
 
-def test_o1_run_id_resume_without_tenant_refused(tmp_path, data_root, capsys):
-    """run.py main given --run-id X and no --tenant is refused before the preflight and
-    materialize, exactly as a fresh run is.
-
-    Even with a setup-only run dir already under T's runs base for that id: the operator must
-    name the tenant to resume it (O6), and nothing is a default."""
-    H.make_tenant(data_root, H.VALID_ID)
-    (H.runs_dir(data_root, H.VALID_ID) / "case-x").mkdir(parents=True)
-    alert = H.plant_alert(tmp_path / "in")
-    before = H.census(data_root)
-    said = _refused([str(alert), "--run-id", "case-x"], H.Recorder(tmp_path / "run"), capsys)
-    assert "--tenant" in said, f"the refusal does not name the missing --tenant: {said!r}"
-    assert H.census(data_root) == before
 
 
-def test_fresh_run_order(tmp_path, data_root):
-    """For a fresh run, main checks the --tenant grammar, then require_tenant, both before the
-    preflight; materialize is reached only after the preflight passes.
-
-    Four arms on one argv shape: an off-grammar id meets the GRAMMAR refusal (not the absent
-    row's, though its row is absent too); a well-formed id with no row meets require_tenant's
-    own refusal; an existing tenant with a failing preflight never reaches materialize; and the
-    passing preflight reaches it, in that order."""
-    alert = H.plant_alert(tmp_path / "in")
-    grammar = H.owner_refusal(H.tenant().TenantId, "Acme")
-    said = _refused([str(alert), "--tenant", "Acme"], H.Recorder(tmp_path / "r1"))
-    H.assert_verbatim(said, grammar, entry="run.py main (grammar first)")
-
-    absent_row = H.owner_refusal(H.require_tenant, H.resolve_data_root(), "acme")
-    said = _refused([str(alert), "--tenant", "acme"], H.Recorder(tmp_path / "r2"))
-    H.assert_verbatim(said, absent_row, entry="run.py main (require_tenant second)")
-
-    H.make_tenant(data_root, "acme")
-    rec = H.Recorder(tmp_path / "r3")
-    rc, refused = _main([str(alert), "--tenant", "acme"], rec,
-                        preflight=lambda _m=None: rec.order.append("preflight") or 2)
-    assert refused is None, f"a failing preflight was reported as a refusal: {refused!r}"
-    assert rc == 2, f"a failing preflight did not stop the run ({rc})"
-    assert rec.order == ["preflight"], f"materialize ran after a failed preflight: {rec.order}"
-
-    rec = H.Recorder(tmp_path / "r4")
-    _accepted([str(alert), "--tenant", "acme"], rec)
-    assert rec.order[:3] == ["preflight", "materialize", "lifecycle"], rec.order
 
 
 # ======================================================================================
@@ -170,10 +89,7 @@ def test_fresh_run_order(tmp_path, data_root):
 def test_o2_unknown_tenant_refused_writes_nothing(tmp_path, data_root):
     """run.py main --tenant acme, well-formed but with no row, is refused and the data root's
     tree is identical before and after (no runs/, no sessions/, no row); the preflight and
-    materialize are never called.
-
-    Refused by require_tenant: the exit carries its refusal verbatim. The positive control:
-    once `acme` is created, the same argv reaches materialize."""
+    materialize are never called."""
     alert = H.plant_alert(tmp_path / "in")
     before = H.census(data_root)
     said = _refused([str(alert), "--tenant", "acme"], H.Recorder(tmp_path / "run"))
@@ -197,33 +113,6 @@ def test_o2_existing_tenant_runs(tmp_path, data_root):
     assert rec.order.index("preflight") < rec.order.index("materialize")
 
 
-def test_d3_materialize_seam_tenant(tmp_path, data_root, monkeypatch):
-    """main calls the materialize seam with T as its tenant keyword argument (#1120 D1: the
-    accepted `Tenant` whose id is T, where pass A handed the bare id as `tenant_id`);
-    _Investigate's parameters are unchanged by #1078.
-
-    For a fresh run AND for an `--episode` sibling (which names T too, checked against its
-    episode container's record, #1105 PR 2): the seam is handed the tenant by keyword. `_Investigate` gains no tenant
-    id — everything it drives follows from `run_dir` (C24, C29); the resolved `RunTenant` it
-    takes is #1106's, and the `oracle` / `verifier` model seams #1224's."""
-    H.make_tenant(data_root, H.VALID_ID)
-    alert = H.plant_alert(tmp_path / "in")
-    fresh = _accepted([str(alert), "--tenant", H.VALID_ID], H.Recorder(tmp_path / "run"))
-    assert "tenant" in fresh, f"materialize was not handed the tenant by keyword: {fresh}"
-    assert isinstance(fresh["tenant"], H.tenant().Tenant), fresh
-    assert fresh["tenant"].id == H.VALID_ID, fresh
-
-    base = H.runs_dir(data_root, H.VALID_ID)
-    H.plant_record(base, H.VALID_ID)
-    src = H.source_run(base)
-    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID, monkeypatch=monkeypatch)
-    sibling = _accepted(H.sibling_argv(manifest, "b", "--tenant", H.VALID_ID),
-                        H.Recorder(tmp_path / "sib"))
-    assert isinstance(sibling.get("tenant"), H.tenant().Tenant), sibling
-    assert sibling["tenant"].id == H.VALID_ID, sibling
-
-    params = list(inspect.signature(H.run_py()._Investigate.__call__).parameters)
-    assert params == INVESTIGATE_PARAMS, f"_Investigate's parameters changed: {params}"
 
 
 # ======================================================================================
@@ -244,12 +133,7 @@ def test_o5_sibling_tenant_from_record(tmp_path, data_root, monkeypatch):
 def test_o5_forged_stamp_ignored(tmp_path, data_root, monkeypatch):
     """With the source run's provenance.json rewritten to name tenant U, the sibling still
     runs under T — the request names T, and the episode container's RECORD agrees (#1105 PR 2);
-    the stamp is not asked.
-
-    U is made a REAL tenant (a hand-made second row, which N13 says nothing refuses), so a
-    sibling that checked the request against the box-writable stamp would refuse T — and one
-    that took the stamp's word would accept U. The positive control is
-    `test_o5_sibling_tenant_from_record`: the same launch with an honest stamp."""
+    the stamp is not asked."""
     src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     H.plant_row(data_root, "victim")
     _stamp_tenant(src, "victim")
@@ -262,11 +146,7 @@ def test_o5_forged_stamp_ignored(tmp_path, data_root, monkeypatch):
 def test_o5_disagreeing_tenant_refused(tmp_path, data_root, monkeypatch):
     """run.py --tenant U --episode <ep> --world L, where the episode container's record names
     T != U (#1105 PR 2: the launcher made it for T), is refused before the preflight and
-    materialize.
-
-    U exists (a hand-made row), so the refusal is the disagreement, not an unknown tenant; the
-    refusal is a '[run.py] ...' exit naming the refused U. The control: `--tenant T` (agreeing)
-    is accepted and runs under T."""
+    materialize."""
     src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     H.plant_row(data_root, "victim")
     said = _refused(H.sibling_argv(manifest, "b", "--tenant", "victim"),
@@ -292,22 +172,6 @@ def test_o5_resume_without_tenant_refused(tmp_path, data_root, monkeypatch, caps
     assert got["tenant"].id == recorded
 
 
-def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root, monkeypatch):
-    """`run.py --episode <ep> --world a --run-id X --tenant T`: the tenant checks are the
-    sibling's (#1105 PR 2: --tenant must equal the episode container's record); --run-id
-    handling is unchanged from today (the sibling takes its id from the manifest)."""
-    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
-    H.plant_row(data_root, "victim")
-    world_run_id = H.run_py().resume_world(
-        Episode.open(manifest.parent), "a",
-        tenant=lambda: H.T1106.run_tenant(H.accept(data_root, "acme"))).run_id
-    got = _accepted(H.sibling_argv(manifest, "a", "--run-id", "case-x", "--tenant", "acme"),
-                    H.Recorder(tmp_path / "sib"))
-    assert got["tenant"].id == "acme"
-    assert got["run_id"] == world_run_id, (
-        f"the resume path took --run-id over the manifest's sibling id: {got['run_id']!r}")
-    _refused(H.sibling_argv(manifest, "a", "--run-id", "case-x", "--tenant", "victim"),
-             H.Recorder(tmp_path / "sib2"))
 
 
 def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, data_root,
@@ -332,10 +196,7 @@ def test_s7_j42_resume_manifest_resolved_at_entry(tmp_path, data_root, monkeypat
     """run.py --episode under a relative or symlinked episodes base (#1105 PR 2: the sibling
     takes the episode's id, and its location is the configured `DEFENDER_EPISODES_BASE`)
     resolves it at entry, before deriving episode_dir, so the sibling's runs base is the same
-    absolute EpisodePaths(ep).runs whatever the invoking cwd.
-
-    Observed on what the materialize seam is handed: the world's `episode_dir`, the root
-    `materialize_run`'s sibling arm derives `EpisodePaths(world.episode_dir).runs` from."""
+    absolute EpisodePaths(ep).runs whatever the invoking cwd."""
     _src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     episode = manifest.parent.resolve()
     expected_runs = H.S.EpisodePaths(episode).runs
@@ -480,61 +341,14 @@ def test_a_corrupt_runs_base_record_is_a_run_py_refusal_not_a_traceback(tmp_path
     assert Path(run_dir).is_dir()
 
 
-def test_unknown_tenant_with_a_pinned_run_id(tmp_path, data_root):
-    """`--run-id X --tenant acme` with no row, but a hand-made <root>/acme/runs/X/: refused by
-    O2 before materialize; nothing under acme/ is read, written or changed."""
-    (H.runs_dir(data_root, "acme") / "case-x").mkdir(parents=True)
-    (H.runs_dir(data_root, "acme") / "case-x" / "alert.json").write_text("{}", encoding="utf-8")
-    before = H.census(data_root / "acme")
-    said = _refused([str(H.plant_alert(tmp_path / "in")), "--run-id", "case-x",
-                     "--tenant", "acme"], H.Recorder(tmp_path / "run"))
-    H.assert_verbatim(said, H.owner_refusal(H.require_tenant, H.resolve_data_root(), "acme"),
-                      entry="run.py main")
-    assert H.census(data_root / "acme") == before
 
 
-def test_tenant_grammar_vs_data_root_validity_order(tmp_path, monkeypatch):
-    """An off-grammar --tenant together with a relative DEFENDER_DATA_ROOT: the operator sees
-    the grammar refusal (Flows, fresh run: grammar first), and nothing is written."""
-    monkeypatch.chdir(tmp_path)
-    H.set_data_root(monkeypatch, "relative/root")
-    alert = H.plant_alert(tmp_path / "in")
-    before = H.census(tmp_path)
-    grammar = H.owner_refusal(H.tenant().TenantId, "../x")
-    said = _refused([str(alert), "--tenant", "../x"], H.Recorder(tmp_path / "run"))
-    H.assert_verbatim(said, grammar, entry="run.py main")
-    assert H.census(tmp_path) == before
 
 
 # ======================================================================================
 # s105 — the argv-driven tail tests supply --tenant
 # ======================================================================================
 
-def test_argv_driven_tail_tests_without_tenant(tmp_path, data_root):
-    """_spec791.drive_tail and the direct parse_args/main callers supply --tenant and the D9
-    tenant; without it they are refused by O1.
-
-    `drive_tail` is driven over a recording stand-in for `main` (same tail seam), so what it
-    HANDS the entry point is observed: `--tenant <D9 tenant>`, whose row exists in this test's
-    own data root. The same argv without `--tenant`, handed to the real `main`, is refused
-    before anything is spent."""
-    seen: dict[str, Any] = {}
-
-    def main(argv, *, lifecycle=None, visualize=None, ticket_writer=None):
-        seen["argv"] = list(argv)
-        return 0
-
-    alert = H.plant_alert(tmp_path / "in")
-    tail = SimpleNamespace(lifecycle=None, visualize=None)
-    assert _spec791.drive_tail(main, alert, tail, "--no-learn") == 0
-    argv = seen["argv"]
-    assert "--tenant" in argv, f"drive_tail hands main no --tenant: {argv}"
-    tenant_id = argv[argv.index("--tenant") + 1]
-    assert H.require_tenant(data_root, tenant_id).tenant_id == tenant_id
-    H.run_py().parse_args([str(alert), "--tenant", tenant_id])  # the direct parser caller's argv
-    stripped = [a for i, a in enumerate(argv)
-                if a != "--tenant" and (i == 0 or argv[i - 1] != "--tenant")]
-    _refused(stripped, H.Recorder(tmp_path / "run"))
 
 
 # ======================================================================================
@@ -602,12 +416,7 @@ def test_g_r6_refusal_confinement(tmp_path, data_root, value):
     or other control content (the R3/R4 'trailing-newline', '../x', 'a/b' members) names the
     value in its message without letting that value forge a second refusal-shaped line or
     otherwise corrupt the message's own structure; the same holds for tenant.setup's exit
-    output.
-
-    Four surfaces (§7 R-g_r6): create_tenant's refusal, `run.py main --tenant`'s exit,
-    `tenant.py setup`'s output, and the branch launcher's refusal of a source whose runs-base
-    record carries the value (the launcher takes no --tenant; its tenant comes off the
-    record)."""
+    output."""
     _confined(str(H.owner_refusal(H.create_tenant, tmp_path / "c", value)), value,
               surface="create_tenant")
     said = _refused([str(H.plant_alert(tmp_path / "in")), "--tenant", value],

@@ -1,20 +1,5 @@
-"""#1135 — the drain tick: the halt on a refused entry, and today's containment of everything else.
-
-Every test drives the REAL corpus drain, `drains.author_drain`, through the REAL stage runner
-`cli._run_stage`, over a CREATED state root (R15) and a real git repo. The default
-`trigger_author` runs the real curators: the gate, the closing rotation and the stuck recorder
-are production code. Rows are chosen so no model is ever called: a family defender row a
-committed `lessons/` lesson already cites is consumed by the findings gate
-(`consumed_idempotent`; #1234 retired the `caught` word that used to be skipped, A4), and a
-world row a committed `lessons-questioner/` lesson already cites is consumed by the questioner
-gate (`consumed_idempotent`) — so "the questioner curator ran" is observable as its consumed
-ledger gaining that row. The fakes are `author_drain`'s own seams (`branch=`, `start_box=`,
-`stop_box=`, `scrub=`), which record and decide nothing; one test (s_d7) also needs the
-`trigger_author=` seam, see its docstring.
-
-Oracles read the tree by today's record names (R14), never through the handle under test; each
-test also reads the queue back through the handle (`rows`), which must agree.
-"""
+"""The corpus drain tick: halt on a refused state entry, containment of everything else. Drives the
+real `drains.author_drain` through `cli._run_stage` over a created state root and a real git repo."""
 from __future__ import annotations
 
 import json

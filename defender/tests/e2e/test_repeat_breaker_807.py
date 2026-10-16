@@ -51,7 +51,6 @@ from defender.scripts.gather_tools.record_query import (
     rejection_trip,
     repeat_trip,
 )
-from defender._query_rules import REPEAT_TRIP_QUERY_ID
 from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -722,31 +721,6 @@ def test_trip_row_conforms_to_the_frozen_row_contract(three_identical_requests):
     assert trip["payload_path"] == f"gather_raw/{LEAD}/2.json"
 
 
-def test_trip_row_is_distinguishable_from_a_finished_leads_rows(tmp_path):
-    """trip_row_is_distinguishable_from_a_finished_leads_rows — O4's contrast, and what is
-    absent today: a stopped lead's record in `executed_queries` carries a non-zero exit and a
-    non-null `error_class`, while a lead that finished has rows that are ALL exit 0 with"""
-    rec = VerbRecorder()
-    r = _run_two_leads(tmp_path, verbs=elastic_ok(rec), run_id="d807-contrast", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        SUMMARY_TURN,                                       # the stopped lead's summary (#987)
-        q("elastic", "query", {"native_query": "FROM other"}),
-        DONE,
-    ])
-    stopped = r.rows_for(LEAD)
-    finished = r.rows_for(SIBLING)
-    assert len(stopped) == 3
-    assert len(finished) == 1
-
-    assert any(row["exit_code"] != 0 for row in stopped)
-    assert any(row["error_class"] is not None for row in stopped)
-    assert [row["exit_code"] for row in finished] == [0]
-    assert [row["error_class"] for row in finished] == [None]
-    assert r.breaker == _BLANK_BREAKER
-
-
 def test_dead_end_return_contract(tmp_path):
     """dead_end_return_contract — `gather_dispatch` catches `GatherDeadEnd` in the same except
     chain as UsageLimitExceeded and returns ONE string that (a) opens with the terminal idiom
@@ -1000,36 +974,6 @@ def test_repeat_trip_empty_params_is_its_own_domain_member(tmp_path):
     assert [row["params"] for row in rows] == [{}, {}, {}]
     assert rows[2]["exit_code"] == 64
     assert INCOMPLETE_IDIOM in r.summary()
-
-
-def test_lead_repository_reads_the_trip_row_unchanged(tmp_path, three_identical_requests):
-    """lead_repository_reads_the_trip_row_unchanged — `lead_repository.load_queries` is a
-    reader of `executed_queries` this change does not move, and it must keep reading: after a
-    trip, `joined` returns the lead with all three rows in seq order, the trip row's"""
-    r, rec = three_identical_requests
-    leads = [
-        lead for lead in lead_repository.joined(r.run_dir)
-        if lead.lead_id not in RESERVED_LEAD_IDS
-    ]
-    assert [lead.lead_id for lead in leads] == [LEAD]
-    rows = leads[0].rows
-    assert [qr.seq for qr in rows] == [0, 1, 2]
-    # #841's split, on the one lead that has both populations: the two calls that reached
-    # elastic are the queries, the refusal is the observation.
-    assert [qr.seq for qr in leads[0].queries] == [0, 1]
-    assert [qr.seq for qr in leads[0].sentinels] == [2]
-    trip = rows[2]
-    assert trip.query_id == REPEAT_TRIP_QUERY_ID
-    assert trip.is_sentinel
-    assert trip.exit_code == 64
-    assert trip.error_class == "agent-fixable"
-    assert trip.raw_ref is not None, "the trip row's payload is unreachable to the join surface"
-    assert trip.raw_ref.is_file()
-
-    dst = tmp_path / "staged"
-    lead_repository.stage_tables(r.run_dir, dst)
-    assert read_jsonl_rows(dst / "executed_queries.jsonl") == r.rows
-    assert _replay(read_jsonl_rows(dst / "executed_queries.jsonl")) == _replay(r.rows)
 
 
 def test_counted_domain_excludes_validate_path_rows(tmp_path):

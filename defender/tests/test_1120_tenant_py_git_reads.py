@@ -1,22 +1,4 @@
-"""#1120 piece 1 — `tenant.py`'s git reads act on the folder they are aimed at, never on a
-repository the environment or an enclosing tree points them at (claims-adversary follow-ups
-on PR #1157).
-
-  * An exported `GIT_DIR` reaches no git call `tenant.py` makes (J-PO1: "both callers must
-    ignore it") — the census's read of the running checkout included, not only check's
-    committed-`.tenant-id` read.
-  * A folder whose `.git` is not a repository of its own (an empty `.git` directory inside
-    another repo's work tree) gets no answer from the ENCLOSING repo: check's committed read
-    cannot say what the folder's own repo commits, so it fails closed (V16).
-  * A clone whose git converts line endings on checkout (`core.autocrlf=true`, a Windows
-    operator's default) holds `.tenant-id` as CRLF over an LF commit: that IS what HEAD
-    commits, so check is clean — the working file is hashed as git would store it, not as raw
-    bytes (code review on PR #1157).
-  * HEAD's blob is read raw, so a clean filter configured for `.tenant-id` neither runs nor
-    makes a hand-edited id match (claims adversary, second pass).
-  * Replace objects are ignored, and a git call that blocks (a FIFO at `.git/HEAD`) fails
-    closed within a bound instead of hanging `check` (code review, max).
-"""
+"""tenant.py git reads act on the folder aimed at, never a repository the environment or an enclosing tree points to."""
 from __future__ import annotations
 
 import os

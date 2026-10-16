@@ -1,6 +1,4 @@
-"""#1120 piece 1 — one rule for the tenant a request names (code review, third pass): the
-entry points share `_tenant.requested_tenant_id` instead of each spelling "`--tenant` is
-required" (six copies had drifted apart in wording)."""
+"""One rule for the tenant a request names."""
 from __future__ import annotations
 
 

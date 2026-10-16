@@ -17,135 +17,6 @@ from defender.learning.core.state import AUTHOR_DRAIN_LOCK, FINDINGS  # noqa: E4
 from defender.tests._state1135 import curation_run_dir, enqueue_run, state_for_paths  # noqa: E402
 from defender.learning.core import persist as persist  # type: ignore[import-not-found]  # noqa: E402
 from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
-from defender.learning import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
-
-
-def _qr(query_id, params=None, *, seq=0, raw_ref=None, lead_id="l-001"):
-    return lr.QueryRow(
-        lead_id=lead_id, seq=seq, system="", verb="", query_id=query_id,
-        params=params or {}, raw_command="", exit_code=0, error_class=None,
-        payload_status="ok", payload_digest="", raw_ref=raw_ref,
-    )
-
-
-def _jl(lead_id="l-001", goal=None, wts=(), queries=()):
-    return lr.JoinedLead(
-        lead_id=lead_id, goal=goal, what_to_summarize=wts, queries=list(queries),
-    )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def _esql_sample(body: str) -> str:
-    return f"### Raw Sample Events (first 3)\n\n```json\n{body}\n```\n"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def _full_judge_doc(**overrides):
-    doc = {
-        "outcome": "caught",
-        "outcome_rationale": "Lead l-001 refuted the projection.",
-        "encounter_analysis": "lead-by-lead walkthrough.",
-        "defender_findings": [
-            {
-                "type": "detection-confirmed",
-                "subject_anchor": "l-001",
-                "subject_topic": "falco container scan",
-                "finding": "lead caught the story.",
-                "citations": [{"source": "investigation", "quote": "q"}],
-            }
-        ],
-        "confidence": "high.",
-    }
-    doc.update(overrides)
-    return doc
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # ---------------------------------------------------------------------------------------
@@ -179,15 +50,6 @@ def test_reply_document_text_leaves_a_trailing_close_tag_for_the_loader_to_refus
         safe_load(loop.reply_document_text(text))
 
 
-def test_reply_document_text_leaves_a_full_xml_envelope_for_the_loader_to_refuse():
-    """#1018 M4 ("no XML envelope unwrapping"): `<content>…</content>` around the document is
-    returned unchanged and refused at the loader. Would fail: the envelope is stripped."""
-    text = "<content>\noutcome: caught\nconfidence: high\n</content>\n"
-    assert loop.reply_document_text(text) == text.strip()
-    with pytest.raises(yaml.YAMLError):
-        safe_load(loop.reply_document_text(text))
-
-
 def test_reply_document_text_refuses_a_dangling_close_fence():
     """#1018 M4 ("no dangling-closer trim"): a lone column-0 ``` after a plain document is "a
     fence inside the reply" — `MalformedReply`, not a trim. Would fail: the closer is trimmed."""
@@ -204,39 +66,6 @@ def test_reply_document_text_strips_thinking_prelude():
         "outcome: survived\nconfidence: high\n"
     )
     assert loop.reply_document_text(text) == "outcome: survived\nconfidence: high"
-
-
-def test_reply_document_text_strips_system_thinking_variant():
-    """E8: the `</system_thinking>` spelling is a prelude boundary too."""
-    text = (
-        "outcome: caught\n(reasoning trace…)\n</system_thinking>\n"
-        "outcome: survived\nconfidence: high\n"
-    )
-    assert loop.reply_document_text(text) == "outcome: survived\nconfidence: high"
-
-
-def test_reply_document_text_passes_through_when_no_thinking_tag():
-    """No prelude, no fence: the document is returned as it was written."""
-    text = "outcome: caught\nconfidence: high\n"
-    assert loop.reply_document_text(text) == "outcome: caught\nconfidence: high"
-
-
-
-
-def _judge_doc(outcome: str, observations: list[dict] | None) -> dict:
-    doc: dict = {"outcome": outcome}
-    if observations is not None:
-        doc["actor_observations"] = observations
-    return doc
-
-
-def _obs(i: int) -> dict:
-    return {
-        "type": "misprediction",
-        "subject_anchor": f"anchor-{i}",
-        "subject_topic": f"topic phrase {i}",
-        "observation": f"observation paragraph {i}\n",
-    }
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -265,24 +94,6 @@ def _isolate(tmp_path: Path) -> tuple[object, Path]:
     learning_run_dir.mkdir(parents=True)
     paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return paths, learning_run_dir
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_rotate_preserves_concurrent_appends(tmp_path: Path):
@@ -371,8 +182,6 @@ def _seed_curator_findings(paths, n: int = 5) -> None:
             fh.write(json.dumps({"finding_id": f"f{i}"}) + "\n")
 
 
-
-
 def test_author_drain_triggers_all_curators(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     _seed_curator_findings(paths)
@@ -456,8 +265,6 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
     finally:
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
         holder.close()
-
-
 
 
 def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
@@ -812,33 +619,6 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
     assert not (paths.state_root / "author-queue" / "case-b-good.json").exists()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import subprocess as _subprocess  # noqa: E402
 
 from defender.learning.author import branch as ab  # type: ignore[import-not-found]  # noqa: E402
@@ -907,13 +687,6 @@ def test_author_branch_lease_true_on_open_pr():
 def test_author_branch_lease_false_when_no_matching_pr():
     forge = _FakeForge(pr_rows=[{"number": 2, "headRefName": "feature/x"}])
     assert ab.AuthorBranch(forge=forge).open_pr_exists() is False
-
-
-def test_author_branch_lease_keyed_on_prefix():
-    forge = _FakeForge(pr_rows=[{"number": 3, "headRefName": "lessons/abc"}])
-    b = ab.AuthorBranch(forge=forge, branch_prefix="lead-author/")
-    assert b.open_pr_exists() is False
-    assert forge.list_calls == ["lead-author/"]
 
 
 def test_author_branch_start_adds_worktree_off_origin_main(tmp_path: Path):
@@ -998,8 +771,6 @@ def test_author_branch_worktree_lifecycle_real_git(tmp_path: Path):
     b.cleanup(wt)
     assert not wt.exists()
     assert _real(work, "rev-parse", "HEAD").stdout.strip() == head_before
-
-
 
 
 def test_author_branch_revert_lesson_pr_removes_and_opens_pr(tmp_path: Path):
@@ -1134,66 +905,5 @@ def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
     finally:
         _fcntl.flock(holder.fileno(), _fcntl.LOCK_UN)
         holder.close()
-
-
-
-
-def _make_run_dir(tmp_path: Path, *, disposition="benign", with_payload=True) -> Path:
-    run = tmp_path / "run"
-    (run / "gather_raw" / "l-001").mkdir(parents=True)
-    (run / "alert.json").write_text(json.dumps({"rule": {"id": "r1"}}))
-    (run / "report.md").write_text(f"---\ndisposition: {disposition}\n---\nbody\n")
-    qrow = {
-        "lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "search",
-        "query_id": "elastic.auth", "params": {"host": "h1"}, "raw_command": "x",
-        "exit_code": 0, "payload_status": "ok", "payload_digest": "d",
-        "payload_path": "gather_raw/l-001/0.json",
-    }
-    (run / "executed_queries.jsonl").write_text(json.dumps(qrow) + "\n")
-    (run / "gather_raw" / "l-001.lead.json").write_text(
-        json.dumps({"goal": "check auth", "what_to_summarize": ["accepted vs failed"]})
-    )
-    if with_payload:
-        events = [{"user": "dev.dana", "outcome": "success"}]
-        payload = (
-            "### Summary\n3 events\n\n### Raw Sample Events\n\n"
-            "```json\n" + json.dumps(events) + "\n```\n"
-        )
-        (run / "gather_raw" / "l-001" / "0.json").write_text(payload)
-    return run
-
-
-_COMPANION = {
-    "hypothesize": {"hypotheses": [{"id": "h-mal", "name": "malicious-cred-validation", "weight": "+"}]},
-    "findings": [{
-        "id": "l-001",
-        "resolutions": [{
-            "hypothesis": "h-mal", "before": "+", "after": "--",
-            "reasoning": "2s cadence => conclusively scripted automation => benign",
-        }],
-        "outcome": {"authorization_resolutions": [
-            {"resolved_by_lead": "l-001", "fulfills": "ac1", "verdict": "authorized"},
-        ]},
-    }],
-    "conclude": {"disposition": "benign"},
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

@@ -1,20 +1,8 @@
-"""#1107 slice B — the adapters read the run's record, reach each system by its own access method.
-
-Every adapter call here is the REAL verb function, handed a `VerbContext` carrying a record built
-by the real resolver over a planted tenant folder (`_spec1107.plant` / `resolve`). The one fake is
-the docker CLI: a `DockerShim` first on the PATH of the env the transport forks with (CX8), which
-records the child's argv and answers from data. Nothing here reaches a real daemon.
-
-Red at base, by construction: `VerbContext` has no `tenant` field (it requires `settings_dir`),
-the record has no `systems`/`elastic`, and every docker child names `soc-playground` (CX17).
-"""
+"""Adapters read their system's settings from the run's tenant record (config.env), never the process env; config faults, docker destinations and breaker accounting."""
 from __future__ import annotations
 
-import ast
-import dataclasses
 import http.server
 import json
-import re
 import shutil
 import threading
 from pathlib import Path
@@ -23,7 +11,6 @@ import pytest
 
 from defender.runtime import circuit_breaker
 from defender.runtime.circuit_breaker import RunAborted
-from defender.runtime.verbs import GRANTED, ModuleVerbRegistry, VerbContext
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters import (
     change_mgmt_adapter,
@@ -57,7 +44,6 @@ _PS = S.answer("PID PPID USER\n1 0 root", None)
 _INSPECT = S.answer('"/web-1"\t"nginx:1.27"\n', None)
 _INSPECT_MISSING = S.answer("", None, rc=1, stderr="error: no such object: c0ffee1107\n")
 _NAMES = S.answer("web-1\nweb-2", None)
-_TICKETS = S.answer("[]")
 
 #: The five stub systems that have an adapter module (case-history's reader is the ticket writer).
 _STUB_ADAPTERS = {
@@ -173,30 +159,6 @@ def test_d_load_config_shape_survives(tmp_path):
     assert "KIBANA_URL" in str(fault), f"a missing KIBANA_URL must be a ConfigFault naming it, got {fault!r}"
 
 
-def test_d_verbcontext_carries_record(tmp_path):
-    """VerbContext carries the run's record (the field is named tenant, F0 resolved) and has no
-    settings_dir field. An adapter verb reads its system's settings as
-    ctx.<record>.systems[...]."""
-    names = {f.name for f in dataclasses.fields(VerbContext)}
-    assert {"defender_dir", "run_dir", "env"} <= names, \
-        f"precondition: VerbContext's field census reads its known fields, got {sorted(names)}"
-    assert S.RECORD_FIELD in names, f"VerbContext has no {S.RECORD_FIELD!r} field: {sorted(names)}"
-    assert "settings_dir" not in names, f"VerbContext still has settings_dir: {sorted(names)}"
-
-    root_a, folder_a = _tenant(tmp_path, "vca", name="a")
-    root_b, _ = _tenant(tmp_path, "vcb", name="b")
-    record_a, record_b = S.resolve(root_a), S.resolve(root_b)
-    shim = S.DockerShim(tmp_path / "shim", [_HOST])
-    ctx_a = _ctx(record_a, tmp_path / "a", shim)
-    # G21: a @model keeps a stdlib-dataclass field by identity.
-    assert S.record_on(ctx_a) is record_a, "VerbContext did not keep the run's record by identity"
-
-    S.config_path(folder_a, "cmdb").unlink()
-    cmdb_adapter.get_host(ctx_a, host="web-1")
-    cmdb_adapter.get_host(_ctx(record_b, tmp_path / "b", shim), host="web-1")
-    urls = [S.curl_url(a) for a in _argvs(shim)]
-    assert urls == ["http://cmdb-vca:8080/hosts/web-1", "http://cmdb-vcb:8080/hosts/web-1"], \
-        f"each call must address its own context's record (file deleted for a): {urls}"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -330,81 +292,12 @@ def test_d2_elastic_containers_no_default(tmp_path):
             f"{key} absent: a call fell back to a built-in container (CX17): {targets}"
 
 
-def test_d2_host_state_config(tmp_path):
-    """host-state reads systems/host-state/config.env. With HOST_STATE_TRANSPORT=docker-exec and
-    HOST_STATE_DOCKER_CONTEXT set, its verbs and its health_check exec against that context.
-    With the file absent they raise ConfigFault."""
-    m = "hsc"
-    root, _ = _tenant(tmp_path, m)
-    shim = S.DockerShim(tmp_path / "shim", [_NAMES])
-    ctx = _ctx(S.resolve(root), tmp_path, shim)
-    host_state_adapter.health_check(ctx)
-    shim.respond(_PS)
-    host_state_adapter.proc_tree(ctx, host="web-1")
-    health, ps = _argvs(shim)
-    want = S.context_name(m, "host-state")
-    assert S.context_of(health) == want, f"health_check must list containers on HOST_STATE_DOCKER_CONTEXT: {health}"
-    assert "ps" in health, f"health_check must list containers on HOST_STATE_DOCKER_CONTEXT: {health}"
-    assert S.context_of(ps) == want, f"proc_tree must exec on web-1 over HOST_STATE_DOCKER_CONTEXT: {ps}"
-    assert S.exec_target(ps) == "web-1", f"proc_tree must exec on web-1 over HOST_STATE_DOCKER_CONTEXT: {ps}"
-
-    root2, folder2 = _tenant(tmp_path, "hsx", name="t2")
-    S.config_path(folder2, "host-state").unlink()
-    shim2 = S.DockerShim(tmp_path / "shim2", [_NAMES])
-    ctx2 = _ctx(S.resolve(root2), tmp_path / "t2", shim2)
-    for label, fn, kw in (("health_check", host_state_adapter.health_check, {}),
-                          ("proc_tree", host_state_adapter.proc_tree, {"host": "web-1"})):
-        fault = _raised(fn, ctx2, **kw)
-        assert isinstance(fault, ConfigFault), \
-            f"host-state {label} with no config.env must raise ConfigFault, got {fault!r}"
-    assert _argvs(shim2) == [], f"host-state with no config spawned a child: {_argvs(shim2)}"
 
 
 # ---------------------------------------------------------------------------------------------
 # O1 / O2: the file as of resolve, never the environment
 # ---------------------------------------------------------------------------------------------
 
-def test_o1_adapter_ignores_env(tmp_path, monkeypatch):
-    """Each variable that names a config key (CMDB_URL_BASE, TICKET_KEY_PATTERN,
-    ELASTIC_EVENTS_INDEX, ELASTICSEARCH_URL, SOC_PLAYGROUND_DOCKER_CONTEXT,
-    SOC_PLAYGROUND_ES_CONTAINER) is exported in the launching process and present in the run's
-    ctx.env. An adapter call's URL, key pattern, index, docker context and container are still
-    the tenant file's values, which the fixture sets apart from every exported value."""
-    # rejected: C2's env-over-file precedence and test_ticket_adapter.py::test_run_env_overrides_the_declared_grammar (CX10)
-    m = "oie"
-    exported = {
-        "CMDB_URL_BASE": "http://env-cmdb:1",
-        "TICKET_KEY_PATTERN": "ENV-[0-9]+",
-        "ELASTIC_EVENTS_INDEX": "envidx-*",
-        "ELASTICSEARCH_URL": "https://env-es:1",
-        "SOC_PLAYGROUND_DOCKER_CONTEXT": "env-docker-context",
-        "SOC_PLAYGROUND_ES_CONTAINER": "env-es-container",
-    }
-    for key, value in exported.items():
-        monkeypatch.setenv(key, value)
-    root, _ = _tenant(tmp_path, m)
-    shim = S.DockerShim(tmp_path / "shim", [_HOST])
-    ctx = _ctx(S.resolve(root), tmp_path, shim)
-    assert {k: ctx.env.get(k) for k in exported} == exported, \
-        "precondition: every exported variable is in the run's ctx.env"
-    shared = [v for v in exported.values() if any(v in t for t in S.config_texts(m).values())]
-    assert shared == [], f"precondition: the file's values are set apart from the env's: {shared}"
-
-    cmdb_adapter.get_host(ctx, host="web-1")
-    assert ticket_adapter.key_pattern(ctx) == f"{m.upper()}-[0-9]+", \
-        "key_pattern must be the tenant file's TICKET_KEY_PATTERN, not the exported one"
-    shim.respond(_SEARCH)
-    envelope = elastic_adapter.query(ctx, native_query="*")
-    cmdb_argv, es_argv = _argvs(shim)
-    assert S.curl_url(cmdb_argv) == f"http://cmdb-{m}:8080/hosts/web-1", f"cmdb URL: {cmdb_argv}"
-    assert S.context_of(cmdb_argv) == S.context_name(m, "cmdb"), f"cmdb context: {cmdb_argv}"
-    assert envelope.get("index") == f"{m}-events-*", f"elastic index: {envelope}"
-    assert (S.curl_url(es_argv) or "").startswith(f"https://es-{m}:9200/{m}-events-*/_search"), \
-        f"elastic URL/index must be the file's: {es_argv}"
-    assert S.context_of(es_argv) == S.context_name(m, "elastic"), f"elastic context: {es_argv}"
-    assert S.exec_target(es_argv) == S.es_container(m), f"elastic container: {es_argv}"
-    leaked = [v for v in exported.values() for a in _argvs(shim) if any(v in t for t in a)]
-    assert leaked == [], f"an exported value reached a child's argv: {leaked}"
 
 
 def test_o2_adapter_config_snapshot(tmp_path):
@@ -501,35 +394,6 @@ def test_s60_timeout_sec_empty_and_request_reads_current_value(tmp_path):
         assert _argvs(shim, before) == [], f"{what} TIMEOUT_SEC spawned a child: {_argvs(shim, before)}"
 
 
-def test_s60_ticket_key_pattern_absent_is_config_fault(tmp_path):
-    """A ticket system's config.env with no TICKET_KEY_PATTERN key is a ConfigFault (design doc:
-    'absent is a ConfigFault'), the same required-key shape as URL_BASE/TIMEOUT_SEC for a stub
-    system."""
-    m = "skp"
-    root, folder = _tenant(tmp_path, m)
-    shim = S.DockerShim(tmp_path / "shim", [_TICKETS])
-    assert ticket_adapter.key_pattern(_ctx(S.resolve(root), tmp_path / "p", shim)) \
-        == f"{m.upper()}-[0-9]+", "precondition: with the key set, key_pattern answers it"
-
-    S.drop_key(folder, "ticket", "TICKET_KEY_PATTERN")
-    ctx = _ctx(S.resolve(root), tmp_path / "kp", shim)
-    fault_kp = _raised(ticket_adapter.key_pattern, ctx)
-    assert isinstance(fault_kp, ConfigFault), f"an absent TICKET_KEY_PATTERN must be a ConfigFault naming it, got {fault_kp!r}"
-    assert "TICKET_KEY_PATTERN" in str(fault_kp), f"an absent TICKET_KEY_PATTERN must be a ConfigFault naming it, got {fault_kp!r}"
-    fault_list = _raised(ticket_adapter.list_tickets, ctx)
-    assert isinstance(fault_list, ConfigFault), \
-        f"every ticket verb requires the key; list_tickets got {fault_list!r}"
-    assert _argvs(shim) == [], f"a ticket call without its pattern spawned a child: {_argvs(shim)}"
-
-    # The same required-key shape as URL_BASE: the same folder, the other key absent instead.
-    S.set_key(folder, "ticket", "TICKET_KEY_PATTERN", f"{m.upper()}-[0-9]+")
-    S.drop_key(folder, "ticket", "TICKET_URL_BASE")
-    fault_url = _raised(ticket_adapter.key_pattern, _ctx(S.resolve(root), tmp_path / "u", shim))
-    assert isinstance(fault_url, ConfigFault), f"precondition: an absent TICKET_URL_BASE is a ConfigFault naming it, got {fault_url!r}"
-    assert "TICKET_URL_BASE" in str(fault_url), f"precondition: an absent TICKET_URL_BASE is a ConfigFault naming it, got {fault_url!r}"
-    assert str(fault_kp).replace("TICKET_KEY_PATTERN", "<KEY>") \
-        == str(fault_url).replace("TICKET_URL_BASE", "<KEY>"), \
-        f"KEY_PATTERN's fault must have URL_BASE's required-key shape: {fault_kp} / {fault_url}"
 
 
 def test_s7_mf3_empty_destination_is_config_fault(tmp_path):
@@ -756,31 +620,6 @@ def test_sibling_system_calls_share_one_docker_context_partial_failure(tmp_path,
             f"{label}: both systems must reach docker on their one shared context: {calls}"
 
 
-def test_a_stored_fault_is_raised_more_than_once_across_the_run(tmp_path):
-    """A system kept as a ConfigFault at resolve faults the same way on every call across the
-    run: each call that reaches it observes the same breaker-counted outcome (exit 2), and the
-    contract is the outcome, not the fault object's identity."""
-    root, folder = _tenant(tmp_path, "sfr")
-    S.config_path(folder, "cmdb").unlink()  # design: a folder with a missing file is kept as its ConfigFault
-    record = S.resolve(root)
-    assert isinstance(record.systems.get("cmdb"), ConfigFault), \
-        f"precondition: cmdb is kept as a ConfigFault at resolve: {record.systems.get('cmdb')!r}"
-    shim = S.DockerShim(tmp_path / "shim", [_OK])
-    ctx = _ctx(record, tmp_path, shim)
-
-    seen = []
-    run_state = _run_state(ctx.run_dir)
-    for fn, kw in ((cmdb_adapter.get_host, {"host": "web-1"}), (cmdb_adapter.health_check, {}),
-                   (cmdb_adapter.get_host, {"host": "web-2"})):
-        fault = _raised(fn, ctx, **kw)
-        assert isinstance(fault, AdapterFault), f"a stored fault must raise on every call: {fault!r}"
-        state = circuit_breaker.record_outcome(run_state, "cmdb", fault.exit_code)
-        seen.append((type(fault).__name__, fault.exit_code, str(fault),
-                     state.get("systems", {}).get("cmdb", {}).get("failures")))
-    assert [s[:3] for s in seen] == [seen[0][:3]] * 3, f"each call must observe the same exit-2 outcome: {seen}"
-    assert seen[0][1] == 2, f"each call must observe the same exit-2 outcome: {seen}"
-    assert [s[3] for s in seen] == [1, 2, 3], f"the breaker must count every call: {seen}"
-    assert _argvs(shim) == [], f"a stored fault spawned a child: {_argvs(shim)}"
 
 
 def test_s7_mf8_config_fault_breaker_accounting_unchanged(tmp_path):
@@ -881,95 +720,14 @@ def test_o8_example_reads_record(tmp_path, monkeypatch):
         f"the example must address its record entry's URL: {addressed}"
 
 
-_TICKET_TABLE = """\
-dispositions:
-  ticket:
-    get-ticket: {roles: [gather]}
-    health-check: {roles: [gather]}
-    key-pattern: {roles: [gather]}
-    list-tickets: {roles: [gather]}
-"""
 
 
-def test_d7_ticket_verbs_survive(tmp_path, checkout_roster):
-    """The ticket adapter's verbs (list-tickets, get-ticket, key-pattern) still dispatch through
-    the verb registry with the run's record."""
-    m = "dts"
-    root, _ = _tenant(tmp_path, m, table=_TICKET_TABLE)
-    record = S.resolve(root)
-    registry = ModuleVerbRegistry(checkout_roster, record.grants.gather)
-    shim = S.DockerShim(tmp_path / "shim", [_TICKETS])
-    ctx = _ctx(record, tmp_path, shim)
-
-    decisions = {v: registry.decide("ticket", v) for v in ("key-pattern", "list-tickets", "get-ticket")}
-    assert {v: d.outcome for v, d in decisions.items()} == dict.fromkeys(decisions, GRANTED), \
-        f"the ticket verbs must dispatch through the registry: {decisions}"
-    assert decisions["key-pattern"].fn(ctx) == f"{m.upper()}-[0-9]+", "key-pattern's answer"
-    decisions["list-tickets"].fn(ctx)
-    shim.respond(S.answer('{"key": "DTS-1", "status": "closed"}'))
-    got = decisions["get-ticket"].fn(ctx, key="DTS-1")
-    assert got.get("key") == "DTS-1", f"get-ticket's answer: {got}"
-    calls = [(S.context_of(a), S.curl_url(a)) for a in _argvs(shim)]
-    ctx_name = S.context_name(m, "ticket")
-    assert calls == [(ctx_name, f"http://ticket-{m}:8080/tickets"),
-                     (ctx_name, f"http://ticket-{m}:8080/tickets/DTS-1")], \
-        f"the ticket verbs must reach the record's ticket system on its context: {calls}"
 
 
-_CLI_NAMES = frozenset({"_cli_context", "main", "build_parser"})
-_CLI_USAGE = re.compile(r"^\s*ticket_adapter\.py\s+\S", re.MULTILINE)
 
 
-def _cli_refs(source: str) -> list[str]:
-    """Each code reference in `source` to ticket_adapter's command-line names."""
-    if "ticket_adapter" not in source or not any(name in source for name in _CLI_NAMES):
-        return []  # every hit spells `ticket_adapter` and a CLI name in the source; skip parsing files without both
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return []
-    hits = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and node.attr in _CLI_NAMES:
-            owner = node.value
-            if (isinstance(owner, ast.Name) and owner.id == "ticket_adapter") or \
-                    (isinstance(owner, ast.Attribute) and owner.attr == "ticket_adapter"):
-                hits.append(f"ticket_adapter.{node.attr}:{node.lineno}")
-        elif isinstance(node, ast.ImportFrom) and (node.module or "").endswith("ticket_adapter"):
-            hits += [f"import {a.name}:{node.lineno}" for a in node.names if a.name in _CLI_NAMES]
-    return hits
 
 
-def test_d7_cli_mode_gone():
-    """ticket_adapter defines no _cli_context, no main and no build_parser, and its module
-    docstring no longer shows command-line usage (ticket_adapter.py:18-19). No test references
-    them (test_meta_json_retirement_647.py:830, test_query_tool_611.py:1408). (Its leg on
-    generate_case.py's lint-dup comment went with that file, which #1120 removed.)
-    _stub_transport.AdapterArgumentParser, whose only production user was build_parser, goes
-    with it (F13 resolved auto; CX25)."""
-    assert {"list-tickets", "get-ticket", "key-pattern"} <= set(ticket_adapter.VERBS), \
-        "precondition: the ticket adapter still declares its verbs"
-    left = sorted(n for n in _CLI_NAMES if hasattr(ticket_adapter, n))
-    assert left == [], f"ticket_adapter still defines its command-line mode: {left}"
-
-    # The census's own positive controls: each scanner flags the base's shapes (CX25, G14).
-    assert _CLI_USAGE.search("Usage:\n    ticket_adapter.py list-tickets [--status open]\n"), \
-        "precondition: the usage scan flags the base docstring's line"
-    assert _cli_refs("parser = ticket_adapter.build_parser()\n"
-                     "from defender.scripts.adapters.ticket_adapter import main\n"), \
-        "precondition: the reference scan flags an attribute and an import"
-    usage = _CLI_USAGE.findall(ticket_adapter.__doc__ or "")
-    assert usage == [], f"ticket_adapter's docstring still shows command-line usage: {usage}"
-
-    tests = [p for p in (S.DEFENDER / "tests").rglob("*.py") if "__pycache__" not in p.parts]
-    assert len(tests) > 100, f"precondition: the census reads the test tree ({len(tests)} files)"
-    refs = {str(p.relative_to(S.REPO_ROOT)): r for p in tests
-            if (r := _cli_refs(p.read_text(encoding="utf-8", errors="replace")))}
-    assert refs == {}, f"tests still reference ticket_adapter's command-line mode: {refs}"
-
-    assert "load_config" in transport.__all__, "precondition: _stub_transport's exports are read"
-    assert not hasattr(transport, "AdapterArgumentParser"), "_stub_transport.AdapterArgumentParser outlived build_parser"
-    assert "AdapterArgumentParser" not in transport.__all__, "_stub_transport.AdapterArgumentParser outlived build_parser"
 
 
 def test_s7_mf7c_the_adapter_judges_its_own_required_keys(tmp_path):

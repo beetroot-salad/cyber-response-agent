@@ -1,18 +1,4 @@
-"""#1106 O8 / M7 — CI checks every committed knowledge folder, not one table.
-
-Before #1106 the census gate (`scripts/lint/lint_verb_disposition_census.py`, run by CI with no
-arguments) loaded ONE table — `defender/knowledge/environment/verb-grants.yaml` — and compared
-it with the walked adapter census. After it there is a table per tenant folder, and M7 makes the
-gate iterate every committed knowledge folder — since #1120 (C26) the two the product repo
-holds, `knowledge/tenant-fixture/` and `knowledge/tenant-template/` (a real tenant's folder is
-checked in its own repo): each must pass the folder rules, each must be total over the SHARED adapters (grants describe shared code), each must load, and
-each folder's `lead-zero.yaml` must name a template the catalog holds and agree with its table
-— a check that today only the run-start path makes (`driver/__init__.py`).
-
-Driven as CI drives it — the real gate script as a subprocess, `--root` a planted, committed
-repo — and every red is paired with the green repo it differs from by one row (or one id):
-a gate that went red on everything, or checked only the first folder, fails one side.
-"""
+"""The verb-disposition census gate checks every committed knowledge folder, red on one missing row."""
 from __future__ import annotations
 
 import shutil

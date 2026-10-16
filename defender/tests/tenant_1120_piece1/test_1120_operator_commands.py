@@ -1,23 +1,4 @@
-"""#1120 piece 1 — D1/D2: the operator commands and the settings loaders read the DATA ROOT's copy.
-
-After piece 1 a tenant's settings live under `<data root>/<T>/knowledge/settings/`, and every
-operator command that takes `--tenant` (`policy_cli gather`, `validate_scaffold`) resolves the data root once and accepts its tenant through
-`accept_tenant` — never through the checkout's `knowledge/tenants/`, and never from a root
-derived off `$DEFENDER_DIR` (C11). A refusal is `accept_tenant`'s `TenantRefused`, surfaced in
-each command's own idiom (M7: `validate_scaffold` is advisory and prints it as a WARN), never a
-traceback. The settings loaders that survive the move unchanged take the folder as a parameter,
-so each is handed the ACCEPTED tenant's `settings` and must read the file there (R7).
-
-The checkout's lab is retired (human, PR #1157: #1158 folded in), so the scenarios that ask
-"which copy was read" use the id `playground` in the data root with settings that DIFFER from
-the committed fixture's (the lab's frozen copy): a gather grant, a `config.env` marker, a
-missing config key, and assert nothing under the checkout's `knowledge/` was reported.
-Commands with no argv parameter (`validate_scaffold`, the census lint) run as processes;
-`policy_cli`, `run.main` and the launcher are driven in-process through their own seams.
-`ticket_adapter` is no operator command: #1107 removed its command line (fork
-TICKET-ADAPTER-CLI-REMOVED-BY-1107), so the legs that drove it are gone. See `_spec1120.py`
-for the coined names.
-"""
+"""D1/D2: the operator commands and the settings loaders read the DATA ROOT's copy."""
 from __future__ import annotations
 
 import functools
@@ -31,14 +12,10 @@ from defender import _tenant
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
 from defender.runtime import box as box_mod
-from defender.runtime import box_codec, lead_zero_config, verb_dispositions
-from defender.runtime import case_ticket
-from defender.runtime.verbs import VerbContext
+from defender.runtime import box_codec
 from defender.scripts import policy_cli
 from defender.scripts import tenant as tenant_py
-from defender.scripts.adapters import _stub_transport, elastic_adapter
 from defender.skills.connect import validate_scaffold
-from defender.tests import _tenants1106 as T1106
 from defender.tests._alert_plant import plant_alert as plant_alert_with_record
 from defender.tests import _triplet_947 as T947
 from defender.tests.tenant_1078_pass_a import _spec1078 as H78
@@ -48,18 +25,11 @@ from defender.tests.tenant_1120_piece1 import _spec1120 as H
 CENSUS_LINT = H.REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
 
 #: A table that loads but grants gather no query verb — a table that DIFFERS from the fixture's
-#: (the fixture grants gather dozens of query verbs), so a command that builds gather's grant from
-#: it is refused naming it, and one that read a checkout copy would not be.
 HEALTH_CHECK_ONLY_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [gather]}\n"
 
 #: A `verb-grants.yaml` that is not YAML (an unclosed flow mapping) — the unloadable table.
 UNPARSEABLE_TABLE = "dispositions:\n  cmdb:\n    health-check: {roles: [gather]\n"
 
-#: The fixture's withheld `cmdb.list-roles` row; the loader test's data-root
-#: table grants it instead, so a grant for it can only have come from the data-root copy.
-CMDB_LIST_ROLES_WITHHELD = (
-    '    list-roles:\n      roles: []\n'
-    '      reason: "in the registry, exercised by no template and no run (c18/#632)"\n')
 
 #: The row `validate_scaffold` prints once it has checked a clean `config.env`.
 CONFIG_CHECKED = "config.env carries no inline secrets"
@@ -77,9 +47,8 @@ def _ticket_config(settings: Path) -> Path:
 
 
 def _mark_ticket_config(settings: Path, marker_key: str, *, drop_timeout: bool) -> Path:
-    """Give a tenant's ticket `config.env` an inline-secret MARKER line (a key
-    `validate_scaffold` FAILs by name) and, with `drop_timeout`, lose the required
-    `TICKET_TIMEOUT_SEC`."""
+    """Give a tenant's ticket `config.env` an inline-secret MARKER line (a key `validate_scaffold`
+    FAILs by name) and, with `drop_timeout`, lose the required `TICKET_TIMEOUT_SEC`."""
     path = _ticket_config(settings)
     lines = [ln for ln in path.read_text(encoding="utf-8").splitlines(keepends=True)
              if not (drop_timeout and ln.startswith("TICKET_TIMEOUT_SEC"))]
@@ -89,9 +58,9 @@ def _mark_ticket_config(settings: Path, marker_key: str, *, drop_timeout: bool) 
 
 
 def _other_tree(tmp_path: Path, tenant_id: str, marker_key: str) -> Path:
-    """Another checkout's `defender/` whose `knowledge/tenants/<tenant_id>` holds a COMPLETE
-    tenant folder carrying `marker_key` in its ticket config — what a command would find if it
-    derived its tenants root from an exported `$DEFENDER_DIR`. Returns its `defender/`."""
+    """Another checkout's `defender/` whose `knowledge/tenants/<tenant_id>` holds a COMPLETE tenant
+    folder carrying `marker_key` in its ticket config — what a command would find if it derived its
+    tenants root from an exported `$DEFENDER_DIR`."""
     other = tmp_path / "other-checkout"
     (other / "defender").mkdir(parents=True)
     folder = other / "knowledge" / "tenants" / tenant_id
@@ -131,17 +100,8 @@ def _census_lint(repo: Path) -> Any:
 
 def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_checkouts(
         data_root: Path, tmp_path: Path, capsys) -> None:
-    """The lab is retired (human, PR #1157: #1158 folded in); the checkout's knowledge/
-    holds only the template and the fixture, a complete copy of the lab's settings. Under
-    DEFENDER_DATA_ROOT the tenant playground has knowledge/settings that differ: a
-    verb-grants.yaml granting gather only a health-check, and a systems/ticket/config.env
-    carrying a distinct marker key and lacking TICKET_TIMEOUT_SEC. In that setup policy_cli
-    gather --tenant playground builds gather's grant from the data-root table (refused naming
-    <root>/playground/knowledge/settings/verb-grants.yaml, where the fixture's table would build a
-    policy; with the fixture's table put back it builds one); and validate_scaffold ticket --tenant playground checks the data-root config.env (it
-    FAILs the data-root marker key). None of them reads the checkout's knowledge/, and none
-    derives a root from DEFENDER_DIR: with DEFENDER_DIR exported naming another tree that holds
-    its own playground folder, the other tree's marker is never reported."""
+    """The lab is retired (human, PR #1157: #1158 folded in); the checkout's knowledge/ holds only the
+    template and the fixture, a complete copy of the lab's settings."""
     tid = "playground"
     H.adopted(data_root, tid)
     settings = H.settings_dir(data_root, tid)
@@ -174,14 +134,8 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
 
 def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_without_a_traceback(
         data_root: Path, tmp_path: Path) -> None:
-    """validate_scaffold and the census lint catch TenantRefused (not only the removed
-    TenantDirError) and surface its message in their own idiom, never a traceback. For a tenant
-    whose knowledge/ is a symlink to a complete folder elsewhere, validate_scaffold ticket
-    --tenant acme prints accept_tenant's refusal verbatim as a WARN and skips the tenant's
-    config check (M7). The census lint, over a tmp repo whose knowledge/tenant-fixture/agent/
-    holds a symlink, exits non-zero naming the fixture folder and the link. Positive controls:
-    with the real folder in place, validate_scaffold checks that config.env; the lint over the
-    unplanted repo exits 0. (ticket_adapter's leg is gone with its command line, #1107.)"""
+    """validate_scaffold and the census lint catch TenantRefused (not only the removed TenantDirError)
+    and surface its message in their own idiom, never a traceback."""
     elsewhere = tmp_path / "elsewhere" / "knowledge"
     shutil.copytree(H.FIXTURE, elsewhere)
     H.write_tenant_id_file(elsewhere, H.TID, "id")
@@ -228,11 +182,8 @@ def test_1120_validate_scaffold_and_the_census_lint_surface_tenant_refused_witho
 
 def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
-    """With DEFENDER_DATA_ROOT unset, validate_scaffold --tenant and policy_cli gather --tenant
-    each report resolve_data_root's refusal naming the variable. Neither falls back to the
-    checkout — the id used, playground, is the lab's own. policy_cli exits non-zero; validate_scaffold is advisory (M7): it prints the refusal as
-    a WARN, never a FAIL, and checks no config.env. The positive controls: with the data root
-    set, validate_scaffold checks the tenant's config.env and policy_cli builds the policy."""
+    """With DEFENDER_DATA_ROOT unset, validate_scaffold --tenant and policy_cli gather --tenant each
+    report resolve_data_root's refusal naming the variable."""
     tid = "playground"
     H.adopted(data_root, tid)
 
@@ -282,9 +233,8 @@ def _launcher_source(root: Path) -> Path:
 
 
 def _launch(source: Path) -> BaseException | int:
-    """The REAL branch launcher over `source`, with no `--tenants-root` (piece 1 removes it),
-    the role preflight neutralised and the spawn recorded. #1105 PR 2 (declared change 1): the
-    tenant and the source run by id (`<root>/<T>/runs/<run id>`)."""
+    """The REAL branch launcher over `source`, with no `--tenants-root` (piece 1 removes it), the role
+    preflight neutralised and the spawn recorded."""
     spawn = _SpawnRecorder()
     try:
         return branch_cli.main(
@@ -299,13 +249,8 @@ def _launch(source: Path) -> BaseException | int:
 
 def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_table(
         data_root: Path, tmp_path: Path, capsys) -> None:
-    """A tenant whose settings/verb-grants.yaml does not parse as YAML: tenant.py check acme
-    exits 1 naming verb-grants.yaml (M6: a malformed table is a named finding, never a
-    traceback). run.main (before anything is spent), the branch launcher, policy_cli gather
-    and tenant.py setup (NF1: "the settings tables load") each refuse naming the file, and
-    setup writes nothing. validate_scaffold never loads the table and accepts the tenant: it
-    proceeds past acceptance to its own work and does not mention verb-grants.yaml. (held_out takes no tenant and generate_case is removed — human, PR
-    #1157.)"""
+    """A tenant whose settings/verb-grants.yaml does not parse as YAML: tenant.py check acme exits 1
+    naming verb-grants.yaml (M6: a malformed table is a named finding, never a traceback)."""
     # rejected: an all-withheld table as a finding (M6, human).
     H.adopted(data_root)
     table = H.settings_dir(data_root) / "verb-grants.yaml"
@@ -369,11 +314,8 @@ def _exposes(source: Path, forbidden: Path) -> bool:
 
 def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root_and_never_settings(
         data_root: Path, tmp_path: Path) -> None:
-    """run.py calls start_box with the accepted tenant's agent half,
-    <root>/acme/knowledge/agent (the tenant's knowledge a local git clone here, so its .git
-    exists). The docker run argv composed for that call binds that source read-only at
-    /tenant/agent, the target that stays in piece 1 (RF5), and no mount source equals, or is an
-    ancestor of, the tenant's settings/, its knowledge/.git, or its knowledge/ folder."""
+    """run.py calls start_box with the accepted tenant's agent half, <root>/acme/knowledge/agent (the
+    tenant's knowledge a local git clone here, so its .git exists)."""
     H.cloned_tenant(tmp_path, data_root)
     H.plant_row(data_root)
     started: list[tuple[tuple, dict]] = []
@@ -418,15 +360,11 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
 
 def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_root_not_the_tenants_root(
         tmp_path: Path) -> None:
-    """When the driver shares paths with the docker daemon (docker-outside-of-Docker, C46) and
-    the tenant's agent half, <root>/acme/knowledge/agent, lies on none of them while the run
-    dir and the defender dir do, composing the box's docker run refuses with BoxFault naming
-    the agent half — and its remedy names DEFENDER_DATA_ROOT and never "the tenants root",
-    which piece 1 removes (F13's refusal-wording consequence, V7). Reading of the remedy: the
-    agent half now lives under the data root, beside the run dir whose remedy is already "Set
-    DEFENDER_DATA_ROOT to a path", so moving it means moving the data root. The positive
-    control: the same tenant with its data root under the shared mount composes (no refusal),
-    so the refusal was the agent half's coverage."""
+    """When the driver shares paths with the docker daemon (docker-outside-of-Docker, C46) and the
+    tenant's agent half, <root>/acme/knowledge/agent, lies on none of them while the run dir and the
+    defender dir do, composing the box's docker run refuses with BoxFault naming the agent half —
+    and its remedy names DEFENDER_DATA_ROOT and never "the tenants root", which piece 1 removes
+    (F13's refusal-wording consequence, V7)."""
     shared = tmp_path / "shared"
     mounts = ((shared, tmp_path / "daemon-side"), (H.DEFENDER, H.DEFENDER))
     off_mount = tmp_path / "data"
@@ -449,13 +387,9 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
 
 
 def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> None:
-    """No key of BOX_ENV_ALLOWLIST names the tenant or the data root: no DEFENDER_DATA_ROOT and
-    no key containing TENANT (C13 — a child learns its tenant from --tenant and the data root
-    from its own environment, never from the box). The box env rendered from a request env
-    that carries DEFENDER_DATA_ROOT and a tenant key drops both, and the docker run argv's
-    --env keys are the required allowlist keys; optional DEFENDER_AGENT_DIR is absent in
-    this tenant-free fixture. The positive control: the allowlist carries DEFENDER_DIR,
-    and the rendered env keeps it."""
+    """No key of BOX_ENV_ALLOWLIST names the tenant or the data root: no DEFENDER_DATA_ROOT and no key
+    containing TENANT (C13 — a child learns its tenant from --tenant and the data root from its own
+    environment, never from the box)."""
     allow = box_codec.BOX_ENV_ALLOWLIST
     assert "DEFENDER_DIR" in allow
     assert H.DATA_ROOT_ENV not in allow, allow

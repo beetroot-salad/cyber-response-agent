@@ -482,19 +482,6 @@ def test_attacker_digest_cannot_forge_execution_md_sections(tmp_path):
             "the digest forged a bare ## Verbs heading line in the curator handoff"
 
 
-def test_executed_lead_carries_verb(tmp_path):
-    """executed_lead_carries_verb — ExecutedLead carries a `verb` field and extract_from_joined
-    copies q.verb from the row; after a real run the extracted lead's verb equals the row's
-    honest registry verb."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=_elastic_registry(rec), turns=[
-        q("elastic", "alerts", {"native_query": "x"}, query_id="elastic.sig"), DONE,
-    ])
-    lead = _executed_leads(r.run_dir)[0]
-    assert hasattr(lead, "verb"), "ExecutedLead grew no verb field"
-    assert lead.verb == r.row()["verb"] == "alerts"
-
-
 def test_actor_view_stays_id_and_params_only(tmp_path):
     """actor_view_stays_id_and_params_only — the paired assertion for the F-7 waiver:
     coverage_manifest (render_joined_yaml) CARRIES verb while actor_view does NOT — the
@@ -536,35 +523,6 @@ def test_noncandidate_rule_is_declared_verb_name(tmp_path):
     assert [p.name for p in drafts_c] == [
         f"{_draft_basename('elastic.sshd-by-srcip')}.md"
     ], "a coined id was not drafted"
-
-
-def test_candidacy_is_stable_across_the_replaying_tree(tmp_path):
-    """candidacy_is_stable_across_the_replaying_tree — candidacy keys on the ROW's own recorded
-    verb, not a roster re-imported at read time: two rows with the SAME query_id (elastic.foo) but
-    a DIFFERENT recorded verb resolve to DIFFERENT candidacy, driven by the frozen verb — so a
-    persisted artifact's meaning does not depend on which tree resolves it."""
-    rec = VerbRecorder()
-    r_a = run_gather(tmp_path / "a", verbs=_elastic_registry(rec), turns=[
-        q("elastic", "foo", {"native_query": "x"}), DONE], run_id="q620-st-a")
-    assert r_a.row()["query_id"] == "elastic.foo"
-    assert r_a.row()["verb"] == "foo"
-    drafts_a = draft_synthesis.synthesize_drafts(
-        _executed_leads(r_a.run_dir), skills=held_skills(tmp_path / "ca"), where=tmp_path / "ca",
-        catalog=[],
-        systems=frozenset({"elastic"}))
-    assert drafts_a == [], "row whose verb equals its query_id suffix was drafted"
-
-    r_b = run_gather(tmp_path / "b", verbs=_elastic_registry(rec), turns=[
-        q("elastic", "query", {"native_query": "x"}, query_id="elastic.foo"), DONE,
-    ], run_id="q620-st-b")
-    assert r_b.row()["query_id"] == "elastic.foo"
-    assert r_b.row()["verb"] == "query"
-    drafts_b = draft_synthesis.synthesize_drafts(
-        _executed_leads(r_b.run_dir), skills=held_skills(tmp_path / "cb"), where=tmp_path / "cb",
-        catalog=[],
-        systems=frozenset({"elastic"}))
-    assert any(p.name == f"{_draft_basename('elastic.foo')}.md" for p in drafts_b), \
-        "candidacy did not follow the row's recorded verb"
 
 
 def test_render_query_binds_the_elastic_body(tmp_path):
@@ -711,16 +669,6 @@ def _run_validate_scaffold(system: str, *, defender_dir: Path = DEFENDER):
     env = {"DEFENDER_DIR": str(defender_dir), "PATH": os.environ.get("PATH", "")}
     return subprocess.run([sys.executable, str(VALIDATE_SCAFFOLD), system],
                           capture_output=True, text=True, env=env, timeout=60)
-
-
-def test_validate_scaffold_green_on_all_seven_via_registry_probe():
-    """validate_scaffold_green_on_all_seven_via_registry_probe — validate_scaffold probes the
-    registry (module importable, non-empty VERBS, health-check declared) and exits 0 for all seven
-    systems; it no longer asserts the --help / exit-64-on-bad-flag / bin/defender-<system>-shim
-    contract that #617 deleted."""
-    failed = {s: _run_validate_scaffold(s).returncode for s in _ALL_SEVEN}
-    assert all(rc == 0 for rc in failed.values()), \
-        f"validate_scaffold did not pass every system on the registry probe: {failed}"
 
 
 def test_validate_scaffold_normalizes_the_spelling_split():

@@ -1,25 +1,4 @@
-"""#1106 M2 — a branched sibling runs on its EPISODE's tenant, handed the data root by env.
-
-A sibling is a child PROCESS: `cli.py` starts `run.py --resume <manifest> --world X` (#1105 PR 2:
-`--tenant T --episode <episode_id> --world X`) with only
-`DEFENDER_RUNS_BASE=<episode>/runs` in its env. The child reads its tenant from that runs base's
-`_tenant.json` (D4) — and before #1106 nothing seeded it, so every sibling minted the default
-tenant whatever the episode's own stamp said: the same bug class `cli.py` already records for
-the model. And the child would resolve its tenants root by itself, from its own checkout.
-
-M2: before spawning, the parent writes `<episode>/runs/_tenant.json` carrying the episode
-stamp's `tenant_id` (through `_tenant`'s create lane) and hands the child its root. A stamp with
-no tenant — or the legacy `default` — refuses (N10, D3): no fallback.
-
-#1120: tenants live under the data root only (the separate tenants root and its flag are
-gone), so "the root" a child is handed is `DEFENDER_DATA_ROOT` in the environment it is spawned
-with, and the episode's tenants are planted under this test's data root.
-
-Observed through the launcher's existing process seam (`spawn=`): the recorder reads the tenant
-record AT SPAWN TIME, so "written before the child starts" is an observation, and reads the
-data root out of the env the child is actually spawned with, so "handed the root" means the
-child would actually receive it. No `run.py` is launched.
-"""
+"""A branched sibling runs on its episode's tenant, handed the data root by env; no stamped tenant refuses."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165

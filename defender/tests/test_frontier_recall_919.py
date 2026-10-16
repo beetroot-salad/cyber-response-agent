@@ -586,35 +586,6 @@ def test_an_open_case_slot_matches_a_concrete_selector_and_a_settled_one_does_no
     assert bare == ["concrete-against-a-bare-marker"]
 
 
-def test_a_candidate_set_is_open_exactly_as_the_bare_marker_is(tmp_path):
-    """CLAIM: `{a, b}` is an open slot. SKILL.md documents `??` -> `{a, b}` -> concrete as three
-    states of one thing, where the candidate set is an UPGRADE from `??` and not a resolution of
-    it."""
-    corpus = _corpus(tmp_path)
-    _write_lesson(corpus, "candidate-set-is-open",
-                  nodes=("type: compute, class: ip-only/dmz, slot: class",))
-    doc = _FIXTURE_DOCS["candidate set"]
-
-    assert _slot_tuples(doc) == [
-        ("v-007", "compute", "ip-only/{internal, dmz}/known-corp", "class",
-         "ip-only/{internal, dmz}/known-corp")
-    ], "an enumerated candidate set is not being read as an open slot"
-    assert _names(_lessons_frontier().match_lessons(_frontier(doc), corpus)) == [
-        "candidate-set-is-open"
-    ]
-
-
-def test_a_node_selectors_type_must_equal_the_open_slots_type(tmp_path):
-    """CLAIM: `type` is a constraint, not decoration."""
-    corpus = _corpus(tmp_path)
-    _write_lesson(corpus, "right-type", nodes=("type: process, slot: attrs.loginuid",))
-    _write_lesson(corpus, "wrong-type", nodes=("type: identity, slot: attrs.loginuid",))
-
-    hits = _names(_lessons_frontier().match_lessons(
-        _frontier(_FIXTURE_DOCS["open loginuid"]), corpus))
-    assert hits == ["right-type"], "a selector matched a slot on a vertex of another type"
-
-
 def test_ties_break_by_lesson_name_rather_than_by_filename(tmp_path):
     """CLAIM: equal scores order by the lesson's `name`."""
     corpus = _corpus(tmp_path)

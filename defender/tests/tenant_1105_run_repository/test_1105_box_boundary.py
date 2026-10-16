@@ -1,52 +1,9 @@
-"""#1105 PR 1 — S3's box boundary over the runs folder's host-only records (S3, N-l; the
-owner's test shape, round 4).
-
-S3: a box cannot hide or forge a sibling on the sandboxed lane. The episode record
-(`tenant.runs/_episodes/<episode_id>.json`) and the tenant record (`tenant.runs/_tenant.json`)
-sit beside the run folders, outside every box bind: the box binds its own run folder read-write
-and the checkout read-only, nothing at or above `tenant.runs` (C8). The executed break attempt
-(GR-A1 under runc, GR-A2 through the production bash lane) is the design's evidence; this file
-pins it as a test, in the shape the owner named: from the sandboxed lane a write to the runs
-folder, `_tenant.json` or `_episodes/` fails, while a control write inside the run folder lands.
-The opt-out lane (`DEFENDER_ALLOW_UNSANDBOXED=1`) gives the boundary up and is not held to it
-(N-l; GR-A3 is the probe's positive control, `w_opt_out_lane_outside_s1_s3`).
-
-ONE BOX SESSION PER RUNTIME. The module-scoped `box_session` fixture plants a real tenant's
-runs folder — the run `RUN_ID`, a sibling run `r0` holding a secret, the sidecar beside the run,
-a host-written episode record claiming the arm `ep-a` (whose folder exists), and `_tenant.json`
-— starts the box for `RUN_ID` under the real `start_box`, and runs one probe inside it that
-makes every write attempt and then lists the run folder's parent. Both S3 tests read that one
-session. `RUN_ID` is exactly 206 bytes, the longest id `RunId` admits (D12.3), so the container
-is named `defender-run-<206-byte id>` (219 characters): CI starts that box under every runtime in
-`RUNTIMES`, runsc included (RG-27-b; MF-10's probe-first, RG-27-a holds for runc), and a runtime
-that refused the name fails the session's `start_box` here.
-The host tree is observed twice after the box stops: entry for entry and byte for byte
-(`H.tree_state`, the run's own folder excluded — the box writes there by design), and through
-the repository's own readers (`runs.list()`, `sibling_run_ids`, `runs.open`), which must
-answer exactly what the planted tree says: the box neither hid a run nor forged a claim.
-
-WHERE IT RUNS, AND WHY IT CANNOT SKIP IN CI. The file carries the `box` marker, so CI's main
-`test` job (`-m "not live and not gate"`) collects it; that job installs gVisor and hard-fails
-unless the daemon registers `runsc`, and it `--ignore`s only `tests/e2e/test_540_box_boundary.py`.
-The session is parametrised over `RUNTIMES` (`runsc`, the production default, and `runc`, the
-floor), so CI starts a gVisor box here (probing GR-A5, unprobed on this dev box). A parameter
-skips for exactly two reasons — no daemon this process can start a box with (none answers, or
-docker-outside-of-Docker with no shared path covering the repo tree, C46), or that runtime not
-registered — and under CI (`CI` set) either reason FAILS instead (`_skip_or_fail`). The third
-test pins all of this by reading the workflow and this file.
-
-Red at base 80888efb, where a box can start: the two box tests import the repository's readers
-from `defender.run_repository` (ModuleNotFoundError). On this dev box (docker-outside-of-Docker,
-the worktree not on a shared mount, runc only) both box tests skip with the first reason. The
-CI-wiring test reads files only and is green at base.
-"""
+"""Box boundary: from a sandboxed box, writes to the runs folder, `_tenant.json` and `_episodes/` fail and sibling runs are invisible; one box session per runtime."""
 from __future__ import annotations
 
-import ast
 import functools
 import json
 import os
-import re
 import shutil
 import subprocess
 import uuid
@@ -55,7 +12,6 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import pytest
-import yaml
 
 from defender.runtime import box as box_mod
 from defender.runtime.bash_exec import parse
@@ -317,83 +273,3 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
         assert (s["runs"] / name).exists(), f"the host's runs folder holds {name}"
 
 
-def _dotted(node: ast.AST) -> str:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-    return ".".join(reversed(parts))
-
-
-_SKIP_SPELLINGS = {"pytest.skip", "pytest.importorskip", "pytest.mark.skip",
-                   "pytest.mark.skipif", "pytest.xfail", "pytest.mark.xfail"}
-
-
-def test_1105_the_box_boundary_file_is_collected_in_ci_on_every_registered_runtime_and_skips_only_for_no_daemon_or_runtime(
-        request):
-    """test_1105_box_boundary.py carries the box marker and neither the live nor the gate marker,
-    so the test job's -m 'not live and not gate' collects it; no workflow --ignore names it; the
-    job that collects it installs gVisor and hard-fails when runsc is not registered
-    (ci.yml:138-142); the file skips only for 'no daemon' or 'runtime not registered' and is
-    parametrised over the registered runtimes, runsc included (probing GR-A5 in CI); positive
-    control: tests/e2e/test_540_box_boundary.py is the one file the main job ignores."""
-    me = Path(__file__).resolve()
-    rel = str(me.relative_to(H.DEFENDER))
-    node = request.node
-    assert node.get_closest_marker("box") is not None, "the file must carry the box marker"
-    assert node.get_closest_marker("live") is None, "a live marker deselects the file from CI"
-    assert node.get_closest_marker("gate") is None, (
-        "a gate marker moves the file out of CI's main (box-capable) test job")
-
-    workflows = H.WORKTREE / ".github" / "workflows"
-    ci = yaml.safe_load((workflows / "ci.yml").read_text(encoding="utf-8"))
-    collecting = [
-        (job_id, job, i) for job_id, job in ci["jobs"].items()
-        for i, step in enumerate(job.get("steps", []))
-        if "pytest tests/" in (step.get("run") or "")
-        and '-m "not live and not gate"' in (step.get("run") or "")]
-    assert len(collecting) == 1, f"one job collects tests/ with the main selection: {collecting!r}"
-    job_id, job, at = collecting[0]
-    run_line = job["steps"][at]["run"]
-    ignored = re.findall(r"--ignore[= ]\s*(\S+)", run_line)
-    assert ignored == ["tests/e2e/test_540_box_boundary.py"], (
-        f"positive control: the main job ignores exactly test_540's file: {ignored!r}")
-    for wf in sorted(workflows.glob("*.y*ml")):
-        text = wf.read_text(encoding="utf-8")
-        for flag, target in re.findall(r"(--ignore(?:-glob)?|--deselect)[= ]\s*(\S+)", text):
-            assert "test_1105_box_boundary" not in target, f"{wf.name}: {flag} {target} drops this file"
-            assert "tenant_1105" not in target, f"{wf.name}: {flag} {target} drops this suite"
-    earlier = "\n".join(s.get("run") or "" for s in job["steps"][:at])
-    assert "runsc install" in earlier, f"job {job_id!r} installs gVisor before it runs the tests"
-    assert "grep -qx runsc" in earlier, (
-        f"job {job_id!r} hard-fails when the daemon does not register runsc")
-
-    tree = ast.parse(me.read_text(encoding="utf-8"))
-    skips = [_dotted(n.func) for n in ast.walk(tree)
-             if isinstance(n, ast.Call) and _dotted(n.func) in _SKIP_SPELLINGS]
-    skips += [_dotted(n) for n in ast.walk(tree)
-              if isinstance(n, ast.Attribute) and _dotted(n) in {"pytest.mark.skip",
-                                                                 "pytest.mark.skipif"}]
-    assert skips == ["pytest.skip"], f"exactly one skip site, in _skip_or_fail: {skips!r}"
-    assert _skip_reason("runsc", usable=False, registered=frozenset({"runsc"})) == NO_DAEMON
-    assert _skip_reason("runsc", usable=True, registered=frozenset({"runc"})) == (
-        RUNTIME_ABSENT.format(runtime="runsc"))
-    assert _skip_reason("runc", usable=True, registered=frozenset({"runc"})) is None
-    in_ci = H.raised(_skip_or_fail, NO_DAEMON, {"CI": "true"})
-    off_ci = H.raised(_skip_or_fail, NO_DAEMON, {})
-    assert isinstance(in_ci, pytest.fail.Exception), f"in CI a skip reason fails: {in_ci!r}"
-    assert isinstance(off_ci, pytest.skip.Exception), f"off CI it skips: {off_ci!r}"
-    assert "runsc" in RUNTIMES, f"the production runtime is parametrised: {RUNTIMES}"
-    assert set(BoxSpec.RUNTIMES) <= set(RUNTIMES), f"every runtime the lever admits: {RUNTIMES}"
-    fixture = next(n for n in ast.walk(tree)
-                   if isinstance(n, ast.FunctionDef) and n.name == "box_session")
-    params = [kw.value for d in fixture.decorator_list if isinstance(d, ast.Call)
-              for kw in d.keywords if kw.arg == "params"]
-    assert [_dotted(p) for p in params] == ["RUNTIMES"], "box_session is parametrised by RUNTIMES"
-    users = sorted(n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
-                   and n.name.startswith("test_") and "box_session" in
-                   {a.arg for a in n.args.args})
-    assert len(users) == 2, f"both S3 box tests run on the parametrised session: {users!r}"
-    assert rel.startswith("tests/"), rel

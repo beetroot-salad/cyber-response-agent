@@ -1,23 +1,4 @@
-"""#1106 — every host-side settings reader reads the INJECTED tenant, never the checkout (O2, O6).
-
-The four settings kinds had eight-odd readers, and each found its file for itself: from
-`ctx.defender_dir`, from `PATHS.defender_dir`, from `$DEFENDER_DIR`, from `__file__`. After
-#1106 none of them finds anything. The run's tenant settings folder is resolved once at the
-process entry point (`accept_tenant(data_root, run.tenant_id).settings`) and HANDED to every
-reader — on the verb context (`VerbContext.tenant`, a required field, whose `settings` is that
-folder) or as an argument.
-
-HOW EACH TEST DISCRIMINATES. The fixture tenant lives under a data root in `tmp_path` —
-OUTSIDE the checkout — and carries the SAME id the committed fixture is set up under
-(`playground`), with DIFFERENT values in every kind. A reader that ignored the handed folder and
-went looking — the checkout's `knowledge/tenant-fixture`, `PATHS`, the old
-`defender/knowledge/environment` — returns the checkout's value, and the assertion is on the
-VALUE that flows out, so it catches that. Each test also reads the checkout's own value and
-asserts it differs, so a later edit to the committed fixture cannot make the test vacuous.
-
-The verb context's `defender_dir` is the REAL checkout's in every test: the tree the code runs
-from is not where its settings are, which is the whole of D2.
-"""
+"""Every host-side settings reader reads the injected tenant's folder, never the checkout's."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165

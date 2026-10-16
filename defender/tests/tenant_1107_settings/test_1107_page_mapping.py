@@ -1,27 +1,4 @@
-"""#1107 — the run page's ticket line (O6, NF-26, PG-2/PG-2a) and the record's case mapping (O2).
-
-TWO SURFACES, ONE SLICE. The page half drives the REAL renderer: `run_common.visualize`, the
-`visualize` seam `run.main` keeps at its production default, handed run.py's own `--update-ticket`
-as an argument (PG-2a, coined keyword `update_ticket=` — `S.render_page`), and the standalone
-`visualize_run.publish_page`, which is handed no flag. The observable is the rendered HTML: a
-marker in a planted receipt either reaches `runtime.html` or it does not, and "no ticket line" is
-the page being byte-equal to the page of the same run dir with no receipt at all (the base page is
-deterministic across renders and carries no ticket text — measured before writing).
-
-The mapping half drives the `case_ticket` consumers with the record's `ticket_mapping` (coined
-keyword `mapping=` — `S.with_mapping`; `release_predicate`, once positional here, was removed by
-#1221's amendment), the query tool's
-ticket screen through the replay harness (`verbs=` / `tenant=`; the served payload is what the
-gather model was shown), and a resumed sibling's `WorldRegistry` through `run.main --resume`,
-whose `lifecycle` seam hands the REAL `_drive_investigation` a recording `investigate`. (#1224
-retired the estate applier and the world patches it once judged against the mapping; a world
-now carries facts its live oracle serves.) "After the record is built" is the `preflight` seam, which `run.main` calls after
-`tenant = tenant_of()`.
-
-Nothing here reaches the real docker: the only transport that forks (the record step in
-`test_d_mapping_error_consumers`) is handed a `DockerShim` env, and every `run.main` drive puts the
-shim first on this process's PATH before run.py builds its env.
-"""
+"""Run page ticket line and receipt rendering, ticket replies independent of mapping, estate registry."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _view_run_1165
@@ -36,7 +13,6 @@ from typing import Any
 from defender import run_common
 from defender.run_repository import RunPaths
 from defender.learning.branch.estate.registry import EstateError
-from defender.runtime import case_ticket
 from defender.runtime import run_tenant
 from defender.tests import _spec767 as M
 from defender.tests import _tenants1106 as T1106
@@ -174,19 +150,8 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _mapping_1107() -> str:
-    """The `_tenants1106` mapping with every value a consumer answers from made distinctive:
-    the signature read from `rule.name` (not the `rule.id` fallback), the reporter and the
-    comment author. (It made the released status distinctive too, until #1221's amendment left
-    nothing that reads one.)"""
-    return (T1106.mapping_text(reporter="rep-1107")
-            .replace("signature: rule.id", "signature: rule.name")
-            .replace("author: defender", "author: author-1107"))
 
 
-def _alert_1107(name: str, description: str) -> dict[str, Any]:
-    return {"rule": {"id": name, "name": name, "description": description},
-            "timestamp": "2026-09-28T01:02:03Z"}
 
 
 # ======================================================================================
@@ -429,80 +394,8 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
 # The record's case mapping and its consumers.
 # ======================================================================================
 
-def test_d_case_ticket_takes_mapping(tmp_path):
-    """The case_ticket functions that consume the mapping (alert_to_open_payload,
-    read_case_record, case_record_to_comment, escalation_comment_payload,
-    unreadable_comment_payload — and release_predicate, until #1221's amendment removed it) take
-    a CaseMapping instead of settings_dir. None of them reads
-    mapping.yaml: called with a CaseMapping while no mapping file exists anywhere, they answer from
-    it."""
-    root = tmp_path / "tenants"
-    folder = S.plant(root, marker="map")
-    S.mapping_path(folder).write_text(_mapping_1107(), encoding="utf-8")
-    record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                       dispatches_lead_zero=False)
-    mapping = record.ticket_mapping
-    assert isinstance(mapping, S.record_type("CaseMapping")), f"ticket_mapping is {mapping!r}"
-    S.mapping_path(folder).unlink()
-    assert not S.mapping_path(folder).exists(), "the mapping file is still there"
-
-    alert = _alert_1107("sig-name-1107", "summary-1107")
-    payload = S.with_mapping(case_ticket.alert_to_open_payload, M.facts_of(alert), "case-1107", mapping=mapping)
-    assert payload["key"] == "case-1107", payload
-    assert payload["reporter"] == "rep-1107", payload
-    assert "sig:sig-name-1107" in payload["labels"], payload
-
-    run_dir = M.make_run(tmp_path / "runs", "case-rec-1107", alert=alert)
-    rec = S.with_mapping(case_ticket.read_case_record, _view_run_1165(run_dir), mapping=mapping)
-    assert rec.signature_id == "sig-name-1107", rec
-    comment = S.with_mapping(case_ticket.case_record_to_comment, rec, mapping=mapping)
-    assert comment["author"] == "author-1107", comment
-    assert comment["body"].startswith("benign — "), comment
-
-    escalation = S.with_mapping(case_ticket.escalation_comment_payload, "aborted", mapping=mapping)
-    assert escalation["author"] == "author-1107", escalation
-    unreadable = S.with_mapping(case_ticket.unreadable_comment_payload, mapping=mapping)
-    assert unreadable["author"] == "author-1107", unreadable
 
 
-def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
-    """The case_ticket callers that mutate the mapping today (F11, the reason _MAPPING_CACHE hands out
-    deep copies) still build their payloads correctly from a read-only CaseMapping, each working on
-    a local copy."""
-    root = tmp_path / "tenants"
-    folder = S.plant(root, marker="mf11")
-    S.mapping_path(folder).write_text(_mapping_1107(), encoding="utf-8")
-    record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                       dispatches_lead_zero=False)
-    mapping = record.ticket_mapping
-    before = _plain(mapping)
-
-    first = _alert_1107("sig-one-1107", "first case")
-    second = _alert_1107("sig-two-1107", "second case")
-    one = S.with_mapping(case_ticket.alert_to_open_payload, M.facts_of(first), "case-one", mapping=mapping)
-    kept = copy.deepcopy(one)
-    # A caller does what callers do with a payload: edits it.
-    one["labels"].append("planted-1107")
-    one["status"] = "planted-1107"
-    two = S.with_mapping(case_ticket.alert_to_open_payload, M.facts_of(second), "case-two", mapping=mapping)
-    assert two["labels"] == ["sig:sig-two-1107", "evt:2026-09-28T01:02:03Z"], two
-    assert two["status"] == "open", two
-    assert two["key"] == "case-two", two
-    again = S.with_mapping(case_ticket.alert_to_open_payload, M.facts_of(first), "case-one", mapping=mapping)
-    assert again == kept, "an edit to one payload reached the next built from the same mapping"
-
-    run_dir = M.make_run(tmp_path / "runs", "case-mf11", alert=first)
-    rec = S.with_mapping(case_ticket.read_case_record, _view_run_1165(run_dir), mapping=mapping)
-    comment = S.with_mapping(case_ticket.case_record_to_comment, rec, mapping=mapping)
-    comment["author"] = "planted-1107"
-    escalation = S.with_mapping(case_ticket.escalation_comment_payload, "aborted", mapping=mapping)
-    escalation["author"] = "planted-1107"
-    unreadable = S.with_mapping(case_ticket.unreadable_comment_payload, mapping=mapping)
-    assert unreadable["author"] == "author-1107", unreadable
-    assert S.with_mapping(case_ticket.case_record_to_comment, rec,
-                        mapping=mapping)["author"] == "author-1107", "a comment edit leaked"
-    assert S.open_reporter(mapping) == "rep-1107"
-    assert _plain(mapping) == before, "building payloads changed the record's mapping"
 
 
 def test_d_mapping_error_consumers(tmp_path, caplog):

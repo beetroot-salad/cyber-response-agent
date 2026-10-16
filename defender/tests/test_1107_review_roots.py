@@ -1,16 +1,4 @@
-"""PR #1156 review — the five root causes behind eleven of its findings, one guard each.
-
-1. How a system is reached is never guessed, and a missing Kibana container is a health-check
-   RESULT, not a fault that discards the Elasticsearch answer and trips the breaker.
-2. No settings fault names a host path. (Its other half — a stored fault is never re-raised as the
-   same object — guarded the branch's elastic stager, retired with cluster staging in #1224.)
-3. Every settings file is read one way: capped, single-linked, no-follow at the leaf, and split
-   on the same line endings the connect validator reads with.
-4. (Secret delivery — one read of `secrets.env`, `{{NAME}}` header slots — moved to #1163.)
-5. A receipt the box planted does not survive the run that planted it, however the run ends.
-
-Each test fails on 755177b6 (the PR head these fixes land on).
-"""
+"""Settings reading: no host path in faults, one capped no-follow reader, receipts live beside the run dir, health checks are data."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165

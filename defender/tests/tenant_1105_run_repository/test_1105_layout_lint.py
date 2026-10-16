@@ -48,7 +48,7 @@ def _lint() -> ModuleType:
         if err.name not in ("scripts.lint.lint_run_layout_imports", "scripts.lint", "scripts"):
             raise
         missing = err.name
-    pytest.fail(f"{LINT_FILE.relative_to(H.WORKTREE)} does not exist ({missing} is not "
+    pytest.fail(f"scripts/lint/lint_run_layout_imports.py does not exist ({missing} is not "
                 "importable): D7's layout lint is not written yet")
 
 

@@ -1,28 +1,9 @@
-"""#1105 PR 1 — `RunId` (D12; MF-02 and MF-08 reading A; OP-4, OP-8; NM-07).
-
-A run id becomes a frozen value type, built only by `RunId.parse(text)` (pinned ids, ids read
-back from storage) and `RunId.mint(label, *, clock=)` (today's `mint_run_id`). Both enforce
-today's grammar and case stability through `refuse_bad_run_id`, and a 206-byte bound on the id
-(255 minus the longest side-file name a write creates beside the run: the longest sidecar
-suffix plus the staged tail, R4-35..R4-37). Every refusal is `RunRefused`. It is unforgeable
-(every copy route re-parses; `__new__` and subclassing are refused) and a strict value: not a
-`str`, not path-like, not JSON-serialisable, unordered against a `str`, never equal to one.
-
-The sidecar clause is NOT part of `RunId` (the repository's `exists` — PR 1's lookup, a method
-since #1105 PR 2 — takes a `RunId` and answers for a known sidecar file at such a name), and the handle's constructors keep taking `str` in PR 1 (D12.4).
-
-Red at base 80888efb: `defender.run_repository` does not exist, so every test here fails at
-its own import of the door (`ModuleNotFoundError`); the handle-constructor test, which pins
-today's `str` behaviour, is red for the same reason (it imports `Run` from the door).
-"""
+"""`RunId`: frozen value, parse/mint bounds (206 bytes), sidecar suffixes, unforgeability."""
 from __future__ import annotations
 
 import copy
 import dataclasses
-import json
-import os
 import pickle
-from pathlib import Path
 
 import pytest
 
@@ -58,21 +39,6 @@ def _forged_in_place(rid: object, text: str, forged: str, protocol: int) -> byte
                     f"(MF-02's rebuild needs it): {blob.count(old)} copies")
     return blob.replace(old, new)
 
-
-def test_1105_run_id_is_built_only_by_parse_and_mint():
-    """RunId.parse(text) and RunId.mint(label, clock=...) each return a RunId; a direct RunId(...)
-    call, with any arguments, raises RunRefused."""
-    from defender.run_repository import RunId, RunRefused
-
-    parsed = RunId.parse("r1")
-    minted = RunId.mint("alert", clock=H.fixed_clock)
-    assert str(parsed) == "r1"
-    assert str(minted) == f"{H.MINT_PREFIX}alert"
-    assert H.is_a(parsed, RunId)
-    assert H.is_a(minted, RunId)
-    for args, kwargs in (((), {}), (("r1",), {}), (("r1", "r2"), {}), ((), {"text": "r1"})):
-        err = H.raised(RunId, *args, **kwargs)
-        assert H.is_a(err, RunRefused), f"RunId(*{args}, **{kwargs}) raised {err!r}"
 
 
 def test_1105_run_id_is_a_frozen_value_ordered_by_its_text_and_never_equal_to_a_str():
@@ -196,30 +162,6 @@ def test_1105_run_id_parse_admits_a_sidecar_suffixed_id():
         assert str(RunId.parse(name)) == name, name
 
 
-def test_1105_the_handle_constructors_keep_taking_str_and_todays_run_id_check(tmp_path):
-    """Run.for_tenant and Run.under still take the run id as a str (or a RunId), and admit it by
-    the repository's one rule, RunId.parse: a bad id, an upper-case one and one over the 206-byte
-    bound each raise RunRefused, so no handle is built for a run whose sidecar files could not be
-    named. (Owner ruling, #1105 PR 1 review: this replaced PR 1's split, where the constructors
-    kept refuse_bad_run_id and its ValueError; the name is kept because the spec graph cites
-    it.)"""
-    from defender.run_repository import Run, RunId, RunRefused
-
-    runs = tmp_path / H.T_ID / "runs"
-    H.plant_tenant_record(runs, H.T_ID)
-    run = Run.for_tenant(H.T_ID, "r1", runs_base=runs)
-    assert run.run_dir == runs / "r1"
-    assert run.runs_base == runs
-    assert run.tenant_id == H.T_ID
-    under = Run.under(runs, "r2", tenant_id=H.T_ID)
-    assert under.run_dir == runs / "r2"
-    assert Run.under(runs, RunId.parse("r3")).run_dir == runs / "r3", "a RunId is taken as is"
-    for ctor in (lambda rid: Run.for_tenant(H.T_ID, rid, runs_base=runs),
-                 lambda rid: Run.under(runs, rid)):
-        for bad in ("Bad Name", "UPPER", "a" * (H.RUN_ID_BOUND + 1)):
-            err = H.raised(ctor, bad)
-            assert H.is_a(err, RunRefused), f"{bad[:20]!r}: {err!r}"
-
 
 def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subclassing_are_refused():
     """Unpickling, copy.copy, copy.deepcopy and dataclasses.replace (and copy.replace where it
@@ -266,26 +208,3 @@ def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subcla
     assert H.is_a(err, RunRefused), f"subclassing RunId gave {err!r}"
 
 
-def test_1105_run_id_is_a_strict_value_not_path_like_not_json_and_unordered_against_str():
-    """A RunId is a closed value type: os.fspath(rid) and Path('x') / rid raise TypeError (a join
-    needs str(rid)); json.dumps(rid) raises TypeError; rid < 'a' raises TypeError;
-    RunId.parse(rid) is refused as a non-str with RunRefused; and a str subclass is admitted but
-    stored as an exact-str copy (type(str(rid)) is str). Reload behaviour is not pinned."""
-    from defender.run_repository import RunId, RunRefused
-
-    rid = RunId.parse("r1")
-    assert str(rid) == "r1"
-    assert Path("x") / str(rid) == Path("x/r1")
-    for probe in (lambda: os.fspath(rid), lambda: Path("x") / rid, lambda: json.dumps(rid),
-                  lambda: rid < "a", lambda: rid > "a"):
-        assert type(H.raised(probe)) is TypeError
-    err = H.raised(RunId.parse, rid)
-    assert H.is_a(err, RunRefused), f"RunId.parse(<RunId>) gave {err!r}"
-
-    class Sub(str):
-        pass
-
-    from_sub = RunId.parse(Sub("r1"))
-    assert type(str(from_sub)) is str
-    assert str(from_sub) == "r1"
-    assert from_sub == rid

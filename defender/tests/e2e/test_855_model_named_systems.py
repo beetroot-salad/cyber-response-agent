@@ -137,17 +137,6 @@ def _queued(rows: list[dict]) -> list[dict]:
     ]
 
 
-#: The most above-guard rejections any arm in this FILE drives on ONE lead —
-#: `test_only_a_coarsened_row_...` at four. `_dead_end`'s negative uses read the summary alone,
-#: and past `REJECTION_BUDGET` rejections the host now ends the lead itself, so every
-#: `assert not _dead_end(...)` below silently changes meaning once the headroom is gone.
-#:
-#: A HAND-MAINTAINED CENSUS, and that is its limit: the assertion below relates two CONSTANTS,
-#: so it catches a budget that moved down and NOT an arm that started driving more. The
-#: durable oracle is `test_1015_rejection_budget._terminator` — a negative arm that read the
-#: lead's terminator instead of the summary would need no census at all. Until the four
-#: `assert not _dead_end(...)` sites are converted, re-count this when adding an arm.
-_MOST_REJECTIONS_ANY_ARM_DRIVES = 4
 
 
 def test_a_schema_rejected_call_cannot_name_a_system_of_record(tmp_path):

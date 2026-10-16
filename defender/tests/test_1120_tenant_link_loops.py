@@ -1,22 +1,4 @@
-"""#1120 piece 1 — acceptance answers a link loop, or a linked tenant folder, with its own
-refusal, never a traceback (code review on PR #1157).
-
-Python 3.11's `Path.resolve()` raises `RuntimeError` on a link loop, not `OSError`, so a check
-that resolved a path below the data root and caught only `OSError` crashed on one. Acceptance
-now walks below the root no-follow and resolves only what it is handed, through one translator.
-
-  * A `knowledge` that is a link to itself, and a data root that is one, are `TenantRefused`
-    naming the path.
-  * `tenant.py check --folder` over a looped folder exits 1 with `[tenant.py] …`, and the
-    census lint's call (`check_knowledge_folder`) refuses it rather than raising.
-  * A link on the way to a required settings file is named as a link.
-  * A NUL in a caller-handed path is a refusal, not a `ValueError`.
-  * Before acceptance, a tenant folder that is a link into the running checkout's `defender/`
-    is refused by the layout's O11a guard, which judges `<T>` by where it leads.
-  * Step 7 refuses a mounted tree inside either knowledge half (a `runs/` linked into `agent/`).
-  * Step 7 counts the tenant's own `runs/`: a `<T>/runs` linked onto `knowledge/` would put the
-    host-only settings half inside the runs base, which a box mounts.
-"""
+"""Acceptance answers a link loop or linked tenant folder with its own refusal, never a traceback."""
 from __future__ import annotations
 
 import shutil

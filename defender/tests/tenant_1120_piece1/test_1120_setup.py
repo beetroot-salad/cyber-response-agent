@@ -1,22 +1,4 @@
-"""#1120 piece 1 — D7 `tenant.py setup <id>`: ADOPT the operator-placed knowledge folder.
-
-DC2 (human, §7): setup never fetches. The operator clones the tenant's repo on the host into
-`<root>/<id>/knowledge` (or places a plain folder there), then runs `tenant.py setup <id>`,
-which runs the one-tenant guard (MF1 (a): a rowless `<id>/` may hold exactly the name
-`knowledge`), then setup's rule as V18 (human) states it: the folder rules (links and special
-files, `agent/.tenant-id` presence + match, the top-level allow-list, the settings files parse —
-`mapping.yaml` included) plus RUN START'S OWN readiness function (V14, human, superseding V1's
-and V10's rule lists: the grant table loads, gather holds a query verb, the lead-zero agreement —
-setup refuses anything that would make a run refuse), then writes the row LAST (MF1 Q2,
-rules-first) — so a refused setup writes nothing.
-There is no `--from`, no copy, no staging, no rename and no git call, over a plain folder or a
-clone (DC2; V11 keeps the committed-.tenant-id rule in `check`). The grant gap is `check`'s,
-never setup's (DC1 as refined by V1: runs proceed over a gap, A1).
-
-Driven as the operator runs it: a process against a data root the test owns. The exit status
-and output are the observables, and "writes nothing" is a before/after census of the data root
-(bytes, mtimes and modes), never a bare exit code, which a crash also satisfies.
-"""
+"""D7 `tenant.py setup <id>`: ADOPT the operator-placed knowledge folder."""
 from __future__ import annotations
 
 import json
@@ -29,13 +11,10 @@ from pathlib import Path
 import pytest
 
 from defender import _tenant
-from defender import run as run_py
 from defender.scripts import tenant as tenant_py
-from defender.tests import _dispositions995 as D995
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
 #: The remedy every "no knowledge folder" refusal carries (DC2, N12 re-read): clone the tenant
-#: repo into the folder, then run setup again.
 REMEDY_WORDS = ("clone", "tenant.py setup")
 
 
@@ -58,12 +37,9 @@ ABSENT_KNOWLEDGE = [
 @pytest.mark.parametrize("plant", ABSENT_KNOWLEDGE)
 def test_1120_setup_over_an_absent_knowledge_folder_exits_one_naming_it_and_the_remedy_and_writes_nothing(
         tmp_path: Path, plant) -> None:
-    """`tenant.py setup acme` exits 1 naming <root>/acme/knowledge and the remedy (clone the
-    tenant repo into it, then run tenant.py setup acme again) in three cases: an absent or
-    empty data root, an empty rowless acme/ folder, and a row-only tenant. It writes nothing:
-    no row, no directory, and an existing row stays byte-identical (rules-first, MF1 Q2).
-    This supersedes pass-A's o10_fresh_root_writes_exactly_row exit 0 and J08's positive
-    leg — presence of a row alone is never a successful setup."""
+    """`tenant.py setup acme` exits 1 naming <root>/acme/knowledge and the remedy (clone the tenant
+    repo into it, then run tenant.py setup acme again) in three cases: an absent or empty data root,
+    an empty rowless acme/ folder, and a row-only tenant."""
     root = tmp_path / "data"
     plant(root)
     before = H.tree_census(root)
@@ -80,8 +56,6 @@ def test_1120_setup_over_an_absent_knowledge_folder_exits_one_naming_it_and_the_
 # ======================================================================================
 
 #: A verb the change-mgmt adapter declares (`change_mgmt_adapter.VERBS`) and the fixture's
-#: table grants on one line — dropping that line leaves a GAP the census names as
-#: `change-mgmt.get-change` (DC1: `check`'s finding, never setup's).
 GAP_LINE = "    get-change:"
 GAP_PAIR = "change-mgmt.get-change"
 
@@ -133,13 +107,8 @@ PLACEMENTS = [
 @pytest.mark.parametrize("place", PLACEMENTS)
 def test_1120_setup_adopts_an_operator_placed_knowledge_folder_writing_only_the_row(
         tmp_path: Path, place) -> None:
-    """Over a data root whose only entry is acme/knowledge, placed by the operator, `tenant.py
-    setup acme` exits 0 and prints nothing. The root census gains exactly acme/tenant.json;
-    every file under knowledge/ is byte- and mtime-identical, and `git status --porcelain` in
-    the clone is empty; accept_tenant then succeeds over the tree. Two cells: a plain `git
-    clone <local repo path>` of a repo committing agent/.tenant-id, whose .git objects are hard
-    links, and a plain folder carrying .tenant-id. The one-tenant guard admits the placed
-    knowledge in the rowless own folder (MF1 (a), P-DC2-1: at a1c65801 it refused it)."""
+    """Over a data root whose only entry is acme/knowledge, placed by the operator, `tenant.py setup
+    acme` exits 0 and prints nothing."""
     # rejected: detecting an in-progress or interrupted clone (NF3) — setup judges the tree
     # as found; the docs say run setup after the clone exits 0.
     root = tmp_path / "data"
@@ -207,14 +176,9 @@ GUARD_CELLS = [
 @pytest.mark.parametrize(("plant", "foreign"), GUARD_CELLS)
 def test_1120_the_one_tenant_guard_admits_only_knowledge_beside_a_missing_row(
         tmp_path: Path, plant, foreign: str | None) -> None:
-    """refuse_foreign_data_root(root, acme) returns over a rowless acme/ holding exactly
-    knowledge, whether that entry is a directory, a symlink or a file: the guard admits the
-    NAME, and acceptance judges the type (NF6). The row's own name stays exempt (pass-A J60).
-    It refuses naming acme/runs when runs/ sits beside knowledge — the principle narrows from
-    "anything setup did not make is foreign" to "anything the setup protocol did not sanction
-    is foreign", never further — and refuses naming beta for beta/knowledge beside acme's (the
-    outer scan is unchanged, N1). The admitted cells are the positive control of the refused
-    ones."""
+    """refuse_foreign_data_root(root, acme) returns over a rowless acme/ holding exactly knowledge,
+    whether that entry is a directory, a symlink or a file: the guard admits the NAME, and
+    acceptance judges the type (NF6)."""
     root = tmp_path / "data"
     plant(root, tmp_path)
     before = H.tree_census(root)
@@ -250,11 +214,8 @@ TENANT_ID_CELLS = [
 def test_1120_setup_refuses_a_placed_knowledge_folder_whose_tenant_id_is_absent_or_names_another_tenant(
         tmp_path: Path, content: str | None, also_named: tuple[str, ...]) -> None:
     """`setup acme` over an operator's clone exits 1 when agent/.tenant-id is absent, naming
-    <root>/acme/knowledge/agent/.tenant-id, or names beta (the wrong tenant's repo was cloned —
-    now the only cross-tenant defence at setup), naming the file, acme and beta. Either way
-    setup writes nothing: no row, knowledge/ byte-identical, and `git status --porcelain` in
-    the clone stays empty (setup never writes a .tenant-id into a clone). The positive
-    control: the same repo committing .tenant-id = acme sets up with exit 0."""
+    <root>/acme/knowledge/agent/.tenant-id, or names beta (the wrong tenant's repo was cloned — now
+    the only cross-tenant defence at setup), naming the file, acme and beta."""
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "bad", root, tenant_id_file=content)
     before = H.tree_census(root)
@@ -275,12 +236,9 @@ def test_1120_setup_refuses_a_placed_knowledge_folder_whose_tenant_id_is_absent_
 # ======================================================================================
 
 def test_1120_setup_over_a_finished_tenant_succeeds_and_writes_nothing(tmp_path: Path) -> None:
-    """After a successful adopt (a finished tenant: its row plus the placed knowledge/), a
-    second `setup acme` runs the folder rules, exits 0 with no output, and the whole data-root
-    census is byte- and mtime-identical — it also carries pass-A's o10_rerun_no_second_row.
-    DC1 cell: the same re-run after the tenant's verb-grants.yaml drops a declared verb still
-    exits 0 silently and writes nothing, because a grant gap is never setup's finding, while
-    `tenant.py check acme` exits 1 naming change-mgmt.get-change."""
+    """After a successful adopt (a finished tenant: its row plus the placed knowledge/), a second
+    `setup acme` runs the folder rules, exits 0 with no output, and the whole data-root census is
+    byte- and mtime-identical — it also carries pass-A's o10_rerun_no_second_row."""
     # rejected: re-cloning, re-copying or overwriting an existing knowledge/ (and, per N6,
     # pulling).
     root = tmp_path / "data"
@@ -336,11 +294,9 @@ REVERIFY_CELLS = [
 @pytest.mark.parametrize("damage", REVERIFY_CELLS)
 def test_1120_setup_rerun_runs_the_folder_rules_and_names_a_knowledge_folder_that_no_longer_passes(
         tmp_path: Path, damage) -> None:
-    """After a successful adopt, a re-run of `setup acme` runs the folder rules again —
-    presence alone is not success — and exits 1 naming the offending path, writing nothing,
-    when knowledge/ has since become empty, a dangling symlink, a regular file, or lost its
-    settings/ half. A clean re-run is the positive control (exit 0). A grant gap is never
-    setup's finding (DC1)."""
+    """After a successful adopt, a re-run of `setup acme` runs the folder rules again — presence alone
+    is not success — and exits 1 naming the offending path, writing nothing, when knowledge/ has
+    since become empty, a dangling symlink, a regular file, or lost its settings/ half."""
     root = tmp_path / "data"
     H.adopted(root)
     H.assert_clean(H.setup(tenant_py, root))
@@ -367,16 +323,10 @@ def test_1120_setup_rerun_runs_the_folder_rules_and_names_a_knowledge_folder_tha
 
 def test_1120_setup_refuses_a_placed_folder_that_fails_acceptance_and_leaves_grant_gaps_to_check(
         tmp_path: Path) -> None:
-    """Setup runs the folder rules (V18: accept_tenant's checks plus the settings files'
-    parse, mapping.yaml included) plus run start's own readiness function (V14: the grant table
-    loads, gather holds a query verb, the lead-zero agreement — its cells pinned in
-    test_1120_check.py), never the grant census (DC1: a gap does not stop runs, A1).
-    An adopted knowledge/ lacking
-    settings/lead-zero.yaml makes `setup acme` exit 1 naming that path and write nothing
-    (knowledge/ byte-identical, no row — rules-first); so does a verb-grants.yaml that does
-    not parse, naming it. DC1 FLIPS the gap: a verb-grants.yaml omitting a declared verb makes
-    setup exit 0 with the row written, while `tenant.py check acme` exits 1 naming
-    change-mgmt.get-change."""
+    """Setup runs the folder rules (V18: accept_tenant's checks plus the settings files' parse,
+    mapping.yaml included) plus run start's own readiness function (V14: the grant table loads,
+    gather holds a query verb, the lead-zero agreement — its cells pinned in test_1120_check.py),
+    never the grant census (DC1: a gap does not stop runs, A1)."""
     missing = tmp_path / "missing"
     H.place_knowledge(missing)
     lead_zero = H.settings_dir(missing) / "lead-zero.yaml"
@@ -482,17 +432,12 @@ FIRST_RUN_FAULTS = [
 @pytest.mark.parametrize("plant", FIRST_RUN_FAULTS)
 def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
         tmp_path: Path, plant) -> None:
-    """Over a data root holding only an operator-placed acme/knowledge and no row, `tenant.py
-    setup acme` exits 1 naming the offending path, writes no row and leaves the data-root
-    census unchanged, when knowledge/ is a symlink (to an otherwise valid folder) or a regular
-    file, when settings/ holds a symlink, when agent/ holds a hard link, when settings/ holds a
-    FIFO (refused without being opened — setup does not block on it), and when lead-zero.yaml
-    or systems/case-history/mapping.yaml does not parse. The refusal is acceptance's (or the
-    settings-files-parse folder rule's — V18 keeps it: run start's readiness function never reads
-    mapping.yaml), never the one-tenant guard's: MF1 admits the NAME knowledge in a
-    row-less own folder (NF6), so "a refused setup writes nothing" and "setup never produces a
-    tenant accept_tenant refuses" hold on the first run as on a re-run (MF1 Q2, N7). The
-    positive control: the fixture placed as-is sets up with exit 0 and writes the row."""
+    """Over a data root holding only an operator-placed acme/knowledge and no row, `tenant.py setup
+    acme` exits 1 naming the offending path, writes no row and leaves the data-root census
+    unchanged, when knowledge/ is a symlink (to an otherwise valid folder) or a regular file, when
+    settings/ holds a symlink, when agent/ holds a hard link, when settings/ holds a FIFO (refused
+    without being opened — setup does not block on it), and when lead-zero.yaml or systems/case-
+    history/mapping.yaml does not parse."""
     root = tmp_path / "data"
     named = plant(root, tmp_path)
     assert not H.row_path(root).exists(), "precondition: this is a first, row-less setup"
@@ -521,44 +466,6 @@ def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
 # The guarded lane: the row is setup's ONLY write, and setup makes no tree operation.
 # ======================================================================================
 
-#: Run a script under a Python audit hook that records every tree operation and every
-#: process spawn it makes (PEP 578 events) — the observation of what setup DOES, not only of
-#: its net effect: a copy made and then removed, or a staged folder renamed into place,
-#: leaves the same final census as no copy at all.
-_AUDIT_RUNNER = '''\
-import json, os, runpy, sys
-_fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-_WATCH = ("os.rename", "os.link", "os.symlink", "os.remove", "os.rmdir", "os.system",
-          "subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn", "os.fork")
-def _hook(event, args):
-    if event in _WATCH or event.startswith("shutil."):
-        os.write(_fd, (json.dumps([event, [repr(a) for a in args]]) + "\\n").encode())
-sys.addaudithook(_hook)
-_script = sys.argv[2]
-sys.argv = [_script, *sys.argv[3:]]
-runpy.run_path(_script, run_name="__main__")
-'''
-
-
-def _audited_setup(tmp: Path, root: Path) -> tuple[object, list[list]]:
-    runner = tmp / "audit_runner.py"
-    runner.write_text(_AUDIT_RUNNER, encoding="utf-8")
-    log = tmp / "audit.jsonl"
-    proc = H.run_script(runner, str(log), str(H.script_of(tenant_py)), "setup", H.TID,
-                        root=root, PYTHONDONTWRITEBYTECODE="1")
-    events = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] \
-        if log.exists() else []
-    return proc, events
-
-
-def _placed_plain_folder(tmp: Path, root: Path) -> None:
-    H.place_knowledge(root)
-
-
-def _placed_clone_with_uncommitted_tenant_id(tmp: Path, root: Path) -> None:
-    """A clone whose .tenant-id matches but is untracked: a setup that asked git anything
-    would either spawn it (seen by the hook) or refuse (V11 moves that rule to check)."""
-    H.clone_with_uncommitted_tenant_id(tmp / "src", root, "untracked")
 
 
 # ======================================================================================
@@ -567,12 +474,8 @@ def _placed_clone_with_uncommitted_tenant_id(tmp: Path, root: Path) -> None:
 
 def test_1120_two_concurrent_first_setups_leave_one_row_and_one_refusal_naming_it(
         tmp_path: Path) -> None:
-    """Two concurrent first `setup acme` runs over one operator-placed knowledge/ leave exactly
-    one tenant.json, valid and naming acme, and knowledge/ byte-identical. Every run exits 0
-    or 1, at least one exits 0, and a run that exits 1 names the row ("already exists",
-    create_tenant's create-exclusive write). No lock is taken. Which of the two outcomes the
-    loser takes is not pinned: rules-first, a loser that sees the winner's row takes the
-    silent re-run path (exit 0), one that races the create is refused naming the row."""
+    """Two concurrent first `setup acme` runs over one operator-placed knowledge/ leave exactly one
+    tenant.json, valid and naming acme, and knowledge/ byte-identical."""
     # rejected: a foreign tenant created mid-setup (N1).
     root = tmp_path / "data"
     H.place_knowledge(root)
@@ -601,21 +504,6 @@ def test_1120_two_concurrent_first_setups_leave_one_row_and_one_refusal_naming_i
 # N12 (pulled up, dissolved by DC2): a pass-A tenant meeting piece 1.
 # ======================================================================================
 
-def _pass_a_tenant(root: Path) -> None:
-    """A pass-A tenant: its row and a runs base with records, and no knowledge/."""
-    H.plant_row(root)
-    runs = H.tenant_folder(root) / "runs"
-    (runs / "r1").mkdir(parents=True)
-    (runs / "_tenant.json").write_text(json.dumps({
-        "tenant_id": H.TID, "base_world_id": "0" * 32,
-        "created_at": "2026-09-26T00:00:00+00:00"}) + "\n", encoding="utf-8")
-    (runs / "r1" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
-
-
-def _row_and_runs(root: Path) -> dict:
-    census = H.tree_census(root)
-    return {k: v for k, v in census.items()
-            if k == f"{H.TID}/{H.ROW_NAME}" or k.startswith(f"{H.TID}/runs")}
 
 
 # ======================================================================================
@@ -625,13 +513,9 @@ def _row_and_runs(root: Path) -> dict:
 def test_1120_a_data_root_inside_the_checkouts_defender_tree_is_still_refused(
         tmp_path: Path) -> None:
     """`tenant.py setup acme` (no --from) with DEFENDER_DATA_ROOT inside the RUNNING checkout's
-    defender/ tree and an adopted acme/knowledge placed there exits 1 through `[tenant.py]`,
-    naming the defender/ tree; no row is written and knowledge/ is byte-identical — the guard
-    refuses AFTER the operator's placement and never removes it. The refusal is O11a's (or
-    acceptance's containment step), never the one-tenant guard's, which admits the placed
-    knowledge. The positive control: <checkout>/.defender-data, outside defender/, with an
-    adopted knowledge/ exits 0 (pass-A o11a_positive_control, re-bound). The running checkout
-    here is a tmp COPY of this one, so the real worktree is never written into."""
+    defender/ tree and an adopted acme/knowledge placed there exits 1 through `[tenant.py]`, naming
+    the defender/ tree; no row is written and knowledge/ is byte-identical — the guard refuses AFTER
+    the operator's placement and never removes it."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     script = checkout / H.script_of(tenant_py).relative_to(H.REPO_ROOT)
     root = checkout / "defender" / "tenant-data"
@@ -658,10 +542,7 @@ def test_1120_a_data_root_inside_the_checkouts_defender_tree_is_still_refused(
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="uid 0 bypasses mode bits; CI runs non-root")
 def test_1120_s2_data_root_parent_not_writable(tmp_path: Path) -> None:
-    """The clone has already created <root>/acme/, so setup's first write is the row into it.
-    When that folder is not writable by setup's user (mode 0555), setup exits 1 naming
-    <root>/acme/tenant.json and the permission error; knowledge/ is untouched and no row
-    exists. Exercised with a real mode fault; skipped as root, which bypasses mode bits."""
+    """The clone has already created <root>/acme/, so setup's first write is the row into it."""
     root = tmp_path / "data"
     H.place_knowledge(root)
     before = _knowledge_census(root)
@@ -700,11 +581,10 @@ DEBRIS = [
 
 @pytest.mark.parametrize("plant", DEBRIS)
 def test_1120_s12_refuse_foreign_data_root_meets_filesystem_debris(tmp_path: Path, plant) -> None:
-    """The one-tenant guard's outer scan is unchanged (N1): any top-level entry other than the
-    id's own folder — an ext-style lost+found/, an NFS silly-rename .nfs* file, a
-    .knowledge.partial orphaned by a deleted tenant — beside an operator-placed acme/knowledge
-    makes `setup acme` refuse, naming the entry, before any write. The positive control: with
-    the debris removed the same root adopts acme (exit 0)."""
+    """The one-tenant guard's outer scan is unchanged (N1): any top-level entry other than the id's own
+    folder — an ext-style lost+found/, an NFS silly-rename .nfs* file, a .knowledge.partial orphaned
+    by a deleted tenant — beside an operator-placed acme/knowledge makes `setup acme` refuse, naming
+    the entry, before any write."""
     root = tmp_path / "data"
     H.place_knowledge(root)
     entry = plant(root)

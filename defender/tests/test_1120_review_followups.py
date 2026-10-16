@@ -1,12 +1,4 @@
-"""#1120 piece 1 — the small follow-ups from the code review on PR #1157.
-
-  * Finding 10: `validate_scaffold` serves against `$DEFENDER_DIR` when it is set, so step 7
-    holds the tenant's settings outside THAT tree — not only outside the package's own
-    `defender/`, which the command may not be running against. (The finding also named
-    `ticket_adapter`, whose command line #1107 has since removed.)
-  * Finding 12: the census lint reports a clean table from the rows it judged; it does not
-    load the table a second time to count the gather grants.
-"""
+"""validate_scaffold serves against DEFENDER_DIR when set."""
 from __future__ import annotations
 
 from pathlib import Path

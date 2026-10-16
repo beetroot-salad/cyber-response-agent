@@ -1,7 +1,5 @@
-"""#826 — the four defects the #807 spec carved out and pointed at a follow-up.
-
-This module holds the parts that need no agent: the elastic sort surface (item 2), the
-"""
+"""#826: elastic sort surface, failing-repeat wording of `repeat_note`, and the companion guard's
+predicate and counted domain (regressions for shipped behaviour)."""
 from __future__ import annotations
 
 import hashlib

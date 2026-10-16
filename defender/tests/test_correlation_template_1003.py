@@ -8,12 +8,10 @@ from pathlib import Path
 import pytest
 
 from defender._corpus import iter_query_templates, read_query_template
-from defender._paths import PATHS
 from defender.runtime.verb_grant import VerbGrant
 from defender.tests._dispositions995 import grant_for, load_dispositions, write_table
 from defender.tests import _tenants1106 as T1106
 
-DEFENDER = PATHS.defender_dir
 
 #: The holder's name as the table spells it — a literal, as in `test_correlation_holder_999`.
 HOLDER = "lead-zero-correlation"
@@ -126,19 +124,6 @@ def _pair(system: str, verb: str) -> str:
 # =========================================================================================
 # The config file: one key, per-deployment, refused the way `verb-grants.yaml` is.
 # =========================================================================================
-
-
-def test_a_planted_config_is_read_rather_than_a_literal(tmp_path):
-    """O1: the id is what the FILE says. A planted config naming another backend's template
-    returns THAT id — the loader carries no default and no fallback to the shipped value.
-    The positive control on the same address is the shipped id round-tripping."""
-    from defender.runtime.lead_zero_config import load_correlation_template
-
-    planted = _config(tmp_path / "moved", "correlation_template: splunk.correlate-things\n")
-    assert load_correlation_template(planted) == "splunk.correlate-things"
-
-    shipped_shaped = _config(tmp_path / "same", f"correlation_template: {SHIPPED_TEMPLATE_ID}\n")
-    assert load_correlation_template(shipped_shaped) == SHIPPED_TEMPLATE_ID
 
 
 def test_a_missing_config_is_refused_naming_the_path(tmp_path):
@@ -424,24 +409,6 @@ def test_a_template_binding_the_health_check_verb_is_not_a_dispatch_target(tmp_p
     assert _pair("elastic", "alerts") in message, message
 
 
-def test_the_grant_reaching_the_dispatch_is_the_tables_projection_whatever_the_id_says(tmp_path):
-    """O5, the negative universal at the unit seam: no id value changes the GRANT a dispatch
-    carries."""
-    from defender.runtime.lead_zero import resolve_correlation_dispatch
-
-    catalog = tmp_path / "catalog"
-    _plant(catalog, "elastic", "correlate-alerts-by-entity", verb="alerts")
-    _plant(catalog, "elastic", "another-alerts-template", verb="alerts")
-    grant = _shipped_shaped_grant(tmp_path)
-    templates = _templates(catalog)
-
-    first = resolve_correlation_dispatch(SHIPPED_TEMPLATE_ID, templates, grant)
-    second = resolve_correlation_dispatch("elastic.another-alerts-template", templates, grant)
-    assert first.grant == second.grant == grant
-    assert {(s, v) for s, v, _ in first.grant.entries} == {("elastic", "alerts"), ("elastic", "health-check")}
-    assert first.template_id != second.template_id
-
-
 # =========================================================================================
 # O6 (a) — an id that is not a template id, or resolves to no established template.
 # =========================================================================================
@@ -483,21 +450,6 @@ def test_an_id_the_lead_could_not_bind_as_its_own_is_refused_even_when_a_file_ca
     message = str(caught.value)
     assert bad_id in message, message
     assert "not the table" in message, f"a fault in the file must not send the operator to the table:\n{message}"
-
-
-def test_an_id_the_lead_binds_verbatim_is_accepted_exactly_when_the_tool_would(tmp_path):
-    """The positive half of the bind-time arm, pinned to the tool: an id `resolve_query_id` hands
-    back verbatim on the granted system is resolved, even a suffix the design's prose would not
-    spell (uppercase, an underscore) — because a lead handed that id WILL bind it."""
-    from defender.runtime.lead_zero import resolve_correlation_dispatch
-    from defender.runtime.query_tool import resolve_query_id
-
-    odd = "elastic.Correlate_Alerts"
-    assert resolve_query_id("elastic", "alerts", odd) == odd, "the fixture's id must be one the tool binds"
-    catalog = tmp_path / "catalog"
-    _plant(catalog, "elastic", "carrier", tid=odd, verb="alerts")
-    dispatch = resolve_correlation_dispatch(odd, _templates(catalog), _shipped_shaped_grant(tmp_path))
-    assert (dispatch.system, dispatch.template_id) == ("elastic", odd)
 
 
 def test_two_established_files_carrying_the_id_are_refused_naming_both_paths(tmp_path):

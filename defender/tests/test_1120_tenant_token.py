@@ -1,6 +1,4 @@
-"""#1120 piece 1 — `Tenant` refuses a construction that does not hold acceptance's token
-(code review, max: the spec's N10 run-time leg left the token out, so dataclass machinery
-refused before the guard ran, and deleting the guard kept the suite green)."""
+"""Tenant refuses a construction without acceptance's token."""
 from __future__ import annotations
 
 from pathlib import Path

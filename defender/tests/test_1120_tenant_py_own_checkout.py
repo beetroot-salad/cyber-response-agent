@@ -1,7 +1,4 @@
-"""#1120 piece 1 — `tenant.py` imports the checkout it runs from, even when another checkout
-comes first on `PYTHONPATH` (claims adversary, second pass on PR #1157: the old guard only
-added this checkout when it was absent, so an earlier entry won). `defender` is a namespace
-tree, so each module comes from the first path entry that holds it."""
+"""tenant.py imports the checkout it runs from even when another comes first on PYTHONPATH."""
 from __future__ import annotations
 
 import os

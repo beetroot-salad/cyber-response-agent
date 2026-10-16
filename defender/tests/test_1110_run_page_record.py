@@ -1,27 +1,4 @@
-"""#1110 — the run page is a run record; the local copy is a dev-only extra. Unit half.
-
-Two things live here, both cheap (no driven run):
-
-- O6, the deployment setting itself: `_env.deployment()` reads `DEFENDER_DEPLOYMENT` at call
-  time, answers `dev` or `production`, treats unset/empty as `production`, and treats anything
-  else as `production` WITH one logged ERROR per read naming the variable, the value and the
-  choices — never raising (the `DEFENDER_LOG_FORMAT` never-fatal precedent).
-- The hand-off in `run.py main` (O1, O7): the post-run render step is handed the run's
-  TENANT-BOUND handle — the one the real builder materialized — and a `VisualizeFailed` out of
-  it leaves the run's exit code at 0. Driven through `_spec791`'s tail seam over the real
-  entrypoint, with the real builder.
-- The failure type (#1110 second review): `VisualizeFailed` is ONE class, defined in the
-  stdlib-only leaf `defender/scripts/visualize/_page_failed.py` and re-exported by
-  `run_common`, so the renderer (which raises it) and `run.py` (which catches it by
-  `run_common`'s name) share it without either importing the other. The lenient-choice rule
-  both settings are read by is `test_env.py`'s (`env_choice`) and `test_log.py`'s.
-
-The end-to-end half (a real rendered run, the handle's `io` seam, the copy, the snapshot) is
-`tests/e2e/test_1110_run_page_record_e2e.py`.
-
-The names under test are imported inside each test, so this file collects against a tree that
-does not have them yet.
-"""
+"""DEFENDER_DEPLOYMENT setting and the run.py render-step hand-off (tenant-bound handle; a failed render leaves exit 0)."""
 from __future__ import annotations
 
 import logging

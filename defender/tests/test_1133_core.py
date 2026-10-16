@@ -1,48 +1,4 @@
-"""#1133 D1' — the rooted core in `defender/_io.py`: the held root (`hold`, `hold_new`, `Held`),
-and the rev-1 durable append `rooted_write` keeps for `Run`. (Rev 1's `rooted_unlink` had no
-caller once the handle's `delete` went through `Held.unlink`; it was removed, and the `Held`
-matrix below pins the same unlink semantics.)
-
-The held root, pinned here on the core itself (the `Episode` handle's matrices are in
-`test_1133_episode_handle.py`):
-
-* `hold(root)` opens the root following its spelling; a missing root is `FileNotFoundError`,
-  a non-directory `NotADirectoryError`; nothing is ever made.
-* `hold_new(parent, name)` makes a missing parent (following its spelling), then makes or adopts
-  `name` off the parent's handle WITHOUT following it (a link, file or FIFO there is the core's
-  folder refusal, left in place), holds the descriptor it made (a later rename of the name moves
-  the held folder with it), and fsyncs the parent on an `O_RDONLY|O_DIRECTORY` handle — whether
-  it made the directory or adopted one, the handle opened relative to the parent's descriptor
-  (the parent is resolved by path once), and a failed sync failing the call.
-* `Held.write` / `mkdir` / `unlink` against every plant: the core's refusal row (rev 3: a plant
-  AT the name is `_io.NotPlainEntry`, one at a folder on the way is not), the tree unchanged,
-  and a positive control on the same address. Rev 3 (R1) removes `Held.read`: reads are the
-  view's, and the view's plant matrix and close race are in `test_1133_rev3.py`.
-* One walk per write: during a verb every open is relative to a held descriptor (the root is
-  never re-resolved by path) and each holding folder is opened once, made in the same walk.
-* Durable append: the leaf is fsynced with every byte on it, then its holding folder on a
-  directory handle opened `O_RDONLY|O_DIRECTORY` (an `O_PATH` handle cannot be fsynced). Every
-  open is relative to a held descriptor, so after a rename the MOVED folder is the one synced;
-  a failed folder sync fails the append. Rev 3 (R4): a durable append walks WITHOUT making a
-  folder, so every durable row here writes into holding folders that already exist, and the
-  one-walk row for a missing folder expects `FileNotFoundError`.
-* No iterable `text`: anything but `str` / `bytes` is a `TypeError` before any I/O.
-* The view: a `Bound` over the same handle, the readers' surface only, owning nothing.
-* Lifetime (dup-per-verb): a verb in flight when `close()` lands keeps working off its own
-  descriptor, even when the root's old number has been reused for another folder; a close
-  landing just as a verb takes its dup cannot free the number under it (the dup and the close
-  share one lock); a verb after `close()` raises `EBADF` and touches nothing.
-* N-h: every descriptor is `O_CLOEXEC`; a child spawned while a root is held does not inherit it.
-* O6: a held root that was removed refuses every write and is never recreated; one that was
-  renamed is written in its new place.
-
-Faults are real (plants, renames, removals, a reused descriptor number) or come through the
-core's own `os_` seam; nothing is monkeypatched.
-
-Red before rev 3 (on the rev-2 tree): every leaf-plant row (no `_io.NotPlainEntry`) and the
-durable one-walk row over missing folders (rev 2's durable walk makes them). The `rooted_*`
-tests and the folder-plant rows hold today and must keep holding.
-"""
+"""The rooted core in _io.py: hold / hold_new / Held verbs and the durable append (no-follow, descriptor-held, close-on-exec, interrupt-safe)."""
 from __future__ import annotations
 
 import errno

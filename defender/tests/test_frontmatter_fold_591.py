@@ -3,14 +3,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender._frontmatter import parse_frontmatter_or_none, strip_frontmatter
+from defender._frontmatter import parse_frontmatter_or_none
 from defender.tests._by_path import DEFENDER, load_module
 from defender.evals.held_out import predicted_disposition
 from defender._vocab import DISPOSITION_ENUM
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp
 from defender.runtime.verbs import read_roster
-
 
 
 def _hook():
@@ -174,12 +173,6 @@ def test_d0_check_skill(tmp_path):
     assert _name_status(
         scaffold, _mk_scaffold_tree(tmp_path, "nb", b"---\nname: defender-nb\ndesc: x\xff\xfe\n---\n"), "nb"
     ) == "UNREADABLE"
-
-
-def test_d0_strip_frontmatter():
-    assert strip_frontmatter("---\ndescription: x\n---\nBODY\n") == "BODY"
-    no_fence = "no fence here\nplain body\n"
-    assert strip_frontmatter(no_fence) == no_fence
 
 
 def test_d_parity_grammar(tmp_path):
@@ -412,15 +405,3 @@ def test_d_unreadable_skill_fail_row(tmp_path):
     assert _name_status(scaffold, defroot, "gone") == "MISSING"
 
 
-def test_d_closer_at_eof_strips():
-    stripped = strip_frontmatter("---\ndescription: x\n---")
-    assert "---" not in stripped
-    assert "description" not in stripped
-    assert strip_frontmatter("---\ndescription: x\n---\nBODY\n") == "BODY"
-
-
-def test_d_no_fence_unchanged():
-    no_fence = "no leading fence\njust body\n"
-    assert strip_frontmatter(no_fence) == no_fence
-    empty_mapping = "---\n---\n"
-    assert strip_frontmatter(empty_mapping) == empty_mapping
