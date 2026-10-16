@@ -148,14 +148,18 @@ def _plant(sentinel: Path, token: str) -> None:
 
 def _probe_sentinel(
     source: Path, target: Path, docker: DockerFn, name: str, sentinel_name: str,
-    *, unlink_on_fault: bool,
+    *, unlink_on_fault: bool, exact: bool = False,
 ) -> None:
+    """Plant a fresh random token at `source / sentinel_name`, read it back through the box at
+    `target`, and remove it. The answer is compared after trimming surrounding whitespace, or,
+    when `exact`, byte for byte (a staged copy's token: no prefix, suffix or padding passes)."""
     token = uuid.uuid4().hex
     sentinel = source / sentinel_name
     _plant(sentinel, token)
     try:
         proc = _call(docker, ["docker", "exec", name, "cat", str(target / sentinel_name)])
-        if proc.returncode != 0 or (proc.stdout or "").strip() != token:
+        answer = proc.stdout or ""
+        if proc.returncode != 0 or (answer if exact else answer.strip()) != token:
             raise BoxFault(
                 f"the box could not read back the startup sentinel at {sentinel} — the tree "
                 "inside the box does not match the host"
@@ -229,9 +233,10 @@ _STAGED_HALVES = frozenset({"agent", "settings"})
 def _check_staged_root(mount: Mount, docker: DockerFn, name: str) -> None:
     """A `staged` mount is the root of a copy the host made (a drain's draft, a run's
     knowledge): it holds exactly `agent/` (a real folder), at most a `settings/` beside it, and
-    nothing else, judged on the host without following any entry. Then a fresh random token is
-    planted at the root, outside `agent/`, read back through the box, and removed, so a box bound
-    to another copy, or to an empty or stale folder, refuses before any workload runs. The
+    nothing else, judged on the host without following any entry (so no earlier start's token
+    remains). Then a fresh random token is planted at the root, outside `agent/`, read back
+    through the box byte for byte, and removed, so a box bound to another copy, or to an empty
+    or stale folder, refuses before any workload runs. The
     copy's `agent/` is never written and `.tenant-id` is never a probe: identity was checked
     once, when the copy's commit was published."""
     source = Path(mount.source)
@@ -249,7 +254,7 @@ def _check_staged_root(mount: Mount, docker: DockerFn, name: str) -> None:
         )
     _probe_sentinel(
         source, Path(mount.target), docker, name,
-        f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
+        f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True, exact=True,
     )
 
 
