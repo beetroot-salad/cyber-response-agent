@@ -591,6 +591,22 @@ def _snapshot_writer(  # noqa: PLR0913 — the run's identity plus the caps its 
         base_request_limit=bounds.base_request_limit, extra_turns=bounds.extra_turns)
 
 
+def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: float) -> None:
+    """Write the run's tool trace, or an empty one when the store cannot produce it; never
+    fails the run (the trace is observability)."""
+    try:
+        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
+    except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
+        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
+        try:
+            write_guarded(RunPaths(run_dir).tool_trace, "")
+        except OSError as fallback_err:
+            # The target can be a planted alias; the trace is observability and must not
+            # discard the run's result.
+            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+                          f"{run_dir} has no tool_trace.jsonl")  # lint-run-records: ok — an operator diagnostic naming the missing record
+
+
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
     *,
     alert_path: Path,
@@ -767,17 +783,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     wall_ms = (time.monotonic() - run_started) * 1000.0
 
     result = agent_run.result if agent_run is not None else None
-    try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
-    except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
-        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
-        try:
-            write_guarded(RunPaths(run_dir).tool_trace, "")
-        except OSError as fallback_err:
-            # The target can be a planted alias; the trace is observability and must not
-            # discard the run's result.
-            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-                          f"{run_dir} has no tool_trace.jsonl")  # lint-run-records: ok — an operator diagnostic naming the missing record
+    _write_trace_or_empty(run_dir, store, session_id, wall_ms)
     logger.close()
     output = result.output if result is not None else None
     return _run_summary(
