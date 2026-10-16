@@ -194,9 +194,15 @@ def planted_source(
     this builder or the helper (they observe snapshots only through driven runs).
     `legal_source` stays snapshot-less: it is N4's fixture and never the helper's input.
 
-    Identical to `legal_source` today, because nothing plants a snapshot yet."""
-    return _hand_planted_source(tmp_path, investigation=investigation, queries=queries,
-                                case_id=case_id, name=name)
+    Snapshotted here, as of the files this builder planted, for every tool-calling response
+    (`_fork_snapshot_plant`, #1255 deferred verification 4)."""
+    from defender.tests._fork_snapshot_plant import plant_fork_snapshots
+
+    planted = _hand_planted_source(tmp_path, investigation=investigation, queries=queries,
+                                   case_id=case_id, name=name)
+    store, run_dir, session_id, _path_ids = planted
+    plant_fork_snapshots(store, session_id, run_dir)
+    return planted
 
 
 def _hand_planted_source(tmp_path: Path, *, investigation: str | None, queries: str | None,

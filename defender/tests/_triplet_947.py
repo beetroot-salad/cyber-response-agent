@@ -713,8 +713,8 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
     FIXTURE-ONLY — a test input, not evidence the driver records snapshots — and no
     `test_1255_snapshot_*` module may import it; `_branch_947.legal_source` stays snapshot-less
     (it is the N4 fixture). This function may call such a helper — but NEVER when
-    `pre_snapshot=True`, which is how the C2 test asks for the snapshot-less source. Today
-    nothing plants a snapshot, so the flag changes nothing yet.
+    `pre_snapshot=True`, which is how the C2 test asks for the snapshot-less source. It calls
+    `_fork_snapshot_plant.plant_fork_snapshots` otherwise.
 
     Idempotent: `runs_base` is called more than once in some scenarios, and a second session
     under one case id would make "the run's own main session" ambiguous.
@@ -729,7 +729,6 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
     from defender.tests import _branch_947
     from defender.tests import _session_store_705 as S
 
-    # Honoured by construction today: nothing below plants a snapshot (see the docstring).
     assert isinstance(pre_snapshot, bool), pre_snapshot
 
     # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
@@ -746,6 +745,11 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
             store.append(session_id, [S.text_response("orienting")], agent_id="main")
         while BRANCH_MESSAGE_ID not in ss.path_row_ids(store, session_id):
             store.append(session_id, list(S.complete_pair()), agent_id="main")
+        if not pre_snapshot:
+            # #1255 deferred verification 4: the fixture-only planter (see its module).
+            from defender.tests._fork_snapshot_plant import plant_fork_snapshots
+
+            plant_fork_snapshots(store, session_id, src)
     finally:
         store.close()
 
