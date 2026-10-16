@@ -16,8 +16,10 @@ folders, and only host code here reads or writes git.
   tenant commits) commits it as plain 100644 blobs, and `Batch.reset` re-syncs the draft.
 - Every push route (finish, retained deliver, revert) sends only commits the commit-maker made,
   by its record under `<T>/learning/`, which outlives the process that made them.
-- Git runs with every credential helper reset and one helper that answers only `get`, from the
-  credential `TenantDelivery.open` read (the file's single reader); no prompt can run.
+- Git runs with every credential helper reset and one helper that answers only `get`, only for
+  the forge's own scheme, host and port, with the credential `TenantDelivery.open` read (the
+  file's single reader), handed over an inherited pipe: never in a process's argument list or
+  environment, never in another file. No prompt can run.
 """
 from __future__ import annotations
 
@@ -177,6 +179,11 @@ class AgentChange:
         if self.content is not None and not isinstance(self.content, bytes):
             raise TypeError(f"the content of {self.path!r} is bytes or None, not "
                             f"{type(self.content).__name__}")
+        # Plain `str` and `bytes`, whatever subclass was given: nothing reachable from a change
+        # can be changed after it is built.
+        object.__setattr__(self, "path", str.__str__(self.path))
+        if self.content is not None:
+            object.__setattr__(self, "content", bytes(self.content))
 
 
 @dataclass(frozen=True)
@@ -333,6 +340,29 @@ def _create_new_at(dir_fd: int, name: str, data: bytes) -> None:
 
 #: The pointer file in `<T>/exports/` naming the latest published export.
 _POINTER = "current"
+#: The name an export is written under before it is renamed into place.
+_STAGING_PREFIX = ".publishing-"
+
+
+def _sweep_staging(exports: Path) -> None:
+    """Remove every staging folder a publisher cut off left in `exports/`, as the entry it is
+    (a folder removed with no link below it followed; anything else unlinked). Called under
+    the tenant's lock, so no live publisher is writing one."""
+    if not _io.entry_present(exports):
+        return
+    fd = os.open(exports, _FOLDER_FLAGS)
+    try:
+        with os.scandir(fd) as entries:
+            stale = [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in entries
+                     if entry.name.startswith(_STAGING_PREFIX)]
+        for name, is_folder in stale:
+            if is_folder:
+                shutil.rmtree(name, dir_fd=fd)
+            else:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(name, dir_fd=fd)
+    finally:
+        os.close(fd)
 
 
 @dataclass(frozen=True)
@@ -479,18 +509,24 @@ def _made_commits(tenant: Tenant) -> list[_Made]:
 # Git: the environment, the credential helper
 # ==========================================================================================
 
-#: The variables the credential helper answers from: what `TenantDelivery.open` read from the
-#: credential file, handed to the git process that needs it and to nothing else.
-_USER_ENV = "DEFENDER_TENANT_FORGE_USER"
-_TOKEN_ENV = "DEFENDER_TENANT_FORGE_TOKEN"
+#: The most a credential answer may hold: it is written whole into a fresh pipe before git
+#: starts, so it must fit the pipe's buffer (64 KiB on Linux) without blocking.
+_ANSWER_LIMIT = 16 * 1024
 
 
-def _credential_helper() -> str:
+def _credential_helper(fd: int) -> str:
     """The one credential helper git consults (amendment 2, flow 5), as a shell snippet: it
-    drains git's request, answers only `get` from the two variables, and ignores `store` and
-    `erase`, so no git operation can rewrite or empty the credential file."""
-    return ('!f() { cat >/dev/null; test "$1" = get || exit 0; '
-            f'printf "username=%s\\npassword=%s\\n" "${_USER_ENV}" "${_TOKEN_ENV}"; }}; f')
+    drains git's request, answers only `get`, by copying out the answer written into the
+    inherited pipe `fd` from the credential `TenantDelivery.open` read (`/dev/fd/<fd>`: a
+    shell redirection cannot name a descriptor above 9), and ignores `store` and `erase`, so
+    no git operation can rewrite or empty the credential file. The snippet holds no
+    credential."""
+    return f'!f() {{ cat >/dev/null; test "$1" = get || exit 0; cat /dev/fd/{fd}; }}; f'
+
+
+def _credential_answer(user: str, token: str) -> bytes:
+    """What the helper hands git for `get`, in git's credential format."""
+    return f"username={user}\npassword={token}\n".encode()
 
 
 def _local_env() -> dict[str, str]:
@@ -587,13 +623,15 @@ class Batch:
         )
 
     def change_set(self) -> ChangeSet:
-        """The claim: the draft's `agent/` against the worktree's, as changes. Only regular
-        files in the lanes may differ; any other entry anywhere in the draft, an oversized
-        file, a change outside the lanes or one touching a forbidden name refuses the claim
-        whole."""
+        """The claim: the draft's `agent/` against the branch's last commit (the worktree's
+        `HEAD`), as changes. The base is read from git's objects, not the worktree's checkout,
+        so attributes on `main` (`eol`, `ident`, a filter) never show a change the box did not
+        make. Only regular files in the lanes may differ; any other entry anywhere in the
+        draft, an oversized file, a change outside the lanes or one touching a forbidden name
+        refuses the claim whole."""
         with _refusals():
             draft = _regular_files(self.draft_root / "agent")
-            base = _regular_files(self.worktree / "agent")
+            base = self._delivery._agent_blobs(self._line.tip)
             changes = []
             for rel in sorted(draft.keys() | base.keys()):
                 if draft.get(rel) == base.get(rel):
@@ -608,11 +646,12 @@ class Batch:
         return self._delivery._commit(self._line, change_set, message)
 
     def reset(self) -> None:
-        """Re-sync the draft's `agent/` with the worktree's, in place: the box's additions
-        removed, its deletions and edits restored, links and FIFOs removed without being
-        followed or opened. The lanes stay, so a running box keeps its binds."""
+        """Re-sync the draft's `agent/` with the branch's last commit, in place, from git's
+        objects: the box's additions removed, its deletions and edits restored, links and
+        FIFOs removed without being followed or opened. The lanes stay, so a running box keeps
+        its binds."""
         with _refusals():
-            files = _regular_files(self.worktree / "agent")
+            files = self._delivery._agent_blobs(self._line.tip)
             _resync(self.draft_root / "agent", files, _folders_of(files, self.lanes))
 
 
@@ -668,12 +707,27 @@ class TenantDelivery:
 
     def _network(self, args: Sequence[str]) -> str:
         """A fetch or push: every credential helper reset, then the one helper, keyed to the
-        forge's own scheme, host and port so it answers no other server, holding the
-        credential `open` read."""
-        config = ["-c", "credential.helper=",
-                  "-c", f"credential.{self.forge.address.origin}.helper={_credential_helper()}"]
-        env = {**_local_env(), _USER_ENV: self._user, _TOKEN_ENV: self._token}
-        return self._git([*config, *args], env=env)
+        forge's own scheme, host and port so it answers no other server (a URL rewritten to
+        another host gets nothing), and `core.askPass` emptied. The credential `open` read is
+        written into a fresh pipe for this git run alone; git and what it spawns inherit the
+        read end, and the helper copies it out. Neither the argument list nor the environment
+        of any process holds it, and no file does."""
+        read_fd, write_fd = os.pipe()
+        try:
+            try:
+                answer = memoryview(_credential_answer(self._user, self._token))
+                while answer:
+                    answer = answer[os.write(write_fd, answer):]
+            finally:
+                os.close(write_fd)
+            helper = _credential_helper(read_fd)
+            config = ["-c", "credential.helper=",
+                      "-c", f"credential.{self.forge.address.origin}.helper={helper}",
+                      "-c", "core.askPass="]
+            return _git.git([*config, *args], cwd=self.tenant.knowledge, env=_local_env(),
+                            pass_fds=(read_fd,))
+        finally:
+            os.close(read_fd)
 
     def _check_origin(self) -> None:
         if self._git(["config", "--get", "remote.origin.url"]) != self._origin:
@@ -748,14 +802,16 @@ class TenantDelivery:
 
     def _write_export(self, commit: str, files: dict[str, bytes]) -> TenantExport:
         """`<T>/exports/<commit>/`, written whole into a fresh folder beside it and renamed into
-        place; an export already there is immutable and kept as it is."""
+        place; an export already there is immutable and kept as it is. The caller holds the
+        lock, so any staging folder found is a dead publisher's and is removed first."""
         exports = self.tenant.exports
+        _sweep_staging(exports)
         final = exports / commit
         if _io.entry_present(final):
             if not stat.S_ISDIR(final.lstat().st_mode):
                 raise DeliveryRefused(f"{final} is not an export folder")
             return TenantExport(commit=commit, path=final)
-        staging = f".publishing-{commit}-{secrets.token_hex(4)}"
+        staging = f"{_STAGING_PREFIX}{commit}-{secrets.token_hex(4)}"
         try:
             with _io.hold_new(exports, staging, exclusive=True) as folder:
                 for path, data in files.items():
@@ -781,7 +837,7 @@ class TenantDelivery:
             with tenant_lock(self.tenant):
                 export = self._publish_locked()
                 self._cut(worktree, branch, export.commit)
-            files = _regular_files(worktree / "agent")
+            files = self._agent_blobs(export.commit)
             with _io.hold_new(self.tenant.drafts, batch_id, exclusive=True) as draft:
                 draft.mkdir("agent")  # lint-unguarded-tree-write: ok — `Held.mkdir`, the rooted core's no-follow walk off the held draft root, not a `Path.mkdir`
                 for rel, data in files.items():
@@ -793,6 +849,19 @@ class TenantDelivery:
             return Batch(id=batch_id, branch=branch, export=export, worktree=worktree,
                          draft_root=self.tenant.drafts / batch_id, lanes=declared,
                          _delivery=self, _line=line)
+
+    def _agent_blobs(self, commit: str) -> dict[str, bytes]:
+        """`agent/` at `commit`, by path below it, each file's exact stored bytes, from git's
+        objects: what the draft is copied from, derived against and reset to. An entry that is
+        not a regular blob refuses (publish refused it already for an export commit)."""
+        env = _local_env()
+        entries = _tree_entries(self.tenant.knowledge, commit, ["agent"], env, recursive=True)
+        for mode, kind, _oid, path in entries:
+            if kind != "blob" or mode not in _REGULAR_MODES:
+                raise DeliveryRefused(f"{commit} holds {path!r} as a {kind} of mode {mode}: "
+                                      "not a regular file")
+        blobs = _cat_blobs(self.tenant.knowledge, (oid for _m, _k, oid, _p in entries), env)
+        return {path.removeprefix("agent/"): blobs[oid] for _m, _k, oid, path in entries}
 
     def _cut(self, worktree: Path, branch: str, base: str) -> None:
         """A new worktree at `base` on a new `branch`: never over an existing branch or folder
@@ -824,6 +893,10 @@ class TenantDelivery:
         worktree to it."""
         if not isinstance(change_set, ChangeSet):
             raise TypeError(f"the commit-maker takes a ChangeSet, not {type(change_set).__name__}")
+        # Re-validated from scratch into a copy the commit-maker alone holds: a change set
+        # altered after it was built (past its frozen attributes) is refused or not seen.
+        change_set = ChangeSet(tuple(AgentChange(change.path, change.content)
+                                     for change in tuple(change_set.changes)))
         with _refusals():
             if not isinstance(message, str) or not message.strip():
                 raise DeliveryRefused("a commit needs a message")
@@ -1023,6 +1096,9 @@ def _read_credential(path: Path) -> tuple[str, str, str]:
             or parts.fragment or any(ord(ch) < 0x20 for ch in user + token)):
         raise DeliveryRefused(f"the tenant's forge credential {path} must be one "
                               "scheme://user:token@host[:port] line")
+    if len(_credential_answer(user, token)) > _ANSWER_LIMIT:
+        raise DeliveryRefused(f"the tenant's forge credential {path} is longer than "
+                              f"{_ANSWER_LIMIT} bytes")
     return user, token, entry
 
 

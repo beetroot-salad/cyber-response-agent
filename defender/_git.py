@@ -66,6 +66,7 @@ def _run(
     timeout: float | None = None,
     input: str | None = None,
     env: Mapping[str, str] | None = None,
+    pass_fds: Sequence[int] = (),
 ) -> subprocess.CompletedProcess[str]:
     proc = subprocess.run(
         ["git", *args],
@@ -77,6 +78,7 @@ def _run(
         timeout=timeout,
         input=input,
         env=None if env is None else dict(env),
+        pass_fds=tuple(pass_fds),
     )
     if check and proc.returncode != 0:
         raise GitError(args, proc.returncode, proc.stderr)
@@ -91,9 +93,13 @@ def git(
     timeout: float | None = None,
     input: str | None = None,
     env: Mapping[str, str] | None = None,
+    pass_fds: Sequence[int] = (),
 ) -> str:
-    return _run(
-        args, cwd=cwd, check=check, timeout=timeout, input=input, env=env).stdout.strip()
+    """`git <args>`, its trimmed output; a non-zero exit raises `GitError` when `check`.
+    `pass_fds` are descriptors the git process (and what it spawns) inherits, as
+    `subprocess.run` passes them."""
+    return _run(args, cwd=cwd, check=check, timeout=timeout, input=input, env=env,
+                pass_fds=pass_fds).stdout.strip()
 
 
 def git_ok(
