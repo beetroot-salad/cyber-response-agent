@@ -9,6 +9,7 @@ clone never interleave, and the lock is free while the host talks to the network
 runs."""
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -800,21 +801,37 @@ def _upkeep_locks(checkout):
 
 
 def _running_in(*roots):
-    """`(pid, command line)` of every other process whose working folder is under `roots`."""
+    """`(pid, command line)` of every other process at work under `roots`: its working folder,
+    a file it holds open, or a path on its command line is there (a git run with `--git-dir`
+    from elsewhere, say)."""
     folders = [os.path.realpath(root) for root in roots]
+
+    def under(path):
+        return any(path == folder or path.startswith(folder + os.sep) for folder in folders)
     found = []
     for entry in os.listdir("/proc"):
         if not entry.isdigit() or int(entry) == os.getpid():
             continue
+        proc = f"/proc/{entry}"
         try:
-            cwd = os.readlink(f"/proc/{entry}/cwd")
-            with open(f"/proc/{entry}/cmdline", "rb") as f:
-                argv = f.read(4096)
+            with open(f"{proc}/cmdline", "rb") as f:
+                argv = f.read(4096).decode("utf-8", "replace")
+            held = [os.readlink(f"{proc}/cwd")]
+            fds = os.listdir(f"{proc}/fd")
         except OSError:
             continue
-        if any(cwd == folder or cwd.startswith(folder + os.sep) for folder in folders):
-            found.append((int(entry), argv.replace(b"\0", b" ").decode("utf-8", "replace")))
+        for fd in fds:
+            with contextlib.suppress(OSError):
+                held.append(os.readlink(f"{proc}/fd/{fd}"))
+        if any(under(path) for path in held) or any(folder in argv for folder in folders):
+            found.append((int(entry), argv.replace("\0", " ").strip()))
     return found
+
+
+#: A process the scan's positive controls start: it holds open the file `P3_HOLD` names, if
+#: any, says it is ready, and sleeps.
+_SLEEPER = ("import os, time; hold = os.environ.get('P3_HOLD'); "
+            "held = hold and open(hold, 'rb'); print('ready', flush=True); time.sleep(60)")
 
 
 def _quiet(*roots, seconds=60.0):
@@ -831,13 +848,17 @@ def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, 
     that: detached, it holds `maintenance.lock` and writes after the call has returned, racing
     the next operation on the clone; in the foreground, it rewrites the clone inside a fetch or
     commit the tenant lock does not cover. So after `open`, `publish`, `start_batch`, `commit`,
-    `reset` and `finish`: no process still runs in the tenant's folders, no upkeep lock stands
-    in the clone, and no upkeep has run there. How the code turns it off is not pinned.
+    `reset` and `finish`: no process the call started still runs (choice 20: none outlives
+    its call), no upkeep lock stands in the clone, and no upkeep has run there. How the code
+    turns upkeep off is not pinned.
 
     The clone's own config forces a task that writes a commit-graph, so a run is seen after the
-    fact whatever environment the code gives its git (choice 20). Positive controls: with this
-    process's environment as it is (the fixtures' `no_upkeep` never reaches it), a plain fetch
-    in a clone armed the same way does leave the graph; the scan sees a process in the clone."""
+    fact whatever environment the code gives its git. A process is seen by its working folder,
+    an open file or a path on its command line under the tenant's folders. A run that starts
+    late shows at the next call's check; after `finish`, the last, the case waits 2 s for one.
+    Positive controls: with this process's environment as it is (the fixtures' `no_upkeep`
+    never reaches it), a plain fetch in a clone armed the same way leaves the graph; the scan
+    sees a process by each of the three."""
     for name, value in git_config_home(tmp_path).create().env().items():
         monkeypatch.setenv(name, value)
     tenant, remote = repo[0], repo[1]
@@ -853,23 +874,32 @@ def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, 
                    capture_output=True, timeout=60)
     assert _quiet(control) == []
     assert _graphs(control), "a plain fetch here must run git's upkeep, or the probe is blind"
-    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], cwd=clone)
-    try:
-        assert sleeper.pid in [pid for pid, _ in _running_in(tenant.dir)], \
-            "the scan must see a process running in the clone"
-    finally:
-        sleeper.kill()
-        sleeper.wait()
+    for how, cwd, args, hold in (("working folder", clone, [], {}),
+                                 ("open file", "/", [], {"P3_HOLD": str(clone / ".git" / "HEAD")}),
+                                 ("command line", "/", [str(clone / ".git")], {})):
+        sleeper = subprocess.Popen([sys.executable, "-c", _SLEEPER, *args], cwd=cwd,
+                                   env={**os.environ, **hold}, stdout=subprocess.PIPE)
+        try:
+            sleeper.stdout.readline()
+            assert sleeper.pid in [pid for pid, _ in _running_in(tenant.dir)], \
+                f"the scan must see a process whose {how} is in the clone"
+        finally:
+            sleeper.kill()
+            sleeper.wait()
+            sleeper.stdout.close()
 
     for key, value in _FORCED_TASK:
         git(clone, "config", key, value)
     roots = [tenant.dir]
 
-    def probe(call, fn):
+    def probe(call, fn, settle=0.0):
         result = fn()
         running, locks, during = _running_in(*roots), _upkeep_locks(clone), _graphs(clone)
         left = _quiet(*roots)
-        ran = "before it returned" if during else "after it returned" if _graphs(clone) else ""
+        deadline = time.monotonic() + settle
+        while not (late := _graphs(clone)) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        ran = "before it returned" if during else "after it returned" if late else ""
         found = {what: got for what, got in (
             ("still running at return", running), ("upkeep locks in the clone", locks),
             ("upkeep's commit-graph written in the clone", ran),
@@ -889,4 +919,4 @@ def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, 
                                                               encoding="utf-8")
     probe("commit", lambda: batch.commit(batch.change_set(), "claim"))
     probe("reset", batch.reset)
-    assert probe("finish", lambda: d.finish(batch)).endswith("/pulls/7")
+    assert probe("finish", lambda: d.finish(batch), settle=2.0).endswith("/pulls/7")
