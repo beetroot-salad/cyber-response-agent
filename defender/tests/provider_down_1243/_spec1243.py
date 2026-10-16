@@ -169,9 +169,9 @@ def ordinary_error(detail: str = "a sibling tool task broke") -> Fault:
 
 
 #: The grouped shapes a `ProviderDown` can arrive in, keyed by test id. `flat`: the group holds
-#: it alone; `nested`: a group inside a group holds it (a one-level unwrap misses it); `mixed`:
+#: it alone; `nested`: a group inside a group holds it (a one-level peel misses it); `mixed`:
 #: a group holding an ordinary error FIRST and it second (a reader of `exceptions[0]`, or an
-#: unwrap of one-member groups only, misses it). A group with NO `ProviderDown` is the control
+#: peel of one-member groups only, misses it). A group with NO `ProviderDown` is the control
 #: (`GROUPED_WITHOUT_PROVIDER_DOWN`).
 GROUPED_PROVIDER_DOWN: dict[str, Callable[[Fault], Fault]] = {
     "flat": lambda down: exception_group(down),
