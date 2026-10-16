@@ -429,8 +429,9 @@ def test_an_unconfigured_ticket_lane_stays_silent_for_every_exit_class(tmp_path)
     """An operator with no case-history configuration makes NO call for any exit class,
     `aborted` included, and (#1107 O6) a run that reached the config says so in an `error`
     receipt naming no store: configuring no ticket system is no longer silent on the run page.
-    The no-verdict exits (budget, store, provider-down) stay silent — their no-verdict check runs BEFORE the config is
-    read, so those runs write no receipt whatever their tenant says (#1047).
+    The no-verdict exits stay silent — their no-verdict check runs BEFORE the config is
+    read, so those runs write no receipt whatever their tenant says (#1047); #1243 O5 adds
+    `provider-down` to them ("as for budget/store").
 
     Positive control: the same run and exit class with a configured lane makes its call."""
     no_verdict = ("budget", "store", "provider-down")

@@ -12,7 +12,9 @@ Three levels, each with its own evidence:
   are the policy's fields, injected — no `monkeypatch`);
 * the REAL builders over real HTTP to a local fake provider (`FakeProvider`): the Anthropic
   builder reached through `ANTHROPIC_BASE_URL` (the SDK reads it when no base URL is passed —
-  anthropic 1.6 `_client.py`), the OpenAI-compatible builder through its own `base_url`;
+  anthropic 1.6 `_client.py`), the OpenAI-compatible builder through its own `base_url`; and
+  the product's default (Fireworks) names, whose https base URL is fixed, through a local
+  proxy that refuses every tunnel (`RefusingProxy`, read from `HTTPS_PROXY`);
 * the run: a scripted run under the real retrier (`drive(wrap_model=...)`), where the wire log,
   the store and the request count are observed.
 
@@ -47,10 +49,19 @@ def _down(exc: BaseException) -> Any:
     return exc
 
 
-def _retry_warnings(caplog: pytest.LogCaptureFixture, status: str) -> list[logging.LogRecord]:
-    """The retry lines: WARNING records naming the status and an attempt out of 4."""
-    return [r for r in caplog.records if r.levelno == logging.WARNING
-            and status in r.getMessage() and "/4" in r.getMessage()]
+def _retry_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """The retry lines: WARNING records naming an attempt out of 4 (whatever else they say —
+    what they must say is each test's assertion)."""
+    return [r.getMessage() for r in caplog.records
+            if r.levelno == logging.WARNING and "/4" in r.getMessage()]
+
+
+def _names_the_wait(msg: str, wait: float, *, n: int, model_name: str,
+                    status: int | None = None) -> bool:
+    """`msg` carries `wait` (seconds, to within 5% or 0.05 s) as a number of its own — not one
+    of the numbers it names for other reasons (status, `n/4`, the model name)."""
+    nums = P.numbers_besides(msg, status=status, spelled=(model_name, f"{n}/4"))
+    return any(abs(x - wait) <= max(0.05, 0.05 * wait) for x in nums)
 
 
 # =================================================================================================
@@ -69,10 +80,14 @@ def test_o1_a_temporary_status_is_retried_and_success_after_a_retry_is_a_plain_s
     assert result.output == "answered"
 
 
-@pytest.mark.parametrize("make", [P.no_response, P.connection_error], ids=["timeout", "connection"])
+@pytest.mark.parametrize("make", [P.no_response, P.connection_error, P.server_disconnected,
+                                  P.opaque_api_error],
+                         ids=["timeout", "connection", "server-disconnected", "opaque-message"])
 def test_o1_no_response_is_retried(make: Any) -> None:
     """O1: a request that got no response at all (timeout, connection error — a model error
-    with no status) is temporary and resent."""
+    with no status) is temporary and resent. Classified by the ABSENCE of a status, never by
+    the message's words (Design: "body text never parsed"): a disconnect worded as httpx words
+    it, and a status-less error whose message names nothing, are retried like a timeout."""
     t = P.Timeline()
     fake = P.Attempts(P.first_n(1, make), timeline=t)
     result = P.run_agent(P.with_retries(P.function_model(fake), t.policy()))
@@ -112,16 +127,28 @@ def test_o1_provider_down_after_no_response_says_no_status() -> None:
 
 
 def test_o1_every_attempt_sends_the_same_request() -> None:
-    """O1/P3: a retry is the SAME request, resent unchanged — not a new turn carrying a retry
-    prompt (a `ModelRetry`-shaped retry appends one, C2)."""
+    """O1/P3: a retry is the SAME request, resent unchanged — the same messages (not a new turn
+    carrying a retry prompt, which a `ModelRetry`-shaped retry appends, C2) and the same model
+    settings (a retry that dropped or rebuilt them would change what the provider is asked)."""
+    settings = {"temperature": 0.0, "max_tokens": 77}
     t = P.Timeline()
     fake = P.Attempts(P.first_n(3), timeline=t)
-    P.run_agent(P.with_retries(P.function_model(fake), t.policy()), "the one prompt")
+    P.run_agent(P.with_retries(P.function_model(fake), t.policy()), "the one prompt",
+                model_settings=settings)
     assert fake.attempts == 4
     first = fake.inbound[0]
     for n, inbound in enumerate(fake.inbound[1:], start=2):
         assert inbound == first, f"attempt {n} sent something other than attempt 1 did"
     assert "retry-prompt" not in str(first)
+    # The settings channel carries the caller's values on attempt 1 (so equality below is not
+    # two empty readings), and every retry carries the same.
+    assert fake.settings[0] is not None, "attempt 1 carried no model settings at all"
+    assert fake.settings[0].get("max_tokens") == 77, (
+        f"attempt 1 did not carry the caller's model settings: {fake.settings[0]!r}")
+    for n, got in enumerate(fake.settings[1:], start=2):
+        assert got == fake.settings[0], (
+            f"attempt {n} was sent with model settings {got!r}, attempt 1 with "
+            f"{fake.settings[0]!r}: a retry is the same request")
 
 
 def _first_wait(exc: Any, jitter: float = 0.5) -> float:
@@ -133,20 +160,63 @@ def _first_wait(exc: Any, jitter: float = 0.5) -> float:
     return t.waits[0]
 
 
-def test_o1_retry_after_is_honoured() -> None:
-    """O1 + scenario 4: a 429 carrying `Retry-After` waits (at least) what the header says.
-    Differential, so a schedule that ignores the header cannot pass: the header is set 100 s
-    beyond the retrier's own header-less first wait (still inside the window)."""
-    own = _first_wait(lambda: P.http_error(429))
+@pytest.mark.parametrize("status", [429, 503, 529])
+def test_o1_retry_after_is_honoured(status: int) -> None:
+    """O1 + scenario 4: a temporary failure carrying `Retry-After` waits (at least) what the
+    header says — on a 429, and on a 503 or 529 too (O1 honours the header with no condition
+    on the status; an overloaded provider sends it with 503/529). Differential, so a schedule
+    that ignores the header cannot pass: the header is set 100 s beyond the retrier's own
+    header-less first wait for that status (still inside the window)."""
+    own = _first_wait(lambda: P.http_error(status))
     header = int(own) + 100
     assert header < P.WINDOW_S, f"the header-less first wait is already {own}s"
     t = P.Timeline()
-    fake = P.Attempts(P.first_n(1, lambda: P.http_error(429, retry_after=str(header))), timeline=t)
+    fake = P.Attempts(P.first_n(1, lambda: P.http_error(status, retry_after=str(header))),
+                      timeline=t)
     P.run_agent(P.with_retries(P.function_model(fake), t.policy()))
     assert fake.attempts == 2
     assert t.waits, "the retrier never waited"
     assert t.waits[0] >= header, (
-        f"Retry-After: {header} was not honoured: waited {t.waits[0]}s (own backoff {own}s)")
+        f"{status} with Retry-After: {header} was not honoured: waited {t.waits[0]}s "
+        f"(own backoff {own}s)")
+
+
+@pytest.mark.parametrize(("header", "may_stop"), [
+    ("abc", False),
+    ("", False),
+    ("-5", False),
+    ("Wed, 21 Oct 2015 07:28:00 GMT", False),
+    ("1e999", True),
+    ("Fri, 01 Jan 2100 00:00:00 GMT", True),
+], ids=["word", "empty", "negative", "http-date-past", "overflow", "http-date-future"])
+def test_o1_a_retry_after_that_is_not_a_number_of_seconds_is_never_a_crash(header: str,
+                                                                            may_stop: bool) -> None:
+    """O1: a 429 is temporary whatever its `Retry-After` says. The header is the PROVIDER's
+    text — RFC 9110 also allows an HTTP-date, and a broken proxy sends anything — so it can
+    never end the request with a parse error, or propagate the 429 as if it were not temporary.
+    A header that names no usable wait (a word, nothing, a negative number, a date already
+    past) leaves the retrier on its own backoff: the request is resent and the second attempt
+    answers. Only a header naming a wait that cannot fit the window (an overflowing number, a
+    date in 2100) may instead stop it with `ProviderDown` (AF1). Whether an HTTP-date is read is
+    the implementer's (it is wall-clock relative; the policy's clock is monotonic)."""
+    t = P.Timeline()
+    fake = P.Attempts(P.first_n(1, lambda: P.http_error(429, retry_after=header)), timeline=t)
+    wrapped = P.with_retries(P.function_model(fake), t.policy())
+    ended: Any
+    try:
+        ended = P.run_agent(wrapped)
+    except BaseException as e:  # noqa: BLE001 — which one is the observation
+        ended = e
+    if isinstance(ended, BaseException):
+        assert isinstance(ended, P.provider_down_cls()), (
+            f"Retry-After: {header!r} on a 429 ended the request with {type(ended).__name__}: "
+            f"{ended!r} after {fake.attempts} attempt(s) — neither a retry nor ProviderDown")
+        assert may_stop, (
+            f"Retry-After: {header!r} names no wait past the window, yet the retrier gave up "
+            f"after {fake.attempts} attempt(s) with {ended!r}: the 429 is still temporary")
+        return
+    assert fake.attempts == 2, f"{fake.attempts} attempts; one 429 then an answer is 2"
+    assert ended.output == "done"
 
 
 def test_o1_retry_after_past_the_window_never_spends_past_it() -> None:
@@ -164,16 +234,20 @@ def test_o1_retry_after_past_the_window_never_spends_past_it() -> None:
         f"the retrier spent {t.now - start}s of (fake) time on a Retry-After past the window")
 
 
-def test_o1_backoff_exists_and_does_not_shrink() -> None:
-    """O1 (R4): a provider that stays down gets 3 waits between its 4 attempts, each > 0 and
-    none shorter than the one before (exponential backoff); no floor value is pinned."""
+def test_o1_backoff_exists_and_grows() -> None:
+    """O1 (R4): a provider that stays down gets 3 waits between its 4 attempts, each > 0, and
+    the backoff GROWS: with the jitter held still, the second wait is longer than the first
+    (exponential backoff — a constant wait is not one) and the third no shorter than the
+    second (a cap on the last step is allowed). No floor value or ratio is pinned."""
     t = P.Timeline()
     fake = P.Attempts(P.ALWAYS_503, timeline=t)
     wrapped = P.with_retries(P.function_model(fake), t.policy(jitter=0.5))
     _down(_raised(lambda: P.run_agent(wrapped)))
     assert len(t.waits) == 3, f"waits between 4 attempts: {t.waits}"
     assert all(w > 0 for w in t.waits), f"a retry was sent with no wait: {t.waits}"
-    assert t.waits == sorted(t.waits), f"the backoff shrank: {t.waits}"
+    first, second, third = t.waits
+    assert first < second, f"the backoff did not grow after the first retry: {t.waits}"
+    assert second <= third, f"the backoff shrank: {t.waits}"
 
 
 def test_o1_backoff_has_jitter() -> None:
@@ -195,19 +269,58 @@ def test_o1_each_request_retries_on_its_own_window() -> None:
     assert fake.attempts == 3, f"{fake.attempts} calls; 1 + (1 failed + 1 retried) is 3"
 
 
+def test_n2_a_request_after_provider_down_retries_on_its_own() -> None:
+    """N2: no provider state is carried across calls. One request through a wrapper exhausts
+    its 4 attempts and raises `ProviderDown`; the NEXT request through the same wrapper starts
+    from nothing — it is sent, retried after its own temporary failure, and answered. (A
+    wrapper that remembered the outage would fail it at once; the oracle's knob model is one
+    cached wrapper for the whole process, so one outage would end every later oracle call.)"""
+    t = P.Timeline()
+    fake = P.Attempts(P.steps(*[lambda: P.http_error(503)] * 5), timeline=t)
+    wrapped = P.with_retries(P.function_model(fake), t.policy())
+    down = _down(_raised(lambda: P.run_agent(wrapped)))
+    assert down.attempts == fake.attempts == P.MAX_ATTEMPTS
+    result = P.run_agent(wrapped)
+    assert result.output == "done", "the request after a ProviderDown did not recover"
+    assert fake.attempts == P.MAX_ATTEMPTS + 2, (
+        f"{fake.attempts} attempts in all: the second request's own 503 and its retry are 2 more")
+
+
+@pytest.mark.parametrize(("plan", "last_status"), [
+    ((lambda: P.http_error(503),) * 3 + (P.no_response,), None),
+    ((P.no_response,) * 3 + (lambda: P.http_error(529),), 529),
+    ((lambda: P.http_error(503), lambda: P.http_error(429), P.connection_error,
+      lambda: P.http_error(502)), 502),
+], ids=["5xx-then-timeout", "timeouts-then-529", "mixed-ending-502"])
+def test_o1_provider_down_names_the_last_failure(plan: tuple[Any, ...], last_status: int | None) -> None:
+    """Design: `ProviderDown` carries "the LAST status or 'no response'" — the failure the
+    provider ended on, not the first one it met — and is raised from that last error."""
+    t = P.Timeline()
+    fake = P.Attempts(P.steps(*plan), timeline=t)
+    wrapped = P.with_retries(P.function_model(fake), t.policy())
+    down = _down(_raised(lambda: P.run_agent(wrapped)))
+    assert fake.attempts == P.MAX_ATTEMPTS
+    assert down.status == last_status, (
+        f"ProviderDown.status is {down.status!r}; the last failure was {fake.raised[-1]!r}")
+    assert down.__cause__ is fake.raised[-1], "ProviderDown is not raised from the last error"
+
+
 def test_p2_provider_down_is_an_ordinary_exception() -> None:
     """P2 (R5): `ProviderDown` is an `Exception`, so every caller's existing `except Exception`
     catch-all outside a run (oracle, learning stage) still decides what it means."""
     assert issubclass(P.provider_down_cls(), Exception)
 
 
-def test_o1_no_attempt_starts_ten_minutes_after_the_first_began() -> None:
+@pytest.mark.parametrize("hang_s", [250.0, 400.0, 550.0])
+def test_o1_no_attempt_starts_ten_minutes_after_the_first_began(hang_s: float) -> None:
     """O1 + scenario 3: a provider that accepts the connection and hangs costs at most ~10 min
-    plus one attempt: no NEW attempt starts once 10 minutes have passed since the first began.
-    Each attempt here hangs 250 s (fake time) before timing out, so a 4th attempt would start
-    past the window; the run ends `ProviderDown` with the attempts actually made."""
+    plus one attempt: no NEW attempt starts once 10 minutes have passed since the first began
+    — checked before EVERY attempt, not only the last. Each attempt here hangs `hang_s` (fake
+    time) before timing out: at 250 s the 4th attempt would start past the window, at 400 s the
+    3rd, at 550 s the 2nd unless the first wait is short. The run ends `ProviderDown` with the
+    attempts actually made."""
     t = P.Timeline()
-    fake = P.Attempts(P.Plan(exc=P.no_response, fail_from=1), timeline=t, hang_s=250.0)
+    fake = P.Attempts(P.Plan(exc=P.no_response, fail_from=1), timeline=t, hang_s=hang_s)
     wrapped = P.with_retries(P.function_model(fake), t.policy())
     caught = _raised(lambda: P.run_agent(wrapped))
     down = _down(caught)
@@ -216,7 +329,7 @@ def test_o1_no_attempt_starts_ten_minutes_after_the_first_began() -> None:
     late = [b - began[0] for b in began if b - began[0] >= P.WINDOW_S]
     assert not late, f"attempts started {late}s after the first — past the 10-minute window"
     assert fake.attempts < P.MAX_ATTEMPTS, (
-        f"{fake.attempts} attempts of 250 s each: the 4th could only start past the window")
+        f"{fake.attempts} attempts of {hang_s} s each: the 4th could only start past the window")
     assert down.attempts == fake.attempts
 
 
@@ -231,19 +344,49 @@ def test_o1_short_hangs_still_get_all_four_attempts() -> None:
 
 
 def test_o1_each_retry_logs_one_warning(caplog: pytest.LogCaptureFixture) -> None:
-    """O1 + scenario 1: each retry logs exactly one warning naming the status and the attempt
-    (n/4); a success after two retries logs two."""
+    """O1 + scenario 1: each retry logs exactly one warning line carrying what O1 lists — the
+    call site (the model's name: the wrapper knows no agent id, AF2), the status, the attempt
+    (n/4) and the wait it is about to take (seconds, as a number of its own); a success after
+    two retries logs two."""
     caplog.set_level(logging.WARNING)
     t = P.Timeline()
     fake = P.Attempts(P.first_n(2, lambda: P.http_error(529)), timeline=t)
+    model = P.function_model(fake)
     caplog.clear()
-    P.run_agent(P.with_retries(P.function_model(fake), t.policy()))
-    warnings = _retry_warnings(caplog, "529")
-    assert len(warnings) == 2, [r.getMessage() for r in caplog.records]
-    for n, record in enumerate(warnings, start=2):
-        msg = record.getMessage()
+    P.run_agent(P.with_retries(model, t.policy()))
+    lines = _retry_lines(caplog)
+    assert len(lines) == 2, [r.getMessage() for r in caplog.records]
+    assert len(t.waits) == 2, t.waits
+    for n, (msg, wait) in enumerate(zip(lines, t.waits, strict=True), start=2):
         assert "529" in msg, f"the retry warning does not name the status: {msg!r}"
         assert f"{n}/4" in msg, f"the retry warning does not name attempt {n}/4: {msg!r}"
+        assert model.model_name in msg, (
+            f"the retry warning does not name its call site ({model.model_name!r}): {msg!r}")
+        assert _names_the_wait(msg, wait, n=n, model_name=model.model_name, status=529), (
+            f"the retry warning does not name its wait ({wait}s): {msg!r}")
+
+
+def test_o1_a_retry_after_no_response_logs_its_warning_too(caplog: pytest.LogCaptureFixture) -> None:
+    """O1: "each retry logs one warning line" — a retry after NO response (a timeout) as much
+    as one after a status: one line, naming the call site, the attempt (2/4) and the wait."""
+    caplog.set_level(logging.WARNING)
+    t = P.Timeline()
+    fake = P.Attempts(P.first_n(1, P.no_response), timeline=t)
+    model = P.function_model(fake)
+    caplog.clear()
+    P.run_agent(P.with_retries(model, t.policy()))
+    assert fake.attempts == 2
+    lines = _retry_lines(caplog)
+    assert len(lines) == 1, (
+        f"a retry after no response logged {len(lines)} retry lines: "
+        f"{[r.getMessage() for r in caplog.records]}")
+    msg = lines[0]
+    assert "2/4" in msg, msg
+    assert model.model_name in msg, (
+        f"the retry warning does not name its call site ({model.model_name!r}): {msg!r}")
+    assert t.waits, "the retrier never waited"
+    assert _names_the_wait(msg, t.waits[0], n=2, model_name=model.model_name), (
+        f"the retry warning does not name its wait ({t.waits[0]}s): {msg!r}")
 
 
 def test_o1_a_cancelled_caller_cuts_the_backoff() -> None:
@@ -285,6 +428,134 @@ def test_o1_a_cancelled_caller_cuts_the_backoff() -> None:
     assert attempts == 1, f"{attempts} attempts: the backoff was not where the cancel landed"
 
 
+class _HangsFirst:
+    """A model function whose FIRST attempt hangs `hang_s` on the event loop (a provider that
+    accepted the connection and went quiet — cancellable, as a real socket read is) before
+    answering; every later attempt answers at once. `started` is set when attempt 1 begins."""
+
+    def __init__(self, hang_s: float) -> None:
+        self.hang_s = hang_s
+        self.attempts = 0
+        self.started = asyncio.Event()
+
+    def model(self) -> Any:
+        from pydantic_ai.messages import ModelResponse, TextPart
+
+        async def hangs_first(_messages: Any, _info: Any) -> Any:
+            self.attempts += 1
+            if self.attempts == 1:
+                self.started.set()
+                await asyncio.sleep(self.hang_s)
+                return ModelResponse(parts=[TextPart(content="first")])
+            return ModelResponse(parts=[TextPart(content="late")])
+
+        return P.function_model(hangs_first)
+
+
+def _one_request(model: Any) -> Any:
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+    from pydantic_ai.models import ModelRequestParameters
+
+    return model.request([ModelRequest(parts=[UserPromptPart("hello")])], None,
+                         ModelRequestParameters())
+
+
+@pytest.mark.parametrize(("hang_s", "expect"), [(30.0, "timed out"), (0.05, "first")],
+                         ids=["hung-attempt", "control-quick-attempt"])
+def test_o1_a_deadline_landing_during_a_hung_attempt_ends_the_request(hang_s: float, expect: str) -> None:
+    """Design (deadlines): a caller's deadline that expires WHILE an attempt is in flight ends
+    the request with the caller's own timeout — the retrier never catches `CancelledError`,
+    so it neither counts the cut attempt as "no response" and retries it (which answers late,
+    after the deadline, as if the deadline had never fired) nor turns it into `ProviderDown`.
+    This is how the correlation lead's deadline and a review stage's `wait_for` cut a hanging
+    provider. Control: the same deadline over a quick first attempt returns its answer, so the
+    channel can show "returned"."""
+    async def scenario() -> tuple[Any, int, float]:
+        hang = _HangsFirst(hang_s)
+        model = P.with_retries(hang.model(), P.instant_policy())
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        try:
+            async with asyncio.timeout(0.3):
+                response = await _one_request(model)
+        except TimeoutError:
+            return "timed out", hang.attempts, loop.time() - began
+        except BaseException as e:  # noqa: BLE001 — the observation is which exception
+            return e, hang.attempts, loop.time() - began
+        text = "".join(getattr(p, "content", "") for p in response.parts)
+        return text, hang.attempts, loop.time() - began
+
+    outcome, attempts, elapsed = asyncio.run(scenario())
+    assert outcome == expect, (
+        f"a 0.3 s deadline over a first attempt hanging {hang_s}s ended with {outcome!r} after "
+        f"{attempts} attempt(s)")
+    assert attempts == 1, f"{attempts} attempts: the cut attempt was retried"
+    assert elapsed < 5.0, f"the request outlived its deadline by {elapsed:.1f}s"
+
+
+def test_o1_a_cancel_landing_during_a_hung_attempt_ends_cancelled() -> None:
+    """Design: "the retrier never catches `CancelledError`" — a request cancelled while its
+    attempt hangs ends cancelled: not retried (the next attempt would answer at once), not
+    `ProviderDown`."""
+    async def scenario() -> tuple[Any, int]:
+        hang = _HangsFirst(30.0)
+        model = P.with_retries(hang.model(), P.instant_policy())
+        task = asyncio.ensure_future(_one_request(model))
+        await asyncio.wait_for(hang.started.wait(), timeout=10)
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=10)
+        except asyncio.CancelledError:
+            return "cancelled", hang.attempts
+        except BaseException as e:  # noqa: BLE001 — the observation is which exception
+            return e, hang.attempts
+        return "returned", hang.attempts
+
+    outcome, attempts = asyncio.run(scenario())
+    assert outcome == "cancelled", f"a request cancelled mid-attempt ended with {outcome!r}"
+    assert attempts == 1, f"{attempts} attempts: the cancelled attempt was retried"
+
+
+def test_o1_the_default_policy_waits_and_reads_time_for_real() -> None:
+    """O1/Design: the policy every caller gets by default (`RetryPolicy()`, no field given)
+    really waits — its sleep suspends ON THE LOOP for the time asked (so a backoff exists in
+    production, not only under a test's injected sleep) and a caller's deadline cuts it — and
+    its clock really advances (the 10-minute window is measured on it). A no-op or a blocking
+    default sleep, or a frozen default clock, fails here."""
+    policy = P.retry_policy()
+
+    async def scenario() -> tuple[float, float, str, float]:
+        loop = asyncio.get_running_loop()
+        began, clock_began = loop.time(), policy.clock()
+        await policy.sleep(0.3)
+        slept, clocked = loop.time() - began, policy.clock() - clock_began
+        cut_began = loop.time()
+        try:
+            await asyncio.wait_for(policy.sleep(5.0), timeout=0.2)
+            cut = "not cut"
+        except TimeoutError:
+            cut = "cut"
+        return slept, clocked, cut, loop.time() - cut_began
+
+    slept, clocked, cut, cut_after = asyncio.run(scenario())
+    assert slept >= 0.25, f"the default sleep asked for 0.3 s returned after {slept:.3f}s"
+    assert clocked >= 0.25, f"the default clock moved {clocked:.3f}s across a 0.3 s sleep"
+    assert cut == "cut", (
+        f"a 0.2 s deadline over the default 5 s sleep was {cut}: the default sleep is not "
+        "awaited on the loop")
+    assert cut_after < 2.0, (
+        f"the default sleep took {cut_after:.2f}s to give way to a 0.2 s deadline: it blocks")
+
+
+def test_o1_the_default_policy_jitters() -> None:
+    """D1/O1 ("with jitter"): the default policy's jitter is a random draw in [0, 1) — not a
+    constant, which would put every concurrent lead's retries in lockstep."""
+    jitter = P.retry_policy().jitter
+    draws = [jitter() for _ in range(16)]
+    assert all(0.0 <= d < 1.0 for d in draws), f"default jitter outside [0, 1): {draws}"
+    assert len(set(draws)) > 1, f"the default jitter drew the same value 16 times: {draws[0]}"
+
+
 # =================================================================================================
 # O2 — anything else is not retried, and propagates exactly as today
 # =================================================================================================
@@ -315,6 +586,25 @@ def test_o2_non_provider_errors_are_not_retried(make: Any) -> None:
     caught = _raised(lambda: P.run_agent(wrapped))
     assert fake.attempts == 1
     assert caught is fake.raised[0]
+
+
+@pytest.mark.parametrize(("first", "then"), [
+    (lambda: P.http_error(503), lambda: P.http_error(400)),
+    (P.no_response, lambda: P.http_error(401)),
+    (lambda: P.http_error(529), lambda: RuntimeError("not a provider fault")),
+], ids=["503-then-400", "timeout-then-401", "529-then-runtime-error"])
+def test_o2_a_rejection_after_a_temporary_failure_propagates_unchanged(first: Any, then: Any) -> None:
+    """O2: what decides a retry is THIS attempt's failure, not that the request already met a
+    temporary one. A temporary failure, then a failure O2 does not retry: 2 attempts, and the
+    second error propagates as the very error the model raised — not a third attempt, not a
+    `ProviderDown` naming a status that was never temporary."""
+    t = P.Timeline()
+    fake = P.Attempts(P.steps(first, then), timeline=t)
+    wrapped = P.with_retries(P.function_model(fake), t.policy())
+    caught = _raised(lambda: P.run_agent(wrapped))
+    assert fake.attempts == 2, f"{fake.attempts} attempts; the second failure is not retried"
+    assert caught is fake.raised[1], (
+        f"the second error did not propagate unchanged: got {type(caught).__name__}: {caught!r}")
 
 
 # =================================================================================================
@@ -426,6 +716,53 @@ def test_p1_the_openai_compatible_builder_makes_one_wire_attempt(monkeypatch: py
     assert len(fake.hits) == 1, f"the OpenAI-compatible client made {len(fake.hits)} attempts"
 
 
+@pytest.mark.parametrize("which", ["DEFAULT_MODEL", "DEFAULT_GATHER_MODEL"])
+def test_p1_the_shared_builder_retries_the_default_openai_compatible_models(
+        which: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """P1 on the product's OWN default models ("a wrapper on the model object itself, built by
+    the shared model builder that every agent in the product gets its model from"): MAIN's and
+    gather's defaults are OpenAI-compatible (Fireworks) names, and `build_for_effort` on them
+    carries the retrier exactly as on an Anthropic name — a provider that gives no response
+    (every tunnel refused at a local proxy, so nothing leaves the host) gets exactly 4 attempts
+    on the wire, then `ProviderDown` with no status. Not 1 (client retries off, no retrier on
+    this path), not 3 (the client's own retries)."""
+    name = P.sym("runtime.driver", which)
+    provider = P.providers().provider_for(name)
+    assert isinstance(provider, P.sym("runtime.providers.openai_compat", "OpenAICompatProvider")), (
+        f"{which}={name!r} is no longer an OpenAI-compatible model; this test is about that path")
+    monkeypatch.setenv(provider.api_key_var, "k-1243")
+    with P.RefusingProxy() as proxy:
+        P.through_proxy(monkeypatch, proxy)
+        built = P.providers().build_for_effort(name, None, retry=P.instant_policy())
+        caught = _raised(lambda: _wire_run(built.model))
+    assert proxy.hits, (
+        f"{name}'s request never reached the proxy (raised {caught!r}): this test's channel "
+        "is gone — the client no longer reads HTTPS_PROXY")
+    assert len(proxy.hits) == P.MAX_ATTEMPTS, (
+        f"{name} made {len(proxy.hits)} wire attempt(s) on no response; the bound is 4")
+    down = _down(caught)
+    assert down.status is None
+    assert down.attempts == P.MAX_ATTEMPTS
+
+
+def test_p1_the_retrier_recovers_an_openai_compatible_request_on_the_wire(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """O1 at the wire, OpenAI-compatible side: the retrier over that builder's model reads the
+    status off the OpenAI client's own errors — two 503s (an OpenAI-shaped error body) then an
+    answer: the caller gets the answer after exactly 3 wire attempts. (Recovery through the
+    default Fireworks names cannot be shown hermetically — their base URL is https and fixed —
+    so the provider is built here over the local fake's URL.)"""
+    cls = P.sym("runtime.providers.openai_compat", "OpenAICompatProvider")
+    overloaded = P.WireAnswer(503, {"error": {"message": "overloaded"}})
+    with P.FakeProvider([overloaded, overloaded, P.WireAnswer(200, P.OPENAI_OK)]) as fake:
+        monkeypatch.setenv("T1243_API_KEY", "k-1243")
+        provider = cls(id="t1243", base_url=f"{fake.url}/v1", api_key_var="T1243_API_KEY",
+                       aliases={}, main_effort="low", gather_effort="none")
+        result = _wire_run(P.with_retries(provider.build_model("t1243:m"), P.instant_policy()))
+    assert result.output == "wire-ok"
+    assert len(fake.hits) == 3, f"{len(fake.hits)} wire attempts; two 503s then an answer is 3"
+
+
 def test_p1_the_shared_builder_retries_exactly_four_times_on_the_wire(monkeypatch: pytest.MonkeyPatch) -> None:
     """P1/O1 + scenario 2 at the wire: the model every caller gets from the shared builder
     (`build_for_effort`) makes exactly 4 wire attempts against a provider that stays at 503,
@@ -502,15 +839,19 @@ def test_p1_the_shared_builder_does_not_retry_a_rejection(monkeypatch: pytest.Mo
     assert len(fake.hits) == 1
 
 
-def test_p1_the_default_builder_path_carries_the_retrier(monkeypatch: pytest.MonkeyPatch) -> None:
-    """P1 (R1): production's own call — `build_for_effort(name, effort)`, the two-argument
+def test_p1_the_default_builder_path_carries_the_retrier(monkeypatch: pytest.MonkeyPatch,
+                                                        caplog: pytest.LogCaptureFixture) -> None:
+    """P1 (R1) + O1: production's own call — `build_for_effort(name, effort)`, the two-argument
     `make_model` shape every caller uses, no policy passed — retries: against a provider that
-    stays at 503 a request reaches the wire at least twice. Real waits; the request is
-    cancelled once the second hit lands (generous ceiling, so any conforming first backoff
-    fits)."""
+    stays at 503 a request reaches the wire at least twice. And the default path's backoff is
+    REAL: the second hit lands no sooner than the wait the retrier's own "2/4" line names (a
+    default policy whose sleep does nothing would log a wait and resend at once). No wait value
+    is pinned — the line's own number is the bound. Real waits; the request is cancelled once
+    the second hit lands (generous ceiling, so any conforming first backoff fits)."""
     from pydantic_ai.messages import ModelRequest, UserPromptPart
     from pydantic_ai.models import ModelRequestParameters, override_allow_model_requests
 
+    caplog.set_level(logging.WARNING)
     ceiling_s = 200.0
     with P.FakeProvider([P.wire_error(503)]) as fake:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k-1243")
@@ -537,3 +878,14 @@ def test_p1_the_default_builder_path_carries_the_retrier(monkeypatch: pytest.Mon
     assert len(fake.hits) >= 2, (
         f"the default builder path made {len(fake.hits)} wire attempt(s) on a 503 "
         f"(ended with {outcome!r}): it carries no retrier")
+    second = [m for m in _retry_lines(caplog) if "2/4" in m]
+    assert len(second) == 1, (
+        f"the default path's first retry logged {len(second)} '2/4' lines: "
+        f"{[r.getMessage() for r in caplog.records]}")
+    named = P.numbers_besides(second[0], status=503,
+                              spelled=(built.model.model_name, P.ANTHROPIC_NAME, "2/4"))
+    assert named, f"the default path's retry line names no wait: {second[0]!r}"
+    gap = fake.hit_times[1] - fake.hit_times[0]
+    assert gap >= 0.8 * min(named), (
+        f"the default path resent {gap:.3f}s after the first hit, but its retry line says it "
+        f"waits {min(named)}s ({second[0]!r}): the default backoff does not really wait")

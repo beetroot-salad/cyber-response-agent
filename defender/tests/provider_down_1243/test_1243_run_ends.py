@@ -181,17 +181,28 @@ def test_o3_a_deadline_cutting_a_backoff_keeps_its_own_ending(tmp_path: Path) ->
 # A review stage (D5)
 # =================================================================================================
 
+#: How long a lens waits for the event it is gated on before giving up (a gate that never ran
+#: the other lens) — a bound on a broken scenario, never reached on a conforming one.
+_GATE_BOUND_S = 30.0
+
+
 class _Lens:
     """A review stage: answers `reply` after `delay` seconds on the loop, or raises `exc()`;
-    records whether it started, finished, or was cancelled."""
+    records whether it started, finished, or was cancelled, and appends "<name>-raised" /
+    "<name>-finished" to `events`. `raised` is an event it sets just before raising; `after`
+    is an event it waits for (bounded) before its `delay` starts — so a sibling's hold can be
+    measured from the moment the failing lens raised, not from when both started."""
 
-    def __init__(self, reply: str = RB.LENS_READING, *, delay: float = 0.0,
-                 exc: Any = None, events: list[str] | None = None, name: str = "lens") -> None:
+    def __init__(self, reply: str = RB.LENS_READING, *, delay: float = 0.0,  # noqa: PLR0913 — one switch per lens behaviour
+                 exc: Any = None, events: list[str] | None = None, name: str = "lens",
+                 raised: asyncio.Event | None = None, after: asyncio.Event | None = None) -> None:
         self.reply = reply
         self.delay = delay
         self.exc = exc
         self.events = events if events is not None else []
         self.name = name
+        self.raised = raised
+        self.after = after
         self.started = 0
         self.finished = 0
         self.cancelled = 0
@@ -199,12 +210,17 @@ class _Lens:
     async def __call__(self, _request: Any) -> str:
         self.started += 1
         try:
+            if self.after is not None:
+                await asyncio.wait_for(self.after.wait(), timeout=_GATE_BOUND_S)
             if self.delay:
                 await asyncio.sleep(self.delay)
         except asyncio.CancelledError:
             self.cancelled += 1
             raise
         if self.exc is not None:
+            self.events.append(f"{self.name}-raised")
+            if self.raised is not None:
+                self.raised.set()
             raise self.exc()
         self.finished += 1
         self.events.append(f"{self.name}-finished")
@@ -226,30 +242,43 @@ def _assert_round_marked_incomplete(d: S.Drive) -> None:
             f"the {role} trace is not marked incomplete for the round the provider ended: {rows}")
 
 
+#: How long the sibling lens keeps working AFTER the failing lens has raised. A real lens takes
+#: minutes; this is the shortest hold that still outlasts any short "grace period" a gate might
+#: wait out before raising (the contract cannot outlast an unbounded one — see the test).
+SIBLING_HOLD_S = 5.0
+
+
 def test_o3_d5_a_review_stage_down_ends_the_run_after_its_sibling_settles(tmp_path: Path) -> None:
     """O3/D5: a review lens whose model is down ends the run `provider-down` (a close that cannot
-    be reviewed cannot commit) — not a failed review the model is told about. The sibling lens
-    is not orphaned: it is never cancelled and records finishing (its 2 s answer outlasts a gate
-    that raised early and the run's in-loop teardown, which would cancel it — a margin, not a
-    strict order: "run-ended" is recorded only after the loop closes); the round's traces are
-    still marked incomplete; no report.md; exit 4."""
+    be reviewed cannot commit) — not a failed review the model is told about. The gate raises
+    only after `gather` settles, so the sibling lens is not orphaned: it is never cancelled and
+    records finishing before the run ends. The sibling's work is ANCHORED on the failure — it
+    waits for the support lens to have raised, then keeps working `SIBLING_HOLD_S` — so a gate
+    that raises early (or after a fixed grace shorter than that hold) cancels it mid-work. Still
+    a margin, not a proof: a grace longer than the hold would pass; "run-ended" is recorded
+    only after the run's loop closes. The round's traces are still marked incomplete; no
+    report.md; exit 4."""
     events: list[str] = []
-    support = _Lens(exc=P.provider_down_fault("review"), events=events, name="support")
-    ablation = _Lens(delay=2.0, events=events, name="ablation")
+    failed = asyncio.Event()
+    support = _Lens(exc=P.provider_down_fault("review"), events=events, name="support",
+                    raised=failed)
+    ablation = _Lens(delay=SIBLING_HOLD_S, events=events, name="ablation", after=failed)
     stages = P.sym("runtime.review_roles", "ReviewStages")(
         support=support, ablation=ablation, composer=RB.stage(RB.composer_reply("holds")))
     d = _review_run(tmp_path, stages, events)
     assert support.started >= 1, "the review gate never dispatched the support lens"
     assert ablation.started >= 1, (
         "the golden investigation dispatched no ablation lens — this scenario needs two lenses")
+    assert "support-raised" in events, f"the support lens never raised: {events}"
     P.assert_ended_provider_down(d)
     assert ablation.cancelled == 0, (
-        f"the sibling lens was cancelled ({ablation.cancelled}): the gate must raise only after "
-        "its lenses settle")
-    assert "ablation-finished" in events, "the sibling lens never finished: it was orphaned"
+        f"the sibling lens was cancelled ({ablation.cancelled}) while it worked on after the "
+        f"failing lens raised: the gate must raise only after its lenses settle ({events})")
+    assert "ablation-finished" in events, f"the sibling lens never finished: it was orphaned ({events})"
     assert "run-ended" in events, "run.py never reached its page step"
-    assert events.index("ablation-finished") < events.index("run-ended"), (
-        f"the sibling lens finished only after the run ended ({events}): it was orphaned")
+    assert events.index("support-raised") < events.index("ablation-finished") < events.index("run-ended"), (
+        f"the sibling lens did not finish between the failure and the run's end ({events}): "
+        "it was orphaned")
     _assert_round_marked_incomplete(d)
 
 
@@ -341,3 +370,94 @@ def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
     assert "b" in records, f"no world record for the sibling that exited 4: {sorted(records)}"
     assert P.sym("learning.branch.outcome", "DID_NOT_FINISH") in records["b"]
     assert "a" not in records, "a sibling that exited 0 was recorded as failed"
+
+
+# =================================================================================================
+# D4 — exit 4 is provider-down's own; the sibling door exits with it too
+# =================================================================================================
+
+@pytest.mark.parametrize(("kill", "member"), [
+    (lambda: P.sym("hooks.budget_enforcer", "BudgetKill")("run budget spent"), "TRUNCATED_BY_BUDGET"),
+    (lambda: P.sym("runtime.circuit_breaker", "RunAborted")(5, ["cmdb"]), "TRUNCATED_BY_ABORTED"),
+], ids=["budget", "aborted"])
+def test_d4_exit_4_is_provider_downs_alone(tmp_path: Path, kill: Any, member: str) -> None:
+    """D4: 4 is provider-down's OWN exit ("its own non-zero run.py exit code"). A run cut short
+    on MAIN's request by another infrastructure end — a budget kill, a run-level abort — ends
+    as today: that class, and exit 0 (so a branched sibling cut by its budget is graded, not
+    recorded "did not finish"). The provider-down tests above read exit 4 off the same channel."""
+    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=kill))
+    d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(CORR)]})
+    assert main.requests == 1, f"MAIN made {main.requests} requests; the kill is on its first"
+    assert d.raised is None, d.raised
+    assert (d.summary or {}).get("truncated_by") == P.sym("runtime.run_end", member), d.summary
+    assert d.rc == 0, f"a run ended {member} exited {d.rc}; only provider-down exits 4"
+
+
+SIBLING_TENANT = "acme"
+SIBLING_WORLD = "b"
+
+
+def _sibling_episode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A launched episode a sibling process can run as (`test_1222_judge_and_episode`'s
+    `_source` + `_launch` shape): a finished source run on tenant `acme` (the #947 runs base's
+    branchable run, recorded: its alert and record at the front door's places), the episode primed from
+    it by the REAL launcher door (`cli.prepare_episode`) with its container made, and the
+    family manifest (worlds a, b, c) written. The episodes root is pointed at its parent."""
+    from defender.run_repository import Run
+
+    planted = S.plant_tenant(SIBLING_TENANT)
+    _base, src = T.runs_base(tmp_path, tenant_id=SIBLING_TENANT, recorded=True)
+    accepted = planted.accept()
+    with P.mod("learning.branch.cli").prepare_episode(
+            T.EPISODE_ID, Run.at(src), data_root=accepted.data_root) as episode:
+        with accepted.runs_repository().episode(episode.dir.name, held=episode) as view:
+            view.create_container()
+        ep = Path(episode.dir)
+    T.write_family(ep, T.family_doc(source_run_dir=str(src)))
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ep.parent))
+    return ep
+
+
+def _run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
+    """World `b`'s sibling through the REAL `run.main --episode/--world` door; its lifecycle
+    seam drives the REAL investigation (`_spec1222.drive_run`, the replay harness) over the run
+    folder the door materialized, with `main` as MAIN's model."""
+    d = S.new_drive(tmp_path, main=main)
+
+    def lifecycle(**kw: Any) -> dict:
+        return S.drive_run(d, Path(kw["run"].run_dir), tenant=kw["tenant"].tenant)
+
+    argv = ["--episode", ep.name, "--world", SIBLING_WORLD, "--tenant", SIBLING_TENANT,
+            "--no-learn"]
+    try:
+        d.rc = P.sym("run", "main")(argv, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
+                                    preflight=lambda *_a, **_k: 0, ticket_writer=S.NoTicket())
+    except SystemExit as exit_:
+        d.refusal = exit_.code if isinstance(exit_.code, str) else None
+        d.rc = exit_.code if isinstance(exit_.code, int) else 1
+    except Exception as e:  # noqa: BLE001 — kept for the test to assert on
+        d.raised = e
+    return d
+
+
+@pytest.mark.parametrize(("fault", "ends", "rc"), [
+    (P.provider_down_fault("sibling"), P.PROVIDER_DOWN, P.PROVIDER_DOWN_EXIT),
+    (lambda: P.sym("hooks.budget_enforcer", "BudgetKill")("world budget spent"), "budget", 0),
+], ids=["provider-down", "control-budget"])
+def test_o6_d4_a_sibling_world_ending_provider_down_exits_4(tmp_path: Path,
+                                                           monkeypatch: pytest.MonkeyPatch,
+                                                           fault: Any, ends: str, rc: int) -> None:
+    """O6/D4 + scenario 8 at the sibling's own door: a branched sibling (`run.py --episode
+    --world`) whose MAIN meets a provider that stays down ends `provider-down` and EXITS 4 —
+    the non-zero exit the launcher records as "did not finish" (the O6 launcher test above),
+    never 0, which the launcher treats as a finished, gradable world. Control on the same
+    door: a sibling cut by a budget kill exits 0, as today."""
+    ep = _sibling_episode(tmp_path, monkeypatch)
+    main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=fault))
+    d = _run_sibling(tmp_path / "sibling", ep, main)
+    assert d.run_dir is not None, (
+        f"the sibling never reached its run (rc={d.rc!r}, refusal={d.refusal!r}, raised={d.raised!r})")
+    assert main.requests == 1, f"the sibling's MAIN made {main.requests} requests"
+    assert d.raised is None, f"the sibling crashed instead of ending {ends}: {d.raised!r}"
+    assert (d.summary or {}).get("truncated_by") == ends, d.summary
+    assert d.rc == rc, f"a sibling world that ended {ends} exited {d.rc!r}; D4/O6 say {rc}"

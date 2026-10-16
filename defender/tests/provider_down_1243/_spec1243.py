@@ -23,6 +23,9 @@ seam"; the spellings below are this contract's, binding on the implementer):
   * `runtime.providers.with_retries(model, policy)` — the retrier applied to any pydantic-ai model.
   * `runtime.providers.build_for_effort(name, effort, *, retry=...)` — the two-argument
     `make_model` shape kept; the returned model carries the retrier.
+  * each retry's WARNING line (O1: "call site, status, attempt n/4, wait") names the model's
+    `model_name` (the call site the wrapper knows, AF2), the status when there is one, `n/4`,
+    and the wait it is about to take, in SECONDS, as a number.
 
 The run-end value is the literal `"provider-down"` and `run.py`'s exit the literal 4 (D4).
 
@@ -35,9 +38,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import socket
 import sqlite3
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -60,9 +65,12 @@ TAKEN_EXITS = frozenset({0, 2, 3})
 MAX_ATTEMPTS = 4
 WINDOW_S = 600.0
 
-#: O1's temporary statuses, and statuses that are not (O2: part 2 owns 4xx).
-RETRIED_STATUSES = (408, 409, 429, 500, 502, 503, 504, 529)
-NOT_RETRIED_STATUSES = (400, 401, 403, 404, 413, 422)
+#: O1's temporary statuses, and statuses that are not (O2: part 2 owns 4xx). O1 says ">=500",
+#: not a list: unlisted 5xx (501, 505, 507, 599) are in, so a retrier keyed on a set of named
+#: statuses fails; O2 says "all other 4xx", so unlisted 4xx (402, 405, 410, 418, 451) are in
+#: the other list, and a retrier keyed on a denylist of named 4xx fails.
+RETRIED_STATUSES = (408, 409, 429, 500, 501, 502, 503, 504, 505, 507, 529, 599)
+NOT_RETRIED_STATUSES = (400, 401, 402, 403, 404, 405, 410, 413, 418, 422, 451)
 
 L3 = S.L3
 
@@ -121,25 +129,57 @@ def connection_error(model: str = "fake") -> BaseException:
     return ModelAPIError(model, "Connection error.")
 
 
+def server_disconnected(model: str = "fake") -> BaseException:
+    """No response, in words the suite never otherwise uses (httpx's own text for a peer that
+    closed the connection): the design classifies by "status code or its absence; body text
+    never parsed", so this is exactly as temporary as a timeout."""
+    from pydantic_ai.exceptions import ModelAPIError
+
+    return ModelAPIError(model, "Server disconnected without sending a response.")
+
+
+def opaque_api_error(model: str = "fake") -> BaseException:
+    """A status-less model API error whose message names nothing at all."""
+    from pydantic_ai.exceptions import ModelAPIError
+
+    return ModelAPIError(model, "zq-7f3a")
+
+
+Fault = Callable[[], BaseException]
+
+
 @dataclass(frozen=True)
 class Plan:
-    """Which ATTEMPTS fail, as data: `fail` lists the 1-based attempts that raise `exc()`;
-    `fail_from` makes every attempt from that one on raise (`fail_from=1` = always down)."""
+    """Which ATTEMPTS fail, and with what, as data: `fail` lists the 1-based attempts that
+    raise `exc()`; `fail_from` makes every attempt from that one on raise (`fail_from=1` =
+    always down); `steps` scripts attempts one by one — attempt n raises `steps[n-1]()`, or
+    answers where that entry is None — and attempts past it follow `fail`/`fail_from`."""
 
-    exc: Callable[[], BaseException] = lambda: http_error(503)
+    exc: Fault = lambda: http_error(503)
     fail: frozenset[int] = frozenset()
     fail_from: int | None = None
+    steps: tuple[Fault | None, ...] = ()
 
-    def fails(self, n: int) -> bool:
-        return n in self.fail or (self.fail_from is not None and n >= self.fail_from)
+    def fault(self, n: int) -> Fault | None:
+        if 1 <= n <= len(self.steps):
+            return self.steps[n - 1]
+        if n in self.fail or (self.fail_from is not None and n >= self.fail_from):
+            return self.exc
+        return None
 
 
 ALWAYS_503 = Plan(fail_from=1)
 UP = Plan()
 
 
-def first_n(n: int, exc: Callable[[], BaseException] = lambda: http_error(503)) -> Plan:
+def first_n(n: int, exc: Fault = lambda: http_error(503)) -> Plan:
     return Plan(exc=exc, fail=frozenset(range(1, n + 1)))
+
+
+def steps(*faults: Fault | None) -> Plan:
+    """A plan scripted attempt by attempt (None = that attempt answers); every attempt past
+    the script answers."""
+    return Plan(steps=tuple(faults))
 
 
 # =================================================================================================
@@ -189,9 +229,9 @@ def dump(messages: Sequence[Any]) -> list[Any]:
 class Attempts:
     """A `FunctionModel` function: each call is one wire attempt. Attempts the plan fails raise;
     the rest are answered by `answer(messages, info)` (default: one text part). Records every
-    attempt's inbound messages (as JSON data) and, with a `timeline`, the fake time each attempt
-    began; `hang_s` advances that timeline per FAILED attempt (an attempt that hung to its
-    timeout)."""
+    attempt's inbound messages (as JSON data) and model settings (`settings`) and, with a
+    `timeline`, the fake time each attempt began; `hang_s` advances that timeline per FAILED
+    attempt (an attempt that hung to its timeout)."""
 
     __name__ = "Attempts"
 
@@ -203,6 +243,7 @@ class Attempts:
         self.hang_s = hang_s
         self.text = text
         self.inbound: list[list[Any]] = []
+        self.settings: list[Any] = []
         self.began: list[float] = []
         self.raised: list[BaseException] = []
         self._lock = threading.Lock()
@@ -212,13 +253,16 @@ class Attempts:
 
         with self._lock:
             self.inbound.append(dump(messages))
+            settings = getattr(info, "model_settings", None)
+            self.settings.append(dict(settings) if settings is not None else None)
             if self.timeline is not None:
                 self.began.append(self.timeline.now)
             n = len(self.inbound)
-            if self.plan.fails(n):
+            fault = self.plan.fault(n)
+            if fault is not None:
                 if self.timeline is not None and self.hang_s:
                     self.timeline.advance(self.hang_s)
-                exc = self.plan.exc()
+                exc = fault()
                 self.raised.append(exc)
                 raise exc
         if self._answer is not None:
@@ -292,8 +336,9 @@ class LeadsFailing(S.LeadRouter):
             seen.append(dump(messages))
             n = len(seen)
         plan = self.plans.get(lead)
-        if plan is not None and plan.fails(n):
-            raise plan.exc()
+        fault = plan.fault(n) if plan is not None else None
+        if fault is not None:
+            raise fault()
         return super().__call__(messages, info)
 
     def attempts(self, lead: str) -> int:
@@ -313,6 +358,22 @@ def wrap_with(policy: Any, *, kinds: Iterable[str] = ("main", "gather")) -> Call
 # =================================================================================================
 # Observation channels
 # =================================================================================================
+
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
+
+def numbers_besides(message: str, *, status: int | None = None, spelled: Iterable[str] = ()) -> list[float]:
+    """The numbers a retry line carries besides the ones it names for other reasons: `status`
+    (removed only as a whole number, so a wait such as `5.03` survives) and every string in
+    `spelled` (the model name, `n/4`). What is left holds the wait (coined: in seconds)."""
+    text = message
+    for s in spelled:
+        if s:
+            text = text.replace(s, " ")
+    if status is not None:
+        text = re.sub(rf"(?<![\d.]){status}(?![\d.])", " ", text)
+    return [float(m) for m in _NUMBER.findall(text)]
+
 
 def sessions(store_path: Path) -> dict[str, str | None]:
     """agent_id -> `truncated_by` for every session in the real store file (a fresh connection,
@@ -435,12 +496,14 @@ def wire_error(status: int, *, retry_after: str | None = None) -> WireAnswer:
 
 class FakeProvider:
     """A provider endpoint on 127.0.0.1: answers each POST from `answers` in order (the last one
-    repeats) and counts every hit. A context manager; `url` is its base URL."""
+    repeats) and counts every hit, with the real monotonic time it arrived (`hit_times`). A
+    context manager; `url` is its base URL."""
 
     def __init__(self, answers: Sequence[WireAnswer]) -> None:
         assert answers, "a fake provider needs at least one answer"
         self.answers = list(answers)
         self.hits: list[str] = []
+        self.hit_times: list[float] = []
         self._lock = threading.Lock()
         owner = self
 
@@ -450,6 +513,7 @@ class FakeProvider:
                 self.rfile.read(length)
                 with owner._lock:
                     owner.hits.append(self.path)
+                    owner.hit_times.append(time.monotonic())
                     answer = owner.answers[min(len(owner.hits), len(owner.answers)) - 1]
                 payload = json.dumps(answer.body).encode("utf-8")
                 self.send_response(answer.status)
@@ -478,6 +542,63 @@ class FakeProvider:
     def __exit__(self, *_exc: Any) -> None:
         self._server.shutdown()
         self._server.server_close()
+
+
+class RefusingProxy:
+    """An HTTP proxy on 127.0.0.1 that refuses every tunnel: each `CONNECT host:port` is counted
+    (`hits`, the target) and answered 502, so a client sent through it (`HTTPS_PROXY`) gets no
+    response from the provider at all — a connection error — and nothing leaves the host.
+
+    The channel for the OpenAI-compatible provider's REAL base URL, which the builder hard-codes
+    (https, so it cannot be pointed at `FakeProvider`): the client libraries read the proxy
+    from the environment when the builder constructs them (C1 probe: today's Fireworks client
+    makes 3 tunnels through it)."""
+
+    def __init__(self) -> None:
+        self.hits: list[str] = []
+        self._lock = threading.Lock()
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_CONNECT(self) -> None:  # noqa: N802 — the stdlib's name
+                with owner._lock:
+                    owner.hits.append(self.path)
+                self.send_response(502)
+                self.send_header("content-length", "0")
+                self.end_headers()
+
+            def log_message(self, *_a: Any) -> None:
+                return
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    @property
+    def url(self) -> str:
+        host, port = self._server.server_address[:2]
+        return f"http://{host}:{port}"
+
+    def __enter__(self) -> RefusingProxy:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+
+#: The proxy variables a client library reads; every one is set or cleared by `through_proxy`.
+_PROXY_VARS = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY",
+               "all_proxy", "NO_PROXY", "no_proxy")
+
+
+def through_proxy(monkeypatch: Any, proxy: RefusingProxy) -> None:
+    """Every https request a client library built from here on makes goes to `proxy`: the https
+    proxy variables name it, every other proxy variable (and the no-proxy list) is cleared."""
+    for var in _PROXY_VARS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", proxy.url)
+    monkeypatch.setenv("https_proxy", proxy.url)
 
 
 def closed_port_url() -> str:
