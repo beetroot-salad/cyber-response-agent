@@ -51,6 +51,13 @@ def _as_int(value, default: int = 0) -> int:
         return default
 
 
+def row_seq(rec: dict) -> int:
+    """A queries-table row's `seq` as the surface reads it (`QueryRow.seq`): the row's own
+    `(lead_id, seq)` key, also for a row that spells it as a string. Every reader keying a row
+    by its seq reads it here, so none drifts from the surface."""
+    return _as_int(rec.get("seq", 0))
+
+
 @model(frozen=True)
 class QueryRow:
     """One queries-table row as the canonical surface reads it: every column
@@ -216,7 +223,7 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
         rows.append(
             QueryRow(
                 lead_id=str(lead_id),
-                seq=_as_int(rec.get("seq", 0)),
+                seq=row_seq(rec),
                 system=str(rec.get("system", "")),
                 verb=str(rec.get("verb", "")),
                 query_id=str(rec.get("query_id", "")),

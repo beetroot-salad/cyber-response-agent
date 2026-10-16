@@ -45,7 +45,7 @@ from defender.learning.branch.ledger import (
     request_key,
 )
 from defender.learning.judge._errors import JudgeRefused
-from defender.learning.lead_repository import JoinedLead, QueryRow, joined
+from defender.learning.lead_repository import JoinedLead, QueryRow, joined, row_seq
 from defender.runtime.branch._family import (
     BASE_ROLE,
     FamilyError,
@@ -506,7 +506,8 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
 
     The table carries no call id (#1255 G4: the model reads it). Each row the run itself wrote
     is handed back carrying the id its host-only call join (`read_call_join`) records for the
-    row's own `(lead_id, seq)` — never by the row's place in the table — under `calls.CALL_ID`,
+    row's own `(lead_id, seq)`, its seq read as the surface reads it (`lead_repository.row_seq`)
+    — never by the row's place in the table — under `calls.CALL_ID`,
     the one key every judge reader of a row's id reads. A row with no join line (a seeded,
     pre-branch row) carries none. A table row that spells an id itself is refused: no writer
     writes one since #1255, so it is an archive from before the join or a planted column.
@@ -515,6 +516,16 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
     coerce it. Validate the string fields used by the computed views before admitting any
     rows, including unserved calls that have no ledger partner to check them against.
     Params retain the shared reader's tolerant handling of non-mappings."""
+    table = _admitted_query_table(bound, label)
+    if table is None:
+        return None
+    join = read_call_join(bound, label)
+    return [_joined_row(row, join) for row in table]
+
+
+def _admitted_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
+    """World `label`'s archived query table read whole and admitted (`read_query_table`'s
+    refusals), unjoined; `None` when nothing is at the name."""
     from defender.learning.judge.calls import CALL_ID
 
     table_name = LAYOUT.world(label).executed_queries
@@ -539,17 +550,18 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
                 f"world {label!r}: {table_name} row {index} carries a {CALL_ID} column, which "
                 "no query-table writer writes since #1255 (the id lives in the host-only "
                 f"{WORLD_LEAVES.call_join}) — an archive from before #1255, or a planted column")
-    join = read_call_join(bound, label)
-    joined: list[dict[str, Any]] = []
-    for row in table:
-        own = dict(row)
-        seq = row.get("seq")
-        call_id = (join.get((row["lead_id"], seq))
-                   if isinstance(seq, int) and not isinstance(seq, bool) else None)
-        if call_id is not None:
-            own[CALL_ID] = call_id
-        joined.append(own)
-    return joined
+    return table
+
+
+def _joined_row(row: dict[str, Any], join: Mapping[tuple[str, int], str]) -> dict[str, Any]:
+    """`row` carrying the call id `join` records for its `(lead_id, seq)`, if any."""
+    from defender.learning.judge.calls import CALL_ID
+
+    own = dict(row)
+    call_id = join.get((row["lead_id"], row_seq(row)))
+    if call_id is not None:
+        own[CALL_ID] = call_id
+    return own
 
 
 def read_served_ledger(bound: Bound, label: str, *, episode_token: str) -> list[dict[str, Any]]:
