@@ -31,6 +31,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+from datetime import UTC, datetime
 from collections.abc import Callable, Iterator
 from functools import partial
 from typing import Any
@@ -212,6 +213,13 @@ class ForkSnapshot:
     @property
     def counters(self) -> dict:
         return dict(self.body["counters"])
+
+    @property
+    def fork_time(self) -> datetime:
+        """The run clock's reading when the response arrived, whole seconds, aware UTC: the
+        arm's cut-off (`as_of`) and the fork time the oracle is handed (rev 5 C4)."""
+        return datetime.fromisoformat(self.body["counters"]["clock"]["reading"]).astimezone(
+            UTC).replace(microsecond=0)
 
     @property
     def review(self) -> dict:

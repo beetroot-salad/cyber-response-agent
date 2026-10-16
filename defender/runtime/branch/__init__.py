@@ -167,9 +167,8 @@ def validate(store: Any, spec: BranchSpec, *, source_run: Run,
             "cannot be branched: nothing says what it held when that response arrived")
 
     # The clock, checked here because only the store knows this branch point's moment.
-    _refuse_bad_as_of(spec, _as_of_of(upto, run_dir, spec.branch_message_id))
-
     snapshot.verify(source_run)
+    _refuse_bad_as_of(spec, snapshot.fork_time)
     # Sentinel rows (`∅.`-prefixed ids) never reached a system, so they are not evidence.
     rows = [row for row in snapshot.captured_rows(source_run)
             if not is_reserved_query_id(str(row.get("query_id", "")))]

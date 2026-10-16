@@ -120,9 +120,10 @@ def session_for_run(store: Any, run_dir: Path, *, source_run: Run) -> str:
 def branch_point_time(store: Any, run_dir: Path, branch_message_id: int, *, source_run: Run) -> datetime:
     """The moment the branch point was written — the clock a sibling resumes into.
 
-    Read from the store's message timestamps. The maximum over the prefix, since a resumed
-    lineage can interleave and T0 must not precede evidence the sibling inherits. Truncated to
-    whole seconds so it round-trips through the `Z`-seconds format `validate` compares against.
+    The run clock's reading in the branch point's fork snapshot (rev 5 C4), whole seconds so it
+    round-trips through the `Z`-seconds format `validate` compares against. Not the framework's
+    message timestamps, which are wall times a natural run's clock need not agree with; those
+    are used only for a source with no snapshot, which `validate` refuses.
     """
     session = session_for_run(store, run_dir, source_run=source_run)
     path = session_store.path_row_ids(store, session)
@@ -131,7 +132,13 @@ def branch_point_time(store: Any, run_dir: Path, branch_message_id: int, *, sour
             f"message {branch_message_id} is not on {run_dir}'s own main session, so it has no "
             "branch-point time — the id has to be one this run's main path actually holds")
     prefix = session_store.hydrate(store, session, role="analysis")
-    return _as_of_of(prefix[: path.index(branch_message_id) + 1], run_dir, branch_message_id)
+    upto = prefix[: path.index(branch_message_id) + 1]
+    from . import _snapshot  # _snapshot reads this module's frontier
+    snapshot = _snapshot.load(store, session, _snapshot.request_count(upto))
+    if snapshot is None:
+        # No snapshot: `validate` refuses this source (N4), whatever moment is named here.
+        return _as_of_of(upto, run_dir, branch_message_id)
+    return snapshot.fork_time
 
 
 def _as_of_of(prefix: list, run_dir: Path, branch_message_id: int) -> datetime:
