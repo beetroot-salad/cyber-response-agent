@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import sys
 import uuid
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -362,28 +363,108 @@ def bound_values(scope: ast.AST) -> dict[str, list[ast.expr]]:
 def spells(node: ast.AST, needle: str, values: Mapping[str, list[ast.expr]],
            _seen: frozenset[str] = frozenset()) -> bool:
     """Does `node`'s source spell `needle`, directly or through a name a plain assignment in
-    the same scope bound to something that does (transitively: `a = episode_id; b = a`)?"""
+    the same scope bound to something that does (transitively: `a = episode_id; b = a`), or
+    through an attribute some assignment in the same file bound to something that does
+    (`self._eid = episode_id` anywhere, `self._eid` used elsewhere)? `values` is
+    `scoped_nodes`' map: plain names, and `".<attr>"` keys for attributes."""
     if needle in ast.unparse(node):
         return True
-    names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} - _seen
-    return any(spells(value, needle, values, _seen | {name})
-               for name in sorted(names) for value in values.get(name, ()))
+    keys = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+    keys |= {"." + n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)}
+    return any(spells(value, needle, values, _seen | {key})
+               for key in sorted(keys - _seen) for value in values.get(key, ()))
+
+
+def attribute_values(tree: ast.AST) -> dict[str, list[ast.expr]]:
+    """`{".<attr>": [values]}` for every `<anything>.<attr> = value` (and annotated) assignment
+    in the whole file: what `spells` follows an attribute through (adversary F1: an id stored
+    on `self` in `__init__` and joined to a `-` in another method)."""
+    out: dict[str, list[ast.expr]] = {}
+    for node in ast.walk(tree):
+        targets = (node.targets if isinstance(node, ast.Assign)
+                   else [node.target] if isinstance(node, ast.AnnAssign) and node.value else [])
+        for target in targets:
+            if isinstance(target, ast.Attribute):
+                out.setdefault("." + target.attr, []).append(node.value)
+    return out
 
 
 def scoped_nodes(tree: ast.AST) -> list[tuple[ast.AST, dict[str, list[ast.expr]]]]:
-    """Every node of `tree` with the `bound_values` of the scope it sits in (the module, or
-    its innermost enclosing function or lambda)."""
+    """Every node of `tree` with the values map of the scope it sits in: the `bound_values` of
+    the module, or of its innermost enclosing function or lambda, plus the file's
+    `attribute_values`."""
     out: list[tuple[ast.AST, dict[str, list[ast.expr]]]] = []
+    attrs = attribute_values(tree)
 
     def walk(node: ast.AST, values: dict[str, list[ast.expr]]) -> None:
         for child in ast.iter_child_nodes(node):
             out.append((child, values))
-            inner = (bound_values(child) if isinstance(
+            inner = ({**bound_values(child), **attrs} if isinstance(
                 child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) else values)
             walk(child, inner)
 
-    walk(tree, bound_values(tree))
+    walk(tree, {**bound_values(tree), **attrs})
     return out
+
+
+#: The walk's owner: the ONE definition both censuses use (the openers census and the
+#: made-by-path census) — the run repository and the episode handle (relative to `defender/`;
+#: a folder prefix ends in `/`). Round 2, R4: the whole folder, not a file list.
+WALK_OWNER = ("run_repository/", "_episode_handle.py")
+
+
+def owned(rel: str) -> bool:
+    """Is `rel` (relative to `defender/`) in the walk's owner?"""
+    return any(rel == own or (own.endswith("/") and rel.startswith(own)) for own in WALK_OWNER)
+
+
+# ------------------------------------------------------------------------------------------
+# Which paths production opens (adversary F10, review round 1: the seam sees only the calls
+# that go through it, so one recorded call silenced it; the kernel's view cannot be dodged)
+# ------------------------------------------------------------------------------------------
+
+_PATH_EVENTS = frozenset({"open", "os.mkdir"})
+_RECORDERS: list[PathOpens] = []
+_HOOKED: list[bool] = []
+
+
+def _audit(event: str, args: tuple) -> None:
+    if event in _PATH_EVENTS and _RECORDERS and args and isinstance(
+            args[0], (str, bytes, os.PathLike)):
+        path = os.fsdecode(args[0])
+        if os.path.isabs(path):
+            for recorder in _RECORDERS:
+                recorder.seen.append(path)
+
+
+class PathOpens:
+    """Every ABSOLUTE path the process opened (`open` audit event: `os.open`, `open`, `hold`,
+    `bind`, ...) or made (`os.mkdir`) while the block ran. A walk that steps from a held handle
+    opens its levels RELATIVE (`dir_fd=`), which this does not record; a walk that `lstat`s a
+    level and then opens it by path, or `hold`s/`bind`s a path below `<T>`, shows up here.
+    `below(folder, allow=)` is the absolute paths strictly below `folder`, minus any at or below
+    an `allow` path (a `Run` handle binds its own run folder by path, and is not constrained).
+    `sys.addaudithook` cannot be removed, so one hook is installed per process and only records
+    while a recorder is active."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def __enter__(self) -> PathOpens:
+        if not _HOOKED:
+            sys.addaudithook(_audit)
+            _HOOKED.append(True)
+        _RECORDERS.append(self)
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        _RECORDERS.remove(self)
+
+    def below(self, folder: Path, allow: Iterable[Path] = ()) -> list[str]:
+        prefix = os.fspath(folder).rstrip("/") + "/"
+        allowed = [os.fspath(a).rstrip("/") for a in allow]
+        return sorted({p for p in self.seen if p.startswith(prefix)
+                       and not any(p == a or p.startswith(a + "/") for a in allowed)})
 
 
 #: inotify's event bits this suite watches for (`<sys/inotify.h>`).

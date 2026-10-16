@@ -447,6 +447,13 @@ def census(root: Path, *, skip_tests: bool = True) -> list[Hit]:
     * `def`: the bound's constant being defined.
     * `str`: a banned name as a string constant, i.e. an `__all__` entry re-exporting it.
     * `mint-args`: `RunId.mint(...)` called with an argument (a label or a clock).
+    * `composer`: a call to a function that joins one of its PARAMETERS to a `-` (found over every
+      file, matched by bare name), handing it an expression that spells `episode_id` —
+      `compose(family.episode_id, label)` (adversary F1, round 2). Limits, said plainly: the
+      callee is matched by name, not resolved to one definition; an id reaching the call
+      through a container, `*args`, a lambda default or another module's constant is not
+      followed. `self._eid = episode_id` joined in another method IS followed (attributes are
+      tracked file-wide by name, not per class).
     * `concat`: the same join spelled without an f-string (review F13) — `<episode_id> + "-..."`,
       `"-".join([... episode_id ...])`, `"{}-{}".format(episode_id, ...)` and
       `"%s-%s" % (episode_id, ...)`.
@@ -457,14 +464,84 @@ def census(root: Path, *, skip_tests: bool = True) -> list[Hit]:
     root = Path(root)
     excluded = (".venv", "__pycache__", "node_modules") + (("tests",) if skip_tests else ())
     hits: list[Hit] = []
+    parsed = []
     for rel in _astlib.source_files(root, excluded):
         _text, tree = _astlib.read_and_parse(root / rel, rel)
         module, package = _astlib.module_and_package(rel, root="defender")
-        env = _astlib.module_env(tree, module, package)
+        parsed.append((rel, tree, _astlib.module_env(tree, module, package)))
+    composers = _composers([tree for _rel, tree, _env in parsed])
+    for rel, tree, env in parsed:
         with _astlib.scan_guard(rel):
             for node, values in S.scoped_nodes(tree):
                 hits.extend(_hits_at(node, env, rel, values))
+                hits.extend(_composer_calls(node, rel, values, composers))
     return sorted(set(hits))
+
+
+def _joined_params(func: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[int, str]:
+    """`{position: name}` of the parameters of `func` that an f-string field or a `+` joins to a
+    `-` in its body, directly or through a local alias — a function that COMPOSES from what it
+    is handed (adversary F1, round 2: `compose(eid, label)` spells no `episode_id`; the caller
+    does)."""
+    args = [a.arg for a in (*func.args.posonlyargs, *func.args.args)]
+    values = S.bound_values(func)
+
+    def reaches(node: ast.AST, name: str, seen: frozenset[str] = frozenset()) -> bool:
+        for n in (x for x in ast.walk(node) if isinstance(x, ast.Name)):
+            if n.id == name or (n.id not in seen and any(
+                    reaches(v, name, seen | {n.id}) for v in values.get(n.id, ()))):
+                return True
+        return False
+
+    out: dict[int, str] = {}
+    for node in ast.walk(func):
+        fields: list[ast.AST] = []
+        if isinstance(node, ast.JoinedStr):
+            fields = [f.value for f, after in zip(node.values, node.values[1:], strict=False)
+                      if isinstance(f, ast.FormattedValue) and isinstance(after, ast.Constant)
+                      and isinstance(after.value, str) and after.value.startswith("-")]
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and isinstance(
+                node.right, ast.Constant) and isinstance(node.right.value, str) and (
+                node.right.value.startswith("-")):
+            fields = [_rightmost(node.left)]
+        for index, name in enumerate(args):
+            if index or name not in ("self", "cls"):
+                if any(reaches(f, name) for f in fields):
+                    out[index - (1 if args[:1] in (["self"], ["cls"]) else 0)] = name
+    return out
+
+
+def _composers(trees: list[ast.Module]) -> dict[str, dict[int, str]]:
+    """`{function or method name: {call position: parameter}}` over every file: the functions
+    `_joined_params` finds. Matched by bare name at the call (a cross-module call cannot be
+    resolved to one definition here), which is why a hit needs an `episode_id` argument too."""
+    out: dict[str, dict[int, str]] = {}
+    for tree in trees:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                    joined := _joined_params(node)):
+                out.setdefault(node.name, {}).update(joined)
+    return out
+
+
+def _composer_calls(node: ast.AST, rel: str, values: dict,
+                    composers: dict[str, dict[int, str]]) -> list[Hit]:
+    """`composer` hits: a call to a composing function whose joined parameter is handed an
+    expression that spells `episode_id` (directly, or through a local or attribute alias)."""
+    if not isinstance(node, ast.Call):
+        return []
+    func = node.func
+    name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(
+        func, ast.Attribute) else None
+    joined = composers.get(name or "")
+    if not joined:
+        return []
+    handed = [(i, a) for i, a in enumerate(node.args)] + [
+        (next((i for i, p in joined.items() if p == k.arg), -1), k.value)
+        for k in node.keywords]
+    if any(i in joined and _names_episode_id(a, values) for i, a in handed):
+        return [Hit(rel, node.lineno, "composer", ast.unparse(node))]
+    return []
 
 
 def _banned_origin(origin: str | None) -> str | None:
@@ -576,7 +653,7 @@ def test_1187_o1_no_production_source_composes_derives_or_bounds_an_id_by_meanin
     """#1187 O1 and declared changes 1, 2, 4: production source (every `.py` under `defender/`
     but `tests/`) has no f-string joining an `episode_id` to a `-`, no call to `mint_run_id`,
     `episode_id_for`, `_claimed_slug` or `arm_run_id_for`, no `RunId.mint(<label>)`, and no
-    `RUN_ID_MAX_BYTES`. RED at base: the hits are the design's census C1 rows (the stamp-label
+    `RUN_ID_MAX_BYTES`. RED at base (29 sites in all, composer calls included): the hits are the design's census C1 rows (the stamp-label
     minter and its one caller, the `-n<message>` deriver and its `-r<n>` retry, the folder-name
     slug matcher, the composed sibling names in the family gate, the judge, the record writer
     and the episode layout, and #1257's arm-id composer)."""
@@ -590,7 +667,8 @@ def test_1187_o1_the_census_finds_what_it_is_meant_to_find(tmp_path):
     production: a planted file carrying each shape is reported, shape by shape, with the alias,
     the attribute form and the module's own function all resolved — and each join made through
     a LOCAL alias of the episode id (adversary F1: `ep = episode_id; f"{ep}-{label}"` kept
-    every composer while the census read []), and the mint reached through `getattr`. A clean
+    every composer while the census read []), the mint reached through `getattr`, an id passed as an argument to a function that composes
+    from its parameter, and an id stored on `self` and joined in another method. A clean
     file beside it is not: a name bound to the episode id in one function and a same-named
     local bound to a label in another are told apart. Without this, a scanner that matched
     nothing would pass the census above."""
@@ -635,7 +713,24 @@ def test_1187_o1_the_census_finds_what_it_is_meant_to_find(tmp_path):
         "    e = getattr(RunId, 'mint')(label)\n"
         "    if (w := family.episode_id):\n"
         "        return f'{w}-x'\n"
-        "    return a, b, c, d, e\n",
+        "    return a, b, c, d, e\n"
+        "\n"
+        "\n"
+        "def compose(eid, label):\n"
+        "    joined = eid\n"
+        "    return f'{joined}-{label}'\n"
+        "\n"
+        "\n"
+        "def passes(family, label):\n"
+        "    return compose(family.episode_id, label)\n"
+        "\n"
+        "\n"
+        "class Holder:\n"
+        "    def __init__(self, family):\n"
+        "        self._eid = family.episode_id\n"
+        "\n"
+        "    def arm(self, label):\n"
+        "        return f'{self._eid}-{label}'\n",
         encoding="utf-8")
     (root / "pkg" / "clean.py").write_text(
         "from defender.run_repository import RunId\n"
@@ -659,7 +754,23 @@ def test_1187_o1_the_census_finds_what_it_is_meant_to_find(tmp_path):
         "\n"
         "def other_scope(label, n):\n"
         "    ep = label\n"
-        "    return f'{ep}-{n}', getattr(RunId, 'mint')()\n",
+        "    return f'{ep}-{n}', getattr(RunId, 'mint')()\n"
+        "\n"
+        "\n"
+        "def stamp(prefix, n):\n"
+        "    return f'{prefix}-{n}'\n"
+        "\n"
+        "\n"
+        "def uses_stamp(label, n):\n"
+        "    return stamp(label, n)\n"
+        "\n"
+        "\n"
+        "class Plain:\n"
+        "    def __init__(self, label):\n"
+        "        self._label = label\n"
+        "\n"
+        "    def name(self, n):\n"
+        "        return f'{self._label}-{n}'\n",
         encoding="utf-8")
 
     found = {(h.rel, h.kind, h.what) for h in census(root)}
@@ -684,7 +795,11 @@ def test_1187_o1_the_census_finds_what_it_is_meant_to_find(tmp_path):
     assert sorted((h.kind, h.what) for h in aliased) == sorted([
         ("fstring", "{ep}-"), ("fstring", "{eid}-"), ("fstring", "{second}-"),
         ("concat", "ep + '-'"), ("mint-args", "defender.run_repository.RunId.mint"),
-        ("fstring", "{w}-")]), aliased
+        ("fstring", "{w}-"),
+        # the parameter-passing shape: `compose` spells no episode id (so no fstring hit there), the caller hands one;
+        # and the attribute shape: `self._eid` assigned from one, joined in another method.
+        ("composer", "compose(family.episode_id, label)"),
+        ("fstring", "{self._eid}-")]), aliased
 
 
 def test_1187_o1_the_census_leaves_tests_out(tmp_path):

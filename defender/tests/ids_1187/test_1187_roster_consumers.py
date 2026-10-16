@@ -1051,6 +1051,32 @@ def test_the_judge_door_opens_an_episode_whose_arm_container_has_no_record(data_
     assert opened == [ep], f"the door opened something for an absent id: {opened}"
 
 
+def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name():
+    """#1187 declared change 4 and census C1 row `judge/family.py:372-379
+    world_label_names_directory` ("loses its run-id half and keeps the label's own rule"),
+    judge side (round 2, adversary F1: nothing pinned the judge's own gate, so a renamed copy
+    of the `<episode_id>-<label>` check survived). A valid 200-character label is admitted
+    under a UUID episode id — its composed name would be 237 bytes, over the old 206-byte
+    bound — and so is 230; the label's OWN rule still refuses a label that does not start with
+    an ASCII alphanumeric (`-a`, `_a`, `.a`: each makes a valid COMPOSED name, `<uuid>-a`, so a
+    check kept on the composed name alone admits them), the empty label, a traversal and a
+    label with a separator. Same two-argument call the existing pin
+    (`test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_echoed_from_a_read`)
+    makes. NOT observable here: a refusal's wording. `is_valid_run_id` has no length bound
+    and a UUID prefix is always a valid start, so the composed half never changed an answer;
+    only the census (`test_1187_ids`) sees a surviving composer. GREEN at base (a guard)."""
+    from defender.learning.judge import family
+
+    episode_id = R.new_id()
+    for long in ("w" * 200, "w" * 230):
+        assert family.world_label_names_directory(episode_id, long), (
+            f"a valid {len(long)}-character label was refused for its composed name")
+    assert family.world_label_names_directory(episode_id, "b")
+    for bad in ("-a", "_a", ".a", "", "../x", "a/b", "..", "a\x00b"):
+        assert not family.world_label_names_directory(episode_id, bad), (
+            f"{bad!r} was admitted: the label's own rule no longer applies")
+
+
 def test_the_judge_refuses_a_manifest_naming_another_episode(tmp_path, data_root):
     """R5 / declared change 10 at the judge (review F8): `grade_episode(runs, <ep>)` — the
     judge's one entry, whose door is `runs.episode_files` — over an episode whose manifest names

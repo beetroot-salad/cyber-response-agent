@@ -15,11 +15,11 @@ Two arms:
 
 * The census (static, over production source, through `scripts/lint/_astlib.py`'s resolver, as
   `test_1187_ids`' census): no call to `Episode.open` / `Episode.create` outside the walk's
-  owner (named FILE BY FILE: `run_repository/_lookup.py`, `_held.py`, `_handle.py` and
-  `_episode_handle.py`), however the name is reached; no call from outside to an owner
-  module-level function that opens a door itself, and no owner package imported by a string
-  (contract repair r1, adversary F2: a new `run_repository/_compat.open_at(path)` laundered
-  the path opens past the folder-wide exemption); no `_io` path opener (`bind`, `hold`,
+  owner (the `run_repository/` folder and `_episode_handle.py`, `_spec1187.WALK_OWNER`),
+  however the name is reached; no call from outside to an owner function or method that opens
+  a door at a path it is handed (wrappers of wrappers, static and instance methods too), and
+  no owner package imported by a string (adversary F2: a new `run_repository/_compat.
+  open_at(path)` is inside the folder, so the callers are what is policed); no `_io` path opener (`bind`, `hold`,
   `hold_new`) over an episode folder — an argument that spells `episode`, directly or through
   a local alias — outside that owner, and none at all in the five re-bind sites' modules. Its
   own planted positive control proves each shape is seen.
@@ -44,13 +44,10 @@ from defender.tests.tenant_1105_run_repository import _spec1105_pr2 as P
 
 DEFENDER = Path(__file__).resolve().parents[2]
 
-#: The repository's walk owner: the only production MODULES that may hold an episode folder by
-#: an `Episode` door, named file by file (relative to `defender/`). Adversary F2: exempting the
-#: whole `run_repository/` folder let a new module there (`_compat.open_at(path)`) launder a
-#: path open for any caller. A new module that must open an `Episode` joins this list by a
-#: reviewed contract repair.
-WALK_OWNER = ("run_repository/_lookup.py", "run_repository/_held.py",
-              "run_repository/_handle.py", "_episode_handle.py")
+#: The repository's walk owner is `_spec1187.WALK_OWNER`, the one definition the made-by-path
+#: census shares: the whole `run_repository/` folder and `_episode_handle.py`. A door inside the
+#: owner is the walk's own; what the census polices is the owner's PATH-TAKING doors reached
+#: from outside (`laundered`), however deep the wrappers nest (adversary F2).
 #: The owner's dotted packages: imported BY A STRING (`__import__`, `importlib.import_module`)
 #: outside the owner, a door no resolver can follow (adversary F2's `run.py` laundering).
 OWNER_PACKAGES = ("defender.run_repository", "defender._episode_handle")
@@ -88,7 +85,7 @@ class Hit:
 
 
 def _owned(rel: str) -> bool:
-    return rel in WALK_OWNER
+    return R.owned(rel)
 
 
 def _parsed(root: Path) -> list[tuple[str, ast.Module, object]]:
@@ -102,22 +99,77 @@ def _parsed(root: Path) -> list[tuple[str, ast.Module, object]]:
     return out
 
 
-def _door_wrappers(parsed: list[tuple[str, ast.Module, object]]) -> frozenset[str]:
-    """The dotted names of the owner's MODULE-LEVEL functions that call an episode door
-    themselves: a caller outside the owner reaching one opens an `Episode` at whatever path it
-    hands over (adversary F2: `open_at(path)` / `create_at(path)` beside the walk)."""
-    wrappers = set()
+def _passes_a_parameter(arg: ast.expr, params: set[str], values: dict) -> bool:
+    """Is `arg` a parameter of the function, bare or wrapped in `Path(...)`, or a local name
+    bound (transitively) to one? The path a wrapper hands a door unchanged."""
+    while isinstance(arg, ast.Call) and len(arg.args) == 1 and (
+            (isinstance(arg.func, ast.Name) and arg.func.id == "Path")
+            or (isinstance(arg.func, ast.Attribute) and arg.func.attr == "Path")):
+        arg = arg.args[0]
+    if isinstance(arg, ast.Name):
+        if arg.id in params:
+            return True
+        return any(_passes_a_parameter(v, params, values) for v in values.get(arg.id, ()))
+    return False
+
+
+def _door_wrappers(parsed: list[tuple[str, ast.Module, object]]) -> tuple[frozenset[str],
+                                                                       frozenset[str]]:
+    """`(dotted names, bare method names)` of the owner's functions that open an episode door at
+    a PATH THEY ARE HANDED: a function (module-level, or a static/class/instance method) whose
+    call to a door — or to another such wrapper, to a fixpoint — passes one of its own
+    parameters (bare, or in `Path(...)`) in the path position. A caller outside the owner
+    reaching one opens an `Episode` wherever it points (adversary F2: `open_at(path)`,
+    `create_at(path)`; round 2: wrappers of wrappers, and methods). A function taking an id
+    and deriving the path itself (`EpisodeRuns.__init__`) is not one. An INSTANCE method is
+    matched by its bare name at the call (the receiver's class cannot be resolved statically);
+    a module-level function or a class's static/class method by its dotted origin."""
+    names: set[str] = set()
+    methods: set[str] = set()
+    defs = []
     for rel, tree, env in parsed:
         if not _owned(rel):
             continue
         module, _package = _astlib.module_and_package(rel, root="defender")
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
-                    isinstance(call, ast.Call)
-                    and (_astlib.callee(call, env) or "").endswith(DOORS)
-                    for call in ast.walk(node)):
-                wrappers.add(f"{module}.{node.name}")
-    return frozenset(wrappers)
+        for owner, node in _functions(tree, module):
+            defs.append((rel, env, owner, node, module))
+    grew = True
+    while grew:
+        grew = False
+        for rel, env, owner, node, module in defs:
+            dotted = f"{owner}.{node.name}"
+            if dotted in names:
+                continue
+            params = {a.arg for a in (*node.args.posonlyargs, *node.args.args,
+                                      *node.args.kwonlyargs)} - {"self", "cls"}
+            values = R.bound_values(node)
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call) or not call.args:
+                    continue
+                called = _astlib.callee(call, env) or ""
+                bare = call.func.attr if isinstance(call.func, ast.Attribute) else None
+                if (called.endswith(DOORS) or called in names or (
+                        bare in methods and called == "")) and _passes_a_parameter(
+                        call.args[0], params, values):
+                    names.add(dotted)
+                    if owner != module:
+                        methods.add(node.name)
+                    grew = True
+                    break
+    return frozenset(names), frozenset(methods)
+
+
+def _functions(tree: ast.Module, module: str) -> list[tuple[str, ast.FunctionDef]]:
+    """`(owner dotted name, def)` for every module-level function (owner = the module) and every
+    method of a module-level class (owner = `<module>.<Class>`)."""
+    out = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out.append((module, node))
+        elif isinstance(node, ast.ClassDef):
+            out.extend((f"{module}.{node.name}", m) for m in node.body
+                       if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    return out
 
 
 def _is_path_call(node: ast.expr, env) -> bool:
@@ -130,12 +182,14 @@ def _is_path_call(node: ast.expr, env) -> bool:
 
 def census(root: Path) -> list[Hit]:
     """Every episode opener under `root` (the `defender/` folder, or a planted tree) outside
-    the walk's owner (`WALK_OWNER`, file by file):
+    the walk's owner (`_spec1187.WALK_OWNER`: the `run_repository/` folder and
+    `_episode_handle.py`):
 
     * `door`: a call resolving to `Episode.open` / `Episode.create` (imported by name, through
       a module alias, or inside a function) — a path handed to the episode handle;
-    * `laundered`: a call resolving to one of the owner's module-level functions that calls a
-      door itself (`_door_wrappers`);
+    * `laundered`: a call to one of the owner's functions or methods that opens a door at a
+      path it is handed, or hands one to another such wrapper, to a fixpoint
+      (`_door_wrappers`); an instance method is matched by its bare name;
     * `dynamic`: `__import__` / `importlib.import_module` of a string naming an owner package
       — a door nothing can resolve;
     * `rebind`: a call resolving to a path opener of `_io` (`bind`, `hold`, `hold_new`) — in
@@ -146,7 +200,7 @@ def census(root: Path) -> list[Hit]:
     The listing is `_astlib.source_files` (tracked plus untracked, unignored `.py`), `tests/`
     and virtualenvs dropped."""
     parsed = _parsed(Path(root))
-    wrappers = _door_wrappers(parsed)
+    wrappers, wrapper_methods = _door_wrappers(parsed)
     hits: list[Hit] = []
     for rel, tree, env in parsed:
         if _owned(rel):
@@ -157,6 +211,9 @@ def census(root: Path) -> list[Hit]:
                     continue
                 called = _astlib.callee(node, env)
                 if called is None:
+                    if node.args and isinstance(node.func, ast.Attribute) and (
+                            node.func.attr in wrapper_methods):
+                        hits.append(Hit(rel, node.lineno, "laundered", ast.unparse(node.func)))
                     continue
                 if called.endswith(DOORS):
                     hits.append(Hit(rel, node.lineno, "door", ast.unparse(node.func)))
@@ -175,7 +232,7 @@ def census(root: Path) -> list[Hit]:
 
 def test_no_production_code_opens_an_episode_by_path_outside_the_walk():
     """S-iso / O8 (review F4): production source has no `Episode.open` / `Episode.create` call
-    outside the run repository's walk files, no laundered door (an owner wrapper called from
+    outside the run repository's walk owner, no laundered door (an owner wrapper called from
     outside, an owner package imported by a string), and no `_io` path opener re-binding an
     episode folder by path — the sibling's pre-acceptance open, `preflight_replay`'s `Path`
     overload, the launcher's `-r<n>` claim, and the judge's and the comparator's re-binds are
@@ -194,12 +251,13 @@ def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
     production: a planted tree holding each shape — a door by name, through a module alias,
     and imported inside a function; a re-bind by `Path(episode_dir)`, by a bare `episode_dir`,
     by `.dir` through a module alias, and by any `Path(...)` in a re-bind module — is reported
-    shape by shape. Adversary F2's laundering shapes too: a door in a NEW `run_repository/`
-    module (only the named walk files are the owner); a module-level wrapper in an owner file
-    (`open_at(path)`) called from outside; an owner package imported by a string; a local
+    shape by shape. Adversary F2's laundering shapes too: a module-level wrapper in the owner
+    (`open_at(path)`, including one in a NEW `run_repository/` module) called from outside; a
+    wrapper of a wrapper; a static method and an instance method that open a door at a path
+    they are handed; an owner package imported by a string; a local
     alias (`d = Path(episode_dir); bind(d)`, and `hold`) outside; and, in a re-bind module, a
     bind or hold of ANY argument. Not reported: the same shapes inside an owner file, an
-    outside call to an owner function that opens no door, a `bind(Path(settings))` in an
+    outside call to an owner function that opens no door or derives its path from an id, a `bind(Path(settings))` in an
     ordinary module, and the one-time command's bind of the old episodes root under `ops/` —
     while a door under `ops/` still is."""
     root = tmp_path / "planted"
@@ -227,7 +285,8 @@ def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
             "import importlib\n"
             "from pathlib import Path\n"
             "from defender import _io\n"
-            "from defender.run_repository._lookup import helper, open_at\n"
+            "from defender.run_repository._lookup import EpisodeRuns, Opener, helper, open_at\n"
+            "from defender.run_repository._compat import chained, derived\n"
             "\n"
             "\n"
             "def c(episode_dir):\n"
@@ -237,13 +296,28 @@ def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
             "    one = open_at(d)\n"
             "    two = __import__('defender.run_repository._lookup', fromlist=['x'])\n"
             "    three = importlib.import_module('defender._episode_handle')\n"
-            "    return bound, h, one, two, three, helper(d)\n"),
+            "    four = chained(d)\n"
+            "    five = Opener.make(d)\n"
+            "    six = Opener().take(d)\n"
+            "    seven = derived('some-id')\n"
+            "    return bound, h, one, two, three, helper(d), four, five, six, seven\n"),
         "run_repository/_compat.py": (
+            "from pathlib import Path\n"
             "from defender._episode_handle import Episode\n"
+            "from defender.run_repository._lookup import open_at\n"
             "\n"
             "\n"
             "def create_at(path):\n"
-            "    return Episode.create(path, exclusive=True)\n"),
+            "    return Episode.create(path, exclusive=True)\n"
+            "\n"
+            "\n"
+            "def chained(where):\n"
+            "    inner = Path(where)\n"
+            "    return open_at(inner)\n"
+            "\n"
+            "\n"
+            "def derived(episode_id):\n"
+            "    return Episode.open(Path('/base') / episode_id)\n"),
         "learning/judge/family.py": (
             "from pathlib import Path\n"
             "from defender._io import bind, hold\n"
@@ -286,7 +360,24 @@ def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
             "\n"
             "\n"
             "def helper(path):\n"
-            "    return path\n"),
+            "    return path\n"
+            "\n"
+            "\n"
+            "class Opener:\n"
+            "    @staticmethod\n"
+            "    def make(folder):\n"
+            "        from defender._episode_handle import Episode\n"
+            "        return Episode.create(folder)\n"
+            "\n"
+            "    def take(self, folder):\n"
+            "        from defender._episode_handle import Episode\n"
+            "        return Episode.open(folder)\n"
+            "\n"
+            "\n"
+            "class EpisodeRuns:\n"
+            "    def __init__(self, tenant, episode_id):\n"
+            "        from defender._episode_handle import Episode\n"
+            "        self.episode = Episode.open(tenant.dir / episode_id)\n"),
     }
     for rel, text in files.items():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -298,11 +389,13 @@ def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
     assert found.count(("learning/judge/family.py", "rebind")) == 3, found
     assert found.count(("ops/retire_legacy_runs.py", "door")) == 1, found
     assert ("ops/retire_legacy_runs.py", "rebind") not in found, found
-    assert found.count(("run_repository/_compat.py", "door")) == 1, found
+    assert not [f for f in found if f[0].startswith("run_repository/")], found
     assert found.count(("pkg/laundry.py", "rebind")) == 2, found
-    assert found.count(("pkg/laundry.py", "laundered")) == 1, found
+    # open_at, chained (a wrapper of the wrapper), Opener.make (static), Opener().take
+    # (instance); `derived` takes an id and `helper` opens nothing.
+    assert found.count(("pkg/laundry.py", "laundered")) == 4, found
     assert found.count(("pkg/laundry.py", "dynamic")) == 2, found
-    assert len([f for f in found if f[0] == "pkg/laundry.py"]) == 5, found
+    assert len([f for f in found if f[0] == "pkg/laundry.py"]) == 8, found
     assert not [f for f in found if f[0] in ("pkg/clean.py", "run_repository/_lookup.py")], found
 
 
