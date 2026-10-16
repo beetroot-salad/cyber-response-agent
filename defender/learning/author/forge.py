@@ -5,7 +5,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     import httpx
@@ -155,36 +155,75 @@ class ForgeAddress:
         """The repository's Forgejo API root."""
         return f"{self.origin}/api/v1/repos/{self.owner}/{self.repo}"
 
-    @property
-    def full_name(self) -> str:
-        """`owner/repo`, as a PR row's head repository names it (case folded)."""
-        return f"{self.owner}/{self.repo}"
+
+#: The page size a listing asks for. Forgejo clamps it to its `max_response_items`, so a page
+#: shorter than this is not the end of the listing.
+_PAGE_LIMIT = 50
 
 
-def _head_repository(row: dict) -> str:
-    """The `owner/repo` a PR row's head branch lives in, case folded. A row without its head
-    repository (Forgejo drops it for a deleted fork) cannot be shown to be ours, and excluding
-    it would release the writer lease on unknown evidence: it is a `ForgeError` (#1108 P3
-    contract choice 9, pending a user decision; this function is the one place that decides)."""
-    repo = row["head"].get("repo")
-    if not isinstance(repo, dict) or not isinstance(repo.get("full_name"), str):
-        raise ForgeError(f"Forgejo pull #{row.get('number')} names no head repository")
-    return repo["full_name"].lower()
+def _head_repository_id(row: dict) -> int | None:
+    """The id of the repository a PR row's head branch lives in, or `None` when the row names
+    none: Forgejo drops the head repository of a deleted fork's PR (D-fork), and such a row,
+    like any fork's, is never ours. The id, not the full name: a rename or a transfer keeps
+    it, and another repository can take the name (#1108 amendment 3, C1)."""
+    head = row["head"]
+    repo_id = head.get("repo_id")
+    if type(repo_id) is not int:
+        repo = head.get("repo")
+        repo_id = repo.get("id") if isinstance(repo, dict) else None
+    return repo_id if type(repo_id) is int else None
+
+
+def _total_count(response: httpx.Response) -> int | None:
+    """`X-Total-Count`, the number of rows the listing holds in all, or `None` when the forge
+    sent none (or one that is not a count, which can end nothing)."""
+    raw = response.headers.get("X-Total-Count", "").strip()
+    return int(raw) if raw.isdigit() else None
+
+
+@dataclass(frozen=True)
+class PullRequest:
+    """One PR of our repository as Forgejo lists it: its number and URL, its head commit
+    (`None` when the row carries none; the head branch plays no part in which PR is whose),
+    and its `status`: `open`, `merged` or `closed` (closed unmerged)."""
+
+    number: int
+    url: str
+    head_sha: str | None
+    status: str
+
+
+def _pull_request(row: dict) -> PullRequest:
+    state, merged = row.get("state"), row.get("merged")
+    if state == "open":
+        status = "open"
+    elif state == "closed":
+        status = "merged" if merged is True or row.get("merged_at") else "closed"
+    else:
+        raise ForgeError(f"Forgejo pull #{row['number']} has an unknown state {state!r}")
+    sha = row["head"].get("sha")
+    return PullRequest(number=row["number"], url=row["html_url"],
+                       head_sha=sha if isinstance(sha, str) and sha else None, status=status)
 
 
 class ForgejoForge:
     """Host-only Forgejo client; importing the legacy forge needs no HTTP stack.
 
-    The origin is parsed once, here, into `address` (O-G): every request goes to its API, every
-    next-page Link is compared against it before it is followed, and only PRs whose head
-    repository is this repository count, by exact head and by prefix alike (a fork's PR is never
-    ours, and never holds the writer lease). This service owns client dependencies, not a
+    The origin is parsed once, here, into `address` (O-G): every request goes to its API. A
+    listing asks for each page by number on that address (`?state=S&page=N&limit=L`) and never
+    follows or compares Forgejo's `Link`, which Forgejo builds from its own `ROOT_URL` (#1108
+    amendment 3, C4): it stops at an empty page, or once the rows seen (every row, counted
+    before any is skipped) reach `X-Total-Count`. Only PRs whose head repository id is this
+    repository's (read once from `GET /repos/{o}/{r}`) count, by exact head and by prefix
+    alike: a fork's PR, a namesake's, or one with no head repository at all (D-fork) is never
+    ours, and never holds the writer lease. This service owns client dependencies, not a
     serialized boundary record; its default representation exposes no credentials."""
 
     def __init__(self, *, origin: str, token: str, client: httpx.Client) -> None:
         self.address = ForgeAddress.parse(origin)
         self._token = token
         self._client = client
+        self._repository_id: int | None = None
 
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         import httpx
@@ -206,6 +245,16 @@ class ForgejoForge:
         except ValueError as e:
             raise ForgeError("Forgejo returned invalid JSON") from e
 
+    def repository_id(self) -> int:
+        """This repository's id, read once (`GET /repos/{o}/{r}`) and kept: what a PR's head
+        repository is compared with."""
+        if self._repository_id is None:
+            value = self._json(self._request("GET", self.address.api))
+            if not isinstance(value, dict) or type(value.get("id")) is not int:
+                raise ForgeError("Forgejo's repository read names no repository id")
+            self._repository_id = value["id"]
+        return self._repository_id
+
     def verify_main_protection(self) -> None:
         response = self._request("GET", f"{self.address.api}/branches/main")
         value = self._json(response)
@@ -213,64 +262,52 @@ class ForgejoForge:
                 or value.get("user_can_push") is not False):
             raise ForgeError("main protection must be known and the bot must not be able to push")
 
-    def _next_page(self, link: str) -> str:
-        """The next page's URL, rebuilt on this forge's own address, once the Link has been
-        shown to name this repository's open pulls (scheme, host, port, owner and repository
-        compared as parsed). A Link that does not parse, or names anything else, is refused
-        before it is requested, so it cannot redirect the token."""
-        try:
-            parts = urlsplit(link)
-            host, port = parts.hostname, parts.port
-        except ValueError as e:
-            raise ForgeError(f"Forgejo pagination Link has an invalid URL: {e}") from e
-        segments = parts.path.split("/")
-        named = None
-        if (parts.scheme in _DEFAULT_PORTS and host and len(segments) == 7
-                and segments[:4] == ["", "api", "v1", "repos"] and segments[6] == "pulls"):
-            owner, repo = _forge_name(segments[4]), _forge_name(segments[5])
-            if owner is not None and repo is not None:
-                named = ForgeAddress(scheme=parts.scheme, host=host,
-                                     port=port or _DEFAULT_PORTS[parts.scheme],
-                                     owner=owner, repo=repo)
-        if (named != self.address or parts.username is not None or parts.password is not None
-                or parts.fragment or parse_qs(parts.query).get("state") != ["open"]):
-            raise ForgeError("Forgejo pagination Link left this repository's open pulls")
-        return f"{self.address.api}/pulls?{parts.query}"
-
-    def _list(self) -> list[dict]:
+    def _rows(self, state: str) -> list[dict]:
+        """Every PR row of `state` whose head is this repository, page by page on our own
+        address. A row of another shape is a `ForgeError`; a fork's row, or one with no head
+        repository, is skipped after it is counted."""
         import httpx
 
-        url = str(httpx.URL(f"{self.address.api}/pulls",
-                            params={"state": "open", "page": "1", "limit": "50"}))
-        visited: set[str] = set()
+        ours = self.repository_id()
         rows: list[dict] = []
-        while url:
-            if url in visited:
-                raise ForgeError("Forgejo pull pagination repeated a page")
-            visited.add(url)
-            response = self._request("GET", url)
+        seen, page = 0, 1
+        while True:
+            url = httpx.URL(f"{self.address.api}/pulls",
+                            params={"state": state, "page": str(page), "limit": str(_PAGE_LIMIT)})
+            response = self._request("GET", str(url))
             value = self._json(response)
             if not isinstance(value, list):
                 raise ForgeError("Forgejo pulls JSON must be an array")
+            if not value:
+                return rows
             for row in value:
                 if (not isinstance(row, dict) or not isinstance(row.get("head"), dict)
                         or not isinstance(row["head"].get("ref"), str)
                         or type(row.get("number")) is not int
                         or not isinstance(row.get("html_url"), str)):
                     raise ForgeError("Forgejo pull has invalid number, head or URL")
-                if _head_repository(row) != self.address.full_name:
-                    continue
-                rows.append({"number": row["number"], "headRefName": row["head"]["ref"],
-                             "url": row["html_url"]})
-            link = response.links.get("next", {}).get("url", "")
-            url = self._next_page(link) if link else ""
-        return rows
+                if _head_repository_id(row) == ours:
+                    rows.append(row)
+            seen += len(value)
+            total = _total_count(response)
+            if total is not None and seen >= total:
+                return rows
+            page += 1
+
+    def _open(self) -> list[dict]:
+        return [{"number": row["number"], "headRefName": row["head"]["ref"],
+                 "url": row["html_url"]} for row in self._rows("open")]
 
     def list_open_prs(self, head_prefix: str) -> list[dict]:
-        return [row for row in self._list() if row["headRefName"].startswith(head_prefix)]
+        return [row for row in self._open() if row["headRefName"].startswith(head_prefix)]
 
     def list_prs_for_head(self, head: str) -> list[dict]:
-        return [row for row in self._list() if row["headRefName"] == head]
+        return [row for row in self._open() if row["headRefName"] == head]
+
+    def pull_requests(self) -> list[PullRequest]:
+        """Every PR of this repository's own, open, merged or closed (a `state=all` listing),
+        with its head commit: where a batch's PR is found by its head commit (amendment 3, C1)."""
+        return [_pull_request(row) for row in self._rows("all")]
 
     def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
         response = self._request("POST", f"{self.address.api}/pulls", json={
