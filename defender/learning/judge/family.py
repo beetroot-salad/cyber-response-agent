@@ -508,8 +508,8 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
     is handed back carrying the id its host-only call join (`read_call_join`) records for the
     row's own `(lead_id, seq)` — never by the row's place in the table — under `calls.CALL_ID`,
     the one key every judge reader of a row's id reads. A row with no join line (a seeded,
-    pre-branch row) carries none; an id spelled on the table row itself is not the host's and
-    is dropped.
+    pre-branch row) carries none. A table row that spells an id itself is refused: no writer
+    writes one since #1255, so it is an archive from before the join or a planted column.
 
     Unlike the tolerant lead reader, grading must preserve the raw call identity rather than
     coerce it. Validate the string fields used by the computed views before admitting any
@@ -533,10 +533,16 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
                 raise JudgeRefused(
                     f"world {label!r}: {table_name} row {index} has malformed {column} "
                     f"({row.get(column)!r}); expected str")
+    for index, row in enumerate(table):
+        if CALL_ID in row:
+            raise JudgeRefused(
+                f"world {label!r}: {table_name} row {index} carries a {CALL_ID} column, which "
+                "no query-table writer writes since #1255 (the id lives in the host-only "
+                f"{WORLD_LEAVES.call_join}) — an archive from before #1255, or a planted column")
     join = read_call_join(bound, label)
     joined: list[dict[str, Any]] = []
     for row in table:
-        own = {k: v for k, v in row.items() if k != CALL_ID}
+        own = dict(row)
         seq = row.get("seq")
         call_id = (join.get((row["lead_id"], seq))
                    if isinstance(seq, int) and not isinstance(seq, bool) else None)

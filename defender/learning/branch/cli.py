@@ -668,7 +668,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     prebranch = prebranch_calls(source, family.branch_message_id)
 
     drift: list[dict[str, Any]] = []
-    calibrated: list[tuple[_Original, Any, bool]] = []
+    calibrated: list[tuple[_Original, Any, bool, bool]] = []
     for call in replayable:
         recorded = recording.base_payload(call.system, call.verb, call.params)
         limiter.acquire()
@@ -689,8 +689,11 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
                 if canonical_json(json.loads(recorded)) != canonical_json(json.loads(live_text)):
                     drift.append({**call.entry, "status": "drifted"})
                 base_text = recorded
-        fixed = request_key(call.system, call.verb, call.params) in prebranch
-        calibrated.append((call, json.loads(base_text), fixed))
+        # D6 (#1255): only an answer the recording holds is fixed; a live base is the system
+        # now, which the oracle serves as it stood at the fork.
+        live = recorded is None
+        fixed = not live and request_key(call.system, call.verb, call.params) in prebranch
+        calibrated.append((call, json.loads(base_text), fixed, live))
 
     stop = threading.Event()
     failures: list[dict[str, Any]] = []
@@ -726,12 +729,12 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
             tenant=tenant, grant_home=tenant.table_pointer, family_answers=family_answers,
             source_run=source)
         try:
-            for call, base, fixed in calibrated:
+            for call, base, fixed, live in calibrated:
                 if stop.is_set():
                     return
                 try:
                     calibrate_one(registry, ctx, call.system, call.verb, call.params, base,
-                                  fixed=fixed)
+                                  fixed=fixed, live=live)
                 except OracleUnservable as unservable:
                     fail(label, call, f"{unservable.reason}: {unservable.detail}")
                     return

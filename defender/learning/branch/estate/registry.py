@@ -219,8 +219,9 @@ class PrebranchChanged(Exception):
     branch point (M01=A: that prefix is fixed, so the world cannot be served)."""
 
 
-def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
-                  params: Mapping[str, Any], base: Any, *, fixed: bool) -> None:
+def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,  # noqa: PLR0913 — the call, its base and its two framings
+                  params: Mapping[str, Any], base: Any, *, fixed: bool,
+                  live: bool = False) -> None:
     """Pre-flight's replay of one original call through `registry`'s world (#1224, Amendment 2
     change 1): one oracle turn and verifier pass against the call's base answer, under the same
     turn lock, checks and budget as a sibling's call. It only CALIBRATES: a verified attempt
@@ -231,7 +232,8 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
     `fixed` marks a call the source run made before the branch point: a verified answer that
     differs from its base raises `PrebranchChanged` before anything is frozen (the oracle is
     told the call is pre-branch; unlike a sibling's turn, pre-flight does not refuse the
-    change and retry — one verified change fails the world, M01=A). An unservable
+    change and retry — one verified change fails the world, M01=A). `live` frames a base read
+    live rather than recorded (#1255 D6), as a sibling's turn frames it. An unservable
     call raises `OracleUnservable` as it would in a sibling. `ctx` is pre-flight's own verb
     context; every oracle-side query of the turn runs in it, at the branch-point clock."""
     asked = dict(params)
@@ -249,7 +251,8 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
 
     with registry._turn(_carrying(ctx, as_of=registry.as_of), pauses_clock=False):
         registry.oracle.serve((system, verb, asked), base,
-                              lambda: registry._real(system, base), commit, fixed=fixed)
+                              lambda: registry._real(system, base), commit, fixed=fixed,
+                              live=live)
 
 
 @dataclasses.dataclass(frozen=True)
