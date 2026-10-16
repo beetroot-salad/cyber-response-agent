@@ -295,13 +295,19 @@ _N3 = ("N3: agent-stage records stay with #1142; `stage_dir(lane)` is the handle
        "escape, handing `learning_run_dir` to the stage harness at this site")
 _N7 = ("N7: evals/ is not application code (#1105 R2); it keeps touching its own temporary "
        "state tree by path (and points a CLI at one through the env var)")
+_K1108 = ("#1108 amendment 2 (O-F): the per-tenant knowledge lock `<T>/knowledge.lock`, held "
+          "only for a tenant clone's fast-forward, export publish and worktree creation. It is "
+          "not a learning-state tree lock: it sits in the tenant's own folder, beside "
+          "`knowledge/`, never under `LoopPaths.state_root`, and serialises git work on the "
+          "clone, which the learning-state handle does not own")
 
 #: O1's allow-list. Each row is `(module, qualname, kind, text)` with its reason; `*` matches
 #: anything. N3's rows are one per stage-harness site (JF10 b) — today's five, named by the
 #: function that hands the stage its folder (S4, G54); their call text is the implementer's
 #: (`*`), the kind is pinned to the escape itself, so a composition onto the folder (`compose`)
-#: is never admitted. N7's two modules are allowed whole. The learning-state module is not
-#: scanned at all.
+#: is never admitted. N7's two modules are allowed whole. #1108's per-tenant knowledge lock has
+#: three rows, each pinned to its exact text: the `_flock` import, and `tenant_lock`'s
+#: `open_lock_at` and `_flock` uses. The learning-state module is not scanned at all.
 ALLOW: dict[tuple[str, str, str, str], str] = {
     ("defender/learning/author/lessons/run.py", "invoke_agent", "escape", "*"): _N3,
     ("defender/learning/author/questioner/run.py", "invoke_agent", "escape", "*"): _N3,
@@ -310,6 +316,11 @@ ALLOW: dict[tuple[str, str, str, str], str] = {
     ("defender/learning/leads/_lead_spine.py", "_spawn_author_agent", "escape", "*"): _N3,
     ("defender/evals/harness.py", "*", "*", "*"): _N7,
     ("defender/evals/harness_lead.py", "*", "*", "*"): _N7,
+    ("defender/learning/author/tenant_delivery.py", "<module>", "flock",
+     "from defender import _flock"): _K1108,
+    ("defender/learning/author/tenant_delivery.py", "tenant_lock", "flock", "_flock"): _K1108,
+    ("defender/learning/author/tenant_delivery.py", "tenant_lock", "core",
+     "_io.open_lock_at"): _K1108,
 }
 
 
@@ -391,7 +402,9 @@ def test_no_production_module_touches_the_state_tree_outside_the_handle() -> Non
     learning-state module itself; N3's stage_dir escape, one row per stage-harness touch (JF10
     b); N4's runs_dir compositions (author/drain.py around 1221/1232, lessons/run.py:113,
     verify_forward/forward.py:19, verify_forward/checks.py:90, ops/trace_lesson.py:77); and N7's
-    evals (evals/harness.py, evals/harness_lead.py). Each entry carries its reason and is keyed
+    evals (evals/harness.py, evals/harness_lead.py); and #1108's per-tenant knowledge lock
+    (tenant_delivery.py's `_flock` import and `tenant_lock`, which is no learning-state tree
+    lock). Each entry carries its reason and is keyed
     by (module, qualname, kind, call text), never a line number. The eight
     `lint-unguarded-tree-write: ok` waivers O1 lists (X7) are gone, and the write lint's
     baseline keeps no key for a function this change deletes (JF10 e): every

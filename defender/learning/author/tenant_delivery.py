@@ -41,7 +41,10 @@ from urllib.parse import unquote, urlsplit
 if TYPE_CHECKING:
     import httpx
 
-from defender import _flock, _git, _io
+# `_flock` alone on its line: the #1135 front-door census reads every name of a line importing
+# it as a lock alias, and only `tenant_lock` takes a lock here.
+from defender import _flock
+from defender import _git, _io
 from defender._tenant import Tenant, TenantRefused, parse_tenant_id_bytes
 from defender.learning.author.branch import LESSONS_BRANCH_PREFIX
 from defender.learning.author.forge import ForgeError, ForgejoForge
