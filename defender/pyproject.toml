@@ -75,6 +75,11 @@ box = [
     "duckdb>=1.5,<2",
     # duckdb's undeclared import for zoned timestamps — see `runtime` (#1126).
     "pytz",
+    # The run clock inside the box (#1255 "Into the box"): the wheel vendors a prebuilt
+    # `libfaketime.so.1` that every box process preloads (`runtime/box/_clock.py`). Its library
+    # is x86_64 ONLY — on an arm64 host the preload cannot load and the box refuses to start.
+    # Pinned exactly: the library's path inside the wheel is part of the box's create command.
+    "libfaketime==3.0.1",
 ]
 # The platform HTTP API (`defender/api/`, #1131): the stub endpoints over in-memory fakes. Its
 # own extra because the API is its own program — it never loads the investigation or learning

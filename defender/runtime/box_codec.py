@@ -26,6 +26,12 @@ BOX_ENV_ALLOWLIST: tuple[str, ...] = (
     "LANG",
     "TZ",
     "DEFENDER_BOX",
+    # The run clock's preload (#1255 "Into the box", `box/_clock.CLOCK_ENV`): set on the create
+    # command and carried to every in-box child, so `defender-sql` and python read the run clock.
+    "LD_PRELOAD",
+    "FAKETIME_TIMESTAMP_FILE",
+    "FAKETIME_NO_CACHE",
+    "FAKETIME_DONT_FAKE_MONOTONIC",
 )
 
 #: The in-box mark. Applied after every other env source in both `docker run` builders, so a
