@@ -49,6 +49,7 @@ defender/
                     #   store's (#1082), stated on the ports; `fakes.py` enforces none of them. Never imports
                     #   runtime/ or learning/. `api/serve.py` runs it locally over the fakes (`--extra api`)
   evals/            # metrics + harness-on-the-harness (scenarios/)
+  ops/              # one-time operator commands: retire_legacy_runs.py moves pre-#1187 entries aside
   lessons/          # checked-in lesson corpus (the defender's; read at PLAN time)
   lessons-questioner/ # the questioner's own corpus — lessons about authoring worlds, never read by the runtime agent
   fixtures/         # alert.json (+ optional gather_raw payloads) used as runtime inputs
@@ -84,6 +85,16 @@ copies nothing), and no run, fork or drain in flight on any checkout of the host
 user that runs defender; a destination already occupied makes setup refuse, naming it in the
 message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
 setup run as root — that adoption case only.)
+
+**Upgrading a data root from before #1187** (run ids are bare UUIDs; episodes live at
+`<root>/<T>/episodes/<uuid>/`; `DEFENDER_EPISODES_BASE` and `_tenant.json` are retired): stop
+every run, fork and drain on it; drain or clear the curation queue on the OLD code first (the new
+drain quarantines a queued row naming an old run id); upgrade every checkout that uses the data
+root (mixed versions are unsupported — an old checkout writes old ids and a fresh `_tenant.json`);
+then run `python3 defender/ops/retire_legacy_runs.py --tenant <T>` once per tenant, for
+playground with `--old-episodes-root <the old DEFENDER_EPISODES_BASE>`. It only renames old
+entries aside into `<T>/runs-legacy/` and `<T>/episodes-legacy/`; until it has run, the tenant's
+runs listing refuses, naming it.
 
 **Running the suite as root fails one test that is not broken:**
 `tests/test_921_launcher_frame.py::test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts`.

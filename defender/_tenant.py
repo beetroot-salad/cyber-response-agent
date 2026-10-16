@@ -178,6 +178,18 @@ class _TenantLayout:
         return self.dir / "episodes"
 
     @property
+    def runs_legacy(self) -> Path:
+        """Where the one-time command (#1187 Flow 6) moves `runs/`'s pre-#1187 entries. Nothing
+        reads it."""
+        return self.dir / "runs-legacy"
+
+    @property
+    def episodes_legacy(self) -> Path:
+        """Where the one-time command moves the old shared episodes root's entries. Nothing
+        reads it."""
+        return self.dir / "episodes-legacy"
+
+    @property
     def learning(self) -> Path:
         return self.dir / "learning"
 
@@ -301,6 +313,14 @@ class Tenant:
     @property
     def episodes(self) -> Path:
         return self._layout.episodes
+
+    @property
+    def runs_legacy(self) -> Path:
+        return self._layout.runs_legacy
+
+    @property
+    def episodes_legacy(self) -> Path:
+        return self._layout.episodes_legacy
 
     @property
     def learning(self) -> Path:

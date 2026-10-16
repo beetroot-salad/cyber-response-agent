@@ -2033,6 +2033,46 @@ def move_at(held: Held, src: str | PurePath, dst: str | PurePath) -> None:
             os_.rename(s_parts[-1], d_parts[-1], src_dir_fd=src_fd, dst_dir_fd=dst_fd)
 
 
+def held_stat(held: Held) -> os.stat_result:
+    """The held folder's own `stat`, off its descriptor (never its path): what a caller compares
+    `st_dev` against. A function beside `Held`, as `move_at` is."""
+    with held._dup() as fd:
+        return held._os.fstat(fd)
+
+
+def rename_into(src: Held, name: str, dst: Held) -> None:
+    """Rename the entry `name` — one component, a real directory or a regular file — out of the
+    held folder `src` into the held folder `dst`, under the same name, by ONE `renameat` between
+    the two descriptors: nothing is copied, and a move across filesystems is the kernel's
+    `EXDEV`, raised as it comes. A function beside `Held`, as `move_at` is.
+
+    Both names are judged no-follow immediately before the rename: at `name` in `src`, absent is
+    `FileNotFoundError` and a link or anything but a directory or regular file is the core's
+    non-plain refusal (`NotPlainEntry`, left in place); ANY entry at `name` in `dst` is
+    `FileExistsError`. A rename replaces a file or an empty directory at its destination and
+    Python exposes no `RENAME_NOREPLACE` (#1187 R2-22), so the judgement and the rename are two
+    steps, with the swap caveat `_unlink_at` documents: non-replacement holds while nothing
+    else writes the destination folder."""
+    if not isinstance(name, str) or len(_parse_name(name)[1]) != 1:
+        raise ValueError(f"{name!r}: {_NOT_A_NAME}")
+    os_ = src._os
+    where, there = src._where / name, dst._where / name
+    with src._dup() as src_fd, dst._dup() as dst_fd:
+        st = os_.stat(name, dir_fd=src_fd, follow_symlinks=False)
+        if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
+            raise _mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)),
+                              is_alias=stat.S_ISLNK(st.st_mode))
+        try:
+            os_.stat(name, dir_fd=dst_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(there))
+        os_.rename(name, name, src_dir_fd=src_fd, dst_dir_fd=dst_fd)
+        _fsync_folder(os_, dst_fd)
+        _fsync_folder(os_, src_fd)
+
+
 def open_lock_at(held: Held, name: str | PurePath) -> IO[str]:
     """An open file at `name` below the held root, for `flock`: the holding folders walked and
     made with no link followed, the name judged by a no-follow stat (a link, hard link, FIFO or

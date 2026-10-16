@@ -15,15 +15,21 @@ only entries it serves. Anything else — a pre-#1187 run, an old sidecar, `_ten
 `_episodes`, a link, a stray file — refuses the whole listing with `RunRefused` naming the entry
 and the one-time command that moves such entries aside (#1187 O6).
 
+`plan_retire(tenant, old_episodes_root, io=)` is the one-time command's plan (#1187 Flow 6):
+the entries `listing` refuses, and the old shared episodes root's, each bound for a legacy folder
+below `<T>`, every reason to move nothing listed before anything moves (S-move).
+
 This module is the package's bottom layer: `_lookup` imports it, and it imports nothing of the
 package's but its errors and `RunId`.
 """
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import stat
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -281,3 +287,220 @@ def hold_runs_folder(folder: Path, *, create: bool = False, io: Any = _io) -> _i
     except OSError as exc:
         raise TenantRefused(f"the runs folder {folder} could not be created and held: "
                             f"{_hold_fault(folder, exc)}") from None
+
+
+# -- the one-time command's move (#1187 Flow 6, S-move) ------------------------------------------
+
+
+def _stat_kind(st: os.stat_result, io: Any) -> str:
+    """An entry's `ENTRY_*` kind from its own no-follow `stat`, as a listing judges it."""
+    if stat.S_ISDIR(st.st_mode):
+        return io.ENTRY_DIR
+    if stat.S_ISREG(st.st_mode):
+        return io.ENTRY_FILE
+    return io.ENTRY_OTHER
+
+
+def _within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+@dataclass
+class _Lane:
+    """One source folder's share of the move: every entry of `names`, out of the held `source`
+    (`source_path` in messages) into the folder `destination` below `<T>`."""
+
+    source: _io.Held | None
+    source_path: Path
+    destination: Path
+    names: list[str] = field(default_factory=list)
+
+
+class RetirePlan:
+    """The one-time command's plan (#1187 Flow 6): what moves where, and every reason found to
+    move nothing (`faults`). Built by `plan_retire` before anything moves; `act` runs it only
+    when `faults` is empty. Holds `<T>` and each source folder until closed (a context
+    manager)."""
+
+    def __init__(self, tenant_held: _io.Held, tenant_dev: int, io: Any) -> None:
+        self._tenant_held = tenant_held
+        self._tenant_dev = tenant_dev
+        self._io = io
+        self.lanes: list[_Lane] = []
+        self.faults: list[str] = []
+
+    def close(self) -> None:
+        for lane in self.lanes:
+            if lane.source is not None:
+                lane.source.close()
+        self._tenant_held.close()
+
+    def __enter__(self) -> RetirePlan:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def act(self, report: Callable[[str], None]) -> int:
+        """Move every planned entry, natural entries first, each by ONE rename between held
+        handles (`_io.rename_into`, which judges both names again just before it): a folder for
+        a lane is made off the held `<T>` (an existing real one adopted). Each move is reported
+        through `report` as it lands; returns how many moved. A rename that fails — the
+        destination name taken since the plan, the entry changed, `EXDEV` across two mounts of
+        one filesystem — stops the command with `TenantRefused` naming both paths; the moves
+        before it stand, nothing was copied, and a re-run finishes the rest."""
+        if self.faults:
+            raise TenantRefused("the plan has faults; nothing is moved")
+        moved = 0
+        for lane in self.lanes:
+            if not lane.names:
+                continue
+            assert lane.source is not None  # a lane with names was held
+            destination = hold_level(self._tenant_held, lane.destination.name, lane.destination,
+                                     io=self._io, create=True)
+            try:
+                for name in lane.names:
+                    src, dst = lane.source_path / name, lane.destination / name
+                    try:
+                        self._io.rename_into(lane.source, name, destination)
+                    except OSError as exc:
+                        why = ("they are on two mounts (EXDEV), so a rename cannot join them "
+                               "and nothing is copied" if exc.errno == errno.EXDEV
+                               else (exc.strerror or str(exc)))
+                        raise TenantRefused(
+                            f"{entry_path(lane.source_path, name)} could not be renamed to "
+                            f"{entry_path(lane.destination, name)}: {why} — {moved} entr"
+                            f"{'y' if moved == 1 else 'ies'} moved before it stay moved; fix "
+                            "this and run the command again to move the rest") from None
+                    moved += 1
+                    report(f"moved {src} -> {dst}")
+            finally:
+                destination.close()
+        return moved
+
+
+def _judge_entries(plan: RetirePlan, lane: _Lane, stats: dict[str, os.stat_result],
+                   keep: Callable[[str, os.stat_result], bool]) -> None:
+    """Put every entry of `stats` that `keep` does not keep into `lane`, and record a fault for
+    any of them a rename would not move whole: a link or anything but a folder or regular file
+    (the operator removes it by hand), or an entry on another filesystem than `<T>`."""
+    for name in sorted(stats):
+        st = stats[name]
+        if keep(name, st):
+            continue
+        lane.names.append(name)
+        where = entry_path(lane.source_path, name)
+        if stat.S_ISLNK(st.st_mode):
+            plan.faults.append(f"{where} is a link — remove it by hand (`rm` the link; a link "
+                               "is never followed or moved)")
+        elif not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
+            plan.faults.append(f"{where} is neither a folder nor a regular file (a FIFO, socket "
+                               "or device) — remove it by hand")
+        elif st.st_dev != plan._tenant_dev:
+            plan.faults.append(f"{where} is on another filesystem than {lane.destination.parent} "
+                               "(a mount point): a rename cannot move it")
+
+
+def _judge_destination(plan: RetirePlan, lane: _Lane, io: Any) -> None:
+    """The lane's destination below `<T>`, judged off the held `<T>` without following it:
+    absent (made at `act`), or a real folder on `<T>`'s filesystem in which no planned name is
+    taken — a rename replaces a file or an empty folder (R2-22), so a taken name refuses here.
+    A link or anything but a folder refuses."""
+    folder = lane.destination
+    found = io.stat_entry(plan._tenant_held.view(), folder.name)
+    if found.absent:
+        return
+    if found.st is None or not stat.S_ISDIR(found.st.st_mode):
+        why = found.reason if found.st is None else (
+            "a link, which is never followed" if stat.S_ISLNK(found.st.st_mode)
+            else "not a folder")
+        plan.faults.append(f"the destination {folder} is {why} — remove it by hand; the "
+                           "command makes the folder itself")
+        return
+    if found.st.st_dev != plan._tenant_dev:
+        plan.faults.append(f"the destination {folder} is on another filesystem than "
+                           f"{folder.parent} (a mount point): a rename cannot reach it")
+        return
+    if not lane.names:
+        return
+    held = hold_level(plan._tenant_held, folder.name, folder, io=io, what="the destination")
+    try:
+        view = held.view()
+        for name in lane.names:
+            if not io.stat_entry(view, name).absent:
+                plan.faults.append(f"{entry_path(folder, name)} is already taken — a rename "
+                                   "would replace it; move one of the two aside by hand")
+    finally:
+        held.close()
+
+
+def plan_retire(tenant: Tenant, old_episodes_root: Path | None, *, io: Any) -> RetirePlan:
+    """The one-time command's plan (#1187 Flow 6 steps 1-2, S-move), with nothing moved.
+
+    `<T>` is held no-follow and `<T>/runs` listed off that hold (a link there is
+    `TenantRefused`, naming it; absent, nothing to move): every entry the listing would not
+    serve (`served_entry` — old run folders and their sidecars, `_tenant.json`, `_episodes`, a
+    link, a stray file) goes to `<T>/runs-legacy/`. With `old_episodes_root` — the operator's,
+    held FOLLOWING its spelling, as configuration; absent is nothing to move — every entry of
+    it goes to `<T>/episodes-legacy/`. Each entry is judged from its own directory entry, never
+    followed. `faults` lists every reason to move nothing: a link or special file in the move
+    set, a destination that is not a real folder, a destination name already taken, a source
+    (or an entry, or a destination) on another filesystem than `<T>`, and an old episodes root
+    inside the data root (it would move this tenant's live episodes) or holding it."""
+    tenant_held = hold_tenant_folder(tenant, io)
+    try:
+        plan = RetirePlan(tenant_held, io.held_stat(tenant_held).st_dev, io)
+    except BaseException:
+        tenant_held.close()
+        raise
+    try:
+        natural = _Lane(None, Path(tenant.runs), Path(tenant.runs_legacy))
+        plan.lanes.append(natural)
+        with contextlib.suppress(FileNotFoundError):
+            natural.source = hold_level(tenant_held, tenant.runs.name, tenant.runs, io=io,
+                                        what="the runs folder")
+        if natural.source is not None:
+            listed = io.stat_entries(natural.source.view())
+            if listed.stats is None:
+                raise TenantRefused(f"the runs folder {tenant.runs} could not be listed: "
+                                    f"{listed.reason}")
+            _judge_entries(plan, natural, listed.stats,
+                           lambda name, st: served_entry(name, _stat_kind(st, io), io=io))
+        if old_episodes_root is not None:
+            _plan_old_episodes(plan, tenant, Path(old_episodes_root), io)
+        for lane in plan.lanes:
+            _judge_destination(plan, lane, io)
+    except BaseException:
+        plan.close()
+        raise
+    return plan
+
+
+def _plan_old_episodes(plan: RetirePlan, tenant: Tenant, root: Path, io: Any) -> None:
+    lane = _Lane(None, root, Path(tenant.episodes_legacy))
+    plan.lanes.append(lane)
+    real = root.resolve()
+    data_root = Path(tenant.data_root).resolve()
+    if _within(real, data_root) or _within(data_root, real):
+        plan.faults.append(f"the old episodes root {root} is inside the data root {data_root}, "
+                           "or holds it — the retired episodes root sat outside every data root, "
+                           "and moving this would move live entries")
+        return
+    try:
+        lane.source = io.hold(root)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        plan.faults.append(f"the old episodes root {root} cannot be held: "
+                           f"{exc.strerror or exc}")
+        return
+    if io.held_stat(lane.source).st_dev != plan._tenant_dev:
+        plan.faults.append(f"the old episodes root {root} is on another filesystem than "
+                           f"{tenant.dir}: the command only renames, and a rename cannot cross "
+                           "filesystems — move it onto the data root's filesystem first")
+        return
+    listed = io.stat_entries(lane.source.view())
+    if listed.stats is None:
+        plan.faults.append(f"the old episodes root {root} could not be listed: {listed.reason}")
+        return
+    _judge_entries(plan, lane, listed.stats, lambda _name, _st: False)

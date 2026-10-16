@@ -136,11 +136,10 @@ experiments/actor-author-discipline/**/__pycache__/
 # ignored here so it cannot be re-added by accident.
 seam-harness/
 
-# Episode captures written by a sibling worktree. `episodes_root()` refuses a
-# DEFENDER_EPISODES_BASE inside the runs base or inside REPO_ROOT — but REPO_ROOT is the
-# *launching* checkout, so a run driven from a worktree can still point its episodes base
-# at this one, where nothing refuses it. The refusal already covers runs launched from
-# here; this covers the ones that are not.
+# The old shared episodes root (the retired DEFENDER_EPISODES_BASE): episodes live under each
+# tenant's `<data root>/<T>/episodes/` since #1187, and the one-time
+# `defender/ops/retire_legacy_runs.py --old-episodes-root` moves this folder's entries into the
+# playground tenant. Kept ignored so a dev box's leftover copy is never re-added.
 .defender-episodes/
 
 # Experiment run artifacts — run dirs and their session stores are EVIDENCE, not source:

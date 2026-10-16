@@ -59,8 +59,8 @@ from defender._world_label import world_label_fault
 from defender.run_repository._errors import RunAbsent, RunRefused, RunUnreachable
 from defender.run_repository._handle import Run
 from defender.run_repository._held import (
-    level_fault, listing, refuse_sidecar_id, require_accepted_tenant, require_run_id,
-    tenant_levels, walk_from_tenant,
+    RetirePlan, level_fault, listing, plan_retire, refuse_sidecar_id, require_accepted_tenant,
+    require_run_id, tenant_levels, walk_from_tenant,
 )
 from defender.run_repository._id import RunId
 
@@ -401,6 +401,13 @@ class RunsRepository:
         `FileNotFoundError`, a link or a non-directory at any level `TenantRefused`; nothing is
         created. The caller closes the handle."""
         return self._walk_episode(refuse_bad_episode_id(episode_id))
+
+    def retire_plan(self, old_episodes_root: Path | None) -> RetirePlan:
+        """The one-time command's plan for this tenant (#1187 Flow 6, `_held.plan_retire`):
+        `runs/`'s pre-#1187 entries, and with `old_episodes_root` that folder's entries, each
+        with its destination below `<T>`, and every fault found — nothing moved. A link at
+        `<T>` or `<T>/runs` is `TenantRefused`. The caller closes the plan."""
+        return plan_retire(self._tenant, old_episodes_root, io=self._io)
 
 
 # -- the episode view and its arm roster ---------------------------------------------------------
