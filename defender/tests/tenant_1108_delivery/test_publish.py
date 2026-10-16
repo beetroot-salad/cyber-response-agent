@@ -317,11 +317,12 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
     """Flow 6: the lock is held for the fast-forward, the export, `info/attributes` and the
     draft only. Probed from another process at each moment the host waits on something else,
     on every route: `open()`'s repository and protection reads, a publish's fetch, a batch
-    (its fetch and push on a real smart-HTTP remote, its PR lookup and request, the box's
-    create and its window), the retained branch's delivery (its PR lookup and request and
-    any git it runs) and, once a human has merged that PR, the revert of its lesson (its
-    push, its PR request and any fetch). The probe's own positive control sees a held lock
-    as busy."""
+    (its fetch on a real smart-HTTP remote, the box's create and its window), its finish (the
+    PR lookup, whether through git or the forge's API, the push and the PR request), the
+    retained branch's delivery (its PR lookup and request and any git it runs) and, once a
+    human has merged that PR, the revert of its lesson (its push, its PR request and any
+    fetch). The server is rearmed for each phase, so each phase's first git request of each
+    service is probed. The probe's own positive control sees a held lock as busy."""
     from defender.runtime import box
     from defender.tests._box1195 import FakeDaemon
 
@@ -331,7 +332,7 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
     server.on_service = lambda service: probes.setdefault((phase[0], service), lock_probe(tenant))
 
     def on_request(request):
-        if "/pulls" in request.url.path:
+        if "/pull" in request.url.path:
             probes.setdefault((phase[0], f"pr-{request.method.lower()}"), lock_probe(tenant))
         if request.url.path.endswith("/branches/main"):
             probes.setdefault((phase[0], "protection"), lock_probe(tenant))
@@ -367,6 +368,8 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
     (batch.draft_root / "agent/lessons/io.md").write_text("written in the window\n",
                                                           encoding="utf-8")
     batch.commit(batch.change_set(), "claim")
+    phase[0] = "finish"
+    server.rearm()
     http.fail_create = True
     with pytest.raises(target().DeliveryRefused):
         d.finish(batch)
@@ -379,14 +382,18 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tm
     merge_on_remote(http_repo, tmp_path, batch.branch)
     phase[0] = "revert"
     server.rearm()
-    assert d.revert("agent/lessons/io.md", "io") == forge_pulls(http_repo[1])[-1]["html_url"]
+    assert opened(d.revert("agent/lessons/io.md", "io"), None) == forge_pulls(http_repo[1])[-1]["html_url"]
 
     required = {("open", "repository"), ("open", "protection"), ("publish", "git-upload-pack"),
-                ("batch", "git-upload-pack"), ("batch", "git-receive-pack"), ("batch", "pr-post"),
-                ("batch", "after-start-batch"), ("batch", "box-create"), ("batch", "box-window"),
+                ("batch", "git-upload-pack"), ("batch", "after-start-batch"), ("batch", "box-create"),
+                ("batch", "box-window"), ("finish", "git-receive-pack"), ("finish", "pr-post"),
                 ("deliver", "pr-post"), ("revert", "git-receive-pack"), ("revert", "pr-post")}
     assert required <= set(probes), sorted(required - set(probes))
-    assert all(result.get("free") for result in probes.values()), probes
+    for route in ("finish", "deliver"):
+        # The PR lookup asks the forge, by git (`refs/pull/*`) or by its API; either is probed.
+        assert {(route, "git-upload-pack"), (route, "pr-get")} & set(probes), f"{route}'s PR lookup was not probed"
+    held = {moment: result for moment, result in probes.items() if not result.get("free")}
+    assert held == {}, f"the lock was not free at {sorted(held)}: {held}"
 
 
 def _under(root, path):

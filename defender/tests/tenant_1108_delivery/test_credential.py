@@ -201,7 +201,7 @@ def test_deliver_and_revert_never_store_erase_prompt_for_or_share_the_credential
     opened(d.deliver("routes"))
     merge_on_remote(http_repo, tmp_path, batch.branch)
     server.seen.clear()
-    assert d.revert("agent/lessons/routes.md", "routes") == forge_pulls(remote)[-1]["html_url"]
+    assert opened(d.revert("agent/lessons/routes.md", "routes"), None) == forge_pulls(remote)[-1]["html_url"]
     assert server.authorized("git-receive-pack"), "the revert pushed with the helper's token"
     assert _state(credentials) == before
     assert sorted(p.name for p in credentials.parent.iterdir()) == ["git-credentials"]
@@ -254,7 +254,7 @@ def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, tmp_pat
     http.fail_create = False
     opened(d.deliver("no-copy"))
     merge_on_remote(http_repo, tmp_path, batch.branch)
-    assert d.revert("agent/lessons/no-copy.md", "no-copy") == forge_pulls(http_repo[1])[-1]["html_url"]
+    assert opened(d.revert("agent/lessons/no-copy.md", "no-copy"), None) == forge_pulls(http_repo[1])[-1]["html_url"]
     assert server.authorized("git-receive-pack")
     new_in_tmp = [os.path.join(tmp, name) for name in sorted(set(os.listdir(tmp)) - existing)]
     copies = _holding([*new_in_tmp, tenant.dir, git_config_home(tmp_path).home], token.encode(), started)
@@ -336,7 +336,7 @@ def test_the_credential_never_rides_in_a_process_argument_or_environment(http_re
         opened(d.deliver("argv"))
     merge_on_remote(http_repo, tmp_path, batch.branch)
     with spawns:
-        assert d.revert("agent/lessons/argv.md", "argv") == forge_pulls(http_repo[1])[-1]["html_url"]
+        assert opened(d.revert("agent/lessons/argv.md", "argv"), None) == forge_pulls(http_repo[1])[-1]["html_url"]
     assert spawns.seen
     assert spawns.carrying(_secrets(TOKEN)) == []
 

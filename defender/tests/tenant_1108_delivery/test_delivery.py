@@ -65,6 +65,7 @@ from ._support import (
     push_to_remote,
     remote_refs,
     set_pull_state,
+    still_open,
     target,
 )
 
@@ -1051,7 +1052,7 @@ def test_a_later_process_delivers_a_retained_branch_by_the_commit_maker_record(r
                          b"raw git, not the commit-maker\n", base=batch.export.commit)
     later = in_a_later_process(repo, "deliver", "retained")
     if planted is None:
-        assert later.get("status") == "open", later
+        assert later.get("status") == "opened", later
         assert later["url"].endswith("/pulls/7"), later
         assert [(c["base"], c["head"]) for c in later["creates"]] == [("main", batch.branch)]
     else:
@@ -1135,17 +1136,18 @@ def test_finish_and_deliver_answer_only_with_the_pr_for_their_own_head(repo, oth
     batch's commit-maker commits and its head repository id is the base repository's (from
     `GET /repos/{o}/{r}`); the branch name and the full name play no part. Each row here,
     listed and held under `refs/pull/5/head` before ours exists, is not ours: finish pushes
-    and opens our own PR (7), and deliver then answers it, open, without opening another."""
+    and opens our own PR (7, `opened`), and deliver then answers it (`open`, its URL) without
+    opening another."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("forked", lanes=LANES)
     _write(batch.draft_root / "agent/lessons/new.md", "ours\n")
     sha = batch.commit(batch.change_set(), "ours")
     _lay_pr(repo, http, _NOT_OUR_PR[other](batch.branch, sha, batch.export.commit))
-    opened(d.finish(batch))
+    url = opened(d.finish(batch))
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert [c["head"] for c in http.creates] == [batch.branch]
-    opened(d.deliver("forked"))
+    still_open(d.deliver("forked"), url)
     assert len(http.creates) == 1
 
 
@@ -1201,8 +1203,9 @@ def test_the_batchs_pr_is_known_by_its_head_commit_and_repository_id(repo, row):
 
 def test_finishing_twice_answers_the_one_open_pr(repo):
     """C1 / D-closed: once the forge has a PR for the batch, a retry pushes nothing and opens
-    nothing: a second finish, and a deliver, answer `open` with the same URL; one PR request
-    in all, the remote's refs as the first finish left them."""
+    nothing: the first finish answers `opened`; a second finish, and a deliver, answer `open`
+    with the same URL; one PR request in all, the remote's refs as the first finish left
+    them."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("twice", lanes=LANES)
@@ -1210,16 +1213,16 @@ def test_finishing_twice_answers_the_one_open_pr(repo):
     batch.commit(batch.change_set(), "claim")
     url = opened(d.finish(batch))
     refs = remote_refs(repo[1])
-    assert opened(d.finish(batch)) == url
-    assert opened(d.deliver("twice")) == url
+    still_open(d.finish(batch), url)
+    still_open(d.deliver("twice"), url)
     assert len(http.creates) == 1
     assert remote_refs(repo[1]) == refs
 
 
 def test_a_batch_with_no_commit_has_nothing_to_deliver(repo):
-    """C1: a batch whose branch holds no commit-maker commit past its base (here no claim was
-    committed, so it has no branch at all) answers `nothing to deliver`; nothing is pushed
-    and no PR is requested."""
+    """C1: a batch whose branch tip equals its base, or which has no branch (here no claim was
+    committed, so it has none), answers `nothing to deliver`; nothing is pushed and no PR is
+    requested. (A branch holding a foreign commit refuses instead: choice 34.)"""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("idle", lanes=LANES)
@@ -1299,7 +1302,7 @@ def test_a_reused_batch_id_is_not_mistaken_for_its_old_pr(repo, tmp_path):
     assert not hung
     if not isinstance(error, target().DeliveryRefused):
         assert error is None, error
-        assert result.status == "open", result
+        assert result.status == "opened", result
         assert result.url != old_url, "the new batch was answered with its old PR"
 
 
@@ -1310,9 +1313,13 @@ def test_a_reused_batch_id_is_not_mistaken_for_its_old_pr(repo, tmp_path):
 _MAKES_COMMITS = {"commit", "commit-tree", "cherry-pick", "revert", "am", "rebase", "merge"}
 _SENDS_COMMITS = {"push", "send-pack"}
 #: git subcommands that write a checkout (or the clone's own index along with it). The
-#: fast-forward, a merge that may only fast-forward, is the one checkout left (C2).
+#: fast-forward, a merge that may only fast-forward, is the one checkout left (C2). Two more
+#: count only in the form that writes one: `read-tree -u` (without it, `read-tree` fills an
+#: index, a private one in a plumbing commit-maker), and `worktree add` or `move` (listing
+#: or pruning worktrees writes none).
 _TOUCHES_CHECKOUT = {"checkout", "switch", "restore", "checkout-index", "reset", "stash", "clean",
-                     "merge", "pull", "rebase", "cherry-pick", "revert", "worktree"}
+                     "merge", "pull", "rebase", "cherry-pick", "revert"}
+_WORKTREE_MADE = {"add", "move"}
 
 
 def _census(events, kinds):
@@ -1320,9 +1327,20 @@ def _census(events, kinds):
             if sub in kinds and not (sub == "merge" and "--ff-only" in args)}
 
 
+def _after(sub, args):
+    """The words of a spawned git's argv after its subcommand `sub`."""
+    return args[args.index(sub) + 1:] if sub in args else []
+
+
+def _worktree_made(sub, args):
+    verb = next((a for a in _after(sub, args) if not a.startswith("-")), None)
+    return sub == "worktree" and verb in _WORKTREE_MADE
+
+
 def _checkouts(events):
     return {phase for phase, sub, args in events
-            if sub in _TOUCHES_CHECKOUT or (sub == "read-tree" and {"-u", "--reset"} & set(args))}
+            if sub in _TOUCHES_CHECKOUT or (sub == "read-tree" and "-u" in _after(sub, args))
+            or _worktree_made(sub, args)}
 
 
 def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo, tmp_path):
@@ -1331,9 +1349,9 @@ def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo,
     drain (publish, batch, box request, claim, reset, finish, retained deliver) and, once a
     human has merged it (unobserved), the revert of its lesson.
     A commit is made only under the commit-maker (`commit`) and the revert; commits are sent
-    only by finish, deliver and revert. C2: no `git worktree` runs at all, and a checkout is
-    written only by the fast-forward (publish, start_batch, and a revert that publishes):
-    never by a claim, a reset, finish or deliver. An audit hook sees every spawn; its
+    only by finish, deliver and revert. C2: no git worktree is made (`worktree add` or
+    `move`), and a checkout is written only by the fast-forward (publish, start_batch, and a
+    revert that publishes): never by a claim, a reset, finish or deliver. An audit hook sees every spawn; its
     positive control comes first."""
     http = ForgeHTTP()
     events, phase, active = [], ["control"], [True]
@@ -1374,7 +1392,7 @@ def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo,
     assert _census(events, _MAKES_COMMITS) == {"commit", "revert"}, events
     sent = _census(events, _SENDS_COMMITS)
     assert {"finish", "revert"} <= sent <= {"finish", "deliver", "revert"}, events
-    assert not [e for e in events if e[1] == "worktree"], "a git worktree was made or listed"
+    assert not [e for e in events if _worktree_made(e[1], e[2])], "a git worktree was made"
     assert _checkouts(events) <= {"publish", "start_batch", "revert"}, events
 
 
@@ -1382,9 +1400,11 @@ def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo,
 # Revert: the newest agent change `main` still holds, peeled back one at a time (C1, R1, R9)
 # ---------------------------------------------------------------------------------------
 
-def _revert_commit(remote, http, main, url):
+def _revert_commit(remote, http, main, result):
     """The one commit the revert's PR offers: its head branch's tip, directly on `main`, which
-    does not move. `url` must be that PR's (the open row the revert's one request made)."""
+    does not move. `result` (the revert's) must be `opened`, with that PR's URL (the open row
+    the revert's one request made)."""
+    url = opened(result, None)
     [create] = http.creates
     assert create["base"] == "main"
     rows = [row for row in forge_pulls(remote) if row["state"] == "open" and row["head"]["ref"] == create["head"]]
@@ -1456,9 +1476,20 @@ def test_revert_peels_back_through_the_agents_changes_to_none_left(repo, tmp_pat
     found by its head commit, whatever the merge style. The agent wrote A, then B, then A
     again, each merged; reverting (each revert's PR merged in turn) gives B, then A, then no
     lesson, then a refusal: an agent change whose bytes come back is never undone twice, and
-    revert commits are not agent changes to undo."""
+    revert commits are not agent changes to undo. The third revert runs in a freshly started
+    process, so what the earlier reverts left in the record outlives the process that wrote
+    it."""
     _agent_wrote(repo, tmp_path, _FIRST, _SECOND, _FIRST)
-    peeled = [_revert_and_merge(repo, tmp_path, _LEARNED, "learned", style) for _ in range(3)]
+    peeled = [_revert_and_merge(repo, tmp_path, _LEARNED, "learned", style) for _ in range(2)]
+    main = git(repo[1], "rev-parse", "main")
+    later = in_a_later_process(repo, "revert", _LEARNED, "learned")
+    assert later.get("status") == "opened", later
+    [create] = later["creates"]
+    assert later["url"] == forge_pulls(repo[1])[-1]["html_url"]
+    tip = git(repo[1], "rev-parse", f"refs/heads/{create['head']}")
+    assert git(repo[1], "rev-parse", f"{tip}^") == main
+    merge_on_remote(repo, tmp_path, create["head"], style, delete_branch=style != "merge")
+    peeled.append(_on_main(repo, _LEARNED))
     assert peeled == [_SECOND, _FIRST, None]
     _refused_revert(repo, _LEARNED, "learned")
 
@@ -1467,23 +1498,34 @@ def test_a_revert_whose_pr_was_closed_refuses_the_next_and_skips_nothing(repo, t
     """R1 with D-closed: a revert PR closed unmerged is a rejection. The agent wrote A, B, A
     (each merged); the first revert (back to B) has its PR closed. The next revert of that
     lesson refuses, with nothing pushed or requested: it does not skip to an older change
-    (the agent's first change matches `main` too, and undoing it would delete the lesson)."""
+    (the agent's first change matches `main` too, and undoing it would delete the lesson).
+    The same holds in a freshly started process."""
     _agent_wrote(repo, tmp_path, _FIRST, _SECOND, _FIRST)
     http = ForgeHTTP()
-    delivery(repo, http).revert(_LEARNED, "learned")
+    opened(delivery(repo, http).revert(_LEARNED, "learned"), None)
     close_on_remote(repo, http.creates[-1]["head"])
     _refused_revert(repo, _LEARNED, "learned")
+    branches = _branches(repo[1])
+    later = in_a_later_process(repo, "revert", _LEARNED, "learned")
+    assert "refused" in later, later
+    assert later["creates"] == []
+    assert _branches(repo[1]) == branches
 
 
 def test_a_revert_whose_pr_is_open_answers_that_pr(repo, tmp_path):
-    """R1: while a revert's PR is open, the next revert of that lesson (from a new delivery
-    object) answers that PR's URL: nothing is pushed and no second PR is requested."""
+    """R1: while a revert's PR is open, the next revert of that lesson, from a new delivery
+    object and from a freshly started process, answers `open` with that PR's URL: nothing is
+    pushed and no second PR is requested."""
     _agent_wrote(repo, tmp_path, _FIRST, _SECOND)
-    url = delivery(repo, ForgeHTTP()).revert(_LEARNED, "learned")
+    url = opened(delivery(repo, ForgeHTTP()).revert(_LEARNED, "learned"), None)
     refs = remote_refs(repo[1])
     again = ForgeHTTP()
-    assert delivery(repo, again).revert(_LEARNED, "learned") == url
+    still_open(delivery(repo, again).revert(_LEARNED, "learned"), url)
     assert not again.creates
+    later = in_a_later_process(repo, "revert", _LEARNED, "learned")
+    assert later.get("status") == "open", later
+    assert later["url"] == url
+    assert later["creates"] == []
     assert remote_refs(repo[1]) == refs
 
 
@@ -1600,7 +1642,7 @@ def test_revert_ignores_a_later_commit_maker_change_whose_pr_is_still_open(repo,
     batch = writer.start_batch("unmerged", lanes=LANES)
     (batch.draft_root / _LEARNED).write_bytes(b"the agent's unmerged words\n")
     batch.commit(batch.change_set(), "learning unmerged")
-    assert writer.finish(batch).status == "open"
+    assert writer.finish(batch).status == "opened"
     tip = _reverted(repo, _LEARNED, "learned")
     assert _name_status(repo[1], tip) == {_LEARNED: "D"}
 
@@ -1669,7 +1711,7 @@ def test_a_later_process_reverts_by_the_commit_maker_record(repo, tmp_path):
     merged_agent_lesson(repo, tmp_path, "changed", "agent/lessons/seed.md", b"seed, as the agent rewrote it\n")
     main = git(remote, "rev-parse", "main")
     later = in_a_later_process(repo, "revert", "agent/lessons/seed.md", "seed")
-    assert "url" in later, later
+    assert later.get("status") == "opened", later
     [create] = later["creates"]
     assert create["base"] == "main"
     assert later["url"] == forge_pulls(remote)[-1]["html_url"]
@@ -1906,8 +1948,8 @@ def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, t
     merged = merge_on_remote(repo, tmp_path, batch.branch)
     with monkeypatch.context() as env:
         redirect(env)
-        url = d.revert("agent/lessons/ambient.md", "ambient")
-    assert url == forge_pulls(repo[1])[-1]["html_url"]
+        reverted = d.revert("agent/lessons/ambient.md", "ambient")
+    assert opened(reverted, None) == forge_pulls(repo[1])[-1]["html_url"]
     revert_head = http.creates[-1]["head"]
     tip = git(repo[1], "rev-parse", f"refs/heads/{revert_head}")
     assert git(repo[1], "rev-parse", f"{tip}^") == merged == git(repo[1], "rev-parse", "main")

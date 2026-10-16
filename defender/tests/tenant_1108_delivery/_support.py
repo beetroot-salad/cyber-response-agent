@@ -482,9 +482,19 @@ def batch_base(clone, batch):
 
 
 def opened(result, number=7):
-    """`result` of finish or deliver is `open`, with the URL of PR `number`; returns the URL."""
+    """`result` of finish, deliver or revert is `opened` (a PR this call created), with the URL
+    of PR `number` (any number when `None`); returns the URL."""
+    assert result.status == "opened", result
+    if number is not None:
+        assert result.url.endswith(f"/pulls/{number}"), result.url
+    return result.url
+
+
+def still_open(result, url):
+    """`result` of finish, deliver or revert is `open` (an open PR it found, none created),
+    with `url`; returns the URL."""
     assert result.status == "open", result
-    assert result.url.endswith(f"/pulls/{number}"), result.url
+    assert result.url == url, (result.url, url)
     return result.url
 
 
@@ -886,12 +896,9 @@ out = {}
 try:
     later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client)
     result = getattr(later, verb)(*args)
-    if isinstance(result, str):
-        out["url"] = result
-    else:
-        status = result.status
-        out["status"] = status if isinstance(status, str) else repr(status)
-        out["url"] = result.url
+    status = result.status
+    out["status"] = status if isinstance(status, str) else repr(status)
+    out["url"] = getattr(result, "url", None)
 except mod.DeliveryRefused as refused:
     out["refused"] = str(refused)
 out["creates"] = http.creates
@@ -919,9 +926,9 @@ def in_a_later_process(repo, verb, *args):
     """`verb(*args)` (`deliver` or `revert`) on a `TenantDelivery` opened for `repo`'s tenant in
     ANOTHER, freshly started process with its own forge double (backed by the same remote,
     as the real forge is) and a fresh environment, as a later drain would: nothing of this
-    process's objects, memory or environment reaches it. Returns `{"url": ...}` (and
-    `"status"` for `deliver`) or `{"refused": ...}`, with `"creates"`, the PR requests it
-    sent."""
+    process's objects, memory or environment reaches it. Returns `{"status": ..., "url": ...}`
+    (`url` `None` when the result has none) or `{"refused": ...}`, with `"creates"`, the PR
+    requests it sent."""
     tenant, remote = repo[0], repo[1]
     scratch = Path(tenant.data_root).parent / f"later-{len(list(Path(tenant.data_root).parent.glob('later-*')))}"
     proc = subprocess.run([sys.executable, "-c", _LATER_SCRIPT, str(tenant.data_root), str(tenant.id),
