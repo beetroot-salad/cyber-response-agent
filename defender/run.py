@@ -249,8 +249,8 @@ class _Investigate(Protocol):
 
     The run's judgement of its systems is not part of it: the lifecycle binds the one `main`
     made at run start (`system_status.RunSystems`: the roster the run reads and each system down
-    at its start) into the production drive (`_drive_investigation(systems=…)`); an injected
-    seam reads whatever roster it owns.
+    at its start) into whichever seam it drives (`_judged`), which hands it to
+    `_drive_investigation(systems=…)`.
     """
 
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
@@ -368,6 +368,18 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     )
 
 
+def _judged(investigate: _Investigate, systems: RunSystems | None) -> _Investigate:
+    """`investigate` with the run's one judgement of its systems bound in (`systems=`), when
+    `main` made one (#1256): the seam's shape (`_Investigate`) stays the investigation's
+    identity, and the judgement rides beside it to the drive that holds it
+    (`_drive_investigation`, or a seam composed over it), so the run is not judged twice.
+    Without one, the seam as it is: its driver judges."""
+    if systems is None:
+        return investigate
+    seam: Callable[..., dict[str, Any]] = investigate
+    return functools.partial(seam, systems=systems)
+
+
 def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs plus its four injection seams
     *,
     run: Run,
@@ -387,12 +399,12 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     serving: Any = None,
     #: The opened source run a world forks, threaded beside `world`.
     source: Run | None = None,
-    #: The run's one judgement of its systems, made by `main` at run start (#1256), bound into
-    #: the production drive so the run reads that roster and holds that verdict (`None`: the
-    #: drive reads `defender_dir`'s roster and the driver judges it, as for a direct caller).
+    #: The run's one judgement of its systems, made by `main` at run start (#1256), handed to
+    #: the investigation beside its seam's shape (`_judged`) so the run reads that roster and
+    #: holds that verdict (`None`: the drive reads `defender_dir`'s roster and the driver
+    #: judges it, as for a direct caller).
     systems: RunSystems | None = None,
-    #: The investigation; `None` is the production drive (`_drive_investigation`) over `systems`.
-    investigate: _Investigate | None = None,
+    investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
     scrub: Callable[..., None] = box_mod.scrub,
@@ -411,8 +423,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
 
     box = start_box(run_dir, defender_dir, tenant_agent=tenant.agent, tenant_id=tenant.tenant_id,
                     write_verdict=write_verdict)
-    drive: _Investigate = (investigate if investigate is not None
-                           else functools.partial(_drive_investigation, systems=systems))
+    drive = _judged(investigate, systems)
     investigation_ok = False
     try:
         summary = drive(

@@ -21,6 +21,7 @@ from pydantic import SkipValidation, field_validator
 from .run_state import RunState
 from .verb_grant import GrantError, VerbGrant
 from defender._io import read_bytes_capped
+from defender._paths import name_roots, root_spellings
 
 if TYPE_CHECKING:
     from defender.runtime.run_tenant import RunTenant as _RunTenant
@@ -106,11 +107,10 @@ def redact_settings_path(text: str, settings: Path) -> str:
     carry an adapter's or the resolver's fault text goes through (the query tool's two fault
     channels, lead-zero's "unavailable" note, the ticket writer's receipt reason): a fault worded
     with the path it read would otherwise put the host's layout in front of the model, and the run
-    dir is the box's writable mount. @owns settings redaction"""
-    for spelling in {str(Path(settings)), str(Path(settings).resolve())}:
-        text = text.replace(spelling.rstrip("/") + "/", SETTINGS_POINTER).replace(
-            spelling, SETTINGS_POINTER.rstrip("/"))
-    return text
+    dir is the box's writable mount. Only a whole path is named (`_paths.name_roots`): a sibling
+    that merely shares the folder's prefix (`settings2/`) is left as it is. @owns settings
+    redaction"""
+    return name_roots(text, root_spellings(Path(settings), SETTINGS_POINTER.rstrip("/")))
 
 
 @model(frozen=True)
