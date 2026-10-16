@@ -43,9 +43,11 @@ setup run as root — that adoption case only.)
 
 ```bash
 # Primary: score against ground truth. It walks fixtures/held-out/ and finds each
-# fixture's run by run-id, so launch scored runs as:
-#   run.py <fixture>/alert.json --tenant playground --run-id <slug> --no-learn
-python3 defender/evals/held_out.py "$DEFENDER_DATA_ROOT/playground/runs"
+# fixture's run through the held-out index F you name (outside every runs and episodes
+# tree): launch appends {slug, run_id} to F, then runs
+#   run.py <fixture>/alert.json --tenant playground --run-id <uuid> --no-learn
+python3 defender/evals/held_out.py launch <slug> --index F
+python3 defender/evals/held_out.py "$DEFENDER_DATA_ROOT/playground/runs" --index F
 ```
 
 **There used to be a second metric here.** `secondary.py` scored a *frozen-actor

@@ -26,14 +26,17 @@ Each subdirectory contains:
 key and a run dir sits inside the agent's readable workspace, so nothing is
 copied there and no run records a pointer back to its fixture. Two consequences:
 
-- **Scoring** (`evals/held_out.py`) walks THESE dirs and locates each fixture's
-  run by run-id convention — the opposite direction from a scan over run dirs.
-  Launch a scored run as:
+- **Scoring** (`evals/held_out.py`) walks THESE dirs and finds each fixture's
+  run through the held-out index — a JSON Lines file you name, kept outside every
+  runs and episodes tree, one `{slug, run_id}` row per launch — never by a run
+  folder's name, which is an opaque UUID (#1187). Launch a scored run as:
 
   ```bash
-  python3 defender/run.py defender/fixtures/held-out/<slug>/alert.json \
-      --run-id <slug> --no-learn
+  python3 defender/evals/held_out.py launch <slug> --index <F>
   ```
+
+  which appends the row first, then runs
+  `run.py defender/fixtures/held-out/<slug>/alert.json --tenant playground --run-id <uuid> --no-learn`.
 
 - **Contamination** is stopped at the two entrances to learning, and both checks
   are label-free:
