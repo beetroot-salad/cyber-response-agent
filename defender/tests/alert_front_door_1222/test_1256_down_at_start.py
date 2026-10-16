@@ -26,7 +26,7 @@ one mixing a broken adapter with a not-configured one (a broken adapter is down 
 
 D5 (r4) — a `ConfigFault` escaping during l-00c (O-5b) still downs its system on the spot,
 uncharged; a lead that has written a usable summary keeps it — a summary written beside the call
-that escaped counts even when the lead's last turn is empty (the orchestrator's r4 ruling) — and
+that escaped counts even when the lead's last turn is empty (D5 as written, confirmed in r4 review) — and
 MAIN gets it with a host note naming the system and the cause (never the fault text, #1222 A2); a
 lead that ends with no summary takes the `down_mid_lead` ending, told apart by its correlation
 section.
@@ -450,7 +450,7 @@ def test_d5_l00c_keeps_a_usable_summary_and_main_is_told_its_system_went_down(
         tmp_path: Path) -> None:
     """D5: l-00c's first call is served; it writes its summary and, in the same response, makes a second call, which escapes the start check (ConfigFault): elastic goes Down(NotConfigured) on the spot, uncharged, and a later call never reaches the verb. The lead's summary is usable (one call succeeded, the text is not empty: A2's classifier) and was written before the system went down — and, should the lead run on, it ends on the same text. MAIN's correlation section carries that summary, framed as the lead's own text, AND a host note — outside the frame — naming elastic and the cause 'not configured'; never the fault's text (A2 stands) and never the breaker's words (DP4). Rejected by D5: ending `down_mid_lead` and discarding the summary. Red at base, which delivers the summary with no note.
 
-    The summary is written both beside the escaping call and as the lead's last text, so this arm holds whether an implementation stops the lead at the escape or lets it run to its own end. That a summary written beside the escaping call counts even when the lead's last turn is empty is the next arm's (the orchestrator's r4 ruling)."""
+    The summary is written both beside the escaping call and as the lead's last text, so this arm holds whether an implementation stops the lead at the escape or lets it run to its own end. That a summary written beside the escaping call counts even when the lead's last turn is empty is the next arm's (D5 as written, confirmed in r4 review)."""
     scene = _Scene(tmp_path)
     written_then_escaped = S.Turn(text=D5_SUMMARY, tool_calls=_q(2).tool_calls)
     d = scene.run("d5-summary", backend=_backend(fault=T.Fault(raise_after=1), exc=_escape),
@@ -487,7 +487,7 @@ def test_d5_l00c_keeps_a_usable_summary_and_main_is_told_its_system_went_down(
 
 def test_d5_l00c_keeps_a_summary_written_beside_the_escape_though_its_last_turn_is_empty(
         tmp_path: Path) -> None:
-    """D5, as written ("if the lead has written a usable summary, MAIN receives that summary"; its rejected alternative "discards evidence already gathered") and as the orchestrator ruled in r4: a usable summary the lead wrote beside the call that escaped counts even when the lead's last turn is empty. l-00c's first call is served; its next response carries its summary AND a second call, which raises a ConfigFault the start check missed (O-5b); its last turn is empty. MAIN's correlation section carries that summary, framed as the lead's own text, and a host note outside the frame naming elastic and 'not configured' — not the `down_mid_lead` ending, which is for a lead that wrote no summary; never the fault's text (A2) or the breaker's words (DP4). Elastic is down from the escape, uncharged. Red at base, which names the lead's empty turn `dispatch_raised` and discards the summary."""
+    """D5, as written ("if the lead has written a usable summary, MAIN receives that summary"; its rejected alternative "discards evidence already gathered") and as confirmed in r4 review: a usable summary the lead wrote beside the call that escaped counts even when the lead's last turn is empty. l-00c's first call is served; its next response carries its summary AND a second call, which raises a ConfigFault the start check missed (O-5b); its last turn is empty. MAIN's correlation section carries that summary, framed as the lead's own text, and a host note outside the frame naming elastic and 'not configured' — not the `down_mid_lead` ending, which is for a lead that wrote no summary; never the fault's text (A2) or the breaker's words (DP4). Elastic is down from the escape, uncharged. Red at base, which names the lead's empty turn `dispatch_raised` and discards the summary."""
     scene = _Scene(tmp_path)
     written_then_escaped = S.Turn(text=D5_SUMMARY, tool_calls=_q(2).tool_calls)
     d = scene.run("d5-empty-end", backend=_backend(fault=T.Fault(raise_after=1), exc=_escape),
