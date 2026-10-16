@@ -100,11 +100,12 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
     stored answer is looked up again under the turn, then the oracle serves, the host checks
     and the verifier pass it, and its rows, facts and answer are committed before the ledger row.
 
-    A call the source run made before the branch point whose answer the recording holds
-    (`registry.prebranch`, M01=A; D6 binds only recorded answers) still takes its turn (S1),
-    but a submission that changes its base answer is refused as a failed attempt before the
-    host checks and the verifier (`changes_base`): the world serves it unchanged or goes
-    unservable, as pre-flight would have failed it (`calibrate_one`).
+    A call the source run made before the branch point (`registry.prebranch`, M01=A) still
+    takes its turn (S1), but a submission that changes its base answer is refused as a failed
+    attempt before the host checks and the verifier (`changes_base`): the world serves it
+    unchanged or goes unservable, as pre-flight would have failed it (`calibrate_one`) — unless
+    the primer's skip record names it (D6: the source asked it, but its call failed or its
+    payload was unreadable; `registry.fixes`), whose oracle's fork-time answer is served.
 
     The answer is recorded and delivered only once the turn has closed (its clock mark
     included): a failure closing the turn raises before any row is written, so the ledger
@@ -124,7 +125,7 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
         hit = registry.store.answers.get(key)
         if hit is None:
             hit = _served_in_turn(registry, system, verb, asked, base_text,
-                                  fixed=recorded and key in registry.prebranch, live=not recorded)
+                                  fixed=registry.fixes(key), live=not recorded)
     return registry._record_answer(system, verb, asked, hit)
 
 
@@ -331,6 +332,9 @@ class WorldRegistry(ModuleVerbRegistry):
         self.tenant = tenant
         self.world_facts = tuple(getattr(world, "facts", ()) or ())
         self.prebranch = frozenset(prebranch)
+        #: The calls the source asked whose answer the recording lacks (#1255 D6, the primer's
+        #: skip record): never fixed, served through the oracle at the fork time.
+        self.unrecorded = ledger.unrecorded_keys()
         self._source_run = source_run
         self.store = OracleStore(Path(oracle_dir))
         self._turn_lock = threading.Lock()
@@ -370,6 +374,11 @@ class WorldRegistry(ModuleVerbRegistry):
         if recorded is not None:
             self.oracle.unservable = recorded
         self._wrapped: dict[str, dict[str, Any]] = {}
+
+    def fixes(self, key: str) -> bool:
+        """Whether the call keyed `key` is a fixed pre-branch answer (M01=A): one the source
+        made before the branch point, unless the primer recorded it unanswered (#1255 D6)."""
+        return key in self.prebranch and key not in self.unrecorded
 
     @property
     def call_run(self) -> str:
