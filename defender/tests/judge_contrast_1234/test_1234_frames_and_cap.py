@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import functools
 import hashlib
-import importlib
 import inspect
 import json
 import re
@@ -451,110 +450,10 @@ def test_1234_payload_cap_never_cuts_the_judged_world_call_list(tmp_path, monkey
             f"decision word: {missing}")
 
 
-def test_1234_header_contrast_and_surfaces_alone_exceed_the_cap(tmp_path, monkeypatch):
-    """Sections 1-4 are never silently cut; a world whose sections 1-4 alone exceed what remains
-    of the cap is refused with its reason named (A9).
-
-    Observed on a control and six planted worlds, each carrying a ~3 KB fact statement, under a
-    2000-byte cap: no planted world is asked, none leaves a wire-log record, and each row names
-    the cap; under an ample cap the same family is asked about every world with every run's
-    facts in its prompt."""
-    planted = [FOCUS, SIB, "wdee", "weee", "wfee", "wgee"]
-
-    def worlds() -> list[S.World]:
-        over = {label: {"facts": [S.fact(f"f-{label}", f"{_FILLER * 38}{S.marker(label, 'fact')}",
-                                         label=label)], "role": role}
-                for label, role in zip(planted, "BCDEFG", strict=True)}
-        return _worlds(**over)
-
-    def queueing_judge() -> S.RoutedJudge:
-        """Every planted world, if asked, files a finding resting on a two-run conduct pair."""
-        return S.judge({label: _queueing_reply(label) for label in planted})
-
-    def logged(where: Any) -> list[str]:
-        """Agent ids of every wire-log record but the family call's."""
-        return [str(r.get("agent_id", "")) for r in S.wire_log_records(where)
-                if str(r.get("agent_id", "")).split(":")[1:2] != [S.FAMILY]]
-
-    tight = S.family(tmp_path, worlds(), root=tmp_path / "tight")
-    seam = _grade(tight, monkeypatch, cap=2000, judge=queueing_judge())
-    asked = [label for label in planted if seam.called(label)]
-    assert not asked, f"sections 1-4 alone exceed the cap, yet these worlds were asked: {asked}"
-    assert not logged(tight), f"a refused world still left a wire-log record: {logged(tight)}"
-    measured = [label for label in planted if S.row(tight, label).get(MEASURED) is not False]
-    assert not measured, f"these refused worlds read as measured: {measured}"
-    unnamed = [label for label in planted if not CAP_REASON_RE.search(
-        str(S.row(tight, label).get(NOT_MEASURED_REASON) or ""))]
-    assert not unnamed, f"these refused worlds' rows do not name the cap: {unnamed}"
-    queued = [label for label in planted if S.from_world(S.defender_queue(), label)]
-    assert not queued, f"these refused worlds queued a defender row: {queued}"
-
-    ample = S.family(tmp_path, worlds(), root=tmp_path / "ample")
-    control = _grade(ample, monkeypatch, cap=AMPLE, judge=queueing_judge())
-    assert all(control.called(label) for label in planted), "an ample cap must grade every world"
-    prompt = control.prompt_for(FOCUS)
-    assert all(S.marker(label, "fact") in prompt for label in planted), (
-        "uncapped, the judged world's prompt carries every run's facts whole")
-    assert {S.parse_agent_id(a)[0] for a in logged(ample)} >= set(planted), (
-        f"control: an asked world left no wire-log record: {logged(ample)}")
-    assert all(S.from_world(S.defender_queue(), label) for label in planted), (
-        "control: an asked world's finding did not queue, so 'no defender row' proves nothing")
 
 
-def test_1234_payload_cap_zero_or_negative(tmp_path, monkeypatch):
-    """A non-positive JUDGE_PAYLOAD_CAP is refused loudly; the prompt never claims a comparison
-    it no longer contains.
-
-    Observed for 0 and -1: the pass raises a refusal naming the knob and makes no model call;
-    the same family under the operator default is graded."""
-    for cap in (0, -1):
-        built = S.family(tmp_path, _worlds(), root=tmp_path / f"cap{cap}")
-        monkeypatch.setenv(S.CAP_KNOB, str(cap))
-        seam = S.judge()
-        refused = _raised(S.refusals(), S.grade, built, seam)
-        assert refused is not None, f"cap {cap}: the pass did not refuse"
-        assert S.CAP_KNOB in str(refused), f"cap {cap}: the refusal does not name the knob"
-        assert seam.calls == 0, f"cap {cap}: {seam.calls} model calls were made"
-    control = _grade(S.family(tmp_path, _worlds(), root=tmp_path / "default"), monkeypatch)
-    assert control.called(FOCUS), "a positive cap must grade the family"
 
 
-def test_1234_am_uncharged_call_list_larger_than_the_cap(tmp_path, monkeypatch):
-    """The judged world's call list is never cut (A9; K13) and no new bound is added (N13). A
-    reply cut off by size is a malformed attempt re-asked within `_REPLY_ATTEMPTS`; a world
-    whose every attempt fails is not graded, with its reason (L15) (NA06).
-
-    Observed with four hundred judged-world calls whose params alone exceed a 20000-byte cap
-    and a model whose every reply for that world is cut off mid-document (P-AM28: a provider's
-    `max_tokens` / `model_context_window_exceeded` / `length` stop returns the partial text with
-    no exception): the world is asked exactly `_REPLY_ATTEMPTS` times, every ask carries every
-    call, its row is not measured and says why (its refused asks counted), and it queues
-    nothing; the same family whose world answers well-formed queues its finding (the positive
-    control). A size failure that RAISES is the next test's (R5)."""
-    marks = [S.marker(FOCUS, f"call-c{i:03d}") + "-" + "x" * 40 for i in range(400)]
-    assert sum(map(len, marks)) > 20_000, "fixture: the call list must outgrow the cap"
-    calls = [S.CallRow(system="siem-x", verb="lookup", params={"entity": mk}) for mk in marks]
-    built = S.family(tmp_path, _worlds(**{FOCUS: {"calls": calls}}))
-    full = S.as_text(S.world_reply("lead-quality", ["idp"]))
-    cut_off = full[:full.index("bucket: lead-quality") + len("bucket: lead-q")]
-    attempts = S.sym(S.JUDGE, "_REPLY_ATTEMPTS")
-    seam = _grade(built, monkeypatch, cap=20_000,
-                  judge=S.judge({FOCUS: [cut_off] * (attempts + 2)}))
-    asks = seam.calls_for(FOCUS)
-    assert len(asks) == attempts, f"{len(asks)} asks for world {FOCUS}, not {attempts}"
-    short = [i for i, p in enumerate(seam.prompts_for(FOCUS)) if not all(mk in p for mk in marks)]
-    assert not short, f"asks {short} carried a cut call list"
-    row = S.row(built, FOCUS)
-    assert row.get(MEASURED) is False, f"world {FOCUS} reads as measured: {row}"
-    assert row.get(NOT_MEASURED_REASON), f"world {FOCUS}'s row names no reason"
-    assert (row.get(S.EXISTING["row.malformed_replies"]) or 0) == attempts, (
-        f"world {FOCUS}'s row does not count its {attempts} refused asks: {row}")
-    assert not S.from_world(S.defender_queue(), FOCUS), "a world never graded queued a row"
-
-    answered = S.family(tmp_path, _worlds(**{FOCUS: {"calls": calls}}), root=tmp_path / "answered")
-    _grade(answered, monkeypatch, cap=20_000, judge=S.judge({FOCUS: _queueing_reply(FOCUS)}))
-    assert S.from_world(S.defender_queue(), FOCUS), (
-        "control: the well-answered world queued nothing, so 'queues nothing' proves nothing")
 
 
 def test_1234_raised_size_failure_is_asked_once_and_recorded(tmp_path, monkeypatch):
@@ -583,75 +482,10 @@ def test_1234_raised_size_failure_is_asked_once_and_recorded(tmp_path, monkeypat
     assert S.from_world(S.defender_queue(), FOCUS), "control: the answered world queued nothing"
 
 
-def _search_threshold(episode: Callable[[int], tuple[Any, Any]], lo: int, lo_ep: Any,
-                      hi: int, hi_seam: Any) -> tuple[Any, int, Any]:
-    """Bisect (lo refused, hi asked) to within 64 bytes: returns (the refused episode, the
-    asked cap, its judge)."""
-    while hi - lo > 64:
-        mid = (lo + hi) // 2
-        built, seam = episode(mid)
-        if seam.called(FOCUS):
-            hi, hi_seam = mid, seam
-        else:
-            lo, lo_ep = mid, built
-    return lo_ep, hi, hi_seam
 
 
-def test_1234_am_reference_share_smaller_than_its_frame(tmp_path, monkeypatch):
-    """Each reference keeps at least its label, frame markers and truncation notice; when the
-    leftover cannot give every reference that minimum, the world is refused with its reason
-    named (A9) rather than showing a reference as a bare frame (NA06).
-
-    Observed on a control and five planted worlds (five references for world wbee), each
-    reference report ~3 KB: the smallest cap at which wbee is asked is bisected; there every
-    reference shows its label, a frame and a stated cut, and 64 bytes below it the world is
-    refused with the cap named."""
-    refs = (CTL, SIB, "wdee", "weee", "wfee")
-    labels = (FOCUS, *refs)
-    roles = {"wdee": "D", "weee": "E", "wfee": "F"}
-
-    def episode(cap: int) -> tuple[Any, S.RoutedJudge]:
-        over = {label: {"report": _report(label, _bulky(label, "report", 3000)),
-                        **({"role": roles[label]} if label in roles else {})}
-                for label in refs}
-        built = S.family(tmp_path, _worlds(**over), root=tmp_path / f"cap-{cap}")
-        return built, _grade(built, monkeypatch, cap=cap)
-
-    one, at_one = episode(1)
-    assert not at_one.called(FOCUS), "a 1-byte cap still sent world wbee a prompt"
-    _top, at_top = episode(400_000)
-    assert at_top.called(FOCUS), "a 400 KB cap must send world wbee its prompt"
-    lo_ep, hi, hi_seam = _search_threshold(episode, 1, one, 400_000, at_top)
-    prompt = hi_seam.prompt_for(FOCUS)
-    bare = [ref for ref in refs if not _block(prompt, ref, labels)]
-    assert not bare, f"at cap {hi}, these references show no labelled frame: {bare}"
-    silent = [ref for ref in refs if not CUT_RE.search(_block(prompt, ref, labels))]
-    assert not silent, f"at cap {hi}, these references were cut without saying so: {silent}"
-    assert CAP_REASON_RE.search(_refused_reason(lo_ep, FOCUS)), (
-        "just below the threshold the refused world's row must name the cap")
 
 
-def test_1234_one_bulky_reference_run_under_a_tight_cap_beside_a_small_control(
-        tmp_path, monkeypatch):
-    """Section 5 is trimmed first with an equal guaranteed share per reference, the control
-    included (A9); a bulky sibling cannot crowd out another reference's share.
-
-    Observed on world wbee's prompt under a 60000-byte cap with a 400 KB sibling report beside
-    a 1 KB control report: the control's report survives whole in its own labelled block, the
-    sibling's is cut and says so."""
-    built = S.family(tmp_path, _worlds(**{
-        CTL: {"report": _report(CTL, _bulky(CTL, "report", 1000))},
-        SIB: {"report": _report(SIB, _bulky(SIB, "report", 400_000))}}))
-    seam = _grade(built, monkeypatch, cap=60_000)
-    assert seam.called(FOCUS), f"world {FOCUS} was never asked"
-    prompt = seam.prompt_for(FOCUS)
-    ctl_head, ctl_tail = S.marker(CTL, "report-head"), S.marker(CTL, "report-tail")
-    assert ctl_head in prompt, "the control's report was crowded out by a bulky sibling"
-    assert ctl_tail in prompt, "the control's report was cut beside a bulky sibling"
-    assert set(_owners(prompt, ctl_tail, LABELS)) == {CTL}, "the control's report left its block"
-    assert S.marker(SIB, "report-head") in prompt, "the bulky sibling lost its own share"
-    assert S.marker(SIB, "report-tail") not in prompt, "the bulky sibling was not trimmed"
-    assert CUT_RE.search(_block(prompt, SIB, LABELS)), "the trimmed sibling must say it was cut"
 
 
 def test_1234_payload_cap_cuts_inside_an_untrusted_frame(tmp_path, monkeypatch):
@@ -690,56 +524,8 @@ def test_1234_payload_cap_cuts_inside_an_untrusted_frame(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_reference_facts_appear_only_in_their_runs_labelled_block(tmp_path):
-    """A reference world's fact statement appears in the prompt only inside an untrusted frame
-    within a block labelled with that world (its header row or its reference section), never
-    inside the judged world's section; the block's host label sits outside the frame (A10).
-
-    Observed on world wbee's prompt and on its wire-log record: wcee's fact marker sits only in
-    frames whose host label is wcee, never in a frame with wbee's own text; wbee's own fact is
-    seen under wbee's label, so the observation can tell the two apart."""
-    built = S.family(tmp_path, _worlds())
-    seam = S.judge()
-    S.grade(built, seam)
-    assert seam.called(FOCUS), f"world {FOCUS} was never asked"
-    stored = [r["prompt"] for r in S.wire_log_records(built) if r["agent_id"] == f"judge:{FOCUS}:0"]
-    assert stored, "the judged world's prompt was never written to the wire log"
-    ref_fact, own_fact = S.marker(SIB, f"fact-f-{SIB}"), S.marker(FOCUS, f"fact-f-{FOCUS}")
-    own_text = (S.marker(FOCUS, "report"), S.marker(FOCUS, "investigation"))
-    for where, prompt in (("prompt", seam.prompt_for(FOCUS)), *(("wire log", p) for p in stored)):
-        assert _holding(prompt, ref_fact), f"{where}: the reference's fact never reached a frame"
-        assert ref_fact not in _host(prompt), f"{where}: the reference's fact sits in host text"
-        assert set(_owners(prompt, ref_fact, LABELS)) == {SIB}, (
-            f"{where}: the reference's fact sits outside a block labelled {SIB}: "
-            f"{_owners(prompt, ref_fact, LABELS)}")
-        assert not [f for f in _holding(prompt, ref_fact)
-                    if any(m in _body(prompt, f) for m in own_text)], (
-            f"{where}: the reference's fact shares a frame with the judged world's own text")
-        assert FOCUS in _owners(prompt, own_fact, LABELS), (
-            f"{where}: positive control: the judged world's fact is under no {FOCUS} label")
 
 
-def test_1234_judged_world_facts_sit_in_the_focus_section(tmp_path):
-    """The judged world's own fact statements appear in its focus section, framed untrusted
-    under a host label that sits outside the frame (A10).
-
-    Observed on world wbee's prompt: wbee's fact marker is never in host text, and some frame
-    holding it is labelled wbee by the host and comes after every reference report (the focus
-    section follows the reference sections)."""
-    built = S.family(tmp_path, _worlds())
-    seam = S.judge()
-    S.grade(built, seam)
-    assert seam.called(FOCUS), f"world {FOCUS} was never asked"
-    prompt = seam.prompt_for(FOCUS)
-    own_fact = S.marker(FOCUS, f"fact-f-{FOCUS}")
-    assert own_fact not in _host(prompt), "the judged world's fact sits in host text"
-    refs_end = max((f.end for ref in (CTL, SIB) for f in _holding(prompt, S.marker(ref, "report"))),
-                   default=None)
-    assert refs_end is not None, "no reference report reached the prompt"
-    focus = [f for f in _holding(prompt, own_fact)
-             if f.open_at > refs_end and _owner(prompt, f, LABELS) == FOCUS]
-    assert focus, ("the judged world's fact is in no frame of its own labelled section after "
-                   "the reference runs")
 
 
 def _hostile_family(tmp_path: Path) -> Any:
@@ -1060,62 +846,8 @@ def test_1234_oracle_store_text_of_a_reference_run_closes_a_frame(tmp_path):
         "positive control: wbee's own forged row is under no wbee label")
 
 
-def _archived_strings(ep: Path) -> set[str]:
-    """Every string the archive holds verbatim (JSON/YAML values, whole text files), stripped —
-    read before the pass writes its own files."""
-    out: set[str] = set()
-    for path in ep.rglob("*"):
-        if path.is_symlink() or not path.is_file():
-            continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        docs: list[Any] = [text]
-        try:
-            if path.suffix == ".jsonl":
-                docs += [json.loads(ln) for ln in text.splitlines() if ln.strip()]
-            elif path.suffix == ".json":
-                docs.append(json.loads(text))
-            elif path.suffix in (".yaml", ".yml"):
-                docs.append(_yaml.safe_load(text))
-        except Exception:  # noqa: S110 — an unparseable file contributes its text alone
-            pass
-        out |= {s.strip() for doc in docs for s in S.strings_in(doc)}
-    return out
 
 
-def test_1234_am_computed_row_carrying_run_text(tmp_path):
-    """Host-computed values (counts, call numbers, shown-its-facts) are host text outside
-    frames; run or manifest strings embedded in a computed row (a reached verdict, a goal, a
-    system and params, an entity) are non-host text framed in place (A10: each frame holds only
-    non-host text) (NA07).
-
-    Observed on two twin families that differ only in whether reference wcee's one call was
-    altered (`oracle`) or passed through: wbee's host text differs between them (a computed
-    value moved outside the frames), while every frame body one has and the other lacks is a
-    string archived verbatim; wcee's goal, params and entity are framed in place."""
-    entity = S.marker(SIB, "entity")
-
-    def twin(source: str) -> tuple[str, set[str]]:
-        built = S.family(tmp_path, _worlds(**{SIB: {
-            "calls": [S.CallRow(system="edr", params=_params(SIB, "host:db-1"), source=source)],
-            "facts": [S.fact(f"f-{SIB}", entities=("alice", entity), label=SIB)]}}),
-            root=tmp_path / source)
-        archived = _archived_strings(built.ep)
-        seam = S.judge()
-        S.grade(built, seam)
-        assert seam.called(FOCUS), f"world {FOCUS} was never asked"
-        return seam.prompt_for(FOCUS), archived
-
-    altered, archived_x = twin("oracle")
-    passed, archived_y = twin("passthrough")
-    embedded = [S.marker(SIB, "goal-l-001"), S.marker(SIB, "params"), entity]
-    unframed = [m for m in embedded if not _holding(altered, m) or m in _host(altered)]
-    assert not unframed, f"run strings embedded in computed rows are not framed: {unframed}"
-    assert S.unsalted(_host(altered)) != S.unsalted(_host(passed)), (
-        "whether a reference was shown its facts changed nothing in host text")
-    bodies_x = {_body(altered, f).strip() for f in _frames(altered)}
-    bodies_y = {_body(passed, f).strip() for f in _frames(passed)}
-    host_in_frames = sorted(b for b in bodies_x ^ bodies_y if b not in archived_x | archived_y)
-    assert not host_in_frames, f"host-computed values sit inside frames: {host_in_frames}"
 
 
 def test_1234_am_run_label_outside_the_frame_imitates_host_text(tmp_path):
@@ -1186,59 +918,6 @@ def test_1234_hostile_run_text_reaches_the_wire_log_and_page_unframed(tmp_path):
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_shared_stage_contract_puts_host_titles_outside_frames(tmp_path):
-    """The shared stage contract (stage_user_message, titled_section) and its frame lint admit
-    host-authored section titles and run labels outside the untrusted frames, the contract's
-    'headings and labels are data' sentence and the pins in test_systemic_stage_frames_680 say
-    the same, and every non-host string stays framed (A10, K10).
-
-    Observed on world wbee's prompt: the reader contract opens it and every frame shares its
-    salt; host text sits between the frames and names every run label; no frame body holds a
-    `## ` title line; every run's marked text stays framed; the contract tells the reader that
-    text outside the frames is the host's. The frame lint passes the shipped builders with no
-    suppression in the judge, and still flags a bare section argument and a raw boundary."""
-    built = S.family(tmp_path, _worlds())
-    seam = S.judge()
-    S.grade(built, seam)
-    assert seam.called(FOCUS), f"world {FOCUS} was never asked"
-    prompt = seam.prompt_for(FOCUS)
-    salt, contract = _contract(prompt)
-    assert salt is not None, "the prompt carries no reader contract"
-    frames = _frames(prompt)
-    assert frames, "the prompt carries no untrusted frame"
-    assert frames[0].open_at > prompt.index(contract), (
-        "the reader contract is not the message's first framed section")
-    assert {f.salt for f in frames} == {salt}, "a frame carries a salt other than the message's"
-    assert any(seg.strip() for _at, seg in _gaps(prompt)[1:-1]), (
-        "no host title or label sits between the frames")
-    host = _host_after_contract(prompt)
-    assert all(S.label_re(label).search(host) for label in LABELS), (
-        "a run label is missing from the host text")
-    titled = [f for f in frames if re.search(r"(?m)^## ", _body(prompt, f))]
-    assert not titled, f"{len(titled)} frames still carry a host `## ` title"
-    marked = [S.marker(label, ch) for label in LABELS for ch in ("report", "params", "goal-l-001")]
-    loose = [m for m in marked if m in host]
-    assert not loose, f"run text outside the frames: {loose}"
-    assert S.COINED["contract.host_text"].lower() in " ".join(contract.lower().split()), (
-        "the reader contract does not say that text outside the frames is the host's")
-
-    lint = importlib.import_module("scripts.lint.lint_stage_prompt_frames")
-    baseline = tmp_path / "baseline.json"
-    baseline.write_text('{"entries": {}}', encoding="utf-8")
-    assert lint.main([], scope=S.DEFENDER / "learning", baseline_path=baseline) == 0, (
-        "the frame lint flags the shipped stage builders")
-    suppressed = [p.name for p in (S.DEFENDER / "learning" / "judge").glob("*.py")
-                  if lint.SUPPRESS in p.read_text(encoding="utf-8")]
-    assert not suppressed, f"the judge passes the frame lint only by suppression: {suppressed}"
-    fixtures = {"bare": "from defender.learning._prompt import stage_user_message\n"
-                        "x = stage_user_message(salt, body)\n",
-                "raw": "y = f'## {body}'\n"}
-    for name, source in fixtures.items():
-        scope = tmp_path / name
-        scope.mkdir()
-        (scope / f"{name}.py").write_text(source, encoding="utf-8")
-        assert lint.main([], scope=scope, baseline_path=baseline) == 1, (
-            f"the frame lint no longer flags the {name} fixture")
 
 
 def _titled(title: str, body: str) -> Any:

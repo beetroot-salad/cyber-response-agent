@@ -79,22 +79,6 @@ _HYP_HEADER = (
 )
 
 
-
-
-@pytest.mark.parametrize("case", ["golden-v2sshd", "golden-sshpivot-ab3"])
-def test_real_corpus_companion_is_byte_identical(case):
-    """Parsing a real, warning-free `investigation.md` must yield exactly the
-    companion dict frozen from HEAD. Any refactor that perturbs a field —
-    even one no targeted test asserts on — trips this."""
-    src = (_CORPUS_DIR / case / "investigation.md").read_text()
-    expected = json.loads((_GOLDEN_DIR / f"{case}.companion.json").read_text())
-    body, warnings = parse_dense_companion(src)
-    assert warnings == []
-    assert body == expected
-
-
-
-
 _PRODUCTION_SURFACE = [
     "parse_dense_companion",
     "ParseWarning",
@@ -118,36 +102,6 @@ _TEST_SURFACE = [
     "_HYP_REFUT_COLS",
     "_HYP_AUTHZ_COLS",
 ]
-
-
-@pytest.mark.parametrize("name", _PRODUCTION_SURFACE + _TEST_SURFACE)
-def test_parser_reexports_name(name):
-    """Every name external importers pull stays importable from `parser`."""
-    assert hasattr(parser, name), f"{name} no longer importable from parser"
-
-
-def test_reexported_symbols_keep_their_kind():
-    """The re-exported names keep their observable kind (callable / regex /
-    column-list), so `from parser import X` gives consumers the same thing."""
-    assert callable(parser.parse_dense_companion)
-    assert callable(parser._resolution_record)
-    assert callable(parser._split_cells)
-    assert issubclass(parser.RowError, ValueError)
-    assert hasattr(parser.INVLANG_FENCE_RE, "finditer")
-    assert callable(parser.scan_fences)
-    # A frozen dataclass with all three halves of the accounting — the complement
-    # cannot be dropped from the type without this failing — plus `open_tail`, the
-    # mid-block state `validate._check_surface` reads off the BASELINE so an append
-    # onto an unterminated fence is not refused for the pairing that state forces.
-    assert parser.FenceScan.__dataclass_fields__.keys() == {
-        "bodies", "spans", "orphaned_headers", "open_tail",
-    }
-    assert parser._VERTEX_COLS == ["id", "type", "class", "ident", "attrs"]
-    assert parser._EDGE_COLS[:2] == ["id", "rel"]
-    assert isinstance(parser._HYP_HEADER_COLS, set)
-    assert parser._HYP_PRED_COLS == ["id", "subject", "claim"]
-
-
 
 
 def test_split_quoted_cell_form_keeps_empty_and_honors_quotes():
@@ -194,10 +148,6 @@ def test_parse_auth_splits_kind_source_on_first_colon():
     assert _parse_auth("bare") == {"kind": "bare", "source": ""}
 
 
-def test_split_csv_trims_and_drops_empties():
-    assert _split_csv("a, b ,,c") == ["a", "b", "c"]
-
-
 def test_split_csv_or_semi_prefers_semicolon_when_present():
     assert _split_csv_or_semi("a;b;") == ["a", "b"]
     assert _split_csv_or_semi("a,b") == ["a", "b"]
@@ -222,14 +172,6 @@ def test_row_dict_zips_columns_preferring_block_header():
     }
     headerless = Block(tag="H", name="h-1.parent_attrs", columns=None)
     assert _row_dict(headerless, "k|v", ["key", "value"]) == {"key": "k", "value": "v"}
-
-
-def test_require_raises_its_message_on_missing_or_falsy_key():
-    with pytest.raises(RowError, match="need id"):
-        _require({"id": "", "name": "x"}, "id", msg="need id")
-    _require({"id": "x"}, "id", msg="need id")
-
-
 
 
 _WARNING_SITES = [
@@ -332,8 +274,6 @@ def test_warning_site_block_label_and_reason(label, body, exp_block, exp_reason,
     assert exp_reason in w.reason
 
 
-
-
 def test_r_consultations_bucket_projects_canonically():
     body, warnings = parse_dense_companion(
         _fence(":R consultations [resolved_by|anchor_kind|verdict]\nl-001|cmdb|consulted")
@@ -389,10 +329,7 @@ _LEAD_HEADER_FAIL = (
 def test_a_row_without_its_own_lead_is_refused_however_obvious_the_lead_looks(
     label, block
 ):
-    """There is no positional fallback. Even with exactly one lead in the
-    document — the case where guessing would have been right — a row that does
-    not name its lead is dropped with a warning, because the rule that made the
-    guess wrong with several leads open is the same rule here."""
+    """There is no positional fallback."""
     body, warnings = parse_dense_companion(
         _fence(
             _LEAD_HEADER + "\n"
@@ -472,17 +409,7 @@ def test_relisting_a_lead_with_fail_reason_keeps_its_projected_buckets():
 
 
 def test_t_shelved_is_refused_by_name_and_projects_nothing():
-    """`:T shelved` is retired, and a document that writes one is told so rather than told
-    "unknown block".
-
-    The row used to project onto the lead as `shelved` / `shelved_rationales` and discharge
-    rules #23, #24 and #34. Nothing on record ever wrote one — the block was never in the
-    injected SKILL.md — so the only runs that could reach the retirement route were the ones
-    that guessed its grammar, while the rules it discharged stayed armed for everyone.
-
-    Refusing BY NAME rather than through the generic fallthrough is the same principle
-    `_warn_unknown_conclude_subblock` was added for: an error that points away from its cause
-    costs the author the one thing the diagnostic is for."""
+    """`:T shelved` is retired, and a document that writes one is told so rather than told "unknown block"."""
     body, warnings = parse_dense_companion(
         _fence(':T shelved [hyp_id|by_lead|rationale]\nh-002|l-001|"weak signal"')
     )

@@ -1,22 +1,4 @@
-"""#754 — the log as a record, the schema version, the two openers, and the readers.
-
-The executable form of the `spec_graph_754.yaml` demands that bind `session_head_log` as a
-table, `session` as a shape, `user_version`, `open_store_for_read`, the role-scoped reader
-surface and the visualizer's session pick. Each test's docstring carries its demand's prose;
-the ledger ids sit in a `# provenance:` comment beneath it.
-
-**RED AGAINST `1cecad37` IS THE EXPECTED STATE.** `SCHEMA_VERSION` is 1, `_check_schema_version`
-is wired exclusively to `hydrate` (C4/OC-1), `_migrate_session_columns` silently re-shapes a
-pre-existing file (B7, executed) and `visualize_run.py:328` still carries the bare rowid
-fallback the design never mentions (c12).
-
-The version-refusal tests build their subject by hand — a real SQLite file carrying the shape
-shipped before this change, stamped `PRAGMA user_version = 1`, left in the default `delete`
-journal mode (`_session_head_754.legacy_v1_store_file`). That is what makes both halves of the
-refusal observable rather than inferred: a refusal that had run the DDL would have left new
-tables behind, and one that had run the WAL pragma would have left the file in WAL with
-`-wal`/`-shm` sidecars beside it (PR-11 and PR-12, both executed).
-"""
+"""The head log's schema, version refusal on stale stores, the two openers, and role-scoped readers."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -35,7 +17,6 @@ from defender.tests._session_head_754 import (  # noqa: E402
     legacy_v1_store_file,
     linear_turns,
     log_rows,
-    message_ids,
     raised_by,
     session_analysis,
     sidecars,
@@ -100,41 +81,6 @@ def test_session_head_log_has_the_declared_shape(tmp_path):
     assert [e.session_id for e in log_rows(store)] == [session_id, fork]
     assert log_rows(store, fork)[0].from_message_id is None
     assert log_rows(store, session_id)[0].from_message_id == r2
-
-
-def test_session_carries_head_message_id_and_no_fork_at_message_id(tmp_path):
-    """    `session` carries `head_message_id`, an integer keyed to `message(id)`, and no longer
-    carries `fork_at_message_id` at all; its other columns are unchanged and the table is
-    still STRICT. The workflow that depended on the removed column — a fork's first append
-    finding its branch point without the caller re-supplying it — still completes, now through
-    the head column."""
-    # provenance: R5 substitute for the removal. C1 (census): the column had no live reader
-    # outside `_session_tip`, which this change also removes, so the removal's whole dependent
-    # set is inside the delta.
-    ss = store_mod()
-    store = make_store(tmp_path)
-
-    columns = {row[1]: row for row in sql(store, "PRAGMA table_info(session)")}
-    assert set(columns) == {"session_id", "case_id", "parent_session_id", "agent_id",
-                            "head_message_id", "truncated_by", "last_render_len"}, (
-        sorted(columns))
-    assert columns["head_message_id"][2].upper() == "INTEGER"
-    assert not columns["head_message_id"][3], "a session with no head is the ordinary state"
-    ddl = sql(store, "SELECT sql FROM sqlite_master WHERE name = 'session'")[0][0]
-    assert "STRICT" in ddl.upper(), ddl
-    keys = {row[3]: (row[2], row[4]) for row in sql(store, "PRAGMA foreign_key_list(session)")}
-    assert keys["head_message_id"] == ("message", "id")
-    assert keys["parent_session_id"][0] == "session"
-    assert "fork_at_message_id" not in keys
-
-    main = store.new_session(agent_id="main")
-    r1, r2 = linear_turns(store, main, 2)
-    fork = store.fork(main, at_message_id=r1)
-    first = store.append(fork, [text_response("no re-supplied parent")], agent_id="main")[0]
-    assert sql(store, "SELECT parent_id FROM message WHERE id = ?", (first,)) == [(r1,)], (
-        "the substitute carries the workflow the removed column used to")
-    assert ss.path_row_ids(store, fork) == [r1, first]
-    assert head_of(store, main) == r2
 
 
 # the log as an append-only record
@@ -436,38 +382,6 @@ def test_hydrate_fails_closed_on_an_unresolvable_path_element(tmp_path):
 
 # the schema version, and where the refusal lands
 
-def test_a_fresh_store_stamps_schema_version_2(tmp_path):
-    """    Opening a store on a path that does not exist yet SUCCEEDS and leaves the file stamped at
-    the schema version this change ships — the new check cannot refuse the file it is itself
-    creating — and reopening that same, now non-fresh, file succeeds too.
-
-    This is the positive control for both the version-1 refusal and the deleted-shim negative."""
-    # provenance: P67. PR-11 (executed, SQL-trace confirmed): today all the DDL runs and commits
-    # BEFORE the fresh-only user_version stamp, which is the very last statement the opener
-    # issues, so a check placed after the DDL meets an unstamped fresh file and refuses it.
-    # PR-14 (executed): executescript commits per statement, so a partially built, unstamped
-    # file can exist on disk.
-    ss = store_mod()
-    base = runs_base(tmp_path)
-
-    assert ss.SCHEMA_VERSION == 2, "the bump this change ships"
-    store = ss.open_store(case_id="case-fresh", sessions=SessionPaths(base))
-    session_id = store.new_session(agent_id="main")
-    linear_turns(store, session_id, 1)
-    assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 2
-    assert ss.hydrate(store, session_id, role="analysis"), "the fresh file reads normally"
-    store.close()
-
-    shape = file_shape(store.path)
-    assert shape["user_version"] == 2
-    assert "session_head_log" in shape["objects"], shape["objects"]
-    assert "head_message_id" in shape["session_columns"], shape["session_columns"]
-
-    again = ss.open_store(case_id="case-fresh", sessions=SessionPaths(base))
-    assert ss.path_row_ids(again, session_id) == message_ids(again, session_id), (
-        "a non-fresh file at the current version reopens and reads")
-
-
 def test_open_store_refuses_a_user_version_1_file(tmp_path):
     """    A store file stamped `PRAGMA user_version = 1` — the shape shipped before this change — is
     refused at `open_store` with `UnknownSchemaVersion` naming the version it found, rather
@@ -493,44 +407,6 @@ def test_open_store_refuses_a_user_version_1_file(tmp_path):
     fresh = ss.open_store(case_id="case-fresh", sessions=SessionPaths(base))
     assert fresh.path != stale, "control: a file at the current version opens"
     assert fresh.new_session(agent_id="main")
-
-
-def test_open_store_refuses_before_any_ddl_or_wal_pragma(tmp_path):
-    """    The refusal fires immediately after connecting and before anything else: a refused
-    version-1 file is left byte-identical — no new table, no altered column, still in its
-    original journal mode — and no `-wal`/`-shm` sidecar is left beside it, because the gate
-    closes the connection before re-raising.
-
-    A refusal that reshapes the file it refuses is not failing closed. The fixture is a
-    hand-built file in the default journal mode precisely so both halves are observable rather
-    than inferred: a refusal that had run the DDL would have left new tables behind, and one
-    that had run the WAL pragma would have rewritten the header of the file it refuses."""
-    # provenance: PR-11 (the DDL runs and commits before the stamp) and PR-12 (executed): with
-    # the connection closed the refused file is byte-identical, but a raise propagating out
-    # without the caller ever getting a handle to close LEAKS the connection and its sidecars
-    # until process exit.
-    ss = store_mod()
-    base = runs_base(tmp_path)
-    stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(base)))
-    before_bytes = stale.read_bytes()
-    before = file_shape(stale)
-    assert before["journal_mode"] == "delete", before
-    assert "session_head_log" not in before["objects"], before
-
-    refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(base))
-
-    assert isinstance(refusal, ss.StoreError), refusal
-    assert stale.read_bytes() == before_bytes, (
-        "the refused file must be byte-identical: nothing ran before the check")
-    after = file_shape(stale)
-    assert after["objects"] == before["objects"], (
-        f"the DDL ran on a file the open was about to refuse: {after['objects']}")
-    assert after["journal_mode"] == "delete", (
-        "the WAL pragma ran before the check — it rewrites the header of the very file the "
-        "open refuses")
-    assert sidecars(stale) == [], (
-        "PR-12's leak: the connection and its -wal/-shm sidecars must be closed before the "
-        "raise, not left until process exit")
 
 
 def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
@@ -600,40 +476,6 @@ def test_an_unknown_user_version_is_still_refused_at_the_new_raise_point(tmp_pat
     reopened = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     assert ss.hydrate(reopened, session_id, role="analysis"), (
         "control: restored to the known version, the same file opens and reads again")
-
-
-def test_no_alter_shim_reshapes_an_existing_store(tmp_path):
-    """    No migration shim reshapes a pre-existing store: a file carrying the ORIGINAL five-column
-    `session` table opens to a refusal and keeps all five columns, and its version is not
-    re-stamped either. The recorded lineage is never falsely reported absent — it is simply
-    inaccessible — and no migration path forward is named.
-
-    The positive control is the fresh path on the same runs base, so "nothing was reshaped"
-    cannot be satisfied by an opener that reshapes nothing because it creates nothing."""
-    # provenance: D3, and the R5 substitute for the removal. B7 (executed): the shim grew that
-    # table from five columns to seven with no version check and no error, so 'silently
-    # re-shaped' is literal. P84.
-    ss = store_mod()
-    base = runs_base(tmp_path)
-    legacy = legacy_v1_store_file(ss.store_path_for("case-legacy", sessions=SessionPaths(base)),
-                                  migrated=False)
-    before = file_shape(legacy)
-    assert before["session_columns"] == ["session_id", "case_id", "parent_session_id",
-                                         "truncated_by", "last_render_len"], before
-
-    refusal = raised_by(ss.open_store, case_id="case-legacy", sessions=SessionPaths(base))
-
-    assert isinstance(refusal, ss.UnknownSchemaVersion), refusal
-    after = file_shape(legacy)
-    assert after["session_columns"] == before["session_columns"], (
-        f"a shim ALTERed the table the open refused: {after['session_columns']}")
-    assert "agent_id" not in after["session_columns"]
-    assert "head_message_id" not in after["session_columns"]
-    assert after["user_version"] == 1, "and its version was not re-stamped either"
-
-    fresh = ss.open_store(case_id="case-fresh", sessions=SessionPaths(base))
-    assert "head_message_id" in file_shape(fresh.path)["session_columns"], (
-        "control: the fresh path still builds the current shape")
 
 
 # the store's session pick

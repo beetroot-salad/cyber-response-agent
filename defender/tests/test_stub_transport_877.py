@@ -1,22 +1,4 @@
-"""The shared stub transport's fault floor (#877 F-5): a dead system is a DOWN system, never
-an empty one.
-
-`docker_exec_curl` appends `-w "\\n%{http_code}"`, so curl writes a status line to stdout on
-every exit — including the ones where no request completed. That made
-`_raise_on_transport_failure`'s old `rc != 0 and not stdout` condition unsatisfiable for a
-curl-level fault (stdout is `"\\n000"`, not empty), `_parse_status_code` read the status as `0`,
-`_raise_on_http_error` matched neither its 5xx nor its 4xx arm, and `_request` returned `{}` as
-a SUCCESS. An outage of any of the five stub systems routed through this transport — `ticket`,
-`cmdb`, `identity`, `change-mgmt`, `threat-intel` — therefore reached the lead as "the system
-answered, and it holds nothing", and the circuit breaker counted nothing, because the row's exit
-code was 0 and `INFRA_EXIT_CODES` is `{2, 124}`: no `PER_SYSTEM_FAIL_LIMIT` trip, no
-down-message, and the silent zero repeating for the rest of the run.
-
-`elastic_adapter._http_json` has carried the missing guard verbatim all along
-(`curl reported HTTP 000 (no response; rc=…)`); these tests are the contract's holder outside
-it, and they drive the REAL verbs of a real stub adapter so the fault has to survive the whole
-`health_check` → `http_get_obj` → `_request` path rather than a unit call to the guard.
-"""
+"""The shared stub transport's fault floor (#877): a curl-level failure (HTTP 000, rc != 0) is a transport fault, never an empty successful payload. Driven through real stub-adapter verbs."""
 from __future__ import annotations
 
 import pytest

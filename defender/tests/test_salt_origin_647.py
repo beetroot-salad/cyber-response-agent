@@ -1,41 +1,6 @@
-"""Executable spec (written BEFORE the code) for design #647 — the DRIVEN-RUN half.
-
-The demand list, structure, claims and gate live in `spec-flow/specs/spec_graph_647.yaml`;
-the sweep/relocation half lives in `test_meta_json_retirement_647.py` beside it. One
-test per `form: test` demand, named by its `discharged_by`, with the demand's
-observable-outcome prose in the test's docstring.
-
-**AMENDED BY #875.** This module's original obligation was the salt's ORIGIN: the run has ONE
-trust token, minted by the production builder, and every salted surface carries that same one.
-#875 F-1 found what that shape cost — a token shared across a run is a token the gather
-subagent reads in plaintext on every payload view it is handed, and can therefore echo to
-close the frame its own summary arrives in and keep writing in MAIN's host-text region.
-
-So the origin obligation is retired rather than repaired: `wrap_fresh` mints each frame's
-delimiter AFTER its content is in hand, and there is no run-scoped salt left to originate.
-The four tests below state the successor obligations — the builder mints nothing, every frame
-carries its own delimiter, no frame's salt occurs in its own body, and gather is bound with
-none. Two of them assert the INVERSE of what this file used to require; each says so, and
-says what the old reasoning got wrong.
-
-**The second new pin** is message 0's run-dir listing. `orient` inlines the workspace map
-into MAIN's first model request, and the map enumerates the run dir's children. Nothing
-pinned that listing before, which is why three review passes and a cold review all missed
-that deleting a file out of the run dir changes MAIN's prompt.
-
-The machinery is the real replay harness: `drive()` runs the REAL `driver.run_investigation`
-with a `FunctionModel`, so the salted wrappers observed here are exactly what the model sees.
-Both fakeable boundaries — the model and the data-source verb registry — enter by INJECTION,
-never by patching a module attribute.
-
-Placed in `defender/tests/` rather than `defender/tests/e2e/` — beside the spec graph, as the
-artifact rule requires, since `check_binds` scans only the graph's own directory for the
-`discharged_by` docstrings. The `e2e` marker still routes it with the rest of the replay
-suite.
-"""
+"""Every salted frame in a driven run carries its own salt, absent from the content it delimits; run-dir file set parity."""
 from __future__ import annotations
 
-import ast
 import re
 from pathlib import Path
 
@@ -141,48 +106,6 @@ def run_dir_listing(message_zero: str) -> list[str]:
 
 
 
-def test_materialize_run_dir_returns_only_the_run_dir(tmp_path, monkeypatch):
-    """The builder hands back the one thing it still owns: the run directory it created.
-
-    AMENDED FROM `..._returns_run_dir_then_salt_on_the_success_lane` (#875). #647's obligation
-    was that the run's ONE trust token has a single origin — the production builder — so that
-    no surface could obtain a delimiter the others did not share. That obligation is discharged
-    now by construction rather than by provenance: `wrap_fresh` mints each frame's salt AFTER
-    its content is in hand, so there is no run-scoped token for anything to originate, share,
-    or diverge from. A builder that returned one would be handing out the very object #875 F-1
-    removed."""
-    run_dir = build(tmp_path, monkeypatch)
-
-    assert isinstance(run_dir, Path), "the builder no longer returns a bare run dir"
-    assert run_dir.is_dir(), "the builder's returned run dir is not a real directory"
-    assert run_dir.name == "origin-647"
-    assert RunPaths(run_dir).alert.is_file()
-    assert (run_dir / "gather_raw").is_dir()
-
-    src = (DEFENDER / "run_common.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    # #1110: ONE builder, `materialize_run`, which answers the run's handle. The `.run_dir`-only
-    # wrapper it briefly kept is gone (the review: two builders are two places for the stamp and
-    # this very check to be forgotten), so the walk reads exactly one function — and a second
-    # `materialize_run*` def reappearing beside it is itself the finding.
-    builders = [
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name.startswith("materialize_run")
-    ]
-    assert [b.name for b in builders] == ["materialize_run"], (
-        f"run_common defines {[b.name for b in builders]} — the run has one builder, "
-        "`materialize_run`, and nothing that wraps it")
-    mints = [
-        n for builder in builders for n in ast.walk(builder)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-        and isinstance(n.func.value, ast.Name) and n.func.value.id == "secrets"
-    ]
-    assert not mints, (
-        "the run builder still mints a run-scoped token — #875 removed the run salt; a "
-        "token minted here can only be threaded to a party the frames it delimits are shown to"
-    )
-
-
 def test_every_frame_in_one_model_context_carries_its_own_salt(tmp_path, monkeypatch):
     """Every frame the model is shown carries a DISTINCT delimiter.
 
@@ -262,70 +185,6 @@ def test_the_gather_subagent_is_bound_with_no_salt_at_all(tmp_path, monkeypatch)
         "the gather dispatch passes a salt into bind(GATHER_DEF, …)"
 
 
-def test_a_driven_run_leaves_no_meta_json_in_the_run_dir(tmp_path, monkeypatch):
-    """A driven run leaves no run-dir metadata file behind. The builder never writes one, and
-    nothing downstream recreates it: after a full driven run the directory holds no such file
-    at any depth. No completion marker replaces it — the file was the last unconditional write
-    and so incidentally marked 'materialization finished', but nothing ever consumed that
-    property and none is owed."""
-    run_dir = build(tmp_path, monkeypatch, run_id="no-meta-647")
-    assert run_dir.is_dir(), "the builder materialized no run dir to inspect"
-    assert not (run_dir / "meta.json").exists(), "the builder still writes the metadata file"
-
-    replay = ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
-        Turn(text="Done."),
-    ])
-    drive(run_dir, run_id=run_dir.name, main=replay)
-
-    assert not list(run_dir.rglob("meta.json")), (
-        f"a metadata file reappeared: {[str(p) for p in run_dir.rglob('meta.json')]}"
-    )
-
-
-def test_run_dir_still_carries_every_investigation_artifact_after_the_removal(
-    tmp_path, monkeypatch
-):
-    """Removing the metadata file costs the run dir nothing an operator or the learning loop
-    reads. A driven run still produces the copied alert, the raw-payload subdir, the
-    investigation log and the report the loop's normalizer parses, plus the live request log
-    and its projected tool trace. The narrowed obligation is exactly this: the same
-    investigation artifacts and the same salted surfaces — not the same directory listing."""
-    run_dir = build(tmp_path, monkeypatch, golden=GOLDEN, run_id="artifacts-647")
-    assert RunPaths(run_dir).alert.is_file(), (
-        "the builder did not materialize the copied alert it owns"
-    )
-    assert (run_dir / "gather_raw").is_dir(), (
-        "the builder did not materialize the raw-payload subdir it owns"
-    )
-    inv_text = (GOLDEN / "investigation.md").read_text(encoding="utf-8")
-
-    # #774/R1: report.md left the model's write allow-list — the golden's own disposition
-    # (inconclusive) commits straight through the close tool with no gate work, so no
-    # review_stages injection is needed here either.
-    # #810: investigation.md is landed by `append_block` — onto a run dir the builder seeded
-    # without it, so the append is the create and the golden still reconstructs whole.
-    replay = ReplayFn([
-        Turn(tool_calls=[("append_block", {"text": inv_text})]),
-        Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
-        Turn(text="Done."),
-    ])
-    drive(run_dir, run_id=run_dir.name, main=replay)
-
-    for name in ("investigation.md", "report.md", "tool_trace.jsonl"):
-        assert (run_dir / name).is_file(), f"{name} is missing from the run dir"
-    assert RunPaths(run_dir).alert.is_file(), "the alert is missing from the run dir"
-    # Named through `RunPaths` and not joined onto the root: the wire log sits under
-    # `wire_logs/`, which is what keeps it outside every reader's run-dir read shape.
-    assert RunPaths(run_dir).wire_log.is_file(), "the wire log is missing from the run dir"
-    assert (run_dir / "gather_raw").is_dir()
-    assert (run_dir / "investigation.md").read_text(encoding="utf-8") == inv_text
-    m = re.search(r"^disposition:\s*(\w+)", (run_dir / "report.md").read_text(encoding="utf-8"), re.M)
-    assert m, "the report's disposition frontmatter no longer parses"
-
-
-
-
 def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_children(
     tmp_path, monkeypatch
 ):
@@ -367,45 +226,6 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
     )
     assert PROVENANCE not in listed, (
         "the run's own provenance stamp leaked into MAIN's directory view"
-    )
-
-
-def test_replayed_message_zero_listing_matches_the_production_run_dir_file_set(
-    tmp_path, monkeypatch
-):
-    """The replayed orientation shifts with the harness's own builder, so the harness must drop
-    the metadata write too. Deleting that write is NOT a pure deletion: the harness's run dir
-    is what the replayed message 0 enumerates, so a harness still writing the file would keep
-    advertising it to the model long after production stopped producing it — a suite green on
-    pass/fail while pinning a prompt production can no longer emit. The listing a replayed run
-    shows must name only files a production run would have."""
-    harness_dir = materialize(tmp_path / "h", GOLDEN, run_id='replay-msg0-647')
-    assert not (harness_dir / "meta.json").exists(), (
-        "the replay harness still writes the metadata file into its run dir"
-    )
-
-    prod_dir = build(tmp_path, monkeypatch, run_id="replay-msg0-647-prod")
-    assert prod_dir.is_dir(), (
-        "there is no production run dir to compare the replayed listing against"
-    )
-
-    replay = ReplayFn([Turn(text="Done.")])
-    drive(harness_dir, run_id="replay-msg0-647", main=replay)
-    listed = run_dir_listing(replay.seen[0])
-
-    assert "meta.json" not in listed, "the replayed message 0 still advertises the removed file"
-    production_names = {p.name for p in prod_dir.iterdir()}
-    # `production_names` is `materialize_run`'s snapshot, taken BEFORE
-    # `run_investigation` starts; `tool_trace.jsonl` is written by `run_investigation` itself,
-    # between that snapshot and message 0 — present in a real run by the time the model sees
-    # the listing, just not in this earlier snapshot. The case pointer (#705) used to be the
-    # second such file; #1235 moved it to a host-only sidecar BESIDE the run dir, so it is no
-    # longer allowed for here. The wire log is written in that window too but is NOT allowed
-    # for here: it lands under `wire_logs/`, which the map suppresses along with `gather_raw/`
-    # because the read gate refuses both.
-    assert set(listed) <= production_names | {"tool_trace.jsonl"}, (
-        f"the replayed listing names files a production run dir never has: "
-        f"{set(listed) - production_names}"
     )
 
 

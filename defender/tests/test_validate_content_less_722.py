@@ -1,24 +1,4 @@
-"""Hermetic spec for the judge-doc validators' "non-empty string" gates (#722, same class).
-
-The judge writes this YAML after reading the actor's story and the investigation, both
-downstream of attacker-influenced alert/gather text. `validate.py` is the gate that
-decides whether a case is processable — and a validated finding is not merely logged:
-`persist.py` queues `subject_anchor` / `subject_topic` verbatim into the pending-findings
-table, and the lesson curator's prompt renders them as the lesson's anchor. A field that
-renders as NOTHING must therefore not pass a check spelled "must be a non-empty string".
-
-`not v.strip()` was that check. strip() keys off `str.isspace()`, True for the
-visible-width separators (U+00A0, U+3000, U+2028) and False for the zero-width ones
-(U+200B, U+FEFF, U+00AD, U+2060) and NUL — so an anchor of a single zero-width space
-passed the gate and became a lesson anchor, while an anchor of one NBSP did not.
-
-The same split ran the other way on the two keyword gates: `outcome` and the report's
-`disposition` tolerated an NBSP around the keyword and turned the whole case
-unprocessable on a zero-width one. Both now match on what the value renders as.
-
-Driven through the public seam the pipeline itself calls — the `learning.loop`
-re-exports — with real docs and a real report.md on disk.
-"""
+"""Judge-doc validators' non-empty-string and keyword gates match on what a value RENDERS as: zero-width/NUL-only anchors are rejected, NBSP-padded keywords accepted (#722)."""
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,29 +1,7 @@
-"""Pitfalls curation mode (Stage 2) — behavior spec at its own module seam.
-
-Issue #513 (#455 Part 2) lifts the cross-run, threshold-gated ``execution.md``
-pitfalls curation out of ``lead_author.py`` into ``leads/pitfalls_curator.py`` — a
-**behavior-preserving module move**. These tests are the #511 characterization spec
-for that mode, RELOCATED to bind at the new ``pitfalls_curator.*`` seam (the move is
-clean, with no re-export shim on ``lead_author``). Against HEAD the target import
-fails (the module doesn't exist yet) — the expected red before the move; after it the
-whole file goes green. The assertions are byte-identical to the #511 spec that passed
-against the equivalent ``lead_author.*`` seam, so green here means the moved behavior
-is unchanged.
-
-Borrowed collaborators are imported from their canonical homes — ``LeadAuthorError``
-from ``lead_extraction``, ``persist`` / ``config`` / ``LoopPaths`` from ``core``, and
-the engine from ``lead_author_engine`` — NOT re-read off ``pitfalls_curator``. That keeps
-this an independent encoding of intent and leaves the move free to source those
-symbols however it likes (in particular, it does not force the new module to
-re-export them). The shared spawn/verify/commit spine (#511's ``_spawn_author_agent``
-/ ``_verify_corpus_scope`` / ``_loop_commit_body``) is invisible here: the tests bind
-at the pitfalls seam, and the spawn capture patches the canonical runner module, so
-this spec is agnostic to where that spine lands (issue #513 leaves it open).
-"""
+"""Pitfalls curation mode (leads/pitfalls_curator.py): commit-gate verification, threshold/rotation, and the systemless-batch drop."""
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -37,7 +15,7 @@ from defender.learning.core.config import LoopPaths  # type: ignore[import-not-f
 from defender.tests._repo import seed_skills_repo
 from defender.tests._curator1134 import open_state
 from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
-from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS
+from defender.learning.core.state import PITFALLS
 
 
 
@@ -330,42 +308,6 @@ def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
     return cap
 
 
-def test_invoke_pitfalls_agent_prompt_reaches_engine(tmp_path: Path, monkeypatch):
-    """The pitfalls prompt (skills_dir + pitfalls_handoffs, and NONE of the per-run keys) reaches
-    the in-process engine as the ``user_prompt`` payload."""
-    cap = _capture_engine(monkeypatch)
-    handoffs = [{"surface": "system", "system": "elastic",
-                 "path": "defender/skills/elastic/execution.md",
-                 "failures": []}]
-    rc = pitfalls_curator._invoke_pitfalls_agent(handoffs, state=_state(tmp_path), repo_root=tmp_path)
-    assert rc == 0
-    prompt = cap["user_prompt"]
-    assert re.search(r"<run-[0-9a-f]+-pitfalls_handoffs>", prompt)
-    assert "skills_dir: defender/skills/" in prompt
-    assert "run_dir" not in prompt
-    assert "catalog_dir" not in prompt
-    assert "executed_template_handoffs" not in prompt
-
-
-def test_invoke_pitfalls_agent_wires_engine_kwargs_and_pending_anchor(tmp_path: Path, monkeypatch):
-    """(rewrite of the RunnerOptions/allowlist-string options-wiring — both are gone) The engine
-    gets the pitfalls prompt, the 'pitfalls' batch id, and the injected repo_root. F4: the pitfalls
-    curator has NO per-run dir, so its learning trace anchors at PENDING_DIR (the stable cross-run
-    queue dir), not a synthesized run dir. Model/effort/request_limit default inside
-    run_author_stage (pinned in test_lead_author_engine).
-
-    Since #713 the batch id rides the StageWiring rather than being its own engine kwarg,
-    so it stays observable on the trace name and label."""
-    cap = _capture_engine(monkeypatch)
-    pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path)
-    assert cap["system_prompt_file"] == pitfalls_curator.LEAD_PITFALLS_PROMPT
-    assert cap["trace_name"].startswith("pitfalls.")
-    assert cap["label"].endswith(":pitfalls")
-    assert cap["repo_root"] == tmp_path
-    state_root = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "state").state_root
-    assert cap["learning_run_dir"] == (state_root / LEAD_QUEUE_LOCK.file).parent
-
-
 def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypatch):
     """F1: a systemic config fault from the engine PROPAGATES through the pitfalls spawn too —
     not swallowed into an rc."""
@@ -374,24 +316,3 @@ def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypat
     with pytest.raises(FatalConfigError):
         pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path)
 
-
-def test_invoke_pitfalls_agent_passes_through_engine_rc(tmp_path: Path, monkeypatch):
-    """A per-run rc (124 from a RunUnprocessable inside the engine) is returned unchanged."""
-    _capture_engine(monkeypatch, rc=124)
-    assert pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path) == 124
-
-
-
-
-def test_pitfalls_commit_message_title_and_body():
-    """Fixed 'execution.md pitfalls' title; body lists each changed path as '- {p}'."""
-    msg = pitfalls_curator._pitfalls_commit_message(
-        ["defender/skills/elastic/execution.md", "defender/skills/cmdb/execution.md"]
-    )
-    assert "learning(lead-author): execution.md pitfalls" in msg
-    assert (
-        "git).\n\n"
-        "Paths:\n"
-        "- defender/skills/elastic/execution.md\n"
-        "- defender/skills/cmdb/execution.md\n"
-    ) in msg

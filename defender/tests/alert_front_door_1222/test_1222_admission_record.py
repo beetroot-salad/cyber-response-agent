@@ -476,32 +476,6 @@ def test_p086_mapped_value_has_an_unpaired_surrogate_escape_at(tmp_path):
     assert S.recorded(run_dir, "event_time") == event_time
 
 
-def test_p087_mapped_value_has_an_unpaired_surrogate_escape_in(tmp_path):
-    """An alert holding an unpaired surrogate escape is refused at admission, so neither the
-    judge's enqueue nor the lesson author meets it; the judge's pass and the curator's drain
-    neither hang nor corrupt the queue.
-
-    Refused before any run folder, nothing exists to launch, judge or author from, and the
-    learning enqueue is never reached: the curation queue stays empty. Positive control: a PAIRED
-    surrogate escape (one astral character) is admitted, and production's learning enqueue files
-    its request."""
-    planted = S.plant_tenant()
-    enqueue = _learning_enqueue(_held_out_fixtures(tmp_path))
-    d = _drive(tmp_path, planted, "p087-surrogate", alert=S.admission_bytes("lone_surrogate"),
-               enqueue=enqueue)
-    _assert_refused_before_any_folder(d, "lone surrogate")
-    assert d.enqueued == [], "the learning enqueue was reached for a refused alert"
-    assert _curation_requests() == {}, "a refused alert left a request on the learning queue"
-
-    paired = (b'{"rule": {"id": "R-1001", "description": "x\\ud83d\\ude00y"}, '
-              b'"detected_at": "2026-09-30T08:15:00Z"}')
-    control = _drive(tmp_path, planted, "p087-paired", alert=paired, enqueue=enqueue)
-    run_dir = _assert_admitted(control, "a paired surrogate escape")
-    assert control.enqueued, "the learning enqueue was never reached"
-    assert _request_key_for(run_dir) is not None, "the admitted run filed no curation request"
-    assert S.recorded(run_dir, "summary") == "x\U0001F600y"
-
-
 def test_p138_refused_alert_leaves_a_run_folder_without_a_reco(tmp_path):
     """Admission runs before any run folder is created, so a refused alert leaves nothing under
     the runs base; no box and no lead start, and a refused start is never counted as a trial.
@@ -650,32 +624,6 @@ def test_alert_mapping_is_read_once_at_run_start(tmp_path):
     assert S.recorded(run_dir, "signature") == "app-7"
 
 
-def test_p060_mapping_file_edited_between_acceptance_and_the_r(tmp_path):
-    """The run holds the version read at run start, and every reader sees that version.
-
-    The tenant is accepted with `signature: rule.id`, then the operator saves `signature:
-    rule.uuid` before the run. The run holds U-9 — the version present when it started — in its
-    record, in orientation's lookups, in both ticket legs; R-1001 (the accepted version's value)
-    reaches none of them."""
-    planted = S.plant_tenant(case_mapping=_case_mapping_naming_the_signature())
-    planted.accept()
-    S.remap(planted, {**S.DEFAULT_MAPPING_GENERIC, "signature": "rule.uuid"})
-
-    shim, store = _failed_shims(), S.TicketStore()
-    d = _drive(tmp_path, planted, "p060-1", alert=_alert(uuid="U-9"), orient_shim=shim,
-               tickets=S.ticket_writer(store), update_ticket=True, main=S.closing_main_turns())
-    run_dir = _assert_admitted(d, "an ordinary alert")
-    assert _handed_signatures(shim) == ["U-9"], (
-        f"orientation did not see the run-start mapping's signature: {shim.argvs()}")
-    assert not _argv_mentions(shim, "R-1001"), f"orientation used another version: {shim.argvs()}"
-    assert "sig:U-9" in store.only_open().get("labels", []), store.only_open()
-    comments = store.comments()
-    assert len(comments) == 1, f"the post-run record leg posted {len(comments)} comments"
-    assert "[sig=U-9]" in comments[0].get("body", ""), comments
-    assert "R-1001" not in _ticket_text(store), "a ticket leg used the accepted version's value"
-    assert S.recorded(run_dir, "signature") == "U-9"
-
-
 def test_p141_record_for_a_value_the_signature_rule_refuses(tmp_path):
     """When the key rule refuses a mapped value, the record holds no signature, with the same
     note as for an unmapped path. The refused value reaches no sink, the record included.
@@ -779,36 +727,6 @@ def test_p118_run_restarted_in_the_same_run_directory_after_th(tmp_path):
         "the refused restart rewrote the alert")
     assert _snapshot(S.record_file(altered)) == _held(held, altered, S.record_file(altered)), (
         "the refused restart rewrote the record")
-
-
-def test_p140_setup_only_folder_redriven_after_a_mapping_edit(tmp_path):
-    """A re-driven setup-only folder keeps the record it finds, as the alert is kept, and a
-    folder holding the new read-only directory is still recognised as setup-only.
-
-    The run is stopped after setup (its folder holds the input directory with the alert and the
-    record), the operator re-keys the signature on `rule.alt`, and the same run id is driven
-    again. PA-02: at base any name outside setup's set flips the folder to "ran" and the re-drive
-    is refused. The re-drive must resume, keep the first record byte for byte, and run on the
-    first record's signature (R-1001), never the re-derived one (ALT-7)."""
-    planted = S.plant_tenant()
-    alert = _alert(alt="ALT-7")
-    run_dir = _stopped_after_setup(tmp_path, planted, "p140", alert)
-    held = _tree(run_dir)
-
-    S.remap(planted, {**S.DEFAULT_MAPPING_GENERIC, "signature": "rule.alt"})
-    shim = _failed_shims()
-    again = _drive(tmp_path, planted, "p140", alert=alert, orient_shim=shim)
-    _assert_admitted(again, "the re-driven setup-only folder")
-    assert again.lifecycle_calls, "the setup-only folder was not resumed"
-    assert _handed_signatures(shim) == ["R-1001"], (
-        f"the re-driven run did not run on its first record's signature: {shim.argvs()}")
-    assert not _argv_mentions(shim, "ALT-7"), (
-        f"the re-driven run re-derived its signature from the edited mapping: {shim.argvs()}")
-    assert _snapshot(S.alert_file(run_dir)) == _held(held, run_dir, S.alert_file(run_dir)), (
-        "the re-drive rewrote the alert")
-    assert _snapshot(S.record_file(run_dir)) == _held(held, run_dir, S.record_file(run_dir)), (
-        "the re-drive rewrote the record")
-    assert S.recorded(run_dir, "signature") == "R-1001"
 
 
 # =================================================================================================

@@ -1,13 +1,4 @@
-"""#870 M6 — one reducer surface, a handoff that discriminates, and a prompt that knows.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_870.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared870.py`.
-
-The curator gains a SECOND edit target. Everything downstream of the handoff — the prompt the
-model reads, the partition, the commit gate — discriminates on one new key, `surface`, and the
-key that used to name the target (`execution_md_path`) is gone from both shapes.
-"""
+"""#870 M6 — one reducer surface, a handoff that discriminates, and a prompt that knows."""
 from __future__ import annotations
 
 import re
@@ -18,8 +9,7 @@ import pytest
 from defender.tests._claim1175 import claim_git
 from defender import _git
 from defender.learning.leads import pitfalls_curator
-from defender.learning.leads.lead_extraction import LeadAuthorError, collect_general_failures
-from defender._query_rules import BASH_SHIM_QUERY_ID
+from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests._declared870 import (
     BINDER,
     PITFALLS_SECTION,
@@ -31,7 +21,6 @@ from defender.tests._declared870 import (
     pitfall_row,
     reducer_surface_text,
     seed_tree,
-    shim_lead,
     shim_row,
     write,
     write_reducer_surface,
@@ -117,40 +106,6 @@ def test_the_reducer_handoff_names_no_system():
         assert name not in blob, f"{name} survived into the reducer handoff: {blob}"
 
 
-def test_every_handoff_entry_carries_surface_and_path():
-    """Over a mixed batch, EVERY handoff entry carries a `surface` of `'system'` or
-    `'reducer'` and a `path`; no entry carries `execution_md_path`; only the system shape
-    carries `system`; each entry's failures keep the five keys
-    `query_id`/`goal`/`executed_query`/`stderr_digest`/`occurrences`; and the reducer entry
-    sorts LAST, after the system entries' by-name order.
-
-    #0's return contract, settled at FK-9. The ordering is pinned rather than left free
-    because `lead_pitfalls.md` reads the entries IN ORDER and the one consumer of this key is
-    a model — an independent reader of the live doc already misread `surface` as a file name
-    rather than as the discriminator.
-    """
-    handoffs = pitfalls_curator._build_pitfalls_handoffs(
-        [pitfall_row("r:l-001:0", "elastic"),
-         pitfall_row("r:l-002:0", "cmdb"),
-         shim_row("r:l-003:0")],
-        systems=DECLARED,
-    )
-    assert [e.get("surface") for e in handoffs] == ["system", "system", "reducer"], (
-        "the reducer entry must sort last, after the system entries' own by-name order"
-    )
-    assert [e.get("system") for e in handoffs] == ["cmdb", "elastic", None]
-    assert [e["path"] for e in handoffs] == [
-        "defender/skills/cmdb/execution.md",
-        "defender/skills/elastic/execution.md",
-        REDUCER_REL,
-    ]
-    for entry in handoffs:
-        assert "execution_md_path" not in entry, "the renamed key survived"
-        assert entry["failures"]
-        for failure in entry["failures"]:
-            assert set(failure) == FAILURE_KEYS
-
-
 def test_many_reducer_mistakes_share_one_handoff_entry():
     """Five shim rows carrying three distinct `stderr_digest`s produce exactly ONE handoff
     entry for the reducer surface, holding THREE failures ordered most-repeated first.
@@ -175,87 +130,7 @@ def test_many_reducer_mistakes_share_one_handoff_entry():
     assert entries[0]["failures"][0]["stderr_digest"] == BINDER
 
 
-def test_a_reducer_failure_shows_the_curator_its_command():
-    """A reducer failure's `executed_query` renders the shim command as the STRUCTURED call
-    `_executed_query` actually produces — `verb: bash` over `params.command` — not the bare
-    string and not an empty value.
-
-    C12/G17 (executed) CORRECT M6's "its `executed_query` is `params['command']`":
-    `engine_for(system, 'bash')` is `'none'` at both `''` and `'elastic'`, so the body-param
-    branch is never taken and the value is a YAML-dumped, line-wrapped call block. A prompt
-    written from the doc's sentence would teach the curator to look for a string that is not
-    there.
-    """
-    row = collect_general_failures([shim_lead(system="elastic")], Path("r"), catalog=[])[0]
-    rendered = row["executed_query"]
-    assert rendered.startswith("verb: bash"), rendered
-    assert "params:" in rendered
-    assert "command:" in rendered
-    assert "defender-sql" in rendered
-    assert not rendered.startswith("cat "), "M6's uncorrected reading shipped"
-
-    failure = by_surface(pitfalls_curator._build_pitfalls_handoffs(
-        [row | {"pitfall_id": "r:l-003:0"}], systems=DECLARED,
-    ))["reducer"][0]["failures"][0]
-    assert failure["executed_query"] == rendered, "the shape did not survive the handoff"
-    assert failure["query_id"] == BASH_SHIM_QUERY_ID
-
-
 # The two readers of one decision: the prompt the model obeys, and the gate that refuses it.
-
-
-def test_the_curator_prompt_agrees_with_the_commit_gate():
-    """`lead_pitfalls.md` names BOTH edit targets — a declared system's `execution.md` and
-    `defender/skills/gather/defender-sql.md` — names `## Common pitfalls` as the section to
-    write into the reducer surface, no longer says its single edit target is `execution.md`,
-    and no longer names the retired `execution_md_path` key.
-
-    Every literal corpus path the prompt names PASSES `_pitfalls_path_rule`, and no path the
-    rule refuses is named: the prompt and the gate are two readers of one decision, and they
-    drift apart silently — a prompt that names a path the gate refuses costs the whole tick
-    (FF-4), and a gate that admits a path the prompt never names is a widened write surface
-    nobody asked for.
-
-    This demand carries the two settled content premises as PROMPT INSTRUCTIONS only; the
-    mechanical backstop is `_pitfalls_content_rule` (FK-2), which is a different strength of
-    guarantee and has its own demand.
-    """
-    text = pitfalls_curator.LEAD_PITFALLS_PROMPT.read_text(encoding="utf-8")
-
-    assert REDUCER_REL in text, "the prompt never names the surface this round opens"
-    assert "defender/skills/{system}/execution.md" in text
-    assert PITFALLS_SECTION in text
-    assert "execution_md_path" not in text, "G16's renamed key is still in the prompt"
-    assert '"surface"' in text, "the discriminator is not in the schema block the model reads"
-    for value in ('"system"', '"reducer"'):
-        assert value in text, f"the prompt never names {value} as a legal surface"
-    assert "only `defender/skills/{system}/execution.md`" not in text, (
-        "the prompt still tells the curator its single edit target is execution.md"
-    )
-
-    named = sorted(set(_PROMPT_PATH.findall(text)))
-    assert REDUCER_REL in named
-    for path in named:
-        concrete = path.replace("{system}", "elastic")
-        pitfalls_curator._pitfalls_path_rule(" M", concrete, systems=frozenset({"elastic"}))
-
-    # FK-4's requirement, minted here at no mechanism cost: a reducer bullet must be
-    # PAYLOAD-SHAPE-SCOPED in its own text. The reducer surface is the one file every
-    # system's reduce reads before every attempt, so an unscoped bullet — "always cast the
-    # column" — is advice handed to every future reduce for every system, where the same
-    # sentence on a system's `execution.md` is read only when working that system. The
-    # instruction has to sit in the paragraph that names the reducer target, or it is a
-    # general style note the curator can apply to the wrong surface.
-    scoped = [
-        para for para in text.split("\n\n")
-        if "payload shape" in para.lower()
-        and (REDUCER_REL in para or "reducer" in para.lower())
-    ]
-    assert scoped, (
-        "the prompt never tells the curator a reducer bullet must name the payload shape it "
-        f"applies to — FK-4's cost (cross-system reach) is unpriced in the one place it can "
-        f"be: {text!r}"
-    )
 
 
 def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_path):

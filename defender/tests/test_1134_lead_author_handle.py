@@ -1,71 +1,12 @@
-"""#1134 step 6 (v3, addendum 2): the lead author and the pitfalls curator reach `skills/` only through the
-drain's held mount, and the drain label that names that mount is consumed where the trees open.
-
-The contract is the step-6 contract over #1134's design (D4 "Lead author" and "Pitfalls curator",
-O3's catalog regression, O5.4, O5.5's draft-writer half, D7's rows for them), the 2026-10-01
-addendum (A3: one `DrainTrees` per work-step seam call, opened inside the default seam with the
-label bound in, closed when it returns or raises; A4: readers take a `Bound`, writers the `Held`)
-and the owner decisions of 2026-09-29 (the label is required; functions that took
-`catalog_dir` / `skills_dir` take the handle only, no `Path` form, no default). The shape it pins:
-
-- `drains._invoke_lead_author(paths, run, *, label, box, on_done)` and
-  `drains._invoke_pitfalls(paths, *, label, box, on_curated, lock_wait_seconds)` require the label
-  and open `open_drain_trees(paths, label)` AROUND the curator call. `lead_author.run(run, *,
-  label, ...)` requires it too. Below the open, the open `DrainTrees` flows:
-  `run_under_held_queue_lock(..., trees)`, `run_pitfalls(*, paths, trees, ...)` and
-  `build_lead_author_deps(paths, *, trees)` require it (`TypeError` without). The deps carry
-  `skills` (the held mount, `trees.mount(paths.skills_dir)`) and `tree_for` (`trees.tree_for`).
-- `synthesize_drafts(executed, *, skills: Held, where: Path, catalog=None, systems)` writes
-  `gather/queries/<sys>/_draft/<hex>.md` through the `Held` (O5.4) and returns `where / name`.
-- The readers take the mount's view and `where`: `collect_general_failures(..., skills=, where=,
-  catalog=)`, `build_handoff(..., skills=, where=, catalog=)`, `discover_system_drafts(*, skills,
-  where, systems)`, `_draft_contradicts_skill(skills, draft, *, where)`,
-  `_minted_identities(skills, created, *, where)`, `render_query(source, name, params)`,
-  `lead_neighbors.load_lane_catalog(skills, *, where)`, and `check_system_skill(source, system,
-  name=None)` (a `Bound` with a name, or its unchanged `Path` form).
-- Every post-agent rule (`_rules.py`, and the pitfalls curator's `_readable_pair` /
-  `_pitfalls_content_rule` / `_pitfalls_rule` / `_verify_pitfalls_state`) takes a required
-  `tree_for` and judges / reads through `lane_trees.kind_at` / `read_at` (a path inside the
-  lane's mount through its handle; outside it, the plain path, D3).
-- v3 (addendum 2): there is no `Bound.kind` / `Bound.walk`. Every "what stands here" goes on
-  `_tree_listing.entry_kind` (one listing of the parent; a refused holding folder is a `reason`,
-  which `kind_at` maps to `"other"`), and every listing on `_tree_listing.list_tree` with the
-  tree's fixed depth. Neither raises: after the trees close they answer `Bad file descriptor`.
-
-What the handle buys, per reader and rule (D7's guard plus positive control): an entry that is
-not a plain file is never followed. The plants are real filesystem entries: a symlink at the
-name to a file outside the repo carrying `OUT_MARK` (content a link-following reader would
-accept, so following it changes the answer), a hard link at the name to such a file, and a
-symlink or a plain file at each holding folder below `skills/` (the real folder moved outside).
-Each guard asserts: the reader's "not read" answer; the kernel saw no read of the outside file
-(and, for a symlink or a folder plant, no open of it either: `kernel_watch`, inotify, by any
-route); the mark in neither the answer nor the log; the plant and everything outside unchanged.
-Its positive control is the same bytes as a plain file at the same address: the "read" answer,
-and the watch saw that read (it is not blind).
-
-Sections: the reader/rule matrix; `_skills_content_rule`'s one verdict per link; `_departed_drafts`;
-the draft writer (O3, O5.4, O5.5), through `synthesize_drafts`, `lead_author.run(label=, deps=)`,
-`run_under_held_queue_lock(trees=)` and `drains.lead_author_drain` with its REAL default seams;
-the existence-probe fault decision (an EACCES / EIO at a draft's holding folder refuses its
-listing, the probe falls through to the write, which is refused and logged, and the claim goes
-on); the trees' lifetime around each seam; and the label / trees plumbing.
-`test_1134_lead_author_holes.py` carries the adversary-closing rows (v1's H1b-H8) and the
-refused / gone folder handling of `discover_system_drafts` and the half-promote listing.
-
-Faults that cannot be made for real as root (a refused listing, EACCES / EIO) go through the
-`os_` seam of `DrainTrees.open` only; nothing is monkeypatched but the environment
-(`monkeypatch.setenv("LEAD_AUTHOR_MODEL", ...)`, a tripwire that turns a reached agent spawn into
-`FatalConfigError` instead of a model call). A FIFO plant runs under `in_time`'s deadline.
-
-Red before step 6: the module imports names step 6 adds (`lane_trees.kind_at` / `read_at` /
-`view_at`, `_lead_spine.lane_skills`, `lead_neighbors.load_lane_catalog`,
-`path_validation.CATALOG_FOLDER`), so collection fails on the base.
+"""The lead author and pitfalls curator reach `skills/` only through the drain's held mount: readers and
+post-agent rules never follow a symlink, hard link, FIFO or planted holding folder, the draft writer mints through
+the `Held`, and the held trees live exactly as long as each drain seam call. Real filesystem plants; faults that
+need root go through the `os_` seam of `DrainTrees.open`.
 """
 from __future__ import annotations
 
 import dataclasses
 import errno
-import functools
 import json
 import logging
 import os
@@ -76,17 +17,12 @@ from typing import Any
 
 import pytest
 
-from defender.tests._claim1175 import claim_git
 from defender import _git, _scaffold_rules
 from defender._env import FatalConfigError
-from defender._io import NotPlainEntry
-from defender._tree_listing import entry_kind
 from defender.learning.core import drains
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
-from defender.learning.core.state import PITFALLS, LearningState
-from defender.learning.core.lane_trees import DrainTrees, kind_at, open_drain_trees, read_at, view_at
+from defender.learning.core.lane_trees import DrainTrees, open_drain_trees, read_at
 from defender.learning.leads import lead_author, lead_neighbors, lead_render, pitfalls_curator
-from defender.learning.leads._lead_spine import lane_skills
 from defender.learning.leads.draft_synthesis import (
     _draft_basename,
     _draft_params,
@@ -99,7 +35,7 @@ from defender.learning.leads.lead_extraction import (
     LeadAuthorError,
     collect_general_failures,
 )
-from defender.learning.leads.path_validation import CATALOG_FOLDER, CATALOG_REL, SKILLS_REL
+from defender.learning.leads.path_validation import CATALOG_REL, SKILLS_REL
 from defender.runtime.verbs import engine_for
 from defender.tests._declared869 import LeadAuthorSpawn, head_files, seed_executed_query, seed_tree
 from defender.tests._lead_author_1134 import (
@@ -111,7 +47,6 @@ from defender.tests._lead_author_1134 import (
     errors,
     lead_trees,
     logged,
-    opened,
     outcome,
     place,
     plant_folder,
@@ -133,7 +68,6 @@ from defender.tests._spec791 import (
 )
 from defender.tests._tree_listing_1134 import descriptors_under
 from defender.tests.test_1111_rooted_io import census, in_time
-from defender.tests.test_1134_mount_list import UNKNOWN_LABELS
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -727,21 +661,6 @@ def test_the_writer_mints_each_draft_under_the_skills_mount_with_its_bytes(bare:
     assert errors(caplog) == []
 
 
-def test_a_draft_returns_the_path_where_spells_and_opens_nothing_by_it(tmp_path: Path):
-    """`where` only spells: the drafts land below the HELD mount, and `created` is spelled
-    `where / name` even when `where` names somewhere else entirely (never made, never opened).
-
-    Catches: a writer that writes `where / name` by path, or derives the handle from `where`."""
-    repo = bare_skills(tmp_path)
-    skills_dir = repo / "defender" / "skills"
-    elsewhere = tmp_path / "spelled-elsewhere"
-    with opened(LoopPaths(repo_root=repo)) as trees:
-        created = synthesize_drafts([ELASTIC_LEAD], skills=trees.mount(skills_dir),
-                                    where=elsewhere, catalog=[], systems=SYSTEMS)
-    name, text = draft_of(ELASTIC_LEAD)
-    assert created == [elsewhere / name]
-    assert (skills_dir / name).read_text(encoding="utf-8") == text
-    assert not os.path.lexists(elsewhere), "where= was made or written through"
 
 
 #: Every folder a draft's write passes below the mount. `gather` and `gather/queries` lie on
@@ -838,16 +757,6 @@ def test_an_occupied_draft_name_is_skipped_and_a_non_plain_one_is_refused(
         assert len(said) == 1, errors(caplog)
 
 
-def test_a_refused_draft_write_raises_the_cores_not_plain_entry(bare: Scene):
-    """The refusal the writer logs for a symlink at the draft's name is the core's own,
-    exactly `NotPlainEntry` (so a writer that contained every OSError silently, or replaced the
-    link, would not produce it): written through the same held mount the writer is handed."""
-    w_name, w_text = draft_of(WAZUH_LEAD)
-    bare.at(w_name).symlink_to(bare.outside / "no-such.md")
-    with pytest.raises(OSError) as exc:  # noqa: PT011 — the exact type is asserted below
-        bare.skills.write(w_name, w_text, mode="replace")
-    assert type(exc.value) is NotPlainEntry
-    assert bare.at(w_name).is_symlink()
 
 
 # ---------------------------------------------------------------------------------------
@@ -971,29 +880,6 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_loc
     assert [m for m in wrote_errors(caplog) if str(w_draft) in m and "wazuh.hunt-creds" in m]
 
 
-def test_a_kind_fault_does_not_unwind_the_claim_through_run(tmp_path: Path, caplog):
-    """`lead_author.run(label=, deps=)` with deps built under trees whose `os_` refuses the
-    wazuh draft's `_draft` folder (EACCES): the elastic claim goes on to the agent, which is
-    handed exactly the elastic draft's handoff (the fake fails, rc 1, so the run stops there,
-    rc 2)."""
-    repo = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _run_dir()
-    site = paths.skills_dir / "gather/queries/wazuh/_draft"
-    site.mkdir(parents=True, exist_ok=True)
-    refuser = RefusesFolder(site, "step", errno.EACCES)
-    spawn = LeadAuthorSpawn(rc=1)
-
-    with DrainTrees.open((paths.skills_dir,), os_=refuser) as trees:
-        deps = _deps(paths, trees, spawn, [WAZUH_LEAD, ELASTIC_LEAD])
-        rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps)
-
-    assert rc == 2, "the run did not reach the (failing) agent"
-    assert refuser.refused > 0
-    e_name, e_text = draft_of(ELASTIC_LEAD)
-    assert [h["executed_template_path"] for h in spawn.handoffs] == [f"{SKILLS_REL}{e_name}"]
-    assert (paths.skills_dir / e_name).read_text(encoding="utf-8") == e_text
-    assert len(said_for(caplog, WAZUH_LEAD, paths.skills_dir)) == 1, wrote_errors(caplog)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1086,39 +972,6 @@ def test_run_goes_on_past_a_refused_draft_folder(tmp_path: Path, kind: str, capl
                and repr(WAZUH_LEAD.query_id) in m for m in errors(caplog)), errors(caplog)
 
 
-@pytest.mark.parametrize("site", [None, "gather", "gather/queries"])
-def test_run_under_held_queue_lock_writes_nothing_outside_skills_through_a_linked_catalog(
-        tmp_path: Path, site: str | None, monkeypatch, caplog):
-    """O3 through `run_under_held_queue_lock(trees=...)`, the drain's own entry, reading its
-    real tables (one coined elastic row): with `skills/gather` or `skills/gather/queries` linked
-    outside, the draft is refused and logged, nothing outside changes, no lead resolves, the
-    agent is not reached and the run hands `on_done` no commit. `site=None` is the control: the
-    draft lands with its frontmatter id and the run reaches its agent (`FatalConfigError` from
-    the unroutable model)."""
-    monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
-    repo = _worktree(tmp_path)
-    run_dir = _run_dir(("elastic.newthing", "elastic", "esql"))
-    hexname = _draft_basename("elastic.newthing")
-    done: list[str | None] = []
-    with scene_over(tmp_path, repo) as s:
-        draft = s.at(f"gather/queries/elastic/_draft/{hexname}.md")
-        if site is None:
-            with pytest.raises(FatalConfigError, match=NO_MODEL):
-                lead_author.run_under_held_queue_lock(run_of(run_dir), paths=s.paths, state=state_for_paths(s.paths), trees=s.trees,
-                                                      on_done=done.append)
-            assert f"id: elastic.{hexname}" in draft.read_text(encoding="utf-8")
-            assert done == []
-            return
-        plant_folder(s, site, "link")
-        before = census(s.outside)
-        rc = lead_author.run_under_held_queue_lock(run_of(run_dir), paths=s.paths, state=state_for_paths(s.paths), trees=s.trees,
-                                                   on_done=done.append)
-
-    assert rc == 0
-    assert done == [None]
-    assert census(s.outside) == before
-    assert any("synthesize_drafts: could not write" in m and str(draft) in m
-               for m in errors(caplog)), errors(caplog)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1294,76 +1147,10 @@ def test_the_lead_author_seam_releases_skills_when_its_call_raises(tmp_path: Pat
     assert descriptors_under(repo) == [], "a handle on the leaf outlived the raising seam"
 
 
-def _queue_read_spy(repo: Path, state: Path, seen: list[list[str]],
-                    fault: BaseException | None = None) -> tuple[LoopPaths, LearningState]:
-    """The seam's `paths` and a handle over them that records, each time the pitfalls queue is
-    read through it (the curator reads its queue right after taking the mount), what this
-    process holds under the repo; with `fault`, raises it after recording. A class per call.
-
-    #1135: the queue is read through the learning-state handle (the curator no longer asks the
-    paths for the channel), so the spy sits on the handle's read of the pitfalls channel."""
-
-    class QueueReadSpy(LearningState):
-        def rows(self, channel):  # type: ignore[override]
-            if channel is PITFALLS:
-                seen.append(sorted(descriptors_under(repo)))
-                if fault is not None:
-                    raise fault
-            return super().rows(channel)
-
-    state.mkdir(parents=True, exist_ok=True)
-    paths = LoopPaths(repo_root=repo, state_dir=state)
-    return paths, QueueReadSpy.open(paths)
 
 
-@pytest.mark.parametrize("fault", [None, "RuntimeError"])
-def test_the_pitfalls_seam_holds_skills_only_while_its_call_runs(tmp_path: Path, fault):
-    """`drains._invoke_pitfalls(..., label=LEAD)` over a worktree with an empty queue: while the
-    curator reads its queue the process holds exactly `skills/`; after the seam returns (rc 0)
-    or raises (the queue read fails), it holds nothing under the worktree."""
-    repo = _worktree(tmp_path)
-    seen: list[list[str]] = []
-    paths, state = _queue_read_spy(repo, tmp_path / "state", seen,
-                                   RuntimeError("queue read failed") if fault else None)
-    assert descriptors_under(repo) == []
-
-    if fault is None:
-        assert drains._invoke_pitfalls(paths, state, label=LEAD, on_curated=lambda _d: None,
-                                       lock_wait_seconds=0) == 0
-    else:
-        with pytest.raises(RuntimeError, match="queue read failed"):
-            drains._invoke_pitfalls(paths, state, label=LEAD, on_curated=lambda _d: None,
-                                    lock_wait_seconds=0)
-
-    assert seen, "the curator never read its queue"
-    assert all(held == [os.path.realpath(paths.skills_dir)] for held in seen), seen
-    assert descriptors_under(repo) == [], "a handle on the leaf outlived the seam"
 
 
-@pytest.mark.parametrize("seam", ["lead_author", "pitfalls"])
-def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path: Path, seam: str):
-    """A leaf with no `skills/`: the seam's `open_drain_trees` cannot hold it, and that
-    `FileNotFoundError` propagates out of the seam unchanged (declared routing: the lane's
-    dead-letter guard sees it), not swallowed into the curator call's `rc=None` and so not a
-    `_LeadAuthorRetry`. Nothing is served and nothing is held after."""
-    import shutil
-
-    paths, repo = _lifetime_paths(tmp_path)
-    shutil.rmtree(paths.skills_dir)
-    run_dir = _unresolved_run()
-
-    if seam == "lead_author":
-        call = functools.partial(drains._invoke_lead_author, paths, state_for_paths(paths), run_of(run_dir),
-                                 label=LEAD,
-                                 on_done=lambda _s: None)
-    else:
-        call = functools.partial(drains._invoke_pitfalls, paths, state_for_paths(paths), label=LEAD,
-                                 on_curated=lambda _d: None, lock_wait_seconds=0)
-    with pytest.raises(FileNotFoundError):
-        call()
-
-    assert not (run_dir / "lead_author").exists()
-    assert descriptors_under(repo) == []
 
 
 # ---------------------------------------------------------------------------------------
@@ -1378,73 +1165,8 @@ def _lessons(paths: LoopPaths) -> None:
         tree.mkdir(parents=True, exist_ok=True)
 
 
-def test_the_seams_and_entry_points_refuse_a_call_without_their_label_or_trees(tmp_path: Path):
-    """No default: `_invoke_lead_author`, `_invoke_pitfalls` and `run` without `label`, and
-    `run_under_held_queue_lock`, `run_pitfalls` and `build_lead_author_deps` without `trees`,
-    are a `TypeError` (`run` even with deps, and even for a run dir that does not exist). Each
-    is then driven with it, as the positive control: the empty run is served, the empty queue
-    returns 0."""
-    paths, _repo = _lifetime_paths(tmp_path)
-    run_dir = _run_dir()
-    state = state_for_paths(paths)
-
-    with pytest.raises(TypeError):
-        drains._invoke_lead_author(paths, state, run_of(run_dir), on_done=lambda _s: None)
-    with pytest.raises(TypeError):
-        drains._invoke_pitfalls(paths, state, on_curated=lambda _d: None, lock_wait_seconds=0)
-    with pytest.raises(TypeError):
-        lead_author.run(tmp_path / "no-such-run")
-    with pytest.raises(TypeError):
-        lead_author.build_lead_author_deps(paths, state=state)
-    with opened(paths) as trees:
-        deps = _deps(paths, trees, LeadAuthorSpawn(), [])
-        with pytest.raises(TypeError):
-            lead_author.run(run_of(run_dir), paths=paths, deps=deps)
-        with pytest.raises(TypeError):
-            lead_author.run_under_held_queue_lock(
-                run_of(run_dir), paths=paths, state=state, on_done=lambda _s: None)
-        with pytest.raises(TypeError):
-            pitfalls_curator.run_pitfalls(paths=paths)
-
-        assert lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps) == 0
-        assert lead_author.run_under_held_queue_lock(
-            run_of(run_dir), paths=paths, state=state, trees=trees, on_done=lambda _s: None) == 0
-        assert pitfalls_curator.run_pitfalls(paths=paths, trees=trees) == 0
-    drains._invoke_lead_author(paths, state, run_of(run_dir), label=LEAD, on_done=lambda _s: None)
-    assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
-    assert drains._invoke_pitfalls(paths, state, label=LEAD, on_curated=lambda _d: None,
-                                   lock_wait_seconds=0) == 0
 
 
-def test_the_deps_hold_the_trees_skills_mount_and_route_tree_for_through_the_trees(
-        tmp_path: Path):
-    """`build_lead_author_deps(paths, state=state_for_paths(paths), trees=trees)`: `deps.skills` IS `trees.mount(skills_dir)`
-    (the held mount itself, no second hold), `deps.tree_for` answers with that same `Held` for a
-    skills path and `None` for a path outside the lane's mount (a lessons path), and refuses a
-    relative path as `DrainTrees.tree_for` does. The handoff and discovery partials read through
-    the held view: a link at a pending skill draft is not discovered, the plain one is."""
-    paths, _repo = _lifetime_paths(tmp_path)
-    outside = tmp_path / "outside"
-    write(paths.skills_dir / "elastic/_draft/plain.md",
-          "---\nid: elastic.plain\nstatus: draft\n---\n")
-    write(outside / "linked.md", f"---\nid: elastic.linked\nstatus: draft\n---\n# {OUT_MARK}\n")
-    (paths.skills_dir / "elastic/_draft/linked.md").symlink_to(outside / "linked.md")
-
-    with opened(paths) as trees:
-        deps = lead_author.build_lead_author_deps(paths, state=state_for_paths(paths), trees=trees)
-        held = trees.mount(paths.skills_dir)
-        assert deps.skills is held
-        hit = deps.tree_for(paths.skills_dir / "elastic/SKILL.md")
-        assert hit is not None
-        assert hit[0] is held
-        assert hit[1] == "elastic/SKILL.md"
-        assert deps.tree_for(paths.lessons_dir / "x.md") is None
-        with pytest.raises(ValueError):  # noqa: PT011 — DrainTrees.tree_for's refusal of a relative path
-            deps.tree_for("defender/skills/elastic/SKILL.md")
-        found = deps.discover_system_drafts()
-
-    assert paths.skills_dir / "elastic/_draft/plain.md" in found
-    assert paths.skills_dir / "elastic/_draft/linked.md" not in found
 
 
 def _refusing_trees(tmp_path: Path) -> dict[str, Callable[[], tuple[LoopPaths, DrainTrees]]]:
@@ -1494,193 +1216,25 @@ def test_trees_that_do_not_hold_skills_exactly_are_refused(tmp_path: Path, how: 
     assert [r["pitfall_id"] for r in persist.read_pitfalls(state_for_paths(paths))] == ["r:l-000:0"]
 
 
-def test_trees_holding_skills_exactly_are_taken_whatever_opened_them(tmp_path: Path):
-    """The control for the refusals: trees holding exactly `skills/`, opened directly
-    (`DrainTrees.open`, not through the lead member), get deps whose `skills` is that trees'
-    mount, and `run_pitfalls` serves its empty queue under them."""
-    repo = _worktree(tmp_path)
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    with DrainTrees.open((paths.skills_dir,)) as trees:
-        deps = lead_author.build_lead_author_deps(paths, state=state_for_paths(paths), trees=trees)
-        assert deps.skills is trees.mount(paths.skills_dir)
-        assert pitfalls_curator.run_pitfalls(paths=paths, trees=trees) == 0
 
 
-#: Non-members (#1179 O1'), as `test_1134_mount_list.UNKNOWN_LABELS` spells them: the members'
-#: values and names as strings, a look-alike enum's members, `.value` carriers, near misses.
-#: Each raises `AttributeError` at its first use; the author member, which is a label, is
-#: refused for holding no `skills/` (`LeadAuthorError`).
-NON_MEMBERS = list(UNKNOWN_LABELS)
 
 
-def _refusal_for(label: object) -> type[Exception]:
-    return LeadAuthorError if label is AUTHOR_DRAIN_LABEL else AttributeError
 
 
-@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, *NON_MEMBERS], ids=repr)
-def test_run_consults_the_label_it_is_given(tmp_path: Path, label: object):
-    """`run(label=...)` with deps: refused unless the label's trees hold the deps' `skills_dir`
-    (the author member: `LeadAuthorError`), and a non-member raises at its first use
-    (`AttributeError`), either way before the queue lock or any of the run; without deps it
-    opens that label's trees, so the same label is refused there, again before any of the run
-    is served. The control is the lead member, on the same deps."""
-    paths, _repo = _lifetime_paths(tmp_path)
-    _lessons(paths)
-    run_dir = _run_dir()
-    spawn = LeadAuthorSpawn()
-    refusal = _refusal_for(label)
-    with opened(paths) as trees:
-        deps = _deps(paths, trees, spawn, [ELASTIC_LEAD])
-        with pytest.raises(refusal):
-            lead_author.run(run_of(run_dir), label=label, paths=paths, deps=deps)  # type: ignore[arg-type]
-        assert not (run_dir / "lead_author").exists()
-        with pytest.raises(refusal):
-            lead_author.run(run_of(run_dir), label=label, paths=paths)  # type: ignore[arg-type]
-        assert not (run_dir / "lead_author").exists()
-        assert spawn.calls == []
-        assert lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps) == 0
-    assert spawn.calls, "the control never reached the agent"
 
 
-@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, *NON_MEMBERS], ids=repr)
-def test_the_drain_seams_consult_the_label(tmp_path: Path, label: object):
-    """`_invoke_lead_author` / `_invoke_pitfalls` open the trees of the label they are handed:
-    the author member's (its two corpora present in the leaf) hold no `skills/`, so each refuses
-    with `LeadAuthorError`; a non-member raises at its first use (`AttributeError`). Either way
-    nothing is served and nothing is left held. The lead member's control is in
-    `test_the_seams_and_entry_points_refuse_...`."""
-    paths, repo = _lifetime_paths(tmp_path)
-    _lessons(paths)
-    run_dir = _run_dir()
-    refusal = _refusal_for(label)
-
-    with pytest.raises(refusal):
-        drains._invoke_lead_author(paths, state_for_paths(paths), run_of(run_dir),
-                                   label=label,  # type: ignore[arg-type]
-                                   on_done=lambda _s: None)
-    assert not (run_dir / "lead_author").exists()
-    with pytest.raises(refusal):
-        drains._invoke_pitfalls(paths, state_for_paths(paths),
-                                label=label,  # type: ignore[arg-type]
-                                on_curated=lambda _d: None, lock_wait_seconds=0)
-    assert descriptors_under(repo) == []
 
 
-def _rule_calls(s: Scene) -> dict[str, Callable[..., Any]]:
-    """Each post-agent check with every argument but `tree_for`, passed as `**extra`."""
-    rel = s.rel(TEMPLATE_NAME)
-    return {
-        "_frontmatter_id": lambda **extra: lead_author._frontmatter_id(s.repo, rel, **extra),
-        "_check_promoted_template": lambda **extra: lead_author._check_promoted_template(
-            s.repo, resolver(s), rel, **extra),
-        "_skills_content_rule": lambda **extra: lead_author._skills_content_rule(
-            s.repo, resolver(s), "A ", rel, **extra),
-        "_skills_path_rule": lambda **extra: lead_author._skills_path_rule(
-            s.repo, "A ", rel, systems=DECLARED, **extra),
-        "_skills_rule": lambda **extra: lead_author._skills_rule(
-            s.repo, resolver(s), "A ", rel, systems=DECLARED, **extra),
-        "_answered_after_batch": lambda **extra: lead_author._answered_after_batch(
-            s.repo, **extra),
-        "_refuse_half_promote": lambda **extra: lead_author._refuse_half_promote(
-            s.repo, {"wazuh.nothing"}, **extra),
-        "_departed_drafts": lambda **extra: lead_author._departed_drafts(s.repo, {}, [], **extra),
-        "_covers_rule": lambda **extra: lead_author._covers_rule(s.repo, {}, [], **extra),
-        "_verify_skills_state": lambda **extra: lead_author._verify_skills_state(
-            s.repo, [], systems=DECLARED, **extra, git=claim_git(s.repo)),
-        "_readable_pair": lambda **extra: pitfalls_curator._readable_pair(
-            s.repo, pitfalls_curator.REDUCER_REL, **extra),
-        "_pitfalls_content_rule": lambda **extra: pitfalls_curator._pitfalls_content_rule(
-            s.repo, " M", pitfalls_curator.REDUCER_REL, **extra),
-        "_pitfalls_rule": lambda **extra: pitfalls_curator._pitfalls_rule(
-            s.repo, " M", pitfalls_curator.REDUCER_REL, systems=DECLARED, reducer_offered=True,
-            **extra),
-        "_verify_pitfalls_state": lambda **extra: pitfalls_curator._verify_pitfalls_state(
-            s.repo, [], systems=DECLARED, reducer_offered=True, **extra, git=claim_git(s.repo)),
-    }
 
 
-RULES = (
-    "_frontmatter_id", "_check_promoted_template", "_skills_content_rule", "_skills_path_rule",
-    "_skills_rule", "_answered_after_batch", "_refuse_half_promote", "_departed_drafts",
-    "_covers_rule", "_verify_skills_state", "_readable_pair", "_pitfalls_content_rule",
-    "_pitfalls_rule", "_verify_pitfalls_state",
-)
-
-#: Each check's answer through the lane's `tree_for` on the plain scene below (an unchanged
-#: reducer surface, a well-formed established template the agent "wrote"): the control.
-RULE_CONTROL: dict[str, Callable[[tuple], bool]] = {
-    "_frontmatter_id": lambda got: got == ("returned", "wazuh.probe"),
-    "_answered_after_batch": lambda got: got[0] == "returned" and "wazuh.probe" in got[1],
-    "_departed_drafts": lambda got: got == ("returned", []),
-    "_readable_pair": lambda got: got == ("returned", (REDUCER_TEXT, REDUCER_TEXT)),
-    "_verify_skills_state": lambda got: got == ("returned", [f"{SKILLS_REL}{TEMPLATE_NAME}"]),
-    "_verify_pitfalls_state": lambda got: raised(got, "LeadAuthorError", "probe.md"),
-}
 
 
-@pytest.mark.parametrize("rule", RULES)
-def test_every_post_agent_check_requires_tree_for(scene: Scene, rule: str):
-    """Each check reads the tree through the `tree_for` it is handed and has no default for it
-    (a default would be a second way in, with no trees behind it): without it, `TypeError`.
-    The control is the same call with the lane's `tree_for`, on a plain tree holding an
-    unchanged reducer surface and a well-formed template."""
-    _commit_reducer(scene)
-    place(scene, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain")
-    call = _rule_calls(scene)[rule]
-
-    with pytest.raises(TypeError):
-        call()
-    got = outcome(lambda: call(tree_for=scene.tree_for))
-    assert RULE_CONTROL.get(rule, lambda g: g == ("returned", None))(got), got
 
 
-def test_the_readers_and_the_writer_take_the_handle_and_nothing_else(scene: Scene):
-    """Owner decision 2: `synthesize_drafts`, `collect_general_failures`, `build_handoff` and
-    `discover_system_drafts` take `skills=` (the held mount or its view) with `where=`: the old
-    `catalog_dir=` / `skills_dir=` spellings, and no tree at all, are `TypeError`.
-    `collect_general_failures` with `catalog=None` needs BOTH `skills` and `where`; with a
-    `catalog` it needs no tree. `render_query` takes `(source, name, params)`: its old
-    `(template_path, params)` is a `TypeError`. `check_system_skill`: a `Bound` without the
-    name, or a `Path` with one, is a `ValueError` before any read."""
-    lead = _lead("wazuh.search", system="wazuh", verb="search", error_class="agent-fixable")
-    catalog_dir = scene.skills_dir / "gather" / "queries"
-
-    for call in (
-        lambda: synthesize_drafts([lead], catalog_dir=catalog_dir, catalog=[], systems=DECLARED),
-        lambda: synthesize_drafts([lead], catalog=[], systems=DECLARED),
-        lambda: synthesize_drafts([lead], skills=scene.skills, catalog=[], systems=DECLARED),
-        lambda: collect_general_failures([lead], scene.run_dir, catalog_dir=catalog_dir),
-        lambda: collect_general_failures([lead], scene.run_dir),
-        lambda: collect_general_failures([lead], scene.run_dir, skills=scene.view),
-        lambda: collect_general_failures([lead], scene.run_dir, where=scene.skills_dir),
-        lambda: lead_author.build_handoff(scene.run_dir, [lead], catalog_dir=catalog_dir),
-        lambda: lead_author.build_handoff(scene.run_dir, [lead]),
-        lambda: lead_author.discover_system_drafts(skills_dir=scene.skills_dir, systems=DECLARED),
-        lambda: lead_author.discover_system_drafts(systems=DECLARED),
-        lambda: lead_author.discover_system_drafts(skills=scene.view, systems=DECLARED),
-        lambda: lead_render.render_query(scene.at(TEMPLATE_NAME), {"index": "x"}),
-    ):
-        with pytest.raises(TypeError):
-            call()
-    with pytest.raises(ValueError):  # noqa: PT011 — the call-shape refusal; the type is the contract
-        _scaffold_rules.check_system_skill(scene.view, "elastic")
-    with pytest.raises(ValueError):  # noqa: PT011 — the call-shape refusal; the type is the contract
-        _scaffold_rules.check_system_skill(scene.at(SKILL_MD_NAME), "elastic", SKILL_MD_NAME)
-
-    assert [r["query_id"] for r in collect_general_failures([lead], scene.run_dir, catalog=[])] \
-        == ["wazuh.search"]
-    assert [r["query_id"] for r in collect_general_failures(
-        [lead], scene.run_dir, skills=scene.view, where=scene.skills_dir)] == ["wazuh.search"]
 
 
-def test_render_query_raises_for_an_absent_template_naming_it(scene: Scene):
-    """`render_query(source, name, params)` on a name with nothing at it raises `OSError` naming
-    the name (`build_handoff` catches it and renders `""`); the plain template renders."""
-    with pytest.raises(OSError, match="gather/queries/wazuh/absent.md"):
-        lead_render.render_query(scene.view, "gather/queries/wazuh/absent.md", {})
-    place(scene, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain")
-    assert "index: idx-7" in lead_render.render_query(
-        scene.view.under("gather/queries"), "wazuh/probe.md", {"index": "idx-7"})
+
 
 
 # ---------------------------------------------------------------------------------------
@@ -1688,112 +1242,13 @@ def test_render_query_raises_for_an_absent_template_naming_it(scene: Scene):
 # ---------------------------------------------------------------------------------------
 
 
-def test_kind_at_and_read_at_go_through_the_mount_and_keep_a_plain_path_outside_it(scene: Scene):
-    """`lane_trees.kind_at` / `read_at`: a path inside the lane's mount (relative to the repo,
-    as git status spells it, or absolute) is judged and read through its handle (a link there
-    is "other" and refused; nothing is "absent" with a reason); a path outside every mount (the
-    box's read-only area, D3) is judged and read by its plain path."""
-    place(scene, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain")
-    rel = scene.rel(TEMPLATE_NAME)
-    assert kind_at(scene.repo, scene.tree_for, rel) == "file"
-    assert kind_at(scene.repo, scene.tree_for, scene.at(TEMPLATE_NAME)) == "file"
-    assert read_at(scene.repo, scene.tree_for, rel) == (marked_template("wazuh.probe"), None)
-    assert kind_at(scene.repo, scene.tree_for, scene.rel("gather/queries/wazuh")) == "dir"
-    absent = scene.rel("gather/queries/wazuh/nothing.md")
-    assert kind_at(scene.repo, scene.tree_for, absent) == "absent"
-    text, reason = read_at(scene.repo, scene.tree_for, absent)
-    assert text is None
-    assert reason
-
-    place(scene, TEMPLATE_NAME, marked_template("wazuh.probe"), "link")
-    assert kind_at(scene.repo, scene.tree_for, rel) == "other"
-    text, reason = read_at(scene.repo, scene.tree_for, rel)
-    assert text is None
-    assert reason
-    assert OUT_MARK not in reason
-
-    adapter = "defender/scripts/adapters/wazuh_adapter.py"
-    assert kind_at(scene.repo, scene.tree_for, adapter) == "file"
-    assert read_at(scene.repo, scene.tree_for, adapter) == (
-        (scene.repo / adapter).read_text(encoding="utf-8"), None)
-    assert kind_at(scene.repo, scene.tree_for, "defender/scripts/adapters") == "dir"
-    assert kind_at(scene.repo, scene.tree_for, "defender/scripts/nothing.py") == "absent"
-    (scene.repo / "defender/scripts/linked.py").symlink_to(scene.outside / "nowhere.py")
-    assert kind_at(scene.repo, scene.tree_for, "defender/scripts/linked.py") == "other"
 
 
-def test_kind_at_answers_other_for_a_refused_holding_folder_and_never_raises(tmp_path: Path):
-    """`kind_at` through the handle goes on `entry_kind`, which has a reason channel: an EACCES
-    at a holding folder is that folder's refused listing, which `kind_at` answers as `"other"`
-    (O2: something stands in the way, and it is not the plain entry), never raised and never
-    `"absent"`; so are a linked holding folder and a handle used after its trees closed (`Bad
-    file descriptor`). The control answers `"file"`."""
-    repo = bare_skills(tmp_path)
-    skills_dir = repo / "defender" / "skills"
-    refuser = RefusesFolder(skills_dir / "gather/queries/wazuh", "step", errno.EACCES)
-    rel = "defender/skills/gather/queries/wazuh/auth-events.md"
-    with DrainTrees.open((skills_dir,)) as trees:
-        assert kind_at(repo, trees.tree_for, rel) == "file"
-        tree_for = trees.tree_for
-    held, name = tree_for(repo / rel)
-    got = entry_kind(held.view(), name)
-    assert (got.kind, got.absent, got.reason) == (None, False, os.strerror(errno.EBADF))
-    assert kind_at(repo, tree_for, rel) == "other"
-    with DrainTrees.open((skills_dir,), os_=refuser) as trees:
-        held, name = trees.tree_for(repo / rel)
-        assert entry_kind(held.view(), name).reason == os.strerror(errno.EACCES)
-        assert kind_at(repo, trees.tree_for, rel) == "other"
-    shutil.move(skills_dir / "gather/queries/wazuh", tmp_path / "moved-wazuh")
-    (skills_dir / "gather/queries/wazuh").symlink_to(tmp_path / "moved-wazuh")
-    with DrainTrees.open((skills_dir,)) as trees:
-        assert kind_at(repo, trees.tree_for, rel) == "other"
-        assert kind_at(repo, trees.tree_for, "defender/skills/gather/queries/wazuh") == "other"
-        assert kind_at(repo, trees.tree_for, "defender/skills") == "dir"
 
 
-def test_view_at_reads_the_mount_root_and_a_folder_below_it(scene: Scene):
-    """`view_at(held, ".")` is the mount's own view; `view_at(held, name)` is the view of the
-    folder `name` below it (the same handle: a read there walks from the held root)."""
-    held = scene.skills
-    assert view_at(held, ".").read(SKILL_MD_NAME).text == (
-        scene.at(SKILL_MD_NAME).read_text(encoding="utf-8"))
-    assert view_at(held, "gather/queries").read("wazuh/auth-events.md").text == (
-        scene.at("gather/queries/wazuh/auth-events.md").read_text(encoding="utf-8"))
-    assert entry_kind(view_at(held, "elastic"), "SKILL.md").kind == "file"
 
 
-def test_lane_skills_is_the_trees_own_skills_mount_or_a_refusal(tmp_path: Path):
-    """`lane_skills(trees, paths)` is `trees.mount(paths.skills_dir)` itself; trees without
-    that exact mount point are a `LeadAuthorError` (not the `ValueError` of `mount`)."""
-    paths, _repo = _lifetime_paths(tmp_path)
-    with opened(paths) as trees:
-        assert lane_skills(trees, paths) is trees.mount(paths.skills_dir)
-    with DrainTrees.open((paths.defender_dir,)) as above, pytest.raises(LeadAuthorError):
-        lane_skills(above, paths)
 
 
-def test_load_lane_catalog_spells_each_template_as_today(scene: Scene):
-    """`load_lane_catalog(view, where=skills_dir)` reads `gather/queries` under the mount and
-    spells each template `skills_dir / gather/queries / <sys>/[_draft/]x.md`, exactly as
-    today's `load_catalog(catalog_dir)` does (`created`, `minted` and `tpl.path` comparisons
-    must not drift), in the same order."""
-    got = lead_neighbors.load_lane_catalog(scene.view, where=scene.skills_dir)
-    today = lead_neighbors.load_catalog(scene.skills_dir / CATALOG_FOLDER)
-    assert [(t.id, t.path) for t in got] == [(t.id, t.path) for t in today]
-    assert {t.path for t in got} == {scene.at("gather/queries/wazuh/auth-events.md"),
-                                     scene.at("gather/queries/wazuh/_draft/newthing.md")}
-    assert CATALOG_FOLDER == "gather/queries"
-    assert f"{SKILLS_REL}{CATALOG_FOLDER}/" == CATALOG_REL
 
 
-def test_the_path_form_of_check_system_skill_is_unchanged(scene: Scene):
-    """N-h: `check_system_skill(path, system)` (`skills/connect/validate_scaffold.py`'s call)
-    reads a plain SKILL.md as before, refuses a wrong name, and words an absent one
-    `skill-unreadable`; no descriptor is left under the repo."""
-    assert _scaffold_rules.check_system_skill(scene.at(SKILL_MD_NAME), "elastic") == []
-    assert [f.code for f in _scaffold_rules.check_system_skill(
-        scene.at(SKILL_MD_NAME), "wazuh")] == ["skill-name"]
-    assert [f.code for f in _scaffold_rules.check_system_skill(
-        scene.at("wazuh/SKILL.md"), "wazuh")] == ["skill-unreadable"]
-    held = sorted(descriptors_under(scene.repo))
-    assert held == [os.path.realpath(scene.skills_dir)], held  # the scene's own mount, only

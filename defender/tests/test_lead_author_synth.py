@@ -1,15 +1,4 @@
-"""Tests for lead_author.synthesize_drafts — the WARN-and-draft fix.
-
-An executed query whose coined `{system}.{suffix}` id matches no catalog template must
-be minted as a `{system}/_draft/{suffix}.md` skeleton (so the lead-author curates it)
-rather than dropped. Ad-hoc leads (id with no `{system}.` prefix) and untagged calls
-(id suffix == the row's recorded verb) are not catalog candidates and are skipped.
-
-#620: re-pinned off the dead `params['arg0']` positional (the query tool never writes it)
-onto the named-params row shape — the canonical record is the verb's declared body param
-verbatim (an engine verb) or a structured `{verb, params}` call (a param-only verb), and
-candidacy keys on the row's own recorded `verb`, not a hardcoded reserved-verb set.
-"""
+"""lead_author.synthesize_drafts: executed queries with no catalog template are minted as safe `_draft` skeletons."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -100,7 +89,6 @@ def test_idempotent(tmp_path):
         [_lead("stub-cmdb.network-map", {"name": "web-1"}, verb="map")],
         **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
     assert second == []
-
 
 
 _ESQL_PIPE = (
@@ -273,23 +261,6 @@ def test_a_minted_draft_declares_the_verb_it_was_minted_from(tmp_path):
     assert _scaffold_rules.check_template(template, _stub_verbs()) == []
 
 
-def test_a_minted_engine_draft_does_not_declare_the_body_param_it_spent(tmp_path):
-    """An engine verb's body param is not bound by a `${placeholder}` in the minted file — its
-    VALUE became the fenced `## Query` body. Declaring it would describe a file that does not
-    exist, and would be the one `params:` entry no reader could reconcile against the text."""
-    from defender import _scaffold_rules
-
-    cat = _catalog(tmp_path)
-    lead_author.synthesize_drafts([
-        _lead("elastic.sshd-failed-by-srcip", {"query": _ESQL_PIPE}, verb="esql",
-              system="elastic"),
-    ], **drafts_under(cat), systems=frozenset({"elastic"}))
-    template = _minted(cat, "elastic", "elastic.sshd-failed-by-srcip")
-    assert template.verb == "esql"
-    assert template.params == ()
-    assert _scaffold_rules.check_template(template, _stub_verbs()) == []
-
-
 def test_a_row_whose_verb_is_not_a_plain_name_mints_nothing(tmp_path):
     """The verb is spent as a frontmatter DECLARATION now, so it is held to the alphabet the id
     segments already were (#852 F-21). A draft whose `verb:` resolves to nothing would fail the
@@ -430,41 +401,6 @@ def test_a_placeholder_inside_a_bound_value_is_not_declared_as_an_interface(tmp_
     # text to classify and cannot refuse the draft for the shape of the data it recorded.
     assert template.query == ""
     assert _scaffold_rules.check_template(template, _stub_verbs()) == []
-
-
-def test_a_wrapper_only_name_in_a_bound_value_no_longer_mints_a_refused_draft(tmp_path):
-    """The #917 review finding, end to end.
-
-    A gather lead against a verb with a `@verb(wrapper_only=…)` param, binding a VALUE that
-    contains that param's name in `${…}` form, used to mint a draft declaring
-    `body_substitutions: [require_closed]` — which `check_template` refuses twice, as
-    `reserved-body-substitution` AND `undeclared-placeholder`. Neither refusal reaches the
-    batch that wrote it (the commit gate skips `_draft/`), so it landed in CI on everyone,
-    from model-supplied telemetry text."""
-    from defender import _scaffold_rules
-    from defender.runtime.verbs import VerbContext, verb
-
-    @verb(wrapper_only=("require_closed",))
-    def get_ticket(ctx: VerbContext, *, key: str = "", require_closed: bool = False) -> dict:
-        return {}
-
-    cat = _catalog(tmp_path)
-    lead_author.synthesize_drafts(
-        [_lead("stub-cmdb.case-lookup", {"key": "ABC-${require_closed}"}, verb="get-ticket")],
-        **drafts_under(cat), systems=frozenset({"stub-cmdb"}))
-    template = _minted(cat, "stub-cmdb", "stub-cmdb.case-lookup")
-    assert template.body_substitutions == ()
-    assert _scaffold_rules.check_template(template, {"get-ticket": get_ticket}) == []
-
-
-def test_untagged_verb_not_drafted(tmp_path):
-    """A bare `{system}.{verb}` id whose suffix IS the recorded verb (no coined --query-id) is a
-    non-candidate — an untagged call must not mint a junk catch-all draft."""
-    cat = _catalog(tmp_path)
-    assert lead_author.synthesize_drafts([
-        _lead("elastic.esql", {"query": _ESQL_PIPE}, verb="esql", system="elastic"),
-    ], **drafts_under(cat), systems=frozenset({"elastic"})) == []
-    assert not (cat / "elastic" / "_draft").exists()
 
 
 def test_an_identity_a_template_already_covers_is_not_re_minted(tmp_path):

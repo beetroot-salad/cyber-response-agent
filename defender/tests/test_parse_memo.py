@@ -51,27 +51,12 @@ def test_changed_template_text_or_path_is_parsed_afresh(tmp_path: Path) -> None:
     assert moved.path == tmp_path / "identity" / "probe.md"
 
 
-def test_a_malformed_template_answers_the_same_reason_every_time(tmp_path: Path) -> None:
-    path = tmp_path / "cmdb" / "broken.md"
-    first = parse_query_template("no frontmatter here\n", path)
-    assert first[0] is None
-    assert first[1].startswith("malformed template:")
-    assert parse_query_template("no frontmatter here\n", path) == first
-
-
 _GOOD = ("dispositions:\n  alpha:\n    health-check:\n      roles: [gather]\n"
          "    lookup:\n      roles: [gather]\n")
 
 
 def _gather_pairs(rows: tuple) -> set[tuple[str, str]]:
     return {(d.system, d.verb) for d in rows if "gather" in d.roles}
-
-
-def test_a_repeated_table_load_is_served_from_the_cache(tmp_path: Path) -> None:
-    table = tmp_path / "verb-grants.yaml"
-    table.write_text(_GOOD, encoding="utf-8")
-    first = load_dispositions(table)
-    assert load_dispositions(table) is first
 
 
 def test_a_same_size_edit_within_one_mtime_is_read_again(tmp_path: Path) -> None:

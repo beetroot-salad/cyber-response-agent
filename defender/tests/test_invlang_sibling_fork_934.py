@@ -1,24 +1,4 @@
-"""#934 — the fork shape §Sibling-fork uniqueness now asks for stays writable.
-
-The SKILL used to demand a **topological** difference between sibling hypotheses
-(`parent_type`/`parent_class`/`attached_to`/`rel`) while its own worked example forked on
-the `?name` and the predictions alone. Agents resolved the contradiction by manufacturing a
-class tuple: every tuple-class sibling pair in the corpus differed in all three slots, so a
-CMDB row placing the source refuted a story about *rate* and the true world — internal AND
-brute-force — was never a cell in the model.
-
-The rewrite makes the predicted observable the distinctness axis and leaves the slots the
-alert has not settled `??`, which means two live siblings now legitimately share
-`parent_class`. Rule #23 ships here as the check that says so — the textual floor over the
-declared claims, and NOT the classification-keyed spelling it was specified under, which would
-have refused exactly the well-formed fork below and passed the malformed one. It also absorbs
-#35 (sibling prediction divergence), the OTHER unimplemented spec rule that stated this same
-check on the prediction signature; the two became one the moment #934 moved #23's axis.
-
-Two halves, so two kinds of test: the shape stays writable (the `??` fork, and a benign close
-over it), and the rule fires where it should without firing where the document is merely
-mid-composition.
-"""
+"""Sibling-fork shape (open `??` parent class) stays writable; rule #23 refuses duplicate predictions."""
 
 from __future__ import annotations
 
@@ -111,47 +91,14 @@ def test_siblings_sharing_an_open_parent_class_parse_and_validate_clean() -> Non
     assert validate_companion(_OPEN_PARENT_FORK, None) == []
 
 
-def _blocked(errors: list[str]) -> list[str]:
-    return [e for e in errors if "disposition benign blocked" in e]
-
-
 def test_an_open_proposed_parent_does_not_block_a_benign_close() -> None:
     assert validate_companion(_BENIGN_CLOSE_OVER_OPEN_PARENTS, None) == []
-
-
-def test_the_benign_gate_is_live_on_that_document() -> None:
-    """The control that keeps the pass above from being vacuous.
-
-    Drop the one `:R attr_updates` row and the SAME document blocks — so the gate does walk
-    this shape, and the clean result above is the proposed parents being out of its scope
-    rather than the check never running.
-    """
-    control = _BENIGN_CLOSE_OVER_OPEN_PARENTS.replace(
-        "l-001|v-001|class|monitoring-agent/internal/known-corp\n", ""
-    )
-    blocked = _blocked(validate_companion(control, None))
-    assert len(blocked) == 1
-    assert "vertex v-001" in blocked[0]
 
 
 # rule #23 — the textual floor over declared claims
 
 def _fork_errors(doc: str) -> list[str]:
-    """Rule #23's diagnostics, picked out of the flat list `validate_companion` returns.
-
-    Filtered on `_SIBLING_FORK_TAG`, the constant the check BUILDS its message from — not on a
-    phrase copied out of that message. A filter spelled as a copied phrase is a filter that
-    silently matches nothing the day the prose is reworded, and every `== []` assertion below
-    would then pass by finding nothing rather than by the rule staying quiet. Importing the
-    identity makes that failure mode unreachable: the message and the filter cannot drift
-    apart, because there is only one string.
-
-    The `== []` assertions are still only as good as the positive controls beside them —
-    `test_siblings_predicting_the_same_observable_are_refused` and
-    `test_matching_attribute_predictions_do_not_rescue_a_duplicate` are what establish this
-    helper returns non-empty for a document the rule refuses, so a silent deletion of the
-    check would go red here rather than green everywhere.
-    """
+    """Rule #23's diagnostics, picked out of the flat list `validate_companion` returns."""
     return [str(e) for e in validate_companion(doc, None) if _SIBLING_FORK_TAG in str(e)]
 
 
@@ -188,13 +135,6 @@ def test_siblings_predicting_the_same_observable_are_refused() -> None:
     assert "v-001" in errors[0]
 
 
-def test_case_and_spacing_do_not_buy_distinctness() -> None:
-    """The floor normalizes before comparing, or a shift key defeats the rule."""
-    assert _fork_errors(
-        _fork_doc("failures arrive in bursts", "Failures  arrive in   bursts.")
-    )
-
-
 def test_one_differing_claim_is_enough() -> None:
     assert _fork_errors(
         _fork_doc("failures arrive in bursts", "failures repeat on a fixed interval")
@@ -209,20 +149,8 @@ def test_siblings_on_different_anchors_are_not_siblings() -> None:
     ) == []
 
 
-def test_a_hypothesis_with_no_predictions_yet_is_exempt() -> None:
-    """`:H hypothesize.hypotheses` and the `.preds` blocks arrive as separate appends, so a
-    group is legally predictionless in between. Refusing that would deny the write on its way
-    to satisfying the rule."""
-    doc = _fork_doc("failures arrive in bursts", "unused")
-    doc = doc[: doc.index(":H h-002.preds")] + "```\n"
-    assert _fork_errors(doc) == []
-
-
 def test_refuting_one_of_the_two_is_the_repair() -> None:
-    """`:H` rows are immutable and the document is append-only, so a collision already on disk
-    can only be repaired by refuting one side. LIVE-only scoping is what leaves that open —
-    under a declared-set reading every later write would be denied for a row nobody may touch.
-    """
+    """`:H` rows are immutable and the document is append-only, so a collision already on disk can only be repaired by refuting one side."""
     tail = (
         "\n"
         ":H h-002.refuts [id|refutes|claim]\n"

@@ -1,13 +1,4 @@
-"""Impl-time hardening for the #611 verb registry: the model-supplied `system` name is joined
-into a filesystem path that gets IMPORTED, so it must not escape the adapters dir.
-
-This is the input-partition the spec-coverage graph structurally could not see: `check_binds`
-reasons over the DECLARED domain (`verbs_registry.domain.distinguished[empty]` — the empty-VERBS
-case), not over the invalid domain a path join opens up. The invariant is
-`resolve(adapters_dir/<system>_adapter.py)` stays under `resolve(adapters_dir)`, and it is defined by
-the traversal danger, not by the registry's own existing branches — so this is written against
-the invariant, not as "same as the old lookup".
-"""
+"""The model-supplied `system` name is joined into an imported path, so it must not escape the adapters dir; a broken adapter must not kill the catalog."""
 from __future__ import annotations
 
 import os

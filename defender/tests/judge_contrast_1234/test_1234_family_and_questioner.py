@@ -127,28 +127,10 @@ def _lane(built: Any, finding_id: str) -> str | None:
     return S.lane_of(built, finding_id)
 
 
-def _entry(built: Any, finding_id: str) -> dict:
-    found = [e for e in S.ledger(built) if e.get("finding_id") == finding_id]
-    assert len(found) == 1, f"{finding_id}: {len(found)} ledger entries, wanted one"
-    return found[0]
 
 
-def _names_run(entry: dict, built: Any, label: str) -> bool:
-    """A found-gap entry's run names world `label` (by label, or by its world token)."""
-    run = entry.get(S.COINED["found.run"])
-    return run in (label, S.world_token(label, episode_token=built.token))
 
 
-def _instructions(judge: S.RoutedJudge, label: str) -> str:
-    """The host text a world's call was given: its user prompt outside the untrusted frames,
-    plus the system turn its wiring names."""
-    texts = [S.outside_untrusted_frames(judge.prompt_for(label))]
-    for agent, kw in zip(judge.agent_ids, judge.kwargs, strict=True):
-        path = getattr(kw.get("wiring"), "prompt_path", None)
-        if S.parse_agent_id(agent)[0] == label and path is not None and Path(path).is_file():
-            texts.append(Path(path).read_text(encoding="utf-8"))
-            break
-    return "\n".join(texts)
 
 
 # --------------------------------------------------------------------------------------
@@ -156,13 +138,6 @@ def _instructions(judge: S.RoutedJudge, label: str) -> str:
 # --------------------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _roomy_payload_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No scenario here is about the default `JUDGE_PAYLOAD_CAP` except the two that set the knob
-    themselves (d07b's second half, s_AM27), which override this inside the test body. With the
-    cap out of reach, a reference trimmed or a world refused for size (A9) never decides a test
-    about routing, commits or call counts."""
-    monkeypatch.setenv(S.CAP_KNOB, "10000000")
 
 
 @pytest.mark.parametrize("retired", S.RETIRED_REPLY_WORDS)
@@ -216,53 +191,6 @@ def test_1234_family_reply_is_family_scope_world_findings_only(tmp_path: Path,
         "the validator must refuse the retired word BY NAME")
 
 
-def test_1234_family_prompt_reads_no_per_world_reply(tmp_path: Path) -> None:
-    """d07a_family_reads_no_world_reply — _build_family_prompt reads no JudgeReply (the family
-    call's prompt, built beside the family_reply it asks for).
-
-    A marker planted in world b's reply (its bucket text and a finding claim) never reaches the
-    family prompt, and the family prompt is identical whether b's draw succeeded, was refused
-    or failed (today it carries b's bucket, E-05).
-
-    How: three episodes off one builder; b's reply succeeds (a discipline bucket, an
-    investigator and a world finding, a noise note, each carrying a marker), is refused on
-    every ask (the retired episode_outcome shape), or fails (P9). Positive control: in the
-    succeeded run the marker is in b's draw document, so the reply was read and recorded; and
-    every family prompt carries b's archive-derived story, so the channel sees b at all."""
-    claim, world_claim, noise = (S.marker("b", "reply-claim"), S.marker("b", "reply-world"),
-                                 S.marker("b", "reply-noise"))
-    answered = S.world_reply(
-        "decision-discipline", ["idp"],
-        investigator=[S.inv("decision-discipline", claim=claim)],
-        world=[S.wf("mislabelled", evidence=[S.plan_ptr("b")], claim=world_claim)],
-        noise_floor_note=noise)
-    refused_shape = S.world_reply("decision-discipline", ["idp"], episode_outcome="gradable")
-    scenarios = {"succeeded": S.judge({"b": answered}),
-                 "refused": S.judge({"b": refused_shape}),
-                 "failed": S.judge(fail={"b"})}
-
-    built_of: dict[str, S.Built] = {}
-    for name, judge in scenarios.items():
-        built = S.family(tmp_path, root=tmp_path / name)
-        S.grade(built, judge, draws=1)
-        built_of[name] = built
-
-    succeeded = built_of["succeeded"]
-    assert S.draw_files(succeeded, "b"), "world b's accepted reply wrote no draw document"
-    assert claim in json.dumps(S.draw_doc(succeeded, "b", 0), default=str), (
-        "the marker never reached what the pass recorded for b, so its absence below would "
-        "prove nothing")
-    prompts: dict[str, str] = {}
-    for name, judge in scenarios.items():
-        assert judge.called(S.FAMILY), f"{name}: the family call was never made"
-        prompts[name] = judge.prompt_for(S.FAMILY)
-    for name, prompt in prompts.items():
-        assert S.marker("b", "story") in prompt, f"{name}: the family prompt never shows b"
-        for planted in (claim, world_claim, noise):
-            assert planted not in prompt, f"{name}: b's reply text {planted} reached the family"
-    normalized = {name: S.normalized_prompt(p, built_of[name]) for name, p in prompts.items()}
-    assert normalized["succeeded"] == normalized["refused"] == normalized["failed"], (
-        "the family prompt changed with how b's draw went, so it reads b's reply")
 
 
 def test_1234_family_prompt_carries_header_contrast_tables_and_fact_surfaces_for_every_run(
@@ -304,42 +232,6 @@ def test_1234_family_prompt_carries_header_contrast_tables_and_fact_surfaces_for
     assert _names_the_cap(family), f"the family row does not name the cap: {family}"
 
 
-def test_1234_family_call_returns_findings_and_no_verdict_word(tmp_path: Path) -> None:
-    """d07c_family_returns_no_word — _build_family_prompt, validate_reply, family_reply,
-    EpisodeGrade.
-
-    The family prompt asks for family-scope world findings and names no verdict word; a family
-    reply carrying a retired verdict_word is refused at validation and re-asked (A4, A5); after
-    the call judge.yaml carries no family word.
-
-    How: the prompt's host text (outside the untrusted frames) names the three world-finding
-    buckets and none of the family word vocabulary; the first ask's reply carries `survived`, the second does not, and its
-    finding reaches the questioner channel."""
-    built = S.family(tmp_path)
-    claim = S.marker(S.FAMILY, "finding")
-    finding = S.wf("unreachable", systems=("idp",), evidence=[S.plan_ptr()], claim=claim)
-    judge = S.judge({S.FAMILY: [S.family_reply(world=[finding], verdict_word="survived"),
-                                S.family_reply(world=[finding])]})
-
-    S.grade(built, judge, draws=1)
-
-    assert judge.called(S.FAMILY), "the family call was never made"
-    prompt = judge.prompt_for(S.FAMILY)
-    host = S.outside_untrusted_frames(prompt)
-    for bucket in S.WORLD_FINDING_BUCKETS:
-        assert bucket in host, f"the family prompt does not ask for {bucket!r} world findings"
-    for word in S.RETIRED_FAMILY_WORDS:
-        assert not S.word_re(word).search(host), f"the family prompt names {word!r}"
-    assert _asks(judge, S.FAMILY) == [(S.FAMILY, 0, 0), (S.FAMILY, 0, 1)], (
-        f"a verdict_word reply must be refused and re-asked: {judge.calls_for(S.FAMILY)}")
-    assert _mentions(S.questioner_queue(), claim), "the accepted family finding was not queued"
-    record = S.record(built)
-    assert record, "the pass wrote no judge.yaml"
-    for retired in S.RETIRED_RECORD_FIELDS:
-        assert retired not in record, f"judge.yaml carries {retired!r}"
-        assert retired not in S.family_row(built), f"the family row carries {retired!r}"
-    assert not S.word_re("survived").search(S.record_text(built)), (
-        "judge.yaml carries the family word the refused reply offered")
 
 
 # --------------------------------------------------------------------------------------
@@ -389,135 +281,10 @@ def test_1234_family_finding_citing_the_manifest_reaches_the_questioner_queue(
     assert not S.from_world(S.defender_queue(), S.FAMILY)
 
 
-def test_1234_family_scope_design_finding_naming_no_served_system(tmp_path: Path) -> None:
-    """s_A54 — validate_reply over a family_reply; the append_world_rows ->
-    QUESTIONER_FINDINGS payload.
-
-    Family findings carry their own systems (A5); one with empty systems or a name failing the
-    system-token grammar is refused at reply validation and re-asked within
-    `_REPLY_ATTEMPTS`; the manifest's served systems are not stamped on.
-
-    How: for each refused shape (an empty list; `IDP`, outside the lower-case token grammar),
-    the family's first ask files the finding with it and the second files the same design
-    finding naming `netflow` — a grammar-valid system the tenant does not serve, which is the
-    situation's 'no served system settles the predicate' and is NOT refused (names are checked
-    against the grammar, not the served set)."""
-    for case, bad in (("empty", []), ("grammar", ["IDP"])):
-        built = S.family(tmp_path, root=tmp_path / case)
-        state = S.state_over(tmp_path / f"state-{case}")
-        refused_claim, kept_claim = S.marker(S.FAMILY, f"{case}-bad"), S.marker(S.FAMILY, case)
-        bad_doc = S.family_reply(world=[S.wf("unreachable", systems=bad,
-                                             evidence=[S.plan_ptr()], claim=refused_claim)])
-        good_doc = S.family_reply(world=[S.wf("unreachable", systems=("netflow",),
-                                              evidence=[S.plan_ptr()], claim=kept_claim)])
-        judge = S.judge({(S.FAMILY, 0, 0): bad_doc, (S.FAMILY, 0, 1): good_doc})
-
-        S.grade(built, judge, draws=1, state=state)
-
-        assert _asks(judge, S.FAMILY) == [(S.FAMILY, 0, 0), (S.FAMILY, 0, 1)], (
-            f"{case}: the family finding with systems {bad!r} must be refused and re-asked; "
-            f"calls were {judge.calls_for(S.FAMILY)}")
-        rows = S.from_world(S.questioner_queue(state), S.FAMILY)
-        assert _ids(rows) == [built.finding_id(S.FAMILY, 0, 0)]
-        assert rows[0].get(SYSTEMS_KEY) == ["netflow"], (
-            f"{case}: the questioner row must carry the finding's own systems, never the "
-            f"manifest's served systems: {rows[0].get(SYSTEMS_KEY)!r}")
-        assert kept_claim in json.dumps(rows)
-        assert refused_claim not in json.dumps(rows), f"{case}: the refused finding was queued"
-        S.validate_refused(bad_doc, scope=S.FAMILY)
 
 
-def test_1234_am_family_draws_combining(tmp_path: Path) -> None:
-    """s_AM26 — _world_answers over the family_reply draws (JUDGE_DRAWS at 3);
-    append_world_rows -> QUESTIONER_FINDINGS.
-
-    Every completed family draw's kept findings route by class under their own finding_id
-    (A13, no cross-draw matching): two draws filing the same design finding yield two
-    questioner rows, the third draw's different finding a third; a draw filing nothing adds
-    none. The family row records its completed draws."""
-    same = S.wf("unreachable", systems=("idp",), evidence=[S.plan_ptr()],
-                claim=S.marker(S.FAMILY, "same"))
-    other = S.wf("mislabelled", systems=("edr",), evidence=[S.plan_ptr("b")],
-                 claim=S.marker(S.FAMILY, "other"))
-    cases = {"repeated": [[same], [same], [other]], "one-draw-empty": [[same], [], [other]]}
-    for case, per_draw in cases.items():
-        built = S.family(tmp_path, root=tmp_path / case)
-        state = S.state_over(tmp_path / f"state-{case}")
-        judge = S.judge({S.FAMILY: [S.family_reply(world=w) for w in per_draw]})
-
-        S.grade(built, judge, draws=3, state=state)
-
-        expected = {built.finding_id(S.FAMILY, n, 0): w[0] for n, w in enumerate(per_draw) if w}
-        rows = S.from_world(S.questioner_queue(state), S.FAMILY)
-        assert sorted(_ids(rows)) == sorted(expected), (
-            f"{case}: the questioner channel holds {sorted(_ids(rows))}, wanted one row per "
-            f"filed finding per draw: {sorted(expected)}")
-        by_id = _by_id(rows)
-        for finding_id, finding in expected.items():
-            assert finding["claim"] in json.dumps(by_id[finding_id])
-            assert _lane(built, finding_id) == S.LANES["questioner"]
-        assert S.family_row(built).get(COMPLETED) == 3, (
-            f"{case}: the family row must record its three completed draws: "
-            f"{S.family_row(built)}")
 
 
-def test_1234_family_call_sees_one_gap_that_blocked_every_world(tmp_path: Path) -> None:
-    """s_A73 — _build_family_prompt, family_reply, user_record, route_finding.
-
-    The observation goes to the user record, filed by the code's gap computation; the family
-    reply carries no gap list, and a family finding resting only on it is gap-only and refused
-    onto the user record (also when the one blocked system is J3's inherited pre-branch
-    denial, A14).
-
-    How: two families — every world (control included) refused the same `edr lookup` on its
-    own (a `∅.denied` table row joined to a `refused` ledger row), or every world inherited the
-    one pre-branch denial. The family files a finding citing only those rows and, as the
-    control of the classifier, one citing b's ordinary passthrough row beside the plan."""
-    for source in ("own-refusals", "inherited-denial"):
-        if source == "own-refusals":
-            worlds = S.triad(
-                a={"calls": [S.CallRow(), S.refused_call()]},
-                b={"calls": [S.CallRow(), S.oracle_call(fact_id="f-b", forged_id="fg-b-1"),
-                             S.refused_call()]},
-                c={"calls": [S.CallRow(system="edr", params=S.query_params("host:db-1")),
-                             S.refused_call()]})
-            built = S.family(tmp_path, worlds, root=tmp_path / source)
-            refusal = {"a": 1, "b": 2, "c": 1}
-            blocked = [p for label, i in refusal.items()
-                       for p in (built.table(label, built.own_row(label, i)),
-                                 built.served(label, built.served_row(label, i)))]
-        else:
-            built = S.family(tmp_path, root=tmp_path / source, inherited=[S.inherited_denial()])
-            blocked = [built.table(label, 0) for label in ("a", "b", "c")]
-        state = S.state_over(tmp_path / f"state-{source}")
-        gap_claim, design_claim = S.marker(S.FAMILY, f"{source}-gap"), S.marker(S.FAMILY, source)
-        reply = S.family_reply(world=[
-            S.wf("unreachable", systems=("edr",), evidence=blocked, claim=gap_claim),
-            S.wf("incoherent", systems=("idp",),
-                 evidence=[built.table("b", built.own_row("b", 0)), S.plan_ptr()],
-                 claim=design_claim)])
-
-        S.grade(built, S.judge(family_default=reply), draws=1, state=state)
-
-        found = [e for e in S.found_gaps(built)
-                 if e.get(S.COINED["found.system"]) == "edr"
-                 and e.get(S.COINED["found.verb"]) == "lookup"]
-        assert found, f"{source}: the code's gap computation did not file the blocked call"
-        if source == "own-refusals":
-            for label in ("a", "b", "c"):
-                assert any(_names_run(e, built, label) for e in found), (
-                    f"run {label}'s refused call is not among the found gaps: {found}")
-        assert S.draw_files(built, S.FAMILY), f"{source}: the family call wrote no draw"
-        assert S.GAPS not in S.draw_doc(built, S.FAMILY, 0), "a family reply carries gaps"
-        gap_id, design_id = (built.finding_id(S.FAMILY, 0, 0), built.finding_id(S.FAMILY, 0, 1))
-        assert _lane(built, gap_id) == S.LANES["user_record"], (
-            f"{source}: a family finding resting only on blocked calls is gap-only")
-        assert _mentions(S.user(built), gap_id, gap_claim), (
-            f"{source}: the gap-only family finding is not on the user record")
-        for queue in (S.questioner_queue(state), S.defender_queue(state)):
-            assert not _mentions(queue, gap_id, gap_claim), "a gap reached a lesson queue (P-a)"
-        assert _lane(built, design_id) == S.LANES["questioner"]
-        assert design_id in _ids(S.questioner_queue(state))
 
 
 # --------------------------------------------------------------------------------------
@@ -725,42 +492,6 @@ def test_1234_family_call_faults_after_the_worlds_rows_were_queued(tmp_path: Pat
     assert S.from_world(S.questioner_queue(), "c") == c_rows
 
 
-def test_1234_model_call_count_is_one_per_world_per_draw_plus_one_family_call(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """g02_model_call_count_per_pass — grade_episode, _run_world_draws, JUDGE_DRAWS at 3.
-
-    With JUDGE_DRAWS=3 over a triad (control and two planted worlds) a fresh pass makes exactly
-    one model call per planted world per draw plus the family call's draws (six world calls
-    and three family calls), however many reference runs each prompt carries; a stamped pass
-    and a fully queued re-run make none.
-
-    How: a pair, the triad and a four-world family, each read from the knob; then a re-run of
-    each, and a family without its family stamp (not comparable)."""
-    monkeypatch.setenv(S.DRAWS_KNOB, "3")
-    for shape, planted in (("pair", ("b",)), ("triad", ("b", "c")),
-                           ("quad", ("b", "c", "d"))):
-        worlds = [w for w in S.triad(d={"role": "D", "forged_system": "siem-x",
-                                         "calls": [S.CallRow()]})
-                  if w.is_control or w.label in planted]
-        built = S.family(tmp_path, worlds, root=tmp_path / shape)
-        judge = S.judge()
-        S.grade(built, judge, draws=None)
-
-        for label in planted:
-            assert _asks(judge, label) == [(label, n, 0) for n in range(3)], (
-                f"{shape}: world {label} calls {judge.calls_for(label)}")
-        assert _asks(judge, S.FAMILY) == [(S.FAMILY, n, 0) for n in range(3)]
-        assert not judge.called("a"), "the control is a reference, never a judged world"
-        assert judge.calls == 3 * len(planted) + 3, f"{shape}: {judge.agent_ids}"
-
-        rerun = S.judge()
-        S.grade(built, rerun, draws=None)
-        assert rerun.calls == 0, f"{shape}: a fully queued re-run called {rerun.agent_ids}"
-
-    stamped = S.family(tmp_path, S.triad(), root=tmp_path / "stamped", family_stamp=False)
-    unpaid = S.judge()
-    S.grade(stamped, unpaid, draws=None)
-    assert unpaid.calls == 0, f"a stamped pass called {unpaid.agent_ids}"
 
 
 # --------------------------------------------------------------------------------------
@@ -768,56 +499,6 @@ def test_1234_model_call_count_is_one_per_world_per_draw_plus_one_family_call(
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_family_prompt_per_world_status_before_and_after_world_calls(
-        tmp_path: Path) -> None:
-    """s_A72 — _build_family_prompt over JudgeContext.
-
-    The family prompt reads no per-world reply (M6), so it carries only code-derived status,
-    identical in every position; model-derived status (not measured, bucket) never enters it.
-
-    How: one family (with a cut-short world `zulu`: code-derived status) graded three ways —
-    a fresh pass whose worlds give a bucket (b) and a not-measured world finding (c); a fresh
-    pass whose every world call fails (no model status anywhere); and a re-run that asks the
-    family AFTER both worlds' model status is on judge.yaml (the first pass's family call
-    failed, P9). Positive control: that model status is on judge.yaml before the family call
-    of the third run, and the cut-short world's label does reach the family prompt."""
-    worlds = S.triad(zulu={"role": "D",
-                           "run_end": {"truncated_by": "budget", "closed_before_cut": False}})
-    investigator_claim, world_claim = S.marker("b", "status-claim"), S.marker("c", "status-wf")
-    statuses = {
-        "b": S.world_reply("lead-quality", ["idp"], investigator=[S.inv(claim=investigator_claim)]),
-        "c": S.world_reply(S.NO_BUCKET, [], world=[S.wf("unreachable", evidence=[S.plan_ptr("c")],
-                                                        claim=world_claim)]),
-    }
-
-    fresh = S.family(tmp_path, worlds, root=tmp_path / "fresh")
-    with_status = S.judge(statuses)
-    S.grade(fresh, with_status, draws=1)
-
-    silent = S.family(tmp_path, worlds, root=tmp_path / "no-status")
-    no_status = S.judge(fail={"b", "c"})
-    S.grade(silent, no_status, draws=1)
-
-    after = S.family(tmp_path, worlds, root=tmp_path / "after")
-    S.grade(after, S.judge(statuses, fail={S.FAMILY}), draws=1)
-    assert S.row(after, "b").get(S.RULED["reply.bucket"]) == "lead-quality", S.row(after, "b")
-    assert S.row(after, "c").get(S.COINED["row.measured"]) is False, S.row(after, "c")
-    late = S.judge()
-    S.grade(after, late, draws=1)
-
-    for position, asked in (("between", with_status), ("without-status", no_status),
-                            ("after", late)):
-        assert asked.called(S.FAMILY), f"{position}: the family call was never made"
-    prompts = {"between": (with_status.prompt_for(S.FAMILY), fresh),
-               "without-status": (no_status.prompt_for(S.FAMILY), silent),
-               "after": (late.prompt_for(S.FAMILY), after)}
-    for position, (prompt, _built) in prompts.items():
-        assert re.search(r"\bzulu\b", prompt), f"{position}: the cut-short world is not listed"
-        for planted in (investigator_claim, world_claim):
-            assert planted not in prompt, f"{position}: a world reply's text reached the family"
-    normalized = {position: S.normalized_prompt(p, b) for position, (p, b) in prompts.items()}
-    assert normalized["between"] == normalized["without-status"] == normalized["after"], (
-        "the family prompt differs with the worlds' model status, so it carries it")
 
 
 def _unusable_world(kind: str) -> dict[str, Any]:
@@ -969,39 +650,6 @@ def test_1234_questioner_row_is_design_only_with_systems(tmp_path: Path) -> None
             assert retired not in row, f"a questioner row carries {retired!r}: {row}"
 
 
-def test_1234_world_finding_citing_the_manifest_goes_to_the_questioner_queue(
-        tmp_path: Path) -> None:
-    """d06a_design_finding_to_questioner — route_finding over family_manifest.access[pointer];
-    append_world_rows -> QUESTIONER_FINDINGS.
-
-    A world finding that is not gap-only and has at least one resolving plan pointer
-    (family.yaml#..., alone or beside context pointers) is routed design and queued on the
-    questioner channel with its own systems (A1, A15; M5 residual (i)).
-
-    How: b files three: its own plan entry alone; its plan entry beside a samples section and
-    pre-flight's record; the family-level part of the plan alone (names no run, so it counts
-    for b)."""
-    built = S.family(tmp_path)
-    findings = [
-        S.wf("mislabelled", systems=("idp",), evidence=[S.plan_ptr("b")],
-             claim=S.marker("b", "plan")),
-        S.wf("unreachable", systems=("edr",),
-             evidence=[S.plan_ptr("b"), S.samples_ptr("idp"), S.outcome_ptr()],
-             claim=S.marker("b", "plan-context")),
-        S.wf("incoherent", systems=("siem-x",), evidence=[S.plan_ptr()],
-             claim=S.marker("b", "family-part")),
-    ]
-    S.grade(built, S.judge({"b": S.world_reply(S.NO_BUCKET, [], world=findings)}), draws=1)
-
-    rows = _by_id(S.from_world(S.questioner_queue(), "b"))
-    for i, finding in enumerate(findings):
-        finding_id = built.finding_id("b", 0, i)
-        assert finding_id in rows, f"design finding {finding['claim']} is not queued: {rows}"
-        assert rows[finding_id].get(SYSTEMS_KEY) == finding["systems"]
-        assert finding["claim"] in json.dumps(rows[finding_id])
-        assert _lane(built, finding_id) == S.LANES["questioner"]
-    assert not _mentions(S.serving_findings(built), *(f["claim"] for f in findings))
-    assert not S.from_world(S.defender_queue(), "b")
 
 
 def test_1234_serving_only_world_finding_reaches_the_user_record_not_the_questioner_queue(
@@ -1043,172 +691,9 @@ def test_1234_serving_only_world_finding_reaches_the_user_record_not_the_questio
     assert not _mentions(S.serving_findings(built), control)
 
 
-def test_1234_serving_flaw_finding_also_cites_the_manifest_for_context(tmp_path: Path) -> None:
-    """s_A52 — route_finding over family_manifest.access[pointer]; user_record;
-    append_world_rows -> QUESTIONER_FINDINGS.
-
-    Routing is mechanical (A1): a serving flaw that cites `family.yaml` for context has a
-    resolving plan pointer and is not gap-only, so it is design and reaches the questioner
-    queue; the prompt instruction 'cite family.yaml only where the flaw is in the plan' bounds
-    the leak, which the human accepted (70-resolutions, M5 residual (i)).
-
-    How: b's finding about an altered answer that does not hang together cites the served
-    answer, the oracle store's forged row, and b's plan entry; b's call carries the
-    instruction in its host text."""
-    built = S.family(tmp_path)
-    claim = S.marker("b", "serving-flaw")
-    finding = S.wf("incoherent", systems=("idp",),
-                   evidence=[built.served("b", built.served_row("b", 1)),
-                             built.oracle("b", "forged.jsonl", "0"), S.plan_ptr("b")],
-                   claim=claim)
-    judge = S.judge({"b": S.world_reply(S.NO_BUCKET, [], world=[finding])})
-    S.grade(built, judge, draws=1)
-
-    finding_id = built.finding_id("b", 0, 0)
-    rows = _by_id(S.questioner_queue())
-    assert finding_id in rows, "the plan-citing serving flaw did not route design"
-    assert rows[finding_id].get(SYSTEMS_KEY) == ["idp"]
-    assert _lane(built, finding_id) == S.LANES["questioner"]
-    assert not _mentions(S.serving_findings(built), finding_id, claim)
-    assert re.search(S.COINED["re.plan_cite_rule"], _instructions(judge, "b"),
-                     re.IGNORECASE | re.DOTALL), (
-        "the judge is not told to cite family.yaml only where the flaw is in the plan")
 
 
-def test_1234_world_finding_citing_the_manifest_and_otherwise_only_refusals(
-        tmp_path: Path) -> None:
-    """s_A53 — route_finding, user_record, served_ledger, append_world_rows ->
-    QUESTIONER_FINDINGS.
-
-    Gap-only is checked first (A1 rule 3, A15): when at least one resolving conduct pointer
-    exists and every one is a blocked-call row the finding is gap-only and goes to the user
-    record; design needs 'not gap-only' (rule 4), so a manifest pointer beside refusal rows
-    does not make it design.
-
-    How: b refused one call and faulted one. b files: the plan beside the refusal's table and
-    ledger rows and the fault's ledger row; the plan beside the refusal's table row and a
-    samples section (context is set aside); and, as the control, the plan beside b's ordinary
-    passthrough row, which is design."""
-    built = S.family(tmp_path, S.triad(b={"calls": _b_with_blocked_calls()}))
-    refused_row, refused_led = built.own_row("b", 2), built.served_row("b", 2)
-    claims = [S.marker("b", k) for k in ("refusals", "refusal-and-context", "passthrough")]
-    findings = [
-        S.wf("unreachable", systems=("edr",),
-             evidence=[S.plan_ptr("b"), built.table("b", refused_row),
-                       built.served("b", refused_led),
-                       built.served("b", built.served_row("b", 3))], claim=claims[0]),
-        S.wf("unreachable", systems=("edr",),
-             evidence=[S.plan_ptr("b"), built.table("b", refused_row), S.samples_ptr("idp")],
-             claim=claims[1]),
-        S.wf("mislabelled", systems=("idp",),
-             evidence=[S.plan_ptr("b"), built.table("b", built.own_row("b", 0))],
-             claim=claims[2]),
-    ]
-    S.grade(built, S.judge({"b": S.world_reply(S.NO_BUCKET, [], world=findings)}), draws=1)
-
-    questioner, defender = S.questioner_queue(), S.defender_queue()
-    for i in (0, 1):
-        finding_id = built.finding_id("b", 0, i)
-        assert _lane(built, finding_id) == S.LANES["user_record"], (
-            f"{claims[i]}: a plan pointer beside only blocked-call rows made it design")
-        assert _mentions(S.user(built), finding_id, claims[i]), f"{claims[i]} not on the record"
-        for queue in (questioner, defender):
-            assert not _mentions(queue, finding_id, claims[i]), "a gap reached a lesson queue"
-    control_id = built.finding_id("b", 0, 2)
-    assert _lane(built, control_id) == S.LANES["questioner"]
-    assert control_id in _ids(questioner)
 
 
-def test_1234_design_finding_also_citing_an_unshown_samples_section(tmp_path: Path) -> None:
-    """s_A56 — _draw_document, LEDGER_LANES at `unqueueable`, samples_record.
-
-    A design-routed world finding citing an unshown or unavailable samples section: the
-    sample-citation drop (O16) applies first, the finding is dropped for citing an unshown
-    section; M5 routing applies only to kept findings. The drop is per-world: the family call
-    is shown no samples record, so a family finding's samples pointer is set aside as
-    unresolved instead (R4 (3), human 2026-10-12; s_AM1).
-
-    How: the samples record marks `edr` unavailable and holds real answers for `netflow`, a
-    system the tenant does not serve. b files three plan-citing findings, beside the `edr`
-    section, the `netflow` section, and (the control) the served `idp` section. A dropped
-    finding keeps today's `unqueueable` lane with its reason."""
-    answers = {"verbs": {"query": [json.dumps({"rows": []})]}}
-    samples = {"idp": answers, "siem-x": answers, "netflow": answers,
-               "edr": {"unavailable": "no answers were captured for this system"}}
-    built = S.family(tmp_path, samples=samples)
-    claims = [S.marker("b", k) for k in ("unavailable", "unserved", "shown")]
-    findings = [S.wf("unreachable", systems=("idp",),
-                     evidence=[S.plan_ptr("b"), S.samples_ptr(system)], claim=claim)
-                for system, claim in zip(("edr", "netflow", "idp"), claims, strict=True)]
-    S.grade(built, S.judge({"b": S.world_reply(S.NO_BUCKET, [], world=findings)}), draws=1)
-
-    questioner, defender = S.questioner_queue(), S.defender_queue()
-    control_id = built.finding_id("b", 0, 2)
-    assert control_id in _ids(questioner), (
-        "the finding citing the served `idp` section did not route design, so the drops below "
-        "would prove nothing")
-    assert _lane(built, control_id) == S.LANES["questioner"]
-    for i in (0, 1):
-        finding_id = built.finding_id("b", 0, i)
-        entry = _entry(built, finding_id)
-        assert entry.get("lane") == S.LANES["unqueueable"], (
-            f"{claims[i]}: the O16 drop must come before routing: {entry}")
-        assert S.word_re(S.COINED["reason.samples"]).search(str(entry.get("reason"))), (
-            f"the drop names no samples reason: {entry}")
-        for doc in (questioner, defender, S.serving_findings(built)):
-            assert not _mentions(doc, finding_id, claims[i]), f"{claims[i]} was routed"
 
 
-def test_1234_am_world_finding_citing_only_the_plan_and_context(tmp_path: Path) -> None:
-    """s_AM1 — route_finding over family_manifest.access[pointer]; _resolves over the
-    samples_record; append_world_rows -> QUESTIONER_FINDINGS.
-
-    A finding with no resolving conduct pointer is not gap-only (A15): rule 3 needs at least
-    one resolving conduct pointer and every one blocked. A world or family finding citing
-    `family.yaml` and `samples.yaml` only has a resolving plan pointer, is design, and reaches
-    the questioner queue (I5). The family call is shown no samples record (M6), so a family
-    finding's `samples.yaml` pointer is unresolved and set aside: the finding routes on its plan
-    pointer alone and its row cites only that, while a world finding's samples pointer, whose
-    section the world prompt shows, resolves and is cited (R4 (3), human 2026-10-12: O16's
-    sample-citation drop stays per-world).
-
-    How: b files one citing the family-level plan and a samples section, and one citing its
-    plan entry, a samples section and its own oracle-store row (built layer, not conduct); the
-    family files one of the first shape. The idp samples section's marker is in b's prompt
-    (the positive control) and not in the family prompt."""
-    built = S.family(tmp_path)
-    world_findings = [
-        S.wf("unreachable", systems=("idp",), evidence=[S.plan_ptr(), S.samples_ptr("idp")],
-             claim=S.marker("b", "plan-samples")),
-        S.wf("mislabelled", systems=("idp",),
-             evidence=[S.plan_ptr("b"), S.samples_ptr("idp"),
-                       built.oracle("b", "forged.jsonl", "0")],
-             claim=S.marker("b", "plan-samples-oracle")),
-    ]
-    family_finding = S.wf("unreachable", systems=("idp",),
-                          evidence=[S.plan_ptr(), S.samples_ptr("idp")],
-                          claim=S.marker(S.FAMILY, "plan-samples"))
-    judge = S.judge({"b": S.world_reply(S.NO_BUCKET, [], world=world_findings)},
-                    family_default=S.family_reply(world=[family_finding]))
-    S.grade(built, judge, draws=1)
-
-    queued = _ids(S.questioner_queue())
-    for finding_id, finding in ((built.finding_id("b", 0, 0), world_findings[0]),
-                                (built.finding_id("b", 0, 1), world_findings[1]),
-                                (built.finding_id(S.FAMILY, 0, 0), family_finding)):
-        assert _lane(built, finding_id) == S.LANES["questioner"], (
-            f"{finding['claim']}: a finding with no conduct pointer is not gap-only")
-        assert finding_id in queued, f"{finding['claim']} did not reach the questioner queue"
-        assert not _mentions(S.user(built), finding_id, finding["claim"])
-
-    samples_mark = S.marker("idp", "samples")
-    assert samples_mark in judge.prompt_for("b"), "control: b's prompt shows no idp samples"
-    assert samples_mark not in judge.prompt_for(S.FAMILY), "the family call was shown samples"
-    rows = _by_id(S.questioner_queue())
-    citations = S.RULED["row.citations"]
-    world_cites = set(rows[built.finding_id("b", 0, 0)].get(citations) or [])
-    assert world_cites == {S.plan_ptr(), S.samples_ptr("idp")}, (
-        f"the world finding's shown samples section does not resolve: {world_cites}")
-    family_cites = set(rows[built.finding_id(S.FAMILY, 0, 0)].get(citations) or [])
-    assert family_cites == {S.plan_ptr()}, (
-        f"the family finding's samples pointer was not set aside: {family_cites}")

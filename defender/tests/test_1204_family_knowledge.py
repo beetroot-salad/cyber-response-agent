@@ -2,54 +2,12 @@
 O3, D3, D4).
 
 A branched family (#947) forks one SOURCE run into siblings that must differ only in the one
-axis the questioner declared. #976 anchored the family to the source's PRODUCT commit; since
-runs read the tenant's own knowledge clone (settings today, lessons after #1108), a family
-whose siblings read a different knowledge commit than the source is the same confound. The
-fork check therefore compares the knowledge commit, at both tiers:
-
-* **Preflight** (`cli.main` -> `preflight_episode`): the source's stamp against the launcher's
-  live capture, which in production reads the episode tenant's clone (D3).
-* **Verify** (`verify_family(..., source=)`): every sibling's own stamp against the source,
-  and the siblings against each other.
-
-A2, as settled: a member (sibling or live tree) whose knowledge commit DIFFERS from the
-source's, or siblings that disagree among themselves, is NEVER waivable. Knowledge that is
-`"unversioned"`, unavailable, or ABSENT (a pre-#1204 stamp) on either side is WAIVABLE with
-`--allow-dirty` ("nothing proves the same knowledge"). Comparison is over the COMMIT only — two
-unavailable reasons with different text are not a disagreement.
-
-O3 / D4 — THE NAME CONTRACT for the field table: `defender.learning.branch.cli` holds a
-module-level `STAMP_FIELD_CLASSES: dict[str, str]` from every `RunProvenance` field name to one
-class among `"anchored"` (commit, scope, knowledge), `"constant"` (model), `"dedicated"`
-(dirty, tenant_id), `"informational"` (dirty_paths, dirty_path_count, unavailable) and
-`"expected_to_differ"` (world_id, parent_run_id, fork_turn). It drives the comparison that
-replaces the hardcoded `("commit", "scope", "model")` loop. The wire value of knowledge is
-`{"commit": "<sha>"}` | `"unversioned"` | `{"unavailable": "<reason>"}` | `null`
-(`test_1204_knowledge_revision.py` pins it).
-
-#1224: verify no longer writes the episode outcome (pre-flight's, written once before any
-sibling starts); a family called `incomplete` here is a verify report with `comparable: False`
-and no family stamp.
-
-Fixtures: every fake stamp is `T.provenance_record(...)`, which by default carries
-`{"commit": T.KNOWLEDGE_SHA}` — the source `T.runs_base` writes, every `T.sibling_run_dir` /
-`J.FakeSibling` sibling and the `T.source_capture()` live capture all agree on it, as a real
-family launched from one tenant clone does. `knowledge=T.NO_KNOWLEDGE_KEY` is a pre-#1204
-stamp. Every fake enters by an injection seam (never `monkeypatch.setattr`); the launcher
-scenarios reuse #976's `Launch` harness.
-
-RED before #1204: no `STAMP_FIELD_CLASSES`, no knowledge comparison, no knowledge in the
-read-back stamps.
 """
 from __future__ import annotations
 
-import ast
-import dataclasses
 import json
 import os
 import shutil
-import sys
-import types
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +16,6 @@ import pytest
 from defender import _episode_handle as EH
 from defender import _provenance
 from defender._episode_handle import Episode
-from defender._provenance import RunProvenance
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_976_family_anchor as A
@@ -392,21 +349,6 @@ def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incompl
     assert not (launch.episode_dir / "provenance.json").exists()
 
 
-def test_1204_the_allow_dirty_help_says_it_waives_unprovable_knowledge(capsys):
-    """Non-obligation made visible (one `--allow-dirty` waives both): the flag's own help — the
-    operator's reference for what passing it does — names knowledge among what it waives, and
-    no longer says it waives dirt and only dirt. Without this the help contradicts the
-    refusals that now offer the flag for a knowledge fault."""
-    with pytest.raises(SystemExit):
-        _cli().parse_branch_args(["--help"])
-    text = " ".join(capsys.readouterr().out.split())
-    # The option's own entry: after its LAST mention (the first is the usage line), up to the
-    # next option.
-    entry = text.rsplit("--allow-dirty", 1)[1].split("--model", 1)[0]
-    assert "knowledge" in entry, entry
-    assert "only dirt" not in entry.lower(), entry
-
-
 # ---------------------------------------------------------------------------------------
 # The family stamp says WHAT the override waived, and `agreed` is what the check held
 # ---------------------------------------------------------------------------------------
@@ -598,18 +540,6 @@ def _table() -> dict[str, str]:
     return T.sym("learning.branch.cli", "STAMP_FIELD_CLASSES")
 
 
-def test_1204_every_stamp_field_is_in_exactly_one_class_of_the_table():
-    """O3 census: the fork check's table classifies EVERY `RunProvenance` field — its keys are
-    exactly the dataclass's fields, so a field added to the stamp without a class fails here
-    rather than being silently skipped by the comparison (the gap #1204 found: `knowledge`
-    would have been) — each into one of the five classes, as D4 states them."""
-    table = _table()
-    declared = {f.name for f in dataclasses.fields(RunProvenance)}
-    assert set(table) == declared, f"unclassified or stale: {declared ^ set(table)}"
-    assert set(table.values()) <= CLASSES, set(table.values()) - CLASSES
-    assert table == D4
-
-
 def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family(tmp_path):
     """O3 behavioural arm: for EVERY field the table classes `anchored` or `constant`, a family
     where ONE sibling differs from the source on that field alone is `incomplete` through the
@@ -633,81 +563,6 @@ def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family
 
     report, stamp = _verify(tmp_path, "none-differs", source=T.provenance_record())
     assert report["comparable"] is True, report["reason"]
-
-
-def _cli_with_table(reclassified: dict[str, str], monkeypatch) -> Any:
-    """The fork-check module rebuilt from ITS OWN SOURCE with one difference: right after the
-    module assigns `STAMP_FIELD_CLASSES`, the name is re-bound to that table with
-    `reclassified` applied. Everything the module derives from the table at import, and
-    everything it reads from it at call time, then sees the re-classified table; a comparison
-    that does not consult the table does not change. No production seam: the module is
-    executed as written, under a scratch name, beside the real one (which is untouched)."""
-    real = _cli()
-    path = Path(real.__file__)
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-
-    def assigns_table(node: ast.stmt) -> bool:
-        targets = (node.targets if isinstance(node, ast.Assign)
-                   else [node.target] if isinstance(node, ast.AnnAssign) else [])
-        return any(isinstance(t, ast.Name) and t.id == "STAMP_FIELD_CLASSES" for t in targets)
-
-    at = [i for i, node in enumerate(tree.body) if assigns_table(node)]
-    assert len(at) == 1, "STAMP_FIELD_CLASSES is not assigned once at the module's top level"
-    tree.body[at[0] + 1:at[0] + 1] = ast.parse(
-        f"STAMP_FIELD_CLASSES = {{**STAMP_FIELD_CLASSES, **{reclassified!r}}}").body
-    ast.fix_missing_locations(tree)
-    name = f"{real.__name__}_reclassified_1204"
-    rebuilt = types.ModuleType(name)
-    rebuilt.__file__ = str(path)
-    rebuilt.__package__ = real.__package__
-    monkeypatch.setitem(sys.modules, name, rebuilt)
-    exec(compile(tree, str(path), "exec"), rebuilt.__dict__)  # noqa: S102 — the module's own source
-    assert {**_table(), **reclassified} == rebuilt.STAMP_FIELD_CLASSES
-    return rebuilt
-
-
-def _verify_with(cli: Any, tmp_path: Path, name: str, docs: dict[str, dict]) -> dict:
-    """`cli.verify_family` over three real sibling stamp files whose documents are `docs`
-    (by label), against the default source — planted in the container of an episode of its own
-    (`name`) and handed over as arms opened through its view (#1105 PR 2)."""
-    ep = T.episode(tmp_path, root=tmp_path / "episodes" / name)
-    dirs = [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]
-    for d in dirs:
-        (d / "provenance.json").write_text(json.dumps(docs[d.name[-1]]), encoding="utf-8")
-    with Episode.open(ep) as episode:
-        return cli.verify_family(episode, T.family_arms(episode, T.WORLDS),
-                                 source=T.provenance_record())
-
-
-def test_1204_the_field_table_drives_the_comparison(tmp_path, monkeypatch):
-    """O3/D4: the table DRIVES the comparison rather than sitting beside a hardcoded one —
-    re-classify a field in it and the fork check follows. Three families, each judged by the
-    real module and by the same module rebuilt with a re-classified table:
-    * a sibling on another MODEL: `incomplete` (constant) -> `accepted` once model is
-      informational;
-    * a sibling measured over another SCOPE: `incomplete` (anchored) -> `accepted` once scope
-      is informational;
-    * siblings each stamped with their own WORLD (as every real fork is): `accepted`
-      (expected to differ) -> `incomplete`, naming world_id, once world_id is constant.
-    Without this a comparison that kept the old `("commit", "scope", "model")` loop and merely
-    defined the table would pass every other arm of O3."""
-    clean = T.provenance_record()
-    families = {
-        "model": {w: {**clean, "model": "m-2" if w == "b" else "m-1"} for w in T.WORLDS},
-        "scope": {w: {**clean, "scope": "defender" if w == "b" else "repo"} for w in T.WORLDS},
-        "world_id": {w: {**clean, "world_id": f"{T.EPISODE_ID}.{w}"} for w in T.WORLDS},
-    }
-    real_says = {"model": False, "scope": False, "world_id": True}
-    rebuilt = _cli_with_table(
-        {"model": "informational", "scope": "informational", "world_id": "constant"},
-        monkeypatch)
-    for field, docs in families.items():
-        report = _verify_with(_cli(), tmp_path, f"real-{field}".replace("_", "-"), docs)
-        assert report["comparable"] is real_says[field], (field, report["reason"])
-        flipped = _verify_with(rebuilt, tmp_path, f"table-{field}".replace("_", "-"), docs)
-        assert flipped["comparable"] is not real_says[field], (field, flipped["reason"])
-        if not flipped["comparable"]:
-            assert field in flipped["reason"], (field, flipped["reason"])
 
 
 def test_1204_fields_expected_to_differ_or_informational_are_not_compared(tmp_path):

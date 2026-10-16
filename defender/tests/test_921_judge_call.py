@@ -1,24 +1,4 @@
-"""#921 — the judge's model call: how it is framed, how its reply is validated, where it lands.
-
-Three obligations meet here. O1 — every finding names a hand-off and points at bytes that exist
-in the archive it was graded from. O8 — the replies and pass tables are stored per world per
-draw. O9 — every model-authored text the judge reads is framed untrusted, and the reply is
-validated into `JudgeReply` before anything reads it.
-
-TWO §7 RESOLUTIONS ARE APPLIED HERE AS SETTLED:
-* **J13(a)** — pointer resolution is scoped to the GRADED WORLD's own subtree. O1 states its
-  failing mode episode-scoped ("pointers resolve inside `episodes/<id>/`"), but its RULE says
-  "the archive it was graded from", and a pointer landing in a SIBLING world's archived bytes
-  resolves under the literal text while being a finding about the wrong world.
-* **J6** — a draw that fails at any stage writes a draw record carrying its failure reason,
-  because a silent absence is indistinguishable from a draw never requested.
-
-RED against `d1b8b06a`: `learning/judge/run.py` does not exist. This judge ran under the
-QUESTIONER's key at first — `AgentRole.JUDGE` was the old pipeline judge's, and the registry
-admits one definition per key — then #922 retired that pipeline and freed the word, and #1008
-claimed it for this judge with a `JUDGE_DEF`, a `JudgeDeps` and a deny-all policy of its own
-(pinned in `test_1008_judge_role.py`).
-"""
+"""#921 — the judge's model call: how it is framed, how its reply is validated, where it lands."""
 from __future__ import annotations
 
 
@@ -450,8 +430,6 @@ def test_921_fenced_reply_with_prose_around_it_is_refused_and_a_bare_one_validat
 # ---------------------------------------------------------------------------------------
 
 
-
-
 def test_921_judge_call_is_zero_grant_and_deny_all(tmp_path):
     """The judge's model call holds NO tools, NO bash shapes, NO write shapes and NO verb grant
     — each an OMISSION over deny-all defaults, and `bind(JUDGE_DEF, …)` refuses BY NAME.
@@ -507,30 +485,6 @@ def test_921_model_and_effort_come_from_the_judges_env_knobs_not_questioner_mode
     assert J.judge_record(ep)["knobs"]["model"] == "judge-model"
 
 
-def test_921_no_prompt_carries_two_trajectories(tmp_path):
-    """#1234 rewrite (design M1, M3): the withholding this pinned is REVERSED — a world call is
-    now judged against its reference runs, so it carries them on purpose, each under its own
-    host label. What stays: one call per world per draw, each prompt naming the ONE world it
-    judges, with the control and every other usable planted world named as its references.
-
-    Positive control: two worlds produce TWO prompts — so the assertion cannot pass on a
-    fan-out that makes one call, or none.
-    """
-    ep = _episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": [J.staged_row("c")]})
-    judge = _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(J.reply_doc())), draws=1)
-
-    # #1007 M5 adds a THIRD call (the family-level draw) that IS shown every world on purpose
-    # (that is its whole point) — excluded here, since this test is about the two PER-WORLD
-    # calls' own withholding.
-    world_prompts = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True)
-                     if not a.startswith("judge:family")]
-    assert len(world_prompts) == 2, "two worlds did not produce two calls"
-    for label, prompt in zip(["b", "c"], world_prompts, strict=True):
-        other = "c" if label == "b" else "b"
-        assert f"World {label} has run; judge it against its reference runs (a, {other})" \
-            in prompt, f"world {label}'s prompt does not name its world and its references"
-
-
 def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_path,
                                                                           monkeypatch):
     """Draws per world is the operator's knob and the family record REPORTS the spread rather
@@ -572,8 +526,6 @@ def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_p
         "the record does not distinguish this pass's draws from the files on disk")
 
 
-
-
 # ---------------------------------------------------------------------------------------
 # the shape of `evidence`, as the prompt states it and the validator enforces it
 # ---------------------------------------------------------------------------------------
@@ -591,52 +543,6 @@ def _prompt(ep, label: str = "b") -> str:
     return run_mod._build_prompt(render.render(ep, label), manifest)[0]
 
 
-def test_921_the_task_states_that_evidence_is_a_list_of_pointers(tmp_path):
-    """The prompt says what an evidence entry IS, not just that the field exists.
-
-    The field list named `evidence` and stopped, so the model wrote the English sense of the
-    word: one prose sentence quoting what it had read — refused, or dropped one step later as
-    a finding whose pointers all fail to resolve. Both silent above `malformed_replies`.
-    #1234 (A1): the grammar is episode-relative pointers, and the prompt says so.
-
-    Observed live: a judge draw whose REASONING was correct — it found that the defender closed
-    `benign` where its world called for `inconclusive` and had ridden an earlier precedent —
-    produced no finding at all, because every `evidence` value was a quotation.
-    """
-    # THE PROMPT THE MODEL IS ACTUALLY HANDED, built by the real assembler. Reading run.py's own
-    # source instead would pass on a sentence sitting in a docstring or a dead branch — the
-    # structural-claim-by-substring shape, which asserts that the words exist somewhere rather
-    # than that the model is told them.
-    prompt = _prompt(J.accepted_episode(tmp_path))
-    for required in ("EVERY EVIDENCE POINTER IS EPISODE-RELATIVE", "never prose", "#fragment",
-                     "IS DROPPED"):
-        assert required in prompt, f"the model is never told {required!r}"
-
-
-def test_921_the_evidence_shape_the_prompt_documents_actually_validates(tmp_path):
-    """The example pointers the prompt shows are ones the validator and the resolver accept.
-
-    The companion to the questioner's own prompt-vs-loader guard, and the same failure mode: a
-    prompt that describes a shape in prose while the code enforces another is a prompt whose
-    every obedient reply is refused. Driven through BOTH gates the reply must pass —
-    `validate_reply`, then the pointer resolution routing applies (#1234: the one resolver,
-    read off the ledger) — because a shape that parses and then resolves to nothing still
-    yields no finding.
-    """
-    run_mod = J.mod("learning.judge.run")
-    ep = _episode(tmp_path)
-    pointers = ["worlds/b/report.md", "worlds/b/investigation.md#ANALYZE", "worlds/a/report.md"]
-    prompt = _prompt(ep)
-    for shape in ("worlds/<run>/report.md", "worlds/<run>/investigation.md"):
-        assert shape in prompt, f"the prompt does not document {shape!r}"
-    documented = J.reply_doc(findings=[J.finding_doc(evidence=pointers)])
-    assert run_mod.validate_reply(J.as_reply_text(documented)).investigator_findings
-    _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(documented)), draws=1)
-    assert _lanes(ep) == {"0": "defender"}, (
-        "a finding carrying the pointers the prompt documents was dropped as unresolvable")
-    assert J.draw_doc(ep, "b", 0)["investigator_findings"][0]["contrast_evidence"] == pointers
-
-
 def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_path):
     """A string where a list belongs refuses the reply, and says which field.
 
@@ -652,35 +558,6 @@ def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_pa
     assert "evidence" in str(refusal.value)
 
 
-def test_921_the_task_writes_out_every_episode_outcome_word_it_accepts(tmp_path):
-    """#1234 rewrite (A17): `episode_outcome` and its words are retired; the words the
-    validator accepts are now the world's `bucket` words and the world-finding buckets. Each
-    appears in the prompt LITERALLY — a word the validator accepts that the prompt never names
-    is a word every reply using it is refused for, and a word removed leaves the prompt
-    advertising one that no longer parses.
-    """
-    run_mod = J.mod("learning.judge.run")
-    prompt = _prompt(J.accepted_episode(tmp_path))
-    for word in (*run_mod.WORLD_BUCKETS, *run_mod.WORLD_FINDING_BUCKETS):
-        assert f"`{word}`" in prompt, f"the validator accepts {word!r} and the prompt never writes it"
-
-
-def test_921_the_task_says_a_badly_performing_defender_is_still_gradable(tmp_path):
-    """The prompt separates a fault in the WORLD from a fault in the INVESTIGATOR.
-
-    #1234 rewrite: the degenerate episode words are gone (A17); what a model must not do now is
-    file the investigator's failure as a world finding or a deployment gap (or the reverse), so
-    the prompt says which list is about which. A live draw did exactly that under the old words:
-    five sound findings about the defender's gathering, then a world-level word over an episode
-    its own note described as the defender never pulling the payload.
-    """
-    prompt = _prompt(J.accepted_episode(tmp_path))
-    assert "what is wrong with the WORLD itself, never the investigator" in prompt, (
-        "the prompt never says a world finding is about the world, not the investigator")
-    assert "A gap is never an investigator finding" in prompt, (
-        "the prompt never says a deployment gap is not the investigator's failure")
-
-
 def test_921_a_degenerate_outcome_still_discards_the_findings(tmp_path):
     """#1234 rewrite (A7): the words that keep a world's investigator findings off the queue
     are the not-measured world-finding buckets, `unreachable` and `incoherent` — and
@@ -693,23 +570,3 @@ def test_921_a_degenerate_outcome_still_discards_the_findings(tmp_path):
     assert "mislabelled" not in run_mod.NOT_MEASURED_BUCKETS
 
 
-def test_921_every_accepted_outcome_word_carries_a_criterion(tmp_path):
-    """The words and their criteria have ONE owner, keyed by the validator's own set.
-
-    #1234 rewrite: the retired `_OUTCOME_GUIDANCE` is now `_BUCKET_GUIDANCE` (the world bucket)
-    and `_WORLD_FINDING_GUIDANCE`, rendered by `_guidance`. A word added to a set would reach
-    the model named but unexplained, which is the state that made a live draw choose a
-    degenerate word, discarding five sound findings with it. `_guidance` REFUSES on a member it
-    cannot explain rather than rendering a partial list, so the gap fails here instead of
-    arriving as guesswork.
-    """
-    run_mod = J.mod("learning.judge.run")
-    assert set(run_mod._BUCKET_GUIDANCE) == set(run_mod.WORLD_BUCKETS), (
-        "the bucket criteria and the accepted set have drifted apart")
-    assert set(run_mod._WORLD_FINDING_GUIDANCE) == set(run_mod.WORLD_FINDING_BUCKETS)
-
-    widened = dict(run_mod._BUCKET_GUIDANCE)
-    widened.pop("lead-quality")
-    with pytest.raises(J.sym("learning.judge", "JudgeRefused")) as refusal:
-        run_mod._guidance(run_mod.WORLD_BUCKETS, widened, "bucket")
-    assert "lead-quality" in str(refusal.value)

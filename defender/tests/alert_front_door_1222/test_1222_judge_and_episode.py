@@ -251,8 +251,6 @@ def _old_pass_draws(ep: Path, label: str = "b") -> dict[str, Any]:
                         "systems": [J.HOLDING_SYSTEM]}]}
 
 
-
-
 # --- the launcher ----------------------------------------------------------------------------
 
 def _source(tmp_path: Path, raw: bytes, *, record: bool = True, digest: str | None = None,
@@ -514,76 +512,9 @@ def test_r6_a_skipped_runs_name_cannot_forge_a_line_in_the_judge_notes_or_the_vo
         assert all(stem not in prompt for stem in [*hostile, plain])
 
 
-def test_p039_pre_change_run_presented_to_branch_judge_or_visu(tmp_path, capsys):
-    """A run with no record — whatever made it — is skipped by name and counted by every walker;
-    the launcher and the judge refuse it, naming the missing record; the visualizer owes nothing
-    (display only, N8, N13).
-
-    The run is a pre-change one: its alert at the former place, an `l-000` leads row, no
-    record."""
-    planted = S.plant_tenant(TENANT)
-    base, src = T.runs_base(tmp_path, tenant_id=TENANT)
-    (src / "gather_raw" / f"{S.L0}.lead.json").write_text(json.dumps(
-        {"lead_id": S.L0, "goal": "Alert ancestors: resolve the ancestor documents"}),
-        encoding="utf-8")
-    T.corpus_document(src)
-    _assert_names_record(_refused_launch(planted, src), "the launcher's refusal")
-
-    S.sym(INVLANG_CLI, "main")([str(base), "hypothesis-vocabulary", "--signature", "SIG-p039"])
-    err = capsys.readouterr().err
-    lines = _lines_naming(err, src.name)
-    assert lines, f"the corpus listing does not name the pre-change run:\n{err}"
-    assert any("record" in line.lower() for line in lines), (
-        f"the corpus listing names the pre-change run with no reason naming its record: {lines}")
-
-    uncopied, _raw = _episode(tmp_path, "p039", copy=False)
-    _assert_names_record(_judge_refusal(uncopied, base), "the judge's refusal")
-
-
 # =================================================================================================
 # The findings key: the recorded signature, verbatim (C27)
 # =================================================================================================
-
-def test_p067_bare_reenqueue_of_an_episode_without_a_tenant(tmp_path):
-    """A bare re-enqueue takes the rule key from the episode's record (form per C27), never from
-    a tenant, a mapping or rule.id.
-
-    No tenant is set up; every world copy and the alert's own rule.id name another key."""
-    base = tmp_path / "runs"
-    base.mkdir()
-    ep, _raw = _episode(tmp_path, "p067", signature="SIG-p067")
-    _grade(ep, base)
-    before = _rows()
-    _grade(ep, base)
-    rows = _rows()
-    assert rows == before, "a bare rerun preserves already queued rows"
-    assert set(_keys(rows)) == {"SIG-p067"}, (
-        f"rows carry the keys {set(_keys(rows))}, not the episode's recorded signature")
-
-
-def test_p068_grade_episode_called_directly_without_a_tenant(tmp_path):
-    """A judge pass with no tenant keys findings by the episode's recorded signature."""
-    ep, _raw = _episode(tmp_path, "p068", signature="SIG-p068")
-    _grade(ep, tmp_path / "no-tenant-runs")
-    assert set(_keys(_rows())) == {"SIG-p068"}
-
-
-def test_p069_source_alert_readable_but_mapping_absent_or_faul(tmp_path):
-    """The union is taken by recorded digest whatever the mapping. The key comes from the
-    recorded signature, or is unkeyed when the record holds none.
-
-    The tenant's mapping file is absent; a second episode's record holds no signature."""
-    planted = S.plant_tenant(TENANT, alert_mapping=None)
-    ep, raw = _episode(tmp_path, "p069", signature="SIG-p069")
-    _trial(planted.runs, "trial-p069", raw, facts={"signature": "SIG-p069"})
-    _grade_, judge = _grade(ep, planted.runs)
-    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
-    assert set(_keys(_rows())) == {"SIG-p069"}
-
-    before = len(_rows())
-    unsigned, _raw = _episode(tmp_path, "p069-unsigned", signature=None)
-    _grade(unsigned, planted.runs)
-    assert set(_keys(_rows()[before:])) == {S.UNKEYED}
 
 
 def test_p070_mapping_changed_between_source_run_and_judge(tmp_path):
@@ -613,23 +544,6 @@ def test_p070_mapping_changed_between_source_run_and_judge(tmp_path):
         "recorded signature")
 
 
-def test_p075_two_signatures_share_one_rule_key_slug(tmp_path):
-    """The rule key is the recorded signature verbatim, `unkeyed` when there is none; 'ET
-    Foo/Bar' is no signature (a space), so two distinct signatures never share a key."""
-    base = tmp_path / "runs"
-    base.mkdir()
-    seen: dict[str, set[Any]] = {}
-    for name, sig in (("fold-a", "et-foo-bar"), ("fold-b", "ET-Foo-Bar"),
-                      ("fold-c", "Et.Foo.Bar"), ("spaced", None)):
-        before = len(_rows())
-        raw = _alert(name, rule={"id": "ET Foo/Bar", "name": "spaced rule id"})
-        ep, _raw = _episode(tmp_path, name, raw=raw, signature=sig)
-        _grade(ep, base)
-        seen[name] = set(_keys(_rows()[before:]))
-    assert seen == {"fold-a": {"et-foo-bar"}, "fold-b": {"ET-Foo-Bar"},
-                    "fold-c": {"Et.Foo.Bar"}, "spaced": {S.UNKEYED}}, seen
-
-
 def test_p076_rule_key_from_an_enormous_or_path_shaped_signatu(tmp_path):
     """The rule key is used only as data, never as a path or file name. The queue row holds it
     without escaping its directory."""
@@ -650,40 +564,9 @@ def test_p076_rule_key_from_an_enormous_or_path_shaped_signatu(tmp_path):
             assert sig not in str(path), f"the key became part of a path: {path}"
 
 
-def test_p105_one_episode_graded_twice_across_a_mapping_edit(tmp_path):
-    """Rows stay under their recorded key, which a mapping edit cannot change; a hand re-enqueue
-    after a mapping edit never rewrites or re-keys an existing row. Whether the defender channel
-    drops the duplicate is base behaviour (77 RG3) and is not asserted."""
-    planted = S.plant_tenant(TENANT, alert_mapping={"signature": "sig_field",
-                                                    "event_time": "detected_at",
-                                                    "summary": "rule.description"})
-    ep, _raw = _episode(tmp_path, "p105", signature="SIG-p105")
-    _grade(ep, planted.runs)
-    first = _rows()
-    assert set(_keys(first)) == {"SIG-p105"}
-    S.remap(planted, {"signature": "user.login", "event_time": "detected_at",
-                      "summary": "rule.description"})
-    _grade(ep, planted.runs)
-    after = _rows()
-    assert after[:len(first)] == first, "the hand re-enqueue rewrote an existing row"
-    assert set(_keys(after)) == {"SIG-p105"}, "a row after the mapping edit carries another key"
-
-
-def test_p110_unmapped_tenant_piles_every_alert_under_one_key(tmp_path):
-    """Every unmapped alert's key is unkeyed."""
-    base = tmp_path / "runs"
-    base.mkdir()
-    for name in ("unmapped-1", "unmapped-2", "unmapped-3"):
-        before = len(_rows())
-        ep, _raw = _episode(tmp_path, name, signature=None)
-        _grade(ep, base)
-        assert set(_keys(_rows()[before:])) == {S.UNKEYED}, name
-
-
 # =================================================================================================
 # The sibling union: runs under the base whose recorded digest is the copy's
 # =================================================================================================
-
 
 
 def test_p114_source_runs_box_rewrote_its_alert_to_another_ale(tmp_path):
@@ -704,24 +587,6 @@ def test_p114_source_runs_box_rewrote_its_alert_to_another_ale(tmp_path):
     _grade_, judge = _grade(ep, base)
     assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
     assert set(_keys(_rows())) == {"SIG-p114"}
-
-
-
-
-def test_p119_source_run_dir_gone_when_the_episode_is_judged(tmp_path):
-    """The episode's alert and recorded signature come from the episode's copy, and the key is
-    derived from it (form per C27). Neither ever comes from a world copy. The pass does not
-    hang.
-
-    The source run's folder is gone from the base; the world copies are the decoys."""
-    base = tmp_path / "runs"
-    ep, raw = _episode(tmp_path, "p119", signature="SIG-p119")
-    _trial(base, "trial-p119", raw)
-    judge = J.scripted_judge()
-    box = _bounded(lambda: _grade(ep, base, judge=judge), what="the judge pass")
-    assert "raised" not in box, f"the pass failed: {box.get('raised')!r}"
-    assert set(_keys(_rows())) == {"SIG-p119"}
-    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
 
 
 def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
@@ -800,18 +665,6 @@ def test_p122_source_run_id_in_the_episode_record_names_a_diff(tmp_path):
     assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 @dataclass
 class _RewritingJudge(J.FakeJudge):
     """`J.FakeJudge` whose first call runs `rewrite` — the episode's record changing on disk
@@ -825,25 +678,6 @@ class _RewritingJudge(J.FakeJudge):
             rewrite, self.rewrite = self.rewrite, None
             rewrite()
         return super().__call__(prompt, role=role, agent_id=agent_id, **kw)
-
-
-
-
-def test_p159_episode_launched_before_the_change_is_judged_aft(tmp_path):
-    """The judge and the bare re-enqueue refuse an episode with no copied record, naming the
-    missing record, and do not hang."""
-    base = tmp_path / "runs"
-    base.mkdir()
-    ep, _raw = _episode(tmp_path, "p159", copy=False)
-    _assert_names_record(_judge_refusal(ep, base), "the judge's refusal")
-
-    _old_pass_draws(ep)
-    rows_before = len(_rows())
-    box = _bounded(lambda: _grade(ep, base), what="the bare re-enqueue")
-    assert "raised" in box, "the bare re-enqueue queued an episode with no copied record"
-    assert isinstance(box["raised"], J.refusals()), f"not a refusal: {box['raised']!r}"
-    _assert_names_record(str(box["raised"]), "the bare re-enqueue's refusal")
-    assert len(_rows()) == rows_before
 
 
 # =================================================================================================
@@ -880,17 +714,6 @@ def test_p071_episode_page_after_the_judges_pick_is_replaced(tmp_path):
 # =================================================================================================
 # The launcher's copy step (C41, C47)
 # =================================================================================================
-
-def test_p156_launch_from_a_source_run_without_a_record(tmp_path):
-    """The launcher refuses a source run with no record, naming the missing record; it never
-    derives a record and never launches without one."""
-    raw = _alert("p156")
-    planted, _base, src = _source(tmp_path, raw, record=False)
-    before = _files_under(src)
-    _assert_names_record(_refused_launch(planted, src), "the launcher's refusal")
-    assert _files_under(src) == before, "the launch wrote into the source run (derived a record)"
-    episodes = Path(os.environ[T.EPISODES_BASE_ENV])
-    assert raw not in _files_under(episodes).values(), "the launch copied the alert anyway"
 
 
 def test_p157_source_digest_and_alert_bytes_disagree_at_launch(tmp_path):

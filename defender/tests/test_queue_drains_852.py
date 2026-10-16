@@ -1,25 +1,4 @@
-"""#852 — the drain treats its queue as best-effort, in five places, without saying so.
-
-The through-line the register names: **a marker leaves the queue only when work provably
-happened for it, and a write to the corpus is attributable to the finding that justified
-it.** Each test below names the register ref it pins.
-
-Two of the five are pinned where their siblings already live rather than here, because the
-property is shared and a lone copy would be the one that rots:
-
-* **F-18** (a marker whose `run_dir` is not a string) joins the dead-letter tables in
-  `tests/learning/test_loop.py` — both queues run the one `claim_markers` protocol, so both
-  tables carry the case.
-* **F-21** (`_SAFE_ID_SEGMENT`'s `$` anchor) joins `tests/test_lead_author_synth.py`, beside
-  the traversal case it is the same guard as.
-
-Fakes enter through the shipped injection seams — `dataclasses.replace(cfg, invoke_agent=)`
-for the corpus author, `run_lead_author=` / `branch=` / the box lifecycle for the drain — so
-no `monkeypatch.setattr` is needed to drive any of this. The one real resource a test takes
-is the lead-author QUEUE LOCK, held with a plain `flock` exactly as a second lead-author
-process would hold it: F-03 is a fact about that lock, and injecting the skip would assert
-the shipped `rc` contract nowhere.
-"""
+"""Queue drains are best-effort only where proven: markers leave the queue only after work happened; lock-held skip; requeue never clobbers."""
 from __future__ import annotations
 
 import fcntl

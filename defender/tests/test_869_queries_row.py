@@ -1,16 +1,4 @@
-"""#869 M3/O2 at the SINK — what a real granted call actually records.
-
-One demand of `spec-flow/specs/spec_graph_869.yaml`
-(`queries_row_records_dispatched_system`), driven end to end because the demand is about the
-row the writer PERSISTS, not about the screen's return value: `test_869_query_id.py` pins
-`resolve_query_id` at the seam, and a screen that returned the right string while the writer
-recorded a different one would satisfy that and leave the table wrong.
-
-Everything between the two replay models is production code — the dispatch, the grant, the
-query tool, the capture path, the two tables. The injected registry is a fault-free fake whose
-verb records what it was handed; it classifies nothing, so every exit code, error class and
-recorded value in the assertions below is the writer's own work.
-"""
+"""#869 M3/O2 at the SINK — what a real granted call actually records."""
 from __future__ import annotations
 
 import pytest

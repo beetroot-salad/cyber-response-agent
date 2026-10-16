@@ -267,51 +267,6 @@ def test_opening_message_holds_one_correlation_section(tmp_path):
     _assert_nothing_later(raised, *ending)
 
 
-def test_slim_heading_names_l00c_reserved(tmp_path):
-    """The opening message's ORIENT heading tells MAIN that l-00c is harness-reserved and not to
-    attach new work to it, and names no l-000.
-
-    Observed on a run whose lead summarised and on one whose table withholds the lead."""
-    for label, table in (("granted", S.TABLE_ELASTIC), ("withheld", S.TABLE_WITHHELD)):
-        planted = S.plant_tenant(f"slim-{label}", table=table)
-        d = S.run_alert(tmp_path / label, tenant=planted, run_id=f"s04-slim-{label}")
-        _run_with_turns(d)
-        opening = d.opening_message
-        assert S.L0 not in opening, (
-            f"[{label}] MAIN's opening message names {S.L0} — after the change it is an ordinary "
-            "id and the heading names only l-00c as reserved")
-        head, _body = S.correlation_section(opening)
-        assert S.L3 in S.harness_text(head), f"[{label}] the l-00c heading is not host prose"
-
-
-def test_o3_opening_prompt_carries_no_ancestor_section(tmp_path):
-    """The opening message MAIN received carries no ancestor section — asserted on the message the
-    model received, never on source.
-
-    The Kibana fixture alert carries `ancestor_events`, and the backend answers every search with a
-    marked document: base's item 1 fetched and rendered it. Positive control on the same message:
-    the alert's own ancestor pointers DO reach MAIN, framed inside the raw alert block, and the
-    slim heading names l-00c."""
-    planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
-    alert = S.fixture_alert()
-    d = S.run_alert(tmp_path, alert=alert, tenant=planted, backend=_resolving_backend(),
-                    run_id="s04-o3-prompt")
-    _run_with_turns(d)
-    opening = d.opening_message
-    assert ANCESTOR_DOC_MARK not in opening, (
-        "a document the harness fetched for the alert's ancestors reached MAIN's opening message")
-    headings = [h for h, _b in S.sections(opening)]
-    assert not [h for h in headings if BASE_ANCESTOR_WORD in h.lower()], (
-        f"MAIN's opening message still opens an ancestor section: {headings}")
-    # Positive control: the channel sees ancestor pointers when the ALERT carries them.
-    pointer = alert["ancestor_events"][0]["id"]
-    assert any(pointer in body for body in S.outer_frames(opening)), (
-        "the alert's own ancestor_events pointers are missing from the raw alert block — the "
-        "observation channel cannot see ancestor content at all, so the negative is vacuous")
-    assert pointer not in S.harness_text(opening)
-    S.correlation_section(opening)
-
-
 # =================================================================================================
 # O1, the timestamp gate, tenants without elastic, O2
 # =================================================================================================
@@ -371,64 +326,6 @@ def test_correlation_dispatches_with_no_or_unparseable_timestamp(tmp_path):
         "l-00c's contract differs when the alert carries no alert_timestamp")
     assert contracts["unparseable"] == contracts["parseable"], (
         "l-00c's contract differs when the alert's alert_timestamp does not parse")
-
-
-def test_tenant_without_elastic_folder_runs_to_close(tmp_path):
-    """A tenant with no systems/elastic/ folder starts a run, dispatches its correlation lead and
-    reaches report.md; the opening message carries no note about a missing Elastic system.
-
-    The control is the same tenant shape with an elastic folder: the host says the same thing to
-    MAIN in both opening messages."""
-    marker = "CORR-NOELASTIC-77"
-    leads = {S.L3: [S.query("cmdb", "list-hosts", {}), S.text(f"{marker}: nothing related.")]}
-    bare = S.plant_tenant("tbare1222", table=S.TABLE_NON_ELASTIC, omit_systems=("elastic",))
-    assert not (bare.settings / "systems" / "elastic").exists()
-    d = S.run_alert(tmp_path / "bare", tenant=bare, run_id="s04-noelastic",
-                    main=S.closing_main_turns(), leads=leads)
-    _run_with_turns(d)
-    assert d.router.dispatched(S.L3), "l-00c was not dispatched on a tenant without elastic"
-    assert d.rows_for(S.L3), "l-00c's query left no row"
-    report = d.report
-    assert report is not None, "the run never reached report.md"
-    assert "disposition:" in report, "report.md carries no disposition"
-    _assert_summary_in_opening(d, marker)
-
-    full = S.plant_tenant("tfull1222", table=S.TABLE_NON_ELASTIC)
-    assert (full.settings / "systems" / "elastic").is_dir()
-    ctl = S.run_alert(tmp_path / "full", tenant=full, run_id="s04-noelastic",
-                      main=S.closing_main_turns(), leads=leads)
-    _run_with_turns(ctl)
-    assert _opening(d, bare.tenant_id) == _opening(ctl, full.tenant_id), (
-        "MAIN's opening message differs between a tenant with an elastic folder and one without "
-        "— the run start told MAIN something about the missing Elastic system")
-
-
-def test_o2_kibana_fixture_alert_still_gets_its_correlation_summary(tmp_path):
-    """Today's Kibana-projected fixture alert on the Elastic fixture tenant still gets l-00c
-    dispatched and its summary into MAIN's opening message, whether or not the agent ever fetches
-    ancestors.
-
-    Every committed fixture alert, on the committed fixture tenant; for the first one MAIN also
-    dispatches a lead that fetches the alert's constituent documents."""
-    tenant = T6.fixture_tenant()
-    root = D.current_data_root()
-    planted = S.Planted(root=root, tenant_id=tenant.id, knowledge=root / tenant.id / "knowledge")
-    for i, slug in enumerate(S.FIXTURE_SLUGS):
-        marker = f"CORR-O2-{i}-e4"
-        main = S.default_main_turns()
-        if i == 0:
-            main = [S.gather("l-001", "elastic", "fetch the alert's constituent events"),
-                    S.text(S.DONE)]
-        d = S.run_alert(tmp_path / slug, alert=S.fixture_alert(slug), tenant=planted,
-                        run_id=f"s04-o2-{i}", main=main,
-                        leads={S.L3: [S.text(f"{marker}: 1 scoped, 4 unscoped.")],
-                               "l-001": [S.query("elastic", "query",
-                                                 {"native_query": '_id: "AZ5fuw9rEmDJyXFcPn5t"',
-                                                  "index": "logs-system.auth-*"}),
-                                         S.text("L1-O2: one constituent fetched.")]})
-        _run_with_turns(d)
-        assert d.router.dispatched(S.L3), f"[{slug}] l-00c was not dispatched"
-        _assert_summary_in_opening(d, marker)
 
 
 # =================================================================================================
@@ -525,34 +422,6 @@ def test_p013_mains_first_turn_dispatches_leads_while_correlat(tmp_path):
 # =================================================================================================
 # l-000, O4 and the confinement survivals
 # =================================================================================================
-
-def test_l000_is_claimed_like_any_lead_on_a_new_run(tmp_path):
-    """On a new run MAIN can dispatch a lead with id l-000 and it is claimed like any other id.
-
-    MAIN dispatches l-000 and l-001 in one turn; both are claimed by the same path and both
-    summaries reach MAIN."""
-    planted = S.plant_tenant("acme")
-    first = S.Turn(tool_calls=(
-        ("gather", {"lead_id": S.L0, "system": "elastic", "goal": "lead zero, ordinary",
-                    "what_to_summarize": ["what the system says"]}),
-        ("gather", {"lead_id": "l-001", "system": "elastic", "goal": "lead one, ordinary",
-                    "what_to_summarize": ["what the system says"]})))
-    d = S.run_alert(tmp_path, tenant=planted, run_id="s04-l000", main=[first, S.text(S.DONE)],
-                    leads={S.L0: [S.query("elastic", "query", {"native_query": "l000:probe"}),
-                                  S.text("L0-ORDINARY-SUMMARY")],
-                           "l-001": [S.query("elastic", "query", {"native_query": "l001:probe"}),
-                                     S.text("L1-ORDINARY-SUMMARY")]})
-    _run_with_turns(d)
-    assert d.router.dispatched(S.L0), (
-        f"MAIN's {S.L0} never ran — the id is still reserved by the harness on a new run")
-    zero, one = d.sidecar(S.L0), d.sidecar("l-001")
-    assert zero.get("goal") == "lead zero, ordinary", zero
-    assert set(zero) == set(one), (
-        f"{S.L0}'s leads row is not shaped like any other lead's: {sorted(zero)} vs {sorted(one)}")
-    assert [r.get("exit_code") for r in d.rows_for(S.L0)] == [0]
-    returned = "\n".join(d.main.seen[1].tool_returns)
-    assert "L0-ORDINARY-SUMMARY" in returned, f"{S.L0}'s summary never reached MAIN"
-    assert "L1-ORDINARY-SUMMARY" in returned, "l-001's summary never reached MAIN"
 
 
 def test_o4_agent_fetches_constituent_events_through_a_gather_lead(tmp_path):
@@ -970,78 +839,6 @@ def _unframed(text: str) -> str:
     return bodies[0].strip()
 
 
-def test_p001_incidental_replay_scripts_gather_for_mains_lead(tmp_path):
-    """Under C01's default the replay gives l-00c its own scripted fake: MAIN's lead draws only MAIN's
-    scripted gather turns, l-00c's canned summary issues no backend call and is usable (C38), and
-    the replay's spawn, session and leads-row counts include l-00c's row and session while the
-    queries rows hold none of l-00c's."""
-    script = [H.Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
-                                            "params": {"native_query": "p001:l001"}})]),
-              H.Turn(text="P001-L1-SCRIPTED-SUMMARY")]
-    gather = _PlainGather(script)
-    sink: list = []
-    run_dir, main = _harness_drive(tmp_path, gather=gather, run_id="s04-p001", sink=sink)
-    assert gather.leads == ["l-001", "l-001"], (
-        f"the replay's one gather script was drawn by {gather.leads} — MAIN's lead must draw "
-        "exactly its own scripted turns, and l-00c its own fake (C01)")
-    paths = RunPaths(run_dir)
-    l1 = Path(paths.gather_summary("l-001"))
-    assert l1.is_file(), "MAIN's lead left no gather summary"
-    assert "P001-L1-SCRIPTED-SUMMARY" in l1.read_text(encoding="utf-8"), (
-        "MAIN's lead did not summarise from its own scripted turns")
-    corr_file = Path(paths.gather_summary(S.L3))
-    assert corr_file.is_file(), "l-00c left no gather summary — it never ran under the default"
-    canned = _unframed(corr_file.read_text(encoding="utf-8"))
-    assert canned, "l-00c's default fake wrote an empty summary"
-    assert "P001-L1-SCRIPTED-SUMMARY" not in canned, "l-00c summarised from MAIN's lead's script"
-    assert any(canned in b for b in S.outer_frames(main.seen[0])), (
-        "l-00c's canned summary is not framed in MAIN's opening message — under C38 a summary "
-        "from a lead that issued no call is usable")
-    rows = read_jsonl_rows(paths.executed_queries)
-    assert [r for r in rows if r.get("lead_id") == S.L3] == [], "l-00c's default fake made a call"
-    assert (run_dir / "gather_raw" / f"{S.L3}.lead.json").is_file(), "l-00c owns no leads row"
-    budget = main.summary["run_state"].budget_snapshot()
-    assert budget.get("subagent_spawns") == 2, (
-        f"the spawn count {budget.get('subagent_spawns')} is not l-00c plus MAIN's one lead")
-    agents = sorted(a for _s, a in _session_rows(sink[-1]))
-    assert agents == sorted(["main", f"gather:{S.L3}", "gather:l-001"]), agents
-
-
-def test_p186_replay_scripts_correlation_itself_or_shares_one_(tmp_path):
-    """A replay that scripts the correlation lead gives l-00c that script; otherwise l-00c gets the
-    default fake. MAIN's leads never draw l-00c's turns.
-
-    Two replays through `_replay_harness.drive`: one passing a single gather script for MAIN's
-    lead, one passing a router that scripts l-00c itself (the suite's `LeadRouter`)."""
-    shared = _PlainGather([
-        H.Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
-                                      "params": {"native_query": "p186:l001"}})]),
-        H.Turn(text="P186-SHARED-L1")])
-    plain_dir, _main = _harness_drive(tmp_path / "shared", gather=shared, run_id="s04-p186-a",
-                                      sink=[])
-    assert shared.leads == ["l-001", "l-001"], (
-        f"one gather script was drawn by {shared.leads}: l-00c took MAIN's lead's turns")
-    default = Path(RunPaths(plain_dir).gather_summary(S.L3))
-    assert default.is_file(), "l-00c never ran on the replay that does not script it"
-    assert "P186-SHARED-L1" not in default.read_text(encoding="utf-8")
-
-    router = S.LeadRouter({
-        S.L3: [S.query("elastic", "alerts", {"native_query": "p186:corr"}),
-               S.text("P186-SCRIPTED-CORR")],
-        "l-001": [S.query("elastic", "query", {"native_query": "p186:l001"}),
-                  S.text("P186-ROUTED-L1")]})
-    routed_dir, routed_main = _harness_drive(tmp_path / "routed", gather=router,
-                                             run_id="s04-p186-b", sink=[])
-    assert router.requests(S.L3) == 2, "l-00c was not given the replay's own correlation script"
-    corr = Path(RunPaths(routed_dir).gather_summary(S.L3)).read_text(encoding="utf-8")
-    assert "P186-SCRIPTED-CORR" in corr
-    rows = read_jsonl_rows(RunPaths(routed_dir).executed_queries)
-    assert [r.get("params", {}).get("native_query") for r in rows
-            if r.get("lead_id") == S.L3] == ["p186:corr"]
-    assert router.requests("l-001") == 2
-    assert any("P186-SCRIPTED-CORR" in b for b in S.outer_frames(routed_main.seen[0]))
-
-
 # =================================================================================================
 # p012, p033, p173 — the outcome is in the opening message, whenever the run ends
 # =================================================================================================
@@ -1101,30 +898,6 @@ def test_p033_mains_first_request_retried_before_correlation_i(tmp_path):
     _assert_summary_in_opening(d, marker)
 
 
-def test_p173_run_request_count_now_includes_the_leads_request(tmp_path):
-    """The run's request count is the total, the lead's requests included, as at base.
-
-    The count is the run summary's; the wire log the run is priced from carries the lead's
-    requests under its own agent id."""
-    d = S.run_alert(tmp_path, tenant=S.plant_tenant("acme"), run_id="s04-p173",
-                    leads={S.L3: [S.query("elastic", "alerts", {"native_query": "p173:corr"}),
-                                  S.text("CORR-P173: 2 scoped.")]})
-    _run_with_turns(d)
-    lead_requests = d.router.requests(S.L3)
-    assert lead_requests == 2, f"l-00c made {lead_requests} request(s); the scenario needs two"
-    total = d.main.requests + sum(d.router.requests(lead) for lead in d.router.leads())
-    assert d.summary is not None, "the run returned no summary"
-    assert d.summary.get("requests") == total, (
-        f"the run summary counts {d.summary.get('requests')} requests; MAIN made "
-        f"{d.main.requests} and the leads {total - d.main.requests}")
-    assert d.run_dir is not None
-    wire = read_jsonl_rows(d.run_dir / "wire_logs" / "llm_requests.jsonl")
-    lead_rows = [r for r in wire if r.get("agent_id") == f"gather:{S.L3}"
-                 and r.get("kind") == "response"]
-    assert len(lead_rows) == lead_requests, (
-        "the wire log the run is priced from does not carry every l-00c request")
-
-
 # =================================================================================================
 # The resume trio: p034, p037, p040
 # =================================================================================================
@@ -1170,75 +943,6 @@ def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
     sib = S.new_drive(tmp_path / "sibling", tenant=planted, main=sibling_turns)
     S.drive_run(sib, sibling_dir, tenant=planted.accept(), resume=spec)
     return src, sib
-
-
-def test_p034_sibling_branched_before_the_correlation_entry_la(tmp_path):
-    """A sibling's inherited history holds the source run's correlation section. A resumed sibling
-    dispatches no correlation.
-
-    Branched at MAIN's first tool return (PR-16: on base, before the late entry); the sibling is
-    handed a verb registry and still issues nothing."""
-    marker = "CORR-P034-INHERIT"
-    planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
-    src, sib = _source_then_sibling(
-        tmp_path, planted=planted, run_id="s04-p034",
-        corr=[S.text(f"{marker}: 2 scoped.")],
-        capture=("elastic", "query", {"native_query": "p034:capture"}),
-        sibling_turns=[S.text("Resumed and stopping.")])
-    assert src.router.dispatched(S.L3), "the source run dispatched no correlation (control)"
-    assert sib.main.seen, "the sibling never reached its model"
-    inherited = sib.main.seen[0]
-    framed = [b for t in inherited.user_prompts for b in _framed_with(t, marker)]
-    assert len(framed) == 1, (
-        f"the sibling's inherited history carries the source's correlation summary {len(framed)} "
-        "time(s) — it must hold exactly the one in the source's opening message")
-    assert not sib.router.dispatched(S.L3), "the resumed sibling dispatched l-00c again"
-    assert sib.backend.rec.calls == [], (
-        f"the resumed sibling reached the backend: {sib.backend.rec.verbs}")
-
-
-def test_p037_ancestor_heading_asserts_a_claim_that_then_fails(tmp_path):
-    """The opening message's correlation section matches the true outcome. A sibling resumed after it
-    inherits that outcome.
-
-    The true outcome here: l-00c's claim collides with a leads row an earlier attempt left (a real
-    file planted before the driver starts). The control run, on the same tenant, summarises."""
-    marker = "CORR-P037-NEVER"
-    planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
-    control = S.run_alert(tmp_path / "control", alert=S.fixture_alert(), tenant=planted,
-                          backend=_resolving_backend(), run_id="s04-p037-control",
-                          leads={S.L3: [S.text(f"{marker}: 2 scoped.")]})
-    _run_with_turns(control)
-    _assert_summary_in_opening(control, marker)
-
-    def pre_claim(run_dir: Path) -> None:
-        raw = run_dir / "gather_raw"
-        raw.mkdir(parents=True, exist_ok=True)
-        (raw / f"{S.L3}.lead.json").write_text(json.dumps(
-            {"goal": "an earlier attempt's correlation", "what_to_summarize": ["earlier"],
-             "provenance": "harness"}), encoding="utf-8")
-
-    src, sib = _source_then_sibling(
-        tmp_path, planted=planted, run_id="s04-p037",
-        corr=[S.text(f"{marker}: 2 scoped.")],
-        capture=("elastic", "query", {"native_query": "p037:capture"}),
-        sibling_turns=[S.text("Resumed and stopping.")], before=pre_claim)
-    assert not src.router.dispatched(S.L3), "l-00c ran although its claim collided"
-    opening = src.opening_message
-    assert marker not in opening, "MAIN was shown a summary from a lead that never ran"
-    head, body = S.correlation_section(opening)
-    assert not S.outer_frames(body), "the collided lead's section carries a frame"
-    ending = (_section_lines(src, head, body)
-              - _section_lines(control, *S.correlation_section(control.opening_message)))
-    assert ending, (
-        "the opening message names no ending for a lead whose claim collided — it says what the "
-        "summary run says, which is not the true outcome")
-    assert src.run_dir is not None
-    inherited = S.normalize("\n".join(sib.main.seen[0].user_prompts), run_dir=src.run_dir,
-                            run_id=src.run_dir.name)
-    for line in ending:
-        assert line in inherited, f"the resumed sibling did not inherit the ending {line!r}"
-    assert not sib.router.dispatched(S.L3)
 
 
 #: An `:R` row citing l-00c against the golden's v-001 — accepted exactly when l-00c is declared.

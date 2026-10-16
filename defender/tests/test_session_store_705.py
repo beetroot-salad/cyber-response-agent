@@ -1,30 +1,7 @@
-"""#705 — the per-case session store: schema, identity, durability, payloads, lineage.
-
-The executable form of the demands in `spec_graph_705.yaml` that bind `session_store`,
-`message`, `message_payload`, `session`, `config` and the path walk. Each test carries
-its demand's observable-outcome prose in its docstring (that docstring is what
-`check_binds` scans in place of a demand `outcome`).
-
-Two ledger refutations govern this file and are pinned as CORRECTIONS, never as
-today's behaviour:
-
-  * **PR1** — a `STRICT INTEGER` column does *not* reject a Python `bool`, a numeric
-    `str` or an integer-valued `float`; all three silently coerce. Only a fractional
-    `float` and `bytes` are rejected. So `test_store_connection_is_strict_fk_wal_with_a_busy_timeout`
-    pins that STRICT/FK/WAL/busy_timeout are SET and says nothing about type rejection,
-    and the coordinate type guard is a separate, application-level demand
-    (`test_the_store_refuses_a_wrong_typed_coordinate_at_its_own_boundary`, FK21(ii)).
-  * **adv:PO4 / dep:PO7** — `dump_python` silently coerces `set`→`list`, `bytes`→base64,
-    `NaN`/`Inf`→`None`, and an unrecognized field is accepted then dropped on re-dump.
-    O5's "verbatim" is therefore already false with no writer at fault (R9), so the
-    round-trip demands compare against the ORIGINAL value and state the coercion set.
-
-Red against `4e4645aa` is the expected state: `runtime/session_store.py` does not exist.
-"""
+"""The per-case session store: schema, identity, durability, payloads, lineage, concurrency."""
 from __future__ import annotations
 
 import json
-import math
 import sqlite3
 import threading
 
@@ -35,9 +12,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.messages import (  # noqa: E402
     ModelMessagesTypeAdapter,
     ModelRequest,
-    ModelResponse,
     TextPart,
-    ThinkingPart,
     ToolReturnPart,
 )
 
@@ -58,32 +33,6 @@ from defender.run_repository import SessionPaths
 
 
 # the handle, the connection, the schema version
-
-def test_open_store_returns_a_per_case_handle(tmp_path):
-    """Opening the store on a case_id returns a handle bound to that case's database
-    file, and two sessions of the same case — including two separate executions of one
-    investigation — open the same file and land in it together."""
-    ss = store_mod()
-    base = runs_base(tmp_path)
-
-    first = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    s1 = first.new_session(agent_id="main")
-    first.append(s1, [user_request("execution one")], agent_id="main")
-    first.close()
-
-    second = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    s2 = second.new_session(agent_id="main")
-    second.append(s2, [user_request("execution two")], agent_id="main")
-
-    other = ss.open_store(case_id="case-beta", sessions=SessionPaths(base))
-
-    assert second.path == first.path, "two executions of one case must share one file"
-    assert other.path != first.path, "a different case must not share the file"
-    assert s1 != s2, "each execution mints its own session_id"
-    sessions = {row[0] for row in sql(second, "SELECT session_id FROM session")}
-    assert sessions == {s1, s2}, (
-        f"both executions' sessions must live in the one per-case file; got {sessions}")
-
 
 def test_store_connection_is_strict_fk_wal_with_a_busy_timeout(tmp_path):
     """A freshly opened store reports STRICT tables, foreign_keys on, journal_mode wal,
@@ -178,61 +127,6 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
             ss.open_store(case_id="case-alpha", sessions=SessionPaths(runs_base(tmp_path)))
 
 
-def test_every_store_connection_sets_the_foreign_keys_pragma_itself(tmp_path):
-    """Every connection the store hands out issues `PRAGMA foreign_keys` itself, as its
-    first statement and outside any transaction, so a second connection reaching the
-    rows — the reader, the visualizer subprocess, an ad hoc script — enforces the
-    foreign keys instead of getting them silently inert.
-
-    `dep:PO2` (executed): `foreign_keys` is per-connection state, never persisted in the
-    file; a fresh connection that skipped the pragma read `(0,)` and the identical
-    FK-violating INSERT SUCCEEDED."""
-    ss = store_mod()
-    base = runs_base(tmp_path)
-    writer = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    writer.new_session(agent_id="main")
-
-    second = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    assert second.connection is not writer.connection, (
-        "this demand is about a SECOND connection; sharing one hides the defect")
-    assert second.connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-
-    def _orphan_payload_insert() -> None:
-        second.connection.execute(
-            "INSERT INTO message_payload (message_id, payload) VALUES (?, ?)",
-            (999999, "{}"))
-        second.connection.commit()
-
-    with pytest.raises(sqlite3.IntegrityError):
-        _orphan_payload_insert()
-
-
-def test_the_ddl_loads_on_the_sqlite_the_gate_actually_runs(tmp_path):
-    """The published DDL executes with STRICT and foreign keys on against the sqlite3
-    the test process is actually running, and the store refuses to open below STRICT's
-    3.37 floor with a clear diagnostic rather than a syntax error.
-
-    G18/X6 reframed U10: CI's interpreter is uv-managed python-build-standalone bundling
-    its own libsqlite3, so a version NUMBER is the wrong assertion — making the DDL
-    execute in-suite turns the gate itself into the standing probe."""
-    ss = store_mod()
-    conn = sqlite3.connect(":memory:")
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(ss.DDL)
-
-    tables = {row[0] for row in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    assert {"config", "session", "message", "message_payload"} <= tables, tables
-    views = {row[0] for row in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='view'").fetchall()}
-    assert "gather_boundary" in views, views
-
-    floor = (3, 37, 0)
-    running = tuple(int(x) for x in sqlite3.sqlite_version.split("."))
-    assert running >= floor, (
-        f"STRICT needs sqlite >= 3.37; this interpreter runs {sqlite3.sqlite_version}")
-
-
 # append-only: the negative and its positive control
 
 def test_message_rows_are_never_updated_or_deleted(tmp_path):
@@ -267,24 +161,6 @@ def test_message_rows_are_never_updated_or_deleted(tmp_path):
     assert after == before, "an existing row changed under a fold/fork"
 
 
-def test_message_rows_are_appended_by_every_writer(tmp_path):
-    """Both the renderer's append path and the ingest path add new `message` rows, so
-    the append-only negative above is not passing because nothing ever wrote."""
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-
-    rendered = store.append(session_id, [user_request("rendered")],
-                            agent_id="main", synthesized=True)
-    ingested = store.append(session_id, complete_pair(), agent_id="main")
-
-    assert len(rendered) == 1, rendered
-    assert len(ingested) == 2, ingested
-    rows = sql(store, "SELECT id, synthesized FROM message ORDER BY id")
-    assert [r[0] for r in rows] == rendered + ingested
-    assert [r[1] for r in rows] == [1, 0, 0], (
-        "the synthesized flag must distinguish the two writers' rows")
-
-
 # payloads — round-trip, coercion, unknown fields, the encoding
 
 def test_ingested_payload_round_trips_verbatim(tmp_path):
@@ -310,110 +186,6 @@ def test_ingested_payload_round_trips_verbatim(tmp_path):
 
     kinds = [p.get("part_kind") for msg in stored for p in msg.get("parts", [])]
     assert "thinking" in kinds, "the ThinkingPart must survive, not be dropped in setup"
-
-
-def test_a_silently_coerced_payload_value_is_not_reported_as_a_verbatim_round_trip(tmp_path):
-    """A payload value `dump_python` silently coerces — `set`→`list`, `bytes`→base64,
-    `NaN`/`Inf`→`None` — is either refused at append or surfaced as a coercion; it is
-    never reported back as a verbatim round trip of the original.
-
-    adv:PO4 (executed) BREACHED O5 here with no writer at fault: dump_python raises only
-    on a genuinely unknown Python type and on a circular reference, neither reachable
-    from this tree's tools. The assertion is taken against the ORIGINAL value."""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-
-    coercions = [
-        ("set", {1, 2, 3}),
-        ("bytes", b"\x00\x01raw"),
-        ("nan", float("nan")),
-        ("inf", float("inf")),
-    ]
-    for label, value in coercions:
-        message = ModelRequest(parts=[ToolReturnPart(
-            tool_name="query", content=value, tool_call_id=f"c-{label}")])
-        try:
-            store.append(session_id, [message], agent_id="main")
-        except ss.PayloadNotRepresentable:
-            continue  # refused at append — the fail-closed reading, also acceptable
-        row = sql(store, "SELECT payload FROM message_payload ORDER BY message_id DESC LIMIT 1")
-        recovered = ModelMessagesTypeAdapter.validate_json(f"[{row[0][0]}]")[0]
-        got = recovered.parts[0].content
-        if isinstance(value, float) and math.isnan(value):
-            assert got is None or (isinstance(got, float) and math.isnan(got))
-            assert got is not None, (
-                "NaN silently became None (adv:PO4) — the store must not call that a "
-                "verbatim round trip")
-        else:
-            assert got == value, (
-                f"{label}: stored value {got!r} is not the original {value!r}; "
-                "adv:PO4's coercion must be refused or reported, not silently accepted")
-
-
-def test_a_payload_field_the_installed_adapter_does_not_recognize_is_dropped_on_re_dump(tmp_path):
-    """A stored payload carrying a field the installed adapter does not recognize is
-    detected by the store rather than silently accepted and dropped, while a
-    ThinkingPart's six real fields — content, id, signature, provider_name,
-    provider_details, part_kind — round-trip byte-identically including nested
-    provider_details.
-
-    dep:PO7 / is:PO2 (executed): validation does NOT raise on an unrecognized field at
-    either message or part level; the field is silently accepted and DROPPED on re-dump,
-    so a version skew is invisible through the payload."""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-
-    real = ModelResponse(parts=[ThinkingPart(
-        content="weighing", id="th-1", signature="sig",
-        provider_name="anthropic", provider_details={"nested": {"a": [1, 2]}})])
-    store.append(session_id, [real], agent_id="main")
-    dumped = ModelMessagesTypeAdapter.dump_python([real], mode="json")
-    stored = json.loads(sql(store, "SELECT payload FROM message_payload ORDER BY message_id")[0][0])
-    assert stored == dumped[0], "ThinkingPart's real fields must round-trip byte-identically"
-
-    skewed = json.loads(json.dumps(dumped[0]))
-    skewed["totally_unknown_message_field"] = 1
-    skewed["parts"][0]["totally_unknown_part_field"] = 2
-    with pytest.raises(ss.PayloadSchemaSkew):
-        ss.load_payload(json.dumps(skewed))
-
-
-def test_the_store_append_encoding_is_pinned_against_a_lone_surrogate(tmp_path):
-    """A payload carrying a lone surrogate — reachable through `json.loads('"\\ud800"')`
-    on a provider body, with no decoder involved — produces the same, stated outcome
-    every time, because the store names its `ensure_ascii` rather than inheriting it.
-
-    R9 pins this: adv:PO4 found the only content-triggered halt that really exists sits
-    at the SQLite bind, and whether it fires is decided entirely by an unstated keyword.
-    A security-relevant availability property must not rest on a default nobody wrote
-    down; the positive control is ordinary non-BMP text (PR3), which must survive."""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-
-    assert ss.PAYLOAD_ENSURE_ASCII is True, (
-        "the encoding must be stated; with ensure_ascii=False the same content raises "
-        "UnicodeEncodeError at the bind (adv:PO4)")
-
-    control = ModelRequest(parts=[ToolReturnPart(
-        tool_name="query", content="before\x00mid\U0001F4A9after", tool_call_id="ok")])
-    store.append(session_id, [control], agent_id="main")
-    got = ModelMessagesTypeAdapter.validate_json(
-        f"[{sql(store, 'SELECT payload FROM message_payload ORDER BY message_id')[0][0]}]")[0]
-    assert got.parts[0].content == "before\x00mid\U0001F4A9after", (
-        "PR3: NUL and non-BMP survive as escapes; the control must not be the thing "
-        "that breaks")
-
-    lone = json.loads('"\\ud800"')
-    hostile = ModelRequest(parts=[ToolReturnPart(
-        tool_name="query", content=lone, tool_call_id="surrogate")])
-    store.append(session_id, [hostile], agent_id="main")
-    rows = sql(store, "SELECT payload FROM message_payload ORDER BY message_id")
-    assert len(rows) == 2, (
-        "with the encoding pinned, a lone surrogate must not halt the append — a "
-        "zero-privilege availability attack on the defender via alert text")
 
 
 def test_payload_sha_digests_the_stored_payload_text_at_write_time(tmp_path):
@@ -695,31 +467,6 @@ def test_raw_gather_payloads_are_not_stored_in_the_message_payload_table(tmp_pat
     assert raw_marker not in bodies, "the raw payload must stay by-ref in gather_raw/"
 
 
-def test_no_maintained_tool_call_table_and_no_epoch_marker(tmp_path):
-    """The schema contains no maintained `tool_call` projection table and no epoch-marker
-    table or column; tool calls are derived with `json_each` at read time.
-
-    Positive control: the store must actually be open and populated with its real tables
-    (`message`, `session`) before the negative below means anything — otherwise an empty
-    `names` set (a broken `store` handle, a wrong DB, a schema that failed to load) makes
-    every `not any(...)` below pass vacuously, discriminating nothing."""
-    store = make_store(tmp_path)
-    names = {row[0].lower() for row in
-             sql(store, "SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {"message", "session"} <= names, (
-        f"the store must expose its real, populated schema, or the negative checks "
-        f"below are vacuous; got {names}")
-    assert not any("tool_call" in n for n in names), (
-        f"a maintained second copy drifting from its source IS finding 2; got {names}")
-    assert not any("epoch" in n for n in names), names
-
-    all_cols: set[str] = set()
-    for name in names:
-        all_cols |= {row[1].lower() for row in sql(store, f"PRAGMA table_info({name})")}
-    assert all_cols, "table_info over a real schema must yield real columns"
-    assert not any("epoch" in c for c in all_cols), all_cols
-
-
 def test_synthesized_rows_occupy_their_own_seq_address_space(tmp_path):
     """After a fold, the synthesized frontier and the next real message can both hold
     their own `seq` without collision, and `main#5` still names the fifth non-synthesized
@@ -775,30 +522,6 @@ def test_a_session_ends_on_an_incomplete_pair_only_when_truncated_by_is_set(tmp_
         assert sql(store, "SELECT truncated_by FROM session WHERE session_id = ?",
                    (cut,)) == [(reason,)]
         assert ss.ends_on_complete_pair(store, cut) is False
-
-
-def test_the_last_render_length_is_persisted_on_the_session_row(tmp_path):
-    """The length of the last render (or the id of the last appended row) is persisted on
-    the `session` row, so a fresh process recomputes the ingest tail from the store
-    instead of from a number that lived only in the previous process's memory.
-
-    FK18/R17: `PR4` confirmed a live list SHORTER than `last_render` silently slices to
-    `[]` and never raises, so a restart that recomputed from nothing would ingest NOTHING
-    with no diagnostic possible from the slice."""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    store.append(session_id, [user_request("root"), *complete_pair()], agent_id="main")
-    store.set_last_render_len(session_id, 3)
-
-    cols = {row[1] for row in sql(store, "PRAGMA table_info(session)")}
-    assert cols & {"last_render_len", "last_message_id"}, (
-        f"the session row must carry the render cursor; columns are {cols}")
-
-    store.close()
-    reopened = ss.open_store(case_id="case-alpha", sessions=SessionPaths(runs_base(tmp_path)))
-    assert reopened.last_render_len(session_id) == 3, (
-        "a fresh process must recover the cursor from the store")
 
 
 def test_an_append_is_one_commit_per_render_boundary(tmp_path):

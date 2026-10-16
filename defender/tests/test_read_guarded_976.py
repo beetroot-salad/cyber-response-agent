@@ -1,16 +1,4 @@
-"""`_io.read_guarded` — the read-side twin of the write seam (#976).
-
-WHY THIS SEAM EXISTS. Every read of a path inside a run dir, an episode dir or the drain
-corpus is a read from a tree a live box is root on, so an entry at an expected artifact's name
-may be something the model planted. The write side has had ONE seam for that since M3; the
-read side had a per-module habit, and the habit was wrong twice in one file inside a single
-change — no screen at all, then an `S_ISREG` screen that admitted a hard link. Two guards on
-one path that do not match is not a defect you fix once, which is what makes it a function.
-
-The arms below are the refusal set. Each is paired with the write side asking the same
-question, because "twins" is the claim and a test that only exercised one half would let them
-drift apart exactly as the comment they replaced did.
-"""
+"""`_io.read_guarded`: refuses symlinks, hard links, non-regular files, and never leaks a descriptor."""
 from __future__ import annotations
 
 import contextlib

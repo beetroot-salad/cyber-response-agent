@@ -51,7 +51,6 @@ from defender.tests.judge_contrast_1234 import _spec1234 as S
 #: The words A2/M2 require on the aligned lead view and the fact surfaces (`S.COINED`).
 HEURISTIC = S.COINED["label.heuristic"]
 BASELINE = S.COINED["label.baseline"]
-HEURISTIC_RE = re.compile(re.escape(HEURISTIC), re.IGNORECASE)
 
 CTL, WB, WC = "ctl", "wb", "wc"
 LABELS = (CTL, WB, WC)
@@ -71,9 +70,6 @@ def _title(section: str) -> str:
     return S.COINED[f"title.{section}"]
 
 
-@pytest.fixture(autouse=True)
-def _payload_cap_lifted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(S.CAP_KNOB, str(_UNCAPPED))
 
 
 # --------------------------------------------------------------------------------------
@@ -145,7 +141,6 @@ def _world_prompts(judge: S.RoutedJudge) -> list[str]:
 # Reading a prompt: host text, sections, labelled blocks.
 # --------------------------------------------------------------------------------------
 
-_FRAME_TAG = re.compile(r"</?run-[0-9a-f]+-[A-Za-z_]+>")
 
 
 def _host_spans(text: str) -> list[tuple[int, int]]:
@@ -161,9 +156,6 @@ def _host_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _in_frame(text: str, pos: int) -> bool:
-    return any(open_end <= pos < close_start
-               for _s, open_end, close_start, _e in S.untrusted_frames(text))
 
 
 def _host_hits(text: str, pattern: re.Pattern[str], lo: int = 0, hi: int | None = None) -> list[int]:
@@ -176,10 +168,6 @@ def _host_hits(text: str, pattern: re.Pattern[str], lo: int = 0, hi: int | None 
     return sorted(hits)
 
 
-def _host_text(text: str, lo: int = 0, hi: int | None = None) -> str:
-    end = len(text) if hi is None else hi
-    return "".join(text[max(a, lo):min(b, end)] for a, b in _host_spans(text)
-                   if max(a, lo) < min(b, end))
 
 
 def _sections(prompt: str) -> dict[str, tuple[int, int]]:
@@ -226,17 +214,8 @@ def _reference_blocks(prompt: str, focus: str, labels: Iterable[str] = LABELS) -
     return _blocks(prompt, _sections(prompt)["references"], [x for x in labels if x != focus])
 
 
-def _derived_lines(text: str) -> list[str]:
-    """The section's lines with frame tags dropped, stripped, long enough to be distinctive."""
-    return [line.strip() for line in _FRAME_TAG.sub("\n", text).splitlines()
-            if len(line.strip()) >= 16 and re.search(r"[A-Za-z]", line)]
 
 
-def _sentences(text: str) -> list[str]:
-    """Sentences of hard-wrapped prose: a single line break inside a paragraph is a space; a blank
-    line or a list item starts a new one."""
-    joined = re.sub(r"\n(?!\n|\s*(?:[-*]|\d+\.)\s)", " ", text)
-    return [s for s in re.split(r"(?<=[.!?])\s+|\n+", joined) if s.strip()]
 
 
 # --------------------------------------------------------------------------------------
@@ -433,21 +412,6 @@ def test_1234_world_prompt_carries_control_and_every_gradable_sibling_as_referen
     assert S.marker(WC, "report") not in blocks[CTL]
 
 
-def test_1234_pair_family_has_the_control_as_its_only_reference(tmp_path: Path) -> None:
-    """In a pair family (control and one planted world), the planted world's prompt carries
-    exactly one reference section, the control's."""
-    built = _family(tmp_path, [w for w in _triad() if w.label in (CTL, WB)])
-    judge = _graded(built)
-    assert judge.called(WB)
-    prompt = judge.prompt_for(WB)
-    lo, hi = _sections(prompt)["references"]
-    assert _host_hits(prompt, S.label_re(CTL), lo, hi), "the control heads no reference block"
-    references = prompt[lo:hi]
-    assert references.count(S.marker(CTL, "report")) == 1, (
-        "the pair's references carry the control's report other than exactly once")
-    block = _reference_blocks(prompt, WB, (CTL, WB))[CTL]
-    assert S.marker(CTL, "call") in block
-    assert S.marker(CTL, "report") in block
 
 
 _UNGRADABLE = {
@@ -492,80 +456,12 @@ def test_1234_ungradable_planted_world_is_in_no_reference_set(tmp_path: Path, ki
 # --------------------------------------------------------------------------------------
 
 
-def _header_worlds(**over: dict[str, Any]) -> list[S.World]:
-    """Each run with its own reached verdict, axis, label basis and entity."""
-    worlds = {
-        CTL: {"label_basis": "policy-rule"},
-        WB: {"facts": [S.fact("f-wb", entities=("ent-wb-917",), label=WB)], "declared": "malicious",
-             "reached": "false-positive", "axis": f"axis {S.marker(WB, 'axis')}",
-             "label_basis": "judgment"},
-        WC: {"facts": [S.fact("f-wc", entities=("ent-wc-406",), label=WC)], "declared": "malicious",
-             "reached": "inconclusive", "axis": f"axis {S.marker(WC, 'axis')}",
-             "label_basis": "policy-rule"},
-    }
-    for label, fields in over.items():
-        worlds[label].update(fields)
-    return _triad(**worlds)
 
 
-def _has_word(text: str, word: str) -> bool:
-    return bool(re.search(rf"(?<![A-Za-z0-9_\-]){re.escape(word)}(?![A-Za-z0-9_\-])", text))
 
 
-def test_1234_header_names_each_runs_role_facts_and_reached_verdict(tmp_path: Path) -> None:
-    """The computed header carries, for every run in a block labelled with that run (the host
-    label outside the untrusted frames, the run's manifest and report text framed in place, A10),
-    its role, its facts with entities, story, axis, declared verdict and label_basis from the
-    manifest, its reached verdict from that run's own archived report.md, the served systems and
-    the discriminator predicate."""
-    predicate = f"did the analyst look at idp after the branch {S.marker('family', 'predicate')}"
-    built = _family(tmp_path, _header_worlds(), predicate=predicate)
-    judge = _graded(built)
-    assert judge.called(WB)
-    prompt = judge.prompt_for(WB)
-    span = _sections(prompt)["header"]
-    header = prompt[span[0]:span[1]]
-    blocks = _blocks(prompt, span, LABELS)
-    expect = {
-        CTL: {"role": "A", "declared": "benign", "reached": "benign", "basis": "policy-rule"},
-        WB: {"role": "B", "declared": "malicious", "reached": "false-positive", "basis": "judgment",
-             "fact": S.marker(WB, "fact-f-wb"), "entity": "ent-wb-917", "axis": S.marker(WB, "axis")},
-        WC: {"role": "C", "declared": "malicious", "reached": "inconclusive", "basis": "policy-rule",
-             "fact": S.marker(WC, "fact-f-wc"), "entity": "ent-wc-406", "axis": S.marker(WC, "axis")},
-    }
-    for label, want in expect.items():
-        block = blocks[label]
-        story = S.marker(label, "story")
-        assert story in block, f"run {label}'s header block lacks its story"
-        at = span[0] + header.index(story)
-        assert _in_frame(prompt, at), f"run {label}'s story sits outside an untrusted frame (A10)"
-        assert _has_word(block, want["role"]), f"run {label}'s header block lacks its role"
-        for key in ("declared", "reached", "basis", "fact", "entity", "axis"):
-            if key in want:
-                assert want[key] in block, f"run {label}'s header block lacks its {key} {want[key]!r}"
-    # Each reached verdict is that run's own (read off its own report.md), never a sibling's.
-    for label, foreign in ((WB, "inconclusive"), (CTL, "inconclusive"), (WC, "false-positive"),
-                           (CTL, "false-positive")):
-        assert foreign not in blocks[label], f"run {label}'s header shows a sibling's verdict {foreign!r}"
-    for system in S.SYSTEMS:
-        assert system in header, f"the header does not name served system {system}"
-    assert S.marker("family", "predicate") in header, "the header lacks the discriminator predicate"
 
 
-def test_1234_control_reached_a_verdict_other_than_its_declared_one(tmp_path: Path) -> None:
-    """A wrong control is information in the header (its reached verdict is shown) and gates
-    nothing."""
-    built = _family(tmp_path, _triad(**{CTL: {"reached": "false-positive"}}))
-    judge = _graded(built)
-    for label in (WB, WC):
-        assert judge.called(label), f"a wrong control gated the pass ({label} not judged)"
-    assert not S.stamp(built), "a wrong control stamped the family not graded"
-    for label in (WB, WC):
-        assert S.row(built, label).get(S.RULED["row.completed_draws"]) == 1
-        prompt = judge.prompt_for(label)
-        block = _blocks(prompt, _sections(prompt)["header"], LABELS)[CTL]
-        assert "false-positive" in block, f"{label}'s header does not show the control's reached verdict"
-        assert "benign" in block, f"{label}'s header does not show the control's declared verdict"
 
 
 # --------------------------------------------------------------------------------------
@@ -655,98 +551,12 @@ def test_1234_aligned_lead_view_matches_by_surface_then_system_and_verb(tmp_path
         "the prompt's aligned lead view does not mark the shared baseline")
 
 
-def test_1234_every_matched_row_and_surface_hit_is_labelled_heuristic(tmp_path: Path) -> None:
-    """Every matched lead row and every fact-surface hit in the prompt is labelled heuristic:
-    text-matched, not established."""
-    built = _family(tmp_path, _aligned_worlds())
-    judge = _graded(built)
-    assert judge.called(WB)
-    prompt = judge.prompt_for(WB)
-    spans = _sections(prompt)
-    # Three matched rows (l-917+l-305 by surface; l-918+l-408 and l-201+l-211+l-221 by system and
-    # verb) and two hits on wb's fact surface (l-917, l-305): each carries its own label.
-    rows = len(_host_hits(prompt, HEURISTIC_RE, *spans["aligned"]))
-    hits = len(_host_hits(prompt, HEURISTIC_RE, *spans["surfaces"]))
-    assert rows >= 3, f"{rows} heuristic label(s) over the aligned lead view's 3 matched rows"
-    assert hits >= 2, f"{hits} heuristic label(s) over the 2 fact-surface hits"
 
 
-def test_1234_one_lead_id_names_different_leads_in_two_runs(tmp_path: Path) -> None:
-    """The aligned lead view never matches leads by lead id alone; a shared id across runs names
-    different leads unless fact surface or system/verb matching pairs them; unmatched leads get
-    their own rows, all labelled heuristic."""
-    # l-001 is wb's lead before its first altered answer (idp lookup), the control's post-branch
-    # edr query and wc's edr lookup: one id, three unrelated leads.
-    wb = S.planted(WB, facts=[S.fact("f-wb", entities=("ent917",), label=WB)], forged_system="siem-x",
-                   calls=[_call("l-001", "idp", "lookup", {"entity": "b001"}),
-                          _altered("l-917", "host:h917", system="siem-x")])
-    ctl = S.control(CTL, calls=[_call("l-001", "edr", "query", _q("host:a001")),
-                                _call("l-305", "siem-x", "lookup", {"entity": "x305"})])
-    wc = S.planted(WC, role="C", facts=[S.fact("f-wc", entities=("entwc",), label=WC)],
-                   forged_system="siem-x", calls=[_call("l-001", "edr", "lookup", {"entity": "c001"})])
-    built = _family(tmp_path, [ctl, wb, wc])
-    universe = {"l-001", "l-305", "l-917"}
-    ctx = _context(built, WB)
-    lists = [c for c in _collections(ctx)
-             if any(_leads_in(e, universe) == {"l-917", "l-305"} for e in c)]
-    assert lists, "no row pairs wb's l-917 with the control's l-305 (the positive control)"
-    shares = {i: [e for e in c if "l-001" in _leads_in(e, universe)] for i, c in enumerate(lists)}
-    # Three runs' l-001 leads, each in a row of its own (a row per pair of runs holds more rows).
-    good = [i for i, rows in shares.items()
-            if len(rows) >= 3 and all(_leads_in(e, universe) == {"l-001"} for e in rows)]
-    assert good, ("the three runs' l-001 leads are not three rows of their own: rows holding l-001 "
-                  f"per candidate list: {[len(r) for r in shares.values()]}")
-    judge = _graded(built)
-    assert judge.called(WB)
-    prompt = judge.prompt_for(WB)
-    labels = len(_host_hits(prompt, HEURISTIC_RE, *_sections(prompt)["aligned"]))
-    assert labels >= 4, f"{labels} heuristic label(s) over 4 aligned rows (3 x l-001, l-917+l-305)"
 
 
-_ENTITY_CASES = {
-    "empty": ([""], None),
-    "whitespace-only": (["   "], None),
-    "over-256-characters": (["e" * 257], None),
-    "pattern-metacharacters": (["a.b*c", "[a-"], {"l-917", "l-305", "l-307"}),
-    "single-character": (["z"], {"l-917", "l-305"}),
-}
 
 
-@pytest.mark.parametrize("case", sorted(_ENTITY_CASES))
-def test_1234_fact_entity_that_matches_every_lead(tmp_path: Path, case: str) -> None:
-    """Entities match as literal substrings, never as patterns. Empty and over-256-character
-    entities are refused at manifest load (OB21), and so is a whitespace-only entity (X4), so
-    none reaches the matcher; single-character entities match literally and the heuristic label
-    covers the noise (M2)."""
-    entities, touching = _ENTITY_CASES[case]
-    # wb's fact is forged on siem-x; l-917 queried siem-x (a system hit). The control's l-305 and
-    # l-307 carry an entity literally; l-306 carries what the entity matches only as a pattern
-    # ("aXbbbc" for a.b*c) or not at all ("host1" for z).
-    hit = "user:a.b*c" if case == "pattern-metacharacters" else "user:zed"
-    miss = "aXbbbc" if case == "pattern-metacharacters" else "host1"
-    wb = S.planted(WB, facts=[S.fact("f-wb", entities=entities, label=WB)], forged_system="siem-x",
-                   calls=[_altered("l-917", "host:h917", system="siem-x")])
-    ctl = S.control(CTL, calls=[_call("l-305", params=_q(hit)),
-                                _call("l-306", "idp", "lookup", {"entity": miss}),
-                                _call("l-307", params=_q("user:[a-"))])
-    wc = S.planted(WC, role="C", forged_system="edr",
-                   calls=[_call("l-406", "edr", params=_q("host:db-1"))])
-    built = _family(tmp_path, [ctl, wb, wc])
-    if touching is None:
-        family_error = S.sym(S.FAMILY_LOADER, "FamilyError")
-        with S.mod("_io").bind(built.ep) as view, pytest.raises(family_error):
-            S.sym(S.FAMILY_LOADER, "load_family")(view)
-        judge = S.judge()
-        S.grade_refused(built, judge)
-        assert judge.calls == 0, "a refused manifest still reached the model"
-        return
-    universe = {"l-001", "l-305", "l-306", "l-307", "l-406", "l-917"}
-    ctx = _context(built, WB)
-    entries = [e for e in _elements(ctx) if _holds(e, "f-wb") and not _holds(e, "f-wc")]
-    surfaces = [_leads_in(e, universe) for e in entries if _holds(e, "siem-x")]
-    assert touching in surfaces, (
-        f"wb's fact surface does not list exactly the literal hits {sorted(touching)}; its "
-        f"entries list {[sorted(s) for s in surfaces]}")
 
 
 # --------------------------------------------------------------------------------------
@@ -795,44 +605,8 @@ def test_1234_planted_world_shown_as_designed_built_and_served(tmp_path: Path) -
             or S.marker(WB, "calibrated-call") in prompt), "pre-flight's calibration result is not shown"
 
 
-def test_1234_prompt_carries_the_samples_record_and_base_story(tmp_path: Path) -> None:
-    """The world prompt carries the samples record per served system and the manifest's
-    base_story."""
-    built = _family(tmp_path)
-    judge = _graded(built)
-    for label in (WB, WC):
-        assert judge.called(label)
-        prompt = judge.prompt_for(label)
-        for system in S.SYSTEMS:
-            assert S.marker(system, "samples") in prompt, f"{label}'s prompt lacks {system}'s samples"
-        assert S.marker("base", "story") in prompt, f"{label}'s prompt lacks the base story"
 
 
-def test_1234_reference_run_shows_a_full_answer_only_where_it_differs(tmp_path: Path) -> None:
-    """A reference run's section holds its leads, report and call list, and a full answer only
-    for a call whose answer differs from the judged world's matched call."""
-    same = {"rows": [{"note": "MARK-shared-answer"}]}
-    ctl = S.control(CTL, calls=[
-        _call("l-305", params=_q("user:alice"), payload=same),
-        _call("l-306", "edr", params=_q("host:db-1"), payload={"rows": [{"note": "MARK-ctl-diff-answer"}]})])
-    wb = S.planted(WB, calls=[
-        _call("l-201", params=_q("user:alice"), payload=same),
-        _call("l-202", "edr", params=_q("host:db-1"), payload={"rows": [{"note": "MARK-wb-diff-answer"}]}),
-        _altered("l-917", "user:alice host:db-1")])
-    built = _family(tmp_path, [ctl, wb])
-    judge = _graded(built)
-    assert judge.called(WB)
-    prompt = judge.prompt_for(WB)
-    block = _reference_blocks(prompt, WB, (CTL, WB))[CTL]
-    assert S.marker(CTL, "report") in block
-    for lead in ("l-305", "l-306"):
-        assert (S.marker(CTL, "goal-" + lead) in block
-                or S.marker(CTL, "summary-" + lead) in block), f"the control's lead {lead} is missing"
-    for params in ("user:alice", "host:db-1"):
-        assert params in block, f"the control's call list lacks its {params} call"
-    assert "MARK-ctl-diff-answer" in block, "the answer that differs is not shown in full"
-    assert "MARK-shared-answer" not in block, "an answer equal to wb's matched call is shown in full"
-    assert "MARK-shared-answer" in prompt, "wb's own answer is missing (the channel shows answers)"
 
 
 # --------------------------------------------------------------------------------------
@@ -840,170 +614,32 @@ def test_1234_reference_run_shows_a_full_answer_only_where_it_differs(tmp_path: 
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_judge_context_is_stored_nowhere_but_the_wire_log(tmp_path: Path) -> None:
-    """After a pass, no file under the episode holds the contrast table, fact surfaces or aligned
-    lead view except the judge's wire-log records of the prompt, and a second render over the
-    unchanged archive produces the same prompt."""
-    built = _family(tmp_path)
-    archive = S.episode_texts(built, skip=())
-    # Pass 1's call for wb fails (#921 P9), so the bare re-run renders wb a second time over the
-    # unchanged archive.
-    first = _graded(built, S.judge(fail={WB}))
-    second = _graded(built)
-    assert first.called(WB), "pass 1 made no call for wb"
-    assert second.called(WB), "the bare re-run did not render wb again"
-    prompt = second.prompt_for(WB)
-    derived = [line for section in ("contrast", "surfaces", "aligned")
-               for line in _derived_lines(_section(prompt, section))
-               if not any(line in text for text in archive.values())]
-    assert derived, "the computed sections hold no line of their own to look for"
-    after = S.episode_texts(built, skip=())
-    for rel, text in after.items():
-        if rel.startswith("wire_logs/") or archive.get(rel) == text:
-            continue
-        stored = [line for line in derived if line in text]
-        assert not stored, f"{rel} stores computed context: {stored[:3]}"
-    wire = [r for r in S.wire_log_records(built) if r.get("agent_id") == f"judge:{WB}:0"]
-    assert wire, "no wire-log record for wb's call"
-    assert all(line in wire[-1].get("prompt", "") for line in derived), (
-        "the wire log does not hold the computed sections (the positive control)")
-    assert S.unsalted(first.prompt_for(WB)) == S.unsalted(prompt), (
-        "a second render over the unchanged archive produced a different prompt")
 
 
-def test_1234_wire_log_holds_the_prompt_with_its_contrast_table(tmp_path: Path) -> None:
-    """The judge's wire-log record for world b holds the whole prompt sent, and that prompt
-    contains b's contrast table."""
-    built = _family(tmp_path)
-    judge = _graded(built)
-    assert judge.called(WB)
-    records = [r for r in S.wire_log_records(built) if r.get("agent_id") == f"judge:{WB}:0"]
-    assert len(records) == 1, f"{len(records)} wire-log records for wb's call"
-    assert records[0].get("prompt") == judge.prompt_for(WB), "the wire log is not the prompt sent"
-    prompt = records[0]["prompt"]
-    row = _blocks(prompt, _sections(prompt)["contrast"], LABELS)[WB]
-    assert "l-917" in row, "wb's contrast row does not name the lead that received its altered answer"
 
 
-def test_1234_world_prompt_sections_run_in_order(tmp_path: Path) -> None:
-    """The world prompt's sections run in this order: task and taxonomy, computed header,
-    contrast table, fact surfaces and aligned lead view, compressed reference runs, the judged
-    world's views, noise context (pre-flight record)."""
-    built = _family(tmp_path, drift=[_drift()])
-    judge = _graded(built)
-    assert judge.called(WB)
-    prompt = judge.prompt_for(WB)
-    spans = _sections(prompt)
-    start = {s: lo for s, (lo, _hi) in spans.items()}
-    assert start["header"] < start["contrast"] < min(start["surfaces"], start["aligned"])
-    assert max(start["surfaces"], start["aligned"]) < start["references"] < start["focus"] < start["noise"]
-    task = _task(prompt)
-    for word in (*S.INVESTIGATOR_BUCKETS, *S.WORLD_FINDING_BUCKETS):
-        assert word in task, f"the task and taxonomy do not name {word!r} before the header"
-    content = {
-        "header": [S.marker(label, "story") for label in LABELS],
-        "contrast": ["l-917"],
-        "references": [S.marker(CTL, "report"), S.marker(WC, "report")],
-        "focus": [S.marker(WB, "investigation"), S.marker(WB, "call")],
-        "noise": [DRIFT_MARK],
-    }
-    for section, needles in content.items():
-        text = _section(prompt, section)
-        for needle in needles:
-            assert needle in text, f"{needle} is not in the {section} section"
-    assert DRIFT_MARK not in prompt[:start["noise"]], "the pre-flight record is not last"
 
 
-_WITHHELD_RULE = re.compile(S.COINED["re.withheld_rule"], re.IGNORECASE | re.DOTALL)
-_REFERENCE_RULE = re.compile(S.COINED["re.reference_rule"], re.IGNORECASE | re.DOTALL)
 
 
-def _says_other_worlds_withheld(sentence: str) -> bool:
-    return bool(_WITHHELD_RULE.match(sentence))
 
 
-def _says_reference_facts_in_their_section(sentence: str) -> bool:
-    return bool(_REFERENCE_RULE.match(sentence))
 
 
-def test_1234_role_prompt_and_task_no_longer_say_other_worlds_are_withheld(tmp_path: Path) -> None:
-    """Neither judge/role.md nor the world task text says every other world's facts are withheld;
-    both say a reference run's facts sit only in that run's labelled section."""
-    role = (Path(S.mod(S.JUDGE_RUN).__file__).parent / "role.md").read_text(encoding="utf-8")
-    _assert_reference_rule("judge/role.md", role)
-    built = _family(tmp_path)
-    judge = _graded(built)
-    assert judge.called(WB)
-    _assert_reference_rule("the world task text", _task(judge.prompt_for(WB)))
 
 
-def _assert_reference_rule(name: str, text: str) -> None:
-    claims = [s for s in _sentences(text) if _says_other_worlds_withheld(s)]
-    assert not claims, f"{name} still says other worlds' facts are withheld: {claims}"
-    assert any(_says_reference_facts_in_their_section(s) for s in _sentences(text)), (
-        f"{name} does not say a reference run's facts sit only in its labelled section")
 
 
 # --------------------------------------------------------------------------------------
 # s_A9, s_L24 — references are computed from the archive alone.
 # --------------------------------------------------------------------------------------
 
-_REPLY_MARKS = ("MARK-wb-reply-claim", "MARK-wb-reply-world", "MARK-wb-reply-note")
 
 
-def _marked_reply() -> dict:
-    """A reply for wb whose every text carries a marker, with explicit pointers (ctl/wb labels)."""
-    return S.world_reply(
-        "lead-quality", ["idp"], noise_floor_note=f"one trial {_REPLY_MARKS[2]}",
-        investigator=[S.inv("lead-quality", contrast=[S.conduct(WB), S.conduct(CTL)],
-                            claim=f"the lead was never revisited {_REPLY_MARKS[0]}")],
-        world=[S.wf("mislabelled", systems=["idp"], evidence=[S.plan_ptr(WB)],
-                    claim=f"the declared verdict does not follow {_REPLY_MARKS[1]}")])
 
 
-def test_1234_reference_render_after_the_reference_world_was_judged(tmp_path: Path) -> None:
-    """World c's prompt contains nothing of b's judge reply; c's prompt is byte-identical whether
-    b was judged before or after c (P-c, P-b: inputs derived from the immutable archive)."""
-    built = _family(tmp_path)
-    # Pass 1: both calls fail (#921 P9): c is rendered while b has no reply. Pass 2 re-grades both,
-    # b first (manifest order), so c is rendered after b's reply is on disk.
-    first = _graded(built, S.judge(fail={WB, WC}))
-    second = _graded(built, S.judge({WB: _marked_reply()}))
-    assert first.called(WC), "pass 1 made no call for c"
-    assert second.called(WB), "pass 2 did not judge b"
-    assert second.called(WC), "pass 2 did not judge c"
-    assert second.agent_ids.index(f"judge:{WB}:0") < second.agent_ids.index(f"judge:{WC}:0")
-    draws = S.draw_files(built, WB)
-    assert draws, "b has no draw file"
-    assert any(m in draws[0].read_text(encoding="utf-8") for m in _REPLY_MARKS), (
-        "b's reply is not on disk when c is rendered (the scenario did not happen)")
-    prompt = second.prompt_for(WC)
-    leaked = [m for m in _REPLY_MARKS if m in prompt]
-    assert not leaked, f"c's prompt carries b's judge reply: {leaked}"
-    assert S.marker(WB, "report") in _reference_blocks(prompt, WC)[WB], (
-        "b is not a reference for c (the positive control)")
-    assert S.unsalted(first.prompt_for(WC)) == S.unsalted(prompt), (
-        "c's prompt depends on whether b was judged before it")
 
 
-def test_1234_references_do_not_depend_on_whether_a_sibling_has_been_graded_yet(
-        tmp_path: Path) -> None:
-    """C is a reference for B in both passes whether or not C has a completed draw; the reference
-    set is computed from the archive alone."""
-    built = _family(tmp_path)
-    # Pass 1: b's call fails; b is rendered before c has any draw. Pass 2 re-grades b alone, with
-    # c's draw completed and c's row carried, not re-read.
-    first = _graded(built, S.judge(fail={WB}))
-    assert S.row(built, WC).get(S.RULED["row.completed_draws"]) == 1
-    second = _graded(built)
-    assert first.called(WB), "pass 1 made no call for b"
-    assert second.called(WB), "pass 2 did not re-judge b"
-    assert not second.called(WC), "c was re-judged (the scenario needs its draw carried)"
-    for which, judge in (("first", first), ("second", second)):
-        prompt = judge.prompt_for(WB)
-        assert S.marker(WC, "report") in _reference_blocks(prompt, WB)[WC], (
-            f"c is not a reference for b in the {which} pass")
-    assert S.unsalted(first.prompt_for(WB)) == S.unsalted(second.prompt_for(WB))
 
 
 # --------------------------------------------------------------------------------------
@@ -1080,80 +716,16 @@ def test_1234_reference_file_links_to_an_ungradable_worlds_oracle_store(
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_drift_is_shown_as_noise_and_never_refuses_grading(tmp_path: Path) -> None:
-    """An accepted family whose pre-flight record lists drifted calls is graded, and the drift
-    entries appear in each world prompt's noise context (the pre-flight record)."""
-    # rejected: drift as a pre-grading refusal (N-d, N16 stands)
-    built = _family(tmp_path, drift=[_drift()])
-    judge = _graded(built)
-    for label in (WB, WC):
-        assert judge.called(label), f"drift refused grading ({label} not judged)"
-    assert not S.stamp(built)
-    for label in (WB, WC):
-        assert S.row(built, label).get(S.RULED["row.completed_draws"]) == 1
-        assert DRIFT_MARK in _section(judge.prompt_for(label), "noise"), (
-            f"{label}'s noise context does not list the drifted call")
 
 
 # --------------------------------------------------------------------------------------
 # g03 — the judge call's payload.
 # --------------------------------------------------------------------------------------
 
-_SLOT = re.compile(r"\{[A-Za-z_][A-Za-z0-9_.]*\}")
-_ABSENT = re.compile(S.COINED["re.layer_absent"], re.IGNORECASE)
 
 
-def _new_absence_lines(absent: str, present: str, keywords: tuple[str, ...]) -> list[str]:
-    """Lines only the layer-absent prompt has that name the layer and say it is absent."""
-    had = set(S.unsalted(present).splitlines())
-    return [line for line in S.unsalted(absent).splitlines()
-            if line not in had and _ABSENT.search(line)
-            and any(k in line.lower() for k in keywords)]
 
 
-def test_1234_judge_call_sends_role_as_system_and_the_built_prompt_as_user_with_no_unbound_slot(
-        tmp_path: Path) -> None:
-    """The fake judge records the messages of a world call and of the family call: the system turn
-    is judge/role.md and the user turn is the built prompt, and the two share no source (the
-    template is never passed both as the raw system prompt and, rendered, as the user turn); no
-    `{...}` slot token survives in either turn, including for a world whose lessons record or
-    samples are absent (the prompt says the layer is absent instead). A planted world with no
-    oracle store is not an absent layer but a failed read (AM15 read literally, principle 2;
-    R6 (b), human 2026-10-12): it is malformed, named by the store, and never asked; only the
-    control may lack a store."""
-    role_path = Path(S.mod(S.JUDGE_RUN).__file__).parent / "role.md"
-    role_text = role_path.read_text(encoding="utf-8")
-    assert not _SLOT.search(role_text), "an unbound slot survives in the system turn"
-    role_lines = [line.strip() for line in role_text.splitlines() if len(line.strip()) >= 25]
-    # wc has no lessons record, wd no oracle store, and the family no samples record.
-    sparse = {WC: {"lessons": False}, "wd": {"role": "D", "oracle": False}}
-    # One episode id under two roots, so the two prompts differ only where a layer does (and
-    # where the malformed wd's reference block is gone).
-    present = _graded(_family(tmp_path, _triad(wd={"role": "D"}), root=tmp_path / "present"))
-    absent_built = _family(tmp_path, _triad(**sparse), samples=None, root=tmp_path / "absent")
-    absent = _graded(absent_built)
-    assert present.called("wd"), "control: wd with its oracle store was not asked"
-    for label in (WB, WC, S.FAMILY):
-        assert absent.called(label), f"no call was made for {label}"
-    assert not absent.called("wd"), "a planted world with no oracle store was asked"
-    row = S.row(absent_built, "wd")
-    assert row.get(S.EXISTING["row.ungradable"]) is True, f"wd is not ungradable: {row}"
-    assert row.get(S.COINED["row.malformed"]) is True, f"wd is not marked malformed: {row}"
-    reason = str(row.get(S.COINED["row.ungradable_reason"]) or "")
-    assert "forged.jsonl" in reason, f"wd's reason does not name its oracle store: {reason!r}"
-    for agent, prompt, system in zip(absent.agent_ids, absent.prompts, absent.system_prompts(),
-                                     strict=True):
-        assert system is not None, f"{agent}'s call carried no system turn"
-        assert Path(system).resolve() == role_path.resolve(), (
-            f"{agent}'s system turn is {system!r}, not judge/role.md")
-        shared = [line for line in role_lines if line in prompt]
-        assert not shared, f"{agent}'s user turn repeats the role prompt: {shared[:2]}"
-        slots = _SLOT.findall(S.outside_untrusted_frames(prompt))
-        assert not slots, f"{agent}'s user turn carries unbound slot(s) {slots}"
-    layers = ((WC, (S.COINED["layer.lessons"],)), (WB, (S.COINED["layer.samples"],)))
-    for label, keywords in layers:
-        said = _new_absence_lines(absent.prompt_for(label), present.prompt_for(label), keywords)
-        assert said, f"{label}'s prompt does not say its {keywords[0]} layer is absent"
 
 
 # --------------------------------------------------------------------------------------

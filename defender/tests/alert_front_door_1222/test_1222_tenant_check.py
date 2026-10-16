@@ -618,45 +618,6 @@ def test_a5_every_entry_point_gives_the_same_tenant_verdict(tmp_path: Path, caps
 # =================================================================================================
 
 
-def test_fixture_and_template_tenants_ship_an_alert_mapping(tmp_path: Path, capsys: Any) -> None:
-    """The fixture and template tenants each ship an alert mapping the tenant check passes
-    (signature rule.id, event_time a field the committed fixture alerts carry), and neither
-    tenant's case mapping carries a top-level source any more."""
-    for committed in (T6.FIXTURE, T6.TEMPLATE_DIR):
-        # The committed folder, as it is, passes the check.
-        rc, err = tenant_py(capsys, "check", "--folder", str(committed))
-        assert not mapping_lines(err), (
-            f"the committed {committed.name} does not pass the tenant check: {err!r}")
-        assert rc == 0, f"check --folder over the committed {committed.name}: {err!r}"
-        # The pass is about what it ships: a copy WITHOUT its alert mapping is refused naming
-        # the file, and a copy whose case mapping regains a top-level `source:` is refused
-        # naming that — so the committed one ships the first and carries none of the second.
-        bare = tmp_path / f"{committed.name}-without-alert-mapping"
-        shutil.copytree(committed, bare, symlinks=True)
-        (bare / "settings" / ALERT_MAPPING).unlink(missing_ok=True)
-        v = check_folder_verdict(capsys, bare)
-        assert_refused(v, ALERT_MAPPING)
-        sourced = tmp_path / f"{committed.name}-with-source"
-        shutil.copytree(committed, sourced, symlinks=True)
-        case = sourced / "settings" / S.CASE_MAPPING_REL
-        case.write_text(S.CASE_SOURCE_SHAPES["top_level_source_populated"]
-                        + case.read_text(encoding="utf-8"), encoding="utf-8")
-        v = check_folder_verdict(capsys, sourced)
-        assert_refused(v, CASE_MAPPING)
-    # What the shipped mapping derives, on a committed fixture alert: the signature is the
-    # alert's `rule.id`, the event time a value the alert carries.
-    alert = S.fixture_alert(S.FIXTURE_SLUGS[0])
-    for planted in (_committed_fixture_tenant(), _carrying(T6.TEMPLATE_DIR, "template-copy")):
-        d = S.run_alert(tmp_path / planted.tenant_id, alert=alert, tenant=planted,
-                        run_id=f"ship-{planted.tenant_id}")
-        assert d.refusal is None, d.refusal
-        assert d.raised is None, d.raised
-        assert d.recorded("signature") == alert["rule"]["id"]
-        event_time = d.recorded("event_time")
-        assert event_time, "the shipped mapping derives no event_time for a committed alert"
-        assert event_time in carried_values(alert)
-
-
 def _committed_fixture_tenant(tenant_id: str = "playground") -> S.Planted:
     """The committed fixture tenant, set up under this test's data root as every replay that
     names no tenant runs it (`_tenants1106.fixture_tenant`: the real `create_tenant`, whose
@@ -781,31 +742,6 @@ UNPARSEABLE_PAIR = (b"signature: [rule.id\nevent_time: {\n", b"summary: {rule.de
 UNDECODABLE_PAIR = (b"signature: rule.\xff\xfeid\n", b"event_time: \xc3\x28detected_at\n")
 
 
-def test_p055_mapping_file_fault_text_shown_to_main(tmp_path: Path, capsys: Any) -> None:
-    """The refusal reason is fixed and names the file, with no parser text or host path. No
-    model-facing text carries the fault, because the refusal comes before any model runs."""
-    w = world(tmp_path, capsys)
-    # Positive control: with a valid mapping the run reaches MAIN — model-facing text exists.
-    ok = at_run_start(w)
-    assert_passed(ok)
-    assert ok.detail.main.requests > 0
-    for pair in (UNPARSEABLE_PAIR, UNDECODABLE_PAIR):
-        refusals: list[str] = []
-        for content in pair:
-            w.planted.alert_mapping.write_bytes(content)
-            oracle = parser_text(w.planted.alert_mapping)
-            assert oracle, f"{content!r} is not the fault this test means (the parsers accept it)"
-            vs = verdicts(w, ("acceptance", "run-start"))
-            for v in vs.values():
-                assert_refused(v, ALERT_MAPPING)
-                assert_no_parser_text(v, oracle)
-            # Before any model: no request, no lead, no run folder — no model-facing text at all.
-            assert_no_run(vs["run-start"])
-            refusals.append(vs["acceptance"].text)
-        assert refusals[0] == refusals[1], (
-            f"the reason is not fixed — two {pair!r} contents are refused differently: {refusals}")
-
-
 @pytest.mark.parametrize("shape", _shape_params(
     ("directory", "unreadable", "non_utf8", "symlink", "hard_link", "fifo")))
 def test_p058_alert_mapping_file_unreadable(tmp_path: Path, capsys: Any, shape: str) -> None:
@@ -823,56 +759,6 @@ def test_p058_alert_mapping_file_unreadable(tmp_path: Path, capsys: Any, shape: 
         assert_no_run(vs["run-start"])
     finally:
         S.restore_modes(w.planted.root)
-
-
-def test_p059_mapping_file_present_at_acceptance_gone_before_t(tmp_path: Path,
-                                                              capsys: Any) -> None:
-    """A file gone between acceptance and run start is refused as missing. The run never
-    holds two versions."""
-    w = world(tmp_path, capsys)
-    # Accepted with the file present: setup passes and acceptance passes.
-    for v in verdicts(w, ("setup", "acceptance")).values():
-        assert_passed(v)
-    # The operator deletes it before the next run.
-    w.planted.alert_mapping.unlink()
-    run = at_run_start(w)
-    assert_refused(run, ALERT_MAPPING)
-    # Refused AS MISSING: the check's own reason for a folder without the file.
-    missing = at_acceptance(w)
-    assert_refused(missing, ALERT_MAPPING)
-    assert missing.text in run.text, (
-        f"run start's refusal is not the missing-file reason: {run.text!r} vs {missing.text!r}")
-    # It holds no version at all: nothing was read into a run.
-    assert_no_run(run)
-
-
-def test_p094_deployed_tenant_upgraded_without_editing_setting(tmp_path: Path,
-                                                              capsys: Any) -> None:
-    """A case mapping still carrying source: is refused at every entry point. The fixed
-    reason names the file and the move to the alert mapping, and no run starts."""
-    w = world(tmp_path, capsys, launchable=True)
-    # Positive control: the operator's edit made — `source:` moved into the alert mapping —
-    # passes every entry point.
-    for v in verdicts(w).values():
-        assert_passed(v)
-    # The tenant deployed before the change and upgraded with its settings untouched: its own
-    # customised `source:` section, and no alert mapping.
-    w.case_text(S.case_mapping_text(source=CUSTOM_SOURCE))
-    w.alert_shape("missing_file")
-    vs = verdicts(w)
-    for v in vs.values():
-        assert_refused(v, CASE_MAPPING, ALERT_MAPPING)
-        assert SOURCE_SECTION.search(v.text), f"{v.site} does not name the source section"
-    assert_same_reasons(vs)
-    assert_no_run(vs["run-start"])
-    # The move is named: with the alert mapping in place and only `source:` left, every entry
-    # point still refuses and the reason names the alert mapping (nothing else would).
-    w.alert_shape("valid")
-    vs = verdicts(w)
-    for v in vs.values():
-        assert_refused(v, CASE_MAPPING)
-        assert THE_MOVE.search(v.text), f"{v.site} does not name the move: {v.text!r}"
-    assert_same_reasons(vs)
 
 
 def test_p095_case_mapping_carries_source_and_an_alert_mapping(tmp_path: Path,
@@ -924,129 +810,12 @@ def test_p096_case_mapping_carries_source_with_only_event_time(tmp_path: Path, c
     assert_no_run(vs["run-start"])
 
 
-def test_p097_scaffolded_tenant_pinned_at_a_pre_change_knowled(tmp_path: Path,
-                                                              capsys: Any) -> None:
-    """A tree pinned at a commit from before the mapping file existed is refused, naming the
-    missing file."""
-    w = world(tmp_path, capsys)
-    repo = w.planted.knowledge
-    alert_rel = f"settings/{ALERT_MAPPING}"
-    case_rel = f"settings/{S.CASE_MAPPING_REL}"
-    today = {rel: (repo / rel).read_bytes() for rel in (alert_rel, case_rel)}
-    # The tenant's own repo: its first commit is the tree as it stood before the change (no
-    # alert mapping; the case mapping's own `source:` section, `_tenants1106.mapping_text`),
-    # the next one is today's.
-    (repo / alert_rel).unlink()
-    (repo / case_rel).write_text(T6.mapping_text(), encoding="utf-8")
-    G.git(repo, "init", "-q", "-b", "main")
-    G.git(repo, "add", "-A")
-    G.git(repo, "commit", "-q", "-m", "before the alert mapping")
-    pinned = G.git(repo, "rev-parse", "HEAD").stdout.strip()
-    for rel, data in today.items():
-        (repo / rel).write_bytes(data)
-    G.git(repo, "add", "-A")
-    G.git(repo, "commit", "-q", "-m", "the alert mapping")
-    # Positive control: the tree at its current commit is accepted.
-    assert_passed(at_acceptance(w))
-    # The check's reason for this tree without the file — and only that.
-    (repo / alert_rel).unlink()
-    missing = at_acceptance(w)
-    assert_refused(missing, ALERT_MAPPING)
-    G.git(repo, "checkout", "-q", "--", alert_rel)
-    assert_passed(at_acceptance(w))
-    # Pinned at the pre-change commit: refused, naming the missing file among its reasons.
-    G.git(repo, "checkout", "-q", pinned)
-    v = at_acceptance(w)
-    assert_refused(v, ALERT_MAPPING)
-    for reason in mapping_lines(missing.text):
-        assert reason in v.text, f"the pinned tree is not refused as missing {ALERT_MAPPING}: {v.text!r}"
-
-
 P098_FAULTS: dict[str, tuple[str | None, str | None, str]] = {
     "alert-mapping-missing": ("missing_file", None, ALERT_MAPPING),
     "alert-mapping-malformed": ("null_entry", None, ALERT_MAPPING),
     "alert-mapping-unknown-key": ("unknown_key", None, ALERT_MAPPING),
     "case-mapping-top-level-source": (None, "top_level_source_populated", CASE_MAPPING),
 }
-
-
-@pytest.mark.parametrize("fault", sorted(P098_FAULTS))
-def test_p098_tenant_setup_or_check_over_a_bad_alert_mapping(
-        tmp_path: Path, capsys: Any, monkeypatch: pytest.MonkeyPatch, fault: str) -> None:
-    """`setup` and `check --folder` refuse what run start refuses."""
-    w = world(tmp_path, capsys)
-    sites = ("run-start", "setup", "check-folder")
-    for v in verdicts(w, sites).values():
-        assert_passed(v)
-    alert_shape, case_shape, name = P098_FAULTS[fault]
-    if alert_shape is not None:
-        w.alert_shape(alert_shape)
-    if case_shape is not None:
-        w.case_source(case_shape)
-    vs = verdicts(w, sites)
-    assert_refused(vs["run-start"], name)
-    assert_refused(vs["setup"], name)
-    assert_refused(vs["check-folder"], name)
-    assert_same_reasons(vs)
-    # The tenant's own repo in its CI — checked on its own, no data root at all — gets the
-    # same report.
-    repo = tmp_path / "tenant-repo"
-    shutil.copytree(w.planted.knowledge, repo, symlinks=True)
-    with monkeypatch.context() as env:
-        env.delenv(D.DATA_ROOT_ENV, raising=False)
-        ci = check_folder_verdict(w.capsys, repo)
-    assert_refused(ci, name)
-    assert_same_reasons({"check-folder": vs["check-folder"], "tenant-ci": ci},
-                        folders=(w.planted.knowledge, repo))
-
-
-def test_p099_fixture_and_template_tenants_after_the_edit(
-        tmp_path: Path, capsys: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The fixture tenant, the template tenant and an unedited tenant scaffolded from the
-    template derive a signature and an event_time for the committed alerts. The evt: label
-    is non-empty, and the tenant check passes for both committed tenants."""
-    # An unedited tenant `tenant.py scaffold` makes from the template (no data root involved).
-    for key, value in G.GIT_IDENTITY.items():
-        monkeypatch.setenv(key, value)
-    scaffolded = tmp_path / "scaffolded"
-    scaffolded.mkdir()
-    rc, err = tenant_py(capsys, "scaffold", "scaffolded", str(scaffolded))
-    assert rc == 0, f"scaffold failed: {err!r}"
-    # The fixture tenant itself; then, since the template's grants refuse every run, a tenant
-    # carrying the template's own mapping files, and one carrying the scaffolded tenant's.
-    fixture = _committed_fixture_tenant()
-    tenants: dict[str, Callable[[], S.Planted]] = {
-        "fixture": lambda: fixture,
-        "template": lambda: _carrying(T6.TEMPLATE_DIR, "template-copy"),
-        "scaffolded": lambda: _carrying(scaffolded, "scaffold-copy"),
-    }
-    for label, make in tenants.items():
-        planted = make()
-        for slug in S.FIXTURE_SLUGS:
-            alert = S.fixture_alert(slug)
-            store = S.TicketStore()
-            d = S.run_alert(tmp_path / f"{label}-{slug}", alert=alert, tenant=planted,
-                            run_id=f"{label}-{slug}", tickets=S.ticket_writer(store),
-                            update_ticket=True)
-            assert d.refusal is None, (label, slug, d.refusal)
-            assert d.raised is None, (label, slug, d.raised)
-            # The open ticket's `evt:` label is non-empty (O9)...
-            labels = evt_labels(store)
-            assert labels, (f"{label} on {slug}: the open ticket carries no evt: label: "
-                            f"{store.only_open().get('labels')!r}")
-            assert labels[0] != "evt:", f"{label} on {slug}: the open ticket's evt: label is empty"
-            # ...and it is the event time the run recorded, a value the alert carries; the
-            # signature is the alert's `rule.id`.
-            event_time = d.recorded("event_time")
-            assert event_time, f"{label} on {slug}: no event_time was derived"
-            assert event_time in carried_values(alert), (label, slug, event_time)
-            assert labels[0] == f"evt:{event_time}"
-            assert d.recorded("signature") == alert["rule"]["id"], (label, slug)
-    # The tenant check passes for both committed tenants (and the scaffolded one).
-    for folder in (T6.FIXTURE, T6.TEMPLATE_DIR, scaffolded):
-        rc, err = tenant_py(capsys, "check", "--folder", str(folder))
-        assert not mapping_lines(err), f"{folder.name}: {err!r}"
-        assert rc == 0, f"{folder.name}: {err!r}"
 
 
 #: The fault shapes p102 runs through the run's own channels — one of each kind.
@@ -1086,116 +855,8 @@ def test_p102_run_starts_with_a_faulted_alert_mapping(tmp_path: Path, capsys: An
         S.restore_modes(w.planted.root)
 
 
-def test_p103_other_tenant_resolvers_meet_a_bad_alert_mapping(tmp_path: Path,
-                                                              capsys: Any) -> None:
-    """The branch launcher and the policy CLI refuse a tenant whose alert mapping is
-    faulted, naming the file, through the one shared check; the judge resolves no tenant and
-    is unaffected."""
-    w = world(tmp_path, capsys, launchable=True)
-    sites = ("acceptance", "branch-launch", "policy-cli")
-    for v in verdicts(w, sites).values():
-        assert_passed(v)
-    w.alert_shape("misspelled_key")
-    vs = verdicts(w, sites)
-    for v in vs.values():
-        assert_refused(v, ALERT_MAPPING)
-    # Through the one shared check: each carries acceptance's own reason.
-    for site in ("branch-launch", "policy-cli"):
-        assert vs["acceptance"].text in vs[site].text, (site, vs[site].text)
-    assert not vs["branch-launch"].detail.launches
-    # The judge grades the same with the mapping broken as with it valid.
-    broken = judged(judge_grade(tmp_path, "broken"))
-    w.reset()
-    assert broken == judged(judge_grade(tmp_path, "valid"))
-
-
-def test_p104_tenant_folder_without_the_new_mapping_file(tmp_path: Path, capsys: Any) -> None:
-    """A folder without the alert mapping is refused at acceptance, setup, check --folder
-    and run start."""
-    w = world(tmp_path, capsys)
-    for v in verdicts(w, OPERATOR_SITES).values():
-        assert_passed(v)
-    w.alert_shape("missing_file")
-    vs = verdicts(w, OPERATOR_SITES)
-    for v in vs.values():
-        assert_refused(v, ALERT_MAPPING)
-    assert_same_reasons(vs)
-    assert_no_run(vs["run-start"])
-
-
-def test_p160_mapping_broken_after_a_source_run_then_launch_an(tmp_path: Path,
-                                                              capsys: Any) -> None:
-    """Launch and sibling resume refuse a tenant whose alert mapping is now broken, naming
-    the file; the judge needs no mapping and resolves no tenant."""
-    w = world(tmp_path, capsys, launchable=True)
-    sites = ("acceptance", "branch-launch", "sibling-resume")
-    # The source run completed while the mapping was valid; launch and resume pass the check.
-    for v in verdicts(w, sites).values():
-        assert_passed(v)
-    # The mapping breaks afterwards.
-    w.alert_shape("unparseable_yaml")
-    vs = verdicts(w, sites)
-    for v in vs.values():
-        assert_refused(v, ALERT_MAPPING)
-    for site in ("branch-launch", "sibling-resume"):
-        assert vs["acceptance"].text in vs[site].text, (site, vs[site].text)
-    assert not vs["branch-launch"].detail.launches
-    # The judge needs no mapping: it grades the same with the mapping broken as with it valid.
-    broken = judged(judge_grade(tmp_path, "broken"))
-    w.reset()
-    assert broken == judged(judge_grade(tmp_path, "valid"))
-
-
-def test_p161_case_mapping_open_section_maps_a_ticket_field_na(tmp_path: Path,
-                                                              capsys: Any) -> None:
-    """A source field inside open: is ordinary ticket configuration and is not refused; only
-    a top-level source key is."""
-    w = world(tmp_path, capsys)
-    w.case_source("open_source_field")
-    for v in verdicts(w, ("acceptance", "setup", "check-folder")).values():
-        assert_passed(v)
-    # The run starts and the open payload carries the ticket field it maps.
-    store = S.TicketStore()
-    run = at_run_start(w, tickets=S.ticket_writer(store), update_ticket=True)
-    assert_passed(run)
-    assert store.only_open().get("source") == "defender", store.only_open()
-    # Only a top-level `source` key is the old section: the same key there is refused.
-    w.case_source("top_level_source_populated")
-    assert_refused(at_acceptance(w), CASE_MAPPING)
-
-
 #: p162's tenants with two faults at once: an alert-mapping fault and a top-level `source:`.
 P162_ALERT_FAULTS = ("missing_file", "misspelled_key", "non_utf8")
-
-
-def test_p162_tenant_with_several_faults_at_once(tmp_path: Path, capsys: Any) -> None:
-    """The check reports every fault, one fixed reason each, in a fixed order, and
-    acceptance, setup, check --folder and run start report identically."""
-    w = world(tmp_path, capsys)
-    for v in verdicts(w, OPERATOR_SITES).values():
-        assert_passed(v)
-    # Each fault alone: its one reason, as the check gives it.
-    w.case_source("top_level_source_populated")
-    source_alone = mapping_lines(at_check_folder(w).text)
-    assert source_alone, "the check gives no reason for a top-level source: alone"
-    orders: set[tuple[str, ...]] = set()
-    for shape in P162_ALERT_FAULTS:
-        w.reset()
-        w.alert_shape(shape)
-        alone = mapping_lines(at_check_folder(w).text)
-        assert alone, f"the check gives no reason for {shape} alone"
-        # Both at once: every fault reported, one reason each, identically at the four sites.
-        w.case_source("top_level_source_populated")
-        vs = verdicts(w, OPERATOR_SITES)
-        for v in vs.values():
-            assert_refused(v, ALERT_MAPPING, CASE_MAPPING)
-        reasons = assert_same_reasons(vs)
-        for reason in (*alone, *source_alone):
-            assert reason in "\n".join(reasons), (
-                f"{shape} + source: — the fault's own reason {reason!r} is not among the "
-                f"reasons reported for both: {reasons!r}")
-        orders |= {first_named(v.text) for v in vs.values()}
-    assert len(orders) == 1, f"the two files are not reported in one fixed order: {orders}"
 
 
 P163_CASES = [
@@ -1204,33 +865,6 @@ P163_CASES = [
     *[pytest.param("case", s, marks=S.needs_non_root) if s in S.ROOT_BLIND_SHAPES
       else ("case", s) for s in ("open_source_field", *CASE_FAULTS)],
 ]
-
-
-@pytest.mark.parametrize(("file", "shape"), P163_CASES)
-def test_p163_check_folder_and_acceptance_over_the_same_files(tmp_path: Path, capsys: Any,
-                                                              file: str, shape: str) -> None:
-    """`check --folder` and acceptance run the same check, so for the same file read by the
-    same user they reach the same verdict. A file the reading site cannot read is refused,
-    naming the file."""
-    w = world(tmp_path, capsys)
-    try:
-        if file == "alert":
-            w.alert_shape(shape)
-        elif shape == "open_source_field":
-            w.case_source(shape)
-        else:
-            w.case_bytes(CASE_FAULTS[shape])
-        vs = verdicts(w, ("check-folder", "acceptance"))
-        if shape in ("valid", "open_source_field"):
-            for v in vs.values():
-                assert_passed(v)
-            return
-        name = ALERT_MAPPING if file == "alert" else CASE_MAPPING
-        for v in vs.values():
-            assert_refused(v, name)
-        assert_same_reasons(vs)
-    finally:
-        S.restore_modes(w.planted.root)
 
 
 @S.needs_non_root

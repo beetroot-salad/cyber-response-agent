@@ -1,12 +1,4 @@
-"""#921 — what may move a world's row, and who owns its bucket.
-
-#1224 retired the mechanical bucket table and the computed family word: the judge MODEL decides
-each world's bucket (O11, `run.draw_document` owns it); #1234 retired the family-scope word
-too (A17) and combines a world's draws by unanimity (A7). What stays is what the record may and
-may not be moved by: no world's per-world facts read another world's archive, nothing reads
-`served/base.jsonl` or calls the comparator, the control gets no row, the bucket is the draws'
-own (never the findings', never a code path's), and the combination is over completed draws.
-"""
+"""#921 — what may move a world's row, and who owns its bucket."""
 from __future__ import annotations
 
 import pytest

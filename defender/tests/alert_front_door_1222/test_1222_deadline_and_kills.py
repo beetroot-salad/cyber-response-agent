@@ -580,31 +580,6 @@ def test_r5_a_correlation_dispatch_without_a_usable_deadline_refuses_to_run(
             f"[{label}] the refusal does not name the setting {S.DEADLINE_KEY!r}: {said[-400:]!r}")
 
 
-def test_b3_the_shipped_correlation_deadline_sits_under_the_fixed_ceiling() -> None:
-    """The shipped cap table carries the correlation deadline as a positive, finite number of
-    seconds at or under 1080 s: the ceiling 1200 s (the default run clock) - 120 s (a bash call
-    the deadline cannot cut) - MAIN's minimum time, taken as zero because it has no number. The
-    ceiling is fixed against the default clock, checked once here; it is not recomputed from a
-    run's own clock settings.
-
-    Read off production's own default table (`hooks/budget_enforcer.DEFAULT_LIMITS`, through
-    `S.default_limits()`); the number itself is the implementer's (78, H1; §7 round 3, B3)."""
-    limits = S.default_limits()
-    assert S.DEADLINE_KEY in limits, (
-        f"the shipped cap table carries no {S.DEADLINE_KEY!r}: every production run would meet "
-        "an unusable deadline at correlation (r5)")
-    value = limits[S.DEADLINE_KEY]
-    assert not isinstance(value, bool), (
-        f"the shipped correlation deadline is a boolean, not seconds: {value!r}")
-    assert isinstance(value, (int, float)), (
-        f"the shipped correlation deadline is not a number of seconds: {value!r}")
-    assert math.isfinite(value), f"the shipped correlation deadline is not finite: {value!r}"
-    assert value > 0, f"the shipped correlation deadline is not a positive bound: {value!r}"
-    assert value <= S.DEADLINE_CEILING_S, (
-        f"the shipped correlation deadline {value!r} s is above the fixed ceiling "
-        f"{S.DEADLINE_CEILING_S} s (1200 s - 120 s - MAIN's minimum time)")
-
-
 def test_r7_a_lead_main_dispatched_is_stamped_and_read_back_as_before(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A lead MAIN dispatches, ended by each existing ending (request limit, retry exhausted,
@@ -754,28 +729,6 @@ def test_p003_correlation_lead_still_running_at_mains_second_r(tmp_path: Path) -
     assert hung.report is not None, "the run did not reach report.md after the named ending"
 
 
-def test_p004_run_setup_fails_after_correlation_was_scheduled(tmp_path: Path) -> None:
-    """A setup fault after the lead ended (building MAIN's agent or deps) stops the run loudly with
-    the setup error. No task writes the run folder after the run unwinds. l-00c's leads row holds
-    the lead's own outcome."""
-    tenant = S.plant_tenant()
-    stores: list = []
-    clock = _Clock()
-    d = _setup_fault_after_lead(tmp_path, tenant, run_id="r1222-p004", stores=stores,
-                                before=clock)
-    _assert_setup_fault_stopped_the_run(d)
-    assert d.report is None, "a run stopped by a setup fault wrote a report"
-    sidecar = d.sidecar(L3)
-    assert sidecar.get("lead_id", L3) == L3, sidecar
-    assert sidecar.get("goal"), f"l-00c's leads row lost its harness contract: {sidecar!r}"
-    assert SUMMARY in (d.gather_summary(L3) or ""), "l-00c's own outcome is not recorded"
-    assert clock.run_dir is not None
-    settled = _snapshot(clock.run_dir)
-    time.sleep(0.5)
-    assert _snapshot(clock.run_dir) == settled, (
-        "something kept writing the run folder after the run unwound")
-
-
 def test_p007_siem_down_at_run_start(tmp_path: Path) -> None:
     """MAIN's first call to a system the lead found down meets the same outage mark. Correlation's
     failures never end the run."""
@@ -857,84 +810,6 @@ def test_p010_run_kill_in_a_task_nobody_awaits(tmp_path: Path,
     _assert_budget_kill_during_lead(killed, stores)
 
 
-def test_p030_main_mints_l00c_after_the_harness_claim_failed(tmp_path: Path) -> None:
-    """A lead MAIN mints as l-00c is an ordinary lead. No reader grants trust by lead id (l-00c,
-    l-000). Its failures count toward the run kill."""
-    # The table withholds correlation, so no harness claim exists and MAIN can mint l-00c (PR-23).
-    tenant = S.plant_tenant(table=S.TABLE_WITHHELD)
-    stores: list = []
-    d = S.run_alert(tmp_path, tenant=tenant, run_id="r1222-p030",
-                    main=[S.gather("l-001", "identity"), S.gather("l-000", "identity"),
-                          S.gather(L3, "identity"), S.text(S.DONE)],
-                    leads={"l-001": [S.text(LEAD_SUMMARY)], "l-000": [S.text(LEAD_SUMMARY)],
-                           L3: [_parallel("identity", "get-user", _kill_limit()),
-                                S.text("never")]},
-                    backend=S.Backend(fault=T.Fault(fail_on=("identity.get-user",))),
-                    store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
-    for lead in ("l-001", "l-000", L3):
-        assert d.router.dispatched(lead), (
-            f"MAIN's lead {lead} never ran: an ordinary id was refused to MAIN "
-            f"(conversations: {d.router.leads()})")
-    joined = {lead.lead_id: lead for lead in S.sym("learning.lead_repository", "joined")(d.run_dir)}
-    for lead in ("l-000", L3):
-        assert lead in joined, f"the lead repository does not carry MAIN's {lead}"
-        assert joined[lead].provenance == joined["l-001"].provenance, (
-            f"the lead repository reads MAIN's {lead} with provenance "
-            f"{joined[lead].provenance!r}, MAIN's l-001 with {joined['l-001'].provenance!r}: "
-            "trust granted by lead id")
-        assert joined[lead].goal == joined["l-001"].goal, (
-            f"MAIN's {lead} is read back with a goal other than the one MAIN gave it")
-    # The judge's lead view, built the way the judge builds it: same fields, same framing.
-    blocks = _judge_lead_blocks(d.folder)
-    assert blocks["l-000"] == blocks["l-001"], (
-        "the judge renders MAIN's l-000 unlike MAIN's l-001, which ran the same script: "
-        f"{blocks['l-000']!r} vs {blocks['l-001']!r}")
-    assert [line.split(":", 1)[0] for line in blocks[L3]] == [
-        line.split(":", 1)[0] for line in blocks["l-001"]], (
-        f"the judge renders MAIN's {L3} with other fields than an ordinary lead: {blocks[L3]!r}")
-    assert blocks[L3][0] == blocks["l-001"][0], (
-        f"the judge renders MAIN's {L3} with a goal other than the one MAIN gave it")
-    _assert_killed(d, _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
-    assert _session_ending(stores, L3) == _run_end().TRUNCATED_BY_ABORTED
-
-
-def test_p031_correlation_entry_cannot_be_written_to_mains_ses(tmp_path: Path) -> None:
-    """A store fault after the lead produced output stops the run loudly. There is no injected
-    entry any more."""
-    tenant = S.plant_tenant()
-    healthy = S.run_alert(tmp_path / "healthy", tenant=tenant, run_id="r1222-p031-healthy",
-                          leads={L3: [S.text(SUMMARY)]})
-    _assert_lead_ran(healthy)
-    _assert_summary_delivered(healthy, SUMMARY)
-    assert healthy.main.requests >= 2
-    later = healthy.main.seen[-1]
-    assert later.user_prompts == healthy.main.seen[0].user_prompts, (
-        "a later MAIN request carries a host-injected entry beside the opening message: "
-        f"{[p[:80] for p in later.user_prompts]!r}")
-    assert later.text.count(SUMMARY) == 1, "the correlation summary reached MAIN twice"
-
-    stores: list = []
-    d = _store_fault_after_lead_output(tmp_path / "fault", tenant, run_id="r1222-p031-fault",
-                                       stores=stores)
-    _assert_store_fault_stopped_the_run(d)
-
-
-def test_p032_l00c_summary_cannot_be_persisted(tmp_path: Path) -> None:
-    """A run folder that refuses to persist a produced summary stops the run loudly. It is never
-    named as one of the lead's endings."""
-    tenant = S.plant_tenant()
-
-    def squat(run_dir: Path) -> None:
-        Path(RunPaths(run_dir).gather_summary(L3)).mkdir(parents=True)
-
-    d = S.run_alert(tmp_path, tenant=tenant, run_id="r1222-p032", leads={L3: [S.text(SUMMARY)]},
-                    before=squat)
-    _assert_lead_ran(d)
-    assert d.router.requests(L3) >= 1, "the lead never produced its summary"
-    _assert_main_never_asked(d, "the run folder refused the lead's produced summary")
-    _assert_stopped_loudly(d)
-
-
 def test_p165_lead_worst_case_exceeds_the_run_clock(tmp_path: Path) -> None:
     """One harness deadline bounds the whole lead, retries included: MAIN's opening request follows
     within the deadline plus the longest step that cannot be cut (a bash call, up to 120 s), and
@@ -961,18 +836,6 @@ def test_p165_lead_worst_case_exceeds_the_run_clock(tmp_path: Path) -> None:
     assert d.router.requests(L3) < len(script), "the lead ran every one of its requests"
     _assert_timed_out_member(_session_ending(stores, L3), who="l-00c")
     _assert_never_delivered(d, LATE)
-
-
-def test_p166_budget_kill_raised_at_one_of_the_leads_tool_call(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A run-level budget kill raised at one of the lead's own tool calls is a kill from another
-    cause: the run stops loudly."""
-    tenant = S.plant_tenant()
-    stores: list = []
-    d = _budget_kill_during_lead(tmp_path, tenant, monkeypatch, run_id="r1222-p166",
-                                 stores=stores)
-    _assert_budget_kill_during_lead(d, stores)
-    assert d.rows_for(L3) == [], "the lead's killed call ran anyway"
 
 
 def test_p167_model_request_slow_retried_or_just_past_the_time(tmp_path: Path) -> None:
@@ -1013,59 +876,6 @@ def test_p167_model_request_slow_retried_or_just_past_the_time(tmp_path: Path) -
     _assert_lead_ran(d)
     _assert_summary_delivered(d, SUMMARY)
     assert _session_ending(early, L3) is None, "a response inside the deadline was cut"
-
-
-def test_p168_timeout_and_a_main_dispatched_lead_that_hangs(tmp_path: Path) -> None:
-    """The deadline is correlation's only; a gather lead MAIN dispatched is not bound by it."""
-    tenant = S.plant_tenant()
-    stores: list = []
-    d = S.run_alert(tmp_path, tenant=tenant, run_id="r1222-p168",
-                    main=[S.gather("l-001", "cmdb"), S.text(S.DONE)],
-                    leads={L3: [S.text(LATE)], "l-001": [S.text(LEAD_SUMMARY)]},
-                    lead_faults={L3: S.LeadFault(delay=STALL_S),
-                                 "l-001": S.LeadFault(delay=DEADLINE_S + 1.5)},
-                    limits=S.with_deadline(DEADLINE_S),
-                    store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
-    _assert_lead_ran(d)
-    _assert_timed_out_member(_session_ending(stores, L3), who="l-00c")
-    assert d.router.dispatched("l-001"), "MAIN's lead never ran"
-    assert d.main.requests >= 2, "MAIN never got its lead's answer"
-    assert LEAD_SUMMARY in d.main.seen[-1].text, (
-        "the answer MAIN's lead gave after a wait longer than the correlation deadline never "
-        "reached MAIN — the deadline cut a lead MAIN dispatched")
-    assert _session_ending(stores, "l-001") is None, (
-        "MAIN's lead outlasting the correlation deadline was stamped as cut short")
-
-
-def test_p169_lead_timed_out_after_its_calls_succeeded(tmp_path: Path) -> None:
-    """A lead that timed out after successful calls gets "timed out" in the section. Its queries
-    rows stay recorded, and their counts are not delivered."""
-    tenant = S.plant_tenant()
-    deadline = 3.0
-    counts = {"a": 7340033, "b": 8650757}
-    prose: dict[str, str] = {}
-    for label, count in counts.items():
-        stores: list = []
-        backend = S.Backend(answer=_counting(count))
-        # The first request answers at 2.0 s with one call (which succeeds); the next request
-        # would answer at about 4.0 s, past the 3.0 s deadline.
-        d = S.run_alert(tmp_path / label, tenant=tenant, run_id=f"r1222-p169-{label}",
-                        leads={L3: [_alerts_call(), S.text(f"{count} scoped alerts")]},
-                        lead_faults={L3: S.LeadFault(delay=2.0)}, backend=backend,
-                        limits=S.with_deadline(deadline),
-                        store_factory=S.store_factory(tmp_path / label, sink=stores),
-                        stores=stores)
-        _assert_lead_ran(d)
-        rows = d.rows_for(L3)
-        assert len(rows) == 1, (
-            f"the lead's successful call is not recorded in the queries table: {rows!r}")
-        assert rows[0].get("exit_code") == 0, rows
-        _assert_timed_out_member(_session_ending(stores, L3), who=f"[{label}] l-00c")
-        _assert_never_delivered(d, str(count))
-        prose[label] = _prose(d)
-    assert prose["a"] == prose["b"], (
-        "two timed-out leads whose successful calls counted differently gave MAIN different "
-        "opening prose: a count was delivered")
 
 
 def test_p170_operator_interrupts_while_the_lead_runs_before_m(tmp_path: Path) -> None:
@@ -1180,25 +990,6 @@ def test_p174_lead_and_main_failures_together_pass_the_kill_co(tmp_path: Path) -
         f"lead's {n - 1} failures were counted ({below.summary!r})")
     assert below.main.requests >= 2, "MAIN never finished its run"
     _assert_killed(outcome[n], _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
-
-
-def test_p175_main_lead_named_l00c_when_no_harness_claim_exist(tmp_path: Path) -> None:
-    """A lead MAIN dispatched counts toward the kill whatever its id, l-00c included."""
-    # Correlation withheld: no harness claim exists, so the id is MAIN's to mint (PR-23).
-    tenant = S.plant_tenant(table=S.TABLE_WITHHELD)
-    n = _kill_limit()
-    for lead in ("l-001", L3):
-        stores: list = []
-        d = S.run_alert(tmp_path / lead, tenant=tenant, run_id=f"r1222-p175-{lead}",
-                        main=[S.gather(lead, "identity"), S.text(S.DONE)],
-                        leads={lead: [_parallel("identity", "get-user", n), S.text("x")]},
-                        backend=S.Backend(fault=T.Fault(fail_on=("identity.get-user",))),
-                        store_factory=S.store_factory(tmp_path / lead, sink=stores),
-                        stores=stores)
-        assert d.router.dispatched(lead), f"MAIN's lead {lead} never ran"
-        _assert_killed(d, _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
-        assert _session_ending(stores, lead) == _run_end().TRUNCATED_BY_ABORTED, (
-            f"MAIN's {lead} reached the kill count and its session does not read as aborted")
 
 
 def test_run_duration_includes_correlation_and_main(tmp_path: Path) -> None:

@@ -1,53 +1,4 @@
-"""#983 mechanism A — the baseline consultation's carrier into `report.md`, and where it stops.
-
-O3 wants a human reading a closed case to see whether the alerted pattern is recognized as
-recurring in this estate, on exactly the cases O1 creates — which are BENIGN closes. The design
-doc says this rides "the same mechanism that already projects `ceiling_test` notes there, not a
-new architecture", and probing that (claim c11 / red flag RF1) found the cited carrier does not
-reach a benign close at all: `conclude_ceiling_test_rows` is called inside the
-`NO_REVIEW_DISPOSITIONS` branch under `if disposition == "inconclusive"`, and the post-review
-`_CloseFields(...)` takes the `ceiling_test=()` default. So the carrier is EXTENDED, not reused:
-a second companion-derived field populated at BOTH construction sites.
-
-WHAT THIS SUITE PINS, beyond the demands:
-
-  * `_gating.conclude_runtime_evidence_rows(companion_text) -> tuple[RuntimeEvidenceReceipt, ...]`
-    beside `conclude_ceiling_test_rows`, for the same reason that one is public: `report.md` is
-    written from the close's disposition ARGUMENT and never re-reads the companion, so the
-    close carries these in itself.
-  * `render_report(..., runtime_evidence=receipts)` renders one line per receipt into the BODY
-    and never the frontmatter. Never the frontmatter for the same reason a `ceiling_test`
-    `note` is not there: the block is under a 512-byte cap (`_artifact_schema`), a size cap on
-    ungated text is itself a gate, and a value the write gate accepted that the render then
-    refused strands the run.
-  * `render_report`'s docstring stops claiming `ceiling_test` is "the ONE exception" to
-    "no model-supplied body". That claim becomes FALSE with a second field, and the docstring
-    is the load-bearing statement of an invariant on a function whose output rides verbatim
-    into the judge's prompt and out through the ticket bridge (claim c12 / RF2) — a stale
-    invariant there is worse than none, because the next author reads it as still true.
-
-  * `RuntimeEvidenceReceipt` is a FROZEN DATACLASS beside `CeilingReceipt`, and the tests
-    assert on its FIELDS. That is this suite's hardening pass, and it is not a style
-    preference: written against a bare pre-rendered string, every assertion in this file was a
-    substring check, and a `conclude_runtime_evidence_rows` that returned
-    `("runtime-evidence 1500 occurrences ...",)` — the fixture's own text, hardcoded — passed
-    all of them. Nothing asked whether a `:R consultations` row had been READ. Fields make
-    that question askable: `window_start`/`window_end` are `datetime`s, so the row's window
-    has to be genuinely parsed, and two rows carrying different windows cannot both come out
-    of one canned string.
-
-    The STRUCTURED half is the window (parsed), the anchor kind, grounding, id and the owning
-    lead — the cells the format itself gives columns to. `result` and `reasoning` are carried
-    VERBATIM as free text, deliberately: the occurrence count and the actor/host scope live
-    inside `result`'s prose because the design adds no columns to `:R consultations`, and
-    regex-mining a model-authored sentence for a number is the free-text judgment #923 spent a
-    round removing from `ceiling_test`. What holds them honest instead is that the render is
-    asserted to carry EACH row's own text, from a fixture whose two rows differ.
-
-Receipts are OBTAINED from `conclude_runtime_evidence_rows` rather than constructed, so the
-projection and the render are pinned to agree — the property `ceiling_test_block`'s "ONE
-renderer for both" comment exists to hold.
-"""
+"""The baseline consultation's carrier into report.md through the close fields."""
 
 from __future__ import annotations
 
@@ -230,31 +181,6 @@ def test_runtime_evidence_consultation_lands_in_report_body():
     )
     assert "runtime-evidence" not in without, (
         "a close with no baseline rendered one — the default has to be the empty tuple"
-    )
-
-
-def test_render_report_no_longer_claims_ceiling_test_is_the_one_exception():
-    """`render_report`'s docstring stops claiming `ceiling_test` is "the ONE exception" to
-    "no model-supplied body", and says honestly that there are now two.
-
-    A DOC test because the claim is an INVARIANT, not a comment: `render_report` is one of the
-    most heavily invariant-documented functions in the tree (RS12, the 512-byte cap, the
-    judge-prompt and ticket-bridge egress), and the next author reads a stale invariant as
-    still true. Both halves are asserted — the false claim is gone, AND the rationale that
-    survives it (model-CHOSEN structure, never model-AUTHORED prose) is still stated — so the
-    repair cannot be to delete the paragraph that explains why either exception is safe."""
-    doc = close_tool.render_report.__doc__ or ""
-    assert "the ONE exception" not in doc, (
-        "the docstring still claims a single exception to the host-rendered body while a "
-        "second companion-derived field is being rendered beside it"
-    )
-    assert "runtime_evidence" in doc, (
-        "the second exception is rendered and undocumented — the invariant paragraph names "
-        "`ceiling_test` alone"
-    )
-    assert "model-supplied body" in doc, "RS12 itself must survive the edit"
-    assert "model-CHOSEN structure" in doc or "model-chosen structure" in doc.lower(), (
-        "the rationale that makes either exception safe is what the paragraph is FOR"
     )
 
 

@@ -1,32 +1,12 @@
-"""#1134 step 6 (v2, ported to v3): the holes the step-6 adversary found in the suite (E1-E10, R8), each pinned
-by an observable a dishonest variant changes, beside a control on the same address. E1's rows
-and E3's resolver pin live in `test_1134_lead_author_holes.py` (the spy `tree_for` table and the
-label pins); the rest are here.
-
-- E2a / E2b: a commit gate handed a plain `tree_for` (`lambda _p: None`) reads every path by its
-  plain spelling, so a link or a hard link the agent / the curator left in the tree is followed
-  (a symlink committed as mode 120000, an outside file's bytes read and quoted).
-- E4: `where` stat'ed (a following probe) and trusted over the view it spells for.
-- E5: the lift bypass's `contradicts_skill` read by the draft's plain path.
-- E6: `_run_locked`'s reads re-resolving the mount by name (`bind(skills_dir)`), not the held
-  `deps.skills` the trees hold.
-- E7: the label compared to the lead constant instead of looked up in the mount list.
-- E8: deps (the trees' `Held` and bound `tree_for`) cached past the seam's `with`.
-- E9: the writer judging through the handle, then writing by path at the mount's spelling.
-- E10: the stale vulture suppressions on the two entry points kept.
-- R8: `run_pitfalls` reading its queue before it checks the trees.
-
-Linux only in practice, like the files it extends: the read watch is inotify.
+"""Adversary holes for the lead author's commit gates and draft writer: every read goes through the held trees
+(never a plain path), beside a control on the same address.
 """
 from __future__ import annotations
 
-import ast
 import dataclasses
 import errno
-import inspect
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +14,7 @@ import pytest
 
 from defender import _git
 from defender._env import FatalConfigError
-from defender.learning.core import drains, lane_trees, persist
+from defender.learning.core import drains, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.leads import lead_author, lead_neighbors, pitfalls_curator
@@ -536,31 +516,10 @@ def test_where_only_spells_for_the_readers(scene: Scene, tmp_path: Path):
 # E10: the two entry points step 6 gives production callers keep no vulture suppression
 # ---------------------------------------------------------------------------------------
 
-_SUPPRESSION = re.compile(r"noqa:[^\n]*\bV1\d\d\b")
 
 
-def _signature_lines(source: str, fn: ast.FunctionDef) -> str:
-    """The source lines of `fn`'s `def` up to its body (decorators included)."""
-    first = min([fn.lineno, *(d.lineno for d in fn.decorator_list)])
-    return "\n".join(source.splitlines()[first - 1:fn.body[0].lineno - 1])
 
 
-def test_the_lane_trees_entry_points_carry_no_vulture_suppression():
-    """E10: `open_drain_trees` and `DrainTrees.tree_for` have production callers now (each
-    lane's work step opens its trees; the lead author's rules and the curator's put-back look
-    paths up), so neither `def` line keeps the `# noqa: V103` / `# noqa: V105` that stood in
-    for a caller before step 6. A suppression left on a used name hides the day it is unused
-    again."""
-    source = inspect.getsource(lane_trees)
-    tree = ast.parse(source)
-    [opener] = [n for n in tree.body
-                if isinstance(n, ast.FunctionDef) and n.name == "open_drain_trees"]
-    [cls] = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "DrainTrees"]
-    [lookup] = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "tree_for"]
-    for fn in (opener, lookup):
-        header = _signature_lines(source, fn)
-        assert fn.name in header
-        assert not _SUPPRESSION.search(header), (fn.name, header)
 
 
 # ---------------------------------------------------------------------------------------

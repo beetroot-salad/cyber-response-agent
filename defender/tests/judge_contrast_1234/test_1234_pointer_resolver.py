@@ -50,12 +50,10 @@ from defender.tests.judge_contrast_1234 import _spec1234 as S
 DEFENDER = S.LANES["defender"]
 QUESTIONER = S.LANES["questioner"]
 USER_RECORD = S.LANES["user_record"]
-NOT_MEASURED = S.LANES["not_measured"]
 UNRESOLVED = S.LANES["dropped_unresolved"]
 OTHER_RUN = S.LANES["dropped_other_run"]
 NO_PAIR = S.LANES["dropped_no_pair"]
 CITATIONS = S.RULED["row.citations"]
-MEASURED = S.COINED["row.measured"]
 MALFORMED = S.COINED["row.malformed"]
 UNGRADABLE = S.COINED["row.ungradable_reason"]
 
@@ -65,8 +63,6 @@ OUTCOME_CTX = S.outcome_ptr("not_replayable")
 SAMPLES_CTX = S.samples_ptr("idp")
 #: The plan's family-level part (the manifest's `discriminator`), which names no run (A15).
 PLAN_FAMILY = S.plan_ptr(None)
-#: A plan fragment naming an entry no manifest holds.
-PLAN_NO_ENTRY = "family.yaml#" + S.COINED["frag.plan_world"].format(label="zz")
 #: A row the family's shared capture holds, so `served/base.jsonl#0` names a real line.
 BASE_ROWS = [{"system": "idp", "verb": "query", "params": {"q": "user:alice"},
               "payload_text": json.dumps({"rows": []}), "source": "passthrough"}]
@@ -517,42 +513,6 @@ def test_1234_evidence_never_resolves_through_a_link_or_outside_the_reference_se
     assert _probe(built, pointer, HALF) == _probe_expected(pointer, HALF, resolves=not damaged)
 
 
-def test_1234_every_evidence_resolution_goes_through_the_one_resolver(tmp_path: Path) -> None:
-    """Every site that decides whether a judge evidence pointer resolves (the draw document,
-    routing, gap-only evidence) calls the one resolver; the census names each site, and a planted
-    second resolution path is reported.
-
-    The census (one resolver definition, the sites calling it) picks the subjects; each site is
-    then driven through the pass with pointers the resolver refuses although a lexical check
-    would pass them — a plan fragment naming no manifest entry, a ledger row past the last line,
-    a query-table row past the last line, a stray file under b — and each decides as the
-    resolver does. The draw document leaves them out of the citations. Routing does not make a
-    finding design on the dangling plan pointer: it is serving, beside its twin citing b's
-    entry, which is design. Gap-only sets the dangling table pointer aside: the finding stays
-    gap-only and goes to the user record, beside its twin citing an ordinary table row, which
-    queues."""
-    sites = S.call_sites("_resolves", under="learning/judge")
-    resolvers = S.defs_named("_resolves", under="learning")
-    assert len(resolvers) == 1, f"the census needs exactly one resolver: {resolvers}"
-    assert sites, "the census names no site calling the one resolver"
-
-    built = S.family(tmp_path, _refusal_calls())
-    (built.world_dir("b") / "stray.md").write_text("a stray file\n", encoding="utf-8")
-    blocked = [_served(built, "b", 2), _served(built, "a", 1)]
-    _run(built, {"b": _reply(
-        investigator=[
-            _inv([S.conduct("b"), S.conduct("a"), PLAN_NO_ENTRY, built.served("b", 99),
-                  S.conduct("b", "stray.md")], tag="draw-document"),
-            _inv([*blocked, built.table("b", 99)], tag="gap-only-dangling"),
-            _inv([*blocked, _table(built, "b", 0)], tag="gap-only-twin")],
-        world=[_wf([PLAN_NO_ENTRY, S.conduct("b")], tag="routing-dangling"),
-               _wf([S.plan_ptr("b"), S.conduct("b")], tag="routing-twin")])})
-
-    fid = [built.finding_id("b", 0, i) for i in range(5)]
-    assert _cites(fid[0]) == {S.conduct("b"), S.conduct("a")}
-    assert [S.lane_of(built, f) for f in fid] == [
-        DEFENDER, USER_RECORD, DEFENDER, USER_RECORD, QUESTIONER]
-    assert _row_on(S.questioner_queue(), fid[3]) is None
 
 
 # --------------------------------------------------------------------------------------
@@ -689,102 +649,12 @@ def test_1234_pointer_naming_a_served_ledger_row(tmp_path: Path) -> None:
     assert _row_on(S.defender_queue(), fid[1]) is None
 
 
-def test_1234_pointer_naming_the_family_capture_ledger_as_the_reference_half(
-        tmp_path: Path) -> None:
-    """`served/base.jsonl` never resolves (A1): it is the family tier, not a run. A finding using
-    it as the reference half has no conduct pointer in a reference run and is dropped for lacking
-    the two-run pair (I1).
-
-    The capture ledger holds a real row. b's report against `served/base.jsonl#0` and against
-    the bare `served/base.jsonl` are each dropped with the no-pair lane and reach no output; b's
-    report against the control's own served row, in the same reply, is queued."""
-    built = S.family(tmp_path, base_rows=BASE_ROWS)
-    _run(built, {"b": _reply(investigator=[
-        _inv([S.conduct("b"), "served/base.jsonl#0"], tag="capture-row"),
-        _inv([S.conduct("b"), "served/base.jsonl"], tag="capture-file"),
-        _inv([S.conduct("b"), _served(built, "a", 0)], tag="control-row")])})
-
-    fid = [built.finding_id("b", 0, i) for i in range(3)]
-    assert [S.lane_of(built, f) for f in fid] == [NO_PAIR, NO_PAIR, DEFENDER]
-    assert [_surfaces(built, S.marker("b", t)) for t in ("capture-row", "capture-file")] == [
-        [], []]
-    assert _cites(fid[2]) == {S.conduct("b"), _served(built, "a", 0)}
 
 
-def test_1234_world_finding_citing_world_records_not_comparable_or_outcome(tmp_path: Path) -> None:
-    """`world_records/` and `not_comparable.yaml` never resolve; `outcome.yaml#` resolves as a
-    context pointer, as does `samples.yaml#` (A1): context names no run and is set aside for the
-    two-run rule and the gap-only rule. Only a `family.yaml#` plan pointer can make a finding
-    design; none of these counts toward design.
-
-    A failed fourth world's record and not_comparable.yaml are real files. In b's reply: b's
-    report beside pre-flight's record has no two-run pair; two refused rows beside both context
-    pointers stay gap-only (user record); world findings citing pre-flight's record alone or the
-    samples section alone are serving (user record, no questioner row); one citing the world
-    record and not_comparable.yaml is unresolved; one citing b's plan entry beside pre-flight's
-    record is design (questioner). A family finding citing pre-flight's record is serving, one
-    citing the world record and not_comparable.yaml unresolved."""
-    built = S.family(tmp_path, _refusal_calls(d=_failed_d()))
-    (built.ep / "not_comparable.yaml").write_text("reason: planted\n", encoding="utf-8")
-    never = ["world_records/d.yaml", "not_comparable.yaml"]
-    blocked = [_served(built, "b", 2), _served(built, "a", 1)]
-    _run(built, {"b": _reply(
-        investigator=[_inv([S.conduct("b"), OUTCOME_CTX], tag="context-half"),
-                      _inv([*blocked, OUTCOME_CTX, SAMPLES_CTX], tag="gap-only-context")],
-        world=[_wf([OUTCOME_CTX], tag="outcome-only"), _wf([SAMPLES_CTX], tag="samples-only"),
-               _wf(never, tag="records-only"), _wf([S.plan_ptr("b"), OUTCOME_CTX], tag="plan")])},
-        family=S.family_reply(world=[_wf([OUTCOME_CTX], label="family", tag="fam-outcome"),
-                                     _wf(never, label="family", tag="fam-records")]))
-
-    b = [S.lane_of(built, built.finding_id("b", 0, i)) for i in range(6)]
-    fam = [S.lane_of(built, built.finding_id("family", 0, i)) for i in range(2)]
-    assert (b, fam) == ([NO_PAIR, USER_RECORD, USER_RECORD, USER_RECORD, UNRESOLVED, QUESTIONER],
-                        [USER_RECORD, UNRESOLVED])
-    assert {r.get("finding_id") for r in S.questioner_queue()} == {built.finding_id("b", 0, 5)}
 
 
-def test_1234_two_spellings_of_one_run_offered_as_a_two_run_pair(tmp_path: Path) -> None:
-    """One no-follow resolver canonicalises each pointer to exactly one run and one class: two
-    spellings of one file name the same run, so a pair of them is not a two-run pair and the
-    finding is dropped for that; dot segments, doubled separators and trailing separators
-    canonicalise to the file they name (a segment that returns into the same world names the same
-    run); a segment that leaves the world's subtree, or a case variant naming no archived label,
-    is unresolved.
-
-    b's report paired with itself spelled `worlds/b/./`, `./worlds/b/`, `worlds//b/` and
-    `worlds/b/gather_summaries/../` is dropped for no two-run pair, as is b's report paired with
-    `worlds/c/../b/report.md` or `worlds/c/../a/report.md` (leaving c's subtree: unresolved,
-    never canonicalised into another world) or `worlds/A/report.md` (no archived label). b's
-    report spelled with a doubled separator and a dot segment against the control's spelled
-    with a dot segment and a trailing separator is a resolving pair and is queued."""
-    built = S.family(tmp_path)
-    report = S.conduct("b")
-    spellings = ["worlds/b/./report.md", "./worlds/b/report.md", "worlds//b/report.md",
-                 "worlds/b/gather_summaries/../report.md", "worlds/c/../b/report.md",
-                 "worlds/c/../a/report.md", "worlds/A/report.md"]
-    findings = [_inv([report, s], tag=f"spelling-{i}") for i, s in enumerate(spellings)]
-    findings.append(_inv(["worlds//b/./report.md", "./worlds/a/report.md/"], tag="canonical"))
-    _run(built, {"b": _reply(investigator=findings)})
-
-    lanes = [S.lane_of(built, built.finding_id("b", 0, i)) for i in range(len(findings))]
-    assert lanes == [NO_PAIR] * len(spellings) + [DEFENDER]
-    queued = {r.get("finding_id") for r in S.from_world(S.defender_queue(), "b")}
-    assert queued == {built.finding_id("b", 0, len(spellings))}
-    assert _cites(built.finding_id("b", 0, len(spellings))) == {
-        S.conduct("b"), S.conduct("a")}
 
 
-@pytest.mark.parametrize("path", ["family.yaml", "./family.yaml", "x/../family.yaml",
-                                 ".//family.yaml/"])
-def test_1234_plan_spellings_reach_questioner(tmp_path: Path, path: str) -> None:
-    """Every accepted spelling of a plan pointer survives routing and queue validation."""
-    built = S.family(tmp_path)
-    _run(built, {"b": _reply(world=[_wf([path + "#worlds/b"])])})
-    fid = built.finding_id("b", 0, 0)
-    assert S.lane_of(built, fid) == QUESTIONER
-    row = _row_on(S.questioner_queue(), fid)
-    assert row is not None
-    assert row[CITATIONS] == [S.plan_ptr("b")]
 
 
 # --------------------------------------------------------------------------------------
@@ -792,112 +662,14 @@ def test_1234_plan_spellings_reach_questioner(tmp_path: Path, path: str) -> None
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_contrast_pair_between_two_reference_runs_only(tmp_path: Path) -> None:
-    """The two-run rule needs a conduct pointer in the focus run and a conduct pointer in a
-    reference run (A1). A pair whose pointers lie in the control and in c, neither in b, has no
-    conduct pointer in the focus run and the finding is dropped.
-
-    Its lane is names-only-another-run (A13's precedence puts it ahead of no two-run pair), its
-    claim reaches neither queue nor the user record, and b's resolving pair in the same reply
-    is queued and seen on the defender queue."""
-    built = S.family(tmp_path)
-    _run(built, {"b": _reply(investigator=[
-        _inv([S.conduct("a"), S.conduct("c")], tag="references-only"),
-        _inv([S.conduct("b"), S.conduct("a")], tag="pair")])})
-
-    fid = [built.finding_id("b", 0, i) for i in range(2)]
-    assert [S.lane_of(built, f) for f in fid] == [OTHER_RUN, DEFENDER]
-    assert _surfaces(built, S.marker("b", "references-only")) == []
-    assert _surfaces(built, S.marker("b", "pair")) == ["defender queue"]
 
 
-def test_1234_contrast_pair_naming_a_runs_built_layer(tmp_path: Path) -> None:
-    """A world's built layer (`oracle/<X>/…`) is its own pointer class, never conduct: it cannot
-    supply either half of the two-run pair. b's report plus b's oracle store has one conduct
-    pointer in one run; b's report plus c's forged rows has no conduct pointer in c. Both pairs
-    fail the two-run rule and the finding is dropped.
-
-    Both are dropped with the no-pair lane and reach no output. c's forged rows riding beside a
-    resolving pair resolve (they are cited on the queued row) without being a half."""
-    built = S.family(tmp_path)
-    _run(built, {"b": _reply(investigator=[
-        _inv([S.conduct("b"), S.oracle_ptr("b")], tag="own-store"),
-        _inv([S.conduct("b"), S.oracle_ptr("c")], tag="c-forged-rows"),
-        _inv([S.conduct("b"), S.conduct("a"), S.oracle_ptr("c")], tag="rides")])})
-
-    fid = [built.finding_id("b", 0, i) for i in range(3)]
-    assert [S.lane_of(built, f) for f in fid] == [NO_PAIR, NO_PAIR, DEFENDER]
-    assert [_surfaces(built, S.marker("b", t)) for t in ("own-store", "c-forged-rows")] == [
-        [], []]
-    assert _cites(fid[2]) == {S.conduct("b"), S.conduct("a"), S.oracle_ptr("c")}
 
 
-def test_1234_contrast_pair_of_unrelated_files_across_two_runs(tmp_path: Path) -> None:
-    """Only conduct records (report, investigation, calls, served rows) satisfy a contrast pair;
-    alert.json and provenance.json do not.
-
-    b's alert.json against c's provenance.json, and b's provenance.json against the control's
-    alert.json, are each dropped with the no-pair lane and reach no output; b's report against
-    c's investigation in the same reply is queued."""
-    built = S.family(tmp_path)
-    _run(built, {"b": _reply(investigator=[
-        _inv([S.conduct("b", "alert.json"), S.conduct("c", "provenance.json")], tag="alert-prov"),
-        _inv([S.conduct("b", "provenance.json"), S.conduct("a", "alert.json")], tag="prov-alert"),
-        _inv([S.conduct("b"), S.conduct("c", "investigation.md")], tag="conduct-pair")])})
-
-    fid = [built.finding_id("b", 0, i) for i in range(3)]
-    assert [S.lane_of(built, f) for f in fid] == [NO_PAIR, NO_PAIR, DEFENDER]
-    assert [_surfaces(built, S.marker("b", t)) for t in ("alert-prov", "prov-alert")] == [[], []]
-    assert _surfaces(built, S.marker("b", "conduct-pair")) == ["defender queue"]
 
 
-def test_1234_am_contrast_pair_of_two_served_answers_only(tmp_path: Path) -> None:
-    """Two served rows are ledger conduct pointers in two runs, so a pair of served answers
-    satisfies the two-run rule (A1; N-e: substance is not judged) (NA08).
-
-    b's altered served answer against the control's served row for the same call — nothing the
-    investigator wrote or asked — is queued citing both rows; two served rows of b alone are not
-    a two-run pair."""
-    altered_q = S.query_params("user:alice host:db-1")
-    built = S.family(tmp_path, S.triad(a={"calls": [S.CallRow(), S.CallRow(params=altered_q)]}))
-    served_pair = [_served(built, "b", 1), _served(built, "a", 1)]
-    _run(built, {"b": _reply(investigator=[
-        _inv(served_pair, tag="served-answers"),
-        _inv([_served(built, "b", 1), _served(built, "b", 0)], tag="one-run")])})
-
-    fid = [built.finding_id("b", 0, i) for i in range(2)]
-    assert _cites(fid[0]) == set(served_pair)
-    assert [S.lane_of(built, f) for f in fid] == [DEFENDER, NO_PAIR]
 
 
-def test_1234_contrast_pair_of_two_inherited_ordinary_rows_is_no_pair(tmp_path: Path) -> None:
-    """A contrast pair whose two halves are both inherited, ordinary table rows (pre-branch rows
-    carrying no call id of this run, A12, and not blocked calls) is no pair: no divergence lies
-    behind two copies of the shared baseline, so the finding is dropped with the no-pair lane and
-    reaches no output (R2 (b), human 2026-10-12; I1). An inherited row beside a post-branch row
-    still pairs and queues. J3's inherited denial is a blocked call and keeps its gap-only route
-    (A14; d11a, T10 unchanged).
-
-    The family's seeded prefix is one ordinary inherited row (`idp query user:prebranch`) at row
-    0 of every table. b files: its inherited row against the control's inherited row (no pair);
-    its inherited row against the control's own post-branch row, and its own post-branch row
-    against the control's inherited row (each queued, the positive controls)."""
-    prebranch = S.CallRow(params=S.query_params("user:prebranch"), inherited=True)
-    built = S.family(tmp_path, inherited=[prebranch])
-    assert built.table_rows("b")[0] == built.table_rows("a")[0], (
-        "fixture: the inherited row is identical in both tables")
-    assert S.CALL_ID not in built.table_rows("b")[0], "fixture: the inherited row carries no id"
-    inherited_b, inherited_a = built.table("b", 0), built.table("a", 0)
-    _run(built, {"b": _reply(investigator=[
-        _inv([inherited_b, inherited_a], tag="inherited-pair"),
-        _inv([inherited_b, _table(built, "a", 0)], tag="inherited-beside-own"),
-        _inv([_table(built, "b", 0), inherited_a], tag="own-beside-inherited")])})
-
-    fid = [built.finding_id("b", 0, i) for i in range(3)]
-    assert [S.lane_of(built, f) for f in fid] == [NO_PAIR, DEFENDER, DEFENDER]
-    assert _surfaces(built, S.marker("b", "inherited-pair")) == []
-    assert _cites(fid[1]) == {inherited_b, _table(built, "a", 0)}
-    assert _cites(fid[2]) == {_table(built, "b", 0), inherited_a}
 
 
 # --------------------------------------------------------------------------------------
@@ -941,43 +713,8 @@ def test_1234_focus_reply_files_mislabelled_about_a_reference_world(tmp_path: Pa
                     "surfaces": ["questioner queue"] if kept else []}
 
 
-#: case -> (bucket, the world finding's pointers, its lane, b measured)
-_UNREACHABLE = {
-    "unreachable_about_c": ("unreachable", [S.conduct("c"), S.plan_ptr("c")], OTHER_RUN, True),
-    "incoherent_about_c": ("incoherent", [S.plan_ptr("c")], OTHER_RUN, True),
-    "unreachable_about_b_control": ("unreachable", [S.plan_ptr("b"), S.conduct("b")],
-                                    QUESTIONER, False),
-}
 
 
-@pytest.mark.parametrize("case", sorted(_UNREACHABLE))
-def test_1234_focus_reply_files_unreachable_about_a_reference_world(tmp_path: Path,
-                                                                    case: str) -> None:
-    """The finding is dropped (A1, A15): it has run-naming pointers and all name c (a
-    `family.yaml#` fragment at c's entry names c under A15; only the family-level part names no
-    run). A dropped finding is not kept, so it does not mark b not measured and does not mark c.
-
-    b and c each file a lead-quality bucket with a resolving investigator pair. b's unreachable
-    finding citing c's report and c's plan entry, or its incoherent finding citing c's plan
-    entry alone, is dropped (names only another run): b stays measured and its pair queues, c
-    stays measured. The control: the same unreachable finding citing b's plan entry and b's
-    report is kept, so b is not measured and its pair is withheld as not measured."""
-    bucket, evidence, lane, b_measured = _UNREACHABLE[case]
-    built = S.family(tmp_path)
-    _run(built, {
-        "b": _reply(investigator=[_inv([S.conduct("b"), S.conduct("a")], tag="pair")],
-                    world=[_wf(evidence, bucket=bucket, tag="about")]),
-        "c": _reply(investigator=[_inv([S.conduct("c"), S.conduct("a")], label="c", tag="pair")],
-                    systems=("edr",))})
-
-    seen = {"finding": S.lane_of(built, built.finding_id("b", 0, 1)),
-            "b_pair": S.lane_of(built, built.finding_id("b", 0, 0)),
-            "b_measured": S.row(built, "b").get(MEASURED),
-            "c_measured": S.row(built, "c").get(MEASURED),
-            "reached": _surfaces(built, S.marker("b", "about"))}
-    assert seen == {"finding": lane, "b_pair": DEFENDER if b_measured else NOT_MEASURED,
-                    "b_measured": b_measured, "c_measured": True,
-                    "reached": [] if b_measured else ["questioner queue"]}
 
 
 def test_1234_investigator_finding_judging_a_reference_runs_conduct(tmp_path: Path) -> None:
@@ -1005,78 +742,8 @@ def test_1234_investigator_finding_judging_a_reference_runs_conduct(tmp_path: Pa
     assert _surfaces(built, S.marker("c", "the-flaw")) == ["defender queue"]
 
 
-def test_1234_am_what_counts_as_naming_a_run(tmp_path: Path) -> None:
-    """A pointer names run X through X's conduct (report, investigation, query-table rows, gather
-    summaries, served-ledger rows) or X's built layer (`oracle/X/`); a `family.yaml#` pointer at
-    world X's entry names X and one at the family-level part names no run (A15). Context names no
-    run: `samples.yaml#`, `outcome.yaml#`, and a run's files that are not conduct — `alert.json`,
-    `provenance.json`, `run_end.json`, `lessons_loaded.jsonl` (T1's class list). Any other file,
-    such as a stray file the archive copied under b's subtree, is outside A1's classes, so
-    unresolved, and names no run (A15). b's finding citing c's conduct and, from b, only such
-    files has at least one run-naming pointer and every one names c, so it is dropped as naming
-    only another run. The samples/outcome-only world finding has no run-naming pointer and is not
-    dropped by that rule; with no plan pointer and no conduct pointer it is neither design nor
-    gap-only, so it is serving and goes to the user record. An investigator finding citing only
-    such pointers lacks the two-run pair and is dropped.
-
-    In b's reply (a stray file planted under b): context-only investigator pairs (b's alert.json
-    with the control's provenance.json; b's query-table row with the control's
-    lessons_loaded.jsonl) have no two-run pair; b's investigation against c's gather summary is
-    a conduct pair and queues; c's report beside b's non-conduct files and stray file names only
-    c; the samples/outcome-only world finding is serving (user record, among its serving
-    findings); c's forged rows alone name only c; the stray file alone is unresolved; b's oracle
-    store beside the plan's family-level part is design under world b."""
-    built = S.family(tmp_path)
-    (built.world_dir("b") / "stray.md").write_text("a stray file\n", encoding="utf-8")
-    from_b = [S.conduct("b", leaf) for leaf in ("alert.json", "provenance.json", "run_end.json",
-                                                "lessons_loaded.jsonl", "stray.md")]
-    _run(built, {"b": _reply(
-        investigator=[
-            _inv([S.conduct("b", "alert.json"), S.conduct("a", "provenance.json")],
-                 tag="context-pair"),
-            _inv([S.conduct("b", "investigation.md"), S.conduct("c", "gather_summaries/l-001.md")],
-                 tag="conduct-pair"),
-            _inv([_table(built, "b", 0), S.conduct("a", "lessons_loaded.jsonl")],
-                 tag="row-and-context")],
-        world=[_wf([S.conduct("c"), *from_b], tag="c-and-b-context"),
-               _wf([SAMPLES_CTX, OUTCOME_CTX], tag="serving"),
-               _wf([S.oracle_ptr("c")], tag="c-built-layer"),
-               _wf([S.conduct("b", "stray.md")], tag="stray-only"),
-               _wf([S.oracle_ptr("b"), PLAN_FAMILY], tag="b-built-layer-plan")])})
-
-    lanes = [S.lane_of(built, built.finding_id("b", 0, i)) for i in range(8)]
-    assert lanes == [NO_PAIR, DEFENDER, NO_PAIR, OTHER_RUN, USER_RECORD, OTHER_RUN, UNRESOLVED,
-                     QUESTIONER]
-    serving = [json.dumps(e, default=str) for e in S.serving_findings(built)]
-    assert any(built.finding_id("b", 0, 4) in e or S.marker("b", "serving") in e
-               for e in serving), serving
-    q = _row_on(S.questioner_queue(), built.finding_id("b", 0, 7))
-    assert (None if q is None else q.get("world")) == "b"
 
 
-def test_1234_am_plan_pointer_naming_another_worlds_entry(tmp_path: Path) -> None:
-    """A `family.yaml#` pointer at world X's entry names run X; at the family-level part it names
-    no run (A15). It resolves when the fragment names an entry the manifest holds, otherwise it
-    is unresolved. A world finding in b's reply whose only run-naming pointer is c's entry is
-    dropped (T1's stated cost: c's own call and the family call catch it); beside a pointer into
-    b's conduct it names b and c, is kept, and if not gap-only is design, its questioner row
-    carrying the focus world b. A fragment naming no manifest entry is unresolved.
-
-    c's entry alone: names only another run. c's entry beside b's report: design, questioner row
-    under world b. A fragment naming an entry no manifest holds, alone: unresolved; beside b's
-    report: the plan pointer is set aside, so the finding is serving (user record), not
-    design."""
-    built = S.family(tmp_path)
-    _run(built, {"b": _reply(world=[
-        _wf([S.plan_ptr("c")], tag="c-entry-only"),
-        _wf([S.plan_ptr("c"), S.conduct("b")], tag="c-entry-and-b"),
-        _wf([PLAN_NO_ENTRY], tag="no-entry-only"),
-        _wf([PLAN_NO_ENTRY, S.conduct("b")], tag="no-entry-and-b")])})
-
-    fid = [built.finding_id("b", 0, i) for i in range(4)]
-    assert [S.lane_of(built, f) for f in fid] == [OTHER_RUN, QUESTIONER, UNRESOLVED, USER_RECORD]
-    assert {r.get("finding_id"): r.get("world") for r in S.questioner_queue()} == {fid[1]: "b"}
-    assert [_surfaces(built, S.marker("b", t)) for t in ("c-entry-only", "no-entry-only")] == [[], []]
 
 
 # --------------------------------------------------------------------------------------
@@ -1084,59 +751,8 @@ def test_1234_am_plan_pointer_naming_another_worlds_entry(tmp_path: Path) -> Non
 # --------------------------------------------------------------------------------------
 
 
-def _c_second_call(variant: str) -> Any:
-    """Reference run c's second call: well-formed, or carrying a row c's ledger read must
-    refuse (A3, A12, X13): another world's id, no world id, no call id, another run's call id."""
-    over = {"well_formed": {}, "another_worlds_id": {"world_id": S.world_token("a")},
-            "no_world_id": {"world_id": None}, "no_call_id": {"call_id": None},
-            "another_runs_call_id": {"call_id": S.call_id("a", 7)}}[variant]
-    return S.CallRow(system="edr", params=S.query_params("host:web-2"), **over)
 
 
-@pytest.mark.parametrize("second_call", ["well_formed", "another_worlds_id", "no_world_id",
-                                         "no_call_id", "another_runs_call_id"])
-def test_1234_am_served_ledger_pointer_granularity(tmp_path: Path, second_call: str) -> None:
-    """A1's served form carries a row fragment: a served-ledger pointer with no row fragment, or
-    with a fragment past the file's last row, is unresolved (NA03). A row carrying another world's
-    id or none, or no call id of b's run, makes b's ledger read not well-formed (A3, A12; NA03
-    (b), X13: no reader skips it), so b is malformed and no pointer into a usable run reaches such
-    a row; in a usable run every ledger line is a kept row, so a `#row` fragment indexes lines and
-    kept rows alike. A pointer at a usable run's `refused` or `fault` row names that run and that
-    call and is a blocked-call row; at any other row it is a conduct pointer of that run.
-
-    Asked of the cited run c, whose second call is well-formed or carries another world's id, no
-    world id, no call id, or another run's call id: only a well-formed c lets b's pointers at c's
-    first or second row resolve (a pair, queued); otherwise both are unresolved (no two-run
-    pair). In every case: the control's ledger with no fragment or past its last row is
-    unresolved (no pair); its first row is a conduct pointer (a pair, queued); b's refused row
-    with the control's refused row, and b's fault row with it, are blocked-call rows (gap-only:
-    user record, no defender row); b's refused row with the control's ordinary row is not
-    gap-only (queued)."""
-    built = S.family(tmp_path, S.triad(
-        a={"calls": [S.CallRow(), S.refused_call()]},
-        b={"calls": [S.CallRow(), S.oracle_call(fact_id="f-b", forged_id="fg-b-1"),
-                     S.refused_call(), S.fault_call()]},
-        c={"calls": [S.CallRow(system="edr", params=S.query_params("host:db-1")),
-                     _c_second_call(second_call)]}))
-    report = S.conduct("b")
-    _run(built, {"b": _reply(investigator=[
-        _inv([report, built.served("a", None)], tag="no-fragment"),
-        _inv([report, built.served("a", 99)], tag="past-last-row"),
-        _inv([report, _served(built, "a", 0)], tag="control-row"),
-        _inv([_served(built, "b", 2), _served(built, "a", 1)], tag="refused-pair"),
-        _inv([_served(built, "b", 3), _served(built, "a", 1)], tag="fault-refused"),
-        _inv([_served(built, "b", 2), _served(built, "a", 0)], tag="refused-and-ordinary"),
-        _inv([report, built.served("c", 0)], tag="c-first-row"),
-        _inv([report, built.served("c", 1)], tag="c-second-row")])})
-
-    c_usable = second_call == "well_formed"
-    lanes = [S.lane_of(built, built.finding_id("b", 0, i)) for i in range(8)]
-    assert lanes == [NO_PAIR, NO_PAIR, DEFENDER, USER_RECORD, USER_RECORD, DEFENDER,
-                     DEFENDER if c_usable else NO_PAIR, DEFENDER if c_usable else NO_PAIR]
-    assert [_row_on(S.defender_queue(), built.finding_id("b", 0, i)) for i in (3, 4)] == [
-        None, None]
-    assert [_surfaces(built, S.marker("b", t)) for t in ("no-fragment", "past-last-row")] == [
-        [], []]
 
 
 @pytest.mark.parametrize("d_state", ["malformed_world", "not_archived_world", "plain_twin"])

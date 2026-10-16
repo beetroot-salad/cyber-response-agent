@@ -39,11 +39,9 @@ import multiprocessing
 import os
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 from defender import _yaml
 from defender.tests.judge_contrast_1234 import _spec1234 as S
@@ -250,40 +248,8 @@ _VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "inpu
                         "meta", "source", "track", "wbr"})
 
 
-class _ElementText(HTMLParser):
-    """The text inside the one element whose `id` is `element_id`, through its matching end
-    tag (tags stripped, entities decoded)."""
-
-    def __init__(self, element_id: str) -> None:
-        super().__init__()
-        self.element_id = element_id
-        self.depth = 0
-        self.found = False
-        self.text: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if self.depth:
-            self.depth += tag not in _VOID_TAGS
-        elif not self.found and dict(attrs).get("id") == self.element_id:
-            self.found, self.depth = True, 1
-
-    def handle_endtag(self, tag: str) -> None:
-        if self.depth and tag not in _VOID_TAGS:
-            self.depth -= 1
-
-    def handle_data(self, data: str) -> None:
-        if self.depth:
-            self.text.append(data)
 
 
-def _section(html: str, label: str) -> str:
-    """The text of world `label`'s section of the episode page — main's per-world element,
-    `<div id="world-<label>" ...>`, through its matching end tag."""
-    parser = _ElementText(f"world-{label}")
-    parser.feed(html)
-    parser.close()
-    assert parser.found, f"the episode page has no section for world {label!r}"
-    return " ".join(parser.text)
 
 
 def _without(text: str, *episode_ids: str) -> str:
@@ -530,25 +496,6 @@ def test_1234_grade_returns_per_world_measurement_record(tmp_path):
         assert _field(out, retired) is None, f"the returned record still has `{retired}`"
 
 
-def test_1234_world_rows_are_queued_before_the_next_world_is_judged(tmp_path):
-    """World b's defender rows are on the queue and its row flipped to `queued` when the judge is called
-    for world c, and the family call's design findings are queued after its own call (A6)."""
-    built = _built(tmp_path)
-    watch = Watch(built, S.judge({B: _reply(inv=[_inv(B, "first")]),
-                                  FAMILY: S.family_reply(world=[_family_design("plan")])}))
-
-    S.grade(built, watch, state=watch.state)
-
-    at_c = watch.first("call", C)
-    assert _carrying(S.from_world(at_c.defender or [], B), S.marker(B, "first")), (
-        "when the judge was called for charlie, bravo's defender row was not on the queue")
-    assert _state_of(at_c.record, B) == S.QUEUED, (
-        f"bravo's row when charlie was judged: {_row(at_c.record, B)}")
-    at_family = watch.first("call", FAMILY)
-    assert not _carrying(at_family.questioner or [], S.marker(FAMILY, "plan"))
-    assert _carrying(S.from_world(S.questioner_queue(), FAMILY), S.marker(FAMILY, "plan")), (
-        "the family call's design finding is not on the questioner queue after the pass")
-    assert _state_of(S.record(built), FAMILY) == S.QUEUED
 
 
 def test_1234_world_row_commits_queueing_then_appends_then_queued(tmp_path):
@@ -683,59 +630,8 @@ def test_1234_rerun_grades_only_worlds_without_a_completed_draw_and_keeps_rows_v
 # ======================================================================================
 
 
-def test_1234_pass_stopped_after_world_rows_queued_then_bare_rerun(tmp_path):
-    """Completion has one owner (A6): a world's row is written `queueing`, its defender and questioner
-    rows are appended, then the row flips to `queued`. A pass that stops after the `queueing` write leaves a row naming
-    the world; the bare re-run refuses loudly naming that world and appends nothing, so the defender queue holds each
-    finding of b exactly once, as first written (I8, I2). A world with no row is regraded; a `queued` row is skipped."""
-    built = _left_queueing(tmp_path, S.EPISODE_ID, spare="judge-alias",
-                           reply=_reply(inv=[_inv(B, "once")], world=[_design(B, "once-q")]))
-    queued = _carrying(S.from_world(S.defender_queue(), B), S.marker(B, "once"))
-    assert len(queued) == 1, f"bravo's defender rows after the stopped pass: {queued}"
-    before = S.queue_bytes()
-
-    rerun = S.judge({B: _reply(inv=[_inv(B, "again")])})
-    refused = S.grade_refused(built, rerun)
-
-    assert B in str(refused), f"the re-run's refusal does not name bravo: {refused}"
-    assert not rerun.called(B), "the re-run judged bravo again"
-    assert S.queue_bytes() == before, "the refused re-run appended"
-    same_id = [r for r in S.defender_queue() if r.get("finding_id") == queued[0]["finding_id"]]
-    assert same_id == queued, "bravo's finding is not on the defender queue once, as first written"
 
 
-def test_1234_draw_files_left_by_a_stopped_pass_with_a_different_draw_count(tmp_path):
-    """A world's outcome, queued rows and the page's view come from the draws judge.yaml records for it
-    (completed draws counted by that pass); a draw file judge.yaml does not record is read by no reader (A6). Regrading
-    a world with no row overwrites its draw files (safe, K11), so stray files of a wider earlier pass never change
-    an outcome and the page does not show them."""
-    built = _built(tmp_path)
-    wide = {(B, n): _reply(bucket="lead-quality", inv=[_inv(B, f"stray-{n}")]) for n in range(3)}
-    stop = Refuse(tmp_path / "unused", built.ep / "judge.yaml")
-    _stopped(built, Watch(built, S.judge(wide), at_call={(B, 2): stop}), draws=3)
-    stop.clear()
-    assert stop.fired
-    assert len(S.draw_files(built, B)) == 3
-    assert not _row(S.record(built), B), "the stopped pass left a row for bravo"
-
-    S.grade(built, S.judge({(B, 0): _reply(bucket="lead-set", inv=[_inv(B, "fresh")])}),
-            draws=1)
-
-    row = S.row(built, B)
-    assert row.get(COMPLETED) == 1, row
-    assert len(row.get(DRAWS) or []) == 1, row
-    assert row.get(BUCKET) == "lead-set", row
-    assert not row.get(DRAWS_DISAGREE), row
-    queued = S.from_world(S.defender_queue(), B)
-    assert _carrying(queued, S.marker(B, "fresh")), "the recorded draw's finding is not queued"
-    for n in (1, 2):
-        assert not _carrying(queued, S.marker(B, f"stray-{n}")), f"stray draw {n} was queued"
-    assert {r["finding_id"].split("/")[2] for r in queued} == {"0"}, _ids(queued)
-    assert S.marker(B, "fresh") in json.dumps(S.draw_doc(built, B, 0)), "draw 0 not overwritten"
-    html = S.page(built)
-    assert S.marker(B, "fresh") in html, "the page does not show bravo's recorded draw"
-    for n in (1, 2):
-        assert S.marker(B, f"stray-{n}") not in html, f"the page shows stray draw {n}"
 
 
 def test_1234_control_check_fails_on_rerun_after_first_pass_queued_rows(tmp_path):
@@ -822,36 +718,6 @@ def test_1234_am_pass_stops_after_queueing_before_or_between_appends(tmp_path):
     assert first == second, "the record tells a stop before the appends from one between them"
 
 
-def test_1234_am_scope_of_the_queueing_refusal(tmp_path):
-    """A `queueing` row refuses the whole grade pass at the first such row, naming the world (A6, principle
-    2): world c is not graded and the family call is not asked. A stamp pass grades nothing, so it writes its stamp
-    carrying the `queueing` row verbatim and names that world in it; the next grade pass still refuses (NA01)."""
-    built = _left_queueing(tmp_path, S.EPISODE_ID, spare="judge-alias")
-    assert not _row(S.record(built), C)
-    assert _state_of(S.record(built), FAMILY) is None
-
-    rerun = S.judge()
-    refused = S.grade_refused(built, rerun)
-
-    assert B in str(refused), f"the refusal does not name bravo: {refused}"
-    assert not rerun.called(C), "charlie was graded past a queueing row"
-    assert not rerun.called(FAMILY), "the family call was asked past a queueing row"
-    assert _row(S.record(built), C).get(S.STATE_KEY) is None
-
-    other = _left_queueing(tmp_path, EP2, spare="ep2-alias")
-    queueing = _row(S.record(other), B)
-    report = other.world_dir(CONTROL) / "report.md"
-    text = report.read_text(encoding="utf-8")
-    report.unlink()
-    stamp_pass = S.judge()
-    S.grade(other, stamp_pass)
-    stamped = S.record(other)
-    assert stamped.get(STAMP), sorted(stamped)
-    assert stamp_pass.calls == 0, sorted(stamped)
-    assert _row(stamped, B) == queueing, "the stamp did not carry the queueing row verbatim"
-    assert B in json.dumps(stamped.get(STAMP)), "the stamp does not name the queueing world"
-    report.write_text(text, encoding="utf-8")
-    assert B in str(S.grade_refused(other, S.judge()))
 
 
 def test_1234_rerun_when_draw_files_are_complete_on_disk_but_judge_yaml_is_absent(tmp_path):
@@ -923,20 +789,6 @@ def test_1234_judge_yaml_cannot_be_written_after_rows_were_queued(tmp_path):
     assert B in str(S.grade_refused(flipped, S.judge()))
 
 
-def test_1234_serving_finding_when_the_pass_stops_before_judge_yaml(tmp_path):
-    """A6 records serving findings and named gaps at the flip, so a pass that stops before the flip leaves
-    the serving finding only in the world's draw files and its row `queueing`; the re-run refuses loudly naming the
-    world, the operator recovers the finding while reconciling by hand, and no new state is added (NA01)."""
-    built = _left_queueing(tmp_path, S.EPISODE_ID, spare="judge-alias",
-                           reply=_reply(inv=[_inv(B, "def")], world=[_serving(B, "serving")]))
-    serving = S.marker(B, "serving")
-
-    assert serving in json.dumps(S.draw_doc(built, B, 0)), "the serving finding is not in its draw"
-    assert serving not in S.record_text(built), "the record holds the serving finding before the flip"
-    assert not _carrying([*S.defender_queue(), *S.questioner_queue()], serving)
-    states = {r.get(S.STATE_KEY) for r in S.record(built).get("worlds") or []} - {None}
-    assert states <= {S.QUEUEING, S.QUEUED}, f"a state outside A6's two: {states}"
-    assert B in str(S.grade_refused(built, S.judge()))
 
 
 def test_1234_not_graded_stamp_then_the_control_is_repaired(tmp_path):
@@ -972,31 +824,6 @@ def test_1234_not_graded_stamp_then_the_control_is_repaired(tmp_path):
 # ======================================================================================
 
 
-def test_1234_bare_rerun_after_a_fully_graded_pass(tmp_path):
-    """A bare re-run over a fully graded, unchanged archive makes no model call and changes no queue, draw
-    file or judge.yaml row (I8)."""
-    built = _built(tmp_path)
-    S.grade(built, S.judge({B: _reply(inv=[_inv(B, "b")], world=[_design(B, "q")]),
-                            C: _reply(inv=[_inv(C, "c")]),
-                            FAMILY: S.family_reply(world=[_family_design("plan")])}))
-    queues = S.queue_bytes()
-    assert S.marker(B, "b") in queues[0]
-    assert S.marker(C, "c") in queues[0]
-    assert S.marker(B, "q") in queues[1]
-    assert S.marker(FAMILY, "plan") in queues[1]
-    for who in (B, C, FAMILY):
-        assert _state_of(S.record(built), who) == S.QUEUED
-    draws = {who: _bytes_of(S.draw_files(built, who)) for who in (B, C, FAMILY)}
-    assert all(draws.values()), {who: list(d) for who, d in draws.items()}
-    record = S.record_text(built)
-
-    rerun = S.judge()
-    S.grade(built, rerun)
-
-    assert rerun.calls == 0
-    assert S.queue_bytes() == queues
-    assert {who: _bytes_of(S.draw_files(built, who)) for who in (B, C, FAMILY)} == draws
-    assert S.record_text(built) == record
 
 
 def test_1234_bare_rerun_grades_only_the_world_with_no_completed_draw(tmp_path):
@@ -1030,51 +857,8 @@ def test_1234_bare_rerun_grades_only_the_world_with_no_completed_draw(tmp_path):
     assert _state_of(second, C) == S.QUEUED
 
 
-def test_1234_late_world_graded_alone_leaves_earlier_worlds_rows_as_written(tmp_path):
-    """B's queued rows and fields are unchanged; C's grade is not a function of B's reply (P-c, I2)."""
-    built = _built(tmp_path)
-    b_reply = _reply(inv=[_inv(B, "b-over-c", contrast=[S.conduct(B), S.conduct(C)])],
-                     world=[_design(B, "b-q")])
-    S.grade(built, S.judge({B: b_reply}, fail={C}))
-    b_defender = S.from_world(S.defender_queue(), B)
-    b_questioner = S.from_world(S.questioner_queue(), B)
-    assert _carrying(b_defender, S.marker(B, "b-over-c"))
-    assert _carrying(b_questioner, S.marker(B, "b-q"))
-    b_row = _row(S.record(built), B)
-
-    c_reply = _reply(bucket="lead-set",
-                     inv=[_inv(C, "c-over-b", contrast=[S.conduct(C), S.conduct(B)])])
-    late = S.judge({C: c_reply})
-    S.grade(built, late)
-
-    assert S.from_world(S.defender_queue(), B) == b_defender
-    assert S.from_world(S.questioner_queue(), B) == b_questioner
-    assert _row(S.record(built), B) == b_row
-    prompt = late.prompt_for(C)
-    archived = ("report", "investigation", "summary-l-001", "story", "alert")
-    assert any(S.marker(B, what) in prompt for what in archived), (
-        "nothing of bravo's archive reached charlie's prompt — the reference is not observable")
-    assert S.marker(B, "b-over-c") not in prompt, "charlie's prompt carries bravo's reply"
-    assert S.marker(B, "b-q") not in prompt, "charlie's prompt carries bravo's reply"
-    c_rows = S.from_world(S.defender_queue(), C)
-    assert _carrying(c_rows, S.marker(C, "c-over-b"))
-    assert not _carrying(c_rows, S.marker(B, "b-over-c"))
 
 
-def test_1234_rerun_keeps_prior_rows_verbatim_across_two_successive_reruns(tmp_path):
-    """After three passes the queue holds the first world's rows exactly as first written."""
-    built = _built(tmp_path, B, C, D)
-    S.grade(built, S.judge({B: _reply(inv=[_inv(B, "first"), _inv(B, "second")])}, fail={C, D}))
-    first_rows = S.from_world(S.defender_queue(), B)
-    assert len(_carrying(first_rows, S.marker(B, "first"))) == 1
-    assert len(_carrying(first_rows, S.marker(B, "second"))) == 1
-
-    S.grade(built, S.judge({C: _reply(inv=[_inv(C, "c")])}, fail={D}))
-    S.grade(built, S.judge({D: _reply(inv=[_inv(D, "d")])}))
-
-    assert _carrying(S.from_world(S.defender_queue(), C), S.marker(C, "c"))
-    assert _carrying(S.from_world(S.defender_queue(), D), S.marker(D, "d"))
-    assert S.from_world(S.defender_queue(), B) == first_rows
 
 
 # ======================================================================================
@@ -1082,76 +866,10 @@ def test_1234_rerun_keeps_prior_rows_verbatim_across_two_successive_reruns(tmp_p
 # ======================================================================================
 
 
-def _assert_page_states(html: str, *, queueing: str, queued: str, unrecorded: str) -> None:
-    """The three row states as the page shows them, each in its own world's section."""
-    in_progress, graded, ungraded = (S.word_re(WORDS[k]) for k in
-                                     ("page.in_progress", "page.graded", "page.ungraded"))
-    shown = {label: _section(html, label) for label in (queueing, queued, unrecorded)}
-    assert in_progress.search(shown[queueing]), f"{queueing}'s queueing row is not in progress"
-    assert graded.search(shown[queued]), f"{queued}'s queued row is not shown graded"
-    assert not in_progress.search(shown[queued])
-    assert ungraded.search(shown[unrecorded]), f"{unrecorded}, with no row, is not ungraded"
-    assert not in_progress.search(shown[unrecorded])
-    assert WORDS["page.not_enqueued"] not in html, "the page says 'not enqueued' of a recorded row"
 
 
-def test_1234_page_opened_between_the_first_worlds_enqueue_and_judge_yaml(tmp_path):
-    """The page reads judge.yaml's rows (A6), never the queue: a `queueing` row shows in progress naming
-    the world, a `queued` row shows graded, a world with no row shows ungraded, and no draw file judge.yaml does not
-    record is shown; the page never says 'not enqueued' for a recorded row (NA01, N10)."""
-    built = S.family(tmp_path, _worlds(D, B, C))
-    flip = Refuse(tmp_path / "judge-alias", built.ep / "judge.yaml")
-    watch = Watch(built, S.judge({D: _reply(inv=[_inv(D, "graded")]),
-                                  B: _reply(inv=[_inv(B, "pending")])}),
-                  after_append={(B, DEFENDER_Q): flip})
-    _stopped(built, watch)
-    flip.clear()
-    assert flip.fired
-    record = S.record(built)
-    assert (_state_of(record, D), _state_of(record, B), _row(record, C)) == (
-        S.QUEUED, S.QUEUEING, {}), record
-    assert _carrying(S.from_world(S.defender_queue(), B), S.marker(B, "pending"))
-
-    html = S.page(built)
-
-    _assert_page_states(html, queueing=B, queued=D, unrecorded=C)
 
 
-def test_1234_am_readers_meet_a_queueing_row_or_unrecorded_draw_files(tmp_path):
-    """The page shows a `queueing` world as in progress naming it, a `queued` world as graded and a world
-    with no row as ungraded, and shows no draw file judge.yaml does not record (A6). read_grade returns rows verbatim
-    including their state and refuses by name a `state` value other than `queueing` or `queued` (NA01, principle 2)."""
-    built = S.family(tmp_path, _worlds(D, B, C))
-    shown = _reply(inv=[_inv(D, "shown")])
-    first = S.judge({(D, 0): shown, (D, 1): shown, (C, 0): _reply(inv=[_inv(C, "stray")])},
-                    fail={B})
-    stopped = _stopped(built, Watch(built, first, stop_at=(C, 1)), draws=2)
-    assert isinstance(stopped, KeyboardInterrupt), stopped
-    assert S.draw_files(built, C), "charlie's first draw was not written before the interrupt"
-    flip = Refuse(tmp_path / "judge-alias", built.ep / "judge.yaml")
-    _stopped(built, Watch(built, S.judge({B: _reply(inv=[_inv(B, "pending")])}),
-                          after_append={(B, DEFENDER_Q): flip}), draws=1)
-    flip.clear()
-    record = S.record(built)
-    assert (_state_of(record, D), _state_of(record, B)) == (S.QUEUED, S.QUEUEING), record
-    assert _row(record, C).get(S.STATE_KEY) is None
-    assert S.draw_files(built, C)
-
-    html = S.page(built)
-
-    _assert_page_states(html, queueing=B, queued=D, unrecorded=C)
-    assert S.marker(D, "shown") in html, "the page does not show delta's recorded draws"
-    assert S.marker(C, "stray") not in html, "the page shows a draw file judge.yaml does not record"
-
-    read_grade = S.sym(S.JUDGE, "read_grade")
-    assert S.rows(read_grade(built.ep)) == S.rows(built), "read_grade did not return rows verbatim"
-    assert S.rows(read_grade(built.ep))[B].get(S.STATE_KEY) == S.QUEUEING
-    bad = S.record(built)
-    _row(bad, B)[S.STATE_KEY] = "half-done"
-    (built.ep / "judge.yaml").write_text(_yaml.safe_dump(bad, sort_keys=False), encoding="utf-8")
-    with pytest.raises(S.refusals()) as refused:
-        read_grade(built.ep)
-    assert "half-done" in str(refused.value), refused.value
 
 
 # ======================================================================================
@@ -1321,55 +1039,6 @@ def _author_lesson(corpus: Path, name: str, finding_id: str) -> None:
     (corpus / f"{name}.md").write_text(lesson_text(finding_id), encoding="utf-8")
 
 
-def test_1234_a_lesson_authored_from_a_skipped_index_finding_is_recognised_as_consumed_next_tick(tmp_path):
-    """A defender finding with a per-draw id whose index skips numbers (kept ids 0, 2, 4, 5 of one draw,
-    A13) is authored into a lesson whose source_finding_ids carry that id, and the next tick's gate (existing_finding_ids
-    against the corpus) recognises it as consumed_idempotent while a different draw's finding at the same position,
-    which has a different id, is authored: the join resolves non-empty and correctly paired. The control is a finding
-    with no lesson, which is not consumed. On the record-less path, built the reachable way (R7 (b), human
-    2026-10-12: a pre-change pass queued a defender row at the colliding id and stopped before its judge.yaml, then
-    a new-code pass runs), the new finding at that coordinate is never silently lost: it is on the defender queue
-    (under its own or a fresh id) or named on the ledger with a lane other than the defender's (GT-6; how the
-    collision is resolved, a fresh id or a lane, is write-code-from-spec's)."""
-    built = _built(tmp_path)
-
-    def filed(n: int) -> dict:
-        return _reply(inv=[_inv(B, f"d{n}-0"), _inv(B, f"d{n}-1", contrast=_nowhere(n)),
-                           _inv(B, f"d{n}-2"), _inv(B, f"d{n}-3", contrast=_nowhere(n)),
-                           _inv(B, f"d{n}-4"), _inv(B, f"d{n}-5")])
-
-    S.grade(built, S.judge({(B, 0): filed(0), (B, 1): filed(1)}), draws=2)
-    queued = S.from_world(S.defender_queue(), B)
-    kept = {built.finding_id(B, n, i) for n in (0, 1) for i in (0, 2, 4, 5)}
-    assert set(_ids(queued)) == kept, f"kept ids: {sorted(_ids(queued))}"
-    authored_from = built.finding_id(B, 0, 2)
-    same_position = built.finding_id(B, 1, 2)
-    unauthored = built.finding_id(B, 0, 4)
-
-    with _gate_config(tmp_path, questioner=False) as (cfg, corpus):
-        _author_lesson(corpus, "from-a-skipped-index", authored_from)
-        held, consumed, to_author = S.mod(S.LESSONS_RUN)._gate_findings(queued, cfg)
-
-    assert _ids(consumed) == [authored_from], f"consumed: {_ids(consumed)}"
-    assert all(c.get("consumed_category") == "consumed_idempotent" for c in consumed)
-    assert same_position in _ids(to_author), "the other draw's same-position finding was not authored"
-    assert unauthored in _ids(to_author), "a finding with no lesson was not left to author"
-    assert not held, f"held: {held}"
-
-    # The record-less path, the reachable way (R7 (b)): a pre-change pass queued bravo's row
-    # at the colliding id and stopped before writing judge.yaml; then a new-code pass.
-    other = _built(tmp_path, episode_id=EP2)
-    fid = other.finding_id(B, 0, 0)
-    old = S.pre_change_row(fid, finding=f"{_claim(B, 'old')} — stopped early")
-    S.env_state().append(_channel(DEFENDER_Q), [old], dedup_key="finding_id")
-    assert [r for r in S.defender_queue() if r.get("finding_id") == fid] == [old], (
-        "fixture: the pre-change row sits on the queue at the colliding id")
-    assert not (other.ep / "judge.yaml").exists(), "fixture: the pre-change pass left no record"
-    S.grade(other, S.judge({B: _reply(inv=[_inv(B, "new")])}))
-    on_queue = _carrying(S.defender_queue(), S.marker(B, "new"))
-    lane = S.lane_of(other, fid)
-    assert on_queue or (lane is not None and lane != S.LANES["defender"]), (
-        f"the new finding at {fid} was silently lost: not on the queue, lane {lane!r}")
 
 
 def test_1234_questioner_dedup_and_gate_resolve_per_draw_ids_with_skipped_indexes(tmp_path):

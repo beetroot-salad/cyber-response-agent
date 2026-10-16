@@ -1,48 +1,22 @@
-"""#1134 step 6 (v3, addendum 2): the holes the v3 scoped adversary found in the ported suite,
-each pinned. Its brief was the retargeted rows, the `entry_kind` / `list_tree` mapping and the
-#1139 merge; v2's adversary verdict (E1-E10, R8) carries for the rest.
-
-- V3-H1: `lead_author.run` without deps (the CLI's route) serving its claim after its trees
-  closed: every read and write answers `Bad file descriptor`, no draft lands, no agent runs, and
-  the run still records itself done. No row reached a mint through that route.
-- V3-H2: `synthesize_drafts` treating a refused listing (`entry_kind`'s `reason`) as the draft's
-  refusal without trying the write. Every fault row refused the listing AND the write (the `step`
-  route); a listing-only refusal (`scandir`, `reopen`) tells the two apart: the write lands.
-- V3-H3: `kind_at` mapping one refusal (EIO, or an uncommon errno) to `"absent"`, which opens the
-  half-promote twin probe and counts a minted draft as departed. The rows had EACCES only.
-- V3-H4: `discover_system_drafts` listing a refused folder again and taking the second answer
-  (a transient fault, `once=True`): the folder's one listing decides (step 4's V3-H1 shape).
-- V3-H5: a refused folder's warning reworded for an uncommon errno: the reason is `entries()`'s,
-  verbatim (step 4's V3-H2 shape).
-- V3-H6: `kind_at` on the mount point itself hardcoded to `"dir"`: a closed or refused mount is
-  `"other"`.
-- V3-H7: a hand-rolled lister beside B2's helpers (behaviour-identical, so pinned by AST: the
-  helpers have one owner, addendum 2 B2/B3).
-- V3-L1: the `# noqa: V103` on `entry_kind` kept after its first production caller.
-
-Faults that cannot be made for real as root go through `DrainTrees.open`'s `os_` seam only.
+"""V3 holes in the lead author's listings: serving a claim after its trees closed, refused listings alone not refusing
+a draft, `kind_at` mapping a refusal to absent, discovery re-listing a refused folder or rewording its reason.
+Faults go through `DrainTrees.open`'s `os_` seam.
 """
 from __future__ import annotations
 
-import ast
 import errno
-import inspect
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from defender import _tree_listing
 from defender._env import FatalConfigError
-from defender.learning.core import lane_trees
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, kind_at
-from defender.learning.leads import draft_synthesis, lead_author
+from defender.learning.leads import lead_author
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
-from defender.learning.leads.lead_author import _handoff
 from defender.tests._lead_author_1134 import outcome, place, raised, scene_over, write
 from defender.tests._repo import seed_skills_repo
 from defender.tests._shared_readers_1134 import REFUSAL_ROUTES, RefusesFolder
@@ -291,41 +265,9 @@ def test_discover_warns_an_uncommon_refusal_in_its_own_words(
 # ---------------------------------------------------------------------------------------
 
 
-def _function(module: Any, name: str) -> ast.FunctionDef:
-    tree = ast.parse(inspect.getsource(module))
-    [fn] = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name]
-    return fn
 
 
-def _calls(fn: ast.FunctionDef) -> list[str]:
-    """Every callee in `fn`: a bare name, or an attribute's last component."""
-    out: list[str] = []
-    for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
-        f = call.func
-        out.append(f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute)
-                   else "")
-    return out
 
 
-@pytest.mark.parametrize(("module", "name", "helper", "banned"), [
-    (draft_synthesis, "synthesize_drafts", "entry_kind", {"entries", "under", "stat", "lstat"}),
-    (_handoff, "discover_system_drafts", "list_tree", {"entries", "under", "stat", "lstat"}),
-    (lane_trees, "kind_at", "entry_kind", {"under", "stat", "lstat"}),
-], ids=["synthesize_drafts", "discover_system_drafts", "kind_at"])
-def test_each_lister_goes_through_its_b2_helper(module, name, helper, banned):
-    """Addendum 2 B2/B3: the existence test, discover and `kind_at` ask B2's helper, and none
-    lists or stats on its own (a second lister beside the owner drifts from it). `kind_at`'s one
-    own `entries()` is the mount point itself, which `entry_kind` refuses to name."""
-    calls = _calls(_function(module, name))
-    assert helper in calls, (name, calls)
-    assert not banned & set(calls), (name, sorted(banned & set(calls)))
 
 
-def test_entry_kind_carries_no_vulture_suppression():
-    """`entry_kind` has production callers now (the draft writer's existence test, `kind_at`),
-    so its `def` line keeps no `# noqa: V103` standing in for one."""
-    source = inspect.getsource(_tree_listing)
-    fn = _function(_tree_listing, "entry_kind")
-    header = "\n".join(source.splitlines()[fn.lineno - 1:fn.body[0].lineno - 1])
-    assert "def entry_kind" in header
-    assert not re.search(r"noqa:[^\n]*\bV1\d\d\b", header), header

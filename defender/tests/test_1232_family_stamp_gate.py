@@ -1,15 +1,6 @@
 """PR #1232 — the family-stamp gate, the judge's and the episode readers'.
 
 Seventh round (finding 3): `verify_family` withholds the family stamp (`provenance.json`) when
-the siblings ran other code or knowledge than the source, on unverified or dirty trees, or
-under mixed tenants, and only logged why. Before #1224 such a family was recorded `incomplete`
-and the judge refused it; M05=A retired `incomplete` and nothing replaced the gate, so a
-non-comparable family was graded and its findings queued. What holds now (human decision
-2026-10-10): `verify_family` records its reason (`not_comparable.yaml`), and an accepted family
-with no readable family stamp is stamped not-graded `not comparable` naming that reason — no
-model call, nothing queued. A torn stamp counts as absent. `episode.verdicts` and
-`episode.delta_o` refuse the same family through the same predicate
-(`outcome.not_comparable_reason`).
 """
 from __future__ import annotations
 

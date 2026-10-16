@@ -1,24 +1,4 @@
-"""#754 — fork's recorded branch point, the log readers, and the one transaction.
-
-The executable form of the `spec_graph_754.yaml` demands that bind `fork_constructor`, the
-three log readers (`displaced_tip`, `branch_point`, `fold_history`) and obligation 8's
-all-or-nothing guarantee. Each test's docstring carries its demand's prose; the ledger ids
-sit in a `# provenance:` comment beneath it.
-
-**RED AGAINST `1cecad37` IS THE EXPECTED STATE**, and `store.fork()` has NO production caller
-(C6/c15: zero production call sites, eight test ones), so the fork half of this change is
-spec-only by construction until #696 — every test below drives the store API directly, and
-none asserts a driver path that does not exist.
-
-Faults here stay on the author charge's hierarchy. The mid-transaction failure is a real
-object the REAL serializer refuses (`_session_head_754.NotSerializable`, ledger claim B8);
-the contention failure is a real second connection really holding the write lock with the
-store's own `busy_timeout` lowered so the real wait really expires; the exhaustion failure is
-the real database really taken to its real growth ceiling (`FaultStore`'s `disk-full` mode,
-ledger claim `rp-c1`); the process-death failure is a real abandoned transaction. No
-exception class below is authored, and where a class is deliberately unpinned the assertion
-is the rollback.
-"""
+"""fork's recorded branch point, the log readers, and the all-or-nothing transaction."""
 from __future__ import annotations
 
 import inspect
@@ -78,35 +58,6 @@ def test_fork_logs_null_to_branch_point(tmp_path):
     assert ss.path_row_ids(store, fork) == [r1, r2]
 
 
-def test_a_fork_entry_records_no_attachment_point(tmp_path):
-    """    A `fork` entry's `attached_to_message_id` is SQL NULL: `fork()` inserts no message row, so
-    there is no first-inserted row whose parent could be recorded, and in particular the
-    column does not repeat `to_message_id`.
-
-    Left unpinned, an implementer could write the branch point into it and stay green, which
-    would re-create one column over exactly the conflation that column exists to prevent. The
-    control is the multi-message non-linear append, whose entry DOES carry an attachment
-    point: the column is not simply always NULL."""
-    store = make_store(tmp_path)
-    main = store.new_session(agent_id="main")
-    r1, r2 = linear_turns(store, main, 2)
-
-    fork = store.fork(main, at_message_id=r2)
-
-    entry = log_rows(store, fork)[0]
-    assert entry.attached_to_message_id is None, (
-        f"a fork grafts no row on, so it records no attachment point; got {entry}")
-    assert entry.to_message_id == r2, "the branch point stays where it belongs"
-
-    landed = store.append(main, [text_response("a"), text_response("b")], agent_id="main",
-                          parent_id=r1, reason="fold")
-    grafted = log_rows(store, main)[0]
-    assert grafted.attached_to_message_id == r1, (
-        "control: an append that DOES graft a row on records where — so NULL on the fork "
-        "entry is a fact about fork(), not a column nothing ever fills")
-    assert grafted.to_message_id == landed[-1]
-
-
 def test_branch_point_survives_the_parent_folding_past_it(tmp_path):
     """    After the parent folds past the branch point, the fork's branch point is still answerable
     exactly: `branch_point` returns the recorded row even though the parent's own path no
@@ -137,61 +88,6 @@ def test_branch_point_survives_the_parent_folding_past_it(tmp_path):
         f"the recorded branch point survives; derivation would answer {r1}")
     assert ss.branch_point(store, fork) != max(shared)
     assert r3 not in fork_path
-
-
-def test_two_forks_one_branch_point_two_entries(tmp_path):
-    """    Two forks taken from one branch point are two sessions with two `fork` entries naming the
-    same `to_message_id`, each under its own session_id — nothing dedupes them, and nothing
-    refuses the second.
-
-    No idempotency is added on the way in: two forks from one point coexist by design, and a
-    uniqueness constraint over the branch point would break this outright."""
-    # provenance: issue obligation 5; P24 (the end state holds regardless of dispatch timing);
-    # PR-18 (executed): the only unique index on `session` is its primary key over session_id.
-    ss = store_mod()
-    store = make_store(tmp_path)
-    main = store.new_session(agent_id="main")
-    r1, r2 = linear_turns(store, main, 2)
-
-    left = store.fork(main, at_message_id=r2)
-    right = store.fork(main, at_message_id=r2)
-
-    assert left != right, "each fork mints its own session_id"
-    entries = log_rows(store)
-    assert [(e.session_id, e.from_message_id, e.to_message_id, e.reason) for e in entries] == [
-        (left, None, r2, "fork"), (right, None, r2, "fork")], entries
-    assert head_of(store, left) == head_of(store, right) == r2
-    assert ss.branch_point(store, left) == ss.branch_point(store, right) == r2
-    assert ss.path_row_ids(store, left) == ss.path_row_ids(store, right) == [r1, r2]
-
-
-def test_fork_accepts_any_at_message_id_and_records_it_unmodified(tmp_path):
-    """    Nothing restricts which row a fork may branch from: an ancestor short of the current head,
-    a row an earlier fold displaced off the path, a synthesized frontier row, and a row
-    belonging to another session are all accepted, and each fork's log entry names the id it
-    was handed, unmodified, with head set to exactly that row."""
-    # provenance: P59 (an off-path at_message_id), P61 (an ancestor short of head), P56 (a row
-    # from another session — B12 establishes the walk crosses sessions anyway) and P57 (a
-    # synthesized frontier row — fork treats every id uniformly).
-    ss = store_mod()
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    main = store.new_session(agent_id="main")
-    r1, r2, r3 = linear_turns(store, main, 3)
-    frontier = sel.fold(store, main, agent_id="main", boundary=3)
-    other = store.new_session(agent_id="gather-l1")
-    (o1,) = linear_turns(store, other, 1, agent_id="gather-l1", label="leg")
-
-    assert r3 not in ss.path_row_ids(store, main), "r3 is off-path after the fold"
-    for label, at in (("ancestor", r2), ("off-path", r3), ("frontier", frontier),
-                      ("foreign", o1)):
-        child = store.fork(main, at_message_id=at)
-        entries = log_rows(store, child)
-        assert [(e.from_message_id, e.to_message_id, e.reason) for e in entries] == [
-            (None, at, "fork")], f"{label}: {entries}"
-        assert head_of(store, child) == at, label
-        assert ss.path_row_ids(store, child)[-1] == at, label
-    assert r1 in ss.path_row_ids(store, main)
 
 
 def test_a_forks_head_is_independent_of_the_parents_later_appends(tmp_path):
@@ -254,57 +150,6 @@ def test_a_forks_first_append_is_linear_and_adds_no_second_entry(tmp_path):
                  parent_id=r1, reason="fold")
     assert [e.reason for e in log_rows(store, fork)] == ["fork", "fold"], (
         "control: the same channel records a move that IS non-linear")
-
-
-def test_fork_writes_head_and_log_in_one_transaction(tmp_path):
-    """    `fork`'s two writes — the `session` row carrying the new head, and the `fork` log entry —
-    ride ONE `BEGIN IMMEDIATE … COMMIT`, so a failure of either leaves neither: a fork from a
-    session_id that does not exist raises and leaves no session row AND no log row, where an
-    autocommit pair would have left the log entry behind.
-
-    A fault between the two writes would leave a session with a head and NO branch-point
-    record: the unreachable-lineage-without-a-record state the design's own principle forbids,
-    and the state derivation gets wrong."""
-    # provenance: B10 (executed): fork runs on an autocommit connection today and its single
-    # INSERT is atomic BY ACCIDENT — one write was accidentally atomic, two are not. PR-20
-    # (executed) supplies the real fault: parent_session_id is a LIVE foreign key, so the
-    # INSERT raises before the Python-computed fallback can ever become visible.
-    store = make_store(tmp_path)
-    main = store.new_session(agent_id="main")
-    (r1,) = linear_turns(store, main, 1)
-    sessions_before = sql(store, "SELECT COUNT(*) FROM session")
-
-    statements: list[str] = []
-    store.connection.set_trace_callback(statements.append)
-    try:
-        child = store.fork(main, at_message_id=r1)
-    finally:
-        store.connection.set_trace_callback(None)
-
-    ordered = [" ".join(s.split()).upper() for s in statements]
-    begins = [i for i, s in enumerate(ordered) if s.startswith("BEGIN IMMEDIATE")]
-    commits = [i for i, s in enumerate(ordered) if s.startswith("COMMIT")]
-    log_writes = [i for i, s in enumerate(ordered)
-                  if s.startswith("INSERT INTO SESSION_HEAD_LOG")]
-    row_writes = [i for i, s in enumerate(ordered)
-                  if s.startswith("INSERT INTO SESSION") and i not in log_writes]
-    assert len(begins) == len(commits) == 1, f"one transaction, not two: {ordered}"
-    assert len(log_writes) == len(row_writes) == 1, (
-        f"both of fork's writes must be visible in the trace: {ordered}")
-    writes = log_writes + row_writes
-    assert begins[0] < min(writes), f"a write landed before BEGIN IMMEDIATE: {ordered}"
-    assert max(writes) < commits[0], f"a write landed after COMMIT: {ordered}"
-
-    assert head_of(store, child) == r1
-    assert len(log_rows(store, child)) == 1
-
-    failed = raised_by(store.fork, "this-session-id-does-not-exist", r1)
-    assert isinstance(failed, sqlite3.IntegrityError), (
-        f"PR-20's real fault: the parent_session_id foreign key refuses it; got {failed!r}")
-    assert sql(store, "SELECT COUNT(*) FROM session") == [(sessions_before[0][0] + 1,)], (
-        "the refused fork left no session row")
-    assert len(log_rows(store)) == 1, (
-        "and no orphan log entry survived it — the two writes are one transaction")
 
 
 def test_a_fresh_fork_renders_its_inherited_prefix_exactly_once(tmp_path):

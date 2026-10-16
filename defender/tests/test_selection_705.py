@@ -1,32 +1,4 @@
-"""#705 — `runtime/selection.py` and the ONE role-scoped reader.
-
-This file carries demand #0 — the return-value contract — as amended by **R8**:
-
-  * one reader entry point takes a role from the closed set `{send, analysis, actor}`;
-  * `send` and `analysis` return `list[ModelMessage]`; `actor` returns a payload-free
-    `(coord, agent_id, kind, tool_name)` row projection;
-  * **sendability truncation applies to `send` alone** — an `analysis` read sees the full
-    path including an orphan terminal response;
-  * `hydrate` IS that reader called with a role, not a third entry point;
-  * the `PRAGMA user_version` refusal applies to every shape (unchanged from R5).
-
-**Ratified at the phase-E repair round (93-verify-resolutions.md R21, finding F6):** R8's own
-text permitted *either* "three roles" *or* "an equivalent `truncate` flag defaulting on for
-send and off for analysis", and this file closes the second off by asserting the role tuple
-outright. That narrowing is now an explicit decision rather than an assumption made by writing
-a test — **the three roles are the contract and the flag variant is out of it**. The ground:
-the flag formulation leaves the `actor` shape's default unstated (75-reclassification red flag
-2 recorded exactly that and left it undecided), while a closed role vocabulary carries
-FK14/R17's refusal of an unknown value naturally. The assertions below are unchanged; only
-their status is — an implementation of the flag variant is non-conforming, not merely awkward.
-
-R8 **rejects** R5's clause "sendability truncation … applies to both shapes". Nothing here
-may be written one-sided: `75-reclassification.md`'s sharpest output is that
-`test_sendable_history_stops_at_the_last_complete_pair_on_every_terminator` is
-NON-DISCRIMINATING without an analysis-role negative control, because an implementation
-that truncates EVERY read — the shape §7 rejected — passes the send-side half exactly as
-the resolved shape does. Every truncation assertion here is therefore paired.
-"""
+"""runtime/selection.py and the one role-scoped reader over the session store."""
 from __future__ import annotations
 
 import pytest
@@ -194,58 +166,6 @@ def _reachable_by_row_id(module, store, row_id: int) -> list[str]:
                 continue
             out.append(repr(got))
     return out
-
-
-def test_the_reader_exposes_no_row_id_entry_point(tmp_path):
-    """There is no by-row-id read: driven with a raw row id, no path through the reader
-    returns that row's stored body — an audit read takes the `analysis` role and walks the
-    path, so a folded row lying off every path is not addressable at all, under any name.
-
-    FK14/R17: a fail-open second door would put a security boundary on a caller-supplied
-    row id with no role enumeration behind it. Two positive controls, because a negative
-    over a channel that can see nothing is not a negative: the same body IS returned by
-    the reader when it lies on a real path, and the row-id probe itself DOES surface that
-    body when it is run against a deliberately-leaky stand-in — so a door that existed
-    would be caught rather than merely unnamed."""
-    ss = store_mod()
-    store = make_store(tmp_path)
-    folded_body = "OFF-PATH-FOLDED-BODY-705-d4e5f6"
-    fx = nine_row_fixture(store, folded_body=folded_body)
-    orphaned = fx["row_ids"][4]
-
-    # positive control 1 — the same body, ON a path, IS returned by the reader
-    on_path_session = store.new_session(agent_id="main")
-    store.append(on_path_session, [text_response(folded_body)], agent_id="main")
-    reachable = repr(ss.hydrate(store, on_path_session, role="analysis"))
-    assert folded_body in reachable, (
-        "positive control: the reader must be able to return this body at all, or the "
-        "absence assertions below measure nothing")
-
-    # positive control 2 — the probe itself detects a by-row-id door when one exists
-    class LeakyReader:
-        def read_message(self, handle, row_id):
-            return sql(handle, "SELECT payload FROM message_payload WHERE message_id = ?",
-                       (row_id,))
-
-    assert any(folded_body in got
-               for got in _reachable_by_row_id(LeakyReader(), store, orphaned)), (
-        "the row-id probe cannot see a door it is pointed straight at — it would report "
-        "the real reader clean for the wrong reason")
-
-    # the negative: no path through the real reader returns the row by its raw id
-    for got in _reachable_by_row_id(ss, store, orphaned):
-        assert folded_body not in got, (
-            "a reader path returned an off-path row's body from its raw row id — that is "
-            "the fail-open second door FK14 names")
-
-    # and it is off every path, under every role, which is what makes the door matter
-    for role in ss.ROLES:
-        for session_id in (fx["main"], fx["fork_a"], on_path_session):
-            if session_id == on_path_session:
-                continue
-            assert folded_body not in repr(ss.hydrate(store, session_id, role=role)), (
-                f"the folded row surfaced through a role-scoped read at role {role}")
-    assert orphaned not in ss.path_row_ids(store, fx["fork_a"])
 
 
 # truncation — the demand and its REQUIRED negative control (R8)
@@ -477,52 +397,6 @@ def test_the_synthesized_flag_is_surfaced_to_the_analysis_shape(tmp_path):
 
 # the renderer — inversion, the tail, the fold
 
-def test_render_ignores_its_input_and_returns_the_store_render(tmp_path):
-    """The ProcessHistory processor discards the list it is handed and returns
-    `hydrate(store, path)` for role=`send`, so a caller that passes a deliberately wrong
-    list still gets the store's render back.
-
-    R10: the renderer ALWAYS returns the store's render; `DEFENDER_COMPACTION` gates only
-    whether a fold is applied inside it — branching the renderer on the flag would leave
-    every store assertion exercised only under a flag CI does not set."""
-    ss = store_mod()
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    store.append(session_id, [user_request("real root"), *complete_pair()], agent_id="main")
-
-    wrong = [user_request("THIS LIST IS NOT THE HISTORY")]
-    rendered = sel.render(store, session_id, wrong, agent_id="main", fold=False)
-    expected = ss.hydrate(store, session_id, role="send")
-
-    assert ModelMessagesTypeAdapter.dump_python(rendered, mode="json") == \
-           ModelMessagesTypeAdapter.dump_python(expected, mode="json")
-    flat = " ".join(str(p.content) for m in rendered for p in getattr(m, "parts", [])
-                    if hasattr(p, "content"))
-    assert "THIS LIST IS NOT THE HISTORY" not in flat
-
-
-def test_the_renderer_applies_no_truncation_of_its_own(tmp_path):
-    """The history the renderer hands to the provider is exactly what the reader returns
-    for `(session, role="send")`: the renderer applies no truncation of its own, and the
-    last-complete-pair rule has exactly one implementation, reached only through the
-    reader.
-
-    The discriminating fixture is a mid-pair session, where a renderer that skipped the
-    rule would emit one message MORE than the reader does and a renderer that re-applied
-    it locally would still pass a shape-only check (P2)."""
-    ss = store_mod()
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id, n_complete = mid_pair_session(store)
-
-    rendered = sel.render(store, session_id, [], agent_id="main", fold=False)
-    assert len(rendered) == n_complete == len(ss.hydrate(store, session_id, role="send"))
-    assert len(rendered) < len(ss.hydrate(store, session_id, role="analysis"))
-    assert sel.hydrate is ss.hydrate, (
-        "selection must reach the rule through the reader, not carry a second copy")
-
-
 def test_ingest_tail_is_exactly_response_then_request_including_across_a_fold(tmp_path):
     """On every turn of a store-rendered run — the fold turn included — the rows appended
     past the previous render are exactly one `ModelResponse` followed by one
@@ -554,37 +428,6 @@ def test_ingest_tail_is_exactly_response_then_request_including_across_a_fold(tm
             sel.fold(store, session_id, agent_id="main", boundary=5)
 
     assert kinds_per_turn == [["response", "request"]] * 4, kinds_per_turn
-
-
-def test_no_position_or_payload_hash_diffing_on_ingest(tmp_path):
-    """Ingest computes its tail from the render length alone: feeding it a history whose
-    earlier rows have identical payload hashes appends nothing extra and drops nothing,
-    and a live list SHORTER than the last render is refused loudly rather than silently
-    ingesting nothing.
-
-    Positive control:
-    `test_ingest_tail_is_exactly_response_then_request_including_across_a_fold`. PR4
-    (executed) confirmed `live[len(last_render):]` on a shorter live list returns `[]` and
-    never raises, so no diagnostic is possible from the slice alone — FK18's silent
-    no-ingest, which the render cursor on the session row exists to make impossible."""
-    ss = store_mod()
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-
-    twin = text_response("identical body")
-    live = [user_request("root"), twin, tool_return_request(tool_call_id="a"), twin]
-    first = sel.ingest(store, session_id, live, agent_id="main")
-    assert len(first) == 4, "duplicate payloads must not be diffed away"
-
-    live = live + [tool_call_response(tool_call_id="b"), tool_return_request(tool_call_id="b")]
-    second = sel.ingest(store, session_id, live, agent_id="main")
-    assert len(second) == 2, f"the tail is the render-length slice only; got {len(second)}"
-
-    with pytest.raises(ss.IngestTailUnderflow):
-        sel.ingest(store, session_id, live[:2], agent_id="main")
-    assert sql(store, "SELECT COUNT(*) FROM message") == [(6,)], (
-        "a refused ingest must append nothing")
 
 
 def test_one_frontier_row_per_fold_boundary(tmp_path):

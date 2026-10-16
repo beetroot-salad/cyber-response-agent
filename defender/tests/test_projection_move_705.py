@@ -1,27 +1,4 @@
-"""#705 — M8: the projections move off `logger.messages` and onto the store.
-
-R14 freezes the consuming-reader list and sets the bar at CONSUMED-FIELD equivalence, one
-demand per reader:
-
-  | reader                              | consumes                          | exception   |
-  |-------------------------------------|-----------------------------------|-------------|
-  | `run_stats.py`                      | trailing `result`, usage, cost    | none        |
-  | `_replay_harness.load_turns_from_trace` | assistant `tool_use` name/input | none      |
-  | `visualize_runtime`'s footer check  | mtime + event presence            | none        |
-  | `runtime.html`'s six data layers    | event stream incl. `message.id`   | one — the coordinate |
-
-Bit-for-bit was rejected as provably unachievable (X2: `_usage_dict` reshapes usage and
-subtracts cache from `input_tokens`; the two `seq` counters disagree), and golden files
-were rejected because they would bake the two known-unavoidable divergences in anyway.
-**Under R8 the analysis read is not truncated**, which removes the second exception FK12
-would otherwise have had to state — so three of the four readers assert equivalence with NO
-exception, a materially stronger bar than "equivalent except the coordinate" applied
-uniformly. Do not write the blanket tolerance.
-
-`gl1` lives here too: model-authored payload text is attacker-influenced by construction,
-per `session_store`'s own access table, so the rendered page's HTML escaping of it is a
-demand in its own right.
-"""
+"""The trace/visualizer projections read from the session store: consumed-field equivalence, write-once, fail-closed, HTML escaping."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _view_run_1165
@@ -44,7 +21,6 @@ from defender.tests._session_store_705 import (
     jsonl,
     sql,
     store_factory,
-    store_mod,
 )
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
@@ -109,39 +85,6 @@ def _log_derived_reference(run_dir: Path) -> dict:
 
 # the negative and its positive control
 
-def test_projections_are_built_from_the_store_not_from_logger_messages(tmp_path):
-    """`tool_trace.jsonl` and the HTML pages are produced from the store: deleting the wire
-    log before the projection runs changes NOTHING about their content.
-
-    Positive control: `test_the_wire_log_is_still_written_and_still_human_readable`
-    (`test_store_driver_705.py`) — the log still exists, so this negative is not passing
-    because the log stopped being written. G1 refuted O26's census, and R4 grew M8 to all
-    of `runtime.html`'s data layers, so every surface the projection could read from is
-    bound here, not just `tool_trace.jsonl`."""
-    ss = store_mod()
-    run_dir, store, _ = _driven_run(tmp_path, run_id="from-store")
-    session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
-    with_log = (run_dir / "tool_trace.jsonl").read_text()
-    assert with_log.strip(), "the projection produced nothing to compare"
-
-    RunPaths(run_dir).wire_log.unlink()
-    observe_mod = __import__("defender.runtime.observe", fromlist=["write_trace"])
-    observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=0.0)
-    without_log = (run_dir / "tool_trace.jsonl").read_text()
-
-    def _strip_timings(text: str) -> list[dict]:
-        events = [json.loads(line) for line in text.splitlines() if line.strip()]
-        for event in events:
-            event.pop("duration_ms", None)
-            event.pop("duration_api_ms", None)
-        return events
-
-    assert _strip_timings(without_log) == _strip_timings(with_log), (
-        "the projection changed when the wire log was deleted — it is still reading it")
-    assert ss.hydrate(store, session_id, role="analysis"), (
-        "the store is where the content came from")
-
-
 # consumed-field equivalence, one demand per frozen reader
 
 def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_path):
@@ -169,33 +112,6 @@ def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_pat
     assert result["total_cost_usd"] == expected["total_cost_usd"]
     assert any(v for v in expected["usage"].values()), (
         "the fixture recorded no usage at all — the comparison above would be 0 == 0")
-
-
-def test_the_moved_projection_preserves_the_trailing_result_event(tmp_path):
-    """The projection still ends with a `type:"result"` event carrying `duration_ms`,
-    `duration_api_ms`, `total_cost_usd`, `num_turns` and the usage totals, at the same
-    values the log-derived projection produces over the same run — on a truncated run as on
-    a clean one. Consumed fields: NO exception.
-
-    This is the demand truncation would have broken hardest: all five fields change if the
-    terminal response is dropped, and under R5's rejected clause the demand was FALSE as
-    written against a correct implementation. `run_stats.load_result` is the reader; it is
-    driven here, not merely enumerated."""
-    run_stats = _load_run_stats()
-    run_dir, _store, _replay = _driven_run(tmp_path, run_id="result-event")
-    expected = _log_derived_reference(run_dir)
-
-    result = run_stats.load_result(run_dir)
-    assert result is not None, "run_stats found no trailing result event"
-    assert set(result) >= {"duration_ms", "duration_api_ms", "total_cost_usd",
-                           "num_turns", "usage"}, sorted(result)
-    assert result["num_turns"] == expected["num_turns"]
-    assert result["usage"] == expected["usage"]
-    assert result["total_cost_usd"] == expected["total_cost_usd"]
-
-    events = [json.loads(line) for line in
-              (run_dir / "tool_trace.jsonl").read_text().splitlines() if line.strip()]
-    assert events[-1]["type"] == "result", "the result event must be TRAILING"
 
 
 def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):

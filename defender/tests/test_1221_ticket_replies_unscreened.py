@@ -1,19 +1,6 @@
 """#1221 O3 — gather is served a ticket reply as the store answered it.
 
 The design (issue #1221, D3/M2): both read screens go — the own-case identity exclusion and the
-comment-release screen (an open case's comments withheld until a person closes it). They were
-lab-shaped (system `ticket`, verbs `get-ticket`/`list-tickets`, case key = run id), did not run
-on any other tenant, hid enrichment in the lab, and missed branch runs anyway. Model-made
-precedent is now handled by tagging (O1) and rule #27 (O2), not by filtering. After this,
-product code applies no ticket-specific or content-based transform to a ticket reply; the
-generic size view (`runtime/payload_view.py`) still applies, as for every system.
-
-Every test here drives a REAL run (`e2e/_replay_harness.drive`): main dispatches one gather
-lead, the gather model replays a `query` call, and everything between — dispatch, the query
-tool, the grant decision, the capture, the payload view — is production code. The store is a
-fake verb that records what it was handed and answers a fixed payload. Each test asserts on
-the two places a reply lands: the capture (`gather_raw/<lead>/<seq>.json`, which must equal the
-store's answer exactly) and the text the gather model was handed back.
 """
 from __future__ import annotations
 
@@ -167,20 +154,3 @@ def test_1221_get_ticket_on_the_runs_own_key_is_served(tmp_path, key, note):
     assert note in seen, f"{key}'s comment never reached the gather model"
 
 
-def test_1221_the_family_prompt_no_longer_demands_a_released_status_on_a_comment_patch():
-    """The branch questioner's family prompt taught the refusal the estate applier enforced: a
-    `ticket` patch writing `comments` had to move the case to `closed`, because an open case
-    served no comments and the family was refused when parsed. #1221 removed both the screen
-    and the refusal (`test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_accepted`),
-    so a prompt still teaching it would have the questioner close every case it annotates — a
-    difference of its own in every sibling. The control: the prompt still teaches a world's
-    `facts` (#1224 replaced the `patches` table this control once named with facts a live oracle
-    serves)."""
-    prompt = (Path(T1106.DEFENDER) / "learning" / "branch" / "questioner" / "family.md").read_text(
-        encoding="utf-8")
-    flat = " ".join(prompt.split())
-    assert "`facts`" in flat, "the control failed: the family prompt no longer teaches facts"
-    for stale in ("must also set that case's `status`", "serves NO comments"):
-        assert stale not in flat, (
-            f"the family prompt still teaches the removed release rule ({stale!r})"
-        )

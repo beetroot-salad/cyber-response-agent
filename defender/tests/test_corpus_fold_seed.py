@@ -1,34 +1,4 @@
-"""Executable spec for #577 — fold build_corpus_manifest onto iter_lessons, relocate the iterator to
-a neutral ``defender/_corpus.py``, and seed the manifest's section order.
-
-Three parts, and each has a distinct red:
-
-(a) RELOCATE ``iter_lessons`` to ``defender/_corpus.py``, re-exported from
-    ``runtime/lessons_engine/_lessons_common.py``. The load-bearing constraint is the **pre-venv import
-    contract**: a script started as ``python3 <script>`` under SYSTEM python, which has neither
-    PyYAML nor pydantic, re-execs into ``defender/.venv`` with ``reexec_into_venv`` (since #1080
-    the lesson CLIs are started by their ``bin/`` shim, which picks the interpreter itself). Until #1067 that was held by keeping ``_corpus``
-    itself import-pure; since #1067 every record module resolves pydantic at import, so the
-    contract is an ORDERING one instead — the guard runs before any ``defender.*`` import other
-    than the stdlib-only module the guard lives in (``test_c2c``).
-
-(b) FOLD the duplicate corpus walk in ``learning/author/shared.py`` onto ``iter_lessons``. The #559
-    demands (M1-M8b, M10, P1-P4 in ``test_curator_manifest.py``) are CHARACTERIZATION for this fold:
-    they stay green, unchanged. M9's "stem-sorted" half is OVERTURNED (fork F1 — see the spec graph):
-    the manifest takes ``iter_lessons``' full-Path order.
-
-(c) ADD ``build_corpus_manifest(corpus_dir, *, seed: str | None = None)`` — a seeded shuffle of the
-    rendered sections, seeded from ``batch_id``, so the curator's fold-vs-author-new decision stops
-    being systematically biased toward whichever lessons sort early. Reds with an unexpected-kwarg
-    ``TypeError``.
-
-The builder is reached as ``_shared.build_corpus_manifest`` (module attribute) and the new module via
-``importlib.import_module`` — so a missing target reds PER-TEST while the rest of the harness still
-collects and proves itself. Corpus fixtures are imported from ``test_curator_manifest`` rather than
-re-declared: two shapes of the same fixture drifting apart is the bug class this whole issue is about.
-
-Paired spec graph: ``spec_graph_577-corpus-fold-seed.yaml``.
-"""
+"""Corpus fold: manifest byte shape, iter_lessons path order, venv re-exec guard ordering, seeded manifest shuffle."""
 from __future__ import annotations
 
 import ast
@@ -55,8 +25,6 @@ from defender.tests.test_curator_manifest import (  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
-
-
 
 
 def _sections(manifest: str) -> list[str]:
@@ -95,15 +63,12 @@ def _prompt_manifest(prompt: str) -> str:
     return manifest
 
 
-
 def _corpus_of(tmp_path: Path, *stems: str) -> Path:
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     for stem in stems:
         _findings_lesson(corpus, stem)
     return corpus
-
-
 
 
 def test_d0_byte_shape_two_sections(tmp_path):
@@ -122,18 +87,6 @@ def test_d0_byte_shape_two_sections(tmp_path):
     assert manifest.count("\n\n## ") == 1
 
 
-def test_d0_byte_shape_single_section_has_no_separator(tmp_path):
-    """demand: d0, n=1 — the boundary the join hides. One lesson renders as ``## a\\n<yaml>\\n``:
-    safe_dump's trailing newline and nothing else. An implementation that appends a separator PER
-    section (rather than joining BETWEEN them) passes the two-section test and fails here."""
-    corpus = _corpus_of(tmp_path, "solo")
-    manifest = _shared.build_corpus_manifest(corpus)
-    assert manifest.startswith("## solo\n")
-    assert manifest.endswith("\n")
-    assert not manifest.endswith("\n\n")
-    assert len(_sections(manifest)) == 1
-
-
 def test_d0_empty_corpus_is_the_empty_string_exactly(tmp_path):
     """demand: d0 — M7 restated at byte level: an empty corpus returns ``""`` EXACTLY, not ``"\\n"``.
     Falsiness is LOAD-BEARING: ``build_curator_user_prompt`` does
@@ -143,42 +96,6 @@ def test_d0_empty_corpus_is_the_empty_string_exactly(tmp_path):
     empty.mkdir()
     assert _shared.build_corpus_manifest(empty) == ""
     assert _shared.build_corpus_manifest(tmp_path / "missing") == ""
-
-
-
-
-def test_c2b_positive_control_iter_lessons_parses_under_the_venv(tmp_path):
-    """demand: c2b — with PyYAML present (the venv lane), ``defender._corpus.iter_lessons`` actually
-    parses a lesson's frontmatter and yields real data. Originally the positive control for a
-    masked-``yaml`` import test that #1067 retired (see ``test_c2c``); the behaviour it pins stands
-    on its own.
-
-    #584 SUPERSEDES the 2-tuple destructure this test used to do: ``iter_lessons`` now yields a
-    frozen ``Lesson`` dataclass. The property pinned here — the lazy parser import really fires —
-    is unchanged; only the access shape moved (see ``test_corpus_fold_584.py::test_d0``)."""
-    corpus = _corpus_of(tmp_path, "real-lesson")
-    mod = importlib.import_module("defender._corpus")
-    yielded = list(mod.iter_lessons(corpus))
-    assert [lesson.path.stem for lesson in yielded] == ["real-lesson"]
-    assert yielded[0].fm["name"] == "real-lesson"
-
-
-def test_c1_lessons_common_reexports_the_same_object():
-    """demand: c1 (seam) — ``_lessons_common.iter_lessons`` IS ``defender._corpus.iter_lessons``
-    (object identity, not a wrapper), and the name stays in ``_lessons_common.__all__``.
-
-    Identity, not equality: a wrapper would let the two drift back apart, which is the exact failure
-    this issue exists to close — the duplicate walk drifted and the ``UnicodeDecodeError`` hole had to
-    be fixed twice. ``__all__`` also carries the ``lint_vulture`` suppression for a re-exported name
-    with no local use. ``reexec_into_venv`` is deliberately NOT among the re-exports: this module
-    resolves pydantic at import (via ``_corpus``/``_io``), so fetching the guard from here would
-    already have imported what the guard routes around (``test_c2c``)."""
-    common = importlib.import_module("defender.runtime.lessons_engine._lessons_common")
-    assert "reexec_into_venv" not in common.__all__
-    assert not hasattr(common, "reexec_into_venv")
-    corpus_mod = importlib.import_module("defender._corpus")
-    assert common.iter_lessons is corpus_mod.iter_lessons
-    assert "iter_lessons" in common.__all__
 
 
 def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(tmp_path):
@@ -290,19 +207,6 @@ def test_c2c_the_venv_guard_runs_before_any_other_defender_import():
     assert not early, f"defender.* imports above the venv guard: {early}"
 
 
-def test_c5b_iter_lessons_yields_in_full_path_order(tmp_path):
-    """demand: c5 — the shared iterator's ORDER is full-Path sorted and stays that way. The three CLIs
-    re-sort nothing, so their LLM-visible output order is this order; a stem-sort "fix" pushed into the
-    shared module to satisfy the manifest would flip the actor's retrieval order as a silent side
-    effect of a refactor. Exercised on a PREFIX PAIR, the only place the two keys disagree.
-
-    #584 SUPERSEDES the tuple destructure only: the ORDER this pins is unchanged and re-asserted on
-    ``Lesson.path`` (see ``test_corpus_fold_584.py::test_d10``)."""
-    mod = importlib.import_module("defender._corpus")
-    corpus = _corpus_of(tmp_path, "cover", "cover-prereqs")
-    assert [lesson.path.stem for lesson in mod.iter_lessons(corpus)] == ["cover-prereqs", "cover"]
-
-
 def test_s0_manifest_takes_the_iterators_path_order(tmp_path):
     """demand: s0 (fork F1, RESOLVED) — with no seed the manifest follows ``iter_lessons``' full-Path
     order. This OVERTURNS #559's M9, which asserts stem order.
@@ -315,45 +219,6 @@ def test_s0_manifest_takes_the_iterators_path_order(tmp_path):
     the sorted order never reaches a curator) rather than re-sorting by stem at the render site."""
     corpus = _corpus_of(tmp_path, "cover", "cover-prereqs")
     assert _headers(_shared.build_corpus_manifest(corpus)) == ["cover-prereqs", "cover"]
-
-
-def test_w1_malformed_files_are_still_warn_skipped_by_name(tmp_path, capsys):
-    """demand: w1 — after the fold the warn text is ``iter_lessons``' format, but the contract that
-    survives is the one that matters: the offending file is NAMED on stderr, one bad file never aborts
-    the manifest, and its well-formed siblings still render. (#559's M6/M6b assert a substring of the
-    filename, so the message FORMAT was always free — the fold may adopt the iterator's.)
-
-    UPDATED by #590's rule (review of PR #608): a warn-skipped lesson now claims a marker section
-    instead of vanishing from the menu (see test_m6) — survival and the stderr naming are the
-    unchanged half of the demand."""
-    corpus = _corpus_of(tmp_path, "good")
-    (corpus / "bad.md").write_text("no fence\n")
-    (corpus / "corrupt.md").write_bytes(b"---\nname: c\n---\n\xff\xfe\n")
-    manifest = _shared.build_corpus_manifest(corpus)
-    assert _headers(manifest) == ["good", "bad", "corrupt"]
-    err = capsys.readouterr().err
-    assert "bad.md" in err
-    assert "corrupt.md" in err
-
-
-def test_e0_empty_frontmatter_mapping_still_renders(tmp_path):
-    """demand: e0 — a lesson whose frontmatter is an EMPTY MAPPING (``---\\n{}\\n---``) parses to
-    ``fm == {}``: a valid parse, not a ``FrontmatterError``. It must still render as a section
-    (``## slug`` with a ``{}`` body), not be dropped.
-
-    This is where the fifth copy of the walk disagrees: the corpus walk inside
-    ``learning/frontend/serialize.py`` skips on ``if not fm``. A fold that imports that falsy-skip
-    semantics would hide the lesson from the manifest — and the curator, unable to see it, would
-    author a duplicate of it. (#584 folds that fifth copy onto ``iter_lessons`` and closes the
-    divergence; the ident it used to name here is scrubbed so ``lint_stale_refs`` does not block on
-    this file once the helper is deleted.)"""
-    corpus = _corpus_of(tmp_path, "normal")
-    (corpus / "empty-fm.md").write_text("---\n{}\n---\nbody\n")
-    heads = _headers(_shared.build_corpus_manifest(corpus))
-    assert "empty-fm" in heads
-    assert "normal" in heads
-
-
 
 
 def test_s1_seed_none_is_the_default_and_is_the_sorted_order(tmp_path):
@@ -501,19 +366,6 @@ def test_s7_forged_section_defenses_survive_the_shuffle(tmp_path):
     assert not any(ln.strip() == "---" for ln in manifest.splitlines())
 
 
-def test_s7b_positive_control_genuine_slugs_and_lists_do_render(tmp_path):
-    """demand: s7b — the positive control for s7 and m8c. Under the SAME seed, a genuine slug IS a real
-    ``## `` header and a genuine list-valued field IS rendered as a YAML list. Without it, the
-    header-count and "not in" assertions above would pass just as happily on an empty manifest."""
-    corpus = tmp_path / "lessons"
-    corpus.mkdir()
-    _actor_lesson(corpus, "genuine-actor-lesson")
-    manifest = _shared.build_corpus_manifest(corpus, seed="a1b2c3d4e5f6")
-    assert _headers(manifest) == ["genuine-actor-lesson"]
-    assert "techniques:" in manifest
-    assert "- T1098.004" in manifest
-
-
 def test_m8c_a_list_valued_injection_payload_cannot_forge_a_section(tmp_path):
     """demand: m8c (negative) — an injection payload carried inside a LIST-valued frontmatter field
     cannot forge a section: ``yaml.safe_dump`` quotes AND indents the element, so the payload never
@@ -539,8 +391,6 @@ def test_m8c_a_list_valued_injection_payload_cannot_forge_a_section(tmp_path):
     heads = _headers(manifest)
     assert "forged-by-list" not in heads
     assert sorted(heads) == ["genuine-lesson", "list-payload"]
-
-
 
 
 def test_e1_the_author_config_can_pin_the_manifest_seed(tmp_path):

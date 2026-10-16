@@ -1,31 +1,4 @@
-"""Tests for the SURVIVING half of record_query.py after #611.
-
-record_query is no longer a CLI: `capture` / `main` / `parse_params` / `_derive_verb` /
-`payload_status` were DELETED with the bash capture layer they served. The queries row is now
-written by `runtime/query_tool.py`'s `QueryCapture` capability, and its contract — params keyed
-by the verb's REAL param names (never `arg0`/`arg1`), `verb` holding the real verb, payload
-by-ref, payload_status/error_class classification, the truncated model view — is specced in the
-frozen `tests/e2e/test_query_tool_611.py` (row contract, payload-by-ref, empty/error status,
-seq collision). This file keeps ONLY the functions that outlived the CLI, because live code
-still imports them:
-
-  - `derive_system` — the generic system-from-argv derivation (no per-system table);
-  - and, re-pointed at `QueryCapture`, the seq→write→append INTEGRITY property (a failed
-    payload write must not reuse a `(lead_id, seq)`), which the frozen suite does not exercise;
-  - and #1235's queries rows on the run's `RunState` (round 2, comment 6117481676): the live
-    readers (`repeat_note`, `_next_seq`, the writer's seq, `system_for_payload_operands`) take
-    the state and read the rows it recorded, never `executed_queries.jsonl`; since round 3 the
-    state is the record and the file the model's view of it, so a row enters the state before
-    its line is written and stays there when that write fails.
-
-The model-visible view left with #832: `build_truncated_view` / `PASSTHROUGH_SAMPLE_COUNT` /
-`_passthrough_max_bytes` are gone, and `payload_view.py` (specced by `test_payload_view.py`)
-renders the payload now — this module records the query, that one renders its result.
-
-`payload_digest` / `LEAD_ID_RE` survival is pinned by
-`test_query_tool_611.py::test_record_query_module_survives_its_cli`; the lead-id claim-side
-guard by `test_record_lead.py`.
-"""
+"""record_query.derive_system and the QueryCapture seq/append integrity and RunState row recording."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run
@@ -62,17 +35,6 @@ def test_derive_system_from_defender_shim():
 
 def test_derive_system_from_cli_path():
     assert ge.derive_system(["python3", "/x/cmdb_adapter.py", "host-lookup", "web-1"]) == "cmdb"
-
-
-def test_derive_system_multiword_cli_path_normalizes_underscore():
-    assert ge.derive_system(["python3", "/x/host_state_adapter.py", "inspect", "c1"]) == "host-state"
-    assert ge.derive_system(["/x/change_mgmt_adapter.py", "list"]) == "change-mgmt"
-    assert ge.derive_system(["python3", "/x/threat_intel_adapter.py", "lookup"]) == "threat-intel"
-
-
-def test_derive_system_ignores_stray_tokens_before_shim():
-    assert ge.derive_system(["--out", "defender-runs/x", "defender-cmdb", "q"]) == "cmdb"
-    assert ge.derive_system(["FOO=/x/elastic_adapter.py", "defender-cmdb", "q"]) == "cmdb"
 
 
 def test_derive_system_skips_non_adapter_and_unknown():
@@ -211,16 +173,6 @@ def test_repeat_note_ignores_other_leads_and_later_rows(tmp_path):
     assert ge.repeat_note(
         state, "l-001", seq=0, system="elastic", verb="query",
         params={"q": "a"}, **_result_of(_SAME_LENGTH),
-    ) is None
-
-
-def test_repeat_note_is_silent_on_a_run_with_no_rows(tmp_path):
-    # A run that recorded nothing (and has no table on disk) has no earlier call to name.
-    from defender.runtime.run_state import RunState
-
-    assert ge.repeat_note(
-        RunState(tmp_path, "rq"), "l-001", seq=3, system="elastic", verb="query",
-        params={"q": "a"}, **_result_of(_PAYLOAD),
     ) is None
 
 

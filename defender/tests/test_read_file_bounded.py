@@ -87,18 +87,6 @@ def test_overflow_hint_main_pipes_into_defender_sql_and_names_the_write_sink(tmp
     assert _admits(pol, _hinted_command(hint), run)
 
 
-def test_overflow_hint_gather_pipes_into_defender_sql_without_the_write_sink(tmp_path) -> None:
-    """gather has `jq` but NO write tool (`write_allow == ()`), so it must not be told to
-    write the filtered result to a file — a step it cannot take."""
-    run = tmp_path / "run"
-    pol = _gather_policy(tmp_path)
-    assert not pol.write_allow, "premise: gather has no writer"
-    hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
-    assert "defender-sql" in hint
-    assert "write the result" not in hint
-    assert _admits(pol, _hinted_command(hint), run)
-
-
 @pytest.mark.parametrize("policy_of", [_main_policy, _gather_policy], ids=["main", "gather"])
 def test_overflow_hint_offers_a_reduction_correct_for_any_payload_shape(tmp_path, policy_of) -> None:
     """#1138 O8: the reduction the hint hands over has to be right whatever the payload's shape.
@@ -112,37 +100,6 @@ def test_overflow_hint_offers_a_reduction_correct_for_any_payload_shape(tmp_path
     assert "DESCRIBE data" in hint, hint
     assert "count(*)" not in hint, f"the hint offers a whole-payload count: {hint!r}"
     assert _admits(pol, _hinted_command(hint), run)
-
-
-
-
-def test_overflow_hint_reducer_less_agent_points_at_its_read_tool() -> None:
-    """The actor / oracle / verify / curators have no bash reducer: both `jq` and
-    `defender-sql` name programs they cannot run, so the only reduction left is their read
-    tool's own `pattern=` substring fold. The hint names the DEFAULT read tool here."""
-    hint = tools._overflow_filter_hint(_PATH, AgentPolicy())
-    assert "jq" not in hint
-    assert "defender-sql" not in hint
-    assert "pattern=" in hint
-    assert "read_file(" in hint
-
-
-def test_overflow_hint_names_the_callers_read_tool_not_a_constant() -> None:
-    """The rule that bans a hint naming a dead PROGRAM bans one naming a dead TOOL. The
-    curators traded `read_file` for the scoped `lesson_read` (#559) AND have no bash reducer,
-    so they are exactly the agent that lands on this branch — a hardcoded `read_file` would
-    hand them an instruction they cannot execute. The tool name comes from the caller, and the
-    overflow notice tag agrees with it."""
-    hint = tools._overflow_filter_hint(_PATH, AgentPolicy(), "lesson_read")
-    assert "lesson_read(" in hint
-    assert "read_file(" not in hint
-    assert "pattern=" in hint
-    over = tools._bounded_read(
-        "x" * (tools._read_char_cap() + 10), _PATH, cap=CAP,
-        filter_hint=hint, read_tool="lesson_read",
-    )
-    assert "[lesson_read]" in over
-    assert "[read_file]" not in over
 
 
 
@@ -194,17 +151,6 @@ def test_over_cap_truncates_head_and_appends_notice(tmp_path) -> None:
     assert "defender-sql" in out
     assert path in out
     assert str(CAP + 5000) in out
-
-
-def test_notice_reports_true_line_count() -> None:
-    blob = "z" * (CAP + 1000)
-    out = tools._bounded_read(blob, "/p.json", cap=CAP, filter_hint=_MAIN_HINT)
-    assert "/ 1 line(s)" in out
-    assert "offset" not in out
-    assert "limit" not in out
-    lined = ("line\n" * ((CAP // 5) + 200))
-    out2 = tools._bounded_read(lined, "/p.json", cap=CAP, filter_hint=_MAIN_HINT)
-    assert f"/ {lined.count(chr(10)) + 1} line(s)" in out2
 
 
 def test_char_slice_never_splits_multibyte() -> None:

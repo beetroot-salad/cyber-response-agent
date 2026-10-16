@@ -1,15 +1,6 @@
 """#1202: removing a paused runsc box.
 
 Under runsc, `docker rm -f` on a PAUSED container kills it but answers non-zero ("could not
-kill: container … PID … is zombie and can not be killed") and leaves it behind. Observed on the
-GitHub runner: the first `rm -f` failed 8/8 (#1200); after it, `docker wait` returned `137`
-promptly and a second removal succeeded 15/15 (#1201). Every site that removes a box —
-`stop_box` and the two reaps — must survive that answer, and none may thaw a frozen box to do
-it (#1178).
-
-The daemon is a scripted `docker=` seam answering `rm` from a queue with the observed fault
-text; every call is recorded so the order (rm, wait, rm) and the absence of `unpause` are
-asserted, not assumed.
 """
 from __future__ import annotations
 

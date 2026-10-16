@@ -1,19 +1,6 @@
 """#1221 O1 — every comment the host posts opens with the agent tag naming the authoring run.
 
 The design (issue #1221, D1/M1): the write-back stays a plain comment, and the host marks it as
-model-made by putting ONE plain-text line at the START of the body — a fixed prefix
-(`case_ticket.AGENT_TAG_PREFIX`) plus the authoring run's id (`case_ticket.agent_comment_tag`).
-It is added at the single POST every comment leaves through, never through the tenant's
-`comment.body` template, so a tenant mapping cannot drop it and a future comment kind cannot
-miss it. It names the RUN (`run_dir.name`), not the case key, which on the platform is the
-vendor's ticket id. Its bytes come out of the body's wire bound, and it sits at the start
-because a long reply reaches gather with each string leaf clipped to its first 600 characters
-(`runtime/payload_view.py`): a trailing tag would be cut while the verdict above it survived.
-
-Every test here drives the REAL writer (`ticket_writer.record_case_ticket`) through its one
-seam, `TicketWriterDeps.request`, with a fake that CAPTURES the outbound payload, and asserts
-on what the fake received. The two new names are reached through `require` at call time, so a
-missing one is one red per test, never a collection error.
 """
 from __future__ import annotations
 

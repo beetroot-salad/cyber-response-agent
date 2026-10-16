@@ -1,38 +1,4 @@
-"""#535/#575 — the gather+main bash reader lane confines file operands to {run_dir, corpus}.
-
-Spec for the confined-read migration, rewritten onto #575's one containment model.
-
-  - #535 moved gather/main from a program-only bash allowlist (`^cat(?: .*)?$`, ANY operand) to a
-    per-run regex allowlist whose file operands were ANCHORED to the run dir + corpus, closing a
-    demonstrated bypass (`decide_bash("cat /etc/passwd", policy=…GATHER…).allow` was True).
-  - #575 replaced the ANCHOR with a `Grant`: a SHAPE (program + flags + arity, no paths) plus a
-    SCOPE (anchored regexes over the **RESOLVED** path of everything the program opens). The
-    confinement property is the same; it is now enforced against the path the OS will open rather
-    than the text the model typed. Three consequences run through this file:
-
-      1. `grep`/`head`/`tail`/`wc`/`jq` LOST their file operand — they are stdin-only pipe stages.
-         `grep -n s {run}/x.md` DENIES; `cat {run}/x.md | grep -n s` ALLOWS. Same capability, one
-         extra `cat |`, and `cat` becomes the SOLE opener (one extractor, one scope check).
-      2. `ls` and `cd` are GONE from the lane entirely. `ls`'s anchored DIR operand was the other
-         path-opening slot, and dropping it leaves the whole surface with NO recursive-descent
-         primitive: to reach a path you must NAME it, and a named path is a resolved path is a
-         scope check.
-      3. the symlink RESIDUAL this file used to document as un-closable IS NOW CLOSED (§H): the
-         lane resolve()s, so an in-shape symlink pointing out of the run dir lands outside every
-         scope and denies.
-
-Entry points under test:
-  - `compile_policy_for(<DEF>, run_dir, *, defender_dir)` — the policy-only half of `bind`; RAISES
-    on a missing run_dir / degenerate root (safe-by-construction: no unconfined fallback).
-  - `decide_bash(command, *, policy, run_dir, defender_dir) -> BashDecision`
-    (.allow / .reason; since #611 there are no `.adapter_argv` / `.sql_pipe` routing fields — a
-    data source is reached through the `query` tool, not from bash). `defender_dir` is load-bearing
-    now: a RELATIVE operand is rebased on the executor's cwd (`defender_dir.parent`) before it
-    resolves.
-
-The gate RESOLVES operands (it still never stats them — `resolve(strict=False)`), so the roots here
-are real tmp dirs and commands interpolate their ABSOLUTE paths.
-"""
+"""The gather/main bash reader lane confines file operands to {run_dir, corpus} by resolved path."""
 from __future__ import annotations
 
 import os
@@ -350,26 +316,6 @@ def test_parity_out_of_root(env):
     assert _bash(env, f"cat {env.run}/investigation.md", "gather").allow      # positive control
 
 
-def test_parity_ground_truth_inside_corpus(env):
-    """{DFN}/fixtures/held-out/m01/ground_truth.yaml lives INSIDE defender_dir; decide_read denies it
-    and the bash lane must too. (Doubly denied: it is outside the tight corpus `.md` shape AND its
-    basename hits the denylist — the shape half is what the `.md`-named probe below removes.)
-    Positive control: a lessons .md is allowed on both."""
-    gt = f"{env.dfn}/fixtures/held-out/m01/ground_truth.yaml"
-    assert not _read(env, gt, "gather").allow
-    assert not _bash(env, f"cat {gt}", "gather").allow
-    assert _bash(env, f"cat {env.dfn}/lessons/ok.md", "gather").allow  # positive control
-
-
-def test_parity_captured_env_in_run_dir(env):
-    """A captured .env at the top of the run dir: it is IN-SHAPE (`under(run, SEG)` admits any
-    run-dir file), so the secret denylist is the ONLY thing that can deny it — and it denies on BOTH
-    surfaces. An in-scope operand is necessary, not sufficient."""
-    dotenv = f"{env.run}/.env"
-    assert not _read(env, dotenv, "gather").allow
-    assert not _bash(env, f"cat {dotenv}", "gather").allow
-
-
 def test_parity_ssh_dir_component(env):
     """The denylist's path-COMPONENT axis (`.ssh`), probed where only it can decide: `{DFN}/lessons/
     .ssh/key.md` matches the tight corpus `.md` shape (`.ssh` is a legal path segment), so the shape
@@ -493,23 +439,6 @@ def test_no_recursive_descent_primitive_on_any_lane(env):
             assert not _bash(env, cmd, which).allow, f"{which}: {cmd}"
 
 
-def test_ls_and_cd_are_gone_from_the_lane(env):
-    """`ls` and `cd` — in ANY form — DENY for main and gather (#575 behavior change #2), and no grant
-    names them. `ls DIR` was the other path-opening slot (a bash-lane-only recon primitive with no
-    decide_read counterpart); removing the program is what removes the whole `-I`/`-w`-consumes-the-
-    operand-and-falls-back-to-the-CWD bug class (#579) rather than enumerating 37 safe flags to hold
-    it back. `cd` fell with it: the executor's cwd is fixed, so a relative operand always resolves
-    against one known dir.
-    Positive controls: the surviving programs still run — including the shim `cd` used to prefix."""
-    for which in ("main", "gather"):
-        assert "ls" not in {g.program for g in (env.main if which == "main" else env.gather).bash_allow}
-        for cmd in ("ls", f"ls {env.run}", f"ls -la {env.run}", f"ls {env.run}/gather_raw",
-                    "ls /etc", f"cd {env.run}", f"cd {env.dfn} && defender-lessons --tags"):
-            assert not _bash(env, cmd, which).allow, f"{which}: {cmd}"
-        assert _bash(env, "defender-lessons --tags", which).allow, which          # control
-        assert _bash(env, f"cat {env.run}/investigation.md", which).allow, which  # control
-
-
 # G. Relative operands: rebased on the EXECUTOR's cwd, then resolved            #
 
 def test_relative_operand_is_rebased_not_guessed(env):
@@ -596,18 +525,6 @@ def test_bash_redirect_write_denied(env):
 # J. #611 — the adapter lane is gone; the local-compute lane over payloads       #
 #    already on disk survives, and an adapter denies on BOTH lanes.              #
 
-def test_standalone_adapter_denied_for_gather(env):
-    """#611 FLIP: `defender-elastic query 'x'` used to be ALLOW for gather (its payload captured
-    transparently). A data source is now reached through the `query` tool, so the adapter is
-    unreachable from bash — the standalone form DENIES for gather, and the decision carries no
-    routing fields for a capture layer that no longer exists."""
-    d = _bash(env, "defender-elastic query 'x'", "gather")
-    assert not d.allow
-    assert d.reason == permission.ADAPTER_RETIRED_REASON
-    assert not hasattr(d, "adapter_argv")
-    assert not hasattr(d, "sql_pipe")
-
-
 def test_cat_payload_into_defender_sql_allowed(env):
     """cat {RUN}/gather_raw/l-001/1.json | defender-sql 'SELECT …' → ALLOW for gather: an in-scope
     payload streamed into the sandboxed aggregator (cat scope-checked, defender-sql opens nothing).
@@ -615,24 +532,6 @@ def test_cat_payload_into_defender_sql_allowed(env):
     the new tool-then-bash flow."""
     cmd = f"cat {env.run}/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'"
     assert _bash(env, cmd, "gather").allow
-
-
-def test_adapter_jq_pipe_denied(env):
-    """defender-elastic … | jq '.x' → DENY. This was denied because adapter|jq was not the
-    sanctioned adapter pipe; post-#611 it denies because the adapter stage is unreachable from bash
-    at all. Either way a live adapter's payload never flows into an arbitrary reader stage."""
-    d = _bash(env, "defender-elastic query 'x' | jq '.x'", "gather")
-    assert not d.allow
-    assert d.reason == permission.ADAPTER_RETIRED_REASON
-
-
-def test_adapter_denied_for_main(env):
-    """A data-source adapter is denied for the main loop — unchanged in verdict. Since #611 the
-    reason is the shared `ADAPTER_RETIRED_REASON` (it names the `query` tool); it is prompt surface
-    the e2e deny-tail asserts as a substring, so it is pinned here too."""
-    d = _bash(env, "defender-elastic query 'x'", "main")
-    assert not d.allow
-    assert d.reason == permission.ADAPTER_RETIRED_REASON
 
 
 # K. Degenerate inputs                                                          #

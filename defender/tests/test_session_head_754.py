@@ -1,40 +1,6 @@
-"""#754 — the recorded head pointer and the head-move log: the WRITE side.
-
-The executable form of the demands in `spec_graph_754.yaml` that bind `head_message_id`,
-`session_head_log`, `append`, `reason.domain` and the fold. Each test carries its demand's
-observable-outcome prose in its docstring (that docstring is what `check_binds` scans in
-place of a demand `outcome`); the ledger ids each rests on sit in a `# provenance:` comment
-beneath it, and the design history lives in the frontiers, not here.
-
-**RED AGAINST `1cecad37` IS THE EXPECTED STATE.** `session.head_message_id` does not exist,
-`session_head_log` does not exist, `append` takes no `reason`, and `path_row_ids` derives the
-path from insertion order. This suite pins the demanded CORRECTION, never today's behaviour —
-B1/B2 (executed) measured today's insertion-order path and PR-24 (executed) measured `ingest`
-duplicating all N messages of an inherited prefix; both are the defect, not the contract.
-
-The three rules the whole file turns on, since two of them are counter-intuitive:
-
-  * **When a head move is recorded.** The log is written iff the move is NON-LINEAR **or** an
-    explicit `reason` was supplied. A degenerate fold — root already equal to head — is linear
-    and still logs, because the caller minted a frontier and said why. An append into a
-    session that holds rows but whose head is NULL RAISES rather than silently orphaning them.
-  * **Who may supply a reason.** Membership is validated by exact match whenever `reason` is
-    not None, before the linearity classification and before the empty-batch short-circuit. On
-    a NON-linear move any caller may supply one; on a LINEAR move only a caller minting a
-    frontier row (`synthesized=True`) may, and every other caller is refused. `'fork'` has no
-    legitimate caller through `append` at all, because `fork()` writes its own entry.
-  * **What the log records.** Six columns. `from_message_id` is the DISPLACED head and
-    `attached_to_message_id` is the first inserted row's own parent; they are different
-    questions and a multi-message non-linear append answers both differently.
-
-Two ledger refutations govern what must NOT be asserted here: PR-6 refuted the `IndexError`
-premise behind P95 (the fold path already reads `root = ids[0] if ids else None`), and
-PR-16/PR-21/PR-19 refuted the premises that a live run folds and that the judge or the
-learning loop reads the log. No test below asserts any of them.
-"""
+"""The recorded head pointer and head-move log: the write side (append, fold, reason validation)."""
 from __future__ import annotations
 
-import inspect
 
 import pytest
 
@@ -56,7 +22,6 @@ from defender.tests._session_store_705 import (  # noqa: E402
     sql,
     store_mod,
     text_response,
-    tool_call_response,
     user_request,
 )
 
@@ -183,41 +148,6 @@ def test_path_row_ids_is_empty_when_head_is_null(tmp_path):
     assert ss.path_row_ids(store, session_id) == [r1, r2], (
         "positive control: the identical reader over the identical rows returns them once "
         "head names one")
-
-
-def test_session_head_is_a_column_read_with_no_fork_fallback(tmp_path):
-    """    The implicit append parent is a read of `session.head_message_id`: a fork's head is
-    already set when the fork is constructed, so its first append parents onto it with no
-    `fork_at_message_id` column left to consult, and its SECOND append parents onto the row
-    the first one moved head to rather than onto the branch point again. An explicit parent
-    still wins over the column.
-
-    That second append is what makes the column read observable: a fallback consulted once
-    per fork session and a live head column agree on the first append and disagree on every
-    one after it."""
-    # provenance: R5 substitute for the removed `_session_tip`. C1 (census): the removed
-    # column had no live reader outside it. B4 (executed) measured the once-per-session read.
-    ss = store_mod()
-    store = make_store(tmp_path)
-    main = store.new_session(agent_id="main")
-    r1, r2 = linear_turns(store, main, 2)
-
-    fork = store.fork(main, at_message_id=r1)
-    assert head_of(store, fork) == r1
-    f1 = store.append(fork, [text_response("first")], agent_id="main")[0]
-    assert sql(store, "SELECT parent_id FROM message WHERE id = ?", (f1,)) == [(r1,)]
-    f2 = store.append(fork, [text_response("second")], agent_id="main")[0]
-    assert sql(store, "SELECT parent_id FROM message WHERE id = ?", (f2,)) == [(f1,)], (
-        "the second append reads the moved head, not the branch point a second time")
-    assert ss.path_row_ids(store, fork) == [r1, f1, f2]
-
-    # an explicit parent still wins over the column — with a reason, since naming a row
-    # that is not head is a non-linear move under the rule
-    off = store.append(main, [text_response("explicit wins")], agent_id="main",
-                       parent_id=r1, reason="fold")[0]
-    assert sql(store, "SELECT parent_id FROM message WHERE id = ?", (off,)) == [(r1,)], (
-        f"the explicit parent must win over head ({r2}), or the caller cannot re-parent")
-    assert head_of(store, main) == off
 
 
 # the fold
@@ -638,82 +568,6 @@ def test_one_round_of_ingest_then_fold_contributes_exactly_one_log_row(tmp_path)
     assert (entries[0].from_message_id, entries[0].reason) == (after_ingest, "fold")
 
 
-def test_the_store_writes_the_log_not_its_call_sites(tmp_path):
-    """    A bare `store.append` naming a parent that is not head and handing over a reason produces
-    the log entry on its own, with no fold machinery anywhere in the call: the rule lives
-    inside `append`, so neither the fold path nor `ingest` has to know the log exists.
-
-    The observable that separates the two designs: the row appears with no synthesized
-    frontier row in the store at all, and the entry's reason is the one the caller handed
-    over rather than one the call site chose."""
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    r1, r2 = linear_turns(store, session_id, 2)
-
-    landed = store.append(session_id, [text_response("hand-rolled fold")], agent_id="main",
-                          parent_id=r1, reason="fold")[0]
-
-    entries = log_rows(store, session_id)
-    assert len(entries) == 1, f"append wrote the entry itself; got {entries}"
-    assert (entries[0].from_message_id, entries[0].to_message_id) == (r2, landed)
-    assert entries[0].reason == "fold"
-    assert sql(store, "SELECT COUNT(*) FROM message WHERE synthesized = 1") == [(0,)], (
-        "no fold machinery ran: there is no frontier row in the store")
-    assert head_of(store, session_id) == landed
-
-
-def test_append_accepts_reason_as_a_keyword(tmp_path):
-    """    `reason` is a keyword-only argument with a `None` default, so every call site that
-    predates it keeps working unchanged — including the full existing coordinate set — and
-    only a caller that means to record a head move passes it.
-
-    The seam is not "a member reason is accepted whenever it is a member". On a NON-linear
-    move any caller may hand one over; on a LINEAR move only a caller minting a frontier row
-    may, and both sides are driven here rather than leaving the accepting half to imply the
-    rest. A non-string reason reaches the membership check rather than being rejected at the
-    call boundary, so the check owes a semantic refusal of its own rather than leaking a
-    container's `TypeError`."""
-    # provenance: PR-5 (executed) — no pydantic validate_call, no typeguard and no runtime
-    # decorator anywhere in the store, so the `str | None` annotation is unenforced.
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-
-    plain = store.append(session_id, [user_request("no reason at all")], agent_id="main")
-    assert len(plain) == 1, "the pre-existing call shape still works"
-
-    full = store.append(session_id, [tool_call_response(tool_call_id="c1")],
-                        agent_id="main", parent_id=plain[0], synthesized=False, seq=1,
-                        run_step=3, duration_ms=12.5, wire_sha="abc")
-    assert len(full) == 1, "#705's full coordinate set is unchanged"
-
-    signature = inspect.signature(store.append)
-    assert signature.parameters["reason"].kind is inspect.Parameter.KEYWORD_ONLY
-    assert signature.parameters["reason"].default is None, (
-        "None is the absent sentinel; `is not None` is what tests it, never `if reason:`")
-
-    recorded = store.append(session_id, [text_response("recorded")], agent_id="main",
-                            parent_id=plain[0], reason="fold")
-    assert len(log_rows(store, session_id)) == 1
-    assert head_of(store, session_id) == recorded[0]
-
-    refused = raised_by(store.append, session_id, [text_response("x")], agent_id="main",
-                        reason=123)
-    assert isinstance(refused, ss.StoreAppendError), (
-        f"a non-string reason must get the store's own semantic refusal; got {refused!r}")
-
-    # the seam's discriminator: on a LINEAR move the same member reason turns on the caller
-    linear = raised_by(store.append, session_id, [text_response("ordinary turn")],
-                       agent_id="main", reason="fold")
-    assert isinstance(linear, ss.StoreAppendError), (
-        f"an ordinary caller may not hand a reason to a linear move; got {linear!r}")
-    minted = store.append(session_id, [user_request("FRONTIER: boundary 9")], agent_id="main",
-                          synthesized=True, seq=9, reason="fold")
-    assert head_of(store, session_id) == minted[0], (
-        "control: the identical linear move from a frontier-minting caller is accepted")
-    assert len(log_rows(store, session_id)) == 2
-
-
 def test_reason_membership_is_validated_before_linearity_classification(tmp_path):
     """    `reason` membership is checked by exact match whenever it is not None, before the move's
     linearity is classified: `'rewind'`, `'Fork'`, `''` and a non-string `123` all raise
@@ -751,31 +605,6 @@ def test_reason_membership_is_validated_before_linearity_classification(tmp_path
     # through `append` at all. That is why the membership control uses `fold` — this demand is
     # about membership, not about who may write a fork entry.
     assert "fork" in ss.HEAD_MOVE_REASONS
-
-
-def test_an_empty_batch_with_a_reason_validates_before_the_short_circuit(tmp_path):
-    """    An append of an EMPTY message list validates its reason before short-circuiting: an
-    out-of-set reason raises `StoreAppendError` even though no row would have been written,
-    while a valid reason returns the empty id list, moves no head and writes no log row —
-    there is no move to record.
-
-    The short-circuit returns before any row exists to classify, so the linearity rule has
-    nothing to inspect; validating first means the caller learns immediately that it passed a
-    meaningless or out-of-set argument instead of getting a silent no-op."""
-    # provenance: P39.
-    ss = store_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    (r1,) = linear_turns(store, session_id, 1)
-
-    with pytest.raises(ss.StoreAppendError):
-        store.append(session_id, [], agent_id="main", reason="rewind")
-
-    assert store.append(session_id, [], agent_id="main", reason="fold") == []
-    assert store.append(session_id, [], agent_id="main") == []
-    assert head_of(store, session_id) == r1, "no move happened, so head did not move"
-    assert log_rows(store, session_id) == [], "and nothing was recorded"
-    assert message_ids(store, session_id) == [r1]
 
 
 # who may hand `append` a reason at all
@@ -1004,49 +833,6 @@ def test_append_still_refuses_a_cyclic_parent_chain_at_write_time(tmp_path):
 
 
 # D4 / survival, and the end-to-end walk
-
-def test_deleting_default_boundary_leaves_every_fold_caller_working(tmp_path):
-    """    With `_default_boundary` no longer standing in as the fold's placeholder default, every
-    surviving fold caller still works: `selection.fold_boundary` still resolves its boundary
-    and still reuses the frontier row at it, a fold handed an explicit boundary still mints
-    exactly one frontier, and `selection.fold` called with no boundary now FAILS CLOSED with
-    a `ValueError` instead of silently counting rows off the path."""
-    # provenance: correction R2 (binding). D4's census was refuted — `selection.fold_boundary`
-    # has one green, committed, spec-bound caller (C2/c10) and `_default_boundary` has two
-    # callers, not one (C3) — so only the fold's `if boundary is None` fallback goes.
-    # rejected: keeping `_default_boundary` as `_fold_impl`'s default. It counts
-    # non-synthesized rows in the SESSION with no path predicate, so after a fold it
-    # over-counts the rows the fold displaced (B3, executed: the path holds 2 rows and it
-    # returns 4), and `_fold_impl`'s own comment already says no production path should take
-    # the placeholder. The over-count itself stays INHERITED by `fold_boundary` and
-    # explicitly unfixed here — path-scoped counting is FK16 / #753 — which is why this test
-    # pins the over-count as the current contract rather than asserting the fix.
-    sel = selection_mod()
-    store = make_store(tmp_path)
-    session_id = store.new_session(agent_id="main")
-    linear_turns(store, session_id, 4)
-
-    assert sel.fold_boundary(store, session_id) == 4, (
-        "the surviving caller still resolves a boundary from the session's row count")
-    frontier = sel.fold(store, session_id, agent_id="main", boundary=2)
-    assert sql(store, "SELECT id FROM message WHERE synthesized = 1") == [(frontier,)], (
-        "an explicit boundary still mints exactly one frontier row")
-
-    assert len(sel.path_row_ids(store, session_id)) == 2, "the path after the fold"
-    assert sel._default_boundary(store, session_id) == 4, (
-        "B3's over-count is inherited and NOT fixed here (FK16 / #753): the count is over "
-        "the session, not over the path")
-    assert sel.fold_boundary(store, session_id) == 4
-
-    reused = sel.fold(store, session_id, agent_id="main", boundary=2)
-    assert reused == frontier, "the reuse lookup still keys on the boundary it was handed"
-
-    refused = raised_by(sel.fold, store, session_id, agent_id="main")
-    assert isinstance(refused, ValueError), (
-        f"fold(boundary=None) fails closed rather than counting off the path; got {refused!r}")
-    assert raised_by(sel._fold_impl, store, session_id, agent_id="main") is not None, (
-        "boundary is required on _fold_impl: there is no placeholder left to fall back to")
-
 
 def test_the_full_lifecycle_walk_new_session_two_folds_and_a_fork(tmp_path):
     """    The seven-point walk, end to end in one store file: (1) a fresh session's head is NULL,

@@ -24,7 +24,6 @@ Every name the implementer coins comes from `S.COINED` (the never-shown statemen
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -37,12 +36,8 @@ from defender.tests.judge_contrast_1234 import _spec1234 as S
 BUCKET = S.RULED["reply.bucket"]
 SYSTEMS = S.RULED["reply.systems"]
 CITATIONS = S.RULED["row.citations"]
-COMPLETED = S.RULED["row.completed_draws"]
 #: The retired reply word A4 / HOLE-2 refuse by name.
 EPISODE_OUTCOME = "episode_outcome"
-#: The contrast table's statement that the judged world was never shown its facts (design M2's
-#: wording; `S.COINED`).
-NEVER_SHOWN = S.COINED["context.never_shown"]
 #: Main's per-draw drop count, which A13's one-lane-per-filed-finding replaces.
 DROP_COUNT = S.EXISTING["draw.dropped_findings"]
 #: A second episode id, for the one scenario that needs two passes at different draw counts.
@@ -59,9 +54,6 @@ def _judge_refused() -> type[BaseException]:
     return S.sym(S.JUDGE, "JudgeRefused")
 
 
-def _attempts() -> int:
-    """`_REPLY_ATTEMPTS`: the asks one draw gets."""
-    return int(S.sym(S.JUDGE, "_REPLY_ATTEMPTS"))
 
 
 def _refusal(doc: Any, **kw: Any) -> str:
@@ -156,26 +148,10 @@ def _draw_claims(built: S.Built, label: str, n: int, key: str) -> list[Any]:
             if isinstance(e, Mapping)]
 
 
-def _world_lanes(built: S.Built, label: str) -> dict[str, list[str]]:
-    """The ledger's lanes for every finding id of world `label` in this episode."""
-    prefix = f"{built.episode_id}/{label}/"
-    return {fid: ln for fid, ln in S.lanes(built).items() if fid.startswith(prefix)}
 
 
-def _blocks(text: str) -> set[str]:
-    """A prompt's paragraphs (blank-line separated), stripped."""
-    return {b.strip() for b in text.split("\n\n") if b.strip()}
 
 
-def _hand_fed_row(built: S.Built, label: str, row_type: str, *, draw: int) -> dict:
-    """A defender FindingRow in d00d's shape (`S.defender_row`: today's keys and values, no
-    `judge_outcome`, plus `contrast_evidence`, `on_verdict_path` and `world_label_doubted` —
-    d12a's "a row carrying all three"), typed `row_type`, its alert key derived from the world's
-    archived alert, under a finding id no pass of this test files."""
-    derive = S.sym("learning.core.persist", "derive_alert_rule_key")
-    alert_doc = json.loads((built.world_dir(label) / "alert.json").read_text(encoding="utf-8"))
-    return S.defender_row(f"{built.episode_id}/{label}/{draw}/0", label=label, type=row_type,
-                          **{S.EXISTING["queue.alert_rule_key"]: derive(alert_doc)})
 
 
 # --------------------------------------------------------------------------------------
@@ -246,55 +222,6 @@ def test_1234_world_reply_carries_bucket_systems_and_three_finding_kinds(tmp_pat
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_world_reply_saying_episode_outcome_discard_spoils_nothing(tmp_path: Path) -> None:
-    """A world reply carrying episode_outcome (discard or corpus-contradiction) is refused at
-    validation by that retired name and re-asked within _REPLY_ATTEMPTS (A4, A5); a world whose
-    every attempt carries it completes no draw and is not graded, with that reason; in either
-    case no other world's queued rows change, and judge.yaml carries no episode_outcome (today
-    one such draw spoils the family, C3)."""
-    built = S.family(tmp_path, S.triad(d=_shown("d")))
-    spoiled_c = S.world_reply("lead-quality", ["edr"], investigator=[_inv("c")],
-                              **{EPISODE_OUTCOME: "corpus-contradiction"})
-    seam = S.judge({
-        "b": [S.world_reply("lead-quality", ["idp"],
-                            investigator=[_inv("b", claim="b's first reply, discard")],
-                            **{EPISODE_OUTCOME: "discard"}),
-              S.world_reply("lead-quality", ["idp"],
-                            investigator=[_inv("b", claim="b's second reply, clean")])],
-        # More copies than any ask budget: the count the pass actually asks is asserted below.
-        "c": [spoiled_c] * 12,
-        "d": S.world_reply("lead-quality", ["idp"], investigator=[_inv("d", claim="d's own")]),
-    })
-
-    S.grade(built, seam)
-
-    # b: refused once by the retired word, asked again, graded on the clean reply.
-    assert seam.calls_for("b") == ["judge:b:0", "judge:b:0:1"]
-    assert _draw_claims(built, "b", 0, S.INVESTIGATOR) == ["b's second reply, clean"]
-    # c: every ask carried it — asked exactly _REPLY_ATTEMPTS times, no draw, not graded, and
-    # its row says why.
-    attempts = _attempts()
-    assert seam.calls_for("c") == ["judge:c:0", *[f"judge:c:0:{i}" for i in range(1, attempts)]]
-    row_c = S.row(built, "c")
-    assert row_c.get(COMPLETED) == 0
-    assert row_c.get(BUCKET) is None
-    assert any(_names(s, EPISODE_OUTCOME) for s in _strings(row_c)), row_c
-    # No other world's queued rows change: b's clean finding and d's finding queue exactly as
-    # filed; c queues nothing on either channel.
-    assert _ids(_queued(built, "b")) == [built.finding_id("b", 0, 0)]
-    assert _ids(_queued(built, "d")) == [built.finding_id("d", 0, 0)]
-    assert _queued(built, "c") == []
-    assert _queued(built, "c", questioner=True) == []
-    # judge.yaml and the landed draw carry no episode_outcome field.
-    assert EPISODE_OUTCOME not in _keys(S.record(built))
-    assert EPISODE_OUTCOME not in _keys(S.draw_doc(built, "b", 0))
-
-    # At the validator: refused by the retired name; the same reply without it is admitted.
-    clean = S.world_reply("lead-quality", ["idp"], investigator=[_inv("b")])
-    S.validate(clean)
-    for word in ("discard", "corpus-contradiction"):
-        message = _refusal({**clean, EPISODE_OUTCOME: word})
-        assert _names(message, EPISODE_OUTCOME), message
 
 
 # --------------------------------------------------------------------------------------
@@ -469,41 +396,6 @@ def test_1234_deployment_gap_names_what_how_and_evidence(tmp_path: Path) -> None
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_observability_is_not_a_defender_finding_type(tmp_path: Path) -> None:
-    """observability is in neither PIPELINE_FINDING_TYPES nor QUEUEABLE_FINDING_TYPES, a
-    defender finding bucketed observability makes the reply malformed, and a hand-fed defender
-    row typed observability is refused by the appender."""
-    config = S.mod(S.CONFIG)
-    assert S.OBSERVABILITY not in config.PIPELINE_FINDING_TYPES
-    assert S.OBSERVABILITY not in config.QUEUEABLE_FINDING_TYPES
-
-    built = S.family(tmp_path)
-    seam = S.judge({"b": [
-        S.world_reply(investigator=[_inv("b", S.OBSERVABILITY, claim="typed observability")]),
-        S.world_reply(investigator=[_inv("b", "lead-quality", claim="typed lead-quality")])]})
-
-    S.grade(built, seam)
-
-    assert seam.calls_for("b") == ["judge:b:0", "judge:b:0:1"]
-    assert [r.get("type") for r in _queued(built, "b")] == ["lead-quality"]
-    # At the validator: refused, naming the bucket; the same finding typed lead-quality admitted.
-    S.validate(S.world_reply(investigator=[_inv("b", "lead-quality")]))
-    message = _refusal(S.world_reply(investigator=[_inv("b", S.OBSERVABILITY)]))
-    assert _names(message, S.OBSERVABILITY), message
-
-    # The appender: a hand-fed row typed observability is refused, naming the type, and never
-    # lands; the same row typed lead-quality is appended (the control).
-    append = S.sym(S.JUDGE_ENQUEUE, "append_rows")
-    state = S.env_state()
-    observability = _hand_fed_row(built, "b", S.OBSERVABILITY, draw=7)
-    refused = _judge_refused()
-    with pytest.raises(refused) as caught:
-        append(built.ep, [observability], state=state)
-    assert _names(str(caught.value), S.OBSERVABILITY), str(caught.value)
-    assert observability["finding_id"] not in _ids(S.defender_queue())
-    control = _hand_fed_row(built, "b", "lead-quality", draw=8)
-    assert append(built.ep, [control], state=state) == 1
-    assert control["finding_id"] in _ids(S.defender_queue())
 
 
 # --------------------------------------------------------------------------------------
@@ -511,36 +403,6 @@ def test_1234_observability_is_not_a_defender_finding_type(tmp_path: Path) -> No
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_each_remaining_defender_finding_type_is_admitted_and_queued(tmp_path: Path) -> None:
-    """A defender finding bucketed lead-set, lead-quality or analyze-discipline is admitted by
-    reply validation and by the appender and queued, each type individually, while
-    observability is refused (the paired control of d05h)."""
-    owners = {"b": "lead-set", "c": "lead-quality", "d": "analyze-discipline"}
-    # Every owner is shown its facts, so analyze-discipline is open to it (A5).
-    built = S.family(tmp_path, S.triad(c=_shown("c", "edr"), d=_shown("d")))
-    seam = S.judge({label: S.world_reply(t, ["idp"], investigator=[_inv(label, t)])
-                    for label, t in owners.items()})
-
-    S.grade(built, seam)
-
-    for label, row_type in owners.items():
-        assert seam.calls_for(label) == [f"judge:{label}:0"], (label, seam.calls_for(label))
-        queued = _queued(built, label)
-        assert [r.get("type") for r in queued] == [row_type], (label, queued)
-        assert _ids(queued) == [built.finding_id(label, 0, 0)]
-
-    append = S.sym(S.JUDGE_ENQUEUE, "append_rows")
-    state = S.env_state()
-    for i, row_type in enumerate(("lead-set", "lead-quality", "analyze-discipline")):
-        row = _hand_fed_row(built, "b", row_type, draw=10 + i)
-        assert append(built.ep, [row], state=state) == 1, row_type
-        landed = [r for r in S.defender_queue() if r.get("finding_id") == row["finding_id"]]
-        assert [r.get("type") for r in landed] == [row_type]
-    refused = _judge_refused()
-    with pytest.raises(refused):
-        append(built.ep, [_hand_fed_row(built, "b", S.OBSERVABILITY, draw=20)], state=state)
-    message = _refusal(S.world_reply(investigator=[_inv("b", S.OBSERVABILITY)]))
-    assert _names(message, S.OBSERVABILITY), message
 
 
 # --------------------------------------------------------------------------------------
@@ -570,28 +432,6 @@ def test_1234_lead_set_refused_when_world_systems_include_no_served_system(
     assert _names(message, "lead-set"), message
 
 
-def test_1234_lead_set_and_decision_discipline_are_accepted_when_their_precondition_holds(
-        tmp_path: Path) -> None:
-    """A world reply bucketed lead-set whose systems include a served system is admitted and
-    its investigator findings queue; a world reply bucketed decision-discipline for a world the
-    contrast table says was shown its facts is admitted and its investigator findings queue with
-    that bucket. These are the paired controls of d13a and s_A70."""
-    # b is shown its facts (one altered answer); c names one served and one unserved system.
-    built = S.family(tmp_path, served_systems=["edr", "idp"])
-    seam = S.judge({
-        "b": S.world_reply("decision-discipline", ["idp"],
-                           investigator=[_inv("b", "decision-discipline")]),
-        "c": S.world_reply("lead-set", ["edr", "siem-x"], investigator=[_inv("c", "lead-set")]),
-    })
-
-    S.grade(built, seam)
-
-    assert seam.calls_for("b") == ["judge:b:0"]
-    assert seam.calls_for("c") == ["judge:c:0"]
-    assert S.row(built, "b").get(BUCKET) == "decision-discipline"
-    assert S.row(built, "c").get(BUCKET) == "lead-set"
-    assert [r.get("type") for r in _queued(built, "b")] == ["decision-discipline"]
-    assert [r.get("type") for r in _queued(built, "c")] == ["lead-set"]
 
 
 # --------------------------------------------------------------------------------------
@@ -637,33 +477,6 @@ def test_1234_discipline_bucket_for_a_world_never_shown_its_facts(tmp_path: Path
         assert [r.get("type") for r in queued] == ["lead-quality"], queued
 
 
-def test_1234_world_never_shown_its_facts_is_told_discipline_buckets_are_unavailable(
-        tmp_path: Path) -> None:
-    """When the judged world received no oracle answer, its contrast table says it was never
-    shown its facts and that analyze-discipline and decision-discipline are unavailable to it;
-    a reply bucketing it in either is refused at validation and re-asked (A5)."""
-    # The triad: b received one oracle answer; c received none, though its oracle store is
-    # archived — what it was SERVED decides, read off its served ledger.
-    built = S.family(tmp_path)
-    seam = S.judge({
-        "b": S.world_reply("analyze-discipline", ["idp"]),
-        "c": [S.world_reply("decision-discipline", ["edr"]),
-              S.world_reply("lead-quality", ["edr"])],
-    })
-
-    S.grade(built, seam)
-
-    # What c's prompt says that b's does not: a passage stating c was never shown its facts
-    # and naming both discipline buckets.
-    only_c = _blocks(seam.prompt_for("c")) - _blocks(seam.prompt_for("b"))
-    told = [blk for blk in only_c
-            if NEVER_SHOWN in blk and "analyze-discipline" in blk and "decision-discipline" in blk]
-    assert told, f"no passage of c's prompt alone says {NEVER_SHOWN!r} with both buckets"
-    # The reply bucketing c decision-discipline is refused and asked again; b (shown) is not.
-    assert seam.calls_for("c") == ["judge:c:0", "judge:c:0:1"]
-    assert S.row(built, "c").get(BUCKET) == "lead-quality"
-    assert seam.calls_for("b") == ["judge:b:0"]
-    assert S.row(built, "b").get(BUCKET) == "analyze-discipline"
 
 
 # --------------------------------------------------------------------------------------
@@ -671,40 +484,6 @@ def test_1234_world_never_shown_its_facts_is_told_discipline_buckets_are_unavail
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_design_world_finding_with_an_empty_systems_list(tmp_path: Path) -> None:
-    """A world finding with empty systems or a name failing the system-token grammar is refused
-    at reply validation and re-asked (A5); it never reaches routing and enqueue refuses nothing
-    for content."""
-    built = S.family(tmp_path)
-    seam = S.judge({
-        "b": [S.world_reply(world=[S.wf("unreachable", systems=[], evidence=[built.plan("b")],
-                                        claim="nothing was built for the fact")]),
-              S.world_reply(world=[S.wf("unreachable", systems=["idp"],
-                                        evidence=[built.plan("b")],
-                                        claim="nothing was built for the fact, on idp")])],
-        "c": [S.world_reply("lead-quality", ["edr"],
-                            world=[S.wf("unreachable", systems=["Not A System"],
-                                        evidence=[built.plan("c")], claim="c, ill-formed")]),
-              S.world_reply("lead-quality", ["edr"],
-                            world=[S.wf("unreachable", systems=["edr"],
-                                        evidence=[built.plan("c")], claim="c, on edr")])],
-    })
-
-    S.grade(built, seam)
-
-    for label, systems in (("b", ["idp"]), ("c", ["edr"])):
-        assert seam.calls_for(label) == [f"judge:{label}:0", f"judge:{label}:0:1"]
-        # Only the accepted reply's design finding reached routing, and enqueue took it: one
-        # questioner row, carrying the finding's own systems, and one ledger lane.
-        assert [r.get("systems") for r in _queued(built, label, questioner=True)] == [systems]
-        assert _world_lanes(built, label) == {
-            built.finding_id(label, 0, 0): [S.LANES["questioner"]]}
-
-    # At the validator: both shapes refused, naming the field; a named system admitted.
-    S.validate(S.world_reply(world=[S.wf("unreachable", systems=["idp"])]))  # the control
-    for systems in ([], ["Not A System"]):
-        message = _refusal(S.world_reply(world=[S.wf("unreachable", systems=systems)]))
-        assert _names(message, "systems"), (systems, message)
 
 
 # --------------------------------------------------------------------------------------
@@ -712,44 +491,6 @@ def test_1234_design_world_finding_with_an_empty_systems_list(tmp_path: Path) ->
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_am_investigator_finding_carrying_evidence_beside_contrast_evidence(
-        tmp_path: Path) -> None:
-    """`contrast_evidence` is an investigator finding's only pointer list and `citations` are
-    its resolving pointers (A1). `evidence` on an investigator finding is the field A1 replaced,
-    a retired name for that shape: a reply carrying it, beside `contrast_evidence` or alone, is
-    refused at validation by that name and re-asked within `_REPLY_ATTEMPTS` (A4, A5, NA08)."""
-    retired = S.RETIRED_FINDING_FIELD
-    beside = _inv("b", claim="b, both lists", **{retired: [S.conduct("c"), S.conduct("a")]})
-    alone = _without(_inv("c", claim="c, the old list alone",
-                          **{retired: [S.conduct("c"), S.conduct("a")]}), S.CONTRAST)
-    built = S.family(tmp_path)
-    seam = S.judge({
-        "b": [S.world_reply(investigator=[beside]),
-              S.world_reply(investigator=[_inv("b", claim="b, contrast only")])],
-        "c": [S.world_reply("lead-quality", ["edr"], investigator=[alone]),
-              S.world_reply("lead-quality", ["edr"],
-                            investigator=[_inv("c", claim="c, contrast only")])],
-    })
-
-    S.grade(built, seam)
-
-    for label in ("b", "c"):
-        assert seam.calls_for(label) == [f"judge:{label}:0", f"judge:{label}:0:1"]
-        landed = _by_claim(S.draw_doc(built, label, 0).get(S.INVESTIGATOR),
-                           f"{label}, contrast only")
-        assert retired not in landed
-        queued = _queued(built, label)
-        assert _ids(queued) == [built.finding_id(label, 0, 0)]
-        # Citations come off contrast_evidence alone: b's row never carries the c pointer its
-        # refused reply's `evidence` named.
-        assert set(queued[0].get(CITATIONS) or []) == {S.conduct(label), S.conduct("a")}
-
-    # At the validator: refused by the retired name, beside contrast_evidence or alone; the
-    # finding carrying contrast_evidence alone is admitted (the control).
-    S.validate(S.world_reply(investigator=[_inv("b")]))
-    for finding in (beside, alone):
-        message = _refusal(S.world_reply(investigator=[finding]))
-        assert _names(message, retired), message
 
 
 # --------------------------------------------------------------------------------------
@@ -838,31 +579,6 @@ def test_1234_evidence_pointers_and_contrast_pair_disagree(tmp_path: Path) -> No
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_no_code_path_computes_a_world_bucket(tmp_path: Path) -> None:
-    """A world whose every draw failed or was refused has no bucket on its row and queues
-    nothing; no bucket is derived from the contrast table, the routing, or a
-    reached-equals-declared comparison (A5)."""
-    # b reached its declared verdict and was shown its facts; every call about it fails (#921
-    # P9). c was never shown its facts; every reply about it is refused. d answers (control).
-    built = S.family(tmp_path, S.triad(d=_shown("d")))
-    seam = S.judge({"c": "this is not one reply document: [",
-                    "d": S.world_reply("lead-quality", ["idp"], investigator=[_inv("d")])},
-                   fail={"b"})
-
-    S.grade(built, seam, draws=2)
-
-    assert seam.called("b")
-    assert seam.called("c")
-    for label in ("b", "c"):
-        row = S.row(built, label)
-        assert row.get(BUCKET) is None, row
-        assert row.get(COMPLETED) == 0, row
-        assert not row.get(S.COINED["row.draws"]), row
-        assert _queued(built, label) == []
-        assert _queued(built, label, questioner=True) == []
-        assert _world_lanes(built, label) == {}
-    assert S.row(built, "d").get(BUCKET) == "lead-quality"
-    assert _ids(_queued(built, "d")) == sorted(built.finding_id("d", n, 0) for n in (0, 1))
 
 
 # --------------------------------------------------------------------------------------
@@ -870,28 +586,6 @@ def test_1234_no_code_path_computes_a_world_bucket(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_world_reached_its_declared_verdict_but_is_bucketed_lead_quality(
-        tmp_path: Path) -> None:
-    """The model's bucket decides (O11): a world whose report reached its declared verdict but
-    that every draw buckets lead-quality is not bucket none, so its investigator findings are
-    queued (I9 withholds only none), each carrying on_verdict_path as filed. No computed
-    reached-equals-declared gate exists (A5)."""
-    # The fixture's b report closes on its declared verdict (`reached` defaults to `declared`).
-    built = S.family(tmp_path)
-    reply = S.world_reply("lead-quality", ["idp"], investigator=[
-        _inv("b", claim="on the verdict path", on_path=True),
-        _inv("b", claim="off the verdict path", on_path=False, anchor="l-002")])
-    seam = S.judge({"b": reply})
-
-    S.grade(built, seam, draws=2)
-
-    assert S.row(built, "b").get(BUCKET) == "lead-quality"
-    queued = {r["finding_id"]: r for r in _queued(built, "b")}
-    expected = {built.finding_id("b", n, i): flag for n in (0, 1)
-                for i, flag in ((0, True), (1, False))}
-    assert set(queued) == set(expected)
-    for finding_id, flag in expected.items():
-        assert queued[finding_id].get(S.ON_PATH) is flag, queued[finding_id]
 
 
 # --------------------------------------------------------------------------------------

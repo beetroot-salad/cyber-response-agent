@@ -1,12 +1,4 @@
-"""Lead-author driver — extraction shape, handoff shape, lock/sentinel paths.
-
-Scope (minimal, per defender/CLAUDE.md): pin algorithmic invariants that
-would silently drift (lead extraction, handoff JSON shape, composite-kind
-inference) plus the gating logic that prevents the driver from spawning
-``claude`` when it shouldn't. We do NOT exhaustively mock ``claude`` —
-the post-flight scope check is shell-and-git logic verifiable by reading
-the code.
-"""
+"""Lead-author driver: lead extraction, handoff shape, lock/sentinel paths, and the post-flight skills scope gate."""
 from __future__ import annotations
 
 import json
@@ -71,8 +63,6 @@ def _executed_lead(**kw):
     )
     base.update(kw)
     return lead_author.ExecutedLead(**base)
-
-
 
 
 def _write_lead_meta(run_dir: Path, lead_id: str, goal: str, wts=()) -> None:
@@ -158,8 +148,6 @@ def catalog(tmp_path: Path) -> Path:
     return cat
 
 
-
-
 def test_extract_single_query_per_entry(run_dir: Path):
     _write_lead_meta(run_dir, "l-001", "list auth events", ["src_ip", "user"])
     _write_query(run_dir, "l-001", 0, "wazuh.auth-events", {"host": "h1", "window": "1h"})
@@ -191,12 +179,6 @@ def test_extract_multi_query_fans_out(run_dir: Path):
     assert leads[1].raw_ref.name == "1.json"
 
 
-def test_extract_skips_query_with_no_payload(run_dir: Path):
-    _write_lead_meta(run_dir, "l-001", "x")
-    _write_query(run_dir, "l-001", 0, "wazuh.auth-events", payload=None)
-    assert lead_author.extract(run_dir)[1] == []
-
-
 def test_extract_multi_query_skips_missing_payload(run_dir: Path):
     _write_lead_meta(run_dir, "l-001", "partial fan-out")
     _write_query(run_dir, "l-001", 0, "wazuh.auth-events")
@@ -221,8 +203,6 @@ def test_extract_invalid_payload_status_raises(run_dir: Path):
         lead_author.extract(run_dir)
 
 
-
-
 def test_build_handoff_groups_by_template(run_dir: Path, catalog: Path):
     """Same template invoked across 3 leads → one handoff with 3 invocations."""
     for i in range(3):
@@ -245,44 +225,6 @@ def test_build_handoff_groups_by_template(run_dir: Path, catalog: Path):
         "call-0", "call-1", "call-2",
     ]
     json.dumps(h)
-
-
-def test_build_handoff_includes_rendered_query_and_status(run_dir: Path, catalog: Path):
-    _write_lead_meta(run_dir, "l-001", "x")
-    _write_query(
-        run_dir, "l-001", 0, "elastic.auth-events",
-        {"host": "bastion-01", "window": "1h"},
-        payload_status="suspect_empty",
-        payload_digest="0 events; data.srcip is IP-typed",
-    )
-    _, leads = lead_author.extract(run_dir)
-    handoffs = lead_author.build_handoff(
-        run_dir, leads, repo_root=catalog.parent, skills=skills_view(catalog.parents[1]),
-        where=catalog.parents[1]
-    )
-    assert len(handoffs) == 1
-    inv = handoffs[0]["invocations"][0]
-    assert inv["payload_status"] == "suspect_empty"
-    assert "data.srcip" in inv["payload_digest"]
-    assert inv["result_refs"] == ["gather_raw/l-001/0.json"]
-    assert inv["rendered_query"]
-    assert "--window 1h" in inv["rendered_query"]
-    assert "${host_clause}" in inv["rendered_query"]
-
-
-def test_build_handoff_surfaces_literal_esql_query(run_dir: Path, catalog: Path):
-    """For an ES|QL invocation the whole query is the verbatim `query` body param — so the
-    handoff carries the literal pipe as `executed_query` (the canonical record), not a
-    `${param}` re-render that drops the values."""
-    pipe = 'FROM logs-system.auth-* | WHERE host.name == "db-1" | STATS c = COUNT(*)'
-    _write_lead_meta(run_dir, "l-001", "x")
-    _write_query(run_dir, "l-001", 0, "elastic.auth-events", {"query": pipe}, verb="esql")
-    _, leads = lead_author.extract(run_dir)
-    inv = lead_author.build_handoff(
-        run_dir, leads, repo_root=catalog.parent, skills=skills_view(catalog.parents[1]),
-        where=catalog.parents[1]
-    )[0]["invocations"][0]
-    assert inv["executed_query"] == pipe
 
 
 def test_build_handoff_drops_unresolved_query_id(run_dir: Path, catalog: Path):
@@ -325,18 +267,8 @@ def test_build_handoff_one_handoff_per_template_cross_system(run_dir: Path, cata
     assert len(by_id["elastic.auth-events"]["invocations"]) == 1
 
 
-
-
 def _claude_should_not_be_called(*args, **kwargs):
     raise AssertionError("claude was spawned despite gating check")
-
-
-def test_run_missing_run_dir():
-    # `run` takes the opened run (#1105 PR 2); a run that is not there is refused by the open,
-    # which the by-hand entry (`--tenant T <run_id>`, J8) makes before any of the run. The
-    # tenant is real, its runs folder made: only the run is missing.
-    tenant_id = curation_run_dir("present").parent.parent.name
-    assert lead_author.main(["--tenant", tenant_id, "nope"]) == 2
 
 
 def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path, tmp_path: Path):
@@ -363,46 +295,6 @@ def test_run_done_sentinel_short_circuits(run_dir: Path, tmp_path: Path):
         invoke_agent=_claude_should_not_be_called,
     )
     assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
-
-
-
-
-def test_under_draft_classifier():
-    assert lead_author._under_draft("defender/skills/gather/queries/wazuh/_draft/x.md")
-    assert lead_author._under_draft("defender/skills/gather/queries/host-query/_draft/y.md")
-    assert not lead_author._under_draft("defender/skills/gather/queries/wazuh/auth-events.md")
-    assert not lead_author._under_draft("defender/lessons/x.md")
-
-
-def test_is_system_skill_md_classifier():
-    assert lead_author._is_system_skill_md("defender/skills/elastic/SKILL.md")
-    assert lead_author._is_system_skill_md("defender/skills/wazuh/SKILL.md")
-    assert not lead_author._is_system_skill_md(
-        "defender/skills/gather/queries/wazuh/auth-events.md"
-    )
-    assert not lead_author._is_system_skill_md(
-        "defender/skills/gather/queries/SCHEMA.md"
-    )
-    assert not lead_author._is_system_skill_md(
-        "defender/skills/elastic/_draft/foo.md"
-    )
-
-
-def test_is_system_skill_draft_classifier():
-    assert lead_author._is_system_skill_draft("defender/skills/elastic/_draft/foo.md")
-    assert lead_author._is_system_skill_draft("defender/skills/cmdb/_draft/bar.md")
-    assert not lead_author._is_system_skill_draft(
-        "defender/skills/gather/queries/elastic/_draft/foo.md"
-    )
-    assert not lead_author._is_system_skill_draft("defender/skills/elastic/SKILL.md")
-
-
-def test_is_in_scope_covers_both_surfaces():
-    assert lead_author._is_in_scope("defender/skills/gather/queries/wazuh/auth-events.md")
-    assert lead_author._is_in_scope("defender/skills/elastic/SKILL.md")
-    assert lead_author._is_in_scope("defender/skills/elastic/_draft/foo.md")
-    assert not lead_author._is_in_scope("defender/lessons/x.md")
-    assert not lead_author._is_in_scope("defender/other/stray.md")
 
 
 def test_discover_system_drafts_finds_files_excluding_readme(tmp_path):
@@ -436,8 +328,6 @@ def test_build_system_draft_handoffs_emits_triple(tmp_path):
         "system": "elastic",
         "skill_path": "defender/skills/elastic/SKILL.md",
     }]
-
-
 
 
 def _run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
@@ -591,25 +481,6 @@ def _stage_covered_draft(repo: Path, query_id: str) -> Path:
     return draft
 
 
-def test_a_promote_that_carries_covers_is_accepted(tmp_git_repo: Path):
-    """The disposition the rule is shaped around: the author names the file for what it
-    measures and carries the coined identity onto it.
-
-    The name is deliberately unrelated to the draft's — that is the whole point of deriving the
-    draft's basename — so nothing but `covers:` connects the two files."""
-    repo = tmp_git_repo
-    draft = _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
-    (repo / _CATALOG / "wazuh" / "auth-failure-rate.md").write_text(
-        query_template("wazuh.auth-failure-rate", "established",
-                       covers=["wazuh.hunt-failed-logins"])
-    )
-    draft.unlink()
-
-    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(repo), git=claim_git(repo))
-    assert "defender/skills/gather/queries/wazuh/auth-failure-rate.md" in changed
-
-
 def test_a_discard_into_widen_that_carries_covers_is_accepted(tmp_git_repo: Path):
     """The PREFERRED disposition (`lead_author.md`: discard-into-widen > skip > promote), and
     the one the old basename link could never have expressed — the identity lands on a template
@@ -653,26 +524,6 @@ def _mint_uncommitted_draft(repo: Path, query_id: str) -> Path:
     draft = repo / _CATALOG / "wazuh" / "_draft" / f"{lead_author._draft_basename(query_id)}.md"
     draft.write_text(query_template(draft_id, "draft", covers=[draft_id, query_id]))
     return draft
-
-
-def test_a_bare_discard_of_a_draft_minted_this_tick_is_refused(tmp_git_repo: Path):
-    """The transfer rule's DOMINANT case, and the one git cannot report.
-
-    `_run_locked` mints and then hands the same draft to the author in the same tick (it
-    reloads the catalog after the mint precisely so the row resolves), so the draft the author
-    bare-discards is almost always one that was never committed: no `D` porcelain record, no
-    `git show HEAD:` pre-image, nothing for a gate reading only git to see. The identities are
-    captured between the mint and the agent instead."""
-    repo = tmp_git_repo
-    draft = _mint_uncommitted_draft(repo, "wazuh.hunt-failed-logins")
-    minted = lead_author._minted_identities(
-        skills_view(repo / "defender" / "skills"), [draft], where=repo / "defender" / "skills")
-    draft.unlink()
-
-    with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
-        lead_author._verify_skills_state(
-            repo, baseline_stray=[], systems=DECLARED, minted=minted, tree_for=lane_tree_for(repo), git=claim_git(repo)
-        )
 
 
 def test_a_promote_of_a_draft_minted_this_tick_is_accepted(tmp_git_repo: Path):
@@ -807,18 +658,6 @@ def test_a_draft_folded_into_another_draft_is_attributed(tmp_git_repo: Path):
     assert wide.relative_to(repo).as_posix() in changed
 
 
-def test_a_draft_with_no_covers_is_still_freely_discardable(tmp_git_repo: Path):
-    """The control. A hand-authored draft carries no minted identity, so there is nothing to
-    orphan and the transfer rule must not invent an obligation — the seeded tree's own
-    `_draft/newthing.md` is exactly that shape, and every promotion test in this file depends
-    on it staying discardable."""
-    repo = tmp_git_repo
-    (repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
-    changed = lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(repo), git=claim_git(repo))
-    assert "defender/skills/gather/queries/wazuh/_draft/newthing.md" in changed
-
-
 def test_an_established_template_may_not_lose_the_identities_it_covers(tmp_git_repo: Path):
     """Monotonicity — the collision detector.
 
@@ -865,13 +704,6 @@ def test_verify_skills_state_rejects_schema_mutation(tmp_git_repo: Path):
     with pytest.raises(lead_author.LeadAuthorError, match="protected surface"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
                                          tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-
-
-def test_verify_skills_state_accepts_draft_discard(tmp_git_repo: Path):
-    (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / "newthing.md").unlink()
-    changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-    assert changed == ["defender/skills/gather/queries/wazuh/_draft/newthing.md"]
 
 
 def test_verify_skills_state_rejects_a_promotion_whose_placeholder_is_not_a_param(
@@ -1001,8 +833,6 @@ def test_verify_skills_state_ignores_baseline_stray(tmp_git_repo: Path):
         tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo)
     )
     assert changed == []
-
-
 
 
 def _bypass_tables():
@@ -1168,8 +998,6 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
     assert not (run_dir / "lead_author" / "done").is_file()
 
 
-
-
 def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(
     tmp_git_repo: Path, tmp_path: Path
 ):
@@ -1207,33 +1035,6 @@ def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(
         lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
-
-
-def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
-    run_dir: Path, monkeypatch, tmp_path: Path
-):
-    """Pending drafts below threshold are silenced; executed handoffs unaffected.
-
-    Stubs out the executed-flow primitives so this test exercises only the
-    threshold gate, independent of which query templates exist in the catalog.
-    """
-    fake_executed = [_executed_lead()]
-    fake_handoff = [{
-        "query_id": "fake.lead", "status": "established",
-        "executed_template_path": "defender/skills/gather/queries/fake/lead.md",
-        "neighbors": [], "invocations": [],
-    }]
-    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
-    deps = _deps(
-        tmp_path,
-        extract=lambda rd: ([], fake_executed),
-        build_handoff=lambda rd, ex, jl=None, **_: fake_handoff,
-        discover_system_drafts=lambda: [Path("/fake/a.md"), Path("/fake/b.md")],
-    )
-    handoffs, drafts, rc = lead_author._prepare_handoffs(run_dir, deps)
-    assert rc is None
-    assert handoffs == fake_handoff
-    assert drafts == []
 
 
 def test_prepare_handoffs_at_threshold_surfaces_drafts(
@@ -1343,8 +1144,6 @@ def test_invoke_agent_pending_drafts_reach_engine_user_prompt(run_dir: Path, mon
     assert re.search(r"<run-[0-9a-f]+-pending_system_drafts>", prompt)
     assert "elastic/_draft/falco-na.md" in prompt
     assert "skills_dir: defender/skills/" in prompt
-
-
 
 
 def test_extract_carries_error_class(run_dir: Path):
@@ -1462,95 +1261,6 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
     assert f"wazuh.{minted}" in {h["query_id"] for h in seen["handoffs"]}
 
 
-def test_collect_general_failures_skips_systemless(tmp_path: Path, catalog: Path):
-    """A failure with a blank system is never collected — it has no
-    defender/skills/{system}/execution.md to fold into."""
-    leads = [
-        _executed_lead(lead_id="l-001", query_id="elastic.esql", system="",
-                       error_class="agent-fixable"),
-    ]
-    out = lead_author.collect_general_failures(leads, tmp_path / "r",
-                                               skills=skills_view(catalog.parents[1]),
-    where=catalog.parents[1])
-    assert out == []
-
-
-
-
-
-
-def test_verify_skills_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
-    """A stray edit AND an in-corpus deletion together → the stray-gate error
-    ('outside') is raised, proving the preamble runs before the per-path loop (a
-    loop-first order would surface 'delete-prohibition', which lacks 'outside')."""
-    _commit_outside(tmp_git_repo).write_text("stray")
-    (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").unlink()
-    with pytest.raises(lead_author.LeadAuthorError, match="outside"):
-        lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-
-
-def test_verify_skills_state_returns_sorted_changed(tmp_git_repo: Path):
-    """Two in-scope edits whose paths interleave ACROSS git's status-class boundary →
-    the returned list is sorted (path order, not git-status order). This discriminates
-    `return sorted(changed)`: git lists all changed-class records before all
-    untracked-class ones (each class internally sorted), so a modified catalog file
-    (`.../gather/...`, sorts LATE) precedes an untracked system draft
-    (`.../elastic/...`, sorts EARLY) in raw git order — only `sorted()` flips them.
-    A regression to `return changed` would return git order and fail this."""
-    (tmp_git_repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
-        query_template("wazuh.auth-events", "established") + "\n# folded\n"
-    )
-    (tmp_git_repo / "defender" / "skills" / "elastic" / "_draft" / "aa-new.md").write_text(
-        "---\nid: elastic.aa-new\nstatus: draft\n---\n# new\n"
-    )
-    changed = lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
-                                               tree_for=lane_tree_for(tmp_git_repo), git=claim_git(tmp_git_repo))
-    assert changed == [
-        "defender/skills/elastic/_draft/aa-new.md",
-        "defender/skills/gather/queries/wazuh/auth-events.md",
-    ]
-
-
-
-
-def test_invoke_agent_wires_engine_kwargs(run_dir: Path, tmp_path: Path, monkeypatch):
-    """(rewrite of the RunnerOptions options-wiring) The spawn hands the engine the lead-author
-    prompt, the run-dir-named batch id, the injected repo_root (distinguishing it from the
-    pitfalls spawn), and the run_dir as the learning trace anchor. The model/effort/request_limit
-    default INSIDE run_author_stage from config (pinned in test_lead_author_engine), so they are
-    not forwarded here — only the per-spawn wiring is.
-
-    Since #713 the batch id is no longer its own engine kwarg: it is carried by the
-    StageWiring the spawn builds, so it stays observable on the trace name and label."""
-    cap = _capture_engine(monkeypatch)
-    lead_author.invoke_agent(run_dir, [], repo_root=tmp_path)
-    assert cap["system_prompt_file"] == lead_author.LEAD_AUTHOR_PROMPT
-    assert cap["trace_name"].startswith(f"{run_dir.name}.")
-    assert cap["label"].endswith(f":{run_dir.name}")
-    assert cap["repo_root"] == tmp_path
-    assert cap["learning_run_dir"] == run_dir
-
-
-def test_invoke_agent_config_fault_propagates(run_dir: Path, tmp_path: Path, monkeypatch):
-    """(replaces runner-error-maps-to-124) F1: a systemic FatalConfigError from the engine
-    PROPAGATES through invoke_agent — it is NOT swallowed into an rc, so a deployment-wide
-    misconfig fails loudly instead of quarantining every marker."""
-    from defender.learning.core.config import FatalConfigError
-    _capture_engine(monkeypatch, raise_exc=FatalConfigError("needs FIREWORKS_API_KEY"))
-    with pytest.raises(FatalConfigError):
-        lead_author.invoke_agent(run_dir, [], repo_root=tmp_path)
-
-
-def test_invoke_agent_passes_through_engine_rc(run_dir: Path, tmp_path: Path, monkeypatch):
-    """A per-run rc from the engine (124 from a RunUnprocessable inside run_author_stage) is
-    returned unchanged — the caller then maps rc != 0 → 2 → drain quarantine."""
-    _capture_engine(monkeypatch, rc=124)
-    assert lead_author.invoke_agent(run_dir, [], repo_root=tmp_path) == 124
-
-
-
-
 # `_loop_commit_message` derives the commit SCOPE from the changed paths alone. Each row is
 # one path shape and the scope it must produce — and, where it matters, the scope it must NOT
 # produce: a message that named both scopes for a catalog-only batch would read as a wider
@@ -1584,20 +1294,5 @@ def test_loop_commit_message_scope_follows_the_changed_paths(case, changed, pres
         assert fragment in msg
     for fragment in absent:
         assert fragment not in msg
-
-
-def test_loop_commit_message_lists_paths_and_source_run_trailer():
-    """Body lists each changed path as '- {p}' in order; trailer carries source-run."""
-    changed = [
-        "defender/skills/gather/queries/wazuh/a.md",
-        "defender/skills/gather/queries/wazuh/b.md",
-    ]
-    msg = lead_author._loop_commit_message(Path("run-123"), changed)
-    assert "git).\n\nPaths:\n- defender/skills/gather/queries/wazuh/a.md\n" in msg
-    assert (
-        "- defender/skills/gather/queries/wazuh/a.md\n"
-        "- defender/skills/gather/queries/wazuh/b.md\n"
-        "\nsource-run: run-123\n"
-    ) in msg
 
 

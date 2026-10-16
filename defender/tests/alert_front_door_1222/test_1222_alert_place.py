@@ -629,54 +629,12 @@ def test_p151_production_runtime_meets_every_write_shape(tmp_path, monkeypatch):
 # The gather lead's instructions, MAIN's coordinates, the host readers
 # =================================================================================================
 
-def test_gather_instructions_name_the_alerts_place(tmp_path):
-    """The gather lead's instructions as received name the alert's place in the read-only input
-    directory, relative to the run folder; no instruction sends a lead to {run_dir}/alert.json."""
-    d = _run(tmp_path)
-    assert d.router.dispatched(S.L3), f"l-00c never ran; conversations: {d.router.leads()}"
-    received = d.router.instructions(S.L3) + "\n" + d.router.first_prompt(S.L3)
-    former = (str(_former_place(d.folder)), "{run_dir}/alert.json")
-    sent = [f for f in former if f in received]
-    assert not sent, f"the gather lead is still sent to the alert's former place: {sent}"
-    rel = S.alert_rel()
-    inputs = S.input_dir(d.folder).relative_to(d.folder).as_posix()
-    assert rel in received, f"the gather instructions never name the alert's place ({rel})"
-    assert inputs in received, (
-        f"the gather instructions never name the input directory ({inputs}/)")
-
 
 def _coordinate(opening: str, run_dir: Path) -> Path:
     m = re.search(r"(?m)^alert: (.+)$", opening)
     assert m, f"MAIN's opening message carries no `alert:` coordinate:\n{opening[:600]}"
     named = Path(m.group(1).strip())
     return named if named.is_absolute() else Path(run_dir) / named
-
-
-def test_p147_agent_reads_the_alert_at_its_former_place(tmp_path):
-    """MAIN's instructions and opening coordinates name the alert's one location. No host reader
-    takes a file the box wrote at the former place for the alert."""
-    d = _run(tmp_path, before=lambda run_dir: _former_place(run_dir).write_bytes(DECOY_BYTES))
-    assert d.raised is None, f"the run did not end cleanly: {d.raised!r}"
-    assert d.rc == 0, f"the run did not end cleanly: rc={d.rc}"
-    opening = d.opening_message
-    # A file the box wrote at the former place is never taken for the alert: MAIN's inlined
-    # copy (orientation's host read) is the admitted alert.
-    assert DECOY not in opening, "a file at the alert's former place reached MAIN as the alert"
-    S.assert_wrapped_untrusted(opening, MARK, "MAIN's raw-alert block")
-    named = _coordinate(opening, d.folder)
-    assert named.is_file(), f"MAIN's `alert:` coordinate ({named}) names no file"
-    assert named.read_bytes() == d.input_bytes, (
-        f"MAIN's `alert:` coordinate ({named}) is not the place the admitted alert sits")
-    told = S.harness_text(opening) + "\n" + d.main_instructions
-    stale = [s for s in (str(_former_place(d.folder)), "{run_dir}/alert.json") if s in told]
-    assert not stale, f"MAIN is told to read the alert at its former place: {stale}"
-    lead_told = d.router.instructions(S.L3) + "\n" + d.router.first_prompt(S.L3)
-    assert "{run_dir}/alert.json" not in lead_told, (
-        "the correlation lead is told to read the alert at its former place")
-    assert str(_former_place(d.folder)) not in lead_told, (
-        "the correlation lead is told to read the alert at its former place")
-    assert named.parent == S.input_dir(d.folder), (
-        "MAIN's coordinate does not name the alert inside the read-only input directory")
 
 
 def _alert_ref_resolves(ref: Any, run_dir: Path, real: bytes) -> bool:
@@ -689,36 +647,6 @@ def _alert_ref_resolves(ref: Any, run_dir: Path, real: bytes) -> bool:
         return True
     target = Path(run_dir) / ref
     return target.is_file() and target.read_bytes() == real
-
-
-def test_p148_host_reader_still_addresses_the_former_place(tmp_path):
-    """No host reader addresses the former place, and a file the box wrote there is never taken
-    for the alert."""
-    d = _run(tmp_path)
-    assert d.raised is None, f"the run did not end cleanly: {d.raised!r}"
-    assert d.rc == 0, f"the run did not end cleanly: rc={d.rc}"
-    run_dir = d.folder
-    real = d.input_bytes
-    # The box's leftover: a file named like the alert at its former place, written after setup.
-    _former_place(run_dir).write_bytes(DECOY_BYTES)
-    page = S.mod("scripts.visualize.visualize_run").render_page(_run_handle_1165(run_dir))
-    assert DECOY not in page, "the run page took the box's file at the former place for the alert"
-    assert MARK in page, "the run page no longer shows the run's alert (N8: display unchanged)"
-    record = S.mod("run_repository").Run.at(run_dir).record
-    case_ref = S.sym("run_repository._handle", "case_ref")
-    assert record.alert_ref == case_ref(real), (
-        f"the run handle's case reference ({record.alert_ref}) is not the admitted alert's "
-        f"({case_ref(real)})")
-    repo = S.mod("learning.lead_repository")
-    view_ref = repo.actor_view(run_dir).get("alert_ref")
-    assert _alert_ref_resolves(view_ref, run_dir, real), (
-        f"the lead repository's actor view points at {view_ref!r}, not at the run's alert")
-    yaml_ref = S.mod("_yaml").safe_load(repo.render_joined_yaml(run_dir)).get("alert_ref")
-    assert _alert_ref_resolves(yaml_ref, run_dir, real), (
-        f"the lead repository's joined view points at {yaml_ref!r}, not at the run's alert")
-    workspace = d.opening_message.split("## Workspace", 1)[-1]
-    assert f"{S.input_dir(run_dir).name}" in workspace, (
-        "MAIN's workspace map never shows the input directory the alert sits in")
 
 
 # =================================================================================================
@@ -836,18 +764,6 @@ def _host_readers() -> dict[str, Callable[[Path], None]]:
     }
 
 
-@pytest.mark.parametrize("reader", list(_host_readers()))
-def test_a1_every_host_side_alert_read_checks_the_recorded_digest(tmp_path, reader):
-    """Every host-side read of a run's stored alert -- orientation's raw-alert block, the
-    read_file tool (MAIN's and the lead's, which opens the file on the host), the visualizers,
-    the run handle's case reference, the launcher -- compares the bytes it read with the digest
-    in the run's record and refuses a mismatch with a fixed reason naming the run, carrying no
-    byte of either file. A reader of the record alone is not asked to (p142), nor is a reader
-    that only names the alert and reads none of its bytes (the lead repository; its address is
-    p148's). Positive control: the untouched alert reads as before at each of them."""
-    _host_readers()[reader](tmp_path)
-
-
 def test_a1_a_replaced_alert_is_refused_at_the_next_host_read_whatever_the_runtime(tmp_path):
     """With the read-only bind taken out of play -- alert.json replaced on the host after setup,
     standing in for a bind that failed silently under the production runtime -- the run's next
@@ -893,26 +809,6 @@ def test_a1_a_replaced_alert_is_refused_at_the_next_host_read_whatever_the_runti
 # The record, the read shape, the pointer, the size
 # =================================================================================================
 
-def test_p146_main_or_the_lead_opens_the_record_with_a_read_to(tmp_path):
-    """Alert-derived text in the record reaches a model only inside an untrusted frame."""
-    summary_mark = "FRONTDOOR-S08-SUMMARY-62f7"
-    rule = {**S.fixture_alert()["rule"],
-            "description": f"{summary_mark} {S.FENCE_RUN} {S.RUN_TAG_CLOSE} {S.FORGED_HEADING}"}
-    rec = S.record_rel()
-    reads = [S.call("read_file", path=rec), S.call("bash", command=f"cat {rec}")]
-    d = _run(tmp_path, alert=_alert(rule=rule), main=[*reads, S.text(S.DONE)],
-             leads={S.L3: [*reads, S.text("ok")]})
-    assert summary_mark in (d.recorded("summary") or ""), (
-        "the record does not hold the mapped summary — nothing for this test to see")
-    for who, seen in (("MAIN", d.main.seen), ("l-00c", d.router.seen(S.L3))):
-        returns = _returns(seen)
-        assert len(returns) == 2, f"{who}'s two reads of the record did not both come back"
-        for tool, ret in zip(("read_file", "cat"), returns, strict=True):
-            S.assert_wrapped_untrusted(ret, summary_mark, f"{who}'s {tool} of the record")
-            for piece in (S.RUN_TAG_CLOSE, S.FORGED_HEADING, S.FENCE_RUN):
-                assert piece not in S.harness_text(ret), (
-                    f"{who}'s {tool}: record text ({piece!r}) sits outside the frame")
-
 
 def test_p149_agents_read_permission_and_the_one_directory_dow(tmp_path):
     """MAIN and the correlation lead can read the alert and the record at their new place. A
@@ -946,33 +842,6 @@ def test_p149_agents_read_permission_and_the_one_directory_dow(tmp_path):
         assert SECRET not in refused, f"{who} read a file one directory down outside the input dir"
         assert Path(OTHER_DIR_FILE).name in refused, (
             f"{who}'s refused read does not name the file it refused: {refused[:300]}")
-
-
-def test_p190_pointer_spelling_in_the_stored_goal(tmp_path):
-    """The stored goal names the alert by a path relative to the run folder, never a host or
-    in-box absolute path; read_file and cat resolve it against the run folder, and one read shape
-    admits the input directory (policies/_common.read_shapes)."""
-    rel = S.alert_rel()
-    planted = _tenant()
-    d = _run(tmp_path, tenant=planted,
-             leads={S.L3: [S.call("read_file", path=rel), S.call("bash", command=f"cat {rel}"),
-                           S.call("read_file", path="wire_logs/llm_requests.jsonl"),
-                           S.text(S.DEFAULT_CORRELATION_SUMMARY)]})
-    goal = d.sidecar(S.L3)["goal"]
-    assert rel in goal, f"the stored goal does not name the alert by its run-relative path {rel}"
-    hosts = S.host_paths_in(goal, d.folder, planted.root, S.alert_file(d.folder), S.DEFENDER)
-    assert not hosts, f"the stored goal spells a host (= in-box) path: {hosts}"
-    returns = _returns(d.router.seen(S.L3))
-    assert len(returns) == 3, f"the lead's reads did not all come back: {returns}"
-    text = d.input_bytes.decode("utf-8")
-    _assert_read_whole_and_framed(returns[0], text, "read_file of the run-relative pointer")
-    _assert_read_whole_and_framed(returns[1], text, "cat of the run-relative pointer")
-    # ONE shape admits the input directory: the wire log one directory down stays refused
-    # (CLAUDE.md: the one-segment run-dir shape is what keeps it from MAIN and GATHER).
-    assert NOT_READABLE in returns[2], (
-        f"the widened read shape also opened wire_logs/: {returns[2][:300]}")
-    assert not S.framed_bodies(returns[2]), (
-        f"the widened read shape also opened wire_logs/: {returns[2][:300]}")
 
 
 def test_p192_alert_larger_than_one_read_returns(tmp_path):

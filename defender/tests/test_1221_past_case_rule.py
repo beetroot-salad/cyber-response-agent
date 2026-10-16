@@ -2,26 +2,6 @@
 
 The design (issue #1221, D2/M3, as amended 2026-10-08): a comment a model wrote is a PAST CASE,
 cited `grounding past-case`, `cites_past_case <run id>`. What makes an `:R authz` row a past
-case for #27 is its CITATION, not its grounding word: a row is a past case iff its
-`cites_past_case` cell is non-empty — citing a run IS leaning on it, whatever the grounding cell
-says. An authz contract whose `authorized` rows all cite a past case is not discharged, so a
-benign close over it is refused with an error naming the contract; any `authorized` row on that
-contract without a citation rescues it. The rule lives in the one reading of "discharged"
-(`outstanding_authz_contracts`), so the retrieval frontier keeps such a contract open too. It
-covers `benign` only (N9).
-
-Two row-structure rules make the citation the honest signal, and they hold under EVERY
-disposition (they are about the row, not the verdict):
-  * a non-empty `cites_past_case` must be a run id (`defender._run_id.is_valid_run_id`);
-  * a row whose grounding folds to `past-case` (case- and separator-insensitive) must cite the
-    run it leans on — a past case written uncited would otherwise slip past #27.
-
-Every document here is the shipped example `defender/examples/example-b-parallel-iam-cmdb.md`'s
-own invlang, whose one `:R authz` row discharges `ac1` on the live `h-001` and which closes
-`benign`. The probe rewrites that row's header to carry the two optional cells
-(`grounding|cites_past_case`) and nothing else, so every control differs from its negative in
-exactly the cell under test. The entry point is the validator's own, `diagnose`, and its string
-surface `validate_companion` (what the production close reads).
 """
 from __future__ import annotations
 

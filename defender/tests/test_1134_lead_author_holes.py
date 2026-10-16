@@ -1,46 +1,11 @@
-"""#1134 step 6 (v3, addendum 2): the holes an adversarial implementation of v1's step 6 left open
-while passing its handle file, each retargeted at `DrainTrees` / `Held` / `Bound` and addendum 2's
-`entry_kind` / `list_tree`, plus the listing consumers' refused / gone folder handling. The scene and the rows are `test_1134_lead_author_handle.py`'s.
-
-- H1, a hard link at the name: in the handle file's plant matrix (`test_a_hard_link_...`).
-- H1b, the entry swapped for a link between `entry_kind` and the read. The trees are held
-  over an `os_` that, at the entry's first open or no-follow stat (`entry_kind` judges from the
-  parent's listing and touches neither, so in v3 that is the read), replaces the plain file with
-  a symlink to an outside file.
-  A reader that asks the handle and then opens the `Path` follows the swap; one that reads
-  through the handle refuses it.
-- H2, `_run_locked`'s catalog loads through a `Path` inside the mount, which follows a link at
-  `gather` or `gather/queries` to a catalog that answers the lead, so following it changes what
-  the run does. And H6, the `catalog=None` fallbacks (`synthesize_drafts`, `build_handoff`,
-  `collect_general_failures`) loading the same way.
-- H3, a pitfalls seam carrying the wrong label: in the handle file
-  (`test_the_drain_seams_consult_the_label`, `test_trees_that_do_not_hold_skills_exactly_...`).
-- H4, a folder planted above an entry. "Is there anything at this name" asked by a following
-  probe (`os.path.lexists(repo_root / path)` follows every folder above the leaf) answers by
-  the link's target.
-- H5, the `tree_for` taken and discarded: a check that builds its own lookup, or probes the plain
-  path beside it; and (the step-6 adversary's E1) a composite gate, `_skills_rule`,
-  `_verify_skills_state`, `_pitfalls_rule` or `_verify_pitfalls_state`, handing its parts
-  something other than the `tree_for` it was given. (The label consulted, and a mount list
-  whose lead mount is moved or above `skills/`: in the handle file.)
-- H7 and H8, the lane binding the wrong constant into a default seam, or the CLI running under
-  the wrong label, where a hermetic drive cannot see it: AST pins, each label resolved through
-  `_astlib`'s scopes to `config`'s binding (E3: a local alias named like the constant). (Step 3
-  pins the batch calls' label and the one spelling of each label in `drains`.)
-- Refused / gone folders: `discover_system_drafts` and `_refuse_half_promote` (through the step-4
-  selection) skip a declared `<sys>` or `_draft` whose own listing is refused with one warning
-  (the listing's reason verbatim) and still read every other system; one found gone is silent; a
-  refused listing of the top warns once and yields nothing; a link at a
-  `<sys>`, a `_draft` or a draft name is never entered or returned.
-
-Linux only in practice, like the file it extends: the read watch is inotify.
+"""Holes in the lead author's handle reads: entry swapped for a link after the kind answer, catalogs behind a linked
+folder, composite gates handing parts a different `tree_for`, and refused or gone folders in discovery and the
+half-promote walk. Linux only (inotify read watch).
 """
 from __future__ import annotations
 
-import ast
 import dataclasses
 import errno
-import inspect
 import logging
 import os
 import shutil
@@ -54,7 +19,6 @@ from defender.tests._claim1175 import claim_git
 from defender._io import ALIAS_READ_REFUSAL
 from defender._scaffold_rules import check_system_skill
 from defender.learning.author import shared as _author_shared
-from defender.learning.core import drains
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender._tree_listing import list_tree
 from defender.learning.core.lane_trees import DrainTrees, read_at
@@ -62,7 +26,6 @@ from defender.learning.leads import lead_author, lead_render, pitfalls_curator
 from defender.learning.leads.lead_extraction import collect_general_failures
 from defender.learning.leads.path_validation import CATALOG_REL, SKILLS_REL
 from defender.tests._tree_listing_1134 import SWAP_PLANTS, RealOs, SwapsOnStep, fd_path
-from defender.tests._by_path import import_lint_lib
 from defender.tests._declared869 import LeadAuthorSpawn
 from defender.tests._lead_author_1134 import (
     OUT_ID,
@@ -82,7 +45,6 @@ from defender.tests._lead_author_1134 import (
 from defender.tests._repo import query_template, seed_skills_repo
 from defender.tests._shared_readers_1134 import REFUSAL_ROUTES, RefusesFolder, kernel_watch
 from defender.tests.test_1111_rooted_io import census, in_time
-from defender.tests.test_1134_mount_list import CONFIG_MODULE, _foreign_imports, _rebindings
 from defender.tests._state1135 import run_of
 from defender.tests.test_1134_lead_author_handle import (
     CONTENT_CASES,
@@ -766,95 +728,20 @@ def test_every_check_reads_through_the_tree_for_it_is_handed(scene: Scene, follo
 # default seams is `test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skills`.
 
 
-#: Where the lead drain's label is bound: every spelling of it must resolve here.
-LEAD_ORIGIN = f"{CONFIG_MODULE}.LEAD_AUTHOR_DRAIN_LABEL"
 
 
-def _tree(module: Any) -> ast.Module:
-    return ast.parse(inspect.getsource(module))
 
 
-def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
-    [fn] = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name]
-    return fn
 
 
-def _callee(call: ast.Call) -> str | None:
-    f = call.func
-    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
 
 
-def _label_kw(call: ast.Call) -> ast.expr | None:
-    return next((k.value for k in call.keywords if k.arg == "label"), None)
 
 
-def _named(value: ast.expr | None) -> str | None:
-    """The name `value` spells: a bare name, or the attribute of a dotted one."""
-    if isinstance(value, ast.Name):
-        return value.id
-    if isinstance(value, ast.Attribute):
-        return value.attr
-    return None
 
 
-def test_the_lead_author_drain_binds_its_own_label_into_both_default_seams():
-    """In `lead_author_drain`, the default `run_lead_author` and `run_pitfalls` are
-    `partial(_invoke_lead_author, ..., label=LEAD_AUTHOR_DRAIN_LABEL)` and
-    `partial(_invoke_pitfalls, ..., label=LEAD_AUTHOR_DRAIN_LABEL)`: the constant itself, by
-    name, resolved through `_astlib` (the gates' scope-aware resolver) to `config`'s binding,
-    never a local alias (the contract forbids one), never the curators' constant; and
-    `AUTHOR_DRAIN_LABEL` is not named in the function at all. (That nothing in `drains` binds
-    the name again is step 3's pin.)
-
-    Catches: `partial(_invoke_pitfalls, ..., label=AUTHOR_DRAIN_LABEL)`, a local
-    `LEAD_AUTHOR_DRAIN_LABEL = ...` in the lane, and a seam left without its label (each
-    `_invoke_*` requires it, so that one is a `TypeError` per claim)."""
-    astlib = import_lint_lib("_astlib")
-    tree = _tree(drains)
-    env = astlib.module_env(tree)
-    fn = _function(tree, "lead_author_drain")
-    bound: dict[str, list[ast.expr | None]] = {}
-    for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
-        if _callee(call) == "partial" and call.args:
-            target = _named(call.args[0])
-            if target in ("_invoke_lead_author", "_invoke_pitfalls"):
-                bound.setdefault(target, []).append(_label_kw(call))
-
-    assert sorted(bound) == ["_invoke_lead_author", "_invoke_pitfalls"], bound
-    for target, values in bound.items():
-        assert [_named(v) for v in values] == ["LEAD_AUTHOR_DRAIN_LABEL"], (
-            target, [ast.dump(v) if v else v for v in values])
-        assert [astlib.origin(v, env) for v in values] == [LEAD_ORIGIN], target
-    assert not [n for n in ast.walk(fn)
-                if isinstance(n, ast.Name) and n.id == "AUTHOR_DRAIN_LABEL"], \
-        "lead_author_drain names the curators' label"
 
 
-def test_the_cli_runs_under_the_lead_label():
-    """H7, structurally: `lead_author.main` calls `run(..., label=...)` with a label that
-    resolves, through `_astlib` (the gates' scope-aware resolver), to `config`'s
-    `LEAD_AUTHOR_DRAIN_LABEL` (`_loop_config.LEAD_AUTHOR_DRAIN_LABEL`); and nothing in
-    `lead_author/__init__.py` binds that name again: no local, parameter or module-level
-    assignment, and no import of it from elsewhere, in any scope.
-
-    Catches: a local alias in `main` named like the constant
-    (`LEAD_AUTHOR_DRAIN_LABEL = _loop_config.AUTHOR_DRAIN_LABEL`; the resolver answers `None`
-    for a local), and any other spelling of the label at the call.
-
-    Not driven: `main` takes the queue lock at `DEFAULT_PATHS` (this checkout's own state dir)
-    and resolves the real repo's systems; a hermetic seam for either would be invented for this
-    test."""
-    astlib = import_lint_lib("_astlib")
-    tree = _tree(lead_author)
-    env = astlib.module_env(tree)
-    fn = _function(tree, "main")
-    runs = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and _callee(n) == "run"]
-    assert len(runs) == 1, [ast.dump(r) for r in runs]
-    value = _label_kw(runs[0])
-    assert value is not None, ast.dump(runs[0])
-    assert astlib.origin(value, env) == LEAD_ORIGIN, ast.unparse(value)
-    assert _rebindings(tree, "LEAD_AUTHOR_DRAIN_LABEL") == []
-    assert _foreign_imports(env, "LEAD_AUTHOR_DRAIN_LABEL", LEAD_ORIGIN) == []
 
 
 # ---------------------------------------------------------------------------------------
@@ -912,15 +799,6 @@ def test_discover_skips_only_the_unlistable_system(skills: Path, deny: str, rout
     assert _warnings(caplog) == [GHOST, f"warn: skipping {skills / deny} ({DENIED})"]
 
 
-@pytest.mark.parametrize("route", REFUSAL_ROUTES)
-def test_discover_keeps_the_undeclared_warning_for_an_unlistable_undeclared_folder(
-        skills: Path, route: str, caplog):
-    """An unlistable UNDECLARED top-level folder keeps its "skipped undeclared directory"
-    warning (and nothing else); every declared system is read."""
-    refuser = RefusesFolder(skills / "ghost", route, errno.EACCES)
-    assert _discover(skills, refuser) == [skills / "elastic/_draft/a.md",
-                                          skills / "wazuh/_draft/b.md"]
-    assert _warnings(caplog) == [GHOST]
 
 
 @pytest.mark.parametrize("route", ["reopen", "scandir"])

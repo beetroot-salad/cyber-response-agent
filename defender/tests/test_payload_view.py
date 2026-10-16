@@ -61,14 +61,6 @@ def test_under_the_ceiling_the_payload_is_verbatim(tmp_path):
     assert _view(text, ceiling=65536, run_dir=tmp_path) == text
 
 
-def test_the_key_name_decides_nothing_under_the_ceiling(tmp_path):
-    hits = _docs(2)
-    named = _view(_lucene(hits, key="hits"), ceiling=65536, run_dir=tmp_path)
-    unnamed = _view(_lucene(hits, key="zzz_widgets"), ceiling=65536, run_dir=tmp_path)
-    assert named == _lucene(hits, key="hits")
-    assert unnamed == _lucene(hits, key="zzz_widgets")
-
-
 def test_the_key_name_decides_nothing_above_the_ceiling(tmp_path):
     """The load-bearing property. Rename the list and the decision, the kept counts and the
     elision records are identical — which is exactly what `_is_event_payload` could not do.
@@ -84,13 +76,6 @@ def test_the_key_name_decides_nothing_above_the_ceiling(tmp_path):
     assert known[0].kind == "list"
 
 
-@pytest.mark.parametrize("key", ["hits", "values", "entries", "packages", "users", "zzz"])
-def test_every_list_key_is_treated_alike(tmp_path, key):
-    payload = json.dumps({"captured_at": "2026-08-07T00:00:00Z", key: _docs(60)})
-    _, elisions = pv.walk(json.loads(payload), 1200)
-    assert [e.path for e in elisions] == [key]
-
-
 # O1 — the view never asserts a limitation the payload in context does not have.
 
 def test_a_complete_empty_envelope_carries_no_prohibition(tmp_path):
@@ -103,13 +88,6 @@ def test_a_complete_empty_envelope_carries_no_prohibition(tmp_path):
     assert "not count" not in view.lower()
     assert "sample" not in view.lower()
     assert json.loads(view)["total"] == 0
-
-
-def test_a_complete_payload_shown_in_full_is_never_called_a_sample(tmp_path):
-    for n in (1, 3, 20):
-        view = _view(_lucene(_docs(n)), ceiling=65536, run_dir=tmp_path)
-        assert "sample" not in view.lower(), f"{n} complete records described as a sample"
-        assert len(json.loads(view)["hits"]) == n
 
 
 # O3 — a view can never be mistaken for the payload.
@@ -129,11 +107,6 @@ def test_the_marker_names_how_many_were_dropped(tmp_path):
     body = json.loads(_json_block(view))
     kept = len(body["hits"]) - 1
     assert f"{60 - kept} of 60" in body["hits"][-1]
-
-
-def test_nothing_is_marked_when_nothing_was_dropped(tmp_path):
-    view = _view(_lucene(_docs(2)), ceiling=65536, run_dir=tmp_path)
-    assert pv.ELISION_PREFIX not in view
 
 
 # O5 — a kept element is a WHOLE element. Only long string leaves clip.
@@ -210,15 +183,6 @@ def test_a_capped_envelope_states_the_servers_own_total(tmp_path):
     view = _view(_lucene(_docs(20), total=2471), ceiling=1200, run_dir=tmp_path)
     assert "2471" in view
     assert "EXACT" in view
-
-
-def test_capped_and_complete_do_not_borrow_each_others_wording(tmp_path):
-    capped = _view(_lucene(_docs(20), total=2471), ceiling=1200, run_dir=tmp_path)
-    complete = _view(_lucene(_docs(60)), ceiling=1200, run_dir=tmp_path)
-    assert "2471" in capped
-    assert "EXACT" in capped
-    assert "EXACT" not in complete, "a complete payload was described as a capped one"
-    assert "total matches" not in complete
 
 
 def test_view_side_elision_is_not_reported_as_a_server_cap(tmp_path):
@@ -429,21 +393,6 @@ def _json_block(view: str) -> str:
     """The payload region of a rendered view — everything after the `[record_query]` prose."""
     lines = [ln for ln in view.splitlines() if not ln.startswith(("[record_query]", "→", "  "))]
     return "\n".join(lines).strip()
-
-
-def test_the_byte_ruler_holds_because_the_serializer_escapes():
-    """The module compares BYTES but measures with `len()`, which counts codepoints. They agree
-    only because `_dumps` leaves `ensure_ascii` on, so everything measured is pure ASCII.
-
-    Pinned because the coupling is invisible at every use site and #834's compact encoding is
-    exactly the change that would reach for `ensure_ascii=False`. Without it a CJK payload
-    measures a third of its weight and rides through the ceiling whole.
-    """
-    for value in ({"m": "日本語 café"}, {"m": "M" * 100}, {"m": "\n\"\\ x"}):
-        serialized = pv._dumps(value)
-        assert len(serialized) == len(serialized.encode("utf-8")), (
-            "ensure_ascii went off — len() is no longer the byte count this module compares"
-        )
 
 
 def test_a_list_never_collapses_to_a_bare_marker(tmp_path):

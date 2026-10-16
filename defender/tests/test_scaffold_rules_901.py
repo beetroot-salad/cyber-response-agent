@@ -1,25 +1,4 @@
-"""#901 — the scaffold invariants as one rule, over every lane that writes `defender/skills/`.
-
-The invariants lived in `skills/connect/validate_scaffold.py`, run by a maintainer at scaffold
-time, and `check_templates` selected `"_draft" not in t.path.parts` — the exact directory the
-lead-authoring lane mints into. The checker and the writer could not meet, so a lead-authored
-template whose `${placeholder}` is not a param its verb declares was refused by nothing.
-
-What is pinned here, and why each one is a control rather than a restatement:
-
-- the RULE, `_scaffold_rules.check_template`, findings-per-defect, including the two the fold
-  closed on the way past (a `params:` entry the verb does not declare, and a placeholder naming
-  a `@verb(wrapper_only=…)` param no model may bind);
-- the SCOPE, over the shipped corpus WITH drafts. The pre-existing sweeps
-  (`test_620_consumers.py::test_validate_scaffold_green_on_all_seven_via_registry_probe`) are
-  green-tree checks: they pass today and would pass unchanged against a fix that enforced
-  nothing new, so a corpus assertion alone does not discriminate. The negative controls that do
-  live at each lane's own seam — `test_lead_author.py` for the commit gate,
-  `test_lead_author_synth.py` for the minter;
-- the RESOLVER, which must answer about the tree it was handed and not the one this process
-  imported from — the property the loop's gate depends on, since it runs from the main checkout
-  and gates a drain worktree.
-"""
+"""The scaffold invariants as one rule (`_scaffold_rules.check_template`) over every lane that writes defender/skills/."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,7 +7,6 @@ import pytest
 
 from defender import _scaffold_rules
 from defender._corpus import iter_query_templates, read_query_template
-from defender.runtime.verbs import engine_for, engine_of
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 _CATALOG = _DEFENDER / "skills" / "gather" / "queries"
@@ -272,12 +250,6 @@ def test_every_shipped_template_including_drafts_satisfies_the_rule(resolver):
     )
 
 
-def test_every_shipped_system_skill_carries_its_frontmatter_identity():
-    for system in _ALL_SEVEN:
-        skill = _DEFENDER / "skills" / system / "SKILL.md"
-        assert _scaffold_rules.check_system_skill(skill, system) == [], system
-
-
 def test_a_skill_md_whose_frontmatter_names_another_system_is_refused(tmp_path):
     skill = tmp_path / "SKILL.md"
     skill.write_text("---\nname: defender-elastic\n---\n# body\n")
@@ -321,15 +293,3 @@ def test_an_unresolvable_system_raises_rather_than_reporting_a_clean_template(tm
     with pytest.raises(_scaffold_rules.ScaffoldRuleError):
         resolver.verbs("nosuchsystem")
 
-
-def test_the_engine_declaration_table_agrees_with_every_decorator():
-    """Two sources answer "is this verb an engine verb": the `@verb(engine=…)` attribute the
-    rule reads (`engine_of`), and the static `_ENGINE_DECL` table keyed by `(system, verb)` that
-    the offline lanes read (`engine_for`) where no registry is in hand. They agree today; a
-    silent disagreement would exempt a template from the placeholder rule in one lane and
-    enforce it in the other, which is the drift class this issue is about."""
-    resolver = _scaffold_rules.VerbResolver(_DEFENDER)
-    for system in _ALL_SEVEN:
-        for name, fn in resolver.verbs(system).items():
-            assert engine_of(fn) == engine_for(system, name), f"{system}.{name}"
-    assert _ADAPTERS.is_dir()

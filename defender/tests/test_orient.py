@@ -1,12 +1,4 @@
-"""Tests for the precomputed ORIENT pack (runtime/orient.py).
-
-Focus: the persistent-context fix — the raw alert and the invlang grammar are
-inlined into message 0 (which a compaction fold preserves verbatim), so the
-agent needn't Read alert.json / skills/invlang/SKILL.md and a freeze can't drop
-them. The alert must stay wrapped in the run's salted untrusted tag so injected
-text inside it is inert. Shim-backed sections (lessons/corpus) may be absent in
-the test env — that's fail-safe by design and not asserted here.
-"""
+"""The precomputed ORIENT pack: raw alert and invlang grammar inlined into message 0, with untrusted text framed."""
 
 from __future__ import annotations
 

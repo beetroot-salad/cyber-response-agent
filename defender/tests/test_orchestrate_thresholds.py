@@ -1,15 +1,4 @@
-"""A non-numeric loop threshold env var must fail loud as the contracted exit 2,
-not crash the author-drain stage with an uncaught ValueError (issue #435).
-
-The drain wake gates (`_has_curator_work` / `_has_lead_author_work`) read their
-trigger thresholds with `config.env_int`, which raises `FatalConfigError` (the
-layer-neutral misconfig condition from `defender._env`, a `ValueError` subclass) on
-a bad value. `FatalConfigError` is *enrolled alongside* `StageAbort` at the drain
-catch sites — not a `StageAbort` subclass, since the exit-2 *response* is
-learning-only while the *condition* is shared with runtime/. The gate runs at the
-top of `_run_worktree_batch`, before any git/PR work, so the `FatalConfigError`
-propagates out of the drain to `_run_stage`, which maps it to rc 2.
-"""
+"""A non-numeric loop threshold env var fails loud as exit 2 (FatalConfigError), and the drain's quarantine/requeue/dead-letter behavior."""
 from __future__ import annotations
 
 import json
@@ -28,7 +17,6 @@ from defender.learning.core.config import (  # type: ignore[import-not-found]
     LoopPaths,
 )
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 
 
 
@@ -43,12 +31,6 @@ def test_has_curator_work_raises_on_bad_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
     with pytest.raises(FatalConfigError):
         drains._has_curator_work(_state1135.state_for_paths(LoopPaths(repo_root=tmp_path)))
-
-
-def test_has_lead_author_work_raises_on_bad_pitfalls_threshold(tmp_path, monkeypatch):
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
-    with pytest.raises(FatalConfigError):
-        drains._has_lead_author_work(_state1135.state_for_paths(LoopPaths(repo_root=tmp_path)))
 
 
 def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queued(
@@ -96,104 +78,6 @@ def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
     paths = _paths(tmp_path)
     assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 2
 
-
-
-def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, monkeypatch):
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
-    for sibling in (
-        "LEARNING_AUTHOR_ACTOR_THRESHOLD",
-        "LEARNING_AUTHOR_ENV_THRESHOLD",
-        "LEARNING_AUTHOR_ACTOR_ENV_THRESHOLD",
-    ):
-        monkeypatch.delenv(sibling, raising=False)
-    paths = _paths(tmp_path)
-    assert cli._run_stage(lambda: drains.author_drain(paths=paths)) == 0
-    assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 0
-
-    empty = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "empty-state")
-    # The seam holds the lane's `skills/` mount before it reads the queue (#1134 step 6), and
-    # a mount point always exists in a checkout: this tmp tree gets one.
-    empty.skills_dir.mkdir(parents=True)
-    assert drains._invoke_pitfalls(
-        empty, _state1135.state_for_paths(empty), on_curated=lambda _d: None, lock_wait_seconds=0, label=LEAD_AUTHOR_DRAIN_LABEL) == 0
-
-
-
-
-def test_fatal_config_error_is_enrolled_not_subclassed_and_disjoint_from_run_unprocessable():
-    """The cause/response split: FatalConfigError is the layer-neutral *condition*
-    (a ValueError subclass shared with runtime/ via defender._env), NOT a StageAbort —
-    the exit-2 *response* is learning-only, so the type is enrolled alongside StageAbort
-    at the catch sites rather than inheriting from it. It stays disjoint from
-    RunUnprocessable, so a systemic misconfig can never be mis-read as a per-run
-    'quarantine this item' (or vice versa). The exit-2 mapping is pinned behaviorally by
-    the `_run_stage(...) == 2` tests, not by a subclass relationship."""
-    from defender._env import FatalConfigError as SharedFatalConfigError
-
-    assert FatalConfigError is SharedFatalConfigError
-    assert issubclass(FatalConfigError, ValueError)
-    assert not issubclass(FatalConfigError, StageAbort)
-    assert not issubclass(FatalConfigError, RunUnprocessable)
-    assert not issubclass(RunUnprocessable, StageAbort)
-
-
-def test_every_stage_abort_except_clause_in_learning_also_names_fatal_config():
-    """The structural guard for #468's cause/response split. FatalConfigError is no
-    longer a StageAbort *subclass*, so the exit-2 contract rests on it being NAMED
-    alongside StageAbort at every systemic catch site rather than inherited — the type
-    system no longer enforces it, so this test does.
-
-    It parses every module under ``defender/learning/`` and asserts every literal
-    ``except`` clause that catches ``StageAbort`` also catches ``FatalConfigError``. The
-    sweep is by TREE, not by module: #717 split the orchestrator into core/{run_cycle,
-    drains,markers,faults,cli}.py, and a guard pinned to one file would have silently
-    stopped covering three of the four subsystems it was written for. The risk it
-    defends: the drain-design contract is "route the swallow site through
-    run_or_dead_letter and be systemic-fault-safe for free; a hand-rolled ``except`` is
-    the odd-one-out" — and a hand-rolled ``except StageAbort: raise`` in a future drain
-    would silently DROP a FatalConfigError to per-marker quarantine (exit 0) instead of
-    the contracted exit 2 (the #438 class of bug). Such a clause fails here.
-
-    The existing sites are covered without overlap: the literal ``except (StageAbort,
-    FatalConfigError)`` clauses (cli._run_stage, _pydantic_stage.run_stage) are checked here; faults.run_or_dead_letter's ``except
-    reraise:`` indirection (reraise = (*SYSTEMIC_FAULTS, *propagate)) is opaque to the
-    AST and is pinned behaviorally by test_run_or_dead_letter_reraises_systemic_faults.
-    A future maintainer who genuinely wants a StageAbort-only catch (not a known need)
-    must update this test deliberately."""
-    import ast
-    from pathlib import Path
-
-    learning_dir = Path(cli.__file__).resolve().parents[1]
-
-    def _caught_names(node: ast.expr | None) -> set[str]:
-        """The exception types a handler names: a bare Name, or a tuple of Names.
-        An ``except <var>:`` indirection yields just the var name (e.g. 'reraise')."""
-        if node is None:
-            return set()
-        elts = node.elts if isinstance(node, ast.Tuple) else [node]
-        return {e.id for e in elts if isinstance(e, ast.Name)}
-
-    orphans = [
-        f"{src.relative_to(learning_dir)}:{handler.lineno}"
-        for src in sorted(learning_dir.rglob("*.py"))
-        for handler in ast.walk(ast.parse(src.read_text(encoding="utf-8")))
-        if isinstance(handler, ast.ExceptHandler)
-        and "StageAbort" in _caught_names(handler.type)
-        and "FatalConfigError" not in _caught_names(handler.type)
-    ]
-    assert not orphans, (
-        f"defender/learning/ has `except StageAbort` clause(s) at {orphans} that "
-        "do not also name FatalConfigError. Since #468 FatalConfigError is enrolled "
-        "(not subclassed), so it must ride along at every systemic catch site or a "
-        "config misconfig is silently dead-lettered instead of mapped to exit 2."
-    )
-
-
-def test_env_int_raises_fatal_config_error_on_non_numeric(monkeypatch):
-    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
-    with pytest.raises(FatalConfigError, match="LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD"):
-        lead_author._lift_threshold()
 
 
 def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkeypatch):

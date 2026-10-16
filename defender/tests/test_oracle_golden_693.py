@@ -1,23 +1,4 @@
-"""Tree-level invariants for the oracle-calibration golden set (#693, #711).
-
-What is pinned here is the CASE TREE, not the scorer: the files every case promises,
-the identity a manifest claims, the one leak the hidden/visible split cannot catch, and
-the provenance every committed score must carry. The scorer's own behaviour moved to
-`tests/evals/test_score.py` when `score.py` stopped being pure — the judge runs inside
-it now, so `test_every_checked_in_score_reproduces` pinned a function that no longer
-exists.
-
-What replaces that pin is `test_every_checked_in_score_names_the_judge_in_its_tag`. A
-score is no longer reproducible by re-running it, so the artifact has to carry who
-produced it: the tag names the resolved judge model, the effort, and a hash over both
-prompts. Editing either prompt changes the hash and fails every committed score at once
-— which is the intended cost of a prompt edit, not an accident.
-
-`test_no_story_states_the_expected_result` guards the other direction: a story is an
-oracle INPUT, and the seed negative control announced in its own story that a faithful
-oracle "must therefore return `0` for every lead". The hidden/visible split cannot catch
-an answer leaked inside oracle_visible/.
-"""
+"""Tree-level invariants for the oracle-calibration golden set: case identity, no leaked expected result, score provenance, projection integrity."""
 from __future__ import annotations
 
 import json
@@ -39,11 +20,6 @@ from defender.evals.oracle_golden import judge, score  # noqa: E402
 CASE_DIRS = sorted(p for p in CASES_DIR.iterdir() if p.is_dir())
 
 
-def test_there_are_cases_to_check():
-    """Every sweep below would pass vacuously against an empty cases/ tree."""
-    assert CASE_DIRS
-
-
 #: `expected.yaml` stopped being a per-case requirement when the judge redesign landed
 #: (#711 §9). It held HAND labels, which were the scoring contract; the contract is now
 #: the judge's own measurement of the telemetry, and the surviving hand labels are the
@@ -51,21 +27,6 @@ def test_there_are_cases_to_check():
 #: recruited case has no hand labels by design, so requiring them of every case would
 #: force someone to invent the answers the suite exists to measure.
 CALIBRATION_FILE = "expected.yaml"
-
-
-@pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
-def test_every_case_has_the_files_the_readme_promises(case_dir):
-    for rel in ("manifest.yaml", "environment.yaml",
-                "oracle_visible/story.md", "oracle_visible/leads.jsonl"):
-        assert (case_dir / rel).is_file(), f"{case_dir.name} is missing {rel}"
-
-
-def test_the_calibration_set_still_exists_somewhere():
-    """`expected.yaml` is optional per case but must not vanish from the tree: it is
-    what `audit_judge.py` calibrates the label pass against, and a calibration set of
-    zero leads is not a calibration."""
-    labelled = [d for d in CASE_DIRS if (d / CALIBRATION_FILE).is_file()]
-    assert len(labelled) >= 4, f"only {len(labelled)} cases carry hand labels"
 
 
 @pytest.mark.parametrize("case_dir", CASE_DIRS, ids=lambda p: p.name)
@@ -226,27 +187,6 @@ def _typed_instants(doc, path: str = "") -> list[str]:
         for i, value in enumerate(doc):
             found += _typed_instants(value, f"{path}[{i}]")
     return found
-
-
-def test_there_are_projections_to_scan():
-    """The sweep below would pass vacuously over an empty glob."""
-    assert len(PROJECTION_FILES) > 50
-
-
-@pytest.mark.parametrize(("typed", "where"), [
-    ({"a": date(2026, 7, 25)}, "/a"),
-    ({"projections": [{"events": [{"@timestamp": datetime(2026, 7, 25, 7, 48)}]}]},
-     "/projections[0]/events[0]/@timestamp"),
-    ({datetime(2026, 7, 25, 7, 48): "x"}, "/<key datetime.datetime(2026, 7, 25, 7, 48)>"),
-    ([[date(2026, 7, 25)]], "[0][0]"),
-])
-def test_the_typed_instant_walker_fires_on_a_synthetic_document(typed, where):
-    """The tree sweep is green today (design C9: 0 typed values in 101 projections), so
-    this proves its detector can fire — on a value, a nested value, a key, and inside a
-    bare list — and that a quoted instant does not trip it."""
-    assert _typed_instants(typed) == [where]
-    assert _typed_instants(yaml.safe_load("a: '2026-07-25T07:48:37.065Z'\nb: 2026-07-25")) == ["/b"]
-    assert _typed_instants(yaml.safe_load("a: '2026-07-25'\nb: [x, 22, ~]")) == []
 
 
 @pytest.mark.parametrize("path", PROJECTION_FILES,

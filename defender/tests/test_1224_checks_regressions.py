@@ -1,11 +1,6 @@
 """Regressions for #1224's host checks and rate limiter, found by the claims adversary.
 
 - D: a `counts` entry with group "*" and base 0 laundered an arbitrary unclaimed added row
-  past check 1 — any row carrying a scalar equal to the entry's `served` passed as a bucket.
-- C: check 1's coverage of claimed-but-unserved forged rows summed `added` over every count,
-  so a count for an unrelated group hid a forged row missing from the answer.
-- Limiter: a positive finite rate whose reciprocal overflows (5e-324) made every second
-  permit `sleep(inf)`, and `True` was accepted as a rate of 1.
 """
 from __future__ import annotations
 

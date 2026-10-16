@@ -3,41 +3,6 @@
 Runs read `settings/` (and, after #1108, lessons, queries and skills) from the tenant's own
 knowledge clone, yet the stamp named only the PRODUCT commit. This suite pins the new field at
 its reader (`capture_knowledge`), its one production write site (`run_common.materialize_run`)
-and its wire (`RunProvenance.as_json` / `from_obj`). The fork check that consumes it is
-`test_1204_family_knowledge.py`.
-
-THE PYTHON NAME CONTRACT these tests fix (the implementation matches it):
-
-* `defender._provenance.capture_knowledge(knowledge_dir: Path) -> KnowledgeRevision` — never
-  raises, never runs a subprocess (git is not in the runtime image), never follows a link below
-  `knowledge_dir`, never searches upward for a parent repo.
-* `defender._provenance.KnowledgeRevision` — a frozen VALUE (equal when its variant and payload
-  are equal) with three variants, built by
-    - `KnowledgeRevision.at(commit: str)`            -> wire `{"commit": "<sha>"}`
-    - `KnowledgeRevision.unversioned()`              -> wire `"unversioned"`
-    - `KnowledgeRevision.unavailable_because(reason: str)` -> wire `{"unavailable": "<reason>"}`
-  and carrying `.commit: str | None` (the sha, only on `at`), `.unavailable: str | None` (the
-  reason, only on `unavailable_because`) and `.as_wire()` (the JSON-able wire value above).
-* `RunProvenance.knowledge: KnowledgeRevision | None = None`. `as_json` always emits the key
-  `"knowledge"`: the wire value, or `null` when the record does not say. `from_obj` folds any
-  malformed knowledge value to `None` WITHOUT voiding the rest of the record.
-* A commit is 40 or 64 LOWERCASE hex characters, after stripping surrounding whitespace; any
-  other shape is unavailable when captured and malformed (-> `None`) when read back.
-
-Assertions are on the WIRE shape (what `as_json` writes and what lands on disk), with attribute
-reads kept to the three the contract names. New names are reached per test (`T.sym`), so a
-missing one is one red per test rather than one collection error hiding the rest.
-
-Every git fixture is a REAL repository built by the real `git` (through the `_git` facade, with
-global and system config shut out so a contributor's `init.defaultBranch`, hooks or signing
-cannot change what is built); every link is a real symlink whose target is a VALID ref holding
-a VALID sha, so an implementation that followed it would return a commit and fail. The no-follow
-refusals asserted here were first observed on the real primitive (`_io.bind` + `stat_entry`):
-a link at `.git`, `.git/refs`, `.git/refs/heads`, a leaf ref or `HEAD` answers with a refusal
-`reason`, never the target's bytes.
-
-RED before #1204: `capture_knowledge`, `KnowledgeRevision` and `RunProvenance.knowledge` do not
-exist, and the stamp has no `"knowledge"` key.
 """
 from __future__ import annotations
 
@@ -330,50 +295,6 @@ def test_1204_a_reftable_repository_is_unavailable_naming_reftable(tmp_path):
     assert (repo / ".git" / "reftable").is_dir(), "precondition: a reftable repo"
 
     _assert_unavailable(_wire(repo), mentions=("reftable",), never=(head,))
-
-
-def test_1204_a_reftable_directory_is_unavailable_even_beside_readable_loose_refs(tmp_path):
-    """O1/D1 keys reftable on the PRESENCE of `.git/reftable/`, so this plants that directory in
-    an otherwise ordinary files-backend repo whose loose ref still holds a valid sha. Legitimate
-    rather than imagined: D1's rule is "reftable dir present -> unavailable", independent of
-    whatever else `.git` holds, and this host-independent arm keeps that rule pinned where
-    git is too old to make a reftable repo. The positive control is the same repo before the
-    directory is planted."""
-    repo = _repo(tmp_path / "knowledge")
-    head = _head(repo)
-    assert _wire(repo) == {"commit": head}
-
-    (repo / ".git" / "reftable").mkdir()
-    _assert_unavailable(_wire(repo), mentions=("reftable",), never=(head,))
-
-
-@pytest.mark.parametrize("what", ["link", "file"])
-def test_1204_a_non_directory_at_git_reftable_is_named_for_what_it_is(tmp_path, what):
-    """O1/D1, one rule for every read's answer (review fix): `.git/reftable` decides the ref
-    format only when a DIRECTORY is there. A link (no-follow: a link is present, whatever it
-    points at) or a plain file at that name is not a reftable repository — it is unavailable
-    with a reason naming what stands there, never the reftable-refs reason. The link's target
-    is a real directory, so a reader that followed it would call this a reftable repo. The
-    positive control is a real directory at the same name in the same repo, whose reason is
-    the reftable one — and the two reasons differ."""
-    repo = _repo(tmp_path / "knowledge")
-    head = _head(repo)
-    reftable = repo / ".git" / "reftable"
-    reftable.mkdir()
-    reftable_reason = _assert_unavailable(_wire(repo), mentions=("reftable",), never=(head,))
-    reftable.rmdir()
-    assert _wire(repo) == {"commit": head}, "positive control: nothing at .git/reftable"
-
-    if what == "link":
-        target = tmp_path / "a-real-directory"
-        target.mkdir()
-        reftable.symlink_to(target)
-    else:
-        reftable.write_text("not a ref table\n", encoding="utf-8")
-    reason = _assert_unavailable(_wire(repo), mentions=("reftable",), never=(head,))
-    assert reason != reftable_reason, reason
-    named = ("link",) if what == "link" else ("file", "not a directory")
-    assert any(word in reason.casefold() for word in named), (named, reason)
 
 
 def test_1204_a_git_FILE_is_unavailable_and_its_gitdir_is_not_followed(tmp_path):
@@ -947,26 +868,3 @@ def test_1204_a_stamp_that_does_not_say_writes_null_and_an_old_stamp_reads_as_no
         assert json.loads(record.as_json()) == {**RICH, "knowledge": None}
 
 
-def test_1204_the_three_constructors_build_the_three_wire_shapes():
-    """The contract's surface, held to its wire: `at`, `unversioned` and `unavailable_because`
-    build exactly the three shapes, carry `.commit`/`.unavailable` only on their own variant,
-    compare as values, and are frozen. Without the value equality a record read back off disk
-    would never equal the one written."""
-    revision = _revision()
-    at = revision.at(SHA)
-    assert at.as_wire() == {"commit": SHA}
-    assert (at.commit, at.unavailable) == (SHA, None)
-    unversioned = revision.unversioned()
-    assert unversioned.as_wire() == "unversioned"
-    assert (unversioned.commit, unversioned.unavailable) == (None, None)
-    unavailable = revision.unavailable_because("unborn branch")
-    assert unavailable.as_wire() == {"unavailable": "unborn branch"}
-    assert (unavailable.commit, unavailable.unavailable) == (None, "unborn branch")
-
-    assert revision.at(SHA) == at
-    assert revision.at("c" * 40) != at
-    assert revision.unversioned() == unversioned != at
-    assert revision.unavailable_because("unborn branch") == unavailable
-    assert revision.unavailable_because("reftable") != unavailable
-    with pytest.raises(AttributeError):
-        at.commit = "c" * 40

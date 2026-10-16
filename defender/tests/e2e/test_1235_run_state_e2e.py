@@ -1,51 +1,6 @@
-"""#1235, round 2 — one `RunState` per run, created by the driver and carried by reference.
-
-The owner's redesign (issue comment 6117481676): round 1 kept the run's live decision state in
-three process-wide tables keyed by the run folder's path. The review found four faults that come
-from that keying, and the redesign makes them impossible by construction: the driver builds ONE
-`defender.runtime.run_state.RunState` at the start of `run_investigation`, every live decision
-is an operation on it, it rides on `AgentDeps.run_state` (gather leads get the parent's object)
-and on `VerbContext.run_state`, and it lives exactly as long as the run.
-
-The seam a driven test reads the state through is the harness's own return value: since round
-3 production's summary carries no state — `run_investigation(run_state=…)` takes it — and
-`drive(...)` builds the run's state, injects it, and returns it under `"run_state"`. It is the
-one place a test reaches a driven run's state.
-
-What this module pins, each through the real driver:
-
-  R1. A branch sibling's inherited query rows are live from its first turn. The sibling is a
-      real resume (`drive(..., resume=spec)`) of a legal source whose queries table holds rows
-      for `l-001`, rows a real run wrote. The repeat guard and the rejection budget count the
-      inherited rows; the sibling's next `l-001` row takes the seq after them and leaves the
-      inherited payload files alone; a failed reducer over an inherited payload is recorded with
-      that payload's system. Round 1 loaded its view before seeding wrote the rows, and no test
-      caught it.
-
-      Reachability: a production source copies each lead's claim (`gather_raw/<lead>.lead.json`)
-      into the sibling, so a sibling's MAIN cannot re-dispatch an inherited lead; the
-      repeat/rejection/seq arms reach it through `_branch_947.legal_source`, a legal source that
-      carries no claim for its lead (as lead-0's leads look to `leads_at`). The reducer arm is
-      the one a production sibling reaches as is: a NEW lead reading an inherited payload.
-  R2. No live operation finds its state by looking it up. A run driven through a symlinked
-      spelling of its folder counts one pool, and the gather lead's verb context carries the
-      very object the driver returns; two runs with ONE run id driven in one process share
-      nothing.
-  R4. State is released with the run: once the caller drops what `drive()` returned, a weak
-      reference to the run's state dies.
-  R5. A run recorded before #1235 (its case link still inside the folder, no sidecar) is refused
-      loudly by every reader of the run -> case link, naming the run and saying to re-run it; it
-      never reads as "no session".
-
-R3 (a refused row write leaves the state unchanged) and the oracle clock's half of R6 are pinned
-at the object in `tests/test_1235_run_state_object.py` and `tests/test_record_query.py`; the
-driven clock tests are `live_oracle_1224/test_1224_concurrency_and_clock.py`.
-
-RED until the round-2 implementation lands: `defender.runtime.run_state` does not exist.
-"""
+"""#1235 — one `RunState` per run, driven through the real driver: a branch sibling counts its inherited query rows live from its first turn; no live operation looks state up by path (symlinked folder, shared run id); state is released with the run."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 import gc
 import json
@@ -60,7 +15,6 @@ pytest.importorskip("pydantic_ai")
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
-from defender.runtime import branch, session_store  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at  # noqa: E402
@@ -71,11 +25,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     Turn,
     drive,
     materialize,
-)
-from defender.tests.e2e.test_1235_queries_and_pointer import (  # noqa: E402
-    OLD_POINTER_NAME,
-    _finished_run,
-    _pointer,
 )
 from defender.tests.e2e.test_pitfalls_input_823 import SQL, _Box  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
@@ -462,70 +411,4 @@ def test_nothing_holds_the_runs_state_once_the_caller_drops_the_result(tmp_path)
 # R5 — a run recorded before #1235 is refused at every reader of its case link.
 # ======================================================================================
 
-def _make_pre_1235(run_dir: Path) -> dict:
-    """Turn a finished run into what #1235 found on disk before it: the case link inside the
-    folder under its old name, and no sidecar beside it. Returns the link."""
-    link = _pointer(run_dir)
-    (run_dir / OLD_POINTER_NAME).write_text(json.dumps(link), encoding="utf-8")
-    RunPaths(run_dir).session_pointer().unlink()
-    return link
 
-
-def _says_rerun(err: BaseException, run_dir: Path) -> None:
-    text = str(err)
-    assert run_dir.name in text, f"the refusal does not name the run: {text}"
-    assert "re-run" in text, f"the refusal does not say to re-run the run: {text}"
-    assert "1235" in text, f"the refusal does not say the run predates #1235: {text}"
-
-
-def test_a_run_recorded_before_1235_refuses_at_every_reader_of_its_case_link(tmp_path):
-    """R5: a folder holding `session_store_pointer.json` and no sidecar is a run recorded before
-    #1235. Every reader of the run -> case link refuses it with one clear error naming the run
-    and saying to re-run it: the run page's store and session lookups
-    (`session_store.LegacyRunLink`, a `StoreError`), the branch's source-store opens
-    (`BranchError`), and the branch-point session lookup, which must not fall back to the root
-    session. None of them reads it as "no session".
-
-    Controls on the same folder: with the old file gone it reads as "no session" (the plain
-    absent error, `None`, the root session); with the sidecar back beside the old file, the
-    sidecar wins and the run's own store opens."""
-    run_dir = _finished_run(tmp_path / "a", "r1235-v2-legacy")
-    link = _make_pre_1235(run_dir)
-    store = session_store.open_store_for_read(Path(link["store_path"]))
-    try:
-        assert issubclass(session_store.LegacyRunLink, session_store.StoreError)
-        for read in (session_store.resolve_store_path, session_store.resolve_session_id):
-            with pytest.raises(session_store.LegacyRunLink) as err:
-                read(_run_handle_1165(run_dir))
-            _says_rerun(err.value, run_dir)
-        for open_store in (branch.open_source_store, branch.source_store_if_any):
-            with pytest.raises(branch.BranchError) as err:
-                open_store(run_dir, source_run=_run_handle_1165(run_dir))
-            _says_rerun(err.value, run_dir)
-        with pytest.raises(session_store.LegacyRunLink) as err:
-            branch.session_for_run(store, run_dir, source_run=_run_handle_1165(run_dir))
-        _says_rerun(err.value, run_dir)
-
-        # Control: no old file and no sidecar is a folder with no link — "no session".
-        (run_dir / OLD_POINTER_NAME).unlink()
-        with pytest.raises(FileNotFoundError):
-            session_store.resolve_store_path(_run_handle_1165(run_dir))
-        with pytest.raises(FileNotFoundError):
-            session_store.resolve_session_id(_run_handle_1165(run_dir))
-        assert branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir)) is None
-        assert branch.session_for_run(store, run_dir, source_run=_run_handle_1165(run_dir)) == branch.main_session(store)
-    finally:
-        store.connection.close()
-
-    # Control: the sidecar beside an old file wins.
-    (run_dir / OLD_POINTER_NAME).write_text(json.dumps({"case_id": "elsewhere"}), encoding="utf-8")
-    session_store.write_case_pointer(_run_handle_1165(run_dir), case_id=link["case_id"],
-                                     store_path=Path(link["store_path"]),
-                                     session_id=link.get("session_id"))
-    assert session_store.resolve_store_path(_run_handle_1165(run_dir)) == Path(link["store_path"])
-    handle = branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir))
-    assert handle is not None
-    try:
-        assert Path(handle.path).resolve() == Path(link["store_path"]).resolve()
-    finally:
-        handle.connection.close()

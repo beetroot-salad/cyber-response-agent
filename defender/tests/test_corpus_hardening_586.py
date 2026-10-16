@@ -1,33 +1,4 @@
-"""Review hardening for the #584 corpus fold (found in review on PR #586).
-
-Three defects the fold left standing in the code it was folding. Each is pinned here against its
-fix; none of them is a restatement of the #584 spec (``test_corpus_fold_584.py``), which stands
-as approved.
-
-1. **The utf-8 pin was applied to the READ only.** ``iter_lessons`` reads with
-   ``encoding="utf-8"`` so a valid UTF-8 lesson survives a C-locale box — but every corpus CLI
-   then *prints* that lesson's text through a stdout still decoding under the ambient locale. 42
-   checked-in lessons carry non-ASCII (em-dashes in ``description`` above all), so under the same
-   locale ``iter_lessons``' own pin is tested against (d5), a bare ``defender-lessons`` over the
-   real corpus died with an ascii ``UnicodeEncodeError`` partway through — the defender's
-   PLAN-time retrieval exiting non-zero on a silently truncated corpus. Same locale dependence as
-   the read bug, one direction over.
-
-2. **The curator's cache signature restated the discovery rule and dropped its robustness.**
-   The observation curator's id pre-flight kept a hand-rolled glob for its mtime signature, whose
-   ``stat()`` was unguarded where the walk's read is guarded — so a dangling symlink (a
-   distinguished member of the corpus domain in #584's OWN spec graph, which demands it be
-   warn-skipped) crashed the whole curator drain before the agent ever ran.
-
-   THE CACHE ITSELF LEFT WITH #922: that pre-flight belonged to the retired observation curator,
-   and the surviving findings pre-flight never had one — it walks `iter_lessons` and nothing
-   else. What the case below still pins is the half that outlived the cache and is the reason
-   the cache was a bug: the pre-flight must tolerate exactly what the walk tolerates. A future
-   cache added to the survivor arrives against a case that already refuses the old shape.
-
-3. **``iter_lessons`` re-derived the parser's fence offsets** to slice ``Lesson.raw``, the one
-   duplicate of the frontmatter parse the "one walk, one reader" fold left in place.
-"""
+"""Review hardening for the corpus fold: utf-8 write pin under a C locale, pre-flight tolerance of unreadable lessons, one discovery rule, on_skip, Lesson.raw, windowed --all counts."""
 from __future__ import annotations
 
 import subprocess
@@ -70,7 +41,6 @@ def _tenant_runs() -> Path:
 
 def _load_trace_lesson():
     return load_trace_lesson("trace_lesson_586")
-
 
 
 def _corpus_with_an_em_dash(tmp_path: Path) -> Path:

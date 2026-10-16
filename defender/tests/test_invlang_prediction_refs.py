@@ -238,13 +238,7 @@ def test_a_well_grounded_resolution_row_is_accepted(case, row, extra):
 
 
 def test_a_dropped_hypothesis_block_defers_to_its_own_parse_warning():
-    """The `:H` header is off-schema, so the parser rejects the whole block and
-    h-001 never exists — every resolution against it then looks phantom. The
-    parse warning already names the cause; reporting the rows too would bury one
-    fixable defect under errors pointing away from it.
-
-    `examples/example-b-parallel-iam-cmdb.md` is the shipped instance: seven
-    parse warnings, and four resolutions against the hypotheses they dropped."""
+    """The `:H` header is off-schema, so the parser rejects the whole block and h-001 never exists — every resolution against it then looks phantom."""
     doc = _doc(
         _STRONG_EDGE + "\n"
         ":H hypothesize.hypotheses [id|name|attached_to|rel]\n"
@@ -261,10 +255,7 @@ def test_a_dropped_hypothesis_block_defers_to_its_own_parse_warning():
 
 
 def test_a_misspelled_new_hypotheses_block_names_itself():
-    """`:H l-NNN.new_hypotheses` is now a documented authoring surface, so the
-    singular typo is reachable. The projector drops an unhandled `:H` lead
-    sub-block, and with no warning the resolution row took the blame for a
-    hypothesis the author did declare — an error pointing at a correct row."""
+    """`:H l-NNN.new_hypotheses` is now a documented authoring surface, so the singular typo is reachable."""
     doc = _doc(
         _two_hypotheses() + "\n"
         ":H l-001.new_hypothesis "

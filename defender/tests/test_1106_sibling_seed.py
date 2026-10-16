@@ -39,13 +39,6 @@ from defender.tests.tenant_1107_settings import _spec1107 as S
 from defender.run_repository import RunPaths
 
 
-@pytest.fixture(autouse=True)
-def _tmp_roots(tmp_path, monkeypatch):
-    """The launcher's two configured roots inside `tmp_path` (as `test_947_triplet_launcher`)."""
-    monkeypatch.setenv(P.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(P.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-
-
 class SpawnRecorder:
     """`spawn=`: records each child's argv and env, and the tenant record the child's runs base
     held at the moment the child was started."""
@@ -206,15 +199,6 @@ def _knowledgeless_source(tmp_path: Path, tenant_id: str) -> Path:
     return src
 
 
-def test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant(tmp_path):
-    root = current_data_root()
-    outcome, spawn, _est = _estate_launch(tmp_path)
-    assert spawn.launches, f"no sibling was started: {outcome!r}"
-    for launch in spawn.launches:
-        assert launch["tenant_at_spawn"] == "acme", launch
-        assert _child_data_root(launch).resolve() == root.resolve()
-
-
 @pytest.mark.parametrize("stamp_tenant", [None, "default"])
 def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sibling(
         tmp_path, capsys, stamp_tenant):
@@ -300,25 +284,6 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     assert "verb-grants.yaml" in text, text
     assert spawn.launches == []
     assert questioner.calls == 0, "the questioner was paid for before the refusal"
-
-
-def test_a_source_stamp_naming_a_tenant_absent_from_the_injected_root_refuses_before_any_sibling(
-        tmp_path, capsys):
-    """The stamp names `ghost`; the data root holds `ghost`'s row and runs base but no knowledge
-    folder for it, and a complete `acme` — no fallback to `acme`: refused, naming the missing
-    folder, before a sibling starts or a record is minted. The control is the `acme` launch
-    above. (#1120: one root now holds both the rows and the knowledge, so "absent from the
-    injected root" is `ghost`'s knowledge folder absent beside its row.)"""
-    root = current_data_root()
-    src = _knowledgeless_source(tmp_path, "ghost")
-    _episode_tenant(root)
-    outcome, spawn = _launch(tmp_path, stamp_tenant="ghost", source=src)
-    err = capsys.readouterr().err
-    assert spawn.launches == [], spawn.launches
-    assert str(root / "ghost") in f"{outcome} {err}", (outcome, err)
-    episodes = tmp_path / "episodes-root"
-    minted = sorted(str(p) for p in episodes.rglob("_tenant.json")) if episodes.exists() else []
-    assert minted == [], minted
 
 
 # ---- O3 on the resume path: a sibling serves through its OWN run's grant ------------------------

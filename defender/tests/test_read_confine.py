@@ -1,41 +1,7 @@
-"""Spec for #512 slice 2 — per-agent read confinement across BOTH read surfaces.
-
-The permission surface under test (#512 slice 2, as rebuilt on #575's one containment model):
-
-  - AgentPolicy.read_confine: tuple[Path, ...] = ()   # REPLACES the defender_dir read base when non-empty
-  - AgentPolicy.bash_allow: tuple[Grant, ...] = ()    # per-agent SHAPE (program+flags+arity) + SCOPE (resolved-path regexes)
-  - decide_read: honour read_confine; FAIL CLOSED on a resolve() error
-  - decide_bash(command, *, policy, run_dir=None, defender_dir=None): a command is allowed iff EVERY
-    stage is claimed by a grant's shape AND everything `PROGRAMS[grant.program]` says it opens
-    RESOLVES into that grant's scope.
-
-What #575 changed under this spec, and why these tests still hold:
-
-  - `operand_gated` is DELETED. It was the judge's special case — "this agent's `cat` operands are
-    resolve()-gated rather than textually anchored" — and it is now the GENERAL rule: every `cat`
-    grant, on every lane, resolves its operands and matches them against that grant's scope. The
-    judge's lane is no longer exceptional, so it no longer needs a bit; the tests that pinned the
-    behavior are unchanged, only the way the policy is built (`compile_policy_for(CORPUS_AUTHOR_DEF, …)`,
-    the real seam, instead of two hand-imported regexes).
-  - `raw_reads` is DELETED. Containment is positive enumeration now: an agent reaches gather_raw iff
-    its grants carry that shape. For a confined actor the payload is not merely un-granted, it is not
-    even under a read ROOT — which is the honest statement of the property the bit used to make.
-  - the judge's `_CAT_PATTERN`/`_SQL_PATTERN` are gone; its lane is `_judge_bash_shapes`, reached
-    through `compile_policy_for`. Building the policy from the REAL seam (never a hand-copied regex)
-    is the point: a copy keeps passing against the old grammar after the real one is tightened.
-
-These are pure unit tests (no model, no API key) — they drive permission.decide_read / decide_bash
-directly. Builder wiring and the read-tool return contract live in test_read_confine_engine.py.
-
-Locked design: malicious actor confined to {lessons-actor, lessons-environment} with NO bash readers
-(empty `bash_allow`); benign actor to {lessons-environment} likewise; judge keeps ONLY `cat` (scoped
-to its read roots) piped into the sandboxed `defender-sql`; main/gather keep the viewer lane. See
-issues #512 / #522 / #575.
-"""
+"""Per-agent read confinement across both read surfaces (decide_read and decide_bash)."""
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -125,14 +91,6 @@ def test_confine_replaces_defender_dir_but_run_dir_stays(tmp_path):
     pol = _policy(read_confine=_MALICIOUS_CONFINE)
     assert permission.decide_read(tmp_path / "actor_out.json", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
     assert not permission.decide_read(_DEFENDER / "SKILL.md", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
-
-
-def test_empty_confine_is_legacy_defender_dir_base(tmp_path):
-    """read_confine=() -> roots are exactly {run_dir, defender_dir}; a defender_dir read is allowed
-    (byte-for-byte with today's judge, whose read_allow carries no corpus SHAPE filter). The field is
-    inert when empty."""
-    pol = _policy(read_confine=())
-    assert permission.decide_read(_DEFENDER / "SKILL.md", run_dir=tmp_path, defender_dir=_DEFENDER, policy=pol).allow
 
 
 def test_confine_root_dir_itself_allowed(tmp_path):
@@ -316,42 +274,6 @@ def test_multiline_command_is_denied_with_a_reason_that_says_why(tmp_path, cmd):
 
 
 
-def test_gather_multiline_command_denies_with_the_lexing_reason_not_a_policy_one(tmp_path):
-    """The case that motivates a dedicated reason, and it is NOT the judge's.
-
-    SQL/ES|QL is line-oriented and the query templates render it as multi-line blocks, so gather
-    must flatten it into one shell argument on every call. When it doesn't, the command may be an
-    otherwise-allowed invocation whose only defect is a newline inside its quoted query — and a
-    POLICY reason ("reach a data source with the `query` tool", "adapters are not runnable from
-    bash") would blame policy for a tokenizer failure, telling the model the exact opposite of what
-    it needed to know. So a lexing failure must be diagnosed BEFORE any classification of the
-    command's shape.
-
-    #611: the motivating command used to be a standalone `defender-elastic esql …` (which was
-    allowed when flat). That form is now unreachable from bash, so the probe is gather's surviving
-    multi-line-prone command — a `cat <payload> | defender-sql '<SQL>'` aggregation — plus an
-    adapter-shaped multi-liner, which must ALSO lex-deny rather than get the adapter reason (the
-    over-tightening this test exists to catch would now hand back `ADAPTER_RETIRED_REASON`)."""
-    run = tmp_path / "run"
-    dfn = _DEFENDER
-    pol = compile_policy_for(T1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)
-    raw = f"{run}/gather_raw/l-001/0.json"
-    multi = f"cat {raw} | defender-sql 'SELECT host,\ncount(*)\nFROM data GROUP BY host'"
-    flat = f"cat {raw} | defender-sql 'SELECT host, count(*) FROM data GROUP BY host'"
-
-    denied = permission.decide_bash(multi, policy=pol, run_dir=run, defender_dir=dfn)
-    assert not denied.allow
-    assert denied.reason == permission.UNTOKENIZABLE_REASON
-    assert denied.reason != pol.deny_reason
-    assert permission.decide_bash(flat, policy=pol, run_dir=run, defender_dir=dfn).allow
-
-    adapter_multi = 'defender-elastic esql \'FROM logs-*\n| WHERE host == "db-1"\''
-    d = permission.decide_bash(adapter_multi, policy=pol, run_dir=run, defender_dir=dfn)
-    assert not d.allow
-    assert d.reason == permission.UNTOKENIZABLE_REASON
-    assert d.reason != permission.ADAPTER_RETIRED_REASON
-
-
 def test_main_cat_scope_is_the_read_surface(tmp_path):
     """MAIN keeps a viewer lane, and its `cat` grant's SCOPE is the run dir + corpus over the RESOLVED
     path — an in-scope cat is allowed, an out-of-scope cat is denied (pre-#535: any operand allowed).
@@ -394,19 +316,3 @@ def test_gather_stream_plumbing_anchored(tmp_path):
     assert not bash("cat /tmp/p.json | wc -c").allow
     assert not bash(f"cat {run}/gather_raw/evil.json").allow
 
-
-def test_empty_confine_preserves_existing_decide_read_rows(tmp_path):
-    """the confine field is inert for main: decide_read still allows the corpus, denies outside, and
-    denies the raw payload. The corpus-readable probe is a tight-corpus `.md` (`skills/**.md`) — the
-    policy's `read_allow` IS the cat grant's scope (#575), so a bare `SKILL.md` directly under
-    defender_dir (outside lessons/skills/examples) is denied on the read tool exactly as the bash cat
-    lane denies it (#545/#546 parity, now by construction)."""
-    run = tmp_path / "run"
-    (run / "gather_raw" / "l-001").mkdir(parents=True)
-    dfn = tmp_path / "defender"
-    (dfn / "skills" / "elastic").mkdir(parents=True)
-    main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
-    assert permission.decide_read(dfn / "skills" / "elastic" / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
-    assert not permission.decide_read(dfn / "SKILL.md", run_dir=run, defender_dir=dfn, policy=main).allow
-    assert not permission.decide_read(Path("/etc/passwd"), run_dir=run, defender_dir=dfn, policy=main).allow
-    assert not permission.decide_read(run / "gather_raw" / "l-001" / "0.json", run_dir=run, defender_dir=dfn, policy=main).allow

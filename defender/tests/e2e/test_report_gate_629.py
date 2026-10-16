@@ -1,23 +1,5 @@
 """#629 — the investigation.md size-bound legs of `tests/spec_graph_629-report-output-structure.yaml`
-that survive #774 unchanged: the mid-run lifecycle legs (lc1-lc3).
-
-R1 (#774) removes report.md from `write_file`/`edit_file`'s write allow entirely — the close
-tool is now its sole writer — which retires every report.md-specific demand this file used to
-carry (D4-D6, wm1-wm5, ii3, D5, lc6): their premise was "content-dependent refusal on
-write_file/edit_file", and that entry point now refuses report.md unconditionally, regardless
-of content. Those demands are retired with their reason in
-`tests/spec_graph_629-report-output-structure.yaml` (see the `#774-retired` notes there) rather
-than discovered as a broken test; the properties they pinned that #774 still owes are
-re-expressed on the close tool, whose live witness is now `tests/test_797_retirement.py` —
-it drives a close through the real close tool and reads the disposition it committed to
-report.md. #774's own close-tool file went with the three review stages #797 retired, so this
-pointer names what survives instead of a deleted one.
-
-investigation.md stays fully model-writable through both tools, so its size-bound legs are
-untouched by R1 and still belong here, driving the REAL `_tool_write_file`/`_tool_edit_file`
-(through the real `bind` seam), matching this file's original discipline: fakes enter only
-through injection seams, never `monkeypatch.setattr`.
-"""
+that survive #774 unchanged: the mid-run lifecycle legs (lc1-lc3)."""
 from __future__ import annotations
 
 

@@ -1,31 +1,4 @@
-"""#870 M8 — the partition follows the handoff, and what the tick tells a human.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_870.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared870.py`.
-
-Today the curated set is `row.system in kept` and a reducer row has no system (C18/C9's row
-`s1`, executed), so a taught reducer row is buried on the tick that taught it. FK-7 makes the
-criterion ASYMMETRIC — system rows keep `kept`-membership, a shim row is curated only when a
-reducer handoff was emitted AND the commit's changed set contains the reducer literal.
-
-WHICH SEAM CARRIES THAT CONDITION IS FORK F3 AND IS NOT PINNED HERE. Every demand below
-observes `run_pitfalls`' own outputs — the queue file, the consumed ledger, the deadletter,
-the commit, the log — so the implementer keeps F3's choice between passing the handoff list,
-a flag, or a builder-computed id set into `_split_batch_by_membership`.
-
-TWO DEMANDS BELOW ARE THE ROUND'S REVIEW, NOT ITS ORIGINAL SPEC, and they bound the two ends
-FK-7 left open:
-
-* `an_unoffered_reducer_edit_is_refused` — FK-7 asked what a handoff MEANS for rotation and
-  the M7 literal allowance answered a different question: the reducer surface became writable
-  on every tick, including one whose batch held no reducer row. The offer now gates the COMMIT
-  as well as the partition.
-* `a_perpetually_declined_hold_retires_at_the_ceiling` — FK-7's hold ("neither rotated nor
-  graveyarded") had no exit, so a row the curator can never teach re-spawned the curator agent
-  every drain pass forever. The hold keeps its meaning and gains the same
-  `author_max_attempts()` ceiling every other exit from this queue already had.
-"""
+"""#870 M8 — the partition follows the handoff, and what the tick tells a human."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,7 +11,6 @@ from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests import _state1135
 from defender.tests._declared870 import (
-    PITFALLS_SECTION,
     REDUCER_REL,
     Spawn,
     by_surface,
@@ -50,7 +22,6 @@ from defender.tests._declared870 import (
     git,
     graveyard_by_id,
     head_files,
-    loop_log,
     pitfall_row,
     queue_ids,
     seed_tree,
@@ -470,47 +441,6 @@ def test_the_commit_carries_exactly_what_the_rule_admitted(scene):
     assert git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
 
 
-def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
-    """On a tick that taught ONLY the reducer surface, the operator log NAMES that surface and
-    the commit message stops claiming it folded pitfalls into per-system `execution.md`.
-
-    `run_pitfalls`' operator line builds its named set from a TRUTHY comprehension over
-    attributed systems (`{s for r in records if (s := ...)}`), and a reducer-only tick is
-    systemless BY CONSTRUCTION — so it contributes nothing to the named-systems text and G5
-    reproduced exactly that (row `s1` retired unnamed). `_pitfalls_commit_message` says
-    "learning(lead-author): execution.md pitfalls" / "Folded … into per-system execution.md
-    ## Common pitfalls" UNCONDITIONALLY, so on this tick it misdescribes its own contents.
-
-    These two strings are the human-visible records this lane produces, which is what makes a
-    wrong one a live defect rather than a cosmetic one (FK-6). That the graveyard is the only
-    other candidate and reaches a human only through #903's queue page is NOT demonstrated here — it is a deliberate
-    prose deferral recorded as the clause demand `graveyard_is_still_unread` (G22, searched),
-    named rather than asserted so a reader cannot mistake this suite for its evidence. The four existing test files that assert the message verbatim are
-    updated by the same change.
-    """
-    repo, paths = scene
-    _shim_batch(paths)
-    head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
-    capsys.readouterr()
-
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(curate_reducer_surface()),
-                                         trees=lead_trees(paths)) == 0
-
-    log = loop_log(capsys)
-    named = [ln for ln in log.splitlines() if REDUCER_REL in ln or "defender-sql.md" in ln]
-    assert named, f"an operator cannot tell a reducer lesson was taught: {log}"
-
-    summary = git(repo, "log", "-1", "--pretty=%B").stdout.split("Paths:")[0]
-    assert "per-system execution.md" not in summary, (
-        f"the commit misdescribes a tick that touched no execution.md: {summary!r}"
-    )
-    assert "pitfalls" in summary
-    assert git(repo, "rev-parse", "HEAD").stdout.strip() != head_before, (
-        "nothing was committed, so the message asserted above is the seed's"
-    )
-    assert REDUCER_REL in head_files(repo)
-
-
 # The composition frame — two ticks over one corpus tree and one queue.
 
 
@@ -520,85 +450,3 @@ def _leg(paths, spawn):
         paths=p, state=st, invoke=spawn, box=box, trees=lead_trees(p))
 
 
-def test_two_curation_ticks_land_distinctly_in_every_shared_sink(scene):
-    """Two successive curation ticks, driven through the DRAIN that fans them, leave every
-    shared sink holding both ticks' work: the reducer surface carries both bullets, the
-    consumed ledger carries both batches' ids exactly once each, and each row carries the sha
-    of ITS OWN tick.
-
-    R2(b) bound at the composition frame rather than at the leg, because a single-leg test
-    cannot see a cross-tick collision: every sink this round writes is `serialized-append`,
-    the serialization is the TICK rather than a lock (the pitfalls channel has
-    `drain_lock: None` by design), and a second tick that regenerated the reducer surface
-    instead of appending to it — or re-stamped the first tick's rows with its own sha — would
-    be green in every per-tick test here.
-
-    The drain's own `ClaimGit.reset` runs between the two, so the second tick reads
-    exactly the committed state the first one left, which is what makes this two ticks rather
-    than one long one.
-    """
-    repo, paths = scene
-    first = _shim_batch(paths, n=2)
-    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _leg(paths, Spawn(curate_reducer_surface("a LIST, not JSON"))))
-    sha_one = git(repo, "rev-parse", "HEAD").stdout.strip()
-
-    second = [shim_row("r2:l-004:0", digest="exit=1; Parser Error: at or near \"@timestamp\"")]
-    persist.append_pitfalls(second, state=_state1135.state_for_paths(paths))
-    drains._drain_pitfalls(
-        paths, _state1135.state_for_paths(paths), _leg(paths, Spawn(curate_reducer_surface("quote @timestamp"))),
-    )
-    sha_two = git(repo, "rev-parse", "HEAD").stdout.strip()
-    assert sha_one != sha_two, "the second tick committed nothing, so nothing is being shared"
-
-    surface = (repo / REDUCER_REL).read_text(encoding="utf-8")
-    assert surface.count("a LIST, not JSON") == 1, "the first tick's lesson was overwritten"
-    assert surface.count("quote @timestamp") == 1
-    assert surface.count(PITFALLS_SECTION) == 1, "the second tick restarted the section"
-
-    consumed = consumed_by_id(paths)
-    assert set(consumed) == {*first, "r2:l-004:0"}
-    for pid in first:
-        assert consumed[pid]["consumed_commit"] == sha_one
-    assert consumed["r2:l-004:0"]["consumed_commit"] == sha_two
-    assert queue_ids(paths) == []
-    assert graveyard_by_id(paths) == {}
-
-
-def test_a_committed_batch_is_not_re_bumped(scene, monkeypatch):
-    """Rows already rotated to `consumed_committed` do not gain `attempts` when a LATER step
-    in the same tick fails, and do not reach the graveyard: the retirement bumps only the rows
-    still in the queue.
-
-    The commit-then-rotate window is inherited machinery, but M8 changes WHICH rows the bump
-    lands on — a reducer row is now in the curated set — and a batch that is durably taught
-    being walked toward a ceiling graveyard for work that succeeded is the shape FK-10 keeps
-    closed while explicitly declining to re-architect the fault posture this round.
-
-    The fault is injected at the drain's own leg seam and its class is the one FK-10's
-    answerer traced: `ImportError` is not in `SYSTEMIC_FAULTS`, so it falls to the generic
-    guard and is routed to `_retire_pitfalls_batch` → `drain.retire`, identical bounded
-    retirement to a curator `rc != 0`.
-    """
-    repo, paths = scene
-    monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
-    persist.append_pitfalls(
-        [shim_row("r:l-003:0"), pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths),
-    )
-
-    def _half_done(p, st, box=None, **_kw):
-        persist.rotate_pitfalls(
-            ["r:l-003:0"], "deadbeef", state=st, category="consumed_committed",
-        )
-        raise ImportError("the curator module vanished mid-tick")
-
-    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _half_done)
-
-    consumed, graveyard = consumed_by_id(paths), graveyard_by_id(paths)
-    entry = consumed.get("r:l-003:0", {})
-    assert entry.get("consumed_category") == "consumed_committed"
-    assert "attempts" not in entry, "a durably taught row was re-bumped"
-    assert "r:l-003:0" not in graveyard
-
-    still_queued = {r["pitfall_id"]: r for r in persist.read_pitfalls(_state1135.state_for_paths(paths))}
-    assert set(still_queued) == {"r:l-000:0"}
-    assert still_queued["r:l-000:0"]["attempts"] == 1

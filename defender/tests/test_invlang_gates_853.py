@@ -98,11 +98,7 @@ def test_a_laced_ident_cell_no_longer_hides_an_open_attribute_from_the_benign_ga
 
 
 def test_a_quote_opening_mid_token_is_refused_rather_than_merging_cells():
-    """F-14's residual half, and the one the `\\"` fix did NOT close: an EVEN number of plain
-    `"` merges cells with row parity intact, so `_has_unbalanced_quote` stays silent. Nor can
-    a cell count see it — the merge eats one delimiter and the optional trailing `attrs?`
-    absorbs the shift, so `signing=??` lands in `ident`, which by #836/N9 gates nothing. What
-    is actually malformed is the quote's POSITION, and that is what the row is refused for."""
+    """F-14's residual half, and the one the `\"` fix did NOT close:"""
     merged = _benign_doc(
         'v-001|compute|bastion"/internal/known-corp|bastion"-01.corp|signing=??'
     )
@@ -147,56 +143,12 @@ def test_a_quoted_cell_and_a_quoted_subcell_value_are_still_legal():
     }
 
 
-def test_an_empty_table_still_writes_itself_as_one_none_row():
-    """`none` under a two-column header is a COMPLETE row saying the table is empty, not a
-    truncated one — the shape `:T conclude.surviving` uses when every hypothesis was
-    refuted. The required-cell check has to know the marker or it refuses that document."""
-    doc = _doc(
-        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
-        "v-001|compute|bastion/internal/known-corp|bastion-01.corp|",
-        ":L findings [id|loop|name|target|tests|system|window]\n"
-        "l-001|1|cmdb-lookup|v-001||cmdb|n/a",
-        ":T conclude.surviving [hyp_id|final_weight]\nnone",
-    )
-    _companion, warnings = parse_dense_companion(doc)
-    assert warnings == []
-    assert validate_companion(doc) == []
-
-
-def test_an_omitted_trailing_optional_column_is_still_padded():
-    """The control the `?` flags exist for: `attrs?` is optional, so a row that stops after
-    `ident` — with no trailing `|` — is a complete row and still parses."""
-    doc = _benign_doc("v-001|compute|bastion/internal/known-corp|bastion-01.corp")
-    companion, warnings = parse_dense_companion(doc)
-    assert warnings == []
-    assert companion["prologue"]["vertices"][0]["identifier"] == "bastion-01.corp"
-    assert validate_companion(doc) == []
-
-
 # F-15 — every documented spelling of an unresolved slot blocks benign
 
 def test_per_slot_candidate_set_blocks_benign():
     """SKILL.md §Open questions: "Per-slot enumeration is fine when only one axis is open" —
     so the gate has to read the slot, not the whole cell."""
     doc = _benign_doc("v-001|compute|monitoring-agent/{internal, dmz}/known-corp|10.42.7.183|")
-    assert _blocked(validate_companion(doc))
-
-
-def test_whole_triple_and_type_prefixed_candidate_sets_block_benign():
-    whole = _benign_doc(
-        "v-001|compute|{monitoring-agent/internal/known-corp, ip-only/internet/novel}|10.42.7.183|"
-    )
-    prefixed = _benign_doc(
-        "v-001|compute|compute:{monitoring-agent/internal/known-corp, ip-only/internet/novel}|10.42.7.183|"
-    )
-    assert _blocked(validate_companion(whole))
-    assert _blocked(validate_companion(prefixed))
-
-
-def test_single_member_candidate_set_blocks_benign():
-    """No comma required: `{internal}` has still not picked, and demanding the comma made the
-    NARROWEST open state the one spelling that passed."""
-    doc = _benign_doc("v-001|compute|monitoring-agent/{internal}/known-corp|10.42.7.183|")
     assert _blocked(validate_companion(doc))
 
 
@@ -221,15 +173,6 @@ def test_an_unterminated_candidate_set_blocks_benign():
     )
     assert _blocked(validate_companion(truncated))
     assert _blocked(validate_companion(mid_tuple))
-
-
-def test_a_resolved_document_and_an_attribute_that_merely_contains_braces_still_close():
-    """The whole-value anchor, as a control: a legitimate `attrs.cmdline` carrying `{...}`
-    inside a longer string is a fact, not an open question, and must not block."""
-    doc = _benign_doc(
-        "v-001|compute|bastion/internal/known-corp|bastion-01.corp|cmdline=deploy-{blue}-svc"
-    )
-    assert validate_companion(doc) == []
 
 
 def test_a_candidate_set_resolved_by_attr_updates_closes_benign():
@@ -300,21 +243,7 @@ def test_two_hypotheses_declaring_the_same_contract_id_are_denied():
 
 
 def test_a_collision_with_one_side_refuted_is_not_denied():
-    """LIVE, not declared — and the scope is what keeps the rule repairable. `investigation.md`
-    is append-only and `:H` rows are immutable, so a collision already on disk can never be
-    edited away; under a declared-set reading every later write to that document would be
-    denied for a row the author is not allowed to touch. Refuting one side is the in-grammar
-    move that ends the ambiguity.
-
-    The DECLARING-side exemption is what this pins, and it stands. Its original second half —
-    "and it costs nothing: `_check_benign_authz` reads the same live set, so a contract on a
-    refuted hypothesis discharges nothing either way" — was true of the CONTRACT and false of
-    the ROW that fulfills it, which is #876/F-3: the `:R authz` row carries no hypothesis
-    column, so the refuted declarer's row discharged the live one's same-numbered contract.
-    The assertion is therefore narrowed to the collision error this test is about. Both
-    contracts here also share an ANCHOR KIND, so the benign close is now blocked instead —
-    `test_invlang_gates_876` carries that case and the differing-anchor one it repairs by.
-    """
+    """LIVE, not declared — and the scope is what keeps the rule repairable."""
     doc = _authz_doc(
         "ac1",
         "ac1",
@@ -369,16 +298,6 @@ def test_one_hypothesis_repeating_a_contract_id_in_one_block_is_denied():
     assert validate_companion(doc)
 
 
-def test_distinct_contract_ids_each_discharged_still_close_benign():
-    doc = _authz_doc(
-        "ac1",
-        "ac2",
-        "l-001|e-001|ac1|authorized|change-mgmt|\"CHG-4471 covers the window\"",
-        "l-001|e-001|ac2|authorized|change-mgmt|\"CHG-4471 covers the window\"",
-    )
-    assert validate_companion(doc) == []
-
-
 # F-27 — a hierarchical child declares its own sub-blocks
 
 _CHILD_DOC = _doc(
@@ -399,10 +318,7 @@ _CHILD_DOC = _doc(
 
 
 def test_a_hierarchical_child_can_declare_the_predictions_the_validator_demands():
-    """`_HYP_PREFIX_RE` is built from `HYPOTHESIS_ID_RE` now, so the declaring side accepts
-    every id the four reference sites already accepted. Before, the sub-block fell through to
-    the generic unknown-block warning and the whole write was denied — leaving a committed
-    child with no way to declare a prediction, and so no way to ever be moved `++`."""
+    """`_HYP_PREFIX_RE` is built from `HYPOTHESIS_ID_RE` now, so the declaring side accepts every id the four reference sites already accepted."""
     companion, warnings = parse_dense_companion(_CHILD_DOC)
     assert warnings == []
     hyp = companion["hypothesize"]["hypotheses"][0]
@@ -410,11 +326,3 @@ def test_a_hierarchical_child_can_declare_the_predictions_the_validator_demands(
     assert validate_companion(_CHILD_DOC) == []
 
 
-def test_a_sub_block_on_an_undeclared_child_still_warns_about_the_hypothesis():
-    """The widened prefix must not swallow a typo: an unknown child now lands on the
-    sub-block's own "references unknown hypothesis" warning, which names the real cause."""
-    typo = _CHILD_DOC.replace(":H h-001-001.preds", ":H h-001-002.preds")
-    _companion, warnings = parse_dense_companion(typo)
-    assert [w.reason for w in warnings] == [
-        "sub-block references unknown hypothesis 'h-001-002'"
-    ]

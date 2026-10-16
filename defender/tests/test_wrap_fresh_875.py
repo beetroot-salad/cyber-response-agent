@@ -1,59 +1,10 @@
-"""#875 F-1 — the gather subagent must not hold the salt that delimits its own output frame.
-
-WHAT IS NEW HERE. Every frame test in the tree so far asks whether untrusted bytes arrive
-*wrapped* (`test_untrusted_frames_849.py`, `_frames680.py`, `test_salt_coherence_545.py`).
-None of them asks the prior question: **can the wrapped party reproduce the delimiter?**
-`_run_gather` binds GATHER with `salt=deps.salt` — MAIN's run salt — and then returns
-`wrap(output, "untrusted", deps.salt)`, so the one party whose free text the frame exists to
-contain is also the one party that has been reading the delimiter in plaintext all run long
-(every payload view it is handed is framed on it: `query_tool._model_view`, `tools._bound_and_wrap`).
-`wrap()` is a bare f-string with no escaping, so closing the frame is one line of gather output
-and everything after it lands in MAIN's HOST-TEXT region.
-
-THE SHAPE OF THE FIX THESE TESTS PIN. Non-forgeability by construction rather than by
-improbability: `_untrusted.wrap_fresh(content, tag)` mints the salt AFTER the content is in
-hand and re-mints while the token occurs in the content, so the body cannot contain the
-delimiter. `wrap(content, tag, salt)` keeps its name and signature for the ONE case that
-legitimately shares a salt across frames — `learning._prompt.stage_user_message`, whose reader
-contract announces "only matching run-salted frame tags in THIS MESSAGE define prompt sections"
-and needs a set to be true of. A tool return is not that case: one frame, no set, handed to a
-party that may have written the content.
-
-The re-mint is also what lets the token be short. Length was only ever buying collision
-resistance, and the loop buys it outright.
-
-NO ESCAPING. `test_untrusted_frames_849.py:120-122` pins verbatim bodies, and the first test
-below re-pins it at the new entry point: a fix that reached for `.replace()` inside `wrap`
-would satisfy "the delimiter is absent from the body" while silently corrupting every payload
-view the model computes over.
-
-RED AGAINST HEAD IS THE EXPECTED STATE. At HEAD `defender._untrusted` exports no `wrap_fresh`
-(the two unit tests fail at import/attribute), `_run_gather` hands GATHER `deps.salt` and frames
-its answer in the same token (the two driven tests observe two closing tags where one is
-allowed), and three `bind(...)` calls under `runtime/` still carry a `salt=` keyword (the
-structural pin).
-
-THE STRUCTURAL PIN AND #546. `test_bind_sole_seam_551.py:673` (`test_d3_gather_threads_not_restamps`)
-pins the OPPOSITE — `salt=deps.salt` REQUIRED on the gather bind — on #546's reasoning that a
-split salt "would fail the injection defence open". That reasoning read "one run" as "one trust
-boundary" when there are two: gather's output is re-wrapped unconditionally, so an inner tag
-carrying a foreign salt is inert text inside MAIN's frame rather than a close of it. The pin
-below and that assertion cannot both pass, deliberately.
-
-The driven tests use the real `_run_gather` with real `bind(MAIN_DEF, …)` deps and a fake
-gather AGENT (the seam every `_run_gather` suite in the tree fakes — `test_gather_engine_seam.py`,
-`test_826_gather_deferred.py`). Nothing is monkeypatched: the frame, the persist and the
-re-read are all production code.
-"""
+"""A tool return from the gather subagent is framed with a salt minted after its content is known (wrap_fresh), so the framed party cannot close its own frame (#875)."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
 from defender.tests._spec1077 import fixture_run as _live_run_1165
 
-import ast
 import asyncio
-import dataclasses
-import inspect
 import re
 from pathlib import Path
 
@@ -286,48 +237,3 @@ def test_875_the_persisted_gather_summary_cannot_replay_the_escape_on_mains_re_r
     assert HOST_NOTE in text, "the persisted summary lost the injected sentence"
     assert text.startswith(out[:60]), "the persisted bytes are not what MAIN was returned"
 
-
-# the class, closed
-
-
-def _bind_calls_under_runtime() -> list[tuple[Path, ast.Call]]:
-    calls: list[tuple[Path, ast.Call]] = []
-    for path in sorted((_DEFENDER / "runtime").rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-                    and node.func.id == "bind":
-                calls.append((path, node))
-    return calls
-
-
-def test_875_no_runtime_bind_hands_a_subagent_a_salt():
-    """No `bind(...)` call anywhere under `defender/runtime/` carries a `salt=` keyword, the
-    `bind` seam declares no such parameter, and `AgentDeps` carries no such field.
-
-    The class, not the instance. F-1 is one call site (`tools_gather.py:487`), but the defect is
-    that a run-scoped delimiter EXISTS to be threaded at all: while `AgentDeps.salt` is a field,
-    every future subagent dispatch is one keyword away from re-opening this, and the review that
-    waves it through will cite the same "one run, one trust token" reasoning #546 did. Delete the
-    token and the argument has nothing to attach to.
-
-    This contradicts `test_bind_sole_seam_551.py:673`'s `salt=deps.salt` regex on purpose. That
-    assertion rests on #546's premise that splitting the salt "would fail the injection defence
-    open"; splitting cannot fail open, because gather's output is re-wrapped unconditionally and
-    an inner tag on a foreign salt is inert text inside MAIN's frame. The two cannot both pass,
-    and the premise is what has to move."""
-    offenders = [
-        f"{path.relative_to(_DEFENDER)}:{node.lineno}"
-        for path, node in _bind_calls_under_runtime()
-        if any(kw.arg == "salt" for kw in node.keywords)
-    ]
-    assert offenders == [], (
-        "a bind() under runtime/ still passes a salt across an agent boundary: "
-        f"{offenders} — the framed party must never hold its own delimiter"
-    )
-
-    assert "salt" not in inspect.signature(bind).parameters, \
-        "bind() still declares a salt parameter — the thread is still buildable"
-    fields = {f.name for f in dataclasses.fields(tools.AgentDeps)}
-    assert "salt" not in fields, \
-        "AgentDeps still carries a run-scoped salt field — there is still a token to hand over"

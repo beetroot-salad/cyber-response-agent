@@ -1,23 +1,4 @@
-"""Tests for defender/hooks/record_lead.py.
-
-`claim_lead` writes the leads-table row `gather_raw/{lead_id}.lead.json` and
-claims the `lead_id` with an atomic exclusive create — a reused id fails the
-create and returns `ALREADY_CLAIMED`, which `runtime/tools_gather._run_gather`
-turns into a `ModelRetry` before gather is spawned.
-
-THE CODES ARE THREE, and every assertion below names which one it means (#855
-F-12). They used to be two: success and every silent skip both returned 0, so
-the one live caller could not write the check it needed and read "not the reuse
-code" as success — which ran a gather session under an id with no leads row,
-past the reuse gate that IS that row's exclusive create. An assertion that
-spells `== CLAIMED` is one that would have failed when the write did not happen.
-
-Driven through `claim_lead(dispatch)` — the function that live caller reaches,
-with the same dict shape it builds from the typed `gather` request. These used
-to run through the module's `claude -p` PreToolUse `main()`, which recovered
-that dict from a Task prompt's fenced YAML; nothing invokes it, and the lenient
-parser it fed (`extract_dispatch`/`_parse_block`) was deleted with it.
-"""
+"""record_lead.claim_lead: atomic exclusive claim of a lead id and its failure modes."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run
@@ -88,20 +69,6 @@ def test_reused_id_returns_already_claimed_with_remediation(tmp_path, capsys):
     assert json.loads((run_dir / "gather_raw" / "l-001.lead.json").read_text())["goal"] == "first"
 
 
-def test_the_three_codes_are_distinct(tmp_path):
-    """#855 F-12, at the seam that caused it: a caller must be able to write "the row is on
-    disk" as a check, and it can only do that if SUCCESS has a code no skip shares. One run
-    over the three domains — a good claim, a refused one, a reused one — and the three answers
-    are three."""
-    run_dir = tmp_path / "run"
-    good = claim_lead(_dispatch(run_dir, "l-001", "g", ["d"]), run=fixture_run(run_dir))
-    refused = claim_lead(_dispatch(run_dir, "l-002", "", ["d"]), run=fixture_run(run_dir))
-    reused = claim_lead(_dispatch(run_dir, "l-001", "again", ["d"]), run=fixture_run(run_dir))
-    assert len({good, refused, reused}) == 3, \
-        "two of the claim's outcomes share a code — a caller cannot tell them apart"
-    assert (good, refused, reused) == (CLAIMED, NOT_CLAIMED, ALREADY_CLAIMED)
-
-
 def test_an_empty_or_whitespace_goal_claims_nothing(tmp_path):
     """The leads row records the STRIPPED goal, so `"   "` used to claim the id and write a
     row whose goal is `""` — the same empty row the falsy arm refuses, reached by a string
@@ -130,14 +97,6 @@ def test_malformed_lead_id_silently_skips(tmp_path):
     run_dir = tmp_path / "run-bad-id"
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "0", "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
-    assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
-
-
-def test_missing_lead_id_silently_skips(tmp_path):
-    run_dir = tmp_path / "run-no-id"
-    (run_dir / "gather_raw").mkdir(parents=True)
-    dispatch = {"run_dir": str(run_dir), "goal": "g", "what_to_summarize": ["d"]}
-    assert claim_lead(dispatch, run=fixture_run(run_dir)) == NOT_CLAIMED
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
 
 

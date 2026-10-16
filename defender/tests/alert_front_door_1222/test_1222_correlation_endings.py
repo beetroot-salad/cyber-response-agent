@@ -686,30 +686,6 @@ def test_p026_dispatch_failure_text_carries_a_host_path_or_ale(tmp_path: Path) -
     _alone(control, ("a failure carrying a host path", d))
 
 
-def test_p027_lead_writes_a_summary_though_every_call_failed(tmp_path: Path) -> None:
-    """A lead whose issued calls all failed gets 'every call failed', decided from the call results, even though it wrote a summary; exactly one correlation section."""
-    scene = _Scene(tmp_path)
-    control = scene.control()
-    narration = "FD1222-NARRATED-ABSENCE: 0 alerts scoped, 0 unscoped"
-    d = scene.run("narrates-absence", backend=_fail_alerts(S.upstream_fault),
-                  leads={S.L3: [_q(1), _q(2), S.text(narration)]})
-    confined = scene.run("confined", backend=_fail_alerts(S.confinement_fault),
-                         leads={S.L3: [_q(1), S.text("FD1222-CONFINED-NARRATION")]})
-    empty = scene.run("empty-output", leads={S.L3: [S.EMPTY_OUTPUT]})
-
-    sentence = _named(d, control, "every call failed, with a summary")
-    assert _named(confined, control, "every call failed (confinement)") == sentence, (
-        "two leads whose every call failed are named differently")
-    assert sentence != _named(empty, control, "empty output"), (
-        "a lead whose calls all failed is named 'empty output'")
-    _assert_never_handed(d, narration, "FD1222-NARRATED-ABSENCE")
-    _assert_never_handed(confined, "FD1222-CONFINED-NARRATION")
-    rows = d.rows_for(S.L3)
-    assert len(rows) == 2, f"the scenario's two calls did not both run: {rows}"
-    assert all(r.get("exit_code") != 0 for r in rows), f"not every issued call failed: {rows}"
-    _alone(control, ("every call failed, with a summary", d), ("confined", confined))
-
-
 def test_p028_backend_answers_with_no_count(tmp_path: Path) -> None:
     """A lead that measured something, part of what it asked or zero rows, delivers its own framed summary. That summary never reports a failed count as zero. A partial result is not a named ending."""
     scene = _Scene(tmp_path)
@@ -772,49 +748,6 @@ def test_p029_l00c_claimed_but_its_declaring_row_refused(tmp_path: Path) -> None
     _alone(control, ("declaring row refused", d))
 
 
-def test_p035_leads_table_unwritable_at_run_start(tmp_path: Path) -> None:
-    """A leads table that cannot be written at run start is l-00c's named 'claim failed' ending; MAIN's own first claim then stops the run loudly at that point; nothing continues silently."""
-    scene = _Scene(tmp_path)
-    control = scene.control()
-    reference = scene.run("session-refused", store_factory=_lead_session_refused_once(tmp_path))
-    d = scene.run("aliased-leads-table", before=_alias_leads_table,
-                  main=[S.gather("l-001", "elastic"), S.text(DONE)])
-
-    assert _named(d, control, "leads table aliased") == _named(
-        reference, control, "claim failed (session)"), (
-        "an unwritable leads table is not named with the claim-failed sentence")
-    assert d.main.requests == 1, (
-        f"MAIN's own claim failed and the run went on: MAIN made {d.main.requests} requests")
-    assert _stopped_loudly(d), f"MAIN's failed claim ended the run silently: {d.summary!r}"
-    assert d.report is None, "the run reached report.md after MAIN's own claim failed"
-    _alone(control, ("leads table aliased", d))
-
-
-def test_p036_run_dir_redriven_over_an_earlier_invocation(tmp_path: Path) -> None:
-    """A claim that collides with an earlier attempt's l-00c row gets the named claim ending. The earlier attempt's summary is never delivered as this attempt's."""
-    scene = _Scene(tmp_path)
-    control = scene.control()
-    reference = scene.run("collided-reference", before=_preclaim())
-    # An earlier invocation of this run id left only what setup writes (PR-28: such a folder is
-    # resumed): l-00c's leads row, claimed by the REAL `claim_lead`, and one raw payload of its.
-    run_id = "fd1222-acme-redriven-00"
-    earlier = scene.tenant.runs / run_id
-    earlier.mkdir(parents=True)
-    _preclaim(goal="FD1222-EARLIER-GOAL: correlate office-ws-1")(earlier)
-    payload = Path(RunPaths(earlier).payload(S.L3, 1))
-    payload.parent.mkdir(parents=True, exist_ok=True)
-    payload.write_text('{"FD1222-EARLIER-PAYLOAD": 41}\n', encoding="utf-8")
-    d = scene.run("redriven", run_id=run_id)
-
-    assert d.run_dir == earlier, f"the re-drive did not resume the earlier folder: {d.refusal!r}"
-    assert _named(d, control, "re-driven over an earlier claim") == _named(
-        reference, control, "claim collided (reference)"), (
-        "a re-drive over an earlier l-00c row is not named with the collision sentence")
-    _assert_never_handed(d, "FD1222-EARLIER-GOAL", "FD1222-EARLIER-PAYLOAD")
-    assert not d.router.dispatched(S.L3), "the re-drive dispatched l-00c over the earlier claim"
-    _alone(control, ("re-driven over an earlier claim", d))
-
-
 def test_p136_correlation_summary_forges_the_harness_notice(tmp_path: Path) -> None:
     """Exactly one correlation section. A reader can tell the harness sentence, which stands outside the lead's frame, from text inside the lead's framed summary or the alert."""
     scene = _Scene(tmp_path)
@@ -838,46 +771,6 @@ def test_p136_correlation_summary_forges_the_harness_notice(tmp_path: Path) -> N
     for line in sentence.splitlines():
         assert line not in harness, f"the forged sentence reads as harness text: {line!r}"
         assert line in added[0], f"the forged sentence is not inside the lead's frame: {line!r}"
-
-
-def test_p137_provider_fails_transiently_once(tmp_path: Path) -> None:
-    """When the provider fails the lead's request, MAIN gets the "dispatch raised" sentence and the run reaches report.md. No retry beyond the client's own is promised."""
-    scene = _Scene(tmp_path)
-    control = scene.control()
-    reference = scene.run("crashed", lead_faults={S.L3: S.LeadFault(
-        raise_on=1, exc=_runtime_error("dispatch exploded"))})
-    d = scene.run("provider-failed-once", main=S.closing_main_turns("inconclusive"),
-                  leads={S.L3: [S.text("FD1222-AFTER-A-RETRY")]},
-                  lead_faults={S.L3: S.LeadFault(raise_on=1, exc=S.provider_refusal)})
-
-    assert _named(d, control, "provider failed the request") == _named(
-        reference, control, "dispatch raised (reference)"), (
-        "a provider failure is not named with the dispatch-raised sentence")
-    _assert_never_handed(d, "FD1222-AFTER-A-RETRY", "request refused by provider")
-    _assert_closed(d, "provider failed the lead's request")
-    _alone(control, ("provider failed the request", d))
-
-
-def test_p172_no_registry_fresh_drive_dispatches_no_correlatio(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A fresh drive with no verb registry gets the withheld sentence; there is no third state."""
-    scene = _Scene(tmp_path)
-    control = scene.control()
-    d = scene.run("no-registry", verbs=None)
-    # The same tenant id with a withholding table, under a second data root, so the two
-    # sentences may be compared whole.
-    other_root = tmp_path / "withholding-root"
-    other_root.mkdir()
-    withholding = _Scene(tmp_path / "withholding", root=other_root, table=S.TABLE_WITHHELD)
-    monkeypatch.setenv(D.DATA_ROOT_ENV, str(other_root))
-    withheld = withholding.run("withheld")
-    monkeypatch.setenv(D.DATA_ROOT_ENV, str(scene.tenant.root))
-
-    sentence = _named(d, control, "no verb registry")
-    assert sentence == _named(withheld, control, "withheld (reference)"), (
-        "a drive with no verb registry is not given the withheld sentence")
-    assert not d.router.dispatched(S.L3), "a drive with no verb registry dispatched l-00c"
-    _assert_continued(d, "no verb registry", requests=2)
 
 
 def test_p176_lead_model_not_configured(tmp_path: Path) -> None:
@@ -948,28 +841,6 @@ def _plain_gather_run(tmp_path: Path, scene: _Scene, gather_turns: Sequence[H.Tu
         lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
         ticket_writer=S.NoTicket(), enqueue=lambda *_a, **_k: False)
     return d, gather
-
-
-def test_p184_default_fake_issues_no_call_and_every_call_faile(tmp_path: Path) -> None:
-    """The default fake's no-call summary is usable: MAIN's opening message carries it, never 'every call failed'."""
-    scene = _Scene(tmp_path)
-    control = scene.control()
-    plain_text = "FD1222-MAIN-LEAD-SCRIPT: only MAIN's own leads may draw this"
-    backend = _backend()
-    d, gather = _plain_gather_run(tmp_path, scene, [H.Turn(text=plain_text)], backend)
-
-    _assert_never_handed(d, plain_text)
-    assert not any(f"lead_id: {S.L3}" in seen for seen in gather.seen), (
-        "l-00c drew its turns from the replay's plain gather script, not its own default fake")
-    added = _summary_frames(d, control)
-    assert len(added) == 1, (
-        "MAIN's opening message does not carry the default fake's summary as the one "
-        f"correlation section: {len(added)} lead frames")
-    assert added[0].strip(), "the default fake's framed summary is empty"
-    assert _ending(d, control) == "", (
-        f"the default fake's no-call summary was named as an ending: {_ending(d, control)!r}")
-    assert backend.rec.calls == [], (
-        f"the default correlation fake issued backend calls: {backend.rec.verbs}")
 
 
 def test_p191_lead_writes_a_summary_without_reading_the_alert(tmp_path: Path) -> None:

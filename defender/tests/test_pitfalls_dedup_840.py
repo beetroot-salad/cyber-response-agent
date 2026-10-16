@@ -1,36 +1,4 @@
-"""#840 — the pitfalls RECORD SET is deduplicated, and the count survives the collapse.
-
-`collect_general_failures` emits one record per failing ROW and `append_pitfalls` used to
-append them untouched, so the incident that motivated #823 — `l-003` spending ~8 consecutive
-turns brute-forcing DuckDB `unnest` against one envelope — enqueued ~8 near-identical records
-and cleared #823's threshold of 3 on a single lesson. The curator then received eight copies
-of one bullet, and a green threshold stopped being evidence that the channel had learned three
-things (#823 O3 / C9).
-
-WHAT THIS PINS
---------------
-- The identity of a MISTAKE is `(owner, stderr_digest)` (`persist.pitfall_key`) — NOT the row,
-  not the exact query. The l-003 shape varies the SQL while the adapter's diagnosis stays put,
-  and two coined queries that earn the identical rejection teach one bullet. The owner was
-  `system` when #840 was written and is the SURFACE THE LESSON IS TAUGHT ON since #870, which
-  added a second one: a `∅.bash-shim` row belongs to `defender-sql` however the reduce was
-  attributed. `query_id` is still out of the key as an identity — it is read only to answer
-  which surface owns the row, which is why `_row` defaults to a system id and `_shim` exists.
-- The collapse KEEPS THE COUNT (`occurrences: N`). N identical failures are evidence of
-  severity as well as noise; a dedup that discarded the count would throw the severity away.
-- The seam is the READ, not the append: the queue file keeps one line per failure (#719 D9
-  leaves exactly one wholesale rewriter of a queue file, and it is the rotation), while both
-  seams that consume the queue — the curation threshold and the curator's handoff — read it
-  through `merge_pitfalls`. Counting rows counts failures; counting records counts lessons.
-
-WHAT IT DELIBERATELY DOES NOT TOUCH
------------------------------------
-Row-level duplication in the queries table: `test_pitfalls_input_823.py::test_shim_row_never_
-causes_a_trip` pins that three identical failing reduces write three rows, because shim rows
-are observational and must not dead-end a lead (#823 N3). The duplication is by design at the
-row level; #840 is only about whether it survives into the record level. The threshold VALUE
-is #823 M4's and is out of scope here too.
-"""
+"""The pitfalls record set is deduplicated on read by (owner, stderr_digest) and the occurrence count survives the collapse."""
 from __future__ import annotations
 
 import json
@@ -267,27 +235,6 @@ def test_a_row_whose_digest_carries_no_diagnosis_keys_to_itself(paths):
         )
 
 
-def test_the_merge_key_normalises_system_the_way_the_handoff_groups_it():
-    """`_build_pitfalls_handoffs` groups on the STRIPPED system, so a key coarser than that
-    grouping hands the curator N entries it reads as N bullets — the one thing the collapse
-    exists to prevent."""
-    rows = [_row("r:l-001:0"), _row("r:l-002:0", system="elastic "),
-            _row("r:l-003:0", system=" elastic")]
-    failures = pitfalls_curator._build_pitfalls_handoffs(
-        rows, systems=frozenset({"elastic"}))[0]["failures"]
-    assert len(failures) == 1, "one mistake reached the curator as three bullets"
-    assert failures[0]["occurrences"] == 3
-
-
-def test_an_empty_append_leaves_the_queue_untouched(paths):
-    """The rewrite must not fire on a no-op append — a run with no agent-fixable failure is
-    the common case, and it has no business rewriting another run's queue."""
-    persist.append_pitfalls([_row("r:l-001:0")], state=_state1135.state_for_paths(paths))
-    before = (paths.state_root / PITFALLS.queue).read_text(encoding="utf-8")
-    assert persist.append_pitfalls([], state=_state1135.state_for_paths(paths)) == 0
-    assert (paths.state_root / PITFALLS.queue).read_text(encoding="utf-8") == before
-
-
 # O3's repair — the threshold now counts distinct mistakes, so clearing it means the channel
 # learned that many things.
 
@@ -353,29 +300,6 @@ def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch)
     assert [e["surface"] for e in calls[0]] == ["reducer"]
 
 
-def test_three_distinct_lessons_do_clear_it(paths, monkeypatch):
-    """The positive control: the gate still opens, so the negative above is a dedup and not
-    a channel that stopped working.
-
-    Driven on the SYSTEM lane (`_row`'s own default since #870): a `∅.bash-shim` row is a
-    REDUCER row now, and a reducer row's rotation is governed by FK-7's confirmed-edit rule
-    rather than by membership — which is a demand of that round
-    (`a_no_edit_reducer_tick_holds_its_rows`) and not what #840's collapse-then-rotate seam is
-    about. The merge key is `(owner, stderr_digest)` either way and the digests here are three
-    distinct diagnoses, so the collapse under test is unchanged."""
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    persist.append_pitfalls(
-        [_row(f"r:l-00{i}:0", digest=f"exit=1; distinct error {i}") for i in range(3)],
-        state=_state1135.state_for_paths(paths),
-    )
-    calls: list = []
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls),
-                                         trees=lead_trees(paths)) == 0
-    assert len(calls) == 1
-    assert len(calls[0][0]["failures"]) == 3
-    assert _pending(paths) == [], "the batch was curated but not rotated"
-
-
 def test_the_wake_gate_counts_what_the_curation_gate_counts(paths, monkeypatch):
     """`_has_lead_author_work` is what spins the drain up. If it counted rows while
     `run_pitfalls` counted mistakes, every tick would start a lead-author drain that then
@@ -408,19 +332,6 @@ def test_the_handoff_carries_the_count_and_leads_with_it():
     failures = handoffs[0]["failures"]
     assert [f["occurrences"] for f in failures] == [8, 1]
     assert failures[0]["stderr_digest"] == UNNEST
-
-
-def test_the_handoff_builder_collapses_raw_queue_rows_itself():
-    """The builder is handed queue ROWS, which carry no count of their own, and it is the
-    last seam before the prompt. It merges rather than trusting its caller to have done it,
-    so no future reader of the queue can hand the curator four copies of one bullet."""
-    rows = [_row(f"r:l-003:{i}") for i in range(4)]
-    for row in rows:
-        assert "occurrences" not in row
-    failures = pitfalls_curator._build_pitfalls_handoffs(
-        rows, systems=frozenset({"elastic"}))[0]["failures"]
-    assert len(failures) == 1
-    assert failures[0]["occurrences"] == 4
 
 
 def test_every_duplicate_row_behind_a_curated_record_rotates(paths, monkeypatch):

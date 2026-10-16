@@ -1,18 +1,4 @@
-"""#648 — a path recorded in a run artifact is a label, not an address.
-
-The run dir is the box's rw bind, so model-written bash can write the queries table and the
-gather tree. Two host-side readers used to turn a recorded string into an `open()` under a
-LEXICAL guard: the payload reader rejected paths that were spelled absolute, and the bundle
-resolver TRUSTED paths that were spelled absolute. Neither asked where the value lands.
-
-Both gates matter and they answer different questions, so the symlink case is the load-bearing
-one here: it is spelled exactly like a real artifact and still escapes, which is precisely what
-a shape-only fix passes.
-
-The bundle resolver (`resolve_run_bundle`) is gone (#1105 PR 2, F-13): a stored run is
-addressed by id (`RunAddress`, which refuses a path where the id belongs) and opened through
-its tenant's repository, so its three tests went with it.
-"""
+"""A path recorded in a run artifact is a label, not an address: payload reads and staging refuse escapes and planted links."""
 from __future__ import annotations
 
 import json
