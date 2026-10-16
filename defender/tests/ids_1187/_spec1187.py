@@ -71,6 +71,25 @@ def new_id() -> str:
     return str(uuid.uuid4())
 
 
+#: How many hex digits canonical UUID text carries (the `near_miss_id` positions).
+UUID_HEX_DIGITS = 32
+
+
+def near_miss_id(text: str, digit: int = -1) -> str:
+    """`text` (canonical UUID text) with ONE hex digit changed — its `digit`-th hex digit,
+    hyphens not counted (the last by default) — so the result is canonical UUID text too and
+    shares every other character. A mismatch only a whole-id comparison sees: a reader that
+    compares a prefix, one group or a suffix of two ids passes it whenever the changed digit is
+    one it skips (adversary F11)."""
+    chars = list(text)
+    at = [i for i, c in enumerate(chars) if c != "-"][digit]
+    chars[at] = "0" if chars[at] != "0" else "1"
+    out = "".join(chars)
+    if not is_canonical_uuid(out) or out == text:  # pragma: no cover — 32 hex digits round-trip
+        raise ValueError(f"{out!r} is not a canonical near miss of {text!r}")
+    return out
+
+
 def is_canonical_uuid(text: object) -> bool:
     """Is `text` canonical lowercase UUID text? The test-side oracle, written from the
     design's rule (O2), not from production's."""
@@ -286,6 +305,112 @@ def tree(root: Path) -> dict[str, tuple[str, bytes | str | None]]:
     """Every entry under `root` (links not followed): relative path -> (kind, content or link
     target). For "nothing changed" and "these bytes moved intact" assertions."""
     return H5.tree_state(Path(root))
+
+
+def identities(root: Path, names: Iterable[str] | None = None) -> dict[str, tuple[int, int]]:
+    """`{relative path: (st_dev, st_ino)}` of every entry under `root` whose top-level name is
+    one of `names` (every entry, by default), the entries below them included, links not
+    followed. A rename keeps both numbers; a copy — even a byte-identical one — makes new
+    inodes. For "moved by rename, never copied" assertions (adversary F3), beside `tree`'s
+    bytes."""
+    root = Path(root)
+    wanted = None if names is None else frozenset(names)
+    out: dict[str, tuple[int, int]] = {}
+    if not root.is_dir():
+        return out
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in (*dirnames, *filenames):
+            path = Path(dirpath) / name
+            rel = path.relative_to(root)
+            if wanted is not None and rel.parts[0] not in wanted:
+                continue
+            st = os.lstat(path)
+            out[rel.as_posix()] = (st.st_dev, st.st_ino)
+    return out
+
+
+#: inotify's event bits this suite watches for (`<sys/inotify.h>`).
+IN_ACCESS = 0x00000001
+IN_OPEN = 0x00000020
+
+
+class FileReads:
+    """What the KERNEL saw happen to one file while the block ran: each `IN_OPEN` and
+    `IN_ACCESS` (a read that returned bytes) inotify reports on `path`, whoever made it —
+    production code reading through `_io`, a raw `open`, or any other route (adversary F9: a
+    sentinel that fires only through one parser misses a read through another). Linux only;
+    `available()` says whether this box has it.
+
+    Watch a file AFTER its last rewrite (the watch is on the inode a later replace would leave
+    behind), and drain `events()` before anything else reads it — the test's own reads count
+    too. A context manager: leaving it closes the inotify descriptor."""
+
+    def __init__(self, path: Path) -> None:
+        import ctypes
+
+        self.path = Path(path)
+        libc = ctypes.CDLL(None, use_errno=True)
+        self._fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        if self._fd < 0:
+            raise OSError(ctypes.get_errno(), "inotify_init1 failed")
+        wd = libc.inotify_add_watch(self._fd, os.fsencode(self.path), IN_ACCESS | IN_OPEN)
+        if wd < 0:
+            errno_ = ctypes.get_errno()
+            os.close(self._fd)
+            raise OSError(errno_, f"inotify_add_watch({self.path}) failed")
+        self._seen: list[str] = []
+
+    @staticmethod
+    def available() -> bool:
+        """Can this box watch a file (Linux, inotify present)?"""
+        import ctypes
+        import sys
+
+        if not sys.platform.startswith("linux"):
+            return False
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        except (OSError, AttributeError):
+            return False
+        if fd < 0:
+            return False
+        os.close(fd)
+        return True
+
+    def events(self) -> list[str]:
+        """Every event so far, oldest first, as `"open"` / `"read"`."""
+        import struct
+
+        while True:
+            try:
+                buf = os.read(self._fd, 65536)
+            except BlockingIOError:
+                break
+            at = 0
+            while at < len(buf):
+                _wd, mask, _cookie, length = struct.unpack_from("iIII", buf, at)
+                at += 16 + length
+                if mask & IN_OPEN:
+                    self._seen.append("open")
+                if mask & IN_ACCESS:
+                    self._seen.append("read")
+        return list(self._seen)
+
+    def reads(self) -> int:
+        """How many reads of the file returned bytes so far."""
+        return self.events().count("read")
+
+    def close(self) -> None:
+        if self._fd >= 0:
+            os.close(self._fd)
+            self._fd = -1
+
+    def __enter__(self) -> FileReads:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
 
 raised = H5.raised
