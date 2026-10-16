@@ -81,32 +81,6 @@ def _prose_files() -> list[Path]:
 
 # --- the unmoved consumers of the vocabulary ------------------------------------------------
 
-def _lessons_run_has_no_confident_ground_truth(_tmp_path: Path) -> None:
-    """Asserted as the reader's answer for EVERY member including the new one, in both
-    directions — not as the set of members it says yes to.
-
-    A yes-set is the vacuous shape and this case shipped in it: this reader answers False for
-    every value it does not name, so a table that only lists the members it accepts is
-    identical before and after the vocabulary grows, and the case asserts nothing about the
-    member it is named for. Keyed per member, the new member needs a cell, so the case is red
-    until the vocabulary carries it and red again if it is ever taught to stand as ground truth
-    for either hunt."""
-    from defender._vocab import DISPOSITION_ENUM
-    from defender.learning.author.lessons.run import _has_confident_ground_truth
-
-    confident = {
-        direction: {m: _has_confident_ground_truth(direction, m) for m in sorted(DISPOSITION_ENUM)}
-        for direction in ("benign", "adversarial")
-    }
-    expected = {
-        "benign": {GAP_MEMBER: False, MEMBER: False, "benign": False,
-                   "false-positive": False, "malicious": True},
-        "adversarial": {GAP_MEMBER: False, MEMBER: False, "benign": True,
-                        "false-positive": False, "malicious": False},
-    }
-    assert confident == expected, confident
-
-
 def _invlang_queries_finds_the_case(_tmp_path: Path) -> None:
     from defender.skills.invlang.corpus import Companion
     from defender.skills.invlang.parser import parse_dense_companion
@@ -325,8 +299,8 @@ def _visualize_episode_counts_the_member_and_coerces_nothing(_tmp_path: Path) ->
 
 
 _READERS = {
-    # the vocabulary's unmoved consumers
-    "lessons_run": _lessons_run_has_no_confident_ground_truth,
+    # the vocabulary's unmoved consumers (#1166 retired "lessons_run": the per-case ground-truth
+    # reader it drove was deleted with the forward check)
     "invlang_queries": _invlang_queries_finds_the_case,
     "invlang_cli": _invlang_cli_accepts_it_as_a_filter,
     # #767 N10 retired "ticket_lane->disposition" (`_ticket_lane_refuses_it_as_an_authored_

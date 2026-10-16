@@ -177,11 +177,9 @@ def test_1224_oracle_and_its_verifier_are_their_own_roles_with_their_own_model_k
     AgentRole, AGENTS = _role(), _agents()
     assert AgentRole.ORACLE.value == "oracle"
     assert AgentRole.ORACLE_CHECK.value == "oracle_check"
-    assert AgentRole.VERIFIER not in (AgentRole.ORACLE, AgentRole.ORACLE_CHECK)
     oracle_def, check_def = AGENTS[AgentRole.ORACLE], AGENTS[AgentRole.ORACLE_CHECK]
     assert oracle_def.role is AgentRole.ORACLE
     assert check_def.role is AgentRole.ORACLE_CHECK
-    assert oracle_def is not AGENTS[AgentRole.VERIFIER]
 
     # Read at call time: the same definition answers the knob's new value with no reload.
     monkeypatch.setenv(S.KNOB_MODEL, "glm-5.3")

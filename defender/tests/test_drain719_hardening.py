@@ -70,7 +70,6 @@ def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: 
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
-    h.write_source_refs(paths, "a")
     h.seed(paths, ch, rows)
 
     cfg = h.cfg_for(
@@ -130,7 +129,6 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
-    h.write_source_refs(paths, "a")
     h.seed(paths, ch, rows)
 
     appender = h.Holder(paths.state_root / ch.append_lock)
@@ -182,7 +180,6 @@ def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tm
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
-    h.write_source_refs(paths, "a")
     h.seed(paths, ch, rows)
     stray = paths.repo_root / "scratch.txt"
 

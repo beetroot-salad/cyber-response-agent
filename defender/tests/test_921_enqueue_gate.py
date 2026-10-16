@@ -35,7 +35,6 @@ import pytest
 
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
-from defender.tests._curator1134 import author_trees
 from defender.learning.core.config import LoopPaths
 from defender.learning.core.state import LearningState
 from defender.tests import _state1135
@@ -73,7 +72,7 @@ def _family_row(fid: str = "ep-1/b/0/0", **over) -> dict:
                contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
                on_verdict_path=True, world_label_doubted=False)
     # `D.finding_row` is the adversarial channel's shape, which still spells the retired word.
-    row.pop("judge_outcome")
+    row.pop("judge_outcome", None)
     row.update(over)
     return row
 
@@ -119,7 +118,7 @@ def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
 def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings(tmp_path):
     """One tick's batch carrying family rows AND adversarial/benign rows routes each population
     by its OWN rule and neither disturbs the other: the family rows take the family partition,
-    the rest take `_gate_findings` unchanged.
+    the rest are held as a retired direction (#1166 deleted the per-case route they took).
 
     A mixed batch is the designed shape, not an edge case — the channel gate is called once per
     tick over every keyed row of the file — and it is the shape the whole tick fails on if the
@@ -127,7 +126,6 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
     """
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
-    D.write_source_refs(paths, "run-adv", disposition="benign")
     D.seed(paths, channel, [
         D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial"),
         _family_row("ep-1/b/0/0"),
@@ -138,12 +136,12 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
 
     assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
     authored = {r["finding_id"] for r in agent.calls[0]["rows"]}
-    assert authored == {"run-adv/0", "ep-1/b/0/0"}, (
+    assert authored == {"ep-1/b/0/0"}, (
         f"the two populations did not route independently: {sorted(authored)}")
-    still_held = {r["finding_id"] for r in D.pending(paths, channel)}
-    assert still_held == {"run-held/0"}, (
-        "the adversarial row with no ground truth stopped being held, or the family row was "
-        "held with it")
+    still_held = {r["finding_id"]: r["held_reason"] for r in D.pending(paths, channel)}
+    assert still_held == {"run-adv/0": "retired_direction('adversarial')",
+                          "run-held/0": "retired_direction('adversarial')"}, (
+        "an adversarial row stopped being held, or the family row was held with it")
 
 
 def test_921_gate_family_authors_a_survived_row(tmp_path):
@@ -352,7 +350,6 @@ def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path
     # The blast radius the refusal exists to prevent, on the real channel.
     paths = D.make_paths(tmp_path / "blast")
     channel = D.channel_of("findings")
-    D.write_source_refs(paths, "run-adv", disposition="benign")
     unkeyable = _family_row("ep-1/b/0/9")
     unkeyable.pop("run_id")
     D.seed(paths, channel, [D.finding_row("run-adv/0", run_id="run-adv"), unkeyable])
@@ -549,14 +546,13 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     is asserted here and not just the absence of a raise.
 
     The loss is bounded to the torn line: every row this pass says it enqueued is readable on
-    the queue afterwards, and so is the adversarial row that was already there.
+    the queue afterwards, and so is the family row that was already there.
     """
     from defender._io import read_jsonl_rows_report
 
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
-    D.write_source_refs(paths, "run-adv", disposition="benign")
-    D.seed(paths, channel, [D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial")])
+    D.seed(paths, channel, [_family_row("ep-0/b/0/0")])
     queue = paths.state_root / channel.queue
     with queue.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(_family_row("ep-1/b/9/9"))[:120])   # NO newline: the tail is TORN
@@ -582,15 +578,16 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         f"{unreadable} unreadable line(s) on the queue: the torn tail cost more than itself — "
         "an appended row was concatenated onto the fragment and lost with it")
     ids = [r["finding_id"] for r in rows]
-    assert "run-adv/0" in ids, (
-        "the adversarial row that was already queued went with the torn tail")
-    family_ids = [r["finding_id"] for r in rows if r.get("direction") == "family"]
+    assert "ep-0/b/0/0" in ids, (
+        "the family row that was already queued went with the torn tail")
+    family_ids = [r["finding_id"] for r in rows
+                  if r.get("direction") == "family" and r["finding_id"] != "ep-0/b/0/0"]
     assert len(family_ids) == record["enqueued_rows"], (
         f"the record claims {record['enqueued_rows']} enqueued rows and {len(family_ids)} are "
         "readable; a row of this pass's own was swallowed by the fragment")
 
     # The stall F-11 exists to prevent, on the real channel: the tick runs to completion and
-    # routes both populations rather than stuck-recording the whole batch behind one torn line.
+    # drains the queue rather than stuck-recording the whole batch behind one torn line.
     agent = D.recording(D.committing("torn-tail"))
     assert J.mod("learning.author.drain").run_batch(
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
@@ -598,9 +595,8 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         "a torn trailing row stuck-recorded the batch; P6's blast radius is every direction "
         "riding in that tick, which is the whole reason the reader must skip it")
     authored = {r["finding_id"] for call in agent.calls for r in call["rows"]}
-    assert "run-adv/0" in authored, (
-        "the direction that already works stopped draining because of a torn line written by "
-        "the direction this issue adds")
+    assert "ep-0/b/0/0" in authored, (
+        "the row already queued stopped draining because of a torn line written after it")
 
 
 # ---------------------------------------------------------------------------------------
@@ -714,124 +710,6 @@ def test_921_discard_needs_a_majority_of_draws(tmp_path):
 # ---------------------------------------------------------------------------------------
 # N6 and J12 — what this appender does NOT touch
 # ---------------------------------------------------------------------------------------
-
-
-
-
-def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):
-    """J12, settled with the human: a `direction: family` row is EXEMPT from the lessons
-    forward check, whose ground truth for it is `disposition_declared` on the family record
-    rather than a `source_refs.yaml` it does not have.
-
-    #773 M1 moves the check out of the curator's own tool call entirely — the drain now runs
-    it itself, and `cfg.exempt(row)` (wired to this exact predicate on the lessons channel,
-    `CorpusAuthorConfig.exempt is skips_forward_check`) is where the exemption is consulted;
-    there is no more model-facing tool, no `queued_ids` route and no `forward_checkable_ids`
-    derivation to pin separately (see `tests/test_773_verdict_pass.py`'s
-    `test_a_file_cited_only_by_a_family_finding_commits_on_exempt_773` for the exemption
-    driven through a real tick). What survives here is the predicate itself.
-
-    Positive control: an adversarial row does NOT skip the check, so the exemption is a route
-    rather than the check's removal.
-    """
-    checks = J.mod("learning.author.verify_forward.checks")
-    paths = D.make_paths(tmp_path)
-    D.write_source_refs(paths, "run-adv", disposition="benign")
-
-    assert checks.skips_forward_check(_family_row()) is True
-    assert checks.skips_forward_check(
-        D.finding_row("run-adv/0", run_id="run-adv")) is False, (
-        "the exemption swallowed the adversarial direction's check as well")
-
-    lessons_run = J.mod("learning.author.lessons.run")
-    paths2 = D.make_paths(tmp_path / "cfg")
-    cfg = lessons_run.build_author_config(paths2, trees=author_trees(paths2), state=LearningState.open(paths2))
-    assert cfg.exempt is checks.skips_forward_check
-
-
-def _removed_test_921_a_family_row_answers_exempt_rather_than_error(tmp_path):
-    """The J12 exemption reaches the model as EXEMPT, not as a check that broke.
-
-    The exemption was implemented as a ROUTE — a family row's id is kept out of `queued_ids` —
-    and the model-facing tool then answered "not in this batch's queued rows", which renders as
-    ERROR. The curator prompt's rule for a pair that errors twice is to revert the file like a
-    BAD, so the one authorable outcome the family judge produces was written and then deleted
-    on every tick: the row rotates back onto the queue and the next batch repeats it forever.
-
-    Driven through the real tool over real `CuratorDeps`, because what was wrong is the VERDICT
-    the tool renders — a test asserting on `skips_forward_check` alone never sees it, and the
-    committed one did not.
-
-    #773 M1 deletes the model-facing `forward_check` tool this test drove — the check is the
-    drain's own now. Left as an unreachable (renamed, un-prefixed-`test_`) function rather
-    than deleted outright, so the historical reasoning above stays attached to its code.
-    """
-    import asyncio
-
-    from defender.tests import _curator_scene as S
-
-    tool = J.mod("learning.author.verify_forward.tool")
-    lessons_run = J.mod("learning.author.lessons.run")
-
-    family = _family_row()
-    scene = S.curator_scene(tmp_path)
-    lesson = scene.corpus / "L1.md"
-    lesson.write_text("---\nid: L1\n---\nbody\n", encoding="utf-8")
-
-    # THE PRODUCTION DERIVATIONS, both of them: the route is that one set excludes the row and
-    # the other names it. Re-deriving either here would leave the test green when production's
-    # filter is removed.
-    queued = lessons_run.forward_checkable_ids([family])
-    exempt = lessons_run.forward_exempt_ids([family])
-    assert queued == frozenset(), "the family row entered the checkable set"
-    assert exempt == {str(family["run_id"])}, "the family row is not named exempt"
-
-    deps = S.curator_deps(scene)
-    out = asyncio.run(tool.run_forward_check(
-        deps, [tool.Pair(lesson_path=str(lesson), source_id=str(family["run_id"]))]))
-
-    assert out.startswith("EXEMPT "), f"the exemption did not render as EXEMPT: {out!r}"
-    assert S.batch_exempt(out) == 1, f"the batch summary does not count it: {out!r}"
-    assert S.batch_counts(out) == (0, 0, 0), (
-        f"an exempt pair was also counted as good, bad or errored: {out!r}")
-
-
-def _removed_test_921_a_row_missing_for_any_other_reason_still_errors(tmp_path):
-    """EXEMPT is keyed on the row's KIND, never on absence from the queued set.
-
-    Collapsing the two would answer "nothing to do here" for a row that went missing through a
-    real fault, and the batch would stop hearing about it — the opposite of what the queued-set
-    check is for. The positive control for the test above.
-
-    #773 M1 deletes the model-facing tool (`queued_ids`, `Pair`, `run_forward_check`) this
-    drove; the property survives, driven differently, at
-    `tests/test_773_inputs.py::test_queue_row_direction_is_an_unrecognized_value_773` (GL1:
-    `skips_forward_check` is one equality test on `direction`, so a row missing for any OTHER
-    reason is never accidentally exempted). Left unreachable rather than deleted so the
-    reasoning above stays attached to its code.
-    """
-    import asyncio
-
-    from defender.tests import _curator_scene as S
-
-    tool = J.mod("learning.author.verify_forward.tool")
-    scene = S.curator_scene(tmp_path)
-    lesson = scene.corpus / "L1.md"
-    lesson.write_text("---\nid: L1\n---\nbody\n", encoding="utf-8")
-
-    deps = S.curator_deps(scene)
-    out = asyncio.run(tool.run_forward_check(
-        deps, [tool.Pair(lesson_path=str(lesson), source_id="run-nobody-queued")]))
-
-    assert out.startswith("ERROR "), f"a genuinely absent row was excused: {out!r}"
-    assert S.batch_exempt(out) == 0, "a fault was filed as an exemption"
-
-
-def _never_verifies(*_a, **_k) -> str:
-    """A verify seam that must not be reached: both cases above are settled before the check
-    runs, and reaching it would mean the exemption or the queued-set guard did not."""
-    raise AssertionError("the forward check ran for a pair it should have settled first")
-
 
 
 def test_the_row_rule_screens_key_presence_not_the_value():

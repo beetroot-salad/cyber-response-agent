@@ -54,6 +54,7 @@ from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
+from ..exception_groups import carried, carried_unless_overridden
 from .. import review_roles
 from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
@@ -279,16 +280,25 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
-    except (run_end.CallRecordWriteFailed, BaseExceptionGroup) as e:
-        # A call record the run could not write ends it (A12, #1234), stamped with the record
-        # that failed. Concurrent leads may deliver it inside an exception group; a group that
-        # carries none propagates as itself.
-        failed = _call_record_failure(e)
-        if failed is None:
+    except (run_end.CallRecordWriteFailed, providers.ProviderDown, BaseExceptionGroup) as e:
+        # Two failures end the run by name. Concurrent leads may deliver either inside an
+        # exception group; a group that carries neither propagates as itself.
+        failed = carried(e, run_end.CallRecordWriteFailed)
+        down = _provider_down_in(e)
+        if failed is not None:
+            # A call record the run could not write (A12, #1234), stamped with the record that
+            # failed.
+            _logger.error(f"{failed}")
+            truncated_by = failed.record
+            exit_reason = "CallRecordWriteFailed"
+        elif down is not None:
+            # A model request kept failing temporarily past the retrier (#1243): an
+            # infrastructure end, so like the budget kill it writes no report.
+            _logger.error(f"{down}; ending the run")
+            truncated_by = session_store.TRUNCATED_BY_PROVIDER_DOWN
+            exit_reason = "ProviderDown"
+        else:
             raise
-        _logger.error(f"{failed}")
-        truncated_by = failed.record
-        exit_reason = "CallRecordWriteFailed"
     finally:
         _flush_run_end(run, store, session_id, truncated_by)
     # The run-end record is taken before the forced close sets `closed`, and written always
@@ -316,16 +326,10 @@ def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
     bind_call_ids(state, run if isinstance(run, str) and run else run_id)
 
 
-def _call_record_failure(exc: BaseException) -> run_end.CallRecordWriteFailed | None:
-    """The `CallRecordWriteFailed` `exc` is or carries (an exception group may wrap it)."""
-    if isinstance(exc, run_end.CallRecordWriteFailed):
-        return exc
-    if isinstance(exc, BaseExceptionGroup):
-        for inner in exc.exceptions:
-            found = _call_record_failure(inner)
-            if found is not None:
-                return found
-    return None
+def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:
+    """The `ProviderDown` that should end the run on `exc` (bare, or carried by a group that
+    holds no interrupt, kill or abort), else `None`."""
+    return carried_unless_overridden(exc, providers.ProviderDown, (BudgetKill, RunAborted))
 
 
 def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
@@ -498,7 +502,12 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
     except (sqlite3.Error, session_store.StoreError) as e:
         _logger.error(f"store fault during the correlation lead ({e!r}); ending the run")
         return None, stop(session_store.TRUNCATED_BY_STORE, "StoreAppendError")
-    except BaseException:
+    except BaseException as e:
+        # A provider that stayed down (#1243) may arrive inside an exception group.
+        down = _provider_down_in(e)
+        if down is not None:
+            _logger.error(f"{down}; stopping before the agent starts")
+            return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
         logger.close()
         with contextlib.suppress(Exception):
             store.close()

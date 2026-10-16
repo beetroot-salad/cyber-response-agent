@@ -55,6 +55,7 @@ from defender._episode_handle import Episode  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
+from defender.runtime import run_end  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.run_tenant import RunTenant  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, ServingAbort, read_roster  # noqa: E402
@@ -775,11 +776,23 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
                 visualize(run, update_ticket=ns.update_ticket)
             except _run.VisualizeFailed:
                 _logger.warning("the run page was not saved", exc_info=True)
-            return 0
+            return _exit_code(summary)
 
 
 #: A sibling whose world went unservable exits with this (its world record says why).
 UNSERVABLE_EXIT = 3
+#: A run whose model provider stayed down past the retrier ends with this: rerun later. Non-zero, so
+#: a branched sibling that hits it is recorded `did not finish`.
+PROVIDER_DOWN_EXIT = 4
+
+
+def _exit_code(summary: dict) -> int:
+    """The exit status of a run whose post-steps are done: `PROVIDER_DOWN_EXIT` when its model
+    provider stayed down (the run wrote no report, so say why), else 0."""
+    if summary.get("truncated_by") == run_end.TRUNCATED_BY_PROVIDER_DOWN:
+        _logger.error("the model provider stayed down; the run ended with no report (rerun later)")
+        return PROVIDER_DOWN_EXIT
+    return 0
 
 
 def _serving_abort(exc: BaseException) -> ServingAbort | None:

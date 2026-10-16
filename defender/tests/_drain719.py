@@ -116,21 +116,11 @@ ALL_CHANNELS = AUTHOR_CHANNELS + ("pitfalls",)
 #: channel name -> the direction module's real config builder. The fold keeps these as
 #: per-direction config builders (D3); it deletes their batch-driver bodies, not them.
 def _findings_cfg(paths: LoopPaths):
-    """The real findings config, with the drain-run check disarmed by default (#773).
-
-    `build_author_config` wires the real `FINDINGS_CHECK` (a real model call) — correct in
-    production, wrong for the pre-773 tests built against this module, which fake
-    `invoke_agent` alone and never meant to exercise a real verifier. `cfg_for(..., name,
-    forward_check=...)` opts back in per test where that IS the point (the #852 vouching
-    suite, say)."""
-    import dataclasses as _dc
-
+    """The real findings config over `paths`."""
     from defender.tests._curator1134 import author_trees
 
-    return _dc.replace(
-        lessons_run.build_author_config(
-            paths, state=LearningState.open(paths), trees=author_trees(paths)),
-        forward_check=None)
+    return lessons_run.build_author_config(
+        paths, state=LearningState.open(paths), trees=author_trees(paths))
 
 
 BUILDERS = {
@@ -229,7 +219,10 @@ def obs_row(oid: str, *, outcome: str = "caught", **extra) -> dict:
     return {"observation_id": oid, "judge_outcome": outcome, "source_run_dir": "", **extra}
 
 
-def finding_row(fid: str, *, run_id: str, direction: str = "adversarial", **extra) -> dict:
+def finding_row(fid: str, *, run_id: str, direction: str = "family", **extra) -> dict:
+    """A defender row the lessons gate admits: `direction: family` carrying the three fields
+    `_gate_family` reads as its ground truth (#1234). Since #1166 it is the only direction the
+    gate authors; any other is held `retired_direction(...)`."""
     return {
         "schema_version": 1,
         "finding_id": fid,
@@ -239,9 +232,11 @@ def finding_row(fid: str, *, run_id: str, direction: str = "adversarial", **extr
         "type": "lead-set",
         "subject": "subj",
         "finding": "narrative",
-        "judge_outcome": "survived",
         "citations": [{"source": "investigation", "quote": "..."}],
-        "source_run_dir": f"defender/learning/runs/{run_id}/",
+        "source_run_dir": f"episodes/{run_id}",
+        "contrast_evidence": ["worlds/b/report.md", "worlds/a/report.md"],
+        "on_verdict_path": True,
+        "world_label_doubted": False,
         **extra,
     }
 
@@ -269,19 +264,6 @@ def row_for(name: str, rid: str, **extra) -> dict:
         }
     default_outcome = "survived" if name == "environment_observations" else "caught"
     return obs_row(rid, outcome=extra.pop("outcome", default_outcome), **extra)
-
-
-def write_source_refs(paths: LoopPaths, run_id: str, disposition: str = "benign") -> None:
-    import yaml
-
-    rd = paths.runs_dir / run_id
-    rd.mkdir(parents=True, exist_ok=True)
-    (rd / "investigation.md").write_text("transcript stub")
-    (rd / "source_refs.yaml").write_text(
-        yaml.safe_dump(
-            {"paths": {}, "normalized_disposition": disposition, "alert_rule_key": "rule-5710"}
-        )
-    )
 
 
 def seed(paths: LoopPaths, channel: Channel, rows: list[dict]) -> None:

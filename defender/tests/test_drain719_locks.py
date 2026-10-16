@@ -60,7 +60,6 @@ def test_every_channel_declares_its_lock_topology(tmp_path: Path):
         assert ch.drain_role is not None
         assert ch.drain_role.file != ch.append_lock
         h.seed(paths, ch, [h.row_for(name, "x/0" if name != "findings" else "run-T/0")])
-        h.write_source_refs(paths, "run-T")
         agent = h.recording(h.skipping())
         with h.Holder(paths.state_root / ch.drain_role.file, blocking_discipline=False):
             assert drain.run_batch(cfg=h.cfg_for(paths, name, invoke_agent=agent)) == 0
@@ -101,7 +100,6 @@ def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
     fails this. With the append lock held from another actor, the rotation does not proceed;
     when the lock is released it completes."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
 
@@ -124,7 +122,6 @@ def test_retire_blocks_while_append_lock_held(tmp_path: Path):
     loses a concurrently appended row (G13/C16); D9 removes it as a separate write path, so
     the retire seam must be excluded by the same append lock rotation is."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
 
@@ -152,7 +149,6 @@ def test_every_channels_read_batch_happens_under_the_append_lock(tmp_path: Path)
     Parity across all four drained channels: with the append lock held, no channel's tick
     reaches its agent call."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "run-R")
     for name in h.AUTHOR_CHANNELS:
         ch = h.channel_of(name)
         rid = "run-R/0" if name == "findings" else "r/0"
@@ -185,7 +181,6 @@ def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_th
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
-    h.write_source_refs(paths, "a")
 
     h.seed(paths, ch, rows)
     blocked = h.recording(h.committing("blocked"))
@@ -220,7 +215,6 @@ def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(t
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
-    h.write_source_refs(paths, "a")
     observed = {}
 
     for deadline in (1, 2):
@@ -256,7 +250,6 @@ def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path
     lock — observed by another actor acquiring the repo lock while the contended tick runs —
     which is what an order that took the repo lock first would fail."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
     assert tuple(drain.LOCK_ORDER) == ("drain_lock", "repo_lock", "append_lock")
@@ -281,7 +274,6 @@ def test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick(tmp_path: P
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
-    h.write_source_refs(paths, "a")
     h.seed(paths, ch, rows)
     tmp_name = (paths.state_root / ch.queue).with_name((paths.state_root / ch.queue).name + ".tmp")
 

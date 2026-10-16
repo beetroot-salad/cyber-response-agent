@@ -280,19 +280,16 @@ _RETIRED_BASELINE_ROWS = (
 
 
 def test_767_resolution_decoding_lane_is_gone(tmp_path):
-    """d5_resolution_lane_deleted — SURVIVAL. The second model-facing read path is closed
-    STRUCTURALLY: the `resolution`-decoding lane is deleted, and the workflow that ran through
-    it — the forward check — still completes through its substitute, which is having no cited
-    policy section at all.
+    """d5_resolution_lane_deleted. The second model-facing read path is closed STRUCTURALLY: the
+    `resolution`-decoding lane is deleted.
 
     c5 is the ground: the lane's one non-test consumer read `resolution` through a `get-ticket`
     SUBPROCESS keyed on `past_tickets.txt`, which no non-test code writes, so
     `load_cited_policy` has always answered `_NO_CITED_POLICY`. Removing it removes a prompt
     section that was already empty on every run, and there is no survivor to reconnect.
 
-    The survival half is driven: a run dir carrying a `past_tickets.txt` that cites a closed
-    case still yields the forward check's own inputs, and no store is contacted to do it."""
-    from defender.learning.author.verify_forward import checks, forward
+    The survival half — the forward check that ran through the lane still completing — retired
+    with the forward check itself (#1166): there is no workflow left to survive."""
 
     for name in _RETIRED_CASE_TICKET:
         assert not hasattr(case_ticket, name), (
@@ -304,35 +301,6 @@ def test_767_resolution_decoding_lane_is_gone(tmp_path):
             f"`case_ticket.{name}` was deleted: D5 leaves the four seed-era helpers alone "
             "(RF1/g13), and deleting them is scope this change did not take"
         )
-
-    for name in ("load_cited_policy", "_fetch_closed_resolution", "_cited_case_ids",
-                 "_NO_CITED_POLICY", "_TICKET_CLI"):
-        assert not hasattr(forward, name), (
-            f"`verify_forward.forward.{name}` survives: the out-of-process ticket read is the "
-            "second model-facing path D5 closes"
-        )
-    assert "cited_covering_policy" not in _text(
-        Path(checks.__file__)
-    ), "the forward check still assembles a `cited_covering_policy` prompt section"
-
-    # Survival: the workflow that ran through the removed element still completes.
-    runs = tmp_path / "runs"
-    run_id = "20260101T000000Z-prior"
-    (runs / run_id).mkdir(parents=True)
-    (runs / run_id / "past_tickets.txt").write_text("- SOC-1: a cited closed case\n",
-                                                    encoding="utf-8")
-    (runs / run_id / "investigation.md").write_text("+ prior work\n", encoding="utf-8")
-    (runs / run_id / "report.md").write_text(
-        "---\ndisposition: benign\nconfidence: high\n---\nprior notes\n", encoding="utf-8")
-    (runs / run_id / "source_refs.yaml").write_text(
-        "normalized_disposition: benign\n", encoding="utf-8")
-    transcript, recorded = forward.load_run_context(run_id, runs_dir=runs)
-    assert transcript, (
-        "the forward check can no longer read its own transcript — the substitute does not "
-        "carry the workflow"
-    )
-    assert recorded == "benign", "the forward check lost the case's recorded disposition"
-    assert forward.expected_disposition("benign", recorded) == "benign"
 
     baseline = json.loads(_text(REPO_ROOT / "scripts" / "lint" / "lint_vulture_baseline.json"))
     rows = [k for k in baseline["entries"] if "case_ticket.py" in k]

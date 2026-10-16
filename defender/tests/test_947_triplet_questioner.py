@@ -66,19 +66,20 @@ def test_947_every_hand_maintained_role_census_agrees_on_the_roster():
     — taking it to nine, and #773 adds a tenth (`CORPUS_REPAIR`, M4's one bounded repair
     spawn, a fixed separate definition rather than a per-spawn override). TWELVE SINCE #1224,
     which adds `ORACLE` and `ORACLE_CHECK` — a branched world's live oracle and its verifier,
-    each with its own definition and model knob. This count moves with the roster, which is
+    each with its own definition and model knob. TEN SINCE #1166, which retires `VERIFIER` and
+    `CORPUS_REPAIR` with the forward check they served. This count moves with the roster, which is
     the whole reason the census is spelled in four places and checked here rather than
     trusted to stay in step on its own."""
     AgentRole = T.sym("runtime.agent_role", "AgentRole")
     AGENTS = T.sym("agents", "AGENTS")
-    assert len(AgentRole) == 12
-    assert len(AGENTS) == 12
+    assert len(AgentRole) == 10
+    assert len(AGENTS) == 10
     assert {AgentRole.ORACLE.value, AgentRole.ORACLE_CHECK.value} == {"oracle", "oracle_check"}
     src = (T.DEFENDER / "tests" / "test_bind_sole_seam_551.py").read_text(encoding="utf-8")
-    assert "== 12" in src, "the bind-case count was not moved with the roster"
+    assert "== 10" in src, "the bind-case count was not moved with the roster"
     assert "QUESTIONER_DEF" in src, "the bind-case enumeration was not moved"
     grant = (T.DEFENDER / "tests" / "test_grant_gate_575.py").read_text(encoding="utf-8")
-    assert "len(AGENTS) == 12" in grant, "the grant gate's hardcoded count was not moved"
+    assert "len(AGENTS) == 10" in grant, "the grant gate's hardcoded count was not moved"
     assert '"questioner"' in grant, "_all_policies never compiles the questioner's policy"
     assert '"judge"' in grant, "_all_policies never compiles the family judge's policy"
 

@@ -124,7 +124,6 @@ def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouc
     byte-identical afterwards — unbounded retry, which is the accepted cost of removing the
     permanent-loss path. Stuck but recoverable and loud, as today."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "b")
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "b/0", attempts=2)]
     h.seed(paths, ch, rows)
@@ -171,7 +170,6 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
     stuck record on every failure and pass, which would make the signal noise rather than a
     stuck-row signal."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")]
     h.seed(paths, ch, rows)
@@ -233,7 +231,6 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
     this — they all fault with an explicit `AuthorError` — so this demand, not the legacy suite,
     is what carries decision 5."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "run-W")
     member_seen, non_member_seen = {}, {}
 
     for name in h.AUTHOR_CHANNELS:
@@ -287,7 +284,6 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
     the row is in the graveyard. The paired control is a genuinely successful batch, which
     rotates and counts nothing."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
 
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -329,7 +325,6 @@ def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
-    h.write_source_refs(paths, "a")
     h.seed(paths, ch, rows)
 
     (paths.state_root / ch.drain_role.file).mkdir(parents=True)
@@ -359,7 +354,6 @@ def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path
     blocking boxed call, so nothing here treats the configured timeout as the bound on the stall
     and no assertion below is about elapsed time."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
     late = author_shared.AuthorError(

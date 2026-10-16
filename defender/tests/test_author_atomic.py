@@ -10,7 +10,6 @@ from defender.learning.core.state import CURATOR_DRAIN_LOCK, FINDINGS, TRY_ONCE
 
 def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-K", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-K/0", run_id="run-K")
 
     def boom(findings, batch_id, cfg):
@@ -38,7 +37,6 @@ def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")  # lint-stale-ref: ok — the ENV
     # VAR outlives the retired module constant of the same name (#717).
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-P", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-P/0", run_id="run-P")
 
     def boom(findings, batch_id, cfg):
@@ -58,7 +56,6 @@ def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
 def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):
     """First tick fails inside the agent. Second tick retries cleanly."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-R", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-R/0", run_id="run-R")
 
     state = {"calls": 0}
@@ -109,7 +106,6 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
     in the corpus, the next batch filters it via existing_finding_ids (idempotent)
     and rotates it out without re-authoring."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-H", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-H/0", run_id="run-H")
 
     cfg = replace(
@@ -135,7 +131,6 @@ def test_default_rotate_consumes_committed_immediately(tmp_repo, helpers, monkey
     """Standalone (hold_committed=False, the default): a committed finding rotates
     straight to consumed.jsonl, as before this change."""
     a = tmp_repo.author
-    helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-D", "benign")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-D/0", run_id="run-D")
     cfg = replace(
         tmp_repo.cfg, invoke_agent=_commit_lesson(tmp_repo, a, name="lessonD", fid="run-D/0")

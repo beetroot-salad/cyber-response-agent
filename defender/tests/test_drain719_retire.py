@@ -61,7 +61,6 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
     test is about."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
-    h.write_source_refs(paths, "run-I")
     h.seed(paths, ch, [h.row_for("findings", "run-I/0")])
 
     fault = h.cfg_for(
@@ -117,7 +116,6 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
 def _retires_on_the_first_failure(tmp_path: Path, ceiling: int) -> None:
     """Shared body for the three ceiling members; each demand's own test drives it."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "b")
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "b/0")])
     cfg = h.cfg_for(
@@ -163,7 +161,6 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
     re-serialisation drift — so an unrelated row cannot be quietly edited by a neighbour's
     failure."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
     outsiders = [
         h.row_for("findings", "a/1", note="keep me", nested={"x": [1, 2]}),
@@ -189,7 +186,6 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     the graveyard append hits ENOSPC (a folder planted at the graveyard's name is now a
     refusal, not an ordinary failure — #1135 — so the fault is injected at the handle's verb)."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
     before = (paths.state_root / ch.queue).read_bytes()
@@ -217,7 +213,6 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
     and no graveyard row, so a steady state of empty ticks cannot grow either file. The
     positive control is the same drain on a non-empty channel, which does write both."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     for name in h.AUTHOR_CHANNELS:
         ch = h.channel_of(name)
         cfg = h.cfg_for(paths, name, invoke_agent=h.raising(AssertionError("never called")))
@@ -271,7 +266,6 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     assert set(writers) == {"rotate"}, f"more than one queue rewriter: {writers}"
 
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/9")])
     drain.retire(_state1135.state_for_paths(paths), channel=FINDINGS, batch_ids=["a/0"], reason="via the rotation", max_attempts=1)
@@ -284,7 +278,6 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
     `DEFAULT_PATHS` is frozen at import (F7) — an in-process environment change would not
     reach a second actor at all."""
     paths = h.make_paths(tmp_path)
-    h.write_source_refs(paths, "a")
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
 

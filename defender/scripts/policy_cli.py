@@ -56,7 +56,7 @@ def _scope_for(
     role: AgentRole, defender_dir: Path, corpus_name: str | None = None,
     *, agent: str | None = None,
 ) -> RunScope:
-    if role in (AgentRole.CORPUS_AUTHOR, AgentRole.CORPUS_REPAIR):
+    if role is AgentRole.CORPUS_AUTHOR:
         from defender.learning.author.curator_engine import lesson_read_confine
         return RunScope(corpus_name=corpus_name, read_confine=lesson_read_confine(defender_dir))
     return RunScope()

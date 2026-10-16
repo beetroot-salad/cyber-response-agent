@@ -472,17 +472,22 @@ def _with_default_correlation(gather, main):
     return fn
 
 
-def _fake_make_model(main, gather, *, dispatches_correlation: bool):
+def _fake_make_model(main, gather, *, dispatches_correlation: bool, wrap_model: Any = None):
     """The driver's `make_model` seam over the replay doubles: the gather model NAME gets
     `gather` (the correlation lead drawing its own default fake when the run dispatches it,
-    C01), every other name gets `main`."""
-    main_built = BuiltModel(FunctionModel(_awaiting(main)), None)
+    C01), every other name gets `main`. `wrap_model(kind, model)` (#1243), when given, wraps
+    each scripted model (`kind` "main" or "gather") before it is handed out."""
+    def wrap(kind: str, model: Any) -> Any:
+        return wrap_model(kind, model) if wrap_model is not None else model
+
+    main_built = BuiltModel(wrap("main", FunctionModel(_awaiting(main))), None)
     gather_fn = (
         _with_default_correlation(gather, main)
         if dispatches_correlation and driver.resolve_main_model() != driver.gather_model()
         else gather)
     gather_built = (
-        BuiltModel(FunctionModel(_awaiting(gather_fn)), None) if gather_fn is not None else None)
+        BuiltModel(wrap("gather", FunctionModel(_awaiting(gather_fn))), None)
+        if gather_fn is not None else None)
 
     if gather_built is not None and driver.resolve_main_model() == driver.gather_model():
         raise ValueError(
@@ -553,7 +558,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
-        roster: Any = None, systems: Any = None) -> dict:
+        roster: Any = None, systems: Any = None, wrap_model: Any = None) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -668,7 +673,12 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     `run_investigation(systems=…)`). Passed through only when supplied: omitted, the driver
     judges them itself, as it does when started without one.
 
-    `driver_summary` is the same drive returning production's summary untouched."""
+    `driver_summary` is the same drive returning production's summary untouched.
+
+    `wrap_model(kind, model)` (#1243) is applied to each scripted `FunctionModel` before it is
+    handed out as a `BuiltModel` — `kind` is `"main"` or `"gather"` — so a scenario can put a
+    production model wrapper (the provider retrier) between the run and its fake. Omitted, the
+    fakes are handed out bare, as before."""
     # Legacy replay labels are retained in this helper's call shape. The real run identity
     # comes from its directory; materialize(run_id=...) preserves labels that are asserted.
     state = run_state if run_state is not None else RunState(run_dir, run_dir.name)
@@ -677,6 +687,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         store_factory=store_factory, review_stages=review_stages, bounds=bounds,
         toolset=toolset, resume=resume, source_run=source_run, defender_dir=defender_dir, tenant=tenant,
         orient_shim=orient_shim, run_state=state, roster=roster, systems=systems,
+        wrap_model=wrap_model,
     )
     return {**summary, "run_state": state}
 
@@ -686,7 +697,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
-        roster: Any = None, systems: Any = None) -> dict:
+        roster: Any = None, systems: Any = None, wrap_model: Any = None) -> dict:
     """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
     summary exactly as production's caller gets it. `run_state` is what the run is handed
     (`run_investigation(run_state=…)`), the caller keeping its reference; omitted, it is not
@@ -695,7 +706,8 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     _refuse_conflicting_store_seams(resume, store_factory)
     tree = defender_dir if defender_dir is not None else DEFENDER
     make_model = _fake_make_model(main, gather,
-                                  dispatches_correlation=resume is None and verbs is not None)
+                                  dispatches_correlation=resume is None and verbs is not None,
+                                  wrap_model=wrap_model)
 
     seams: dict[str, Any] = {}
     if verbs is not None:

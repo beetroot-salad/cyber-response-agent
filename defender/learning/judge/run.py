@@ -93,6 +93,8 @@ JUDGE_DEF = AgentDefinition(
 #: trim), so the appenders' guards agree by construction.
 SUBJECT_DEFENDER = "defender"
 SUBJECT_WORLD = "world"
+#: The one `direction` a defender row carries (#1166: the per-case directions are retired).
+DIRECTION_FAMILY = "family"
 
 #: A world reply's three filed lists (A13 indexes over them in this order), and the family
 #: reply's one.
