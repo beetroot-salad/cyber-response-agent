@@ -222,6 +222,60 @@ def test_the_commit_maker_stores_the_boxs_bytes_whatever_mains_attributes_say(re
     assert git_bytes(batch.worktree, "cat-file", "blob", f"{sha}:agent/lessons/exact.md") == data
 
 
+def _agent_blobs(cwd, rev):
+    """Every blob under `agent/` at `rev`, by path below `agent/`, with its exact bytes."""
+    names = git(cwd, "ls-tree", "-r", "--name-only", rev, "--", "agent").splitlines()
+    return {name.removeprefix("agent/"): git_bytes(cwd, "cat-file", "blob", f"{rev}:{name}")
+            for name in names}
+
+
+@pytest.mark.parametrize("attributes", ["*.md text eol=crlf\n", "*.md text eol=crlf ident\n"],
+                         ids=["eol", "eol-and-ident"])
+def test_claim_after_claim_the_box_sees_exactly_the_committed_bytes(repo, tmp_path, attributes):
+    """O-B/O-C across claims (the honest implementer's probe): with `main`'s `.gitattributes`
+    converting line endings (and expanding `$Id$`) on checkout, the draft is made, diffed and
+    reset from git's bytes, never from a checkout. The draft starts as exactly the export
+    commit's `agent/` blobs (and the export). Claim 1 (an LF edit of a base file and a new
+    file holding `$Id$`) is exactly the box's changes, committed as the box's bytes; after
+    the reset the draft is exactly the committed blobs. Claim 2 with no edit by the box is an
+    empty change set (no phantom change from checkout bytes). Claim 3 appends to the new
+    file: exactly that change, committed as the box's bytes, and the reset again leaves the
+    committed blobs. Reading the draft and the base both from a checkout would hand the box
+    CRLF bytes for a file it wrote with LF."""
+    def human(checkout):
+        _write(checkout / ".gitattributes", attributes)
+        (checkout / "agent/lessons/human.md").write_bytes(b"a human's lesson\n")
+    push_to_remote(repo, tmp_path, human)
+    batch = delivery(repo, ForgeHTTP()).start_batch("crlf", lanes=LANES)
+    # Precondition: a checkout here converts (the clone's own checkout of the new lesson).
+    assert (repo[0].agent / "lessons/human.md").read_bytes() == b"a human's lesson\r\n"
+    agent, wt = batch.draft_root / "agent", batch.worktree
+    assert files_under(agent) == _agent_blobs(wt, batch.export.commit) == files_under(batch.export.path / "agent")
+
+    claim1 = {"agent/lessons/seed.md": b"seed, revised by the box\n",
+              "agent/lessons/new.md": b"$Id$\nwritten by the box with LF\n"}
+    for rel, data in claim1.items():
+        (batch.draft_root / rel).write_bytes(data)
+    change_set = batch.change_set()
+    assert _changes(change_set) == claim1
+    first = batch.commit(change_set, "claim one")
+    assert {f"agent/{rel}": data for rel, data in _agent_blobs(wt, first).items() if f"agent/{rel}" in claim1} == claim1
+    batch.reset()
+    assert files_under(agent) == _agent_blobs(wt, first), "the reset handed the box other bytes than committed"
+
+    assert _changes(batch.change_set()) == {}, "a claim with no edit by the box is not empty"
+
+    claim3 = {"agent/lessons/new.md": claim1["agent/lessons/new.md"] + b"and appended\n"}
+    (batch.draft_root / "agent/lessons/new.md").write_bytes(claim3["agent/lessons/new.md"])
+    change_set = batch.change_set()
+    assert _changes(change_set) == claim3
+    third = batch.commit(change_set, "claim three")
+    assert git(wt, "rev-parse", f"{third}^") == first
+    assert _agent_blobs(wt, third)["lessons/new.md"] == claim3["agent/lessons/new.md"]
+    batch.reset()
+    assert files_under(agent) == _agent_blobs(wt, third)
+
+
 def _mknod(lane):
     try:
         os.mknod(lane / "dev.md", stat.S_IFCHR | 0o600, os.makedev(1, 3))

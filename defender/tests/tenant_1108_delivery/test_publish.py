@@ -565,8 +565,8 @@ import json, os, sys, time
 from pathlib import Path
 from defender.tests import _tenants1106 as tenants
 from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, lock_probe, target
-root, tenant_id, marker, ready, go = (Path(sys.argv[1]), sys.argv[2], sys.argv[3], Path(sys.argv[4]),
-                                      Path(sys.argv[5]))
+root, tenant_id, marker, ready, go, trace = (Path(sys.argv[1]), sys.argv[2], sys.argv[3],
+                                             Path(sys.argv[4]), Path(sys.argv[5]), Path(sys.argv[6]))
 mod = target()
 tenant = tenants.accept(root, tenant_id)
 d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client)
@@ -574,8 +574,13 @@ clone = os.path.abspath(tenant.knowledge)
 current = os.path.join(os.path.realpath(tenant.dir / "exports"), "current")
 in_clone = os.path.join(clone, "agent", "lessons", marker)
 SPAWNS = ("subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn")
-state = {"inside": False, "done": False, "paused": False}
+state = {"inside": False, "done": False, "paused": False, "unprobed": 0}
 probes = []
+
+def record(moment, verdict):
+    probes.append([moment, verdict])
+    with open(trace, "a", encoding="utf-8") as out:
+        out.write(json.dumps([moment, verdict]) + "\\n")
 
 def resolved(path, dir_fd=None):
     name = os.fsdecode(path)
@@ -614,8 +619,10 @@ def watch(event, args):
         moment = kind(event, args)
         if moment is None or not os.path.exists(in_clone):
             return
-        if len(probes) < 60:
-            probes.append([moment, lock_probe(tenant)])
+        if len(probes) < 60 or moment == "current":
+            record(moment, lock_probe(tenant))
+        else:
+            state["unprobed"] += 1
         if not state["paused"]:
             state["paused"] = True
             ready.write_text("paused", encoding="utf-8")
@@ -635,6 +642,7 @@ try:
 except mod.DeliveryRefused as refused:
     out["refused"] = str(refused)
 out["probes"] = probes
+out["unprobed"] = state["unprobed"]
 print(json.dumps(out))
 """
 
@@ -645,8 +653,9 @@ def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_pa
     one hold of the tenant lock. A first publisher runs in another process. From the end of
     its fast-forward (the older commit's marker checked out in the clone) to its write of
     `current`, every file it writes outside the clone and every program it starts is probed
-    from a third process: each sees the lock busy, and the write of `current` was among
-    them. At the first of those moments it is paused; meanwhile the remote moves to a newer
+    from a third process (at most 60 moments, and always the write of `current`; the probe's
+    positive control, run from the publisher's own environment, comes first): each sees the
+    lock busy, and the write of `current` was among them. At the first of those moments it is paused; meanwhile the remote moves to a newer
     commit and a second publisher refuses at once with `LockBusy`. The first resumes and
     publishes the older commit whole; a later publish then publishes the newer one. So
     `current` never moves back from a newer commit to an older one: an export body written
@@ -657,18 +666,32 @@ def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_pa
     marker = "p3-paused-here.md"
     older = push_to_remote(repo, tmp_path, lambda c: (c / "agent/lessons" / marker).write_bytes(b"older\n"),
                            message="the older commit, with the marker")
-    ready, go = tmp_path / "paused", tmp_path / "go"
+    ready, go, trace = tmp_path / "paused", tmp_path / "go", tmp_path / "probes.jsonl"
+    env = fresh_process_env(tenant, tmp_path / "first")
+    # Positive control: the probe, run from the publisher's own environment, tells a held
+    # lock from a free one.
+    control = [sys.executable, "-c", "import json, sys; from pathlib import Path; "
+               "from defender.tests import _tenants1106 as t; "
+               "from defender.tests.tenant_1108_delivery._support import lock_probe; "
+               "print(json.dumps(lock_probe(t.accept(Path(sys.argv[1]), sys.argv[2]))))",
+               str(tenant.data_root), str(tenant.id)]
+    with LockHolder(tenant, tmp_path / "holder"):
+        held = subprocess.run(control, capture_output=True, text=True, env=env, timeout=120, check=False)
+    free = subprocess.run(control, capture_output=True, text=True, env=env, timeout=120, check=False)
+    assert [next(iter(json.loads(proc.stdout.strip().splitlines()[-1]))) for proc in (held, free)] == \
+        ["busy", "free"], (held.stdout, held.stderr, free.stdout, free.stderr)
     out_path, err_path = tmp_path / "first.out", tmp_path / "first.err"
     with open(out_path, "wb") as out_file, open(err_path, "wb") as err_file:
         first = subprocess.Popen([sys.executable, "-c", _PAUSED_PUBLISH, str(tenant.data_root),
-                                  str(tenant.id), marker, str(ready), str(go)],
-                                 stdout=out_file, stderr=err_file,
-                                 env=fresh_process_env(tenant, tmp_path / "first"))
+                                  str(tenant.id), marker, str(ready), str(go), str(trace)],
+                                 stdout=out_file, stderr=err_file, env=env)
     try:
         deadline = time.monotonic() + 120
         while not ready.exists() and first.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
-        assert ready.exists(), f"the first publisher never reached its export: {err_path.read_bytes()!r}"
+        assert ready.exists(), ("the first publisher never reached its export: probes "
+                                f"{trace.read_text(encoding='utf-8') if trace.exists() else '[]'}, "
+                                f"stderr {err_path.read_bytes()!r}")
         newer = advance_remote(repo, tmp_path)
         _, error, hung = bounded(d.publish, seconds=30)
     finally:
@@ -680,10 +703,11 @@ def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_pa
             first.wait(timeout=60)
     assert first.returncode == 0, err_path.read_bytes()
     result = json.loads(out_path.read_bytes().decode().strip().splitlines()[-1])
-    probes = result.pop("probes")
+    probes, unprobed = result.pop("probes"), result.pop("unprobed")
     assert [moment for moment, verdict in probes if "busy" not in verdict] == [], \
-        f"the lock was free during the export: {probes}"
-    assert "current" in [moment for moment, _ in probes], f"the write of `current` was not seen: {probes}"
+        f"the lock was free during the export: {probes} ({unprobed} moments past the cap unprobed)"
+    assert "current" in [moment for moment, _ in probes], \
+        f"the write of `current` was not seen: {probes} ({unprobed} moments past the cap unprobed)"
     assert not hung, "the second publisher waited for the first instead of failing fast"
     assert isinstance(error, target().LockBusy), f"a second publish went ahead mid-export: {error!r}"
     assert result == {"published": older}, result
