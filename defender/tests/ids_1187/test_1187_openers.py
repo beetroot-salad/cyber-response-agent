@@ -15,10 +15,14 @@ Two arms:
 
 * The census (static, over production source, through `scripts/lint/_astlib.py`'s resolver, as
   `test_1187_ids`' census): no call to `Episode.open` / `Episode.create` outside the walk's
-  owner (`run_repository/`, and `_episode_handle.py` itself), however the name is reached; no
-  `_io.bind(...)` over an episode folder — an argument that spells `episode`, or, in the five
-  re-bind sites' modules, any `Path(...)` — outside that owner. Its own planted positive
-  control proves each shape is seen.
+  owner (named FILE BY FILE: `run_repository/_lookup.py`, `_held.py`, `_handle.py` and
+  `_episode_handle.py`), however the name is reached; no call from outside to an owner
+  module-level function that opens a door itself, and no owner package imported by a string
+  (contract repair r1, adversary F2: a new `run_repository/_compat.open_at(path)` laundered
+  the path opens past the folder-wide exemption); no `_io` path opener (`bind`, `hold`,
+  `hold_new`) over an episode folder — an argument that spells `episode`, directly or through
+  a local alias — outside that owner, and none at all in the five re-bind sites' modules. Its
+  own planted positive control proves each shape is seen.
 * The behaviour: pre-flight (`cli.preflight_replay`) handed a path to `<T>/episodes/<ep>` that
   is a LINK to a real episode elsewhere reads nothing through it; reached through the walk, the
   same pre-flight runs.
@@ -40,18 +44,32 @@ from defender.tests.tenant_1105_run_repository import _spec1105_pr2 as P
 
 DEFENDER = Path(__file__).resolve().parents[2]
 
-#: The repository's walk owner: the only production code that may hold an episode folder by
-#: an `Episode` door (relative to `defender/`; a folder prefix ends in `/`).
-WALK_OWNER = ("run_repository/", "_episode_handle.py")
+#: The repository's walk owner: the only production MODULES that may hold an episode folder by
+#: an `Episode` door, named file by file (relative to `defender/`). Adversary F2: exempting the
+#: whole `run_repository/` folder let a new module there (`_compat.open_at(path)`) launder a
+#: path open for any caller. A new module that must open an `Episode` joins this list by a
+#: reviewed contract repair.
+WALK_OWNER = ("run_repository/_lookup.py", "run_repository/_held.py",
+              "run_repository/_handle.py", "_episode_handle.py")
+#: The owner's dotted packages: imported BY A STRING (`__import__`, `importlib.import_module`)
+#: outside the owner, a door no resolver can follow (adversary F2's `run.py` laundering).
+OWNER_PACKAGES = ("defender.run_repository", "defender._episode_handle")
 #: Exempt from the `rebind` rule only: the one-time command holds the operator-named OLD
 #: episodes root "following its spelling, as configuration" (design Flow 6, S-move) — a path
 #: bind the design asks for, of a folder outside every tenant. It may not open an `Episode`.
 REBIND_EXEMPT = ("ops/",)
-#: The modules holding the design's path re-binds of the episode folder (recheck S2).
+#: The modules holding the design's path re-binds of the episode folder (recheck S2). Once the
+#: re-binds are routed through the walked handle these modules open NO folder by a path, so
+#: every path opener there is reported, whatever its argument is called (adversary F2:
+#: `d = Path(episode_dir); bind(d)` spells no `episode` at the call).
 REBIND_MODULES = frozenset({"learning/branch/episode.py", "learning/judge/__init__.py",
                             "learning/judge/family.py", "learning/judge/render.py"})
 #: The episode door methods.
 DOORS = ("Episode.open", "Episode.create")
+#: `_io`'s openers of a folder by its PATH (each follows the path's spelling above its leaf).
+PATH_OPENERS = ("defender._io.bind", "defender._io.hold", "defender._io.hold_new")
+#: Dynamic importers.
+IMPORTERS = ("builtins.__import__", "importlib.import_module")
 
 _astlib = _by_path.import_lint_lib("_astlib")
 
@@ -70,7 +88,36 @@ class Hit:
 
 
 def _owned(rel: str) -> bool:
-    return any(rel == own or (own.endswith("/") and rel.startswith(own)) for own in WALK_OWNER)
+    return rel in WALK_OWNER
+
+
+def _parsed(root: Path) -> list[tuple[str, ast.Module, object]]:
+    """`(rel, tree, env)` of every production source file under `root`: `_astlib.source_files`
+    (tracked plus untracked, unignored `.py`), `tests/` and virtualenvs dropped."""
+    out = []
+    for rel in _astlib.source_files(root, (".venv", "__pycache__", "node_modules", "tests")):
+        _text, tree = _astlib.read_and_parse(root / rel, rel)
+        module, package = _astlib.module_and_package(rel, root="defender")
+        out.append((rel, tree, _astlib.module_env(tree, module, package)))
+    return out
+
+
+def _door_wrappers(parsed: list[tuple[str, ast.Module, object]]) -> frozenset[str]:
+    """The dotted names of the owner's MODULE-LEVEL functions that call an episode door
+    themselves: a caller outside the owner reaching one opens an `Episode` at whatever path it
+    hands over (adversary F2: `open_at(path)` / `create_at(path)` beside the walk)."""
+    wrappers = set()
+    for rel, tree, env in parsed:
+        if not _owned(rel):
+            continue
+        module, _package = _astlib.module_and_package(rel, root="defender")
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                    isinstance(call, ast.Call)
+                    and (_astlib.callee(call, env) or "").endswith(DOORS)
+                    for call in ast.walk(node)):
+                wrappers.add(f"{module}.{node.name}")
+    return frozenset(wrappers)
 
 
 def _is_path_call(node: ast.expr, env) -> bool:
@@ -83,26 +130,29 @@ def _is_path_call(node: ast.expr, env) -> bool:
 
 def census(root: Path) -> list[Hit]:
     """Every episode opener under `root` (the `defender/` folder, or a planted tree) outside
-    the walk's owner:
+    the walk's owner (`WALK_OWNER`, file by file):
 
     * `door`: a call resolving to `Episode.open` / `Episode.create` (imported by name, through
       a module alias, or inside a function) — a path handed to the episode handle;
-    * `rebind`: a call resolving to `defender._io.bind` whose argument spells `episode`
-      (`episode_dir`, `Path(episode_dir)`, `episode.dir`), or — in one of `REBIND_MODULES` —
-      whose argument is any `Path(...)` — except under `ops/` (`REBIND_EXEMPT`, Flow 6).
+    * `laundered`: a call resolving to one of the owner's module-level functions that calls a
+      door itself (`_door_wrappers`);
+    * `dynamic`: `__import__` / `importlib.import_module` of a string naming an owner package
+      — a door nothing can resolve;
+    * `rebind`: a call resolving to a path opener of `_io` (`bind`, `hold`, `hold_new`) — in
+      one of `REBIND_MODULES`, ANY such call; elsewhere, one whose argument spells `episode`,
+      directly or through a local name bound to something that does (`d = Path(episode_dir);
+      bind(d)`) — except under `ops/` (`REBIND_EXEMPT`, Flow 6).
 
     The listing is `_astlib.source_files` (tracked plus untracked, unignored `.py`), `tests/`
     and virtualenvs dropped."""
-    root = Path(root)
+    parsed = _parsed(Path(root))
+    wrappers = _door_wrappers(parsed)
     hits: list[Hit] = []
-    for rel in _astlib.source_files(root, (".venv", "__pycache__", "node_modules", "tests")):
+    for rel, tree, env in parsed:
         if _owned(rel):
             continue
-        _text, tree = _astlib.read_and_parse(root / rel, rel)
-        module, package = _astlib.module_and_package(rel, root="defender")
-        env = _astlib.module_env(tree, module, package)
         with _astlib.scan_guard(rel):
-            for node in ast.walk(tree):
+            for node, values in R.scoped_nodes(tree):
                 if not isinstance(node, ast.Call):
                     continue
                 called = _astlib.callee(node, env)
@@ -110,22 +160,30 @@ def census(root: Path) -> list[Hit]:
                     continue
                 if called.endswith(DOORS):
                     hits.append(Hit(rel, node.lineno, "door", ast.unparse(node.func)))
-                elif called == "defender._io.bind" and node.args and not rel.startswith(
-                        REBIND_EXEMPT) and (
-                        "episode" in ast.unparse(node.args[0])
-                        or (rel in REBIND_MODULES and _is_path_call(node.args[0], env))):
+                elif called in wrappers:
+                    hits.append(Hit(rel, node.lineno, "laundered", ast.unparse(node.func)))
+                elif called in IMPORTERS and node.args and isinstance(
+                        node.args[0], ast.Constant) and str(node.args[0].value).startswith(
+                        OWNER_PACKAGES):
+                    hits.append(Hit(rel, node.lineno, "dynamic", ast.unparse(node)))
+                elif called in PATH_OPENERS and not rel.startswith(REBIND_EXEMPT) and (
+                        rel in REBIND_MODULES or (node.args and R.spells(
+                            node.args[0], "episode", values))):
                     hits.append(Hit(rel, node.lineno, "rebind", ast.unparse(node)))
     return sorted(hits)
 
 
 def test_no_production_code_opens_an_episode_by_path_outside_the_walk():
     """S-iso / O8 (review F4): production source has no `Episode.open` / `Episode.create` call
-    outside the run repository (the walk's owner) and no `_io.bind(...)` re-binding an episode
-    folder by path — the sibling's pre-acceptance open, `preflight_replay`'s `Path` overload,
-    the launcher's `-r<n>` claim, and the judge's and the comparator's re-binds are gone, each
-    replaced by the walked handle. RED at base: `run.py:663`, `learning/branch/cli.py:216` and
-    `:619`, `learning/branch/episode.py:158` and `:295`, `learning/judge/__init__.py:242`,
-    `learning/judge/family.py:141`, `learning/judge/render.py:339`."""
+    outside the run repository's walk files, no laundered door (an owner wrapper called from
+    outside, an owner package imported by a string), and no `_io` path opener re-binding an
+    episode folder by path — the sibling's pre-acceptance open, `preflight_replay`'s `Path`
+    overload, the launcher's `-r<n>` claim, and the judge's and the comparator's re-binds are
+    gone, each replaced by the walked handle. RED at base: `run.py:663`,
+    `learning/branch/cli.py:216` and `:619`, `learning/branch/episode.py:158` and `:295`,
+    `learning/judge/__init__.py:242`, `learning/judge/family.py:141`,
+    `learning/judge/render.py:339`. Against adversary F2's tree (a `_compat` module, a string
+    import in `run.py`, `d = Path(episode_dir); bind(d)`) it reads those eight again."""
     hits = census(DEFENDER)
     listing = "\n  ".join(str(h) for h in hits)
     assert hits == [], f"{len(hits)} production site(s) open an episode by path:\n  {listing}"
@@ -136,9 +194,14 @@ def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
     production: a planted tree holding each shape — a door by name, through a module alias,
     and imported inside a function; a re-bind by `Path(episode_dir)`, by a bare `episode_dir`,
     by `.dir` through a module alias, and by any `Path(...)` in a re-bind module — is reported
-    shape by shape; the same shapes under `run_repository/`, a `bind(Path(settings))` in an
-    ordinary module, and the one-time command's bind of the old episodes root under `ops/`, are
-    not — while a door under `ops/` still is."""
+    shape by shape. Adversary F2's laundering shapes too: a door in a NEW `run_repository/`
+    module (only the named walk files are the owner); a module-level wrapper in an owner file
+    (`open_at(path)`) called from outside; an owner package imported by a string; a local
+    alias (`d = Path(episode_dir); bind(d)`, and `hold`) outside; and, in a re-bind module, a
+    bind or hold of ANY argument. Not reported: the same shapes inside an owner file, an
+    outside call to an owner function that opens no door, a `bind(Path(settings))` in an
+    ordinary module, and the one-time command's bind of the old episodes root under `ops/` —
+    while a door under `ops/` still is."""
     root = tmp_path / "planted"
     files = {
         "pkg/dirty.py": (
@@ -160,14 +223,36 @@ def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
             "def b(folder):\n"
             "    from defender._episode_handle import Episode as Door\n"
             "    return Door.open(folder)\n"),
+        "pkg/laundry.py": (
+            "import importlib\n"
+            "from pathlib import Path\n"
+            "from defender import _io\n"
+            "from defender.run_repository._lookup import helper, open_at\n"
+            "\n"
+            "\n"
+            "def c(episode_dir):\n"
+            "    d = Path(episode_dir)\n"
+            "    with _io.bind(d) as bound, _io.hold(episode_dir / 'runs', follow=False) as h:\n"
+            "        pass\n"
+            "    one = open_at(d)\n"
+            "    two = __import__('defender.run_repository._lookup', fromlist=['x'])\n"
+            "    three = importlib.import_module('defender._episode_handle')\n"
+            "    return bound, h, one, two, three, helper(d)\n"),
+        "run_repository/_compat.py": (
+            "from defender._episode_handle import Episode\n"
+            "\n"
+            "\n"
+            "def create_at(path):\n"
+            "    return Episode.create(path, exclusive=True)\n"),
         "learning/judge/family.py": (
             "from pathlib import Path\n"
-            "from defender._io import bind\n"
+            "from defender._io import bind, hold\n"
             "\n"
             "\n"
             "def raw_manifest(folder):\n"
-            "    with bind(Path(folder)) as bound:\n"
-            "        return bound\n"),
+            "    d = folder\n"
+            "    with bind(Path(folder)) as bound, bind(d) as again, hold(d) as held:\n"
+            "        return bound, again, held\n"),
         "pkg/clean.py": (
             "from pathlib import Path\n"
             "from defender._io import bind\n"
@@ -192,7 +277,16 @@ def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
             "\n"
             "def walk(episode_dir):\n"
             "    from defender._episode_handle import Episode\n"
-            "    return Episode.open(episode_dir), bind(Path(episode_dir))\n"),
+            "    return Episode.open(episode_dir), bind(Path(episode_dir))\n"
+            "\n"
+            "\n"
+            "def open_at(path):\n"
+            "    from defender._episode_handle import Episode\n"
+            "    return Episode.open(path)\n"
+            "\n"
+            "\n"
+            "def helper(path):\n"
+            "    return path\n"),
     }
     for rel, text in files.items():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -201,9 +295,14 @@ def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
     found = [(h.rel, h.kind) for h in census(root)]
     assert found.count(("pkg/dirty.py", "door")) == 3, found
     assert found.count(("pkg/dirty.py", "rebind")) == 3, found
-    assert found.count(("learning/judge/family.py", "rebind")) == 1, found
+    assert found.count(("learning/judge/family.py", "rebind")) == 3, found
     assert found.count(("ops/retire_legacy_runs.py", "door")) == 1, found
     assert ("ops/retire_legacy_runs.py", "rebind") not in found, found
+    assert found.count(("run_repository/_compat.py", "door")) == 1, found
+    assert found.count(("pkg/laundry.py", "rebind")) == 2, found
+    assert found.count(("pkg/laundry.py", "laundered")) == 1, found
+    assert found.count(("pkg/laundry.py", "dynamic")) == 2, found
+    assert len([f for f in found if f[0] == "pkg/laundry.py"]) == 5, found
     assert not [f for f in found if f[0] in ("pkg/clean.py", "run_repository/_lookup.py")], found
 
 
