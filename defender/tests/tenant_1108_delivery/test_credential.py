@@ -152,7 +152,8 @@ def test_git_authenticates_with_what_open_read_whatever_the_file_says_later(http
     """Flow 5, `open()` the single reader: after `open()` the credential file is emptied,
     rewritten for another host, or rewritten with another token for the same host. Git still
     authenticates with exactly what `open()` read (the server accepts only that token), the
-    publish succeeds, no spy runs and `forge/` gains nothing. The in-process audit in
+    publish succeeds, no spy runs, `forge/` gains nothing, and the token rode in no process's
+    argv or environment (so it reached git another way). The in-process audit in
     `test_credentials_loaded_once_and_token_not_in_representation` cannot see a helper
     subprocess re-reading the file; this can."""
     tenant, remote, credentials, server = http_repo
@@ -163,12 +164,14 @@ def test_git_authenticates_with_what_open_read_whatever_the_file_says_later(http
                             "rewritten-for-another-host": f"http://bot:{TOKEN}@other.invalid:{port}\n",
                             "another-token": f"http://bot:a-token-written-after-open@127.0.0.1:{port}\n"}[change],
                            encoding="utf-8")
-    export, error, hung = bounded(d.publish, seconds=60)
+    with _Spawns() as spawns:
+        export, error, hung = bounded(d.publish, seconds=60)
     assert not hung, "git waited on a prompt"
     assert error is None, f"git did not use the credential open() read: {error!r}"
     assert export.commit == git(remote, "rev-parse", "main")
     assert server.authorized("git-upload-pack")
     assert sorted(p.name for p in credentials.parent.iterdir()) == ["git-credentials"]
+    assert spawns.carrying(_secrets(TOKEN)) == [], "the token reached git through argv or environment"
     _silent(log)
 
 
@@ -252,24 +255,70 @@ def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, tmp_pat
     assert [copy for copy in copies if copy != str(credentials)] == [], copies
 
 
-def test_the_credential_never_rides_in_a_process_argument(http_repo, tmp_path):
-    """Flow 5: the token never appears in a spawned process's arguments (any local user reads
-    them in `/proc/<pid>/cmdline`): not in a `-c http.extraHeader`, an inline helper or a
-    URL, plain or base64, across publish, finish, a retained deliver and a revert. An audit
-    hook sees every spawn; its positive control comes first."""
-    secrets = {TOKEN, f"bot:{TOKEN}", base64.b64encode(f"bot:{TOKEN}".encode()).decode()}
-    argvs, active = [], [True]
+#: Where each spawn audit event carries its argv and its environment (`None`: this
+#: process's own, inherited).
+_SPAWN_FIELDS = {"subprocess.Popen": (1, 3), "os.posix_spawn": (1, 2), "os.exec": (1, 2),
+                 "os.spawn": (2, 3), "os.system": (0, None)}
 
-    def audit(event, args):
-        if active[0] and event in {"subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn"}:
-            raw = args[1]
-            argvs.append(raw if isinstance(raw, str) else " ".join(map(os.fsdecode, raw)))
-    sys.addaudithook(audit)
-    try:
-        subprocess.run([sys.executable, "-c", "pass"], check=True)
-        assert argvs, "the audit hook must see a spawn"
-        argvs.clear()
-        http = ForgeHTTP()
+
+def _text(value):
+    if isinstance(value, (str, bytes, os.PathLike)):
+        return os.fsdecode(value)
+    return " ".join(_text(item) for item in value)
+
+
+class _Spawns:
+    """Every process this one starts while active, as `(argv text, environment text)`,
+    recorded by an audit hook: the environment passed to it, or this process's own when none
+    is (the child inherits it). Audit hooks cannot be removed; this one only records."""
+
+    def __init__(self):
+        self.seen: list[tuple[str, str]] = []
+        self.active = False
+        sys.addaudithook(self._audit)
+
+    def _audit(self, event, args):
+        if not self.active or event not in _SPAWN_FIELDS:
+            return
+        argv_at, env_at = _SPAWN_FIELDS[event]
+        env = args[env_at] if env_at is not None else None
+        env = dict(os.environ) if env is None else env
+        self.seen.append((_text(args[argv_at]),
+                          "\n".join(f"{_text(k)}={_text(v)}" for k, v in env.items())))
+
+    def __enter__(self):
+        self.active = True
+        return self
+
+    def __exit__(self, *exc):
+        self.active = False
+
+    def carrying(self, secrets):
+        """The spawns whose argv or environment holds any of `secrets`."""
+        return [(argv, "environment" if not any(x in argv for x in secrets) else "argv")
+                for argv, env in self.seen if any(x in argv or x in env for x in secrets)]
+
+
+def _secrets(token):
+    return {token, f"bot:{token}", base64.b64encode(f"bot:{token}".encode()).decode()}
+
+
+def test_the_credential_never_rides_in_a_process_argument_or_environment(http_repo, tmp_path):
+    """Flow 5 (ruling: never in an environment, never in argv, never a second file, `open()`
+    the single reader): the token never appears in a spawned process's arguments (any local
+    user reads them in `/proc/<pid>/cmdline`), as a `-c http.extraHeader`, an inline helper or
+    a URL, nor in the environment any spawned process is given or inherits; plain, as
+    `bot:<token>` or base64; across publish, finish, a retained deliver and a revert. How the
+    helper does receive it is not pinned. An audit hook sees every spawn; its positive
+    control comes first."""
+    spawns = _Spawns()
+    with spawns:
+        subprocess.run([sys.executable, "-c", "pass"], check=True,
+                       env={**os.environ, "P3_CONTROL": TOKEN})
+    assert spawns.carrying(_secrets(TOKEN)), "the audit hook must see a spawn and its environment"
+    spawns.seen.clear()
+    http = ForgeHTTP()
+    with spawns:
         d = delivery(http_repo, http)
         batch = d.start_batch("argv", lanes=LANES)
         (batch.draft_root / "agent/lessons/argv.md").write_text("a lesson\n", encoding="utf-8")
@@ -279,14 +328,11 @@ def test_the_credential_never_rides_in_a_process_argument(http_repo, tmp_path):
             d.finish(batch)
         http.fail_create = False
         assert d.deliver("argv").endswith("/pulls/7")
-        active[0] = False
-        merge_on_remote(http_repo, tmp_path, batch.branch)
-        active[0] = True
+    merge_on_remote(http_repo, tmp_path, batch.branch)
+    with spawns:
         assert d.revert("agent/lessons/argv.md", "argv").endswith("/pulls/7")
-    finally:
-        active[0] = False
-    assert argvs
-    assert [a for a in argvs if any(secret in a for secret in secrets)] == []
+    assert spawns.seen
+    assert spawns.carrying(_secrets(TOKEN)) == []
 
 
 @pytest.fixture
@@ -356,9 +402,13 @@ def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
     except OSError as no_terminal:
         pytest.skip(f"no pseudo-terminal on this host ({no_terminal}); the askpass spies remain")
     terminal = os.ttyname(slave)
-    child = subprocess.Popen([sys.executable, "-c", _ON_A_TERMINAL, terminal, str(tenant.data_root),
-                              str(tenant.id)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             stdin=subprocess.DEVNULL, env=fresh_process_env(tenant, tmp_path / "terminal"))
+    # The child's output goes to files, never to pipes nobody drains while the terminal is
+    # watched, so a chatty child cannot stall until the deadline.
+    out_path, err_path = tmp_path / "terminal.out", tmp_path / "terminal.err"
+    with open(out_path, "wb") as out_file, open(err_path, "wb") as err_file:
+        child = subprocess.Popen([sys.executable, "-c", _ON_A_TERMINAL, terminal, str(tenant.data_root),
+                                  str(tenant.id)], stdout=out_file, stderr=err_file,
+                                 stdin=subprocess.DEVNULL, env=fresh_process_env(tenant, tmp_path / "terminal"))
     written, deadline = b"", time.monotonic() + 60
     try:
         while child.poll() is None and time.monotonic() < deadline and not written:
@@ -377,10 +427,10 @@ def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
                 os.killpg(child.pid, signal.SIGKILL)
             except ProcessLookupError:
                 child.kill()
-        out, err = child.communicate(timeout=60)
+        child.wait(timeout=60)
         os.close(slave)
         os.close(master)
     assert written == b"", f"git prompted on the terminal: {written!r}"
-    assert child.returncode == 0, err
-    verdict = json.loads(out.decode().strip().splitlines()[-1])
+    assert child.returncode == 0, err_path.read_bytes()
+    verdict = json.loads(out_path.read_bytes().decode().strip().splitlines()[-1])
     assert verdict.get("published") or "refused" in verdict, verdict

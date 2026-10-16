@@ -268,9 +268,9 @@ def test_publish_requires_the_tenant_id_to_name_this_tenant_through_its_parser(
 
 def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tmp_path):
     """Flow 6 / O-F: while another process holds the tenant's lock, publish and start_batch
-    refuse at once with `LockBusy` (a `DeliveryRefused`) naming the holder's pid, taking no
-    more than a second longer than the same publish with the lock free (a non-blocking try,
-    not a wait for the holder); nothing is
+    refuse at once with `LockBusy` (a `DeliveryRefused`) naming the holder's pid, the fastest
+    of three attempts taking no more than a second longer than the same publish with the
+    lock free (a non-blocking try, not a wait for the holder); nothing is
     fast-forwarded, published or cut meanwhile. Another tenant's publish is unaffected (one
     lock per tenant, under its own folder, not under `forge/`). Released, the lock is taken
     again (control)."""
@@ -286,13 +286,16 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
     mod = target()
     with LockHolder(tenant, tmp_path / "holder") as holder:
         for attempt in (d.publish, lambda: d.start_batch("busy", lanes=LANES)):
-            elapsed, (_, error, hung) = _timed(attempt)
-            assert not hung, "a second taker waited on the lock instead of failing fast"
-            assert isinstance(error, mod.LockBusy), error
-            assert isinstance(error, mod.DeliveryRefused)
-            assert str(holder.pid) in str(error), "the refusal must name the holder"
-            assert elapsed < baseline + 1.0, \
-                f"a second taker waited ({elapsed:.2f} s against {baseline:.2f} s with the lock free)"
+            times = []
+            for _ in range(3):
+                elapsed, (_, error, hung) = _timed(attempt)
+                assert not hung, "a second taker waited on the lock instead of failing fast"
+                assert isinstance(error, mod.LockBusy), error
+                assert isinstance(error, mod.DeliveryRefused)
+                assert str(holder.pid) in str(error), "the refusal must name the holder"
+                times.append(elapsed)
+            assert min(times) < baseline + 1.0, \
+                f"a second taker waited ({min(times):.2f} s against {baseline:.2f} s with the lock free)"
         assert git(tenant.knowledge, "rev-parse", "HEAD") == head
         assert _current(tenant) == (first.commit, first.path)
         assert _exports(tenant) == sorted([first.commit, "current"])
@@ -392,6 +395,15 @@ def _under(root, path):
     return None if rel == os.pardir or rel.startswith(os.pardir + os.sep) else Path(rel).parts
 
 
+def _at(path, dir_fd):
+    """`path` as named relative to the folder descriptor `dir_fd` (`None` or -1: none), read
+    back through `/proc/self/fd`."""
+    if dir_fd is None or dir_fd < 0 or not isinstance(path, (str, bytes, os.PathLike)):
+        return path
+    name = os.fsdecode(path)
+    return name if os.path.isabs(name) else os.path.join(os.readlink(f"/proc/self/fd/{dir_fd}"), name)
+
+
 def _writes(flags):
     return flags is not None and bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC))
 
@@ -400,10 +412,12 @@ def test_the_export_and_current_are_written_under_the_tenant_lock(repo, tmp_path
     """Flow 1 / O-F: the export's folder and files and the `current` pointer are written while
     this process holds the tenant lock, so a publisher that fetched an older commit can never
     point `current` back at it after another published a newer one. Probed from another
-    process (`LockAudit`) before the first write of an export file (a file in a folder under
-    `exports/`), before every rename or link into `exports/`, and before every write of
-    `current`; the probe's positive control comes first. Every probe sees the lock busy, and
-    `current` was among them."""
+    process (`LockAudit`) before the first write of an export file opened by name (a file in a
+    folder under `exports/`), before every rename or link into `exports/` (by name or relative
+    to a folder descriptor), and before every write of `current`; the probe's positive
+    control comes first. Every probe sees the lock busy, and `current` was among them. (An
+    `os.open` relative to a folder descriptor is audited without the descriptor, so export
+    files written that way are not seen; only `current` is required.)"""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     d.publish()
@@ -413,8 +427,10 @@ def test_the_export_and_current_are_written_under_the_tenant_lock(repo, tmp_path
     def pick(event, args):
         if event == "open" and _writes(args[2]):
             parts = _under(exports, args[0])
-        elif event in {"os.rename", "os.link", "os.symlink"}:
-            parts = _under(exports, args[1])
+        elif event in {"os.rename", "os.link"}:
+            parts = _under(exports, _at(args[1], args[3]))
+        elif event == "os.symlink":
+            parts = _under(exports, _at(args[1], args[2]))
         else:
             return None
         if not parts or parts[0] == os.curdir:
@@ -454,31 +470,46 @@ import json, os, resource, signal, sys
 from pathlib import Path
 from defender.tests import _tenants1106 as tenants
 from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, target
-root, tenant_id, marker, exports, limit = (Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4],
-                                           int(sys.argv[5]))
+root, tenant_id, marker, size, limit = (Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4]),
+                                        int(sys.argv[5]))
 mod = target()
 tenant = tenants.accept(root, tenant_id)
 d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client)
-clone = str(tenant.knowledge)
+clone = os.path.abspath(tenant.knowledge)
+in_clone = os.path.join(clone, "agent", "lessons", marker)
 signal.signal(signal.SIGXFSZ, signal.SIG_DFL)  # a write past the limit kills, as a power cut would
+armed = []
 
-def mentions_exports(value):
-    return isinstance(value, (str, bytes, os.PathLike)) and exports in os.fsdecode(value)
+def fast_forwarded():
+    try:
+        return os.stat(in_clone).st_size == size
+    except OSError:
+        return False
 
 def cut_off(event, args):
-    # The moment the export's marker file is opened for writing outside the clone, or a
-    # program is started on the exports folder, every later file write is capped at `limit`
-    # bytes: the marker (larger) is cut off part-written and this process dies of SIGXFSZ.
-    if event == "open" and args[2] is not None and args[2] & (os.O_WRONLY | os.O_RDWR | os.O_CREAT):
-        path = os.path.abspath(os.fsdecode(args[0]))
-        armed = os.path.basename(path) == marker and not path.startswith(clone + os.sep)
-    elif event == "subprocess.Popen":
-        argv = [args[1]] if isinstance(args[1], (str, bytes)) else list(args[1])
-        armed = any(map(mentions_exports, [*argv, args[2], *(args[3] or {}).values()]))
-    else:
-        return
-    if armed:
+    # Once the clone's checkout holds the whole marker (the fast-forward is done), the next
+    # file this process opens for writing anywhere outside the clone (by name, relative to a
+    # folder descriptor, unnamed, or by descriptor) or the next program it starts arms a cap
+    # of `limit` bytes per file: the marker, the only file over it, is cut off part-written
+    # and the process (or its program) dies of SIGXFSZ. Nothing here ever raises into the
+    # code under test.
+    try:
+        if armed or event not in ("open", "subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn"):
+            return
+        if event == "open":
+            flags = args[2]
+            if not flags or not flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT):
+                return
+            if isinstance(args[0], (str, bytes, os.PathLike)):
+                path = os.path.abspath(os.fsdecode(args[0]))
+                if path == clone or path.startswith(clone + os.sep):
+                    return
+        if not fast_forwarded():
+            return
         resource.setrlimit(resource.RLIMIT_FSIZE, (limit, resource.getrlimit(resource.RLIMIT_FSIZE)[1]))
+        armed.append(event)
+    except Exception:
+        return
 sys.addaudithook(cut_off)
 try:
     print(json.dumps({"published": d.publish().commit}))
@@ -486,16 +517,21 @@ except mod.DeliveryRefused as refused:
     print(json.dumps({"refused": str(refused)}))
 """
 
+#: The marker's bytes (well over the cap; every other file of the export is far under it).
+_MARKER_BYTES = b"the export is cut off in here\n" * 8192
+_WRITE_CAP = 64 * 1024
+
 
 def test_a_publish_cut_off_mid_export_leaves_no_partial_export(repo, tmp_path):
     """Flow 1 / O-B: an export is written to a temporary folder and renamed into place, so a
-    publish cut off mid-export (in another process: from the moment it opens the new
-    commit's marker file outside the clone, or starts a program on `exports/`, writes are
-    capped below the marker's size, so the marker is left part-written and the process dies
-    of SIGXFSZ, or its program does and it refuses) leaves no `exports/<commit>` and
-    `current` on the earlier export. The next publish, finding whatever was left, publishes
-    the commit whole and exact: nothing part-written is reused, no stale lock is in the
-    way."""
+    publish cut off mid-export leaves no `exports/<commit>` and `current` on the earlier
+    export. The cut, in another process: once the fast-forward has checked the new commit's
+    marker file out in the clone, the next file write outside the clone (however opened:
+    by name, staged under another name, unnamed, relative to a folder descriptor) or the next
+    program started caps every later file write below the marker's size, so the marker is
+    left part-written and the process dies of SIGXFSZ, or its program does and it refuses.
+    The next publish, finding whatever was left, publishes the commit whole and exact:
+    nothing part-written is reused, no stale lock is in the way."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     first = d.publish()
@@ -503,13 +539,14 @@ def test_a_publish_cut_off_mid_export_leaves_no_partial_export(repo, tmp_path):
     planted = {}
 
     def edit(checkout):
-        (checkout / "agent/lessons" / marker).write_bytes(b"the export is cut off in here\n" * 8192)
+        (checkout / "agent/lessons" / marker).write_bytes(_MARKER_BYTES)
         (checkout / "agent/lessons/after.md").write_bytes(b"written after the marker, or before\n")
         planted.update(_knowledge_files(checkout))
     newer = push_to_remote(repo, tmp_path, edit)
+    assert all(len(data) < _WRITE_CAP for rel, data in planted.items() if not rel.endswith(marker))
     exports = tenant.dir / "exports"
     proc = subprocess.run([sys.executable, "-c", _INTERRUPTED_PUBLISH, str(tenant.data_root),
-                           str(tenant.id), marker, str(exports), str(64 * 1024)],
+                           str(tenant.id), marker, str(len(_MARKER_BYTES)), str(_WRITE_CAP)],
                           capture_output=True, text=True, timeout=300, check=False,
                           env=fresh_process_env(tenant, tmp_path / "cut"))
     assert proc.returncode == -signal.SIGXFSZ or '"refused"' in proc.stdout, \

@@ -669,7 +669,11 @@ class LockAudit:
             return
         self._inside.on = True
         try:
-            label = self.pick(event, args)
+            try:
+                label = self.pick(event, args)
+            except Exception as crash:  # noqa: BLE001 — recorded, judged by the caller
+                self.probes.append(("pick", {"crashed": f"{event}: {crash!r}"}))
+                return
             if label is not None:
                 try:
                     verdict = lock_probe(self.tenant)
