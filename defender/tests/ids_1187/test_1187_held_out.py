@@ -396,6 +396,46 @@ def test_a_run_that_fails_crashes_or_is_interrupted_still_has_its_row(scene, die
         (SLUG, run_id)], "a run that died left no row in F"
 
 
+def test_launch_as_the_operator_runs_it_really_starts_run_py(scene):
+    """Flow 5 step 4 with the REAL spawn (adversary F13, deck #1042c replay: every launch test
+    hands its own `spawn=`, so a default that starts nothing — and returns 0 — passed them all,
+    and no test ran `held_out.py` as a process). `python <checkout>/defender/evals/held_out.py
+    launch <slug> --index F --fixtures-dir D` as a real process, no seam, under a data root that
+    holds NO `playground` tenant: launch appends the row, then really runs `run.py <fixture
+    alert> --tenant playground --run-id <uuid> --no-learn` — which refuses at acceptance,
+    before any model, box or run folder, naming `<data root>/playground`. Observed: F holds
+    exactly one row, for the slug, with a canonical UUID; the process's output carries run.py's
+    own refusal (`[run.py]`) naming the data root's `playground` folder, which a launch that
+    never started run.py cannot print; and nothing was made under the data root. What launch
+    itself exits with is not pinned (as above)."""
+    import subprocess
+    import sys
+
+    index = scene.ops / INDEX_NAME
+    worktree = S.H5.WORKTREE
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+           "PYTHONPATH": os.pathsep.join(filter(None, [str(worktree),
+                                                       os.environ.get("PYTHONPATH")]))}
+    before = S.tree(scene.data_root)
+    child = subprocess.run(  # noqa: S603 — this interpreter, the checkout's own CLI
+        [sys.executable, str(worktree / "defender" / "evals" / "held_out.py"), "launch", SLUG,
+         "--index", str(index), "--fixtures-dir", str(scene.fixtures)],
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env,
+        cwd=str(worktree), timeout=600)
+    said = f"{child.stdout}\n{child.stderr}"
+
+    rows = _rows(index.read_text(encoding="utf-8") if index.is_file() else None)
+    assert [slug for slug, _run_id in rows] == [SLUG], (
+        f"launch did not append one row for {SLUG}: {rows}\n{said[-1500:]}")
+    assert S.is_canonical_uuid(rows[0][1]), f"the row's run id is {rows[0][1]!r}"
+    playground = str(Path(scene.data_root) / LAUNCH_TENANT)
+    refusals = [line for line in said.splitlines() if "[run.py]" in line and playground in line]
+    assert refusals, (
+        "launch's real spawn never ran run.py --tenant playground under this data root: no "
+        f"refusal of its own naming {playground} in the output:\n{said[-1500:]}")
+    assert S.tree(scene.data_root) == before, "the refused run.py made something"
+
+
 # ==========================================================================================
 # Launch: where F may not be (S-roster, review U4, recheck X3)
 # ==========================================================================================
