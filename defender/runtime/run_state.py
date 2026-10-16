@@ -193,6 +193,26 @@ class RunState:
             rows = self.rows.get(lead)
             return rows[-1] if rows else None
 
+    def fork_counters(self) -> dict:
+        """What a fork snapshot records of this state (#1255 P2, D2): the counters the model can
+        feel — the budget's tool-call and spawn counts and the circuit breaker — as one
+        JSON-shaped copy. `restore_fork_counters` is its inverse.
+
+        @owns fork_counters"""
+        with self.lock:
+            return {"tool_calls": self.budget["tool_calls"],
+                    "subagent_spawns": self.budget["subagent_spawns"],
+                    "breaker": copy.deepcopy(self.breaker)}
+
+    def restore_fork_counters(self, counters: dict) -> None:
+        """Start a branch arm's state where its source's stood at the branch point: the
+        counters `fork_counters` recorded there. A key missing from `counters` is a
+        `KeyError` — a snapshot that does not carry a counter cannot restore it."""
+        with self.lock:
+            self.budget["tool_calls"] = int(counters["tool_calls"])
+            self.budget["subagent_spawns"] = int(counters["subagent_spawns"])
+            self.breaker = copy.deepcopy(counters["breaker"])
+
     def inherit_rows(self, rows: Iterable[dict]) -> None:
         """Record rows this run did not write: a branch sibling's inherited prefix, handed over
         by seeding as it writes them into the sibling's table. Grouped by their `lead_id`; a row

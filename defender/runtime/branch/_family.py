@@ -1,8 +1,7 @@
 """The family manifest: the one document a sibling is told, and the schema that gates it.
 
 `episodes/<id>/family.yaml` carries three authors: the launcher's derived half (episode id,
-source run, branch point, T0, the served systems), the operator's `continuation_prompt`, and the
-questioner's authored half (base story, discriminator, worlds and their facts).
+source run, branch point, T0, the served systems) and the questioner's authored half (base story, discriminator, worlds and their facts).
 `run.py --tenant T --episode <episode_id> --world X` derives everything else from it.
 
 The schema lives in the runtime because a resumed run must not import the learning tree to know
@@ -63,6 +62,8 @@ FACT_ID_MAX_LEN = 64
 #: Every top-level field the manifest declares. Unknown ones refuse. `source_run_dir` is no
 #: longer written (#1105 PR 2, decision A): an old manifest carrying it still loads, and its
 #: value is never read — the source is `source_run_id`, opened in the request's tenant's runs.
+#: `continuation_prompt` likewise (#1255 D1, P4): an arm is told nothing on arrival, so an old
+#: manifest's prompt loads and is never read.
 _FAMILY_FIELDS = (
     "episode_id", "source_run_dir", "source_run_id", "branch_message_id", "fences_at",
     "as_of", "continuation_prompt", "served_systems", "base_story", "discriminator", "worlds",
@@ -385,7 +386,6 @@ class Family:
     branch_message_id: int
     fences_at: int
     as_of: dt.datetime
-    continuation_prompt: str
     #: The systems the tenant's gather grant served when the launcher authored the family,
     #: recorded so no later reader resolves a tenant. The live grant still governs every query.
     served_systems: tuple[str, ...]
@@ -433,7 +433,7 @@ def parse_as_of(raw: Any, *, where: str = "as_of") -> dt.datetime:
 
 def _check_scalars(doc: dict) -> None:
     """Every manifest field whose only rule is its own type."""
-    for scalar in ("episode_id", "source_run_id", "continuation_prompt", "base_story"):
+    for scalar in ("episode_id", "source_run_id", "base_story"):
         if not isinstance(doc.get(scalar), str) or not doc.get(scalar):
             raise FamilyError(f"the manifest's {scalar} must be a non-empty string")
     for number in ("branch_message_id", "fences_at"):
@@ -543,7 +543,6 @@ def parse_family(doc: Any) -> Family:
         episode_id=doc["episode_id"],
         source_run_id=doc["source_run_id"], branch_message_id=doc["branch_message_id"],
         fences_at=doc["fences_at"], as_of=as_of,
-        continuation_prompt=doc["continuation_prompt"],
         served_systems=served_systems,
         base_story=doc["base_story"],
         discriminator=discriminator, worlds=worlds,

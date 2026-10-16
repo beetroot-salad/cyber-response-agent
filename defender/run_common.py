@@ -99,7 +99,10 @@ def materialize_run(
                                 "(`episode_runs=`): an arm is made only in its episode's "
                                 "container")
             run = episode_runs.create(admitted)
-            world_id = world.world_id
+            # An arm's stamp is stamped as a natural run's (#1255 P3, O2): its folder is the
+            # box's mount, so it names no world token, parent run or fork turn. The lineage is
+            # the episode's own host-side record (`family.yaml`, the episode's world records).
+            world_id = episode_runs.base_world_id()
         else:
             runs = tenant.runs_repository()
             run = runs.create(admitted, pinned=pinned)
@@ -131,8 +134,6 @@ def materialize_run(
     _stamp(
         run, knowledge_dir=tenant.knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
-        parent_run_id=world.family.source_run_id if world is not None else None,
-        fork_turn=world.family.branch_message_id if world is not None else None,
     )
     return run
 
@@ -286,7 +287,6 @@ def _seal(input_dir: Path) -> None:
 def _stamp(
     run: Run, *, knowledge_dir: Path, model: str | None = None,
     tenant_id: str | None = None, world_id: str | None = None,
-    parent_run_id: str | None = None, fork_turn: int | None = None,
 ) -> None:
     """Write the run's stamp, never taking the run down doing it (ENOSPC, read-only remount,
     a planted alias). Unlike a missing alert, a missing stamp only means the run's code cannot
@@ -299,10 +299,8 @@ def _stamp(
         # Set in the single pre-box write; a later write would land in the box's rw bind.
         if model is not None:
             record = _dataclasses.replace(record, model=model)
-        # Tenant fields equal the tenant record's values; a fork's lineage rides beside them.
-        record = _dataclasses.replace(
-            record, tenant_id=tenant_id, world_id=world_id,
-            parent_run_id=parent_run_id, fork_turn=fork_turn)
+        # Tenant fields equal the tenant record's values.
+        record = _dataclasses.replace(record, tenant_id=tenant_id, world_id=world_id)
         run.facts.provenance.write(record.as_json())
     except OSError as e:
         _logger.error(f"could not stamp {path}: {e!r} — the run continues UNSTAMPED, so "

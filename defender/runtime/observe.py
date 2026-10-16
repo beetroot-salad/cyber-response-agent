@@ -105,12 +105,16 @@ class RequestLogger:
         self._denial_seq = 0
 
     @classmethod
-    def from_record(cls, record: Any) -> RequestLogger:
+    def from_record(cls, record: Any, *, continuing: bool = False) -> RequestLogger:
+        """A logger writing to `record`. A stream is started empty the first time this process
+        opens its path, unless `continuing`: then it is appended to, and its policy-denial
+        numbering goes on from the denials it already holds (a branch arm's log, restored to
+        what its source held at the branch point, #1255 P2)."""
         path = record.path
         key = str(Path(path).resolve())
         if key in _ACTIVE_PATHS:
             raise FileExistsError(f"a RequestLogger has already opened {path}")
-        if key in _EVER_LOGGER_PATHS:
+        if continuing or key in _EVER_LOGGER_PATHS:
             record.append_text("")
         else:
             record.start_stream("")
@@ -121,6 +125,10 @@ class RequestLogger:
         logger.messages = []
         logger._seq = {}
         logger.n_requests = logger._denial_seq = 0
+        if continuing:
+            rows, _malformed, _read = record.read_rows()
+            logger._denial_seq = sum(
+                row.get("event_type") == POLICY_DENIAL_EVENT_TYPE for row in rows)
         _ACTIVE_PATHS.add(key)
         _EVER_LOGGER_PATHS.add(key)
         return logger
@@ -247,7 +255,9 @@ def _denial_logger_or_null(record: Any) -> RequestLogger:
     itself still takes effect; only the record is lost (logged), and the reap scan reports the
     plant."""
     try:
-        return RequestLogger.from_record(record)
+        # Continued, never started over: a branch arm's log already holds its source's denials
+        # through the branch point; a fresh run's does not exist yet.
+        return RequestLogger.from_record(record, continuing=True)
     except OSError as e:
         _logger.error(
             f"the policy-denial log at {record.path} could not be opened ({e!r}); denials "
