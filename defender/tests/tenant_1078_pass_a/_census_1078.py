@@ -313,7 +313,7 @@ def o2_scope(repo: Path = REPO_ROOT) -> list[Path]:
 
 
 def private_helpers_only_called_from(path: Path, caller: str) -> set[str]:
-    """The `_private` top-level functions of `path` whose EVERY call site in the module sits
+    """The private (underscore) top-level functions of `path` whose EVERY call site in the module sits
     inside `caller` — a write inside one of those is `caller`'s own write, split out."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     callers: dict[str, set[str]] = {}

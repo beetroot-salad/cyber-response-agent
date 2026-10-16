@@ -92,6 +92,6 @@ def enqueue_case(state: LearningState, case_id: str, run_dir: Path) -> None:
 
 
 def enqueue_run(state: LearningState, run_dir: Path) -> None:
-    """File a request named for the run itself (the old `markers.enqueue_for_authoring`): the
+    """File a request named for the run itself (the old authoring-marker enqueue): the
     one queue is case-keyed now, so the run's own name stands in as the case."""
     enqueue_case(state, Path(run_dir).name, run_dir)
