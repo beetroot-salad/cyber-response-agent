@@ -5,10 +5,12 @@ an implementation is built.
 ONE LIVE STATUS. Every surface reads the run state's CURRENT status when it is rendered: a system
 an escaped `ConfigFault` downs during lead zero (O-5b) is shown as not configured, with its reason,
 in MAIN's opening view and in the system index of the first lead MAIN dispatches — not a copy of
-the statuses taken at start, which still said "up".
+the statuses taken at start, which still said "up"; and a system a MAIN lead's call downs is shown
+so in the index of the next lead MAIN dispatches — not a copy taken when MAIN's opening was built.
 
-THE DOWN GATE BEFORE THE CLAIM. A dispatch to a down system is refused before a lead id is
-claimed or a lead record (`gather_raw/<id>.lead.json`) written — as lead zero already does (O-6).
+THE DOWN GATE BEFORE THE CLAIM. A dispatch to a down system — whatever its cause: not configured
+at start, downed mid-run, or its adapter broken — is refused before a lead id is claimed or a lead
+record (`gather_raw/<id>.lead.json`) written — as lead zero already does (O-6).
 Observed at the moment MAIN reads the refusal (a probe on MAIN's next request), not at the run's
 end, where a claim-then-release would look the same; and by the lead-claim contract (`claim_lead`:
 an id is claimed once): the same id dispatched next, on a usable system, is claimed and runs.
@@ -34,9 +36,11 @@ import pytest
 
 from defender._paths import adapters_under
 from defender.runtime.verbs import read_roster
+from defender.tests import _triplet_947 as T
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 from defender.tests.alert_front_door_1222.test_1222_correlation_endings import (
     _alert,
+    _backend,
     _fail_alerts,
     _q,
     _Scene,
@@ -45,6 +49,7 @@ from defender.tests.alert_front_door_1222.test_1256_down_at_start import (  # no
     _CMDB_LEAD,
     _CMDB_QUERY,
     _PLANTED_CMDB,
+    BROKEN_MARK,
     PLANTED_CALLS,
     TABLE_THREE,
     _drop,
@@ -52,6 +57,7 @@ from defender.tests.alert_front_door_1222.test_1256_down_at_start import (  # no
     _names_system,
     _planted_calls,
     _planted_tree,
+    _tree_with_broken_elastic,
 )
 from defender.tests.e2e import _replay_harness as RH
 
@@ -108,10 +114,53 @@ def test_a_system_downed_during_lead_zero_is_shown_down_to_main_and_to_the_first
         f"MAIN's opening view does not show elastic as not configured with its reason "
         f"({LIVE_KEY}) though lead zero downed it before the view was built (r4: surfaces read "
         f"the current status, not a copy taken at start):\n{view}")
-    index = d.router.instructions("l-001") + "\n" + d.router.first_prompt("l-001")
+    index = _index_of(d, "l-001")
     assert _down_lines(index, "elastic", LIVE_KEY), (
         f"the system index of the first lead MAIN dispatched does not show elastic as not "
         f"configured with its reason ({LIVE_KEY}) (r4):\n{index}")
+
+
+def _index_of(d: S.Drive, lead_id: str) -> str:
+    """What lead `lead_id` was shown at its start: its instructions and its first prompt (gather's
+    system index is in one of them)."""
+    return d.router.instructions(lead_id) + "\n" + d.router.first_prompt(lead_id)
+
+
+#: The key cmdb's escaped fault names (its reason): no other text in the run carries it.
+CMDB_LIVE_KEY = "FD1256_INVENTORY_LIVE_KEY"
+
+
+def _cmdb_escape() -> BaseException:
+    """A call-time `ConfigFault` cmdb's start check did not raise (O-5b)."""
+    return S.sym("scripts.adapters.faults", "ConfigFault")(
+        f"{CMDB_LIVE_KEY} is not set - this tenant's settings do not configure this system")
+
+
+def test_a_system_downed_by_a_main_lead_is_shown_down_in_the_next_leads_index(
+        tmp_path: Path) -> None:
+    """r4: every surface reads the run state's current status when it is rendered — not a copy taken at start, nor one taken when MAIN's opening was built. Every system passes its start check and lead zero downs nothing. MAIN dispatches l-001 on cmdb, whose call raises a ConfigFault (O-5b): cmdb is Down(NotConfigured) from then on. MAIN then dispatches l-002 on elastic, and l-002's system index shows cmdb as not configured with the escaped fault's reason on its line. Non-vacuity: l-001's own index, rendered while cmdb was up, does not — so the index is read at each dispatch, not a list of every system ever down. Red at base, which has no statuses."""
+    scene = _Scene(tmp_path, tenant_id="acme-live-later")
+    d = scene.run("live-later",
+                  backend=_backend(fault=T.Fault(fail_on=("cmdb.get-host",)), exc=_cmdb_escape),
+                  main=[S.gather("l-001", "cmdb", goal="FD1256 who is web-1"),
+                        S.gather("l-002", "elastic", goal="FD1256 what else fired on web-1"),
+                        S.text(S.DONE)],
+                  leads={"l-001": [S.query("cmdb", "get-host", {"host": "web-1"}),
+                                   S.text("Summary: FD1256 cmdb could not say.")],
+                         "l-002": [S.text("Summary: FD1256 measured elastic.")]})
+
+    assert "cmdb.get-host" in d.backend.rec.verbs, (
+        f"premise: l-001's cmdb call never reached the verb: {d.backend.rec.verbs}")
+    assert d.router.dispatched("l-002"), (
+        f"premise: MAIN's elastic lead never ran (MAIN requests: {d.main.requests})")
+    assert not _down_lines(_index_of(d, "l-001"), "cmdb", CMDB_LIVE_KEY), (
+        "premise: l-001's index, rendered before cmdb's call escaped, already shows cmdb down "
+        "with the reason its call had not yet raised")
+    index = _index_of(d, "l-002")
+    assert _down_lines(index, "cmdb", CMDB_LIVE_KEY), (
+        f"the system index of the lead MAIN dispatched after cmdb went down does not show cmdb as "
+        f"not configured with its reason ({CMDB_LIVE_KEY}) (r4: every surface reads the current "
+        f"status when it is rendered, not a copy taken earlier):\n{index}")
 
 
 # =================================================================================================
@@ -166,10 +215,13 @@ def _first_answer(d: S.Drive) -> str:
     return "\n".join(d.main.seen[1].tool_returns)
 
 
-def _assert_gate_before_claim(d: S.Drive, main: _ProbingMain, system: str, what: str) -> None:
+def _assert_gate_before_claim(d: S.Drive, main: _ProbingMain, system: str, what: str, *,
+                              said: tuple[str, ...] = ("not configured",),
+                              unsaid: tuple[str, ...] = ()) -> None:
     """The refused dispatch left no lead record when MAIN read its refusal, did not consume the
     id (the second dispatch claimed it and ran on cmdb), and was refused for its system's down
-    cause."""
+    cause: the refusal names the system and carries each of `said` (the cause's words, or its
+    reason), and none of `unsaid` (another cause's words, DP4)."""
     assert len(main.probed) >= 2, f"{what}: MAIN was never asked after its first dispatch"
     assert main.probed[1] == [], (
         f"{what}: the dispatch of l-001 to {system}, which is down, wrote a lead record before "
@@ -189,9 +241,14 @@ def _assert_gate_before_claim(d: S.Drive, main: _ProbingMain, system: str, what:
     assert _names_system(answer, system), (
         f"{what}: the refusal MAIN got for its dispatch to {system} does not name it (O-4): "
         f"{answer!r}")
-    assert "not configured" in answer.lower(), (
-        f"{what}: the refusal MAIN got for its dispatch to {system} does not say it is not "
-        f"configured (O-4): {answer!r}")
+    missing = [w for w in said if w.lower() not in answer.lower()]
+    assert not missing, (
+        f"{what}: the refusal MAIN got for its dispatch to {system} does not carry {missing} — "
+        f"its down cause (O-4): {answer!r}")
+    wrong = [w for w in unsaid if w.lower() in answer.lower()]
+    assert not wrong, (
+        f"{what}: the refusal MAIN got for its dispatch to {system} names another cause "
+        f"({wrong}) (DP4): {answer!r}")
 
 
 def test_a_dispatch_to_a_system_down_at_start_claims_no_lead_id(tmp_path: Path) -> None:
@@ -221,6 +278,20 @@ def test_a_dispatch_to_a_system_downed_mid_run_claims_no_lead_id(tmp_path: Path)
     assert d.router.dispatched(S.L3), (
         "premise: l-00c was not dispatched — elastic did not pass its start check")
     _assert_gate_before_claim(d, main, "elastic", "elastic downed during lead zero")
+
+
+@pytest.mark.usefixtures("_import_state_restored")
+def test_a_dispatch_to_a_system_whose_adapter_is_broken_claims_no_lead_id(tmp_path: Path) -> None:
+    """r4: the same gate for the other down cause. The run reads a planted tree whose elastic adapter cannot be imported (`roster=`, so run start judges the roster the run reads): elastic is Down(AdapterBroken) from the start. MAIN dispatches l-001 on elastic and is refused — naming elastic and the adapter's reason, neither 'not configured' nor 'tripped' (O-5a, DP4), and no host path — with no lead record written by the time it reads the refusal; the id stays free for its next dispatch, on cmdb (the planted, well-formed one). Red at base, which has no down gate."""
+    scene = _Scene(tmp_path, tenant_id="acme-claim-broken")
+    tree = _tree_with_broken_elastic(tmp_path / "planted")
+    d, main = _claim_scene(scene, "claim-broken", "elastic", defender_dir=tree,
+                           backend=_backend(), roster=read_roster(adapters_under(tree)))
+    _assert_gate_before_claim(d, main, "elastic", "elastic's adapter broken at start",
+                              said=(BROKEN_MARK,), unsaid=("not configured", "tripped"))
+    leaked = S.host_paths_in(_first_answer(d), tmp_path, tmp_path.resolve(), tree,
+                             scene.tenant.root, S.DEFENDER, S.REPO_ROOT)
+    assert not leaked, f"the refusal MAIN got for its dispatch to elastic carries {leaked}"
 
 
 # =================================================================================================

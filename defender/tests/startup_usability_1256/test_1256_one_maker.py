@@ -10,13 +10,17 @@ What a run shows of it here:
   start-time reason naming the same roster is (A6's rule, here over a roster no defender-tree
   redaction covers).
 * Hiding a path respects path boundaries: a fault text naming a path that merely SHARES A PREFIX
-  with the data root, the tenant's folder or its settings folder (`<root>base/…`, `<root>2/…`)
-  shows that path whole, or hides it whole — never with the shared prefix rewritten and the rest
-  left dangling (`<data root>base/…`). Read as: every occurrence of the path's tail keeps the
-  path's own last directory name and the separator before it (`/<name><tail>`), which an intact
-  path and a hidden ANCESTOR both keep and a prefix rewrite loses.
+  with the data root, the tenant's folder or its settings folder (`<root>base/…`, `<root>2/…`,
+  `<settings>-old/…`, `<settings>.bak/…`, `<settings>_x/…`) shows that path whole, or hides it
+  whole — never with the shared prefix rewritten and the rest left dangling (`<data root>base/…`).
+  Read as: every occurrence of the path's tail keeps the path's own last directory name and the
+  separator before it (`/<name><tail>`), which an intact path and a hidden ANCESTOR both keep and
+  a prefix rewrite loses.
+* An escaped call-time fault naming a host file under the data root that is neither settings nor
+  adapter code reaches the model with no host path: the start-time rule (#1106, O-5a), applied to
+  the escape's reason because one function makes both.
 
-Both drive the real driver through `_replay_harness.drive`; the model-visible text is every
+Each drives the real driver through `_replay_harness.drive`; the model-visible text is every
 request the doubles received after the escaping call.
 """
 from __future__ import annotations
@@ -28,6 +32,7 @@ import pytest
 
 from defender.runtime.verbs import read_roster
 from defender.tests import _tenants1106 as T6
+from defender.tests.alert_front_door_1222._spec1222 import host_paths_in
 from defender.tests.e2e import _lead_zero_808 as LZ
 from defender.tests.e2e import _replay_harness as RH
 from defender.tests.tenant_1107_settings import _spec1107 as S7
@@ -162,9 +167,15 @@ def test_an_escaped_fault_naming_an_out_of_tree_roster_reaches_the_model_with_th
 # Hiding a path respects path boundaries
 # =================================================================================================
 
+#: What a sibling's folder name adds to the name it shares a prefix with: a word character, a
+#: digit, a whole word, and the separators a boundary that stops only at a word character misses.
+SIBLING_SUFFIXES = ("-old", ".bak", "_x", "2", "base")
+
+
+@pytest.mark.parametrize("suffix", SIBLING_SUFFIXES)
 def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """r4 "one maker", the boundary half: an escaped call-time ConfigFault (O-5b) names three paths that SHARE A PREFIX with a path a reason hides — the data root's sibling `<root>base/…`, the tenant folder's `<tenant>base/…`, the settings folder's `<settings>2/…` — none of them inside the folder whose name it extends. Each reaches the model whole, or hidden whole (with its ancestors, up to a separator), never with the shared prefix rewritten and its rest left dangling (`<data root>base/…`, `the tenant's settings2/…`). Red at base, whose settings redaction rewrites `<settings>2/…` into `the tenant's settings2/…` (a #1107 CX5 replace that is not boundary-aware, reached by the escaped fault's reason)."""
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str) -> None:
+    """r4 "one maker", the boundary half: an escaped call-time ConfigFault (O-5b) names three paths that SHARE A PREFIX with a path a reason hides — the data root's sibling `<root><suffix>/…`, the tenant folder's `<tenant><suffix>/…`, the settings folder's `<settings><suffix>/…`, for each suffix shape (`-old`, `.bak`, `_x`, `2`, `base`) — none of them inside the folder whose name it extends. Each reaches the model whole, or hidden whole (with its ancestors, up to a separator), never with the shared prefix rewritten and its rest left dangling (`<data root>base/…`, `the tenant's settings-old/…`). Red at base, whose settings redaction rewrites `<settings><suffix>/…` into `the tenant's settings<suffix>/…` (a #1107 CX5 replace that is not boundary-aware, reached by the escaped fault's reason)."""
     shim = S7.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     root = tmp_path / "tenants-bnd1256"
@@ -172,9 +183,9 @@ def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
     tenant = S7.tenant_folder_of(root)
     settings = Path(tenant.settings)
     siblings: dict[str, tuple[Path, str]] = {
-        "the data root's": (root, "base/fd1256-root.conf"),
-        "the tenant folder's": (root / S7.PLAYGROUND_ID, "base/fd1256-tenant.conf"),
-        "the settings folder's": (settings, "2/fd1256-settings.txt"),
+        "the data root's": (root, f"{suffix}/fd1256-root.conf"),
+        "the tenant folder's": (root / S7.PLAYGROUND_ID, f"{suffix}/fd1256-tenant.conf"),
+        "the settings folder's": (settings, f"{suffix}/fd1256-settings.txt"),
     }
     paths = [f"{prefix}{tail}" for prefix, tail in siblings.values()]
 
@@ -198,4 +209,47 @@ def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
             f"{tail!r} no longer follows its own directory name {prefix.name!r} (r4: the one "
             f"maker hides whole paths): "
             f"{[ln for ln in after.splitlines() if tail in ln][:3]}")
+    assert shim.calls() == [], shim.calls()
+
+
+# =================================================================================================
+# A host path under the data root that is neither settings nor code: hidden at call time as at start
+# =================================================================================================
+
+def test_an_escaped_fault_naming_a_data_root_path_reaches_the_model_with_no_host_path(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """r4 "one maker": the escaped call-time fault's reason (O-5b) is made by the function that makes a start-time reason, so it obeys the start-time rule that a reason the model sees carries no host path (#1106; O-5a: "including a path under the data root outside the tenant's own folder"). cmdb's `get-host` raises a ConfigFault naming a file under the data root, in the tenant's folder but neither its settings folder nor adapter code (`<root>/<tenant>/agent/…conf`). The reason reaches the model; neither that file's path nor any line carrying the reason names the data root, the tenant's folder, or their resolved spellings. A reason built by hiding only the settings folder and code paths leaves it whole: red. Red at base, whose escaped reason hides only the settings folder."""
+    shim = S7.DockerShim(tmp_path / "docker")
+    monkeypatch.setenv("PATH", shim.path_value())
+    root = tmp_path / "tenants-host1256"
+    S7.plant(root, marker="host1256")
+    tenant = S7.tenant_folder_of(root)
+    folder = root / S7.PLAYGROUND_ID
+    host_only = folder / "agent" / "fd1256-host-only.conf"
+    assert Path(tenant.settings) not in (host_only, *host_only.parents), (
+        f"premise: {host_only} is under the tenant's settings folder {tenant.settings}")
+
+    def get_host(ctx: Any, *, host: str = "web-1") -> dict:
+        raise S7.config_fault()(
+            f"{CALL_MARK}: cannot read {host_only} - this tenant's settings do not configure "
+            f"this system")
+
+    run_dir = LZ.materialize_alert(tmp_path / "replay", LZ.alert_doc(ancestors=[]))
+    main, gather = _doubles()
+    RH.drive(run_dir, run_id="host1256", main=main, gather=gather, tenant=tenant,
+             verbs=RH.FakeVerbs({"cmdb": {"get-host": get_host}}))
+
+    after = _after_escape(main, gather)
+    carrying = [ln for ln in after.splitlines() if CALL_MARK in ln]
+    assert carrying, (
+        f"premise: the escaped fault's reason never reached the gather model:\n{after[-2000:]}")
+    spelled = sorted({str(p) for p in (host_only, host_only.resolve())})
+    assert not [s for s in spelled if s in after], (
+        f"an escaped call-time fault reached the model naming the host file it read, under the "
+        f"data root (r4: the one maker hides it, as at start; #1106): {carrying[:3]}")
+    roots = sorted({p for base in (root, folder) for p in (base, base.resolve())}, key=str)
+    leaked = sorted({hit for ln in carrying for hit in host_paths_in(ln, *roots)})
+    assert not leaked, (
+        f"the escaped fault's reason, as the model sees it, names host path(s) {leaked}: "
+        f"{carrying[:3]}")
     assert shim.calls() == [], shim.calls()

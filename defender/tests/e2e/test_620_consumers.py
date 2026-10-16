@@ -26,6 +26,7 @@ The seams
 from __future__ import annotations
 
 import ast
+import importlib
 import json
 import os
 import re
@@ -1104,30 +1105,68 @@ def _strip_check(source: str) -> str:
     return stripped
 
 
+#: The name the `assigned` arm gives the adapter's own check before binding `check_settings` to it.
+_RENAMED_CHECK = "_fd1256_settings_check"
+#: The shipped adapter the `imported` arm binds `check_settings` from (the scaffold's copy is of it).
+_CHECKOUT_CMDB = "defender.scripts.adapters.cmdb_adapter"
+_NOT_CALLABLE = f'\n\n{_CHECK} = "FD1256 a settings check that is not a function"\n'
+
+
+def _rename_check(source: str, new: str) -> str:
+    """`source` with its ONE top-level `def check_settings` renamed `new` (its body untouched)."""
+    defs = [n for n in ast.parse(source).body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == _CHECK]
+    assert len(defs) == 1, f"premise: the adapter defines {_CHECK} {len(defs)} times at top level"
+    lines = source.splitlines(keepends=True)
+    at = defs[0].lineno - 1
+    assert f"def {_CHECK}(" in lines[at], f"premise: line {at + 1} is not the def: {lines[at]!r}"
+    lines[at] = lines[at].replace(f"def {_CHECK}(", f"def {new}(", 1)
+    return "".join(lines)
+
+
 def _with_settings_check(source: str, arm: str) -> str:
-    """The copied cmdb adapter as each arm needs it: `declared` keeps the adapter's own check
-    (appending a stub that answers "usable" only when it declares none), `none` removes every
-    top-level binding of it, `not-callable` binds the name to a string instead — so an arm that
-    removes the check removes it for a reader that imports the module and for one that reads its
-    AST alike."""
+    """The copied cmdb adapter as each arm needs it — so an arm that removes the check removes it
+    for a reader that imports the module and for one that reads its AST alike:
+
+    * `declared` keeps the adapter's own check (appending a stub that answers "usable" only when
+      it declares none);
+    * `none` removes every top-level binding of it; `not-callable` then binds the name to a
+      string;
+    * `rebound` keeps the declared `def` and then rebinds the name to a string — what the module
+      holds is not callable, whatever its source declares first;
+    * `assigned` renames the declared `def` and binds `check_settings` to it by assignment;
+      `imported` removes the check and binds the name by importing the shipped cmdb adapter's own
+      — each a callable check, bound by a form other than a `def` of that name."""
+    declared = source if _binds_check(source) else source + _STUB_CHECK
     if arm == "declared":
-        return source if _binds_check(source) else source + _STUB_CHECK
+        return declared
+    if arm == "rebound":
+        return declared + _NOT_CALLABLE
+    if arm == "assigned":
+        return _rename_check(declared, _RENAMED_CHECK) + f"\n\n{_CHECK} = {_RENAMED_CHECK}\n"
     stripped = _strip_check(source)
     if arm == "none":
         return stripped
+    if arm == "imported":
+        return stripped + f"\n\nfrom {_CHECKOUT_CMDB} import {_CHECK}  # noqa: E402\n"
     assert arm == "not-callable", arm
-    return stripped + f'\n\n{_CHECK} = "FD1256 a settings check that is not a function"\n'
+    return stripped + _NOT_CALLABLE
 
 
-@pytest.mark.parametrize("arm", ["none", "not-callable"])
+def _settings_check_tree(tmp_path: Path, name: str, arm: str) -> Path:
+    """A scaffold tree whose cmdb adapter is `_with_settings_check(<the real one>, arm)`."""
+    root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
+    adapter = root / "scripts" / "adapters" / "cmdb_adapter.py"
+    adapter.write_text(_with_settings_check(adapter.read_text(encoding="utf-8"), arm),
+                       encoding="utf-8")
+    return root
+
+
+@pytest.mark.parametrize("arm", ["none", "not-callable", "rebound"])
 def test_validate_scaffold_fails_an_adapter_without_a_callable_settings_check(tmp_path, arm):
-    """#1256 r4 "one maker for a down cause": the one function that judges an adapter is the start check's, the call-time escape's and the connect scaffold validator's, so the validator FAILS an adapter that declares no `check_settings` (K1: each adapter declares one) — and one whose `check_settings` is not callable — with a row naming `check_settings`. Discriminating control: the SAME tree whose adapter declares a callable check passes, so the FAIL is the check's absence, not an incidental scaffold defect. Red at base, whose validator never looks for the check."""
+    """#1256 r4 "one maker for a down cause": the one function that judges an adapter is the start check's, the call-time escape's and the connect scaffold validator's, so the validator FAILS an adapter that declares no `check_settings` (K1: each adapter declares one) — and one whose `check_settings` is not callable, including one that declares a `def check_settings` and then rebinds the name to a string (`rebound`: run start, which judges what the module holds, finds no callable check) — with a row naming `check_settings`. Discriminating control: the SAME tree whose adapter declares a callable check passes, so the FAIL is the check's absence, not an incidental scaffold defect. Red at base, whose validator never looks for the check."""
     def tree(name: str, which: str) -> Path:
-        root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
-        adapter = root / "scripts" / "adapters" / "cmdb_adapter.py"
-        adapter.write_text(_with_settings_check(adapter.read_text(encoding="utf-8"), which),
-                           encoding="utf-8")
-        return root
+        return _settings_check_tree(tmp_path, name, which)
 
     good = _run_validate_scaffold("cmdb", defender_dir=tree(f"declared-{arm}", "declared"))
     assert good.returncode == 0, (
@@ -1140,6 +1179,30 @@ def test_validate_scaffold_fails_an_adapter_without_a_callable_settings_check(tm
     assert "check_settings" in bad.stdout, (
         f"validate_scaffold FAILED for some other reason than the missing check (expected a row "
         f"naming check_settings)\nstdout:\n{bad.stdout}")
+
+
+@pytest.mark.parametrize("arm", ["assigned", "imported"])
+def test_validate_scaffold_passes_an_adapter_whose_callable_settings_check_is_not_a_def(
+        tmp_path, arm):
+    """#1256 r4 "one maker", the converse: the validator judges an adapter as run start does — by the callable the module holds under `check_settings`, not by how its source spells it — so it PASSES an adapter that binds a callable check by assignment (`assigned`: its own check renamed, then `check_settings = <it>`) or by import (`imported`: the shipped cmdb adapter's own check, K1). A validator with its own rule (a top-level `def check_settings`) FAILs both while run start would find each usable. Discriminating control: the same scaffold with the check removed FAILs naming `check_settings`, so the PASS is the validator reading the check, not ignoring it. Red at base (the control: its validator never looks; and `imported`'s premise: no shipped adapter declares a check yet)."""
+    if arm == "imported":
+        shipped = importlib.import_module(_CHECKOUT_CMDB)
+        assert callable(getattr(shipped, _CHECK, None)), (
+            f"premise (K1): the shipped cmdb adapter declares a callable {_CHECK} for the "
+            f"`imported` arm to bind")
+    ok = _run_validate_scaffold("cmdb", defender_dir=_settings_check_tree(tmp_path, arm, arm))
+    assert ok.returncode == 0, (
+        f"validate_scaffold FAILED an adapter whose check_settings is a callable bound by "
+        f"{'assignment' if arm == 'assigned' else 'import'} — run start, which judges the "
+        f"callable the module holds, finds it usable (#1256 r4: one maker)\nstdout:\n{ok.stdout}"
+        f"\n{ok.stderr}")
+    removed = _run_validate_scaffold("cmdb",
+                                     defender_dir=_settings_check_tree(tmp_path, "none", "none"))
+    assert removed.returncode != 0, (
+        f"control: validate_scaffold passed the same scaffold with no check_settings — the PASS "
+        f"above does not show the validator reads the check\nstdout:\n{removed.stdout}")
+    assert _CHECK in removed.stdout, (
+        f"control: the scaffold with no check FAILED for another reason\nstdout:\n{removed.stdout}")
 
 
 def test_validate_scaffold_enforces_placeholder_invariant(tmp_path):
