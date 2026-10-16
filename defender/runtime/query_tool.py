@@ -182,8 +182,9 @@ def _escaped_reason(deps: Any, detail: str) -> str:
     tenant = getattr(deps, "tenant", None)
     if tenant is None:
         return _model_visible(deps, detail)
-    trees = [(Path(deps.defender_dir), "defender")] if getattr(deps, "defender_dir", None) else []
-    return system_status.shown_reason(detail, tenant, *trees)
+    defender_dir = getattr(deps, "defender_dir", None)
+    return system_status.shown_reason(
+        detail, tenant, defender_dir=Path(defender_dir) if defender_dir else None)
 
 
 class QueryCapture(AbstractCapability[Any]):

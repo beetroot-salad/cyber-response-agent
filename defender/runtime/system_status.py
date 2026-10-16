@@ -50,6 +50,12 @@ _logger = logging.getLogger(__name__)
 #: adapter's own fault text; a crash's can be arbitrarily long.
 REASON_MAX = 400
 
+#: How a reason names the two code trees an adapter's crash text can locate (`shown_reason`):
+#: the defender tree by its name, the adapters tree by a placeholder (it need not sit under the
+#: defender tree). Spelled here only — every surface's reason passes `shown_reason`.
+_DEFENDER_TREE_NAME = "defender"
+_ADAPTERS_TREE_NAME = "<adapters>"
+
 
 @dataclass(frozen=True)
 class NotConfigured:
@@ -112,8 +118,8 @@ def startup_check(
     named by its pointer, and no host path of the data root, the tenant's folder, the defender
     tree or the adapters tree."""
     def shown(text: str) -> str:
-        return shown_reason(text, tenant, (Path(defender_dir), "defender"),
-                            (Path(roster.root), "<adapters>"))
+        return shown_reason(text, tenant, defender_dir=Path(defender_dir),
+                            adapters_root=Path(roster.root))
 
     down: dict[str, StartCause] = {}
     for system in sorted(granted_systems(tenant.grants) & set(roster.accepted)):
@@ -256,7 +262,10 @@ def _mark(state: RunState, system: str, cause: StartCause) -> None:
         state.system_down.setdefault(system, cause)
 
 
-def shown_reason(text: str, tenant: RunTenant, *trees: tuple[Path, str]) -> str:
+def shown_reason(
+    text: str, tenant: RunTenant, *, defender_dir: Path | None = None,
+    adapters_root: Path | None = None,
+) -> str:
     """A down system's reason, fit for the model and the operator — THE redaction every reason
     passes once, where its cause is made, so every surface that renders the cause (the start
     log lines, the O-8 refusal, MAIN's workspace view, gather's system index, `list_verbs`, the
@@ -264,12 +273,14 @@ def shown_reason(text: str, tenant: RunTenant, *trees: tuple[Path, str]) -> str:
     settings folder named by its pointer (`redact_settings_path`, the one settings redaction);
     staged names and world ids removed (`redact_model_visible`); and every host root named
     rather than located — the tenant's folder and the data root (`Tenant.root_names`, their
-    owner's) and each of `trees` (a path and its name: the defender tree, the adapters tree,
-    which need not sit in either). An adapter's crash text often carries its own file's absolute
+    owner's) and the code trees given — `defender_dir` and `adapters_root` (which need not sit in
+    either), each by its name here. An adapter's crash text often carries its own file's absolute
     path, and a repr of the run's record carries the data root."""
     text = redact_settings_path(redact_model_visible(text), tenant.settings)
     named = dict(tenant.tenant.root_names())
-    for root, name in trees:
+    for root, name in ((defender_dir, _DEFENDER_TREE_NAME), (adapters_root, _ADAPTERS_TREE_NAME)):
+        if root is None:
+            continue
         named.update({spelling: name for spelling in (str(Path(root)), str(Path(root).resolve()))
                       if len(spelling) > 1})
     # Longest first, so a root that is a prefix of another's spelling cannot cut it in two.
