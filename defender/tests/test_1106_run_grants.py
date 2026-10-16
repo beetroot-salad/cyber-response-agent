@@ -179,35 +179,44 @@ def test_the_import_probe_does_see_a_settings_read_when_one_happens(tmp_path):
 
 # ---- the refusal names the run's own table ----------------------------------------------------
 
-def test_a_denied_verb_names_the_runs_own_tenants_table_but_not_its_host_path(tmp_path):
-    """A DENIED refusal points at the table the withholding is written in — the RUN's tenant's
-    table (M4), named for the model (`RunTenant.table_pointer`) and handed to the registry as
-    `grant_home` by the run. The model reads this text, so it names the tenant and the file,
-    never the resolved host path of a folder that never reaches the box. The control: tenant
-    B's registry names B, not A, for the same verb."""
-    from defender.runtime.run_tenant import table_pointer
+def test_a_denied_verb_points_at_the_table_and_names_no_tenant_or_host_path(tmp_path):
+    """A DENIED refusal points at the table the withholding is written in -- the RUN's tenant's
+    `verb-grants.yaml` (M4), named for the model (`RunTenant.table_pointer`) and handed to the
+    registry as `grant_home` by the run. The model reads this text, so it names neither the
+    tenant nor the resolved host path of a folder that never reaches the box.
 
+    #1255 (design rev 4, O3: no tenant folder name in anything the model reads; owner decision
+    2026-10-16, which reverses the pre-#1255 "names the tenant"): two tenants holding the SAME
+    table are refused in the same words. Controls: each run is still refused by its own table
+    -- A's withholds a cmdb verb, B's an identity verb -- and each refusal names the table."""
     root = tmp_path / "tenants"
     a = T.place_tenant(root, "acme", table=T.TABLE_A)
+    twin = T.place_tenant(root, "zephyr", table=T.TABLE_A)
     b = T.place_tenant(root, "bravo", table=T.TABLE_B)
-    grants_a, grants_b = T.run_grants(a / "settings"), T.run_grants(b / "settings")
-    tenant_a = T.run_tenant(T.accept(root, "acme"))
-    tenant_b = T.run_tenant(T.accept(root, "bravo"))
-    assert tenant_a.table_pointer == table_pointer("acme")
+    grants_a, grants_twin, grants_b = (T.run_grants(k / "settings") for k in (a, twin, b))
+    tenant_a, tenant_twin, tenant_b = (T.run_tenant(T.accept(root, tid))
+                                       for tid in ("acme", "zephyr", "bravo"))
     # A's gather reaches cmdb and does not hold `list-roles`, a verb the cmdb adapter really
-    # declares: DENIED, and the pointer names A's table.
+    # declares: DENIED by A's table. The twin holds A's table under another tenant's name.
     decision_a = _registry(grants_a.gather, grant_home=tenant_a.table_pointer).decide(
         "cmdb", "list-roles")
     assert decision_a.outcome == "DENIED", decision_a
-    assert tenant_a.table_pointer in (decision_a.refusal or ""), decision_a.refusal
-    assert tenant_b.table_pointer not in (decision_a.refusal or "")
-    assert str(tmp_path) not in (decision_a.refusal or ""), decision_a.refusal
-    # B's gather reaches identity and does not hold `can-access`: DENIED, naming B's table.
+    decision_twin = _registry(grants_twin.gather, grant_home=tenant_twin.table_pointer).decide(
+        "cmdb", "list-roles")
+    assert decision_twin.outcome == "DENIED", decision_twin
+    assert decision_twin.refusal == decision_a.refusal, (
+        "one table, two tenants, two different refusals -- the model is told which tenant it "
+        f"runs for:\n{decision_a.refusal}\n{decision_twin.refusal}")
+    # B's gather reaches identity and does not hold `can-access`: DENIED by B's table.
     decision_b = _registry(grants_b.gather, grant_home=tenant_b.table_pointer).decide(
         "identity", "can-access")
     assert decision_b.outcome == "DENIED", decision_b
-    assert tenant_b.table_pointer in (decision_b.refusal or ""), decision_b.refusal
-    assert tenant_a.table_pointer not in (decision_b.refusal or "")
+    for decision in (decision_a, decision_twin, decision_b):
+        refusal = decision.refusal or ""
+        assert "verb-grants.yaml" in refusal, f"the refusal does not name the table: {refusal}"
+        named = [tid for tid in ("acme", "zephyr", "bravo") if tid in refusal]
+        assert not named, f"the refusal names tenant(s) {named}: {refusal}"
+        assert str(tmp_path) not in refusal, refusal
 
 
 def test_the_narrowed_correlation_registry_names_its_inner_registrys_table(tmp_path):

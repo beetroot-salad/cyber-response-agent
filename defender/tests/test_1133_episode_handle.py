@@ -353,7 +353,15 @@ def test_d2_ensure_is_one_mkdir_on_the_held_root(tree, key):
 
 def _record_matrix():
     for key, verbs in S.RECORD_VERBS.items():
-        rel = S.expected_record_rel(key)
+        try:
+            rel = S.expected_record_rel(key)
+        except AttributeError:
+            # A record the layout does not name yet (#1255 D6's skip record, before its
+            # accessor lands): one case per verb that fails in the test body, where the record
+            # is resolved, instead of an error that hides the whole file at collection.
+            for verb in verbs:
+                yield pytest.param(key, verb, S.LEAF_PLANTS[0], None, id=f"{key}.{verb}-unnamed")
+            continue
         for verb in verbs:
             for kind in S.LEAF_PLANTS:
                 yield pytest.param(key, verb, kind, None, id=f"{key}.{verb}-{kind}")

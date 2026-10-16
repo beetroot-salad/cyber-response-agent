@@ -340,6 +340,9 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("ticket_write", "run", "ticket_write"),
     Accessor("ticket_reads", "run", "ticket_read", (SEQ,), composing=True),
     Accessor("session_pointer", "run", "session_pointer"),
+    # #1255: two host-only JSONL sidecars beside the run folder (`JSONL_SIDECAR_ACCESSORS`).
+    Accessor("call_join", "run", "call_join"),
+    Accessor("ticket_comments", "run", "ticket_comments"),
     Accessor("runtime_html", "run", "runtime_html"),
     Accessor("box_sentinel", "run", "box_sentinel"),
     Accessor("provenance", "run", "provenance"),
@@ -373,7 +376,14 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
 #: sidecar of its own, `<run_id>.session-pointer.json`, F2.) `session_db`'s root is the sessions
 #: directory, a sibling of the runs base (claims C10/C15).
 SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer")
-UPWARD_ACCESSORS = (*SIDECAR_ACCESSORS, "sessions_dir", "session_db")
+#: #1255 (query ids, P3): two more host-only records beside the run folder, each keyed by the
+#: run id and taking the runs base — the call join (`<run_id>.call-join.jsonl`: a table row's
+#: (lead_id, seq) to its served call id, which left the model-readable table) and the run's ticket
+#: comments (`<run_id>.ticket-comments.jsonl`). UPWARD like the four above, but kept out of
+#: `SIDECAR_ACCESSORS`: those are single JSON documents (`test_1077_tree_identity` parses each
+#: whole) and these are JSONL logs.
+JSONL_SIDECAR_ACCESSORS = ("call_join", "ticket_comments")
+UPWARD_ACCESSORS = (*SIDECAR_ACCESSORS, *JSONL_SIDECAR_ACCESSORS, "sessions_dir", "session_db")
 
 
 def upward_root(attr: str, runs_base: Path) -> Path:

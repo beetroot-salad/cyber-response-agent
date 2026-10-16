@@ -59,6 +59,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -620,11 +621,21 @@ def current_tenant() -> Any:
 
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
               tenant_id: str | None = None, recorded: bool | None = None,
-              pre_snapshot: bool = False) -> tuple[Path, Path]:
+              pre_snapshot: bool = False,
+              land_calls: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
 
     `pre_snapshot=True` (#1255, N4/C2) is a run recorded before the fork snapshot existed: its
     session never gets one, whatever `seed_source_session` plants for the others.
+
+    `land_calls(src)` (#1255 P2/P3) writes the source's own pre-branch query rows and payloads
+    INSTEAD of the default one elastic capture, onto an empty table, BEFORE the session is
+    seeded. A fork snapshot holds what the source's model-readable files held when its branch
+    response arrived (the table's length, each payload's hash), and an arm whose source no
+    longer opens on that refuses at launch — so what the source held at the branch point is
+    final before `seed_source_session` (which is where a fixture snapshot is planted), and is
+    never rewritten after `runs_base` returns. Rows the source wrote after the branch point
+    are APPENDED afterwards (`_spec1224.source_run`): the table only grows past the snapshot.
 
     `recorded=False` is a run from before #1222: its alert at the former place and no record, so
     it is not a run any reader admits. `recorded=True` is the run the front door makes: the alert
@@ -671,9 +682,13 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     # ONE CAPTURED CALL, because a source that captured nothing is not branchable: every
     # proposed world agrees with an empty prefix by construction, which is the generated-world
     # design the redesign rejected, and `branch.validate` refuses it at the launch. A scenario
-    # that wants more lands its own rows on top; one that lands this same call again writes a
-    # duplicate the primer skips, so the primed key set is unchanged for it.
-    capture_call(src)
+    # that wants other rows lands them through `land_calls` (before the session is seeded);
+    # one that lands this same call again writes a duplicate the primer skips, so the primed
+    # key set is unchanged for it.
+    if land_calls is None:
+        capture_call(src)
+    else:
+        land_calls(src)
     # THE STAMP EVERY ORDINARY RUN DIR CARRIES. `materialize_run` writes one at the single
     # place a run the box will execute is ever created, so a source run without one is not a run
     # any production path could have produced — and the containment walks read exactly this file
@@ -763,22 +778,34 @@ def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
     Here rather than inside one scenario because it is the only way to give a LAUNCHER test a
     primed capture at all: the launcher primes from the source run's own table, so a test that
     needs the episode's base to hold a key has to put that key in the source.
+
+    THE WRITER'S FULL ROW (#1255 G4): the fourteen columns `append_query_row` writes, in writer
+    order, and no `call_id` — the shape every row of a real run's table has once the id leaves
+    it. A branch seeds the source's rows into each sibling's table verbatim, so a short row here
+    would be a short row in every arm's table (`test_1255_queries_rows`). `raw_command`,
+    `error_class`, `payload_status` and `payload_sha256` come from the writer's own rules over
+    the bytes the sidecar holds.
     """
+    rq = mod("scripts.gather_tools.record_query")
+    breaker = mod("runtime.circuit_breaker")
+    p = dict(params or {"index": EVENTS_PATTERN})
+    body = payload if payload is not None else {"hits": [{"_id": "d1"}]}
+    text = json.dumps(body, sort_keys=True)
     row = {
         "lead_id": lead, "seq": seq, "system": system, "verb": verb,
-        "query_id": f"{system}.{verb}", "params": params or {"index": EVENTS_PATTERN},
+        "query_id": f"{system}.{verb}", "params": p,
+        "raw_command": rq.raw_command(system, verb, p),
         "payload_path": f"gather_raw/{lead}/{seq}.json",
-        "exit_code": 0, "error_class": None, "payload_status": "ok",
+        "exit_code": 0, "error_class": breaker.error_class_for_exit(0),
+        "payload_status": rq.payload_status(0, body), "payload_digest": "",
+        "payload_sha256": rq.payload_sha256(text), "system_key": "",
     }
     table = run_dir / "executed_queries.jsonl"
     with table.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row) + "\n")
     sidecar = run_dir / str(row["payload_path"])
     sidecar.parent.mkdir(parents=True, exist_ok=True)
-    sidecar.write_text(
-        json.dumps(payload if payload is not None else {"hits": [{"_id": "d1"}]},
-                   sort_keys=True),
-        encoding="utf-8")
+    sidecar.write_text(text, encoding="utf-8")
     return row
 
 

@@ -88,8 +88,9 @@ def base_file(root: Path) -> Path:
 # 1. the vocabulary
 
 def test_the_family_tier_is_two_labels_and_no_world_decision_is_one():
-    """    `SOURCES` partitions into the FAMILY tier, the seam's own two, and a world's three
-    serving decisions (#1224: `passthrough`, `oracle`, `real-error`).
+    """    `SOURCES` partitions into the FAMILY tier, the seam's own two, and a world's four
+    serving decisions (#1224: `passthrough`, `oracle`, `real-error`; #1255 D5: `reconstructed`,
+    a control world's oracle turn that changed its base).
 
     `captured` joining `base` in the family tier is the whole of Part B at the vocabulary level:
     both are `world_id=None` rows every sibling replays, and neither is a decision a world's
@@ -97,7 +98,7 @@ def test_the_family_tier_is_two_labels_and_no_world_decision_is_one():
     "any world may claim any member of it" — which now includes the label that means "this is
     what the estate said during the real run". The retired staging decisions are names for
     readers of archived ledgers only, never a new row's source."""
-    world_decisions = {PASSTHROUGH, ORACLE, REAL_ERROR}
+    world_decisions = {PASSTHROUGH, ORACLE, "reconstructed", REAL_ERROR}
     assert CAPTURED in SOURCES
     assert {BASE, CAPTURED} == FAMILY_SOURCES
     assert world_decisions | FAMILY_SOURCES | {REFUSED, FAULT} == SOURCES

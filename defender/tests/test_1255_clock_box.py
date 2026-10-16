@@ -217,8 +217,11 @@ _ISO_IN_FILE = re.compile(
     r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})?")
 #: Any number in the clock file, with an optional sign and unit (`+139000000`, `-3.5d`, `1.9e9`
 #: spelled out) — read as epoch seconds or milliseconds, or as an offset from the wall clock.
-_NUMBER_IN_FILE = re.compile(r"(?<![\w.])([+-]?)(\d+(?:\.\d+)?)([smhd]?)(?![\w.])")
-_UNIT_SECONDS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+#: The units are libfaketime's relative spelling (`-86400`, `+2.5h`, `-1y`; a `y` is 365 days),
+#: so a file in that format decodes (#1255 K3, owner decision 2026-10-16); its `x<rate>` /
+#: `i<step>` modifiers carry no instant and are not read.
+_NUMBER_IN_FILE = re.compile(r"(?<![\w.])([+-]?)(\d+(?:\.\d+)?)([smhdy]?)(?![\w.])")
+_UNIT_SECONDS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400, "y": 365 * 86400}
 #: How far a decoded reading may sit from the run clock's: the file is read a moment after it
 #: was written, and an offset is applied to the wall clock at the READ.
 _FILE_SLACK = dt.timedelta(minutes=2)
