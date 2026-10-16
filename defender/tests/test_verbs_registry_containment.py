@@ -90,7 +90,12 @@ def test_a_broken_adapter_module_does_not_kill_the_catalog(tmp_path):
     catalog = SI.index_text(SI.index_module(), skills, read_roster(adapters), grant)
     assert SI.listing(catalog), "one broken adapter emptied the whole catalog"
     assert "`good`" in catalog
-    assert "`broken`" not in catalog, "a system that cannot be imported was still advertised"
+    # Whether `broken` itself appears here is not this test's: the design does not choose between
+    # an index that omits a broken system and one that lists it and leaves it to the down map, so
+    # an index rendered with nothing down cannot say. An unparsable adapter is a grant refusal at
+    # roster read (C11), and an import-time broken adapter's presence in gather's index — shown
+    # down, with its reason — is pinned by `startup_usability_1256/test_1256_adapter_checks.py::
+    # test_o5a_a_broken_granted_adapter_is_down_from_the_start`.
 
 
 def test_a_broken_adapter_module_raises_from_the_registry(tmp_path):
