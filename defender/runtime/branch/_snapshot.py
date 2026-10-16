@@ -144,7 +144,7 @@ class SnapshotWriter:
         self._state = state
         self._caps = {"limits": dict(limits), "base_request_limit": base_request_limit,
                       "extra_turns": extra_turns}
-        self._digests: dict[tuple[str, tuple[Any, ...]], str] = {}
+        self._digests: dict[tuple[str, tuple[Any, ...]], str | None] = {}
 
     def record(self, request: int, review: Any) -> None:
         """Record the snapshot of MAIN's `request`-th response (`review`: the run's
@@ -170,10 +170,18 @@ class SnapshotWriter:
         for kind, args in _write_once_files(run):
             key = (kind, args)
             if key not in self._digests:
-                held = _bytes_of(_WRITE_ONCE[kind](run, *args))
-                if held is None:
-                    continue
-                self._digests[key] = _sha(held)
+                try:
+                    held = _bytes_of(_WRITE_ONCE[kind](run, *args))
+                except OSError:
+                    # A recognised record the run holds that refuses to be read (a link, a
+                    # directory) is recorded with no digest, never left out: left out, an arm
+                    # would be restored as if the run never held it. No bytes match it, so
+                    # every arm from here is refused (`ForkSnapshot.verify`).
+                    self._digests[key] = None
+                else:
+                    if held is None:
+                        continue
+                    self._digests[key] = _sha(held)
             write_once.append({"kind": kind, "args": list(args), "sha256": self._digests[key]})
         document = run.documents.investigation.read()
         blobs = {} if document is None else {_sha(document.encode("utf-8")): document}

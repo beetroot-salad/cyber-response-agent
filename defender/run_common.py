@@ -102,7 +102,9 @@ def materialize_run(
             # An arm's stamp is stamped as a natural run's (#1255 P3, O2): its folder is the
             # box's mount, so it names no world token, parent run or fork turn. The lineage is
             # the episode's own host-side record (`family.yaml`, the episode's world records).
-            world_id = episode_runs.base_world_id()
+            # The world id is the tenant's natural container's, not the episode container's
+            # own record's: that one is minted per episode, so it would name the episode.
+            world_id = tenant.runs_repository().base_world_id()
         else:
             runs = tenant.runs_repository()
             run = runs.create(admitted, pinned=pinned)

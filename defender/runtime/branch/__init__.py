@@ -89,7 +89,14 @@ from ._seed import (
 
 
 def validate(store: Any, spec: BranchSpec, *, source_run: Run,
-             require_capture: bool = True) -> _snapshot.ForkSnapshot:
+             require_capture: bool = True) -> None:
+    """Refuse a branch point that cannot carry a sibling world (`admitted_snapshot`'s
+    refusals); a check only, so it hands nothing back."""
+    admitted_snapshot(store, spec, source_run=source_run, require_capture=require_capture)
+
+
+def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
+                      require_capture: bool = True) -> _snapshot.ForkSnapshot:
     """Refuse a branch point that cannot carry a sibling world, and return the fork snapshot
     an arm taken there restores.
 
@@ -263,7 +270,7 @@ def open_main_session(
         # it would leave another orphan session in the source database.
         if source_run is None:
             raise BranchError("a resumed run requires its source Run")
-        snapshot = validate(store, spec, source_run=source_run)
+        snapshot = admitted_snapshot(store, spec, source_run=source_run)
         refuse_seeded_run_dir(run_state.run_dir)
         session = source_session(store, spec, source_run=source_run)
         session_id = store.fork(session, at_message_id=spec.branch_message_id)
@@ -354,5 +361,6 @@ __all__ = [
     "store_factory_for",
     "timedelta",
     "validate",
+    "admitted_snapshot",
     "write_guarded",
 ]
