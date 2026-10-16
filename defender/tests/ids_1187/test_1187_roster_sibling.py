@@ -200,6 +200,96 @@ def test_a_second_start_runs_refuses_and_leaves_the_roster_byte_identical(data_r
     assert (planted / S.ROSTER_NAME).read_bytes() == planted_bytes
 
 
+#: The roster write the child below makes: `start_runs` on episode `argv[3]` of tenant
+#: `argv[2]` under the data root `argv[1]`. With a limit (`argv[4]` bytes, non-zero), the kernel
+#: KILLS the child at the first write past that size — `SIGXFSZ` restored to its default action
+#: (Python starts with it ignored, which would turn the kill into an `EFBIG` the writer could
+#: clean up after) and `RLIMIT_FSIZE` set only after every import and the view's own open, so
+#: nothing but `start_runs`' own writes meets the limit. A real SIGKILL-class death mid-write,
+#: through the real primitive (adversary F8).
+_START_RUNS_CHILD = """
+import resource, signal, sys
+from pathlib import Path
+from defender.tests.ids_1187 import _spec1187 as S
+root, tenant_id, episode_id, limit = Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
+runs = S.tenant(root, tenant_id).runs_repository()
+with runs.episode(episode_id) as view:
+    if limit:
+        signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
+        resource.setrlimit(resource.RLIMIT_FSIZE, (limit, resource.RLIM_INFINITY))
+    view.start_runs(["a", "b", "c"])
+"""
+#: Far below any roster of three UUIDs (about 130 bytes), so the write is cut mid-way.
+_WRITE_LIMIT = 16
+
+
+def _start_runs_in_a_child(data_root: Path, episode_id: str, *, limit: int):
+    """`_START_RUNS_CHILD` as a real process of this interpreter over this checkout."""
+    import subprocess
+    import sys
+
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H5
+
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        filter(None, [str(H5.WORKTREE), os.environ.get("PYTHONPATH")])),
+        "PYTHONDONTWRITEBYTECODE": "1", S.DATA_ROOT_ENV: str(data_root)}
+    return subprocess.run(  # noqa: S603 — this interpreter, a fixed script
+        [sys.executable, "-c", _START_RUNS_CHILD, str(data_root), A_ID, episode_id, str(limit)],
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env,
+        cwd=str(H5.WORKTREE), timeout=300)
+
+
+def test_a_roster_write_killed_mid_write_leaves_no_roster(data_root):
+    """Data model, the roster's write (adversary F8; an unseamed rule the handoff left to the
+    implementation stage): the roster is written "through `_io`'s atomic create lane:
+    exclusive, `O_TMPFILE`, write, fsync, then `linkat` ... never through the named `O_EXCL`
+    fallback, which can leave a torn file on SIGKILL", so its presence keeps meaning "this
+    episode reached RUNS". A child running `start_runs` is KILLED by the kernel mid-write (a
+    file-size limit far below the roster, `SIGXFSZ` at its default action): it dies by that
+    signal, and afterwards no `arms.json` name exists and nothing but the manifest and `runs/`
+    is in the episode folder — the episode reads as never having reached RUNS (`arm_ids()` is
+    `None`, the sibling's gate refuses as `TenantRefused`), never as a torn roster every reader
+    refuses for ever. A named `O_EXCL` write leaves the torn prefix under the roster's own name.
+    Positive control, same child with no limit: it exits 0 and writes the roster naming a, b, c.
+    Skipped only where the episode's filesystem has no `O_TMPFILE` (the lane cannot exist
+    there; whether the roster must then refuse is an open design question). RED at base: no
+    `start_runs`."""
+    import errno
+    import signal
+
+    from defender._tenant import TenantRefused
+
+    t = S.tenant(data_root, A_ID)
+    runs = t.runs_repository()
+    episode_id, ep = _episode(data_root, A_ID)
+    try:
+        fd = os.open(ep, os.O_TMPFILE | os.O_WRONLY, 0o600)
+    except OSError as e:
+        if e.errno not in (errno.EOPNOTSUPP, errno.EISDIR, errno.EINVAL):
+            raise
+        pytest.skip(f"no O_TMPFILE on the episode's filesystem ({e}): the atomic lane is absent")
+    os.close(fd)
+
+    killed = _start_runs_in_a_child(data_root, episode_id, limit=_WRITE_LIMIT)
+    assert killed.returncode == -signal.SIGXFSZ, (
+        f"the child was not killed mid-write by the file-size limit (rc {killed.returncode}): "
+        f"{killed.stderr[-1500:]}")
+    torn = (ep / S.ROSTER_NAME).read_bytes()[:200] if os.path.lexists(
+        ep / S.ROSTER_NAME) else None
+    assert torn is None, f"a roster write killed mid-write left {S.ROSTER_NAME}: {torn!r}"
+    leftover = sorted(set(os.listdir(ep)) - {S.MANIFEST_NAME, "runs"})
+    assert leftover == [], f"a roster write killed mid-write left {leftover} in the episode"
+    with runs.episode(episode_id) as view:
+        assert view.arm_ids() is None, "a killed roster write reads as a roster"
+    gate = S.raised(_open_and_close, runs, episode_id, roster_label=LABEL)
+    assert isinstance(gate, TenantRefused), f"the gate after a killed roster write gave {gate!r}"
+
+    control_id, control = _episode(data_root, A_ID)
+    done = _start_runs_in_a_child(data_root, control_id, limit=0)
+    assert done.returncode == 0, f"control: the child failed: {done.stderr[-1500:]}"
+    assert sorted(S.read_roster(control)) == sorted(LABELS), "control: no roster was written"
+
+
 @pytest.mark.parametrize("occupant", ["link-to-another-tenants-arms", "regular-file"])
 def test_a_link_or_a_file_at_runs_refuses_before_any_roster_is_written(
         tmp_path, data_root, occupant):
@@ -312,10 +402,15 @@ def test_an_arm_is_created_only_at_an_id_the_roster_holds(data_root):
 ROSTER_FAULTS = ("torn", "not-an-object", "duplicate-ids", "non-uuid-id", "uppercase-uuid",
                  "extra-label", "missing-label", "link",
                  "deep-nesting", "oversize", "bom", "duplicate-key", "label-off-rule", "int-id",
-                 "list-id")
+                 "list-id", "lone-surrogate-label")
 #: A label no roster, and no caller, may make a refusal print raw: a line break, an ANSI escape,
 #: a C1 control (U+009B, the 8-bit CSI), a line separator, and 20,000 more characters.
 HOSTILE_LABEL = "a\n\x1b[2Jforged row\x9b\u2028" + "x" * 20000 + "HOSTILE-TAIL"
+#: Labels a caller can hand over that no UTF-8 encoder takes (deck #677 replay, adversary F12):
+#: what `run.py --world $'\xff'` carries after argv's surrogateescape decode, and a lone high
+#: surrogate inside a label. A refusal that MEASURES its label with `.encode("utf-8")` raises
+#: `UnicodeEncodeError` instead of refusing.
+SURROGATE_LABELS = ("\udcff", "a\ud800b")
 #: The longest refusal text a hostile roster or label may produce (it quotes at most a bounded
 #: excerpt of anything it shows — `_shown.quoted` keeps 120 characters).
 MESSAGE_BOUND = 2000
@@ -333,6 +428,9 @@ def _unbounded(said: str) -> list[str]:
                   if ord(c) < 0x20 or 0x7F <= ord(c) < 0xA0 or c in "\u2028\u2029"})
     if raw:
         why.append(f"raw control characters {raw}")
+    lone = sorted({f"U+{ord(c):04X}" for c in said if 0xD800 <= ord(c) <= 0xDFFF})
+    if lone:
+        why.append(f"lone surrogates {lone} (not printable; no UTF-8 encoder takes them)")
     if len(said) > MESSAGE_BOUND:
         why.append(f"{len(said)} characters (bound {MESSAGE_BOUND})")
     if "HOSTILE-TAIL" in said:
@@ -399,6 +497,12 @@ ROSTER_TEXTS = {
         [(k, v) for k, v in good.items() if k != "a"] + [(HOSTILE_LABEL, good["a"])]),
     "int-id": lambda good, text: _ids_json(list({**good, "a": 5}.items())),
     "list-id": lambda good, text: _ids_json(list({**good, "a": [good["a"]]}.items())),
+    # `a`'s entry under the key `"\ud800"` (a JSON escape, so the file itself is plain ASCII):
+    # decoded, a lone surrogate no UTF-8 encoder takes (adversary F12) — off the label rule and
+    # off the manifest's worlds; what this pins is that the reader refuses rather than raising
+    # while it measures or quotes the label.
+    "lone-surrogate-label": lambda good, text: _ids_json(
+        [("\ud800", good["a"])] + [(k, v) for k, v in good.items() if k != "a"]),
 }
 
 
@@ -451,9 +555,11 @@ def test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused(tmp_path, data_
     it; a whole read would accept it); a UTF-8 BOM (not strict UTF-8 JSON); a repeated key (a
     last-wins decode would accept it); a label off the rule that is hostile text (it also breaks
     the manifest-set rule — what it pins is the refusal's quoting); an id that is a number or a
-    list. The sibling's gate (`runs.episode(ep, roster_label="a")`) reads the same file: it may
-    open (it checks presence and the label, review F14) or refuse, but never fails any other
-    way. RED at base: `arm_ids` does not exist."""
+    list; a label that is a lone surrogate (adversary F12: a refusal that measures it with
+    `.encode("utf-8")` raises `UnicodeEncodeError` instead). The sibling's gate
+    (`runs.episode(ep, roster_label="a")`) reads the same file: it may open (it checks presence
+    and the label, review F14) or refuse, but never fails any other way. RED at base: `arm_ids`
+    does not exist."""
     t = S.tenant(data_root, A_ID)
     runs = t.runs_repository()
     good = {label: S.new_id() for label in LABELS}
@@ -498,9 +604,11 @@ def test_a_refusal_quoting_a_callers_label_stays_one_bounded_line(data_root):
     for a label the roster does not name is `RunAbsent`, and the sibling form
     `runs.episode(ep, roster_label=L)` is refused, and with `L` the hostile label (a line
     break, an ANSI escape, a C1 control, a line separator, 20,000 more characters) each refusal
-    is one bounded, printable line. Positive control, same calls: `a`, which the roster names,
-    answers the roster's id. RED at base: the episode is looked up under the episodes variable
-    (unset), and `roster_label` is not a keyword."""
+    is one bounded, printable line. The same for a label no UTF-8 encoder takes — argv's
+    surrogateescape form of `--world $'\\xff'`, and a lone surrogate inside a label (adversary
+    F12): a refusal, never the `UnicodeEncodeError` of a measuring `.encode`. Positive control,
+    same calls: `a`, which the roster names, answers the roster's id. RED at base: the episode
+    is looked up under the episodes variable (unset), and `roster_label` is not a keyword."""
     from defender.run_repository import RunAbsent
 
     t = S.tenant(data_root, A_ID)
@@ -508,17 +616,21 @@ def test_a_refusal_quoting_a_callers_label_stays_one_bounded_line(data_root):
     good = {label: S.new_id() for label in LABELS}
     episode_id, _ep = _episode(data_root, A_ID, roster=good)
 
-    with runs.episode(episode_id) as view:
-        absent = S.raised(view.arm_id, HOSTILE_LABEL)
-        assert isinstance(absent, RunAbsent), f"arm_id(<hostile>) gave {absent!r}"
-        assert str(view.arm_id("a")) == good["a"]
-    assert _unbounded(S.message(absent)) == [], (
-        f"arm_id's refusal quoting the caller's label: {_unbounded(S.message(absent))}")
+    for hostile in (HOSTILE_LABEL, *SURROGATE_LABELS):
+        shown = ascii(hostile[:24])
+        with runs.episode(episode_id) as view:
+            absent = S.raised(view.arm_id, hostile)
+            assert isinstance(absent, RunAbsent), f"arm_id({shown}) gave {absent!r}"
+            assert str(view.arm_id("a")) == good["a"]
+        assert _unbounded(S.message(absent)) == [], (
+            f"arm_id's refusal quoting the caller's label {shown}: "
+            f"{_unbounded(S.message(absent))}")
 
-    gate = S.raised(_open_and_close, runs, episode_id, roster_label=HOSTILE_LABEL)
-    assert _is_refusal(gate), f"the gate for a label the roster does not name gave {gate!r}"
-    assert _unbounded(S.message(gate)) == [], (
-        f"the gate's refusal quoting the caller's label: {_unbounded(S.message(gate))}")
+        gate = S.raised(_open_and_close, runs, episode_id, roster_label=hostile)
+        assert _is_refusal(gate), f"the gate for the unnamed label {shown} gave {gate!r}"
+        assert _unbounded(S.message(gate)) == [], (
+            f"the gate's refusal quoting the caller's label {shown}: "
+            f"{_unbounded(S.message(gate))}")
     with runs.episode(episode_id, roster_label="a") as view:
         assert str(view.arm_id("a")) == good["a"]
 
@@ -536,8 +648,15 @@ def test_the_sibling_form_of_the_view_refuses_unless_the_roster_names_the_label(
     when the roster is torn — before the manifest is read (the manifest here is poisoned, so a
     read would refuse naming the poison instead). Positive control: the roster naming every
     world (and the manifest restored, since `arm_id` checks the roster against the manifest's
-    worlds), the same call opens and `arm_id(label)` is the roster's id. RED at base: the episode
-    is looked up under the episodes variable (and `roster_label` is not a keyword)."""
+    worlds), the same call opens and `arm_id(label)` is the roster's id.
+
+    "Before the manifest" is observed twice: by the poison, which only a parse through the
+    family model reports, and by the KERNEL — inotify on the manifest file reports no read at
+    all during the refused call (adversary F9: a gate that reads the manifest raw, outside the
+    family model, to peek at its worlds is invisible to the poison). The control's `arm_id`,
+    which checks the roster against the manifest's worlds, shows the same channel sees a read.
+    RED at base: the episode is looked up under the episodes variable (and `roster_label` is not
+    a keyword)."""
     from defender._tenant import TenantRefused
 
     t = S.tenant(data_root, A_ID)
@@ -554,12 +673,16 @@ def test_the_sibling_form_of_the_view_refuses_unless_the_roster_names_the_label(
         S.write_roster(ep, raw=S.torn(json.dumps(roster, indent=2)))
     before = S.tree(ep)
 
-    err = S.raised(runs.episode, episode_id, roster_label=LABEL)
+    with S.FileReads(ep / S.MANIFEST_NAME) as watch:
+        err = S.raised(runs.episode, episode_id, roster_label=LABEL)
+        seen = watch.events()
     if roster_state == "torn":
         assert _is_refusal(err), f"a torn roster gave {err!r}"
     else:
         assert isinstance(err, TenantRefused), f"roster {roster_state}: {err!r}"
     assert SENTINEL not in S.message(err), f"the manifest was read first: {S.message(err)!r}"
+    assert "read" not in seen, (
+        f"the manifest was read before the gate refused ({roster_state}; the kernel saw {seen})")
     assert S.EPISODES_BASE_ENV not in S.message(err), f"refused for the variable: {err!r}"
     assert S.tree(ep) == before, "the refused view changed the episode"
 
@@ -568,8 +691,12 @@ def test_the_sibling_form_of_the_view_refuses_unless_the_roster_names_the_label(
     (ep / "runs").mkdir(exist_ok=True)
     S.write_roster(ep, roster)
     T.write_family(ep, doc)
-    with runs.episode(episode_id, roster_label=LABEL) as view:
-        assert str(view.arm_id(LABEL)) == roster[LABEL]
+    with S.FileReads(ep / S.MANIFEST_NAME) as watch:
+        with runs.episode(episode_id, roster_label=LABEL) as view:
+            assert str(view.arm_id(LABEL)) == roster[LABEL]
+        assert watch.reads() > 0, (
+            "control: the channel saw no read of the manifest where `arm_id` checks the roster "
+            "against the manifest's worlds")
 
 
 # ==========================================================================================
@@ -645,9 +772,14 @@ def test_the_sibling_is_refused_before_the_manifest_unless_its_roster_names_it(
     * `linked-episode`: R = `acme`, and `<acme>/episodes/<ep>` is a link to `beta`'s real,
       post-RUNS episode folder (O8: the walk never follows it).
 
+    "Before the manifest" is observed by the poison AND by the kernel: inotify on the manifest
+    file reports no read during the refused run (adversary F9: a raw read outside the family
+    model never trips the poison).
+
     Positive controls, same scene: once the gate's condition holds (the roster fixed, or the
     owning tenant `beta` asking) and with the poison still in place, the refusal NAMES the
-    poison — the manifest is read right after the gate; with the manifest restored the sibling
+    poison and the kernel reports the read — the manifest is read right after the gate; with
+    the manifest restored the sibling
     runs (exit 0) and its arm is `<ep>/runs/<roster id for b>`: a canonical UUID holding neither
     the label nor the episode id (O3). Every refused text is also clear of
     `DEFENDER_EPISODES_BASE` (O9). RED at base: the sibling reads the episodes variable, so
@@ -670,10 +802,14 @@ def test_the_sibling_is_refused_before_the_manifest_unless_its_roster_names_it(
     scene.poison()
     before = S.tree(data_root)
 
-    rc, refused, said, rec = _sibling(requester, scene.episode_id)
+    with S.FileReads(scene.ep / S.MANIFEST_NAME) as watch:
+        rc, refused, said, rec = _sibling(requester, scene.episode_id)
+        seen = watch.events()
     assert refused is not None, f"the sibling ran ({case}): rc {rc}"
     assert rc is None, f"the sibling ran ({case}): rc {rc}"
     assert SENTINEL not in said, f"the manifest was read before the gate ({case}): {said!r}"
+    assert "read" not in seen, (
+        f"the manifest was read before the gate refused ({case}; the kernel saw {seen})")
     assert S.EPISODES_BASE_ENV not in said, f"refused for the retired variable: {said!r}"
     assert rec.order == [], f"the sibling spent before refusing ({case}): {rec.order}"
     assert S.tree(data_root) == before, f"the refused sibling wrote under the data root ({case})"
@@ -682,7 +818,10 @@ def test_the_sibling_is_refused_before_the_manifest_unless_its_roster_names_it(
         if os.path.lexists(scene.ep / S.ROSTER_NAME):
             (scene.ep / S.ROSTER_NAME).unlink()
         scene.start_runs_by_hand()
-    rc, refused, said, rec = _sibling(B_ID, scene.episode_id)
+    with S.FileReads(scene.ep / S.MANIFEST_NAME) as watch:
+        rc, refused, said, rec = _sibling(B_ID, scene.episode_id)
+        assert watch.reads() > 0, (
+            f"control ({case}): the channel saw no read of the manifest past the gate")
     assert refused is not None, f"the poisoned manifest was not read ({case}): rc {rc}"
     assert SENTINEL in said, (
         f"past the gate, the manifest's refusal should name {SENTINEL} ({case}): {said!r}")
@@ -720,7 +859,8 @@ def _run_control(scene: _Scene, case: str) -> None:
 def test_the_sibling_refuses_a_manifest_naming_another_episode_before_any_spend(
         tmp_path, data_root):
     """R5 / declared change 10 at the sibling (review F8): a post-RUNS episode (its roster names
-    `b`) whose manifest's `episode_id` is ANOTHER uuid. `run.py --tenant T --episode <ep> --world
+    `b`) whose manifest's `episode_id` is ANOTHER uuid — the folder's own with its last hex digit
+    changed (adversary F11). `run.py --tenant T --episode <ep> --world
     b` passes the roster gate, then the one manifest loader — handed the folder's id — refuses,
     naming both ids, before the settings, `_case_input` and the paid pre-flight
     (`SiblingRecorder.order` empty); no arm is made under `runs/` and nothing is written under
@@ -728,7 +868,7 @@ def test_the_sibling_refuses_a_manifest_naming_another_episode_before_any_spend(
     roster's id. RED at base: the sibling reads the episodes variable (unset here)."""
     scene = _Scene(tmp_path, data_root, B_ID)
     scene.start_runs_by_hand()
-    other = S.new_id()
+    other = S.near_miss_id(scene.episode_id)
     T.write_family(scene.ep, {**scene.doc, "episode_id": other})
     before = S.tree(data_root)
 
