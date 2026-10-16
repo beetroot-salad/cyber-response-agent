@@ -532,13 +532,33 @@ def _credential_answer(user: str, token: str) -> bytes:
     return f"username={user}\npassword={token}\n".encode()
 
 
+#: Settings every git process on a tenant repository runs with, so none outlives the call
+#: that started it: no automatic maintenance or gc (a fetch, merge or commit otherwise spawns
+#: `git maintenance run --auto --detach`, which keeps working on the clone after the call
+#: returns and the tenant's lock is released), and no file-system monitor daemon.
+_NO_BACKGROUND_GIT = (
+    ("maintenance.auto", "false"), ("maintenance.autoDetach", "false"),
+    ("gc.auto", "0"), ("gc.autoDetach", "false"), ("core.fsmonitor", "false"),
+)
+
+
 def _local_env() -> dict[str, str]:
     """Every git call's environment: nothing that relocates the repository (`GIT_DIR`,
-    `GIT_WORK_TREE`, ...), no replace objects, pathspecs taken literally, and no prompt: an
-    empty `GIT_ASKPASS` stops `core.askPass` and `SSH_ASKPASS`, and the terminal prompt is off."""
+    `GIT_WORK_TREE`, ...), no replace objects, pathspecs taken literally, no prompt (an empty
+    `GIT_ASKPASS` stops `core.askPass` and `SSH_ASKPASS`, and the terminal prompt is off), and
+    `_NO_BACKGROUND_GIT`, given as environment configuration (after any already there, so it
+    wins) so the git processes git itself starts carry it too. A `GIT_CONFIG_COUNT` that is
+    not a count is a `ValueError`, as git would refuse it."""
     env = _git.env_for_cwd()
     env.update(GIT_NO_REPLACE_OBJECTS="1", GIT_LITERAL_PATHSPECS="1", GIT_TERMINAL_PROMPT="0",
                GIT_ASKPASS="")
+    count = int(env.get("GIT_CONFIG_COUNT") or 0)
+    if count < 0:
+        raise ValueError(f"GIT_CONFIG_COUNT is not a count: {count}")
+    for key, value in _NO_BACKGROUND_GIT:
+        env[f"GIT_CONFIG_KEY_{count}"], env[f"GIT_CONFIG_VALUE_{count}"] = key, value
+        count += 1
+    env["GIT_CONFIG_COUNT"] = str(count)
     return env
 
 
