@@ -46,7 +46,8 @@ from defender._vocab import (
 from defender.runtime.verbs import SYSTEM_MAX_LEN, is_system_name
 
 #: The base world's role: the control every other world is compared against. Exactly one world
-#: claims it, and it declares `facts: []` — it has no oracle.
+#: claims it, and it declares `facts: []` — its oracle only serves a live-read base as the world
+#: stood at the fork (#1255 D3), never a fact.
 BASE_ROLE = "A"
 
 #: The two bases a world's declared disposition may rest on; `policy-rule` is the default.

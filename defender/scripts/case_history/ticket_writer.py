@@ -264,7 +264,20 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     else:
         reason = None
         _logger.info(f"record {case_id}: comment posted ({status}, {word})")
+        _record_posted_comment(run, case_id, payload)
     _write_receipt(run, config, case_id, word if ok else RECEIPT_ERROR, reason)
+
+
+def _record_posted_comment(run: Run, case_id: str, payload: Mapping[str, object]) -> None:
+    """@owns ticket_comments — append the comment the store just accepted, `{key, body}`, to the
+    run's host-only record of its writes to the world (`RunPaths.ticket_comments`, beside the
+    run folder). A world branched from this run serves the case as it stood at the fork, so its
+    oracle is handed these writes (#1255 P5, O6; `read_posted_comments`). Best-effort like
+    every post-step: a failed append is a warning and never changes the receipt."""
+    try:
+        run.observability.ticket_comments.append([{"key": case_id, "body": payload.get("body")}])
+    except OSError as e:
+        _logger.warning(f"record {case_id}: the posted comment could not be recorded: {e}")
 
 
 def _prior_open_refusal(run: Run) -> str | None:
@@ -314,8 +327,26 @@ def _write_receipt(
         _logger.warning(f"could not write receipt: {e}")
 
 
+def read_posted_comments(run: Run) -> list[tuple[str, str]]:
+    """Every comment this run posted on its case ticket, as `(key, body)` in posting order —
+    its own writes to the world (`_record_posted_comment`). `[]` when it posted none. A record
+    that cannot be read, or a line that is not a `{key, body}` of strings, is a warning and is
+    left out: the oracle is then not told that write."""
+    rows, torn, read = run.observability.ticket_comments.read_rows()
+    if read.reason is not None and not read.absent:
+        _logger.warning(f"{run.run_dir.name}: its posted-comment record could not be read "
+                        f"({read.reason})")
+        return []
+    out = [(r["key"], r["body"]) for r in rows
+           if isinstance(r.get("key"), str) and isinstance(r.get("body"), str)]
+    if torn or len(out) != len(rows):
+        _logger.warning(f"{run.run_dir.name}: {torn + len(rows) - len(out)} line(s) of its "
+                        "posted-comment record could not be read")
+    return out
+
+
 # The path accessor remains the public read-side compatibility surface for run pages.
 __all__ = [
     "TicketWriterDeps", "DEFAULT_DEPS", "open_case_ticket", "record_case_ticket",
-    "receipt_path", "clear_receipt",
+    "receipt_path", "clear_receipt", "read_posted_comments",
 ]

@@ -25,7 +25,7 @@ from defender._io import NotPlainEntry, load_json_artifact, read_text_soft
 from defender.learning.lead_repository import QueryRow, load_queries_report
 from defender._query_rules import ParamsTooDeep
 
-from .ledger import CAPTURED, LedgerError, ServedCall, payload_text, served_line
+from .ledger import CAPTURED, LedgerError, ServedCall, served_line
 
 
 @model(frozen=True)
@@ -153,8 +153,7 @@ def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
     if text is None:
         counts["unreadable"] += 1
         return None
-    canonical = _canonical_payload(text)
-    if canonical is None:
+    if not _readable_payload(text):
         counts["unreadable"] += 1
         return None
     system, verb = row.system, row.verb
@@ -164,7 +163,7 @@ def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
     try:
         return ServedCall(
             system=system, verb=verb, params=row.params,
-            payload_text=canonical, source=CAPTURED, world_id=None,
+            payload_text=text, source=CAPTURED, world_id=None,
         )
     except ParamsTooDeep:
         # A row its own table can read but no ledger row can carry: written before the limit,
@@ -174,15 +173,16 @@ def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
         return None
 
 
-def _canonical_payload(text: str) -> str | None:
-    """One captured sidecar re-spelled in the ledger's canonical form, or `None`.
+def _readable_payload(text: str) -> bool:
+    """Whether one captured sidecar decodes as a JSON answer.
 
-    Re-dumped, never copied: `query_tool` wrote the sidecar without `sort_keys` and the ledger
-    canonicalises with it, so copied bytes would never match a live serve's key and every call
-    would silently miss the base tier.
+    Kept as the source's own bytes, never re-dumped (#1255 G8): a world serves an answer the
+    source received exactly as the source received it, and a row is found by its request key,
+    which is canonical whatever the payload's spelling. Comparing two answers canonicalises
+    them where it compares (`comparator`), never by rewriting evidence.
 
     Decoded by `_io.load_json_artifact` so an undecodable sidecar (including one nested deeply
     enough to hit `RecursionError`) counts as unreadable rather than crashing the episode.
     """
-    payload, unreadable = load_json_artifact(text)
-    return None if unreadable is not None else payload_text(payload)
+    _payload, unreadable = load_json_artifact(text)
+    return unreadable is None

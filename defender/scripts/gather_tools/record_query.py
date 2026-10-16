@@ -79,6 +79,16 @@ def _sha256_hex(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
+def payload_text_of(payload: Any) -> str:
+    """@owns the payload sidecar's spelling — an adapter's answer as the text the query tool
+    persists (`gather_raw/<lead>/<seq>.json`) and hands the model: the answer's own key order,
+    never re-sorted, `default=str` so a `datetime` or `Decimal` cannot raise mid-call.
+
+    A branched world serves an answer read live in exactly this spelling (#1255 G8), so the
+    investigator's file and tool result are the bytes a natural run over the same system gets."""
+    return json.dumps(payload, default=str)
+
+
 def payload_sha256(payload_text: str) -> str:
     """The row's content identity: `sha256` of the exact text persisted to the sidecar.
 
@@ -198,8 +208,12 @@ QUERY_ROW_COLUMNS: tuple[str, ...] = (
     "payload_digest",
     "payload_sha256",
     "system_key",
-    "call_id",
 )
+
+#: The call join's columns (`RunPaths.call_join`, #1255 G4/G6), in writer order: the row's
+#: `(lead_id, seq)` and the call's host-written id. The id's run part is the call run
+#: `bind_call_ids` named (a world token on an arm), so the record holds both.
+CALL_JOIN_COLUMNS: tuple[str, ...] = ("lead_id", "seq", "call_id")
 
 
 def bind_call_ids(state: RunState, run: str) -> None:
@@ -216,7 +230,9 @@ def next_call_id(state: RunState) -> str:
     """@owns call_id — allocate one host-written identity under this run's own lock.
 
     The counter lives only on RunState; model-written rows cannot move it, and another run
-    on the same folder starts with its own state. Both call records carry the allocated id.
+    on the same folder starts with its own state. The served ledger carries the allocated id
+    and the run's call join (`RunPaths.call_join`) pairs it with the call's table row; the
+    model's query table never carries it (#1255 G4).
     """
     with state.lock:
         number = state.call_number
@@ -229,9 +245,16 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     raw_command: str, payload_text: str, exit_code: int, payload_status: str,
     payload_digest: str, system_key: str, call_id: str | None = None,
 ) -> dict:
-    """@owns QUERY_ROW_COLUMNS — the single append to the queries table: allocate the lead's
-    next seq, persist the payload sidecar, record the row in the run's state, and append its
-    line in `QUERY_ROW_COLUMNS` order.
+    """@owns QUERY_ROW_COLUMNS @owns CALL_JOIN_COLUMNS — the single append to the queries
+    table: allocate the lead's next seq, persist the payload sidecar, record the row in the
+    run's state, record the call's join line (`(lead_id, seq)` -> `call_id`, host-only, beside
+    the run folder: #1255 G4/G6) and append the row's line in `QUERY_ROW_COLUMNS` order.
+
+    The call id (`call_id`, default: the next one this run allocates) is never on the row: the
+    table is the model's to read and the box's to write, and on an arm the id spells the world
+    token. The judge joins a table row to its served-ledger rows through the call join, by the
+    row's own `(lead_id, seq)` — never by the row's position, which a refused view write or a
+    box edit can shift.
 
     Every writer goes through here. A row whose keys or order differ from the declaration is a
     `RuntimeError` at the first write. Params past `PARAMS_NESTING_LIMIT` are `ParamsTooDeep`
@@ -250,7 +273,9 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     every live decision (the guards, the seq, the repeat note) still counts it. What is refused
     before anything — too-deep params, a row that disagrees with the declaration — records
     nothing. The state holds the row as its line parses (`json.loads(json.dumps(row))`), so it and
-    the view agree on every line that landed."""
+    the view agree on every line that landed. The join line is written before the view line, so
+    a call the run made is joined whether or not its view line lands; a refused join write
+    raises its `OSError` as the view's does."""
     # First, so too-deep params are refused before a seq is taken or a sidecar written.
     with state.lock:
         stored_params = _json_safe_params(dict(params))
@@ -275,7 +300,6 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
             "payload_sha256": payload_sha256(payload_text),
             # Passed in: the raw string it fingerprints must not be on the row.
             "system_key": system_key,
-            "call_id": call_id,
         }
         # Compared as a tuple: the on-disk key order is part of the contract.
         if tuple(row) != QUERY_ROW_COLUMNS:
@@ -288,6 +312,8 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
         # parsed line, so the state holds exactly what the file says (non-finite floats, tuples
         # and keys as written) and no reader shares the dict handed back to the caller.
         state.rows.setdefault(lead_id, []).append(json.loads(line))
+        join = dict(zip(CALL_JOIN_COLUMNS, (lead_id, seq, call_id), strict=True))
+        run.tables.call_join.append([join])
         run.tables.queries.append([json.loads(line)])
     return row
 

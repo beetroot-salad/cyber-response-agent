@@ -39,14 +39,17 @@ from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths
 #: The five groups, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
 
-#: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table.
+#: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table, plus
+#: #1255's two host-only sidecars: `call_join` (the query writer's, G4/G6) and
+#: `ticket_comments` (the ticket writer's record of its accepted comments, P5).
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
-    "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
+    "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads", "call_join"),
     "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
     "documents": ("investigation", "report", "gather_summaries", "lead_author"),
     "observability": (
         "wire_log", "review_trace", "tool_trace", "review_record",
-        "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer"),
+        "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer",
+        "ticket_comments"),
     "session": ("session_db",),
 }
 MEMBER_ACCESSOR: dict[str, str] = {
@@ -61,7 +64,8 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "review_record": "review_record", "lessons_loaded": "lessons_loaded",
     "ticket_write": "ticket_write", "runtime_html": "runtime_html",
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
-    "session_db": "session_db",
+    "session_db": "session_db", "call_join": "call_join",
+    "ticket_comments": "ticket_comments",
 }
 #: The one write verb per member — per record, not per group, since the group only says how a
 #: record is read. `append` (JSONL), `write` (whole document or write-once fact), `open`
@@ -77,7 +81,7 @@ MEMBER_VERB: dict[str, str | None] = {
     "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
     "ticket_write": "write",
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
-    "session_db": "open",
+    "session_db": "open", "call_join": "append", "ticket_comments": "append",
 }
 # The capability table is authoritative; MEMBER_VERB retains the primary-verb API.
 MEMBER_CAPABILITIES = {name: frozenset((verb,)) if verb else frozenset()
@@ -95,10 +99,11 @@ for _member in ("wire_log", "policy_denials", "review_trace"):
 
 UPWARD_ACCESSORS = (
     "run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer", "sessions_dir",
-    "session_db")
+    "session_db", "call_join", "ticket_comments")
 #: The sidecars sit directly in the runs base, so they are anchored there. (The session db's
 #: `open_store` anchors its own directory.)
-_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer")
+_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer", "call_join",
+                    "ticket_comments")
 #: Written once through the exclusive lane (a second lead claim must collide). The scrub
 #: verdict is a fact too but is rewritten, so it uses `replace` like every other `write`.
 _WRITE_ONCE_MEMBERS = frozenset({"alert", "alert_record", "provenance", "leads"})
