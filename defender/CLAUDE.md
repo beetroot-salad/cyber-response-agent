@@ -86,6 +86,13 @@ user that runs defender; a destination already occupied makes setup refuse, nami
 message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
 setup run as root — that adoption case only.)
 
+**Running the suite as root fails one test that is not broken:**
+`tests/test_921_launcher_frame.py::test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts`.
+It simulates a failing write by chmod'ing a directory to `r-x`, and root ignores permission
+bits — so the write lands and the test asserts "the failed write landed anyway". CI runs
+non-root and it passes there. (The four accounting-failure tests that failed the same way
+retired with #1235.) Confirm against CI before chasing them; don't "fix" the tests.
+
 **Upgrading a data root from before #1187** (run ids are bare UUIDs; episodes live at
 `<root>/<T>/episodes/<uuid>/`; `DEFENDER_EPISODES_BASE` and `_tenant.json` are retired): stop
 every run, fork and drain on it; drain or clear the curation queue on the OLD code first (the new
@@ -95,13 +102,6 @@ then run `python3 defender/ops/retire_legacy_runs.py --tenant <T>` once per tena
 playground with `--old-episodes-root <the old DEFENDER_EPISODES_BASE>`. It only renames old
 entries aside into `<T>/runs-legacy/` and `<T>/episodes-legacy/`; until it has run, the tenant's
 runs listing refuses, naming it.
-
-**Running the suite as root fails one test that is not broken:**
-`tests/test_921_launcher_frame.py::test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts`.
-It simulates a failing write by chmod'ing a directory to `r-x`, and root ignores permission
-bits — so the write lands and the test asserts "the failed write landed anyway". CI runs
-non-root and it passes there. (The four accounting-failure tests that failed the same way
-retired with #1235.) Confirm against CI before chasing them; don't "fix" the tests.
 
 ## Run dir + the two tables
 

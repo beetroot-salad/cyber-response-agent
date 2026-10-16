@@ -11,8 +11,9 @@ carries no labels and no pointer back to its fixture. The index is host-written 
 outside every runs and episodes tree, where no box can write it.
 
 Launch one held-out run (the playground tenant's: run.py requires a tenant, and every run names
-one — there is no default, #1078; set it up once with ``python3 defender/scripts/tenant.py
-setup playground`` after cloning its repo into ``$DEFENDER_DATA_ROOT/playground/knowledge``)::
+one — there is no default, #1078; set it up once with
+``python3 defender/scripts/tenant.py setup playground`` after cloning its repo into
+``$DEFENDER_DATA_ROOT/playground/knowledge``)::
 
     python3 defender/evals/held_out.py launch <slug> --index F
 

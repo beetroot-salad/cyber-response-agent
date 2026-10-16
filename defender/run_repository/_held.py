@@ -128,7 +128,7 @@ def _parses(text: str) -> RunId | None:
 def retire_remedy(tenant_id: str) -> str:
     """What a refusal of a pre-#1187 entry tells the operator to do: run the one-time command
     for the tenant (no run, fork or drain in flight on the data root; its help says so)."""
-    return (f"run {RETIRE_COMMAND} --tenant {tenant_id} to move pre-#1187 entries aside "
+    return (f"run {RETIRE_COMMAND} --tenant {tenant_id}, which moves pre-#1187 entries aside "
             "(nothing is deleted)")
 
 
