@@ -11,6 +11,7 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from pydantic_ai.messages import ModelRequest, RetryPromptPart, ToolCallPart, ToolReturnPart
@@ -322,3 +323,37 @@ def carried_retries(prefix: list) -> dict[str, int]:
         carried.update({tool: retries.get(tool, 0) + 1 for tool in failed})
         retries = carried
     return {tool: n for tool, n in retries.items() if n}
+
+
+def lead_records(run: Run) -> Iterator[tuple[str, tuple[Any, ...]]]:
+    """The per-lead write-once records `run`'s folder holds, as `(kind, args)` — each lead's
+    claim (`("lead_claim", (lead,))`), raw payloads (`("payload", (lead, seq))`) and gather
+    summary (`("gather_summary", (lead,))`) — recognised by the exact name the layout gives
+    them: an entry the layout would not name (a stray file, a planted link's odd name) is not
+    a record and is left out. Directories are judged without following a link."""
+    paths = RunPaths(run.run_dir)
+    if artifact_dir(paths.gather_raw):
+        for entry in sorted(paths.gather_raw.iterdir()):
+            lead = _lead_of(entry.name)
+            if artifact_dir(entry):
+                for payload in sorted(entry.iterdir()):
+                    seq = _lead_of(payload.name)
+                    if seq.isascii() and seq.isdecimal() and _named(
+                            lambda: RUN_LAYOUT.payload(entry.name, int(seq)).name, payload.name):  # noqa: B023 — called at once
+                        yield "payload", (entry.name, int(seq))
+            elif _named(lambda: RUN_LAYOUT.lead_claim(lead).name, entry.name):  # noqa: B023 — called at once
+                yield "lead_claim", (lead,)
+    if artifact_dir(paths.gather_summaries):
+        for entry in sorted(paths.gather_summaries.iterdir()):
+            lead = _lead_of(entry.name)
+            if _named(lambda: RUN_LAYOUT.gather_summary(lead).name, entry.name):  # noqa: B023 — called at once
+                yield "gather_summary", (lead,)
+
+
+def _named(layout_name: Callable[[], str], actual: str) -> bool:
+    """Whether `actual` is exactly the layout's name for a record (`False` when the layout
+    refuses the record's components)."""
+    try:
+        return layout_name() == actual
+    except ValueError:
+        return False

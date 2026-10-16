@@ -30,23 +30,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 import sqlite3
 from collections.abc import Callable, Iterator
 from typing import Any
 
 from defender._io import parse_jsonl_row
-from defender.run_repository import (
-    LEAD_CLAIM_SUFFIX,
-    REVIEW_RECORD_PREFIX,
-    RUN_LAYOUT,
-    RecordHandle,
-    Run,
-    RunPaths,
-    artifact_dir,
-)
+from defender.run_repository import RecordHandle, Run
 
 from ..run_state import RunState
+from ._frontier import lead_records
 from ._spec import BranchError
 
 _logger = logging.getLogger(__name__)
@@ -54,23 +46,51 @@ _logger = logging.getLogger(__name__)
 #: The snapshot body's shape version; a body of any other version is not one this reader knows.
 SNAPSHOT_VERSION = 1
 
+
+def _queries(run: Run) -> RecordHandle:
+    return run.tables.queries
+
+
+def _lessons_loaded(run: Run) -> RecordHandle:
+    return run.observability.lessons_loaded
+
+
+def _policy_denials(run: Run) -> RecordHandle:
+    return run.tables.policy_denials
+
+
 #: The append-only model-readable files, by the name the snapshot records them under, and the
 #: run's own record for each.
 _APPEND_ONLY: dict[str, Callable[[Run], RecordHandle]] = {
-    "executed_queries": lambda run: run.tables.queries,
-    "lessons_loaded": lambda run: run.observability.lessons_loaded,
-    "policy_denials": lambda run: run.tables.policy_denials,
+    "executed_queries": _queries,
+    "lessons_loaded": _lessons_loaded,
+    "policy_denials": _policy_denials,
 }
+
+
+def _lead_claim(run: Run, lead: str) -> RecordHandle:
+    return run.tables.leads(lead)
+
+
+def _payload(run: Run, lead: str, seq: int) -> RecordHandle:
+    return run.tables.payloads(lead, seq)
+
+
+def _gather_summary(run: Run, lead: str) -> RecordHandle:
+    return run.documents.gather_summaries(lead)
+
+
+def _review_record(run: Run, turn: int) -> RecordHandle:
+    return run.observability.review_record(turn)
+
 
 #: The write-once model-readable files, by kind: the run's record for one, from its arguments.
 _WRITE_ONCE: dict[str, Callable[..., RecordHandle]] = {
-    "lead_claim": lambda run, lead: run.tables.leads(lead),
-    "payload": lambda run, lead, seq: run.tables.payloads(lead, seq),
-    "gather_summary": lambda run, lead: run.documents.gather_summaries(lead),
-    "review_record": lambda run, turn: run.observability.review_record(turn),
+    "lead_claim": _lead_claim,
+    "payload": _payload,
+    "gather_summary": _gather_summary,
+    "review_record": _review_record,
 }
-
-_REVIEW_RECORD = re.compile(rf"\A{re.escape(REVIEW_RECORD_PREFIX)}([1-9][0-9]*)\.json\Z")
 
 
 def _sha(data: bytes) -> str:
@@ -89,54 +109,13 @@ def _bytes_of(record: RecordHandle) -> bytes | None:
 
 
 def _write_once_files(run: Run) -> Iterator[tuple[str, tuple[Any, ...]]]:
-    """Every write-once record the run holds, as `(kind, args)`, by its canonical name only: an
-    entry the layout would not name (a planted link, a stray file) is not a record."""
-    paths = RunPaths(run.run_dir)
-    yield from _gather_raw_files(paths)
-    if artifact_dir(paths.gather_summaries):
-        for entry in sorted(paths.gather_summaries.iterdir()):
-            lead = entry.name.removesuffix(".md")
-            if _canonical("gather_summary", (lead,), entry.name):
-                yield "gather_summary", (lead,)
-    if artifact_dir(run.run_dir):
-        for entry in sorted(run.run_dir.iterdir()):
-            found = _REVIEW_RECORD.match(entry.name)
-            if found is not None:
-                yield "review_record", (int(found.group(1)),)
-
-
-def _gather_raw_files(paths: RunPaths) -> Iterator[tuple[str, tuple[Any, ...]]]:
-    """The lead claims and raw payloads under `gather_raw/`, as `_write_once_files` names them."""
-    if not artifact_dir(paths.gather_raw):
-        return
-    for entry in sorted(paths.gather_raw.iterdir()):
-        if not artifact_dir(entry):
-            lead = entry.name.removesuffix(LEAD_CLAIM_SUFFIX)
-            if _canonical("lead_claim", (lead,), entry.name):
-                yield "lead_claim", (lead,)
-            continue
-        for payload in sorted(entry.iterdir()):
-            seq = payload.stem
-            if seq.isascii() and seq.isdecimal() and _canonical(
-                    "payload", (entry.name, int(seq)), payload.name):
-                yield "payload", (entry.name, int(seq))
-
-
-#: The layout's name for each write-once kind, from the record's arguments.
-_LAYOUT_NAME: dict[str, Callable[..., str]] = {
-    "lead_claim": lambda lead: RUN_LAYOUT.lead_claim(lead).name,
-    "payload": lambda lead, seq: RUN_LAYOUT.payload(lead, seq).name,
-    "gather_summary": lambda lead: RUN_LAYOUT.gather_summary(lead).name,
-}
-
-
-def _canonical(kind: str, args: tuple[Any, ...], actual: str) -> bool:
-    """Whether `actual` is exactly the name the layout gives that record (`False` when the
-    layout refuses its components)."""
-    try:
-        return _LAYOUT_NAME[kind](*args) == actual
-    except ValueError:
-        return False
+    """Every write-once record the run holds, as `(kind, args)`: the per-lead records
+    (`lead_records`) and the review records, which the close writes one per round from 1."""
+    yield from lead_records(run)
+    turn = 1
+    while _bytes_of(_review_record(run, turn)) is not None:
+        yield "review_record", (turn,)
+        turn += 1
 
 
 # ------------------------------------------------------------------------------------------
@@ -186,10 +165,10 @@ class SnapshotWriter:
         for kind, args in _write_once_files(run):
             key = (kind, args)
             if key not in self._digests:
-                data = _bytes_of(_WRITE_ONCE[kind](run, *args))
-                if data is None:
+                held = _bytes_of(_WRITE_ONCE[kind](run, *args))
+                if held is None:
                     continue
-                self._digests[key] = _sha(data)
+                self._digests[key] = _sha(held)
             write_once.append({"kind": kind, "args": list(args), "sha256": self._digests[key]})
         document = run.documents.investigation.read()
         blobs = {} if document is None else {_sha(document.encode("utf-8")): document}
