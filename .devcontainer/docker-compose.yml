@@ -71,16 +71,15 @@ services:
   # GitHub. Operator-side infrastructure, like the data root — NOT part of the playground
   # (that is the simulated client estate, and is destroyed on lever-down).
   #
-  # From the dev container: http://forgejo:3000 (clone the lab with
-  # `git clone http://forgejo:3000/tenants/playground.git $DEFENDER_DATA_ROOT/playground/knowledge`,
-  # credentials through a git credential helper, never in the URL). Each tenant's clone uses
-  # its OWN bot account (`bot-<id>-<salt>`, write on that one repo only), whose token lives at
-  # $DEFENDER_DATA_ROOT/<id>/forge/git-credentials — never an admin token. From the host's browser:
-  # http://localhost:${FORGEJO_HTTP_PORT:-3000}. Runs and the runtime image never reach it:
-  # the operator clones, and runs read the clone.
+  # From the dev container: http://forgejo:3000; from the host's browser:
+  # http://localhost:${FORGEJO_HTTP_PORT:-3000}. Each tenant has a non-admin bot and a
+  # repository-restricted Authorized Integration. Host delivery receives short-lived Vault
+  # JWTs explicitly; see defender/docs/development-operations.md for provisioning and scope.
+  # Runtime boxes receive exported files and never receive Forgejo or Vault credentials.
   forgejo:
-    # 15.x is the LTS line (supported to 2027-07). Override per machine in .devcontainer/.env.
-    image: codeberg.org/forgejo/forgejo:${FORGEJO_VERSION:-15.0.9}
+    # Authorized Integrations authenticate short-lived Vault identities for API and git.
+    # Override per machine in .devcontainer/.env.
+    image: codeberg.org/forgejo/forgejo:${FORGEJO_VERSION:-17.0.0}
     container_name: response-forgejo
     environment:
       USER_UID: "1000"

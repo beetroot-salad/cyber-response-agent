@@ -31,17 +31,23 @@ SALT = "s665geo"
 
 def _run_cycle_mounts(run_dir: Path):
     """A minimal run-cycle geography a caller composes (M2): learning_run_dir + the ro
-    defender infra tree + the ro gather_raw evidence tree."""
+    defender infra tree + the ro gather_raw evidence tree, each read-only mount declaring
+    what it holds (#1108 D7 amended): the run's data, the product code, the evidence data."""
     return (
-        Mount(source=run_dir, target=run_dir, writable=False),
-        Mount(source=DEFENDER, target=DEFENDER, writable=False),
-        Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False),
+        Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
+        Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
+        Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False,
+              kind="data"),
     )
 
 
 def _populate_mount_sources(mounts, tmp_path: Path) -> None:
-    """Make each mount source NON-EMPTY — the contrast case against the present-empty gather_raw
-    above — for the sources this test owns, i.e."""
+    """Populate only test-owned sources with an existing read-back file.
+
+    D7 forbids planting during a read-only mount check. The checked-out DEFENDER already
+    has its committed code check file and is never edited by this fixture. The marker below is
+    deliberate setup in temporary sources, available before startup begins.
+    """
     for m in mounts:
         source = Path(m.source)
         if not source.is_relative_to(tmp_path):
@@ -51,13 +57,14 @@ def _populate_mount_sources(mounts, tmp_path: Path) -> None:
 
 
 def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=None, workdir=None,
-             spec=None):
+             spec=None, defender_dir=None):
     return BoxRequest(
         name=name,
         mounts=mounts if mounts is not None else _run_cycle_mounts(run_dir),
         workdir=workdir if workdir is not None else REPO_ROOT,
         env=env if env is not None else {},
         spec=spec,
+        defender_dir=defender_dir,
     )
 
 
@@ -137,18 +144,31 @@ def test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key(
 
 
 # The startup sentinel (O2/M11) + startup-fault loudness (M4/decision 5)
-def test_sentinel_probes_every_mount_ro_readback(tmp_path):
-    """sentinel_probes_every_mount — under M2 the startup sentinel is a PER-MOUNT obligation
-    (M11): every mount the box carries (the rw tree AND each ro tree) is individually probed
-    by a read-back at start, not only the original single rw run_dir."""
+def test_sentinel_probes_every_mount_ro_readback_without_planting(tmp_path):
+    """D7/M11: nonempty read-only mounts are read back without even transient writes."""
     run_dir = make_run_dir(tmp_path)
-    for m in _run_cycle_mounts(run_dir):
-        Path(m.source).mkdir(parents=True, exist_ok=True)
+    evidence = tmp_path / "separate-evidence"
+    evidence.mkdir()
+    (evidence / "result.json").write_text("{}\n", encoding="utf-8")
+    # Disjoint roots give each mount its own observation: a repeated child read cannot
+    # masquerade as a separate read-back of an enclosing mount.
+    mounts = (Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
+              Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
+              Mount(source=evidence, target=evidence, writable=False, kind="data"))
+    before = {m.source: frozenset(m.source.iterdir()) for m in mounts}
     rec = RecordingDocker()
-    start_box_request(_request(run_dir), docker=rec)
-    readbacks = [c for c in rec.calls if len(c) > 1 and c[1] == "exec"]
-    assert len(readbacks) >= len(_run_cycle_mounts(run_dir)), \
-        "the sentinel probed fewer mounts than the box carries (single-mount sentinel survived)"
+    def boundary(argv, **kwargs):
+        assert {m.source: frozenset(m.source.iterdir()) for m in mounts} == before
+        return rec(argv, **kwargs)
+    start_box_request(_request(run_dir, mounts=mounts), docker=boundary)
+    readbacks = [Path(c[-1]) for c in rec.calls if len(c) > 1 and c[1] == "exec"
+                 and Path(c[-1]).is_absolute()
+                 and any(Path(c[-1]).is_relative_to(mount.source) for mount in mounts)]
+    assert len(readbacks) == len(mounts)
+    assert all(path.is_file() for path in readbacks)
+    for mount in mounts:
+        assert any(path.is_relative_to(mount.source) for path in readbacks)
+    assert {m.source: frozenset(m.source.iterdir()) for m in mounts} == before
 
 
 def test_mount_source_directory_absent_at_box_creation(tmp_path):

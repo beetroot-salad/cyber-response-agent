@@ -11,7 +11,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import ClassVar, Literal, Protocol, runtime_checkable
 
 from defender._model import model
 from defender.runtime import bash_exec
@@ -64,12 +64,34 @@ class BoxSpec:
 
 
 
+#: The file a `code` mount is checked by at box start (#1108 D7): read back through the box from
+#: `<code_dir>/MOUNT_CHECK` and compared with the host's own read. A committed, content-free file
+#: the box package owns by this one name; nothing the agent reads names it.
+CODE_CHECK_FILE = "MOUNT_CHECK"
+
+#: What a read-only mount holds, which decides how box start checks it (#1108 D7, amendment 2):
+#: `code` reads back `CODE_CHECK_FILE` under the request's code root; `data` reads back its first
+#: regular file (an empty folder passes, #665 Decision 9); `staged` is the root of a copy the host
+#: made (a drain's draft, a run's knowledge), holding only `agent/` (and a run copy's
+#: `settings/`), with a fresh token planted at its root and read back for each start. Never
+#: inferred from a name or a path. The retired `agent` kind is refused like any other word.
+MountKind = Literal["code", "data", "staged"]
+
+
 @dataclass(frozen=True)
 class Mount:
 
     source: Path
     target: Path
     writable: bool = False
+    #: Required of a read-only mount, which box start refuses without one. A writable mount is
+    #: checked by a planted sentinel and declares no kind; box start refuses one that does.
+    kind: MountKind | None = None
+
+
+def _code_dir(workdir: Path, explicit: Path | None) -> Path:
+    """Resolve the request code root once, retaining legacy checkout geography."""
+    return explicit if explicit is not None else workdir / "defender"
 
 
 @dataclass(frozen=True)
@@ -79,6 +101,15 @@ class BoxRequest:
     mounts: tuple[Mount, ...] = ()
     workdir: Path = Path(".")
     env: dict[str, str] = field(default_factory=dict)
+    #: Explicit product code root; legacy requests derive it from their checkout workdir.
+    defender_dir: Path | None = None
+    #: Tenant knowledge must never run in the host fallback lane.
+    require_sandbox: bool = False
+
+    @property
+    def code_dir(self) -> Path:
+        return _code_dir(self.workdir, self.defender_dir)
+
     # Resolved here so BoxRequest callers honour DEFENDER_BOX_RUNTIME too.
     spec: BoxSpec = field(default_factory=lambda: BoxSpec.from_env(os.environ))
 

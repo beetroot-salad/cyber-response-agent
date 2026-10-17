@@ -287,6 +287,22 @@ class _TenantLayout:
         return self.dir / "knowledge"
 
     @property
+    def exports(self) -> Path:
+        return self.dir / "exports"
+
+    @property
+    def drafts(self) -> Path:
+        return self.dir / "drafts"
+
+    @property
+    def knowledge_lock(self) -> Path:
+        return self.dir / "knowledge.lock"
+
+    @property
+    def commit_record(self) -> Path:
+        return self.learning / "commit-maker.jsonl"
+
+    @property
     def settings(self) -> Path:
         return self.knowledge / SETTINGS_HALF
 
@@ -410,6 +426,30 @@ class Tenant:
     @property
     def knowledge(self) -> Path:
         return self._layout.knowledge
+
+    @property
+    def exports(self) -> Path:
+        """Host-made, immutable copies of the knowledge at one commit each (`<commit>/`), and
+        the `current` pointer naming the latest (#1108 amendment 2)."""
+        return self._layout.exports
+
+    @property
+    def drafts(self) -> Path:
+        """Host-made, git-free copies of `agent/` a drain box writes into, one per batch."""
+        return self._layout.drafts
+
+    @property
+    def knowledge_lock(self) -> Path:
+        """The per-tenant lock over the knowledge clone and its exports: held for a
+        fast-forward, export publication, filter configuration and draft build or sweep,
+        never across network I/O, a box window or commit creation."""
+        return self._layout.knowledge_lock
+
+    @property
+    def commit_record(self) -> Path:
+        """The commit-maker's record of every tenant commit it made, which outlives the
+        process that made them: push routes send only commits it lists."""
+        return self._layout.commit_record
 
     @property
     def settings(self) -> Path:
