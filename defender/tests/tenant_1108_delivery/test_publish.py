@@ -780,8 +780,10 @@ def test_the_draft_and_info_attributes_are_written_under_the_tenant_lock(repo, t
     `test_delivery.py`). Probed from another process (`LockAudit`) before the first write of
     `info/attributes` in `open()` and the first publish, and, on a batch start with a stale
     temporary in `drafts/`, before the first build step, removal and rename under
-    `<T>/drafts/` (by name or relative to a folder descriptor); the probe's positive control
-    comes first. Every probe sees the lock busy, and each of the four was among them."""
+    `<T>/drafts/` (by name or relative to a folder descriptor); then, on a plain publish with
+    another stale temporary there, before its sweep's first removal (orchestrator ruling:
+    publish sweeps under the lock too). The probe's positive control comes first. Every
+    probe sees the lock busy, and each was among them."""
     tenant = repo[0]
     audit = LockAudit(tenant, _under_drafts(tenant))
     control = tenant.dir / "drafts" / ".p3-control"
@@ -806,6 +808,15 @@ def test_the_draft_and_info_attributes_are_written_under_the_tenant_lock(repo, t
     assert all("busy" in verdict for _, verdict in audit.probes), audit.probes
     assert sorted(p.name for p in (tenant.dir / "drafts").iterdir()) == ["drafted"]
     assert files_under(batch.draft_root / "agent") == files_under(batch.export.path / "agent")
+    stale = tenant.dir / "drafts" / ".stale-3d4e5f" / "agent"
+    stale.mkdir(parents=True)
+    (stale / "seed.md").write_bytes(b"left by another build that never finished\n")
+    audit = LockAudit(tenant, _under_drafts(tenant))
+    with audit:
+        d.publish()
+    assert "sweep" in [label for label, _ in audit.probes], audit.probes
+    assert all("busy" in verdict for _, verdict in audit.probes), audit.probes
+    assert sorted(p.name for p in (tenant.dir / "drafts").iterdir()) == ["drafted"]
 
 
 #: A clean and smudge filter driver that logs every run and passes the bytes through, named

@@ -206,8 +206,9 @@ def test_explicit_defender_dir_also_owns_host_fallback_environment(tmp_path):
 
 def _refusing(fault, root, tmp_path):
     """A fake daemon and a `docker=` over it that fails the start as `fault` names: no daemon
-    at all, the create refused, another draft's token read back at the root, or a lane's
-    sentinel not read back."""
+    at all, no box image on it, the create refused, the code mount's check file read back
+    wrong, another draft's token read back at the root, or a lane's sentinel not read back.
+    (`code-check-missing` is the request's own fault: see its case.)"""
     from defender.tests._box1195 import FakeDaemon
     daemon = FakeDaemon(tmp_path)
     if fault == "create-refused":
@@ -219,23 +220,37 @@ def _refusing(fault, root, tmp_path):
         argv = [str(a) for a in argv]
         if fault == "daemon-unavailable":
             raise OSError("daemon unavailable")
+        if fault == "image-missing" and argv[1:3] == ["image", "inspect"]:
+            return subprocess.CompletedProcess(argv, 1, "", "Error: No such image")
+        if fault == "code-check-mismatch" and argv[1:2] == ["exec"] and argv[-1].endswith(box.CODE_CHECK_FILE):
+            return subprocess.CompletedProcess(argv, 0, "another tree's check\n", "")
         if fault == "wrong-token" and argv[1:2] == ["exec"] and _at_root(argv[-1], root):
             return subprocess.CompletedProcess(argv, 0, "another draft's token\n", "")
         return daemon(argv, **kwargs)
     return daemon, docker
 
 
-@pytest.mark.parametrize("fault", ["daemon-unavailable", "create-refused", "wrong-token", "sentinel-refused"])
+_START_FAULTS = ["daemon-unavailable", "image-missing", "code-check-missing", "create-refused",
+                 "code-check-mismatch", "wrong-token", "sentinel-refused"]
+
+
+@pytest.mark.parametrize("fault", _START_FAULTS)
 def test_a_drain_start_fault_raises_and_leaves_nothing_under_the_drafts(repo, tmp_path, monkeypatch, fault):
     """C3 / R5 / O-D: the tenant drain's start requires a sandbox. With the operator's opt-out
-    set (`DEFENDER_ALLOW_UNSANDBOXED=1`), a start fault (no daemon, the create refused,
-    another draft's token read back, a lane's sentinel not read back) raises `BoxFault`: no
-    executor, sandboxed or not, no box left, and nothing under `<T>/drafts/` changed: no
-    did-not-run marker beside a lane, no token, no sentinel."""
+    set (`DEFENDER_ALLOW_UNSANDBOXED=1`), every start fault, before the create or after it
+    (no daemon, no box image, a code mount without its check file, the create refused, the
+    code check read back wrong, another draft's token read back, a lane's sentinel not read
+    back), raises `BoxFault`: no executor, sandboxed or not, no box left, and nothing under
+    `<T>/drafts/` changed: no did-not-run marker beside a lane, no token, no sentinel."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     d, batch = _batch(repo, "no-box")
     drafts = batch.draft_root.parent
     request = replace(batch.box_request(), spec=_PINNED)
+    if fault == "code-check-missing":
+        code = tmp_path / "code-without-check"
+        code.mkdir()
+        request = replace(request, defender_dir=code, mounts=tuple(
+            replace(m, source=code, target=code) if m.kind == "code" else m for m in request.mounts))
     before = _snapshot(drafts)
     daemon, docker = _refusing(fault, batch.draft_root, tmp_path)
     with pytest.raises(box.BoxFault):
