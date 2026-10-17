@@ -662,7 +662,7 @@ class _Record:
 #: The most a credential answer may hold.
 _ANSWER_LIMIT = 16 * 1024
 #: Network git's wall timeout, in seconds, unless `TenantDelivery.open` is given another.
-_NETWORK_TIMEOUT = 120.0
+NETWORK_TIMEOUT = 120.0
 
 
 def _credential_helper(fd: int) -> str:
@@ -892,12 +892,12 @@ class TenantDelivery:
     _origin: str = field(repr=False)
     _user: str = field(repr=False)
     _token: str = field(repr=False)
-    network_timeout: float = _NETWORK_TIMEOUT
+    network_timeout: float = NETWORK_TIMEOUT
     branch_prefix: str = LESSONS_BRANCH_PREFIX
 
     @classmethod
     def open(cls, accepted_tenant: Tenant, *, defender_dir: Path, client: httpx.Client,
-             network_timeout: float = _NETWORK_TIMEOUT) -> TenantDelivery:
+             network_timeout: float = NETWORK_TIMEOUT) -> TenantDelivery:
         """The dormant factory, and the credential file's single reader. Refuses (O9) a tenant
         whose knowledge is not its own git repository, has no `main`, has no network `origin`,
         or has no credential agreeing with that origin's scheme, host and port; reads the

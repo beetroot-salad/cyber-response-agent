@@ -175,10 +175,18 @@ def _head_repository_id(row: dict) -> int | None:
 
 
 def _total_count(response: httpx.Response) -> int | None:
-    """`X-Total-Count`, the number of rows the listing holds in all, or `None` when the forge
-    sent none (or one that is not a count, which can end nothing)."""
-    raw = response.headers.get("X-Total-Count", "").strip()
-    return int(raw) if raw.isdigit() else None
+    """`X-Total-Count`, a nonnegative count, or `None` when the forge sent no header.
+    A malformed count refuses the listing instead of guessing where it ends."""
+    raw = response.headers.get("X-Total-Count")
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if not raw.isascii() or not raw.isdecimal():
+        raise ForgeError("Forgejo X-Total-Count must be a nonnegative whole number")
+    try:
+        return int(raw)
+    except ValueError as e:
+        raise ForgeError("Forgejo X-Total-Count is too large") from e
 
 
 @dataclass(frozen=True)
