@@ -1,6 +1,6 @@
 # defender/
 
-Experimental alert-triage product: an in-process PydanticAI investigation runtime plus an offline learning loop. Product agent prompts under `skills/` are distinct from Claude Code skills. The lab environment is maintained separately under `playground-v2/` and `infra/`.
+Experimental alert-triage product: an in-process PydanticAI investigation runtime plus an offline learning loop. Product agent prompts under `skills/` are distinct from Claude Code skills. The lab environment is maintained separately under `playground-v2/` and `infra/`. <!-- lint-shippable: ok — developer documentation identifies the separate lab, not a product assumption. -->
 
 ## Design and authority
 
@@ -10,7 +10,7 @@ Experimental alert-triage product: an in-process PydanticAI investigation runtim
 
 ## Shared conventions
 
-- Product code is tenant-neutral: no assumptions about a tenant's systems. System-specific behavior belongs with its adapter; shared product modules do not import adapters for data. Elastic is an explicit vendor-specific product integration.
+- Product code is tenant-neutral: no assumptions about a tenant's systems. System-specific behavior belongs with its adapter; shared product modules do not import adapters for data. Elastic is an explicit vendor-specific product integration. <!-- lint-shippable: ok — documents the explicit product-integration exception. -->
 - Use existing seams: `_git` for git, `_io` for bounded UTF-8 reads and JSONL, `_frontmatter` for frontmatter, and guarded I/O for model-writable trees. Consult the relevant checker or `docs/development-lints.md` before implementing a competing helper.
 - Diagnostics use `_log` and `logging.getLogger(__name__)`; command results remain stdout, refusals remain visible stderr or API errors. Entrypoints configure logging. Detailed rules are in `docs/runtime-development.md`.
 - Runs live under `$DEFENDER_DATA_ROOT/<tenant>/runs/`, outside tracked source; no default data root or tenant. Devcontainer bind-mount details and existing CLI procedures are in `docs/development-operations.md`.
