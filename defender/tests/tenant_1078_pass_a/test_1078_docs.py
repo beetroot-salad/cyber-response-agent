@@ -3,7 +3,8 @@ one-time setup step on every documented fresh run, the setup caveats (§7 J13/F8
 `held_out`'s exactly-one invocation, the retired `DEFENDER_RUNS_BASE` knob text, `.gitignore` —
 and J57's autouse data-root isolation, the fixture every other test in this suite runs under.
 
-The doc tests read the REAL files at the paths D8 lists (verified present at ed5386bc). They
+The doc tests read the real D8 documentation; developer setup instructions now live in
+`defender/docs/development-operations.md`, linked from the concise CLAUDE.md. They
 key on what an invocation or an instruction SAYS — a `--tenant` on the command line, a knob
 told to be set — never on line numbers, which the rewrite moves. Red at base means the doc does
 not yet say it; that is a doc the implementer rewrites, not a test to loosen.
@@ -23,12 +24,13 @@ from defender.tests.tenant_1078_pass_a import _spec1078 as H
 
 REPO = H.REPO_ROOT
 DEFENDER = H.DEFENDER
+DEVELOPMENT_OPERATIONS = DEFENDER / "docs" / "development-operations.md"
 
 #: D8's eleven documented fresh-run invocations (C58), by file. `README.md` is the repo root's;
 #: every other path is under `defender/` (the doc's own convention).
 FRESH_RUN_DOCS = (
     REPO / "README.md",
-    DEFENDER / "CLAUDE.md",
+    DEVELOPMENT_OPERATIONS,
     REPO / ".devcontainer" / "README.runtime.md",
     DEFENDER / "run.py",
     DEFENDER / "evals" / "held_out.py",
@@ -132,7 +134,7 @@ def test_d8_setup_doc_caveats():
 
     Read per markdown doc naming `tenant.py setup`, over the section that names it (J13 / F8,
     auto: pass A's docs say to run setup as the user that runs defender; "as root" is only
-    ever said of the (B)/(C) adoption). README.md and defender/CLAUDE.md name it (D8's
+    ever said of the (B)/(C) adoption). README.md and defender/docs/development-operations.md name it (D8's
     fresh-run list), so the set is never empty.
 
     J01's docs knock-on (phase F RC6, auto): with NO DEFAULT DATA ROOT, setup and every run
@@ -141,8 +143,8 @@ def test_d8_setup_doc_caveats():
     default (J01 dropped it from the data model)."""
     docs = _docs_naming_setup()
     names = {p.relative_to(REPO).as_posix() for p in docs}
-    assert {"README.md", "defender/CLAUDE.md"} <= names, (
-        f"the setup step is not documented where D8 puts it (found in {sorted(names)})")
+    assert {"README.md", "defender/docs/development-operations.md"} <= names, (
+        f"the setup step is not documented in the current run guides (found in {sorted(names)})")
     problems = []
     for doc in docs:
         section = _section_after(doc.read_text(encoding="utf-8"), "tenant.py setup")
@@ -294,7 +296,7 @@ def test_d8_retired_runs_knob_text():
 
 def test_d8_devcontainer_data_root():
     """.devcontainer/docker-compose.yml's environment sets DEFENDER_DATA_ROOT:
-    /workspace/.defender-data, and defender/CLAUDE.md's runs-base instruction becomes 'set
+    /workspace/.defender-data, and the development operations guide instructs 'set
     DEFENDER_DATA_ROOT=/workspace/.defender-data'.
 
     Under §7 J01 (NO DEFAULT DATA ROOT) this is the devcontainer's ONLY data root, not an
@@ -306,10 +308,13 @@ def test_d8_devcontainer_data_root():
         env = dict(item.split("=", 1) for item in env)
     assert env.get(H.DATA_ROOT_ENV) == "/workspace/.defender-data", (
         f"the devcontainer does not set {H.DATA_ROOT_ENV}: {env}")
-    claude = (DEFENDER / "CLAUDE.md").read_text(encoding="utf-8")
-    assert "DEFENDER_DATA_ROOT=/workspace/.defender-data" in claude
-    assert "DEFENDER_RUNS_BASE=/workspace/.defender-runs" not in claude, (
-        "defender/CLAUDE.md still tells the devcontainer to set the retired runs-base knob")
+    guide = DEVELOPMENT_OPERATIONS.read_text(encoding="utf-8")
+    assert "DEFENDER_DATA_ROOT=/workspace/.defender-data" in guide
+    assert "DEFENDER_RUNS_BASE=/workspace/.defender-runs" not in guide, (
+        "the development guide still tells the devcontainer to set the retired runs-base knob")
+    instructions = (DEFENDER / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "docs/development-operations.md" in instructions, (
+        "the core instructions must link to the setup and data-root guide")
 
 
 def _ignored(*rels: str) -> set[str]:
