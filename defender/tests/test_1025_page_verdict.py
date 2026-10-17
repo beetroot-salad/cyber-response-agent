@@ -839,19 +839,17 @@ def test_1025_family_drawn_several_times_with_a_dissenting_draw(tmp_path):
 
 def test_1025_manifest_fields_the_slot_bindings_never_name(tmp_path):
     """The manifest fields no slot binds — `source_run_dir` (an absolute path outside the
-    archive), `continuation_prompt`, `as_of`, `fences_at` — stay off the
-    page; `source_run_dir` is never a link source. Positive control: the bound `base_story` and
+    archive), `as_of`, `fences_at` — stay off the
+    page (`continuation_prompt` was a fourth until #1255 P4 retired it); `source_run_dir` is never a link source. Positive control: the bound `base_story` and
     each sibling's `axis` render.
     """
     ep = E.sample_episode(tmp_path)
     manifest = E.sample_manifest(source_run_dir="/runs/SOURCE-RUN-DIR-UNBOUND",
-                                 continuation_prompt="CONTINUATION-PROMPT-UNBOUND",
                                  as_of="2099-01-01T00:00:00Z",
                                  fences_at=98765)
     T.write_family(ep.dir, manifest)
     page = render(ep)
-    for unbound in ("SOURCE-RUN-DIR-UNBOUND", "CONTINUATION-PROMPT-UNBOUND",
-                    "2099-01-01T00:00:00Z", "98765"):
+    for unbound in ("SOURCE-RUN-DIR-UNBOUND", "2099-01-01T00:00:00Z", "98765"):
         assert unbound not in page.raw, unbound
     assert E.BASE_STORY in page.text_of("sec-records")
     assert E.AXIS_GRADED in page.text_of("sec-worlds")

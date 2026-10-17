@@ -34,6 +34,8 @@ import re
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     ReplayFn,
@@ -53,7 +55,7 @@ def _driven_transcript(tmp_path, run_id: str) -> str:
     the tool return from a read of `alert.json`. Exactly the two surfaces #545 compared."""
     run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
     replay = ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
+        Turn(tool_calls=[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})]),
         Turn(text="Done."),
     ])
     drive(run_dir, run_id=run_id, main=replay)

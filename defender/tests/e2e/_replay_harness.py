@@ -48,10 +48,12 @@ on both sides.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import inspect
+import os
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -181,7 +183,10 @@ class NeverEndsModel:
 
     def __init__(self, run_dir: Path):
         self.calls = 0
-        self._alert = str(RunPaths(run_dir).alert)
+        # #1255 P1/C9: the model names the alert by its model path; a host path is refused.
+        from defender.tests._1255_view import model_path
+
+        self._alert = model_path(RunPaths(run_dir).alert, run_dir=run_dir)
 
     def __call__(self, messages, info) -> ModelResponse:
         self.calls += 1
@@ -495,12 +500,45 @@ def _default_tenant() -> Any:
     return _tenants1106.fixture_tenant()
 
 
+def _no_docker_daemon(argv: list[str], **_kw: Any) -> Any:
+    """The docker a hermetic replay has: none. `start_box` turns the failed call into its
+    startup `BoxFault`, which the operator's opt-out turns into production's unboxed mode."""
+    raise FileNotFoundError("docker: a hermetic replay has no daemon")
+
+
+@contextlib.contextmanager
+def _unsandboxed_allowed() -> Iterator[None]:
+    """`DEFENDER_ALLOW_UNSANDBOXED=1` for the length of the block, the prior value (or its
+    absence) restored after — scoped to one `start_box` call, never left set for the test."""
+    prior = os.environ.get(box_mod._ALLOW_UNSANDBOXED)
+    os.environ[box_mod._ALLOW_UNSANDBOXED] = "1"
+    try:
+        yield
+    finally:
+        if prior is None:
+            os.environ.pop(box_mod._ALLOW_UNSANDBOXED, None)
+        else:
+            os.environ[box_mod._ALLOW_UNSANDBOXED] = prior
+
+
+def production_unboxed_box(run_dir: Path, defender_dir: Path, run_tenant: Any) -> Any:
+    """The box a hermetic replay runs its bash lane in: production's unboxed mode, reached the
+    way `run.py` reaches it (`start_box(run_dir, defender_dir, tenant_agent=…, tenant_id=…)`)
+    with no daemon and the opt-out set for this call alone (#1255 C6). Nothing it writes or logs
+    is hidden: the opt-out's "running UNSANDBOXED" warning and the startup fault's did-not-run
+    scrub marker beside the run folder (`RunPaths.scrub_verdict`) are production's, and land in
+    every replay that takes this default."""
+    with _unsandboxed_allowed():
+        return box_mod.start_box(run_dir, defender_dir, docker=_no_docker_daemon,
+                                 tenant_agent=run_tenant.agent, tenant_id=run_tenant.tenant_id)
+
+
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
-        wrap_model: Any = None) -> dict:
+        clock: Callable[[], Any] | None = None, wrap_model: Any = None) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -531,13 +569,16 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     every bash tool call in the replay executes through THAT executor. A scenario that wants
     to ASSERT on what crossed the boundary passes its own recording executor.
 
-    Omitted, it defaults to `box.unboxed_executor()` — host execution, no container. That is
-    the honest default for a HERMETIC replay: these runs have no daemon, and the alternative
-    (the inert production default) makes every bash turn fail closed on infrastructure rather
-    than exercising the lane the scenario is about. It does not weaken the boundary claim,
-    which is pinned directly in the #540 suite — `test_no_box_failure_path_executes_in_process`
-    and `test_tool_bash_executes_through_the_injected_box_seam` assert that production has no
-    unboxed path, and this default is reachable only from a test.
+    Omitted, it defaults to PRODUCTION'S unboxed mode (#1255 C6: "every mode includes the
+    hermetic harness"): `box.start_box` over a docker that has no daemon (`_no_docker_daemon`),
+    with `DEFENDER_ALLOW_UNSANDBOXED=1` set for that one call and restored after
+    (`_unsandboxed_allowed`) — the operator's opt-out, taken the way `run.py` takes it, with the
+    run's tenant half and identity. So whatever production builds for an unboxed run (the run's
+    environment today; the model view, once #1255 lands) is what every replay's bash lane runs
+    in, rather than a lane only tests take. These runs have no daemon, and the alternative (the
+    sandboxed default with no opt-out) makes every bash turn fail closed on infrastructure. It
+    does not weaken the boundary claim, which is pinned directly in the #540 suite: without the
+    opt-out a startup fault aborts the run.
 
     `review_stages` is the SIXTH injection seam (#774), demanded rather than described: the
     live write-time gate drives three lenses and a composer from inside the close tool, and
@@ -607,6 +648,10 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     builds the state first and passes it here, so it still holds what the run decided on.
     `driver_summary` is the same drive returning production's summary untouched.
 
+    `clock` is the run clock's source (#1255: `run_investigation(clock=…)`, a zero-argument
+    callable returning an aware UTC datetime). Passed through only when supplied, so every
+    existing call is byte-identical; RED until `run_investigation` accepts it.
+
     `wrap_model(kind, model)` (#1243) is applied to each scripted `FunctionModel` before it is
     handed out as a `BuiltModel` — `kind` is `"main"` or `"gather"` — so a scenario can put a
     production model wrapper (the provider retrier) between the run and its fake. Omitted, the
@@ -618,7 +663,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, limits=limits, box=box,
         store_factory=store_factory, review_stages=review_stages, bounds=bounds,
         toolset=toolset, resume=resume, source_run=source_run, defender_dir=defender_dir, tenant=tenant,
-        orient_shim=orient_shim, run_state=state, wrap_model=wrap_model,
+        orient_shim=orient_shim, run_state=state, clock=clock, wrap_model=wrap_model,
     )
     return {**summary, "run_state": state}
 
@@ -628,7 +673,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
         tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
-        wrap_model: Any = None) -> dict:
+        clock: Callable[[], Any] | None = None, wrap_model: Any = None) -> dict:
     """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
     summary exactly as production's caller gets it. `run_state` is what the run is handed
     (`run_investigation(run_state=…)`), the caller keeping its reference; omitted, it is not
@@ -684,6 +729,8 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         seams["source_run"] = source_run
     if run_state is not None:
         seams["run_state"] = run_state
+    if clock is not None:
+        seams["clock"] = clock
     # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
     # grant is fixed per process, and no reader finds the settings folder itself). A scenario
     # names its own tenant when it is about one; every other replay runs as the committed
@@ -700,9 +747,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         defender_dir=tree,
         dispatches_lead_zero=resume is None and verbs is not None,
     )
-    seams["box"] = box if box is not None else box_mod.unboxed_executor(
-        env=run_common.run_env(tree, run_dir),
-    )
+    seams["box"] = box if box is not None else production_unboxed_box(run_dir, tree, run_tenant)
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=RunPaths(run_dir).alert, run=Run.under(run_dir.parent, run_dir.name),

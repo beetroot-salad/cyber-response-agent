@@ -171,6 +171,7 @@
     "defender/tests/test_lint_unnarrowed_parse.py:parse_verdict": "collision, not a reference: #1166 deleted the forward check's `parse_verdict`; this is a planted source string inside the lint's own test, a made-up function the lint is run over.",
     "defender/tests/test_scope_intent_850.py:source_refs": "false positive: names the file `source_refs.yaml`, which stays on the confined agents' answer-key deny list (`CASE_ANSWER_KEY_NAMES`); #1166 removed only the run layout's `source_refs` accessor.",
     "scripts/lint/lint_spec_graph_baseline.json:VerdictError": "frozen data, not a reference: the retired spec-graph checker's baseline quotes a finding against the committed #773 spec graph, a frozen spec artifact; #1166 deleted the forward check's `VerdictError` it names.",
-    "scripts/lint/lint_vulture_baseline.json:test_773_gap_ledger": ""
+    "scripts/lint/lint_vulture_baseline.json:test_773_gap_ledger": "",
+    "defender/tests/test_1255_clock_natural.py:_branch_clock": "a contract docstring naming the retired site, not a reference: #1255's committed contract (tag contract/1255-v1) describes the arm-only `now:` line by the function that rendered it, which #1255 (D1, P4) deletes; tests are not edited by the implementer."
   }
 }

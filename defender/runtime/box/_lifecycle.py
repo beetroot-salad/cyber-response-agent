@@ -36,8 +36,10 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     write_did_not_run,
 )
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
+from defender.runtime.model_view import MODEL_AGENT, MODEL_DEFENDER, MODEL_RUN
 from ._alias import _probe_alias_ban
 from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._clock import CLOCK_ENV, CLOCK_TARGET, clock_dir, prepare_clock, remove_clock
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -89,16 +91,23 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         # The agent half lives under the data root, beside the run dir: moving it means moving
         # the data root.
         subjects.append(("tenant agent half", tenant_agent, "Set DEFENDER_DATA_ROOT to a path"))
+    # The run clock's directory (#1255) sits in a sibling of the runs base, under the data root.
+    subjects.append(("run clock directory", clock_dir(run_dir), "Set DEFENDER_DATA_ROOT to a path"))
     for subject, path, remedy in subjects:
         if mounts and not _covered(path, mounts):
             raise _uncovered_fault(subject, path, mounts, remedy)
     # Resolved here, not at BoxSpec construction, which reads nothing off the tree.
     rootfs = resolve_rootfs(spec.rootfs, defender_dir)
-    env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV, **_BOX_MARK_ENV}
+    # #1255 P1: inside the box every tree sits at its model path, so the working directory and
+    # the environment are the model view's constants — the same for every run on every host.
+    # Only the bind SOURCES name host paths; the daemon needs them, and the box never sees them.
+    env_pairs = {**infra_env(Path(MODEL_DEFENDER), Path(MODEL_RUN)), **_LOCALE_ENV,
+                 **CLOCK_ENV, **_BOX_MARK_ENV}
     if tenant_agent is not None:
-        env_pairs["DEFENDER_AGENT_DIR"] = str(tenant_agent)
+        env_pairs["DEFENDER_AGENT_DIR"] = str(MODEL_AGENT)
     run_src = _daemon_source(run_dir, mounts)
     input_dir = _input_dir_source(run_dir)
+    model_input_dir = MODEL_RUN / RUN_LAYOUT.alert_input_dir.as_posix()
     defender_src = _daemon_source(defender_dir, mounts)
     argv = [
         "docker", "run", "--detach", "--name", name,
@@ -109,11 +118,12 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         *_BOX_ULIMITS,
-        "--mount", f"type=bind,source={run_src},target={run_dir}",
+        "--mount", f"type=bind,source={run_src},target={MODEL_RUN}",
         # Over the writable run folder, a directory of its own: a file bind is undone by a host
         # rename, a directory bind is not (#1222 A1).
-        "--mount", f"type=bind,source={_daemon_source(input_dir, mounts)},target={input_dir},readonly",
-        "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
+        "--mount",
+        f"type=bind,source={_daemon_source(input_dir, mounts)},target={model_input_dir},readonly",
+        "--mount", f"type=bind,source={defender_src},target={MODEL_DEFENDER},readonly",
     ]
     if tenant_agent is not None:
         # Never plant a sentinel here: it would dirty the tenant clone. Its existing
@@ -121,11 +131,18 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         argv += [
             "--mount",
             f"type=bind,source={_daemon_source(tenant_agent, mounts)},"
-            f"target={tenant_agent},readonly",
+            f"target={MODEL_AGENT},readonly",
         ]
+    # The run clock's own read-only mount (#1255 "Into the box"): the file the image's
+    # time-faking preload reads, outside every tree the model view shows.
+    argv += [
+        "--mount",
+        f"type=bind,source={_daemon_source(clock_dir(run_dir), mounts)},"
+        f"target={CLOCK_TARGET},readonly",
+    ]
     argv += [
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
-        "--workdir", str(run_dir),
+        "--workdir", str(MODEL_RUN),
     ]
     for key in BOX_ENV_ALLOWLIST:
         if key in env_pairs:
@@ -155,6 +172,7 @@ def _probe_sentinel(
     _plant(sentinel, token)
     try:
         proc = _call(docker, ["docker", "exec", name, "cat", str(target / sentinel_name)])
+        _require_preload(proc.stderr, name)
         if proc.returncode != 0 or (proc.stdout or "").strip() != token:
             raise BoxFault(
                 f"the box could not read back the startup sentinel at {sentinel} — the tree "
@@ -169,8 +187,28 @@ def _probe_sentinel(
     sentinel.unlink(missing_ok=True)
 
 
+#: What the dynamic loader writes when it cannot preload a library (missing, or the wrong
+#: architecture: the vendored libfaketime is x86_64 only — `_clock.PRELOAD_LIBRARY`).
+_PRELOAD_ERROR_MARKS = ("cannot be preloaded", "ld.so")
+
+
+def _require_preload(stderr: str | None, name: str) -> None:
+    """The run clock's preload loaded, or the box does not start (#1255 "Into the box"). Every
+    box process runs under `LD_PRELOAD` (`_clock.CLOCK_ENV`), the startup sentinel's read-back
+    included, so the loader's complaint shows on that exec's error stream. A preload the loader
+    skips — the library missing from the image, or an arm64 host (the vendored library is
+    x86_64 ONLY) — would leave every program in the box on the wall clock while the model is
+    shown the run clock: a `BoxFault`, never a box that runs on the wrong time."""
+    err = stderr or ""
+    if any(mark in err for mark in _PRELOAD_ERROR_MARKS):
+        raise BoxFault(
+            f"the box {name} cannot preload the run clock's time-faking library "
+            f"({CLOCK_ENV['LD_PRELOAD']}; x86_64 only): {err.strip()[:300]}")
+
+
 def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
-    _probe_sentinel(run_dir, run_dir, docker, name, RUN_LAYOUT.box_sentinel.name,
+    """Planted in the host run folder, read back where the box mounts it (`/runs/current`)."""
+    _probe_sentinel(run_dir, Path(MODEL_RUN), docker, name, RUN_LAYOUT.box_sentinel.name,
                     unlink_on_fault=False)
 
 
@@ -236,8 +274,15 @@ def _start_boxed(
     except BoxFault as e:
         write_did_not_run(run_dir, f"box start refused before create: {e}", write_verdict=write_verdict)
         raise
+    try:
+        clock_file = prepare_clock(run_dir)
+    except (OSError, ValueError) as e:
+        write_did_not_run(run_dir, f"box start refused before create: the run clock's file "
+                                   f"could not be made: {e}", write_verdict=write_verdict)
+        raise BoxFault(f"could not make the run clock's file for the box {name}: {e}") from e
     created = _call(docker, create.argv)
     if created.returncode != 0:
+        remove_clock(clock_file)
         # `docker run --detach` is create-then-start, so a failure at task start can leave a
         # `created` container behind; reap it if it carries our token. Marker and reap are
         # best-effort and must not replace the create's stderr.
@@ -253,12 +298,14 @@ def _start_boxed(
         _plant_sentinel(run_dir, docker, name)
         if tenant_agent is not None:
             assert tenant_id is not None
-            _check_tenant_identity(tenant_agent / ".tenant-id", tenant_id, docker, name)
-        _probe_alias_ban(docker, name, run_dir, spec.runtime)
+            # Read through the bind, where the box sees the agent half (`/agent`).
+            _check_tenant_identity(Path(MODEL_AGENT) / ".tenant-id", tenant_id, docker, name)
+        _probe_alias_ban(docker, name, Path(MODEL_RUN), spec.runtime)
     except BaseException as e:
         # The box is ours (create succeeded); the reap is best-effort so it cannot skip the
         # marker or replace `e`.
         _reap_on_fault(docker, name)
+        remove_clock(clock_file)
         write_did_not_run(
             run_dir, f"box startup faulted before the reap scan could run: {e}",
             write_verdict=write_verdict
@@ -266,6 +313,7 @@ def _start_boxed(
         raise
     return BoxExecutor(
         spec=spec, transport=_DockerTransport(name, spec), name=name, docker=docker,
+        clock_file=clock_file,
     )
 
 
@@ -469,13 +517,15 @@ def _start_run_box(
                             write_verdict=write_verdict)
     except BoxFault as e:
         _opt_out_or_raise(e)
-    from defender import run_common
     if tenant_agent is not None:
         assert tenant_id is not None
         path = tenant_agent / ".tenant-id"
         _require_tenant_identity(path, read_tenant_id_file(path), tenant_id)
-    return unboxed_executor(
-        spec, env=run_common.run_env(defender_dir, run_dir, tenant_agent=tenant_agent))
+    # The host runs the bash lane in the model view too (#1255 "Every mode"): over a per-run
+    # staging tree, never the real runs folder.
+    from ._stage import staged_executor
+    return staged_executor(spec, run_dir, defender_dir, tenant_agent,
+                           unmirrored=frozenset({RUN_LAYOUT.wire_log_dir.name}))
 
 
 def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
@@ -486,6 +536,8 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
     reason = _remove_container(docker or _carried_docker(box), box.name)
     if reason is not None:
         raise BoxFault(f"could not tear down the box {box.name}: {reason}")
+    if box.clock_file is not None:
+        remove_clock(box.clock_file)
 
 
 def _carried_docker(box: object) -> DockerFn:

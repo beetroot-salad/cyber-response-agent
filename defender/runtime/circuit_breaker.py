@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from defender._clock import now_iso
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.runtime.run_state import RunState
@@ -81,7 +80,8 @@ def record_outcome(
         if counts_toward_run:
             state.breaker["total_failures"] += 1
         if sysrec["failures"] >= PER_SYSTEM_FAIL_LIMIT and "tripped_at" not in sysrec:
-            sysrec["tripped_at"] = now_iso()
+            # The run clock's reading (#1255): the breaker is run state an arm inherits.
+            sysrec["tripped_at"] = state.now_iso()
         # Inside the charge's lock (it is reentrant), so the copy is the breaker this charge left.
         snapshot = state.breaker_snapshot()
     if snapshot["total_failures"] >= RUN_FAIL_KILL_LIMIT:

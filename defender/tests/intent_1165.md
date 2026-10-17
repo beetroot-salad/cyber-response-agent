@@ -97,7 +97,7 @@ claims:
 
 Compatibility clarification: alert_record retains write-once write and exposes explicit generic replace for the existing missing-alert fork fallback, which replaces a stale sibling record through rooted I/O. Text reads retain the existing universal-newline normalization; byte reads remain opaque.
 
-Compatibility clarification: empty recognized inherited raw lead directories and source gather_summaries presence remain observable. Generic ensure_parent is supported only by payloads and gather_summaries records and delegates to rooted parent preparation; inheritance uses it after canonical selection. Regression: test_selected_empty_evidence_directories_retain_their_presence.
+Compatibility clarification: empty recognized inherited raw lead directories and source gather_summaries presence remain observable. Generic ensure_parent is supported only by payloads and gather_summaries records and delegates to rooted parent preparation; inheritance uses it after canonical selection. Regression: test_selected_empty_evidence_directories_retain_their_presence. <!-- lint-stale-ref: ok — retired by #1255 P2: the fork snapshot replaces the seed cut rules; the property lives in e2e/test_1255_snapshot_restore.py -->
 
 ## Owner-approved query snapshot amendment — 2026-10-14
 

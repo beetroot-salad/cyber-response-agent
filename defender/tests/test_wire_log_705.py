@@ -23,6 +23,8 @@ from defender.tests._by_path import WORKTREE, load_module
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.messages import (  # noqa: E402
@@ -188,7 +190,7 @@ def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN, run_id='join')
     opened: list = []
     replay = ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
+        Turn(tool_calls=[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})]),
         Turn(text="done"),
     ])
     drive(run_dir, run_id="join", main=replay,

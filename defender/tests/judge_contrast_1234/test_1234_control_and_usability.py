@@ -248,12 +248,18 @@ def _finding_reply(focus: str, control: str) -> dict:
 
 
 def _shared_id_calls(label: str, first: S.CallRow) -> list[S.CallRow]:
-    """`first`, then a table-only reject carrying THE SAME call id: two table rows of the run
-    sharing one id (A12). The ledger holds one row, so only the table check can fire."""
+    """`first`, then a table-only reject joined to THE SAME call id: two table rows of the run
+    sharing one id (A12). The ledger holds one row, so only the table check can fire.
+
+    #1255 G4/G6: a table row carries no id; the host-only call-join record names one per
+    `(lead_id, seq)`. So two table rows share one id by sharing one key — the reject is written
+    at `first`'s seq on `first`'s lead (the world's first row: these builds have no inherited
+    rows), the shape a box leaves by duplicating a line of its own table. The join record itself
+    stays well-formed (one line for the key), so the fault is the table's."""
     shared = S.call_id(label, 0)
     return [dataclasses.replace(first, call_id=shared),
-            S.CallRow(params=S.query_params("user:carol"), source=None,
-                      exit_code=S.REJECT_EXIT, call_id=shared)]
+            S.CallRow(params=S.query_params("user:carol"), source=None, lead=first.lead,
+                      exit_code=S.REJECT_EXIT, call_id=shared, seq=0)]
 
 
 def _missing_id_calls(first: S.CallRow) -> list[S.CallRow]:
@@ -1298,13 +1304,18 @@ _J3_KEY = (S.COINED["found.family_run"], "edr", "lookup",
            S.canonical(_PREFIX[1].the_params))
 
 
-def _edit_prefix(edit: str) -> Callable[[list[dict]], list[dict]]:
-    """What a box's rewrite of its own archived table does to the inherited rows (OB10: the
-    run dir is the box's rw bind): drop its copy of J3's row, add an id-less row the source
-    never wrote, or alter an inherited row's params."""
+def _edit_prefix(edit: str, built: S.Built, label: str) -> Callable[[list[dict]], list[dict]]:
+    """What a box's rewrite of world `label`'s own archived table does to the inherited rows
+    (OB10: the run dir is the box's rw bind): drop its copy of J3's row, add an id-less row the
+    source never wrote, or alter an inherited row's params. (#1255 G6: a row is inherited when
+    the run's host-only call-join record names no id for its `(lead_id, seq)`.)"""
+    own = built.own_keys(label)
+
     def apply(rows: list[dict]) -> list[dict]:
-        assert S.CALL_ID not in rows[0], "fixture: the table does not open with inherited rows"
-        assert S.CALL_ID not in rows[1], "fixture: the table does not open with inherited rows"
+        assert own, f"fixture: world {label}'s call-join record names none of its own rows"
+        for r in rows[:2]:
+            assert (r.get("lead_id"), r.get("seq")) not in own, (
+                "fixture: the table does not open with inherited rows")
         if edit == "missing":
             return [rows[0], *rows[2:]]
         if edit == "extra":
@@ -1341,19 +1352,19 @@ def test_1234_box_edits_the_inherited_rows_of_its_own_query_table(tmp_path, edit
     queues. The paired positive control is the unedited family: c grades and J3 is listed
     once."""
     control = _build(tmp_path, f"control-{edit}", _triad_ctl(), inherited=_PREFIX)
-    S.rewrite_jsonl(control.table_path(CTL), _edit_prefix(edit))
+    S.rewrite_jsonl(control.table_path(CTL), _edit_prefix(edit, control, CTL))
     judge = S.judge({"b": _finding_reply("b", CTL)})
     S.grade(control, judge)
     _assert_stamped(control, judge, CTL, "executed_queries.jsonl")
 
     pair = _build(tmp_path, f"pair-{edit}", _ctl(S.pair()), inherited=_PREFIX)
-    S.rewrite_jsonl(pair.table_path("b"), _edit_prefix(edit))
+    S.rewrite_jsonl(pair.table_path("b"), _edit_prefix(edit, pair, "b"))
     judge = S.judge({"b": _finding_reply("b", CTL)})
     S.grade(pair, judge)
     _assert_stamped(pair, judge, CTL, "executed_queries.jsonl")
 
     edited = _build(tmp_path, f"planted-{edit}", _quad(), inherited=_PREFIX)
-    S.rewrite_jsonl(edited.table_path("c"), _edit_prefix(edit))
+    S.rewrite_jsonl(edited.table_path("c"), _edit_prefix(edit, edited, "c"))
     judge = S.judge({"b": _j3_and_ordinary_reply(edited)})
     S.grade(edited, judge)
     _assert_malformed(edited, "c", "executed_queries.jsonl")
@@ -1380,14 +1391,15 @@ def test_1234_box_edits_the_inherited_rows_of_its_own_query_table(tmp_path, edit
 _DISAGREE = {"system": "siem-x", "verb": "lookup", "params": FOREIGN}
 
 
-def _disagree(label: str, column: str) -> Callable[[list[dict]], list[dict]]:
-    """Rewrite the table row carrying `label`'s first call id so its (system, verb, params)
-    no longer matches the ledger row that id joins."""
+def _disagree(built: S.Built, label: str, column: str) -> Callable[[list[dict]], list[dict]]:
+    """Rewrite the table row joined to `label`'s first call id so its (system, verb, params)
+    no longer matches the ledger row that id joins. (#1255 G6: the row is found through the
+    host-only call-join record, by its `(lead_id, seq)` — the table carries no id.)"""
     cid = S.call_id(label, 0)
+    hits = built.lines_of_call(label, cid)
 
     def apply(rows: list[dict]) -> list[dict]:
-        hits = [i for i, r in enumerate(rows) if r.get(S.CALL_ID) == cid]
-        assert len(hits) == 1, f"fixture: one table row carries {cid}: {hits}"
+        assert len(hits) == 1, f"fixture: one table row is joined to {cid}: {hits}"
         assert rows[hits[0]].get(column) != _DISAGREE[column], "fixture: nothing would change"
         return [{**r, column: _DISAGREE[column]} if i == hits[0] else r
                 for i, r in enumerate(rows)]
@@ -1411,7 +1423,7 @@ def test_1234_call_id_joins_a_ledger_row_and_a_table_row_that_disagree(tmp_path,
     assert not S.row(clean, "c").get("ungradable"), f"control: {S.row(clean, 'c')}"
 
     edited = _build(tmp_path, f"planted-{column}", _quad())
-    S.rewrite_jsonl(edited.table_path("c"), _disagree("c", column))
+    S.rewrite_jsonl(edited.table_path("c"), _disagree(edited, "c", column))
     judge = S.judge()
     S.grade(edited, judge)
     _assert_malformed(edited, "c", S.call_id("c", 0))
@@ -1419,7 +1431,7 @@ def test_1234_call_id_joins_a_ledger_row_and_a_table_row_that_disagree(tmp_path,
     _assert_out_of_references(judge, "c")
 
     control = _build(tmp_path, f"control-{column}", _triad_ctl())
-    S.rewrite_jsonl(control.table_path(CTL), _disagree(CTL, column))
+    S.rewrite_jsonl(control.table_path(CTL), _disagree(control, CTL, column))
     judge = S.judge({"b": _finding_reply("b", CTL)})
     S.grade(control, judge)
     _assert_stamped(control, judge, CTL, S.call_id(CTL, 0))

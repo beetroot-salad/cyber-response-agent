@@ -80,7 +80,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -154,7 +154,9 @@ MODEL_KNOB = "JUDGE_MODEL"
 EFFORT_KNOB = "JUDGE_EFFORT"
 CAP_KNOB = "JUDGE_PAYLOAD_CAP"
 
-#: #1234 A12: the host-written call id one served-ledger row and one query-table row share.
+#: #1234 A12: the host-written call id of one investigator call. A served-ledger row carries
+#: it; since #1255 (G4) the query-table row does not — the host-only call-join record
+#: (`CALL_JOIN`) names it for the row's `(lead_id, seq)`.
 CALL_ID = "call_id"
 
 #: The facts a world's row carries off its own archived record (`family.read_world`), all
@@ -241,6 +243,48 @@ def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
         raw if raw is not None else "".join(json.dumps(r) + "\n" for r in stamped),
         encoding="utf-8")
     return path
+
+
+#: #1255 G4/G6 (design rev 4, "Query ids"): an archived world's host-only CALL-JOIN record.
+#: The model-readable query table carries no call id; the join between a table row and the
+#: served-ledger rows that answered it is a record keyed by the row's `(lead_id, seq)` holding
+#: the call id. A live run keeps it beside its run folder, outside the box's mount
+#: (`<run_id>.call-join.jsonl`); the archive copies it into `worlds/<X>/` under this name, and
+#: the judge reads its own-versus-inherited test and the ledger join from it. The reference
+#: shape's spelling, named ONCE here for every hand-built archive (`_spec1234.family`,
+#: `_spec1224.write_call_table`, and the suites that merge rows into an archived world).
+CALL_JOIN = "call_join.jsonl"
+
+
+def call_join_entry(lead_id: str, seq: int, call_id: Any) -> dict:
+    """One call-join line: the table row's `(lead_id, seq)` and the call id the host wrote for
+    it — the only three keys, in this order."""
+    return {"lead_id": lead_id, "seq": seq, CALL_ID: call_id}
+
+
+def write_call_join(world_dir: Path, entries: Iterable[Mapping[str, Any]], *,
+                    append: bool = False) -> Path:
+    """Land world `world_dir`'s call-join record (`CALL_JOIN`): one line per OWN row of the
+    run's query table that carries an id — never one for a row seeded from the source (an
+    inherited row is one the join does not name). The file is written even when no entry is
+    given (a run with no call of its own). `append=True` adds to an existing record, for a
+    scenario that merges rows into an archived world."""
+    from defender._io import append_jsonl
+
+    path = Path(world_dir) / CALL_JOIN
+    rows = [call_join_entry(e["lead_id"], e["seq"], e[CALL_ID]) for e in entries]
+    if not (append and path.is_file()):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    append_jsonl(path, rows)
+    return path
+
+
+def read_call_join(world_dir: Path) -> list[dict]:
+    """World `world_dir`'s call-join record, read raw (`[]` when absent)."""
+    from defender._io import read_jsonl_rows
+
+    return read_jsonl_rows(Path(world_dir) / CALL_JOIN)
 
 
 # --------------------------------------------------------------------------------------

@@ -272,7 +272,7 @@ def _prime_once(
 def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a model call is asked in this one block
     *, source: Run, branch_message_id: int,
     preflight: Callable[..., int], model: str | None,
-    continuation_prompt: str, allow_dirty: bool,
+    allow_dirty: bool,
     live_tree: Callable[[], _provenance.RunProvenance],
     oracle: Any = None, verifier: Any = None,
 ) -> dict:
@@ -299,8 +299,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     """
     source_run_dir = source.run_dir
     _check_oracle_side(oracle=oracle, verifier=verifier)
-    _check_branch_point(source, branch_message_id,
-                        continuation_prompt=continuation_prompt)
+    _check_branch_point(source, branch_message_id)
     # The live tree is judged as a one-member family by `verify_family`'s own rules, before the
     # paid role preflight.
     source_stamp = _stamp_of(source)
@@ -422,8 +421,7 @@ def _source_stamp_agrees(source: Run, tenant_id: _tenant.TenantId) -> None:
 MAX_BRANCH_MESSAGE_ID = 100 * 60
 
 
-def _check_branch_point(source: Run, branch_message_id: int, *,
-                        continuation_prompt: str) -> None:
+def _check_branch_point(source: Run, branch_message_id: int) -> None:
     """Refuse a branch point the source run could not have produced.
 
     Where a session store exists, `branch.validate` is asked here — before the questioner is
@@ -432,8 +430,9 @@ def _check_branch_point(source: Run, branch_message_id: int, *,
     questioner is shown. `as_of` comes from `branch_point_time`, which `validate`
     cross-checks.
 
-    A source with no session store (imported, replayed, pruned) is still branchable; only the
-    range check above applies to it.
+    A source with no fork snapshot for the branch point — one recorded before #1255, or one with
+    no session store at all (imported, replayed, pruned) — is refused here (N4, rev 5 C2):
+    before the questioner, the role preflight or any episode spend.
     """
     source_run_dir = source.run_dir
     if branch_message_id < 0:
@@ -447,7 +446,10 @@ def _check_branch_point(source: Run, branch_message_id: int, *,
             "there, so this is a typo rather than a branch point")
     store = _source_store(source)
     if store is None:
-        return
+        raise LauncherRefused(
+            f"[branch] {source.id} carries no session store, so it recorded no fork snapshot "
+            f"for message {branch_message_id} — nothing says what it held when that response "
+            "arrived, and no arm can be restored from it")
     try:
         as_of = branch.branch_point_time(store, Path(source_run_dir), branch_message_id, source_run=source)
         # An empty capture is not refused here: pre-flight records it as a `refused` episode
@@ -455,7 +457,6 @@ def _check_branch_point(source: Run, branch_message_id: int, *,
         branch.validate(store, branch.BranchSpec(
             source_run_dir=Path(source_run_dir),
             branch_message_id=branch_message_id,
-            continuation_prompt=continuation_prompt,
             as_of=as_of,
         ), source_run=source, require_capture=False)
     except branch.BranchError as bad:
@@ -666,9 +667,11 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     family_answers = read_family_answers(recording.base_path)
     # M01=A's fixed prefix, by the one rule the sibling's registry is handed too (`run.py`).
     prebranch = prebranch_calls(source, family.branch_message_id)
+    # D6 (#1255): the calls the primer recorded unanswered are never fixed.
+    unrecorded = recording.unrecorded_keys()
 
     drift: list[dict[str, Any]] = []
-    calibrated: list[tuple[_Original, Any, bool]] = []
+    calibrated: list[tuple[_Original, Any, bool, bool]] = []
     for call in replayable:
         recorded = recording.base_payload(call.system, call.verb, call.params)
         limiter.acquire()
@@ -689,8 +692,12 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
                 if canonical_json(json.loads(recorded)) != canonical_json(json.loads(live_text)):
                     drift.append({**call.entry, "status": "drifted"})
                 base_text = recorded
-        fixed = request_key(call.system, call.verb, call.params) in prebranch
-        calibrated.append((call, json.loads(base_text), fixed))
+        # D6 (#1255): a pre-branch call the primer recorded unanswered is never fixed; a live
+        # base is the system now, which the oracle serves as it stood at the fork.
+        live = recorded is None
+        key = request_key(call.system, call.verb, call.params)
+        fixed = key in prebranch and key not in unrecorded
+        calibrated.append((call, json.loads(base_text), fixed, live))
 
     stop = threading.Event()
     failures: list[dict[str, Any]] = []
@@ -726,12 +733,12 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
             tenant=tenant, grant_home=tenant.table_pointer, family_answers=family_answers,
             source_run=source)
         try:
-            for call, base, fixed in calibrated:
+            for call, base, fixed, live in calibrated:
                 if stop.is_set():
                     return
                 try:
                     calibrate_one(registry, ctx, call.system, call.verb, call.params, base,
-                                  fixed=fixed)
+                                  fixed=fixed, live=live)
                 except OracleUnservable as unservable:
                     fail(label, call, f"{unservable.reason}: {unservable.detail}")
                     return
@@ -1419,18 +1426,14 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     through the tenant's repository, so a path where the id belongs is refused. No episode id
     argument: it is derived from the source run and branch point.
 
-    The continuation prompt is required because it is part of the measured instrument (its
-    wording can bias siblings toward closing over gathering), and nothing else should author it.
+    No continuation prompt (#1255 D1, P4): an arm resumes with no user message, so there is no
+    instrument text for an operator to author.
     """
     p = argparse.ArgumentParser(prog="branch", description=__doc__)
     p.add_argument("--tenant", required=True,
                    help="the tenant whose run is forked; required, with no default")
     p.add_argument("source_run_id", help="the finished run to fork, by its run id")
     p.add_argument("branch_message_id", type=int, help="the message to resume from")
-    p.add_argument(
-        "--continuation-prompt", required=True,
-        help="what every sibling is told on arrival — part of the measured instrument, so it is "
-             "the operator's rather than the seam's")
     p.add_argument(
         "--allow-dirty", action="store_true",
         help="launch, and record the family stamp, even though the source run, the live tree "
@@ -1529,7 +1532,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     source_stamp = preflight_episode(
         source=source, branch_message_id=ns.branch_message_id,
         preflight=role_preflight, model=ns.model,
-        continuation_prompt=ns.continuation_prompt, allow_dirty=ns.allow_dirty,
+        allow_dirty=ns.allow_dirty,
         live_tree=live_capture, oracle=oracle, verifier=verifier)
     if roster is None:
         from defender._paths import adapters_under
@@ -1791,8 +1794,8 @@ def _author(  # noqa: PLR0913 — the step's inputs
     """`Step.QUESTIONER`: the questioner authors the family, and it is validated before anything
     reads it.
 
-    The launcher's derived fields (episode id, source run, branch point, T0, continuation prompt,
-    served systems) overwrite whatever the model returned, so a family cannot name a different
+    The launcher's derived fields (episode id, source run, branch point, T0, served
+    systems) overwrite whatever the model returned, so a family cannot name a different
     source, or a different set of served systems, than it was authored from. One identity gate
     runs over the whole manifest before it is written."""
     from defender._corpus import iter_lesson_paths
@@ -1801,8 +1804,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
 
     source_run_dir = source.run_dir
     as_of = branch_point_clock(source, ns.branch_message_id)
-    fences = _fence_count(source, ns.branch_message_id,
-                          continuation_prompt=ns.continuation_prompt, as_of=as_of)
+    fences = _fence_count(source, ns.branch_message_id, as_of=as_of)
     leads = _joined_leads(source_run_dir, joined)
     samples = system_samples(source_run_dir, served)
     # Archived before the model call, so the judge sees exactly what the questioner saw.
@@ -1831,7 +1833,6 @@ def _author(  # noqa: PLR0913 — the step's inputs
         "branch_message_id": ns.branch_message_id,
         "fences_at": fences,
         "as_of": as_of.isoformat().replace("+00:00", "Z"),
-        "continuation_prompt": ns.continuation_prompt,
         # The tenant's served systems as this launch's grant decided them (`served_systems`):
         # the judge, lessons and question-writer read them from here (M21).
         "served_systems": list(served),
@@ -1842,8 +1843,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
     return family
 
 
-def _fence_count(source: Run, branch_message_id: int, *,
-                 continuation_prompt: str, as_of: Any) -> int:
+def _fence_count(source: Run, branch_message_id: int, *, as_of: Any) -> int:
     """How many invlang fences the source run's document closed at the branch point.
 
     Through `branch.fence_count_at`: the document says how many fences the run ever wrote,
@@ -1864,7 +1864,7 @@ def _fence_count(source: Run, branch_message_id: int, *,
         return total
     try:
         spec = BranchSpec(source_run_dir=source.run_dir, branch_message_id=branch_message_id,
-                          continuation_prompt=continuation_prompt, as_of=as_of)
+                          as_of=as_of)
         return fence_count_at(store, source_session(store, spec, source_run=source), branch_message_id, document)
     finally:
         store.close()

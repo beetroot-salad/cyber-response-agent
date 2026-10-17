@@ -41,6 +41,7 @@ from defender.scripts.gather_tools.record_query import (
     names_something_readable,
     payload_digest,
     payload_status,
+    payload_text_of,
     persist_payload as _persist_payload,  # noqa: F401
     raw_command,
     rejection_budget_trip,
@@ -63,7 +64,7 @@ from defender._query_rules import (
 )
 
 from . import circuit_breaker
-from .run_state import run_state_of
+from .run_state import run_state_of, run_time_iso
 from .run_end import CallRecordWriteFailed
 from .verbs import (
     CALL_DELIVERY,
@@ -413,7 +414,7 @@ class QueryCapture(AbstractCapability[Any]):
             # trail, and a failed row write below has already left it behind.
             self._denial_logger_for(run_of(deps)).log_policy_denial(
                 role=self._role, system=system, verb=verb,
-                call_id=f"{system}.{verb}", params=params,
+                call_id=f"{system}.{verb}", params=params, ts=run_time_iso(deps),
             )
             # A closed door withholds only the row; the denial is still answered as a denial,
             # not as `QUERY_NOT_RUN`.
@@ -614,7 +615,7 @@ class QueryCapture(AbstractCapability[Any]):
         lead_id = _dispatched_lead(deps)
         state = run_state_of(deps)
 
-        text = "" if exit_code != 0 else json.dumps(payload, default=str)
+        text = "" if exit_code != 0 else payload_text_of(payload)
 
         try:
             row = append_query_row(

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from defender.run_repository import RunPaths
 from defender.run_common import run_env
 from defender.runtime import box as box_mod
 from defender.runtime.box import BOX_ENV_ALLOWLIST, BoxRequest, BoxSpec, Mount
+from defender.tests._1255_view import under_model_root
 from defender.tests._defender_sql import EXIT_NO_RUNTIME, SQL_ARGV
 from defender.tests._spec1092 import (
     DEFENDER,
@@ -221,11 +223,49 @@ def test_defender_sqls_missing_duckdb_message_names_the_image_build_when_marked_
 
 
 # ---- d48 (negative; positive controls: d29/d30/d44 — the three additions are present) ----------------
+
+#: The preload/clock env keys — slice D's own pattern (`test_1255_clock_box._PRELOAD_KEY`), kept
+#: in step here because this lane exempts what D asserts.
+_CLOCK_KEY = re.compile(r"PRELOAD|FAKETIME|CLOCK", re.IGNORECASE)
+
+
+def _without_the_clock(argv: list[str]) -> list[str]:
+    """The run-dir create argv minus #1255's run-clock additions (design rev 4, "Time / Into the
+    box"; slice D asserts their shape): at most ONE read-only bind whose target lies outside the
+    model view's three trees (the clock's own mount, e.g. `/clock`), and any preload/clock
+    `--env` pair (`LD_PRELOAD`, a FAKETIME/CLOCK variable). Exempted the way
+    `without_the_additions` exempts the marker env; everything else stays byte-for-byte."""
+    out: list[str] = []
+    clock_mounts = 0
+    skip = False
+    for i, tok in enumerate(argv):
+        if skip:
+            skip = False
+            continue
+        nxt = argv[i + 1] if i + 1 < len(argv) else ""
+        if tok == "--mount" and "readonly" in nxt:
+            target = nxt.split("target=")[1].split(",")[0] if "target=" in nxt else ""
+            if not under_model_root(target):
+                clock_mounts += 1
+                skip = True
+                continue
+        if tok == "--env" and _CLOCK_KEY.search(nxt.partition("=")[0]):
+            skip = True
+            continue
+        out.append(tok)
+    assert clock_mounts <= 1, f"more than the clock's one extra read-only bind: {argv}"
+    return out
+
+
 def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_pull_never_and_the_image_token(tmp_path):
     """Both `docker run` argv builders produce today's argv plus exactly one
     `--env DEFENDER_BOX=1` pair, one `--pull=never` token, and the owned image token:
     `--network none`, `--read-only`, the seccomp profile, the mounts, the tmpfs, the workdir
-    and every other `--env` pair are byte-for-byte unchanged and each env key lands once.
+    and every other `--env` pair are byte-for-byte unchanged and each env key lands once —
+    except that, since #1255, the run-dir lane's targets, workdir and env are the model view's
+    constants (see the comment below; PATH/PYTHONPATH compared as placeholders), and the run
+    clock's additions (one read-only bind outside the three trees, any preload/clock env pair;
+    slice D asserts their shape) are exempted as the marker env is (`_without_the_clock`).
 
     # rejected: network for the box stays `none`; this issue changes what is installed in
     # the sandbox, not what it can reach."""
@@ -244,18 +284,25 @@ def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_
         "--ulimit", f"fsize={READ_LIMIT}:{READ_LIMIT}",
         "--ulimit", "core=0:0",
     ]
-    infra = {**box_mod.infra_env(defender_dir, run_dir), **box_mod._LOCALE_ENV}
+    # #1255 (design rev 4, P1 Box bullet) flipped the run-dir lane's geography: every target, the
+    # workdir and the env are the model view's constants (`/runs/current`, `/defender`,
+    # `DEFENDER_RUNS_BASE=/runs`), never this host's paths; the SOURCES stay the host's. PATH and
+    # PYTHONPATH are constants whose values the design does not fix: they are compared as
+    # placeholders below and held to "names no host path" instead.
+    model_view = {"DEFENDER_DIR": "/defender", "DEFENDER_RUN_DIR": "/runs/current",
+                  "DEFENDER_RUNS_BASE": "/runs", "PATH": "<CONSTANT>", "PYTHONPATH": "<CONSTANT>",
+                  **box_mod._LOCALE_ENV}
     today_run_dir = [
         *head,
-        "--mount", f"type=bind,source={run_dir},target={run_dir}",
+        "--mount", f"type=bind,source={run_dir},target=/runs/current",
         # #1222 A1: the alert and its record ride in as a read-only DIRECTORY bind over the run folder.
-        "--mount", f"type=bind,source={alert_input},target={alert_input},readonly",
-        "--mount", f"type=bind,source={defender_dir},target={defender_dir},readonly",
+        "--mount", f"type=bind,source={alert_input},target=/runs/current/{alert_input.name},readonly",
+        "--mount", f"type=bind,source={defender_dir},target=/defender,readonly",
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
-        "--workdir", str(run_dir),
+        "--workdir", "/runs/current",
     ]
     for key in ("DEFENDER_DIR", "DEFENDER_RUN_DIR", "DEFENDER_RUNS_BASE", "PATH", "PYTHONPATH", "LANG", "TZ"):
-        today_run_dir += ["--env", f"{key}={infra[key]}"]
+        today_run_dir += ["--env", f"{key}={model_view[key]}"]
     today_run_dir += [image_tag(defender_dir), "sleep", "infinity"]
 
     argv = box_mod._create_argv(name, run_dir, defender_dir, spec, (), token).argv
@@ -263,7 +310,12 @@ def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_
     assert "--pull" not in argv, argv
     assert env_pairs(argv).count(("DEFENDER_BOX", "1")) == 1, env_pairs(argv)
     assert len({k for k, _ in env_pairs(argv)}) == len(env_pairs(argv)), "a key landed twice"
-    assert without_the_additions(argv) == today_run_dir
+    constants = {k: v for k, v in env_pairs(argv) if k in ("PATH", "PYTHONPATH")}
+    assert set(constants) == {"PATH", "PYTHONPATH"}, env_pairs(argv)
+    assert not any(str(tmp_path) in v for v in constants.values()), constants
+    placeheld = [f"{t.partition('=')[0]}=<CONSTANT>"
+                 if t.partition("=")[0] in ("PATH", "PYTHONPATH") else t for t in argv]
+    assert without_the_additions(_without_the_clock(placeheld)) == today_run_dir
 
     request = BoxRequest(
         name="defender-drain-1092", workdir=root, env={"TZ": "Europe/Oslo"},

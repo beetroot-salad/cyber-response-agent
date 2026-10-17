@@ -41,6 +41,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.run_repository import RunPaths  # noqa: E402
+from defender.tests._1255_view import MODEL_DEFENDER, model_path  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     CORRELATION_SUMMARY,
     L3,
@@ -133,13 +134,18 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
     assert res.has_sidecar(L3), f"positive control: the planted tree did not dispatch l-00c ({res.gather_raw_names()})"
     assert res.gather is not None
     assert len(res.gather.seen) == 1, "positive control: item 3 was not dispatched"
-    assert str(tree) in res.gather.seen[0], "positive control: the lead was not dispatched from the planted tree"
+    # #1255 P1/O3: the dispatch names the run's checkout as the model holds it (`/defender`),
+    # never its host path — so the planted tree is no longer told apart from this checkout in the
+    # dispatch text; the refusal below (the planted edit's doing) is what pins the tree read.
+    assert re.search(rf"^defender_dir: {re.escape(MODEL_DEFENDER)}$", res.gather.seen[0],
+                     re.MULTILINE), "positive control: the lead was not dispatched with its checkout"
     assert res.budget, "positive control: the budget did not open"
 
     tree = _mismatched(tmp_path / "bad")
     run_dir = materialize_alert(tmp_path / "bad", alert_doc())
     rec = VerbRecorder()
-    main = ReplayFn([Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
+    main = ReplayFn([Turn(tool_calls=[("read_file", {
+                         "path": model_path(run_dir / "alert.json", run_dir=run_dir)})]),
                      Turn(text="Investigation complete.")])
     gather = ReplayFn([Turn(text=CORRELATION_SUMMARY)])
 
@@ -173,7 +179,7 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
     sibling world of a branch episode died at
     start the moment an operator demoted the template — for a lead a resume never runs."""
     from defender.tests._branch_947 import spec_at
-    from defender.tests._session_store_705 import store_factory, store_mod
+    from defender.tests._session_store_705 import store_factory
     from defender.tests.e2e._replay_harness import GOLDEN, _split_at_fences
 
     # (a) no registry injected: the K12 state, 61 of 96 `drive()` sites.
@@ -203,9 +209,12 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
     )
     assert source.summary_dict.get("truncated_by") is None, source.summary_dict
     store = sink[0]
-    prefix_ids = store_mod().path_row_ids(store, store_mod().main_session_id(store))
-    spec = spec_at(store, source.run_dir, prefix_ids[-1],
-                   prompt="Continue this investigation from where it stands.")
+    # #1255 (D1, P4): an arm is told nothing on arrival, so no continuation prompt is offered,
+    # and it branches at a MAIN response that CALLED tools — the source's last append (its tip
+    # is a text-only response, which D1 refuses).
+    from defender.tests._1255_snapshot import tool_calling_responses
+
+    spec = spec_at(store, source.run_dir, tool_calling_responses(store)[-1])
 
     tree = _mismatched(tmp_path / "resumed")
     sibling_dir = materialize_alert(tmp_path / "resumed", alert_doc())

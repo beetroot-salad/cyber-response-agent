@@ -24,7 +24,7 @@ What this module pins, each through the real driver:
 
       Reachability: a production source copies each lead's claim (`gather_raw/<lead>.lead.json`)
       into the sibling, so a sibling's MAIN cannot re-dispatch an inherited lead; the
-      repeat/rejection/seq arms reach it through `_branch_947.legal_source`, a legal source that
+      repeat/rejection/seq arms reach it through `_branch_947.planted_source`, a legal source that
       carries no claim for its lead (as lead-0's leads look to `leads_at`). The reducer arm is
       the one a production sibling reaches as is: a NEW lead reading an inherited payload.
   R2. No live operation finds its state by looking it up. A run driven through a symlinked
@@ -63,7 +63,14 @@ from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import branch, session_store  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
-from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at  # noqa: E402
+from defender.tests._1255_view import model_path  # noqa: E402
+from defender.tests._branch_947 import (  # noqa: E402
+    GOLDEN_INVESTIGATION,
+    LEGACY_BRANCH_CALL,
+    planted_source,
+    spec_at,
+)
+from defender.tests._session_store_705 import runs_base  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
@@ -142,7 +149,8 @@ def _rows(run_dir: Path, lead: str = LEAD) -> list[dict]:
 # ======================================================================================
 # R1 — the branched sibling. The source's `l-001` rows are rows a REAL run wrote (so the guards'
 # request identity is the writer's, not a hand-built approximation), moved into a legal branch
-# source (`_branch_947.legal_source`: a store, a case link, an alert, the golden document).
+# source (`_branch_947.planted_source`: a store, a case link, an alert, the golden document;
+# not the N4 fixture — the implementer's fixture-only snapshot planting may snapshot it).
 # ======================================================================================
 
 def _real_rows(root: Path, gather_turns: list[Turn]) -> tuple[list[dict], dict[str, bytes]]:
@@ -156,21 +164,35 @@ def _real_rows(root: Path, gather_turns: list[Turn]) -> tuple[list[dict], dict[s
     return rows, payloads
 
 
+#: The planted source's run folder name (`_branch_947.planted_source`'s `name=`), so its files
+#: can be written into it before the source is built.
+SOURCE_RUN = "run-source-001"
+
+
 class Branched:
     """A legal source holding `rows` for `l-001`, and a fresh sibling folder to resume it in."""
 
     def __init__(self, tmp_path: Path, rows: list[dict], payloads: dict[str, bytes]) -> None:
         assert rows, "the source run wrote no l-001 rows — nothing below is inherited"
         self.rows, self.payloads = rows, payloads
-        store, source, _session, path_ids = legal_source(
-            tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"),
-            queries="".join(json.dumps(r) + "\n" for r in rows))
+        # #1255 P2: the payload files land BEFORE `planted_source` builds the source (its
+        # folder is made with `exist_ok`), so a fork snapshot of the source records them as
+        # what it held at its branch point; written after, the snapshot holds no such file and
+        # the sibling's restore has nothing to copy.
+        source = runs_base(tmp_path) / SOURCE_RUN
         for rel, data in payloads.items():
             (source / rel).parent.mkdir(parents=True, exist_ok=True)
             (source / rel).write_bytes(data)
+        store, planted, _session, path_ids = planted_source(
+            tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"),
+            queries="".join(json.dumps(r) + "\n" for r in rows), name=SOURCE_RUN)
+        assert planted == source, (planted, source)
         assert not (source / "gather_raw" / f"{LEAD}.lead.json").exists(), (
             "the legal source carries a claim for l-001, so the sibling could not re-dispatch it")
-        self.spec = spec_at(store, source, path_ids[-1])
+        # #1255 (D1): a tool-calling MAIN response after the document landed, not the RETURN
+        # the pre-#1255 shape branched at (`_branch_947.LEGACY_BRANCH_CALL`). The source is
+        # hand-planted (`planted_source`, not the N4 fixture) — see `_branch_947`'s fixture rule.
+        self.spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
         store.close()
         self.sibling = tmp_path / "defender-runs" / "run-sibling-1235"
         RunPaths(self.sibling).gather_raw.mkdir(parents=True)
@@ -307,9 +329,10 @@ def test_a_failed_reducer_over_an_inherited_payload_is_recorded_with_its_system(
         main=_main(NEW_LEAD),
         gather=ReplayFn([
             q("elastic", "query", _OTHER),
-            Turn(tool_calls=[("bash", {"command": f"cat {own_payload} | {SQL} 'SELECT 1'"})]),
             Turn(tool_calls=[("bash", {
-                "command": f"cat {inherited_payload} | {SQL} 'SELECT 2'"})]),
+                "command": f"cat {model_path(own_payload, run_dir=sib)} | {SQL} 'SELECT 1'"})]),
+            Turn(tool_calls=[("bash", {
+                "command": f"cat {model_path(inherited_payload, run_dir=sib)} | {SQL} 'SELECT 2'"})]),
             DONE]),
         verbs=Asked("sibling").registry(), box=box)
 

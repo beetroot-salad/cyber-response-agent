@@ -42,6 +42,7 @@ import pytest
 
 from defender.run_repository import RunPaths
 from defender.tests import _data_root_1078 as D
+from defender.tests._1255_view import MODEL_RUN
 from defender.tests import _invlang_warn_836 as W836
 from defender.tests import _triplet_947 as T
 from defender.tests.alert_front_door_1222 import _spec1222 as S
@@ -179,6 +180,8 @@ def _named(d: S.Drive, control: S.Drive, what: str) -> str:
         "run's, line for line (A2: one fixed sentence outside the lead's frame; RC1: silent "
         "or late at base)")
     assert "<RUN_DIR>" not in sentence, f"{what}: the sentence names the run folder: {sentence!r}"
+    # #1255 (design rev 4, P1): the run folder's model spelling is no more welcome than its host one.
+    assert MODEL_RUN not in sentence, f"{what}: the sentence names the run folder: {sentence!r}"
     assert not S.host_paths_in(sentence, *_roots(d)), (
         f"{what}: the sentence carries a host path: {sentence!r}")
     assert ALERT_MARK not in sentence, f"{what}: the sentence carries alert text: {sentence!r}"

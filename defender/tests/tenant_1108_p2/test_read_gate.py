@@ -31,6 +31,18 @@ def _put(root: Path, relative: str, marker: str) -> Path:
     return path
 
 
+#: #1255 (design rev 4, P1): the model names every tree by its fixed model path — the run folder
+#: `/runs/current`, the checkout `/defender`, the tenant's agent half `/agent` — and a host path
+#: it guesses is outside the three trees. The table below is the design's, applied to this
+#: file's fixtures; a path under none of the three trees stays the host path it is (refused).
+def _model(path: Path, *, tenant=None, run_dir: Path | None = None) -> str:
+    for host, model in ((getattr(tenant, 'agent', None), '/agent'), (T.DEFENDER, '/defender'),
+                        (run_dir, '/runs/current')):
+        if host is not None and Path(path).is_relative_to(host):
+            return f"{model}/{Path(path).relative_to(host).as_posix()}"
+    return str(path)
+
+
 def _read_turn(surface, path):
     if surface == 'typed':
         return R.Turn(tool_calls=[('read_file', {'path': str(path)})])
@@ -72,8 +84,8 @@ def test_own_tenant_corpus_reads_work_and_other_tenant_and_settings_reads_refuse
     assert checkout_mark in checkout.read_text(encoding='utf-8')
     assert checkout_mark.strip(), 'checkout control must observe nonempty content'
     model = _drive_as(read_scene, role, [
-        _read_turn(surface, mine), _read_turn(surface, other),
-        _read_turn(surface, settings), _read_turn(surface, checkout)])
+        _read_turn(surface, _model(mine, tenant=tenant)), _read_turn(surface, other),
+        _read_turn(surface, settings), _read_turn(surface, _model(checkout, tenant=tenant))])
     assert 'OWN-TENANT-P2-CONTENT' in model.seen[1], 'tenant read did not return its bytes'
     assert 'OTHER-TENANT-P2-CONTENT' not in '\n'.join(model.seen)
     assert 'Blocked' in model.seen[2], 'another tenant root was not explicitly refused'
@@ -94,7 +106,8 @@ def test_tenant_root_preserves_secret_extension_and_corpus_shape_denies(
     tenant, _ = read_scene
     denied = _put(tenant.agent, relative, 'DENIED-TENANT-P2-CONTENT')
     allowed = _put(tenant.agent, 'lessons/control.md', 'CONTROL-TENANT-P2-CONTENT')
-    model = _drive_as(read_scene, role, [_read_turn(surface, denied), _read_turn(surface, allowed)])
+    model = _drive_as(read_scene, role, [_read_turn(surface, _model(denied, tenant=tenant)),
+                                         _read_turn(surface, _model(allowed, tenant=tenant))])
     assert 'Blocked' in model.seen[1]
     assert 'DENIED-TENANT-P2-CONTENT' not in '\n'.join(model.seen)
     assert 'CONTROL-TENANT-P2-CONTENT' in model.seen[2], 'denial is not a blanket refusal'
@@ -107,7 +120,9 @@ def test_raw_payload_permissions_keep_the_existing_role_partition(read_scene, ro
     tenant, run_dir = read_scene
     raw = _put(run_dir, 'gather_raw/l-abc123/0.json', 'ROLE-PAYLOAD-P2-CONTENT')
     allowed = _put(tenant.agent, 'lessons/control.md', 'ROLE-CONTROL-P2-CONTENT')
-    model = _drive_as(read_scene, role, [_read_turn(surface, raw), _read_turn(surface, allowed)])
+    model = _drive_as(read_scene, role, [
+        _read_turn(surface, _model(raw, tenant=tenant, run_dir=run_dir)),
+        _read_turn(surface, _model(allowed, tenant=tenant))])
     if role == 'gather':
         assert 'ROLE-PAYLOAD-P2-CONTENT' in model.seen[1]
     else:

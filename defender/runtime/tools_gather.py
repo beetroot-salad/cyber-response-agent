@@ -24,6 +24,7 @@ from . import run_end
 from . import session_store
 from . import tools
 from .agent_role import GATHER_AGENT_ID_PREFIX
+from .model_view import ModelView
 from .tools import (
     DeadEnd,
     GatherDeps,
@@ -73,10 +74,13 @@ def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
 
 
 def _payload_note(deps: GatherDeps, record: dict) -> str:
-    return (
-        f"\n[record_query] raw payload: {deps.run_dir / record['payload_path']}"
-        if record.get("payload_path") else ""
-    )
+    """The `raw payload:` line naming where the query's payload landed, as the lead may name it
+    back: its model path in the run's view (#1255 P1), else the host path."""
+    if not record.get("payload_path"):
+        return ""
+    host = deps.run_dir / record["payload_path"]
+    view = deps.view
+    return f"\n[record_query] raw payload: {view.to_model(host) if view is not None else host}"
 
 
 def _repo_rel(defender_dir: Path, path: Path) -> str:
@@ -86,9 +90,11 @@ def _repo_rel(defender_dir: Path, path: Path) -> str:
         return str(path)
 
 
-def _locator(defender_dir: Path, t: QueryTemplate) -> str:
-    """The `id — path` line shared by the dispatch index and `template_search` hits."""
-    return f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`"
+def _locator(defender_dir: Path, t: QueryTemplate, view: ModelView | None = None) -> str:
+    """The `id — path` line shared by the dispatch index and `template_search` hits. The path
+    is the template's model path for a role in the model view (#1255 P1), else repo-relative."""
+    shown = view.to_model(t.path) if view is not None else _repo_rel(defender_dir, t.path)
+    return f"- `{t.id}` — `{shown}`"
 
 
 @model(frozen=True)
@@ -104,6 +110,7 @@ class TemplateIndex:
 
 def _template_index(
     defender_dir: Path, dispatched: str, verb_grant: VerbGrant | None = None,
+    *, view: ModelView | None = None,
 ) -> TemplateIndex:
     """Two tiers: the dispatched system's templates with their `## Goal`; every other system's
     as id and path only.
@@ -121,7 +128,7 @@ def _template_index(
         established_seen += 1
         if verb_grant is not None and not verb_grant.allows(t.system, t.verb):
             continue
-        locator = _locator(defender_dir, t)
+        locator = _locator(defender_dir, t, view)
         if t.system == dispatched:
             on_target.append(f"{locator}\n  {' '.join(t.goal.split())}")
         else:
@@ -175,15 +182,16 @@ _INDEX_NONE_GRANTED = (
 )
 
 
-def _execution_surface(knowledge: KnowledgePaths, system: str) -> str:
-    """Which file carries `system`'s execution surface (verbs, params, exit codes, pitfalls).
+def _execution_surface(knowledge: KnowledgePaths, system: str, view: ModelView) -> str:
+    """Which file carries `system`'s execution surface (verbs, params, exit codes, pitfalls),
+    named by its model path (#1255 P1).
 
     A newly scaffolded system may have a `SKILL.md` but no `execution.md` yet; naming that
     saves gather a turn on a failing read.
     """
     execution = knowledge.system_skill_dir(system) / "execution.md"
     if execution.is_file():
-        return f"Its execution surface is the sibling `{execution}`."
+        return f"Its execution surface is the sibling `{view.to_model(execution)}`."
     return (
         f"`{system}` has NO `execution.md` — its execution surface is that SKILL.md's "
         "`## Execution` section; don't go looking for the sibling file."
@@ -216,6 +224,11 @@ def _gather_prompt(
     deps: AgentDeps, request: GatherRequest, catalog: str | None,
     verb_grant: VerbGrant | None = None,
 ) -> str:
+    # Every path the dispatch names is in the run's model view (#1255 P1): gather is handed
+    # the trees by the paths it will name them back by. Only a run's own role dispatches.
+    view = deps.view
+    if view is None:
+        raise TypeError(f"a gather dispatch comes from a run role; {deps.role} has no model view")
     # Section order is the cache prefix: the indexes vary only per system, the Dispatch block
     # per lead, so indexes go first to let same-system leads share a cached prefix.
     block = "Begin gathering this lead.\n\n"
@@ -225,15 +238,16 @@ def _gather_prompt(
             f"progressive disclosure). Your target is `system: {request.system}`, named in the "
             "Dispatch at the end of this message; confirm it here. These descriptions are "
             "usually enough to pick a template or name a measurement — Read the target's full "
-            f"`{deps.knowledge.system_skill_dir(request.system)}/SKILL.md` ONLY on demand, when you "
+            f"`{view.to_model(deps.knowledge.system_skill_dir(request.system))}/SKILL.md` ONLY on "
+            "demand, when you "
             "need field vocab the descriptor lacks; not on every dispatch. Which verbs you may "
             "run and what params each one binds come from `list_verbs`, not from either file — "
             "but the VALUES a param accepts (an enum, a clamp, a timestamp format) are still "
             "the execution surface's to state. "
-            f"{_execution_surface(deps.knowledge, request.system)}\n\n"
+            f"{_execution_surface(deps.knowledge, request.system, view)}\n\n"
             f"{catalog}\n"
         )
-    index = _template_index(deps.defender_dir, request.system, verb_grant)
+    index = _template_index(deps.defender_dir, request.system, verb_grant, view=view)
     if index.text:
         block += _INDEX_HEADER + index.text + "\n"
     else:
@@ -244,8 +258,8 @@ def _gather_prompt(
     ) or "  - (unspecified)"
     block += (
         "\n## Dispatch\n```yaml\n"
-        f"defender_dir: {deps.defender_dir}\n"
-        f"run_dir: {deps.run_dir}\n"
+        f"defender_dir: {view.to_model(deps.defender_dir)}\n"
+        f"run_dir: {view.to_model(deps.run_dir)}\n"
         f"lead_id: {request.lead_id}\n"
         f"system: {request.system}\n"
         f"goal: {_yaml_scalar(request.goal, '  ')}\n"
@@ -313,7 +327,7 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
         shown = matched[:_SEARCH_LINES_PER_TEMPLATE]
         dropped += len(matched) - len(shown)
         hit = "\n".join(
-            [_locator(deps.defender_dir, t), *(f"    {ln}" for ln in shown)]
+            [_locator(deps.defender_dir, t, deps.view), *(f"    {ln}" for ln in shown)]
         )
         (untrusted if permission.is_untrusted_read(t.path) else trusted).append(hit)
 

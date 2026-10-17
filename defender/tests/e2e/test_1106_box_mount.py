@@ -66,9 +66,11 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
     mounts = rec.mounts()
     joined = " ".join(rec.create_argv or [])
 
-    agent_mounts = [m for m in mounts if m["target"] == str(mine.agent)]
+    # #1255 (design rev 4, P1): the agent half is bound from its host path to the model view's
+    # fixed `/agent`, not at its own host path.
+    agent_mounts = [m for m in mounts if m["source"] == str(mine.agent)]
     assert agent_mounts == [{
-        "source": str(mine.agent), "target": str(mine.agent), "readonly": True,
+        "source": str(mine.agent), "target": "/agent", "readonly": True,
     }], mounts
     # Nothing of the other tenant, anywhere on the argv; no settings half of ANY tenant.
     assert str(root / other) not in joined, joined
@@ -91,11 +93,14 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
 
 
 def test_the_same_path_agent_target_is_outside_the_other_bound_trees(tmp_path, two_tenants):
-    """#1108 D2: the host path is absolute and does not shadow another bound tree."""
-    target = two_tenants[1].agent
-    assert target.is_absolute()
-    rec = _start(tmp_path, target)
-    assert any(m["target"] == str(target) for m in rec.mounts())
+    """#1108 D2, as #1255 (design rev 4, P1) reshapes it: the agent half's target is the model
+    view's fixed `/agent` — absolute, and neither shadowing nor shadowed by another bound tree
+    (`/runs/current`, `/defender`). It used to be the host path itself."""
+    agent = two_tenants[1].agent
+    target = Path("/agent")
+    rec = _start(tmp_path, agent)
+    assert any(m["source"] == str(agent) and m["target"] == str(target) for m in rec.mounts()), (
+        rec.mounts())
     for mount in rec.mounts():
         if mount["target"] != str(target):
             assert not target.is_relative_to(mount["target"]), (target, mount)
@@ -103,7 +108,8 @@ def test_the_same_path_agent_target_is_outside_the_other_bound_trees(tmp_path, t
 
 
 def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path):
-    """DooD translates the source while the target remains this run process's agent path."""
+    """DooD translates the source while the target is the model view's `/agent` (#1255 P1; it
+    used to remain this run process's agent path)."""
     from defender.runtime import box as box_mod
 
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
@@ -115,7 +121,7 @@ def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path
         box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared, tenant_agent=agent,
     ).argv
     source = Path("/daemon/shared") / agent.relative_to(tmp_path)
-    assert f"type=bind,source={source},target={agent},readonly" in argv
+    assert f"type=bind,source={source},target=/agent,readonly" in argv
 
 
 def test_an_agent_source_on_no_shared_mount_refuses_the_box_naming_it():

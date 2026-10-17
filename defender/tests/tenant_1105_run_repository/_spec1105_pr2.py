@@ -82,7 +82,7 @@ def new_launch_argv(tenant_id: str, source_run_id: str,
                     branch_message_id: int = BRANCH_MESSAGE_ID, *extra: str) -> list[str]:
     """Declared change 1: `branch --tenant T <source_run_id> <branch_message_id>`."""
     return ["--tenant", tenant_id, source_run_id, str(branch_message_id),
-            "--continuation-prompt", "go", *extra]
+            *T.retired_continuation_argv(), *extra]
 
 
 def sibling_argv(tenant_id: str, episode_dir: Path, label: str, *extra: str) -> list[str]:
@@ -156,15 +156,20 @@ def launch_source(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tupl
     """`(estate, source run dir)`: the launch fixture tenant placed under the data root and ONE
     finished, branchable source run at `<data root>/<T>/runs/<source_run_id>` whose captured
     calls the live estate answers unchanged — `_spec1224.source_run`, at a run id the test
-    names."""
+    names. The calls land through `runs_base(land_calls=...)`, before the source's session is
+    seeded (#1255: the fork snapshot holds the table as it stood at the branch point, so a table
+    rewritten after `runs_base` returns no longer opens on it and the launch is refused)."""
     est = S.estate(tmp_path)
     est.place(tenant_id=LAUNCH_TENANT)
-    _base, src = T.runs_base(tmp_path, tenant_id=LAUNCH_TENANT, source_run_id=source_run_id)
-    (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
-    for seq, c in enumerate(source_calls()):
-        T.capture_call(src, system=c.system, verb=c.verb, params=dict(c.params),
-                       payload=c.payload, lead=S.LEAD, seq=seq)
-        est.answer(c.system, c.verb, c.params, c.payload)
+
+    def land(src: Path) -> None:
+        for seq, c in enumerate(source_calls()):
+            T.capture_call(src, system=c.system, verb=c.verb, params=dict(c.params),
+                           payload=c.payload, lead=S.LEAD, seq=seq)
+            est.answer(c.system, c.verb, c.params, c.payload)
+
+    _base, src = T.runs_base(tmp_path, tenant_id=LAUNCH_TENANT, source_run_id=source_run_id,
+                             land_calls=land)
     return est, src
 
 

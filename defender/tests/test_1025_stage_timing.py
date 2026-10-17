@@ -197,7 +197,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     before = now_iso()
     # #1105 PR 2 (declared change 1): the tenant and the source run by id.
     rc = _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                      "--continuation-prompt", "go"],
+                      *T.retired_continuation_argv()],
                      spawn=spawn, judge=judge, oracle=oracle.model, verifier=verifier.model,
                      **seams)
     return Launch(rc, spawn, judge, episode_dir, before, now_iso())

@@ -60,6 +60,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender._io import read_jsonl_rows
 from defender.run_repository import RunPaths
 from defender.learning import lead_repository
@@ -235,7 +237,7 @@ def _run(
 def _reduce(run_dir: Path, seq: int = 0, lead: str = LEAD, sql: str = "SELECT count(*) FROM data") -> Turn:
     """The reduce turn the gather prompt teaches, over a payload this run actually wrote."""
     payload = run_dir / "gather_raw" / lead / f"{seq}.json"
-    return Turn(tool_calls=[("bash", {"command": f"cat {payload} | {SQL} '{sql}'"})])
+    return Turn(tool_calls=[("bash", {"command": f"cat {model_path(payload, run_dir=run_dir)} | {SQL} '{sql}'"})])
 
 
 @pytest.fixture(scope="module")
@@ -328,7 +330,7 @@ def test_failing_non_shim_bash_writes_no_row(tmp_path):
         q("elastic", "query", {"native_query": "FROM logs"}),
         # The shape `test_capture_fires_only_for_the_query_tool` (#611) drives, so the gate
         # provably admits it — a denied command would make this negative vacuous.
-        Turn(tool_calls=[("bash", {"command": f"cat {run_dir / 'alert.json'} | wc -l"})]),
+        Turn(tool_calls=[("bash", {"command": f"cat {model_path(run_dir / 'alert.json', run_dir=run_dir)} | wc -l"})]),
         DONE,
     ])
     assert box.calls, "the bash turn never reached the boundary, so the negative is vacuous"
@@ -351,7 +353,7 @@ def test_a_non_terminal_reducer_mints_no_row(tmp_path):
     r = _run(tmp_path, run_dir=run_dir, run_id="d823-nonterminal", box=box, turns=[
         q("elastic", "query", {"native_query": "FROM logs"}),
         Turn(tool_calls=[("bash", {
-            "command": f"cat {payload} | {SQL} 'SELECT 1' | grep zzz"})]),
+            "command": f"cat {model_path(payload, run_dir=run_dir)} | {SQL} 'SELECT 1' | grep zzz"})]),
         DONE,
     ])
     assert box.calls, "the pipeline never reached the boundary, so the negative is vacuous"
@@ -427,7 +429,7 @@ def test_main_lane_shim_failure_writes_no_row(tmp_path):
     r = _run(
         tmp_path, run_dir=run_dir, run_id="d823-mainlane",
         main_turns=[
-            Turn(tool_calls=[("bash", {"command": f"cat {alert} | {SQL} 'SELECT 1'"})]),
+            Turn(tool_calls=[("bash", {"command": f"cat {model_path(alert, run_dir=run_dir)} | {SQL} 'SELECT 1'"})]),
             Turn(text="Investigation complete."),
         ],
         turns=[DONE],
@@ -648,7 +650,7 @@ def test_shim_command_is_capped_in_the_record(tmp_path):
     long_sql = "SELECT " + ("x" * 8000)
     r = _run(tmp_path, run_dir=run_dir, run_id="d823-cap", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}),
-        Turn(tool_calls=[("bash", {"command": f"cat {payload} | {SQL} '{long_sql}'"})]),
+        Turn(tool_calls=[("bash", {"command": f"cat {model_path(payload, run_dir=run_dir)} | {SQL} '{long_sql}'"})]),
         DONE,
     ])
     shim = r.shim_rows

@@ -25,6 +25,7 @@ from defender.runtime.tools import (
     _tool_bash,
     _tool_read_file,
 )
+from defender.tests._1255_view import model_path
 from defender.tests._by_path import load_module, on_sys_path
 from defender.tests._frames680 import (
     frame_salt_of,
@@ -477,7 +478,7 @@ def test_d15_main_self_reads_report_and_investigation_without_wrap(tmp_path):
     ):
         path = run / name
         path.write_text(body, encoding="utf-8")
-        assert _tool_read_file(deps, str(path)) == body
+        assert _tool_read_file(deps, model_path(path, run_dir=run)) == body
 
 
 def test_d16_report_close_delimiter_deny_survives_systemic_frame():

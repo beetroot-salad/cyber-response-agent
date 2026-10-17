@@ -48,9 +48,17 @@ def _lifecycle(scene, docker, main, *, observed_env=None):
         if observed_env is not None:
             from defender.runtime.bash_exec import parse
             command = 'printenv DEFENDER_AGENT_DIR'
+            # A neutral cwd (#1255): the executor's own model view, not this test, decides
+            # where the run folder is.
             result = kw['box'].run_parsed(parse(command), command=command,
-                                          cwd=handed_run.run_dir, timeout=10)
-            observed_env.append(result.out.decode().strip())
+                                          cwd=Path('/'), timeout=10)
+            seen = result.out.decode().strip()
+            # The identity file as the executor's programs see it, read while the run's
+            # executor (and whatever tree it stages) is live.
+            command = f'cat {seen}/.tenant-id'
+            ident = kw['box'].run_parsed(parse(command), command=command,
+                                         cwd=Path('/'), timeout=10)
+            observed_env.append((seen, ident.out))
         return R.drive(handed_run.run_dir, run_id=str(handed_run.id), main=main,
                        tenant=tenant, box=kw['box'])
 
@@ -72,13 +80,15 @@ def test_matching_identity_is_read_only_and_precedes_message_zero(scene, ending)
     _lifecycle(scene, docker, main)
     assert main.calls == 1, 'right identity must permit the model request'
     assert len(docker.identity_reads) == 1, 'run start never read the mounted identity'
-    assert docker.identity_reads[0][-1] == str(tenant.agent / '.tenant-id')
+    # #1255 (design rev 4, P1): inside the box the agent half is `/agent`, so the identity is
+    # read there, the bind lands there, and the env names it there.
+    assert docker.identity_reads[0][-1] == '/agent/.tenant-id'
     assert all(snapshot == before for snapshot in docker.snapshots)
     assert tree_bytes(tenant.agent) == before, 'startup dirtied the tenant clone'
     assert [m for m in docker.mounts() if m['source'] == str(tenant.agent)] == [
-        {'source': str(tenant.agent), 'target': str(tenant.agent), 'readonly': True}]
+        {'source': str(tenant.agent), 'target': '/agent', 'readonly': True}]
     assert 'DEFENDER_AGENT_DIR' in BOX_ENV_ALLOWLIST
-    assert docker.env()['DEFENDER_AGENT_DIR'] == str(tenant.agent)
+    assert docker.env()['DEFENDER_AGENT_DIR'] == '/agent'
 
 
 @pytest.mark.parametrize('contents', [
@@ -148,7 +158,15 @@ def test_explicit_unsandboxed_lane_reads_the_accepted_path_before_message_zero(
         observed_env = []
         _lifecycle(scene, docker, main, observed_env=observed_env)
         assert main.calls == 1
-        assert observed_env == [str(tenant.agent)], 'fallback subprocess inherited the wrong agent path'
+        # #1255 (design rev 4, P1 "Every mode"): the unboxed fallback runs its programs in the
+        # model view over a per-run staging tree, so DEFENDER_AGENT_DIR is that tree's `agent`
+        # folder — not the inherited value, and not the tenant clone's host path.
+        ((seen, ident),) = observed_env
+        assert seen != '/wrong/inherited/agent', 'fallback subprocess inherited the wrong agent path'
+        assert Path(seen).name == 'agent' and seen != str(tenant.agent), seen
+        assert ident == (tenant.id + '\r\n').encode(), (
+            f'the agent half the fallback hands its programs does not hold the accepted '
+            f'identity: {ident!r}')
     else:
         with pytest.raises((BoxFault, SystemExit, run_py._tenant.TenantRefused)) as caught:
             _lifecycle(scene, docker, main)
@@ -195,7 +213,8 @@ def test_box_request_and_oracle_lanes_do_not_require_a_run_tenant(tmp_path):
 
 
 def test_daemon_path_translation_preserves_the_run_process_agent_target(tmp_path):
-    """D2: translate only the bind source under DooD; target/env keep Tenant.agent spelling."""
+    """D2: translate only the bind source under DooD; the target is the model view's `/agent`
+    (#1255 P1 — it used to keep Tenant.agent's spelling)."""
     defender_dir = plant_tree(tmp_path / 'tree', copy_code=False)
     run_dir = make_run_dir(tmp_path / 'runs')
     agent = tmp_path / 'tenants' / 'acme' / 'knowledge' / 'agent'
@@ -205,7 +224,7 @@ def test_daemon_path_translation_preserves_the_run_process_agent_target(tmp_path
                                  box_mod.BoxSpec(rootfs=STOCK_ROOTFS), shared,
                                  tenant_agent=agent)
     expected = Path('/daemon/shared') / agent.relative_to(tmp_path)
-    assert f'type=bind,source={expected},target={agent},readonly' in create.argv
+    assert f'type=bind,source={expected},target=/agent,readonly' in create.argv
 
 
 def test_orient_host_shims_receive_the_run_tenants_agent_path(scene, monkeypatch):

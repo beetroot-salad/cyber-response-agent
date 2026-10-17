@@ -637,8 +637,8 @@ def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
     which the real query tool rejects with exit 64 and no ledger row. The pair of b's reject
     with the control's J3 row is the positive control: it queues. On the refused-call clause:
     every refused call in the archive the judge reads has its ledger row, joined to its table
-    row by the call id; the failed-write path itself is
-    test_1234_failed_served_ledger_write_ends_the_run's."""
+    row (#1255 G6: by the host-only join record, the table carrying no id); the failed-write
+    path itself is test_1234_failed_served_ledger_write_ends_the_run's."""
     turns_b = [*S.default_turns()[:-1], S.query_turn("idp", "bogus_verb", {"q": "x"}),
                S.done_turn()]
     built = S.real_family(tmp_path, {"b": S.RealWorld("b", oracle=S.altering_oracle(),
@@ -670,18 +670,28 @@ def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
     for name in ("j3-pair", "j3-world"):
         assert S.lane_of(built, fid[name]) == S.LANES["user_record"], name
         assert _user_mentions(built, fid[name], m[name]), name
+    # #1255 G4/G6 (flipped from "each own denial row carries the id of its `refused` ledger
+    # row"): the table carries no id; the join is the host's, observed where the judge reads it.
+    key = S.COINED["ctx.contrast"]
     for label, rows in tables.items():
-        own_denials = [r for i, r in enumerate(rows)
+        own_denials = [i for i, r in enumerate(rows)
                        if r.get("query_id") == S.DENIED_QUERY_ID and i != j3[label]]
-        refused_ids = {r.get(S.CALL_ID) for r in built.ledger_rows(label)
-                       if r.get("source") == "refused"}
+        refused = [r for r in built.ledger_rows(label) if r.get("source") == "refused"]
         assert own_denials, f"fixture: world {label}'s withheld call was refused at run time"
-        for r in own_denials:
-            assert r.get(S.CALL_ID) is not None, (
-                f"world {label}: a refused call's table row carries no call id: {r!r}")
-            assert r.get(S.CALL_ID) in refused_ids, (
-                f"world {label}: a refused call's table row has no ledger row joined by its "
-                f"call id: {r!r}")
+        assert len(refused) == len(own_denials), f"world {label}: a refused call has no ledger row"
+        ctx = S.render_context(built, label)
+        contrast = (ctx[key] if isinstance(ctx, dict) else getattr(ctx, key))[label]
+        blocked = contrast[S.COINED["contrast.blocked"]] if isinstance(contrast, dict) else \
+            getattr(contrast, S.COINED["contrast.blocked"])
+        joined = {(e[S.COINED["entry.call"]] if isinstance(e, dict)
+                   else getattr(e, S.COINED["entry.call"]),
+                   e[S.COINED["entry.source"]] if isinstance(e, dict)
+                   else getattr(e, S.COINED["entry.source"])) for e in blocked}
+        for line in own_denials:
+            assert (line, "refused") in joined, (
+                f"world {label}: the refused call at line {line} is not joined to its ledger row")
+    carrying = [r for rows in tables.values() for r in rows if S.CALL_ID in r]
+    assert not carrying, f"#1255 G4: a query-table row carries the call id: {carrying[:2]}"
 
 
 def test_1234_served_system_with_unavailable_samples_refused_at_run_time(

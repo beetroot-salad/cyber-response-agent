@@ -107,8 +107,13 @@ def test_an_uncovered_path_is_left_alone_by_the_pure_helper():
 
 
 def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
-    """The load-bearing assertion. source= must be the DAEMON's path; target=, --workdir and
-    the env must stay the path this process (and every downstream reader) uses."""
+    """The load-bearing assertion. source= must be the DAEMON's path; target= and --workdir are
+    the model view's fixed paths (#1255 P1: the run folder at `/runs/current`, the checkout at
+    `/defender`) — neither this process's path nor the daemon's.
+
+    Flipped by #1255 (design rev 4, P1 Box bullet): the target used to stay this process's own
+    path ("the path every downstream reader uses"); the model now sees one host-independent
+    view, and host readers never read a box-written path back (H1)."""
     argv = _create_argv(
         "defender-run-r1", Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"),
         PINNED, MOUNTS,
@@ -116,15 +121,17 @@ def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
     joined = " ".join(argv)
     assert (
         "type=bind,source=/home/dev/projects/repo/.defender-runs/r1,"
-        "target=/workspace/.defender-runs/r1" in joined
+        "target=/runs/current" in joined
     )
     assert (
         "type=bind,source=/home/dev/projects/repo/defender,"
-        "target=/workspace/defender,readonly" in joined
+        "target=/defender,readonly" in joined
     )
-    # The in-isolate geography is untouched — this is what artifacts record.
-    assert argv[argv.index("--workdir") + 1] == "/workspace/.defender-runs/r1"
-    assert "/home/dev/projects/repo" not in joined.split("--workdir")[1]
+    assert argv[argv.index("--workdir") + 1] == "/runs/current"
+    # Neither namespace's host path follows the sources: not the daemon's, not this process's.
+    after_mounts = joined.split("--workdir")[1]
+    assert "/home/dev/projects/repo" not in after_mounts
+    assert "/workspace" not in after_mounts
 
 
 def test_create_argv_is_untouched_when_there_is_no_mount_table():
@@ -132,8 +139,9 @@ def test_create_argv_is_untouched_when_there_is_no_mount_table():
         "defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/srv/defender"), PINNED, (),
     ).argv
     joined = " ".join(argv)
-    assert "type=bind,source=/tmp/defender-runs/r1,target=/tmp/defender-runs/r1" in joined
-    assert "type=bind,source=/srv/defender,target=/srv/defender,readonly" in joined
+    # #1255 P1: no table, no translation of the SOURCE; the target is the model view's path.
+    assert "type=bind,source=/tmp/defender-runs/r1,target=/runs/current" in joined
+    assert "type=bind,source=/srv/defender,target=/defender,readonly" in joined
 
 
 def test_create_argv_refuses_a_run_dir_off_every_shared_mount():
@@ -448,13 +456,14 @@ def test_the_discovered_table_reaches_the_run_dir_create_argv():
             PINNED, rec, lambda _docker: MOUNTS,
         )
     joined = " ".join(rec.create_argv or [])
+    # Targets are the model view's fixed paths (#1255 P1); the SOURCES carry the translation.
     assert (
         "type=bind,source=/home/dev/projects/repo/.defender-runs/r1,"
-        "target=/workspace/.defender-runs/r1" in joined
+        "target=/runs/current" in joined
     )
     assert (
         "type=bind,source=/home/dev/projects/repo/defender,"
-        "target=/workspace/defender,readonly" in joined
+        "target=/defender,readonly" in joined
     )
 
 

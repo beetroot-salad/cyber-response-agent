@@ -21,8 +21,11 @@ the way a daemon does and answers each verb the box code asks.
 - `image inspect`: rc 0 (the image is held).
 - `run --name <n> --label defender.start-token=<t> ...`: creates `<n>` running, or rc 125 when
   the name is taken (docker's own conflict) or a create fault is set.
-- `exec [flags] <name> cat <path>`: the host file at `<path>` (the drain's mounts sit at their
-  own paths), or other bytes under a `sentinel` fault; `exec ... python3 -c <probe>`: the alias
+- `exec [flags] <name> cat <path>`: the host file the in-box `<path>` names through the
+  container's bind table (nested mounts winning; a path no bind covers is read as given — the
+  drain's mounts sit at their own paths, while since #1255 a run box mounts each tree at a
+  fixed model path such as `/runs/current`), or other bytes under a `sentinel` fault;
+  `exec ... python3 -c <probe>`: the alias
   probe's healthy verdict, or one shape allowed when `alias_allowed`. A container that is not
   running answers rc 1.
 - `start <name>`: `exited` (or `created`) -> `running`. On a container already running it
@@ -177,10 +180,33 @@ def _exec(state: dict, argv: list[str]) -> tuple[int, str, str]:
         if state["faults"]["sentinel"]:
             return 0, NOT_THE_SENTINEL, ""
         try:
-            return 0, Path(command[1]).read_text(encoding="utf-8"), ""
+            return 0, _through_binds(box, Path(command[1])).read_text(encoding="utf-8"), ""
         except OSError:
             return 1, "", f"cat: {command[1]}: No such file or directory\n"
     return 0, "", ""
+
+
+def _binds(argv: list[str]) -> list[list[str]]:
+    """A `docker run` argv's bind table: `[target, source]` per `--mount` naming both."""
+    out: list[list[str]] = []
+    for i, tok in enumerate(argv[:-1]):
+        if tok == "--mount":
+            fields = dict(f.split("=", 1) for f in argv[i + 1].split(",") if "=" in f)
+            if fields.get("source") and fields.get("target"):
+                out.append([fields["target"], fields["source"]])
+    return out
+
+
+def _through_binds(box: dict, inside: Path) -> Path:
+    """Where an in-box path lives on the host: through the container's bind table, nested
+    mounts winning, as a real daemon resolves it; unchanged when no bind covers it. A double
+    modelling a bind mount, not a policy."""
+    covering = [(Path(t), Path(src)) for t, src in box.get("binds", [])
+                if inside.is_relative_to(Path(t))]
+    if not covering:
+        return inside
+    target, source = max(covering, key=lambda b: len(b[0].parts))
+    return source / inside.relative_to(target)
 
 
 def _rm(here: Path, state: dict, name: str) -> tuple[int, str, str]:
@@ -216,7 +242,8 @@ def _create(here: Path, state: dict, argv: list[str]) -> tuple[int, str, str]:
     if name in containers:
         return 125, "", (f'docker: Error response from daemon: Conflict. The container '
                          f'name "/{name}" is already in use\n')
-    containers[name] = {"status": "running", "token": _label(argv, "defender.start-token") or ""}
+    containers[name] = {"status": "running", "token": _label(argv, "defender.start-token") or "",
+                        "binds": _binds(argv)}
     save(here, state)
     return 0, "f" * 64 + "\n", ""
 

@@ -46,6 +46,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
@@ -251,23 +253,28 @@ def _hook_kills(run_dir: Path, state: RunState) -> bool:
     pytest.param(0, 0, 0, False, id="fresh"),
     pytest.param(1000, 1000, 0, True, id="spent"),
     pytest.param(1000, 1000, 990, False, id="oracle-held-time-is-not-the-investigators"),
-    pytest.param(-1000, 1000, 0, True, id="wall-clock-stepped-back"),
+    # #1255 ("Time") RETIRES the fourth case, `wall-clock-stepped-back` (-1000, 1000, 0): it
+    # pinned the monotonic delta as a source that kills a run whose wall clock reads before its
+    # start. Elapsed is measured on the run clock alone now, so there is no second origin to
+    # disagree with the first.
 ])
 def test_lead_zeros_budget_gate_agrees_with_the_hooks_on_the_runs_clock(
         tmp_path, wall_back, mono_back, credited, killed):
     """O3: lead-0's gate and the budget hooks answer "is the tail spent?" from one clock — the
-    larger of the wall-clock and monotonic deltas, less the seconds an oracle turn held the
-    world — so on the same state they agree.
+    run's elapsed time, less the seconds an oracle turn held the world — so on the same state
+    they agree. (#1255 "Time": the clock is the run clock alone; this used to say "the larger of
+    the wall-clock and monotonic deltas", and the `wall-clock-stepped-back` case that pinned the
+    monotonic one is retired. Both setups here still move the two origins `_clocked` knows
+    together — the unit edge cannot name the run clock's injection, which the design leaves to
+    the implementation; the run-level statement of every limit is
+    `test_1255_clock_natural` N4/N5.)
 
-    The discriminating cases are where the budget snapshot alone (a wall-clock origin, no
-    monotonic origin, no oracle credit) disagrees with that clock:
+    The discriminating case is where the budget snapshot alone (a wall-clock origin, no oracle
+    credit) disagrees with that clock:
 
       * `oracle-held…`: 1000s of raw time, 990 of them an oracle's — 10s of the investigator's,
         far inside the tail. The snapshot alone says spent: lead-0 would kill a run the hooks
         let continue.
-      * `wall-clock-stepped-back`: the wall clock now reads before the run's start, the
-        monotonic clock shows 1000s gone. The snapshot alone says fresh: lead-0 would issue a
-        backend call on a run the hooks kill at its next tool call.
 
     `fresh` and `spent` are the controls: both derivations agree there, so a gate that never
     (or always) kills fails one of them."""
@@ -292,7 +299,7 @@ def test_a_failed_reducer_on_gather_deps_with_no_state_raises(tmp_path):
     Positive control, same scene: the deps carrying their state return the command's output and
     record the shim row."""
     deps, _box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"Binder Error: o4"))
-    command = f"cat {payload} | defender-sql 'SELECT 1'"
+    command = f"cat {model_path(payload, run_dir=deps.run_dir)} | defender-sql 'SELECT 1'"
     with pytest.raises(TypeError, match="RunState"):
         _tool_bash(dataclasses.replace(deps, run_state=None), command)
 
@@ -320,7 +327,7 @@ def test_a_refused_shim_row_write_never_fails_the_command(tmp_path, kind):
     else:
         table.mkdir()
 
-    out = _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT 1'")
+    out = _tool_bash(deps, f"cat {model_path(payload, run_dir=deps.run_dir)} | defender-sql 'SELECT 1'")
     assert len(box.calls) == 1, "the command never reached the box, so the output is not its"
     assert "Binder Error: o4" in out, "a refused shim-row write cost the command its output"
     assert [r["query_id"] for r in deps.run_state.lead_rows(deps.lead_id)] == \

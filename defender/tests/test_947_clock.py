@@ -8,9 +8,23 @@ counts it as one. And an episode has to be REPLAYABLE: re-running it next week m
 estate the same questions, which for an open-ended window means the same window.
 
 So T0 — the branch point's own moment — is threaded as a value: onto `VerbContext.as_of`, from
-there into the one adapter that mints a timestamp (`host-state`) and the one that mints a
-window (`elastic`), and into `BranchSpec` so an episode records the moment it was forked at
-rather than re-deriving it from a run that has since been read again.
+there into the adapters that bound what they read by it (`elastic`'s window), and into
+`BranchSpec` so an episode records the moment it was forked at rather than re-deriving it from a
+run that has since been read again.
+
+#1255 (design rev 4, "Time") SPLITS what `as_of` used to do. It stays the world's CUT-OFF (the
+window end, what the oracle serves the world as of). It no longer STAMPS a capture: "capture
+stamps use the run clock, not the cut-off (today host-state stamps `captured_at = as_of`, which
+would freeze one visible time while others advance)". So the host-state arms below are flipped
+to "the cut-off never stamps a capture"; that a capture IS stamped with the run clock's reading
+is driven through `run_investigation(clock=…)` in `test_1255_clock_natural.py` (N3) and
+`test_1255_clock_arm.py` (A4), where the run clock exists. Rev 5 C4 settles the adapter called
+OUTSIDE any run — every arm in this file that drives an adapter with a context of its own,
+which carries no run: it "stamps wall time".
+
+Rev 5 C4 also moves T0 itself: "the fork time handed to the oracle and the arm's cut-off
+(`as_of`) are the snapshot's run-clock reading" — no longer the latest timestamp the framework
+stamped on the prefix's messages (a wall-clock time).
 
 WHAT THIS FILE OWNS
 -------------------
@@ -19,10 +33,15 @@ WHAT THIS FILE OWNS
 2. **The seam** — `VerbContext.as_of`, and that the estate registry threads it onto EVERY
    served call, on every system. That is the arm the batch turns on: a clock threaded only
    where a world's facts reach would leave the six host-state stamps live.
-3. **The stamps** — the six `host-state` verbs that carry `captured_at`, the one that does not,
-   and the elastic window whose ABSENT end is what an unbounded query resolves against.
-4. **T0 itself** — `branch_point_time` over the prefix, and `validate`'s refusal of a spec that
-   disagrees with it.
+3. **The stamps** — the six `host-state` verbs that carry `captured_at` (never the cut-off,
+   #1255; wall time outside a run, C4), the one that does not, and the elastic window whose
+   ABSENT end is what an unbounded query resolves against.
+4. **T0 itself** — the fork command's branch-point clock (`cli.branch_point_clock`) is the
+   snapshot's run-clock reading at the branch response (C4), and `validate` refuses a spec that
+   disagrees with it — over a source recorded through `run.main` with an injected clock, at
+   tool-calling responses, the only branch points #1255 admits (`_branch_947.legal_source` and
+   the hand-stamped stores this section used to build become N4 sources, and branched at a
+   tool RETURN, RW-F4).
 
 Hermetic, and with NO `monkeypatch.setattr`. The adapters are driven for real over a `docker`
 planted on the RUN's own `PATH`: both transports fork with `env=dict(ctx.env)`
@@ -34,8 +53,6 @@ written to `tmp_path`, for `test_920_estate_seam`'s reason: `ModuleVerbRegistry`
 reaches the check the grant is validated by.
 """
 from __future__ import annotations
-
-from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 import contextlib
 import dataclasses
@@ -65,19 +82,13 @@ from defender.learning.branch.ledger import (  # noqa: E402
 )
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender.tests import _1255_clock as C  # noqa: E402
 from defender.tests import _tenants1106  # noqa: E402
 from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 from defender.scripts.adapters import elastic_adapter, host_state_adapter  # noqa: E402
 from defender.tests._branch_947 import (  # noqa: E402
-    GOLDEN_INVESTIGATION,
     branch_mod,
-    legal_source,
     spec_at,
-)
-from defender.tests._session_store_705 import (  # noqa: E402
-    make_store,
-    runs_base,
-    store_mod,
 )
 
 #: The committed elastic catalog's ES|QL bodies: 12 of them. The count is asserted below rather
@@ -128,6 +139,10 @@ T0 = dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=dt.UTC)
 T0_Z = "2026-05-25T15:30:45Z"
 
 REAL_ADAPTERS = PATHS.adapters_dir
+
+#: #1255 C4: the branch point `recorded_branch` forks at arrives at this reading of its
+#: source's run clock (`_1255_clock.record_source`'s script: 10 s, then 600 s of MAIN work).
+R = C.BRANCH_READING
 
 
 def _gather_grant() -> VerbGrant:
@@ -367,6 +382,21 @@ def range_filter(body: dict) -> dict | None:
     return None
 
 
+def pass_through() -> dict[str, Any]:
+    """`build_registry`'s oracle-side seam (`oracle=`, `verifier=`: models) for a world with no
+    facts. Under #1255 D3 (rev 4) such a world — a control world, like every `World` stub here —
+    answers each call through one oracle turn, so a registry built over production's lazy oracle
+    model would reach a provider. This double serves the base answer UNCHANGED (the oracle's own
+    `BASE_HANDLE` spelling, with an empty claim) and the verifier passes it; by D5 (rev 5) a
+    control-world turn that leaves the base unchanged is still recorded `passthrough`. It
+    decides nothing a test here asserts: what is served stays the real base."""
+    from defender.tests.live_oracle_1224 import _spec1224 as S
+
+    base = S.sym("learning.branch.estate.oracle", "BASE_HANDLE")
+    return {"oracle": S.oracle(then=S.submit(base, S.EMPTY_CLAIM)).model,
+            "verifier": S.passing_verifier().model}
+
+
 def adapter_calls(ctx: VerbContext) -> list[dict]:
     return read_jsonl_rows(Path(ctx.run_dir) / "adapter-calls.jsonl")
 
@@ -466,34 +496,38 @@ def test_the_clock_is_the_last_field_of_the_context_and_defaults_to_none():
                        tenant=_tenants1106.fixture_run_tenant()).as_of is None
 
 
-def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock(tmp_path):
-    """    THE arm of this batch: a `host-state` read comes back stamped with T0, through the
-    real registry, the real grant and the real adapter body.
+def test_a_registry_served_host_state_capture_is_never_stamped_with_the_cut_off(tmp_path):
+    """    #1255 FLIP (design rev 4, "Time": capture stamps use the run clock, not the cut-off).
+    Before, this arm demanded a `host-state` read served through a world's registry come back
+    stamped with T0; that froze one visible time while every other advanced. Now: through the
+    real registry, the real grant and the real adapter body, with the registry threading its
+    cut-off T0 onto the call, the capture is NOT stamped T0 — and the ledger records exactly the
+    stamp the caller was served.
 
-    A clock threaded only onto the elastic verbs would leave all six host-state stamps on the
-    wall clock — exactly what makes two siblings' `captured_at` differ for no world's reason.
+    THE CONTEXT NAMES NO MOMENT (the production shape `query_tool.py` builds), so a T0 in the
+    payload could only come from the registry's cut-off. Positive control on the same field:
+    the payload carries a well-formed `Z` stamp (a payload with no stamp satisfies `!= T0`).
 
-    THE CONTEXT NAMES NO MOMENT. `docker_ctx` builds the production shape — `query_tool.py`
-    hands the seam a `VerbContext` with no `as_of` — so the T0 in the payload can only have come
-    from the registry putting it there. Handed a pre-seeded ctx, this arm passes with the
-    injection deleted outright, which is the whole property gone with nothing red.
-
-    The stamp is asserted against T0 AND against `now`: equal to the first and different from
-    the second is what separates "the clock was threaded" from "the adapter stamped something
-    that happened to be a timestamp"."""
+    The context also belongs to NO RUN (no run state, so no run clock): rev 5 C4, "an adapter
+    called outside any run (no run clock) stamps wall time" — so the stamp is the wall clock's
+    reading during the call. The stamp's value ON a run — the run clock's reading at the call —
+    is `test_1255_clock_natural`'s N3 and `test_1255_clock_arm`'s A4."""
     ctx = docker_ctx(tmp_path)
     reg = build_registry(read_roster(REAL_ADAPTERS), _gather_grant(), world=World("w1"),
-                        ledger=primed_ledger(tmp_path), as_of=T0)
+                        ledger=primed_ledger(tmp_path), as_of=T0, **pass_through())
+    before = _clock.z_seconds(dt.datetime.now(dt.UTC))
 
     payload = reg.verbs("host-state")["proc-tree"](ctx, host="web-1")
 
-    assert payload["captured_at"] == T0_Z, (
-        f"the served payload is stamped {payload['captured_at']!r}, not the branch point's own "
-        "moment — two siblings of one branch would disagree here for neither world's reason")
-    assert payload["captured_at"] != _clock.z_seconds(dt.datetime.now(dt.UTC)), (
-        "the stamp is this afternoon's, so the fixture is not discriminating")
-    assert json.loads(served_rows(reg.ledger)[-1]["payload_text"])["captured_at"] == T0_Z, (
-        "the ledger recorded a different moment from the one the caller was served")
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(payload.get("captured_at"))), (
+        f"the served capture carries no `Z` stamp at all, so nothing below is observed: {payload}")
+    assert payload["captured_at"] != T0_Z, (
+        "the served capture is stamped with the world's cut-off T0 — a visible time frozen at "
+        "the fork while every other time the model sees advances (#1255)")
+    assert before <= payload["captured_at"] <= _clock.z_seconds(dt.datetime.now(dt.UTC)), (
+        "a capture served outside any run is not stamped with the wall clock (C4)")
+    assert json.loads(served_rows(reg.ledger)[-1]["payload_text"])["captured_at"] == (
+        payload["captured_at"]), "the ledger recorded a different moment from the one served"
 
 
 def test_the_clock_rides_every_served_call_on_every_system(tmp_path):
@@ -509,7 +543,7 @@ def test_the_clock_rides_every_served_call_on_every_system(tmp_path):
     ctx = docker_ctx(tmp_path)
     reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT,
                         world=World("w1", ("elastic",)), ledger=primed_ledger(tmp_path),
-                        as_of=T0)
+                        as_of=T0, **pass_through())
 
     reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -529,7 +563,7 @@ def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
     never made."""
     ctx = docker_ctx(tmp_path)
     reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("A", ("cmdb",)),
-                        ledger=primed_ledger(tmp_path), as_of=T0)
+                        ledger=primed_ledger(tmp_path), as_of=T0, **pass_through())
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
@@ -567,7 +601,7 @@ def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
     reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
-                        ledger=primed_ledger(tmp_path), as_of=T0)
+                        ledger=primed_ledger(tmp_path), as_of=T0, **pass_through())
 
     payload = reg.verbs("cmdb")["get-host"](
         ClocklessContext(defender_dir=tmp_path, run_dir=run_dir, env={}), host="canary-1")
@@ -659,23 +693,34 @@ STAMPING_VERBS = [
 
 
 @pytest.mark.parametrize(("verb", "params"), STAMPING_VERBS)
-def test_every_host_state_capture_reads_the_runs_clock(tmp_path, verb, params):
-    """    All six stamping verbs take `captured_at` from `ctx.as_of` when the run names one.
+def test_no_host_state_capture_is_stamped_with_the_cut_off(tmp_path, verb, params):
+    """    #1255 FLIP (design rev 4, "Time"). Before: all six stamping verbs took `captured_at`
+    from `ctx.as_of`. Now the cut-off a context carries bounds what is read and never stamps a
+    capture: with `ctx.as_of = T0`, none of the six is stamped T0. The context belongs to no
+    run, so by rev 5 C4 ("an adapter called outside any run (no run clock) stamps wall time")
+    each is stamped with the wall clock's reading during the call, cut-off or not.
 
     Enumerated rather than spot-checked because they are six independent call sites of one
-    helper, and one left on `datetime.now()` is one payload class whose bytes differ between
-    siblings — invisible against the five that agree, and reported by ΔO as the world's doing.
-    """
+    helper. Positive control on the same field: each carries a well-formed `Z` stamp. That
+    each stamp equals the run clock's reading at its call ON a run is
+    `test_1255_clock_natural`'s N3, driven through all six over a run with an injected clock."""
     ctx = docker_ctx(tmp_path, as_of=T0)
+    before = _clock.z_seconds(dt.datetime.now(dt.UTC))
 
     payload = host_state_adapter.VERBS[verb](ctx, **params)
 
-    assert payload["captured_at"] == T0_Z
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(payload.get("captured_at"))), (
+        f"{verb} carries no `Z` capture stamp: {payload}")
+    assert payload["captured_at"] != T0_Z, (
+        f"{verb}'s capture is stamped with the world's cut-off T0 (#1255: the run clock stamps)")
+    assert before <= payload["captured_at"] <= _clock.z_seconds(dt.datetime.now(dt.UTC)), (
+        f"{verb}'s capture outside any run is not stamped with the wall clock (C4)")
 
 
 @pytest.mark.parametrize(("verb", "params"), STAMPING_VERBS)
 def test_an_ordinary_run_still_stamps_the_wall_clock(tmp_path, verb, params):
-    """    With no clock on the ctx, the same six verbs stamp NOW — the unbranched run, unchanged.
+    """    With no clock on the ctx, the same six verbs stamp NOW — an adapter called outside any
+    run (no run clock) stamps wall time (rev 5 C4).
 
     The positive control for the arm above, and the one that keeps `as_of=None` meaning "the
     ordinary run" rather than "no stamp at all": a host-state read genuinely IS a point-in-time
@@ -983,91 +1028,42 @@ def test_the_swept_catalog_is_the_corpus_this_half_claims():
 
 # 4. T0 itself: derived from the prefix, and pinned into the spec
 
-def _stamped_turn(store, session_id, moment, *, text="a turn"):
-    """One complete pair whose messages AND parts carry `moment`.
-
-    Both halves are stamped because the framework defaults a part's timestamp to `now`: a
-    fixture that stamped only the message would leave a live `now` inside it, and an
-    implementation reading either would answer a different T0 from the one this test computed.
-    """
-    from pydantic_ai.messages import (
-        ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart,
-    )
-    store.append(session_id, [ModelResponse(
-        parts=[ToolCallPart(tool_name="read_file", args={"path": "/tmp/alert.json"},
-                            tool_call_id=text)],
-        timestamp=moment)], agent_id="main")
-    store.append(session_id, [ModelRequest(
-        parts=[ToolReturnPart(tool_name="read_file", content="{}", tool_call_id=text,
-                              timestamp=moment)],
-        timestamp=moment)], agent_id="main")
+# #1255 rev 5 C4 FLIPS this section's two T0 arms. They built a store by hand, stamped its
+# messages' timestamps, branched at a tool RETURN (RW-F4) and pinned `branch_point_time` as "the
+# MAXIMUM message timestamp in the prefix". C4 makes the fork time "the snapshot's run-clock
+# reading"; a message timestamp is the framework's wall-clock stamp, and a hand-built store has
+# no snapshot (an N4 source). Their two promises — T0 is the branch point's own moment, and a
+# branch point in the middle of a run ignores everything the run did after it — are re-stated
+# over a recorded source in `test_t0_is_the_snapshots_run_clock_reading_at_each_branch_response`.
 
 
-def _timed_source(tmp_path, moments):
-    """A run whose turns land at `moments`, in that order. Returns `(store, run_dir, path_ids)`."""
-    ss = store_mod()
-    store = make_store(tmp_path, case_id="case-clock")
-    run_dir = runs_base(tmp_path) / "run-clock-001"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-clock", store_path=store.path)
-    session_id = store.new_session(agent_id="main")
-    for i, moment in enumerate(moments):
-        _stamped_turn(store, session_id, moment, text=f"t{i}")
-    return store, run_dir, ss.path_row_ids(store, session_id)
+def test_t0_is_the_snapshots_run_clock_reading_at_each_branch_response(recorded_branch):
+    """    C4: the fork command's branch-point clock (`cli.branch_point_clock`, which the family
+    manifest's `as_of` is written from) is the run clock's reading in the fork snapshot — taken
+    when the branch response ARRIVED — aware UTC, in whole seconds.
 
+    One recorded source, two of its tool-calling MAIN responses: `read_file(L1)` arrives at
+    `START+10` and `read_file(L2)` at `START+610` (`_1255_clock.record_source`'s script, the
+    test's own sums); the run went on to `START+615`. Each branch point answers ITS reading —
+    so neither the run's tip nor a whole-run maximum passes both — and neither is any timestamp
+    the framework stamped on the source's messages (wall times: what this derivation read
+    before C4). Positive control: the source carries such timestamps."""
+    from defender.learning.branch import cli
 
-def test_t0_is_the_latest_moment_the_prefix_carries(tmp_path):
-    """    `branch_point_time` answers the MAXIMUM message timestamp in the prefix, truncated to
-    whole seconds — and it is aware UTC.
+    _store, run_dir, l2_response, source = recorded_branch
+    l1_response = C.branch_response(run_dir, tool="read_file", arg_suffix=f"/{C.LESSONS[0]}.md")
 
-    The maximum, not the last row: a session is a tree walked by parent id and nothing forces
-    the store's order to be chronological (item 3's synthesized turn is written straight into
-    MAIN's session after the fact). An implementation reading the tail row's timestamp answers
-    a moment EARLIER than something the prefix already contains, and then stamps payloads that
-    predate evidence the sibling can see — so the fixture puts the latest moment in the middle.
+    early = cli.branch_point_clock(source, l1_response)
+    late = cli.branch_point_clock(source, l2_response)
 
-    Truncated, because `z_seconds` truncates: a T0 carrying microseconds formats to a string
-    that no longer round-trips, and the stored T0 and the stamps derived from it stop
-    comparing equal."""
-    branch = branch_mod()
-    latest = dt.datetime(2026, 5, 25, 15, 31, 0, 654321, tzinfo=dt.UTC)
-    store, run_dir, path_ids = _timed_source(tmp_path, [
-        dt.datetime(2026, 5, 25, 15, 30, 0, tzinfo=dt.UTC),
-        latest,
-        dt.datetime(2026, 5, 25, 15, 30, 30, tzinfo=dt.UTC),
-    ])
-
-    derived = branch.branch_point_time(store, run_dir, path_ids[-1], source_run=_run_handle_1165(run_dir))
-
-    assert derived == latest.replace(microsecond=0), (
-        f"T0 is {derived}, not the prefix's own latest moment truncated to seconds")
-    assert derived.utcoffset() == dt.timedelta(0), f"T0 is not aware UTC: {derived!r}"
-    assert _clock.z_seconds(derived) == "2026-05-25T15:31:00Z"
-
-
-def test_t0_ignores_everything_the_run_did_after_the_branch(tmp_path):
-    """    A branch point in the middle of a finished run derives the moment IT stood at, not the
-    moment the run ended at.
-
-    This is the whole reason T0 is derived from the prefix rather than read off the run: the
-    source ran on, and a sibling forked at turn N is living at turn N. Taken from the run's tip,
-    every sibling of every branch point in one run would share one clock — and an episode
-    branched at 15:31 would close its unbounded windows over evidence that landed at 16:40, i.e.
-    over the source's own later answers.
-
-    Both arms run against ONE run, so an implementation that reads the terminal state passes
-    neither."""
-    branch = branch_mod()
-    store, run_dir, path_ids = _timed_source(tmp_path, [
-        dt.datetime(2026, 5, 25, 15, 30, 0, tzinfo=dt.UTC),
-        dt.datetime(2026, 5, 25, 16, 40, 0, tzinfo=dt.UTC),
-    ])
-
-    early = branch.branch_point_time(store, run_dir, path_ids[1], source_run=_run_handle_1165(run_dir))
-    late = branch.branch_point_time(store, run_dir, path_ids[-1], source_run=_run_handle_1165(run_dir))
-
-    assert early == dt.datetime(2026, 5, 25, 15, 30, 0, tzinfo=dt.UTC)
-    assert late == dt.datetime(2026, 5, 25, 16, 40, 0, tzinfo=dt.UTC)
+    assert (early, late) == (C.FIRST_READ_READING, C.BRANCH_READING), (
+        f"T0 is not the snapshot's run-clock reading at each branch response: early={early} "
+        f"(expected {C.FIRST_READ_READING}), late={late} (expected {C.BRANCH_READING})")
+    assert late.utcoffset() == dt.timedelta(0), f"T0 is not aware UTC: {late!r}"
+    framework = C.source_message_times(run_dir)
+    assert framework, "the source's messages carry no timestamps; the check below is empty"
+    assert not {early, late} & set(framework), (
+        "T0 is a framework message timestamp (the wall clock), not the run clock's reading")
 
 
 def test_the_branch_spec_carries_the_moment_it_forks_at(tmp_path):
@@ -1080,22 +1076,44 @@ def test_the_branch_spec_carries_the_moment_it_forks_at(tmp_path):
     names = [f.name for f in dataclasses.fields(branch.BranchSpec)]
     as_of = next(f for f in dataclasses.fields(branch.BranchSpec) if f.name == "as_of")
 
-    assert names[:3] == ["source_run_dir", "branch_message_id", "continuation_prompt"], (
-        f"the three original coordinates moved: {names}")
+    # #1255 (D1): the continuation prompt is no coordinate of a branch — its removal is
+    # slice A's demand (`test_920_branch_seam`); this arm keeps the two that remain in place.
+    assert names[:2] == ["source_run_dir", "branch_message_id"], (
+        f"the two coordinates moved: {names}")
     assert as_of.default is dataclasses.MISSING, "a resume can be spelled without a moment"
     assert as_of.default_factory is dataclasses.MISSING, (
         "the moment defaults to something the caller never chose — most likely `now`, which "
         "is the wall clock this batch exists to take out of a branched run")
 
 
-def test_a_spec_whose_clock_disagrees_with_its_branch_point_is_refused(tmp_path):
+@pytest.fixture
+def recorded_branch(tmp_path, monkeypatch):
+    """A branch point #1255 admits: a source RECORDED through `run.main` (so it carries what a
+    fork needs, N4) and its tool-calling MAIN response (D1), with the source's store held open
+    for the test. `_branch_947.legal_source` writes its turns straight into a store and branches
+    at a tool RETURN — after #1255 it is a pre-change source that every launch refuses, so a
+    positive arm over it would go red for N4's reason instead of this file's.
+
+    Yields `(store, source run folder, branch message id, opened source run)`."""
+    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
+    _tenant_id, run_dir = C.record_source(tmp_path)
+    source = C.opened_source(run_dir)
+    branch_id = C.branch_response(run_dir, tool="read_file", arg_suffix=f"/{C.LESSONS[1]}.md")
+    store = branch_mod().source_store_if_any(run_dir, source_run=source)
+    assert store is not None, "the recorded source left no session store"
+    try:
+        yield store, run_dir, branch_id, source
+    finally:
+        store.close()
+
+
+def test_a_spec_whose_clock_disagrees_with_its_branch_point_is_refused(recorded_branch):
     """    `validate` refuses a spec whose `as_of` is not the moment the branch point derives.
 
     A spec is data — it comes off a CLI flag or a world file — and a T0 that does not belong to
-    this branch point is the one input that corrupts an episode SILENTLY: every payload stamps
-    consistently, every window closes consistently, and the whole set describes a moment the run
-    was never at. Nothing downstream can detect it, because consistency is all any reader can
-    check.
+    this branch point is the one input that corrupts an episode SILENTLY: every window closes
+    consistently, and the whole set describes a moment the run was never at. Nothing downstream
+    can detect it, because consistency is all any reader can check.
 
     ONE SECOND OFF is the arm that discriminates. A wildly wrong moment would be caught by any
     sanity bound someone might reach for instead — "is this within the run's lifetime" — and a
@@ -1103,27 +1121,39 @@ def test_a_spec_whose_clock_disagrees_with_its_branch_point_is_refused(tmp_path)
     rule produces, which is the near miss that would otherwise sail through.
 
     The positive arm runs first and against the same spec, so the refusal cannot be a `validate`
-    that refuses everything."""
+    that refuses everything. #1255: over `recorded_branch` (a tool-calling branch point of a
+    recorded source), which today's `validate` refuses as a dangling call — red until D1.
+
+    Rev 5 C4: the moment the branch point derives is the snapshot's run-clock reading, `R`
+    (`START+610`, the test's own sum — not derived by production here), so the legal spec names
+    `R`; and a spec naming any timestamp the framework stamped on the source's messages (what
+    the derivation answered before C4: the wall clock) is refused as disagreeing."""
     branch = branch_mod()
-    store, run_dir, _session_id, path_ids = legal_source(
-        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
-    legal = spec_at(store, run_dir, path_ids[-1])
+    store, run_dir, branch_id, source = recorded_branch
+    legal = spec_at(store, run_dir, branch_id, as_of=R)
 
-    assert branch.validate(store, legal, source_run=_run_handle_1165((legal).source_run_dir)) is None, (
-        "the derived spec was refused, so the refusal below pins nothing")
+    assert branch.validate(store, legal, source_run=source) is None, (
+        "the spec at the snapshot's run-clock reading was refused, so the refusal below pins "
+        "nothing")
 
-    for wrong in (dt.timedelta(seconds=1), dt.timedelta(hours=3)):
+    for wrong in (dt.timedelta(seconds=1), dt.timedelta(seconds=-1), dt.timedelta(hours=3)):
         with pytest.raises(branch.BranchError):
-            branch.validate(store, dataclasses.replace(legal, as_of=legal.as_of + wrong), source_run=_run_handle_1165((dataclasses.replace(legal, as_of=legal.as_of + wrong)).source_run_dir))
+            branch.validate(store, dataclasses.replace(legal, as_of=legal.as_of + wrong),
+                            source_run=source)
+    framework = C.source_message_times(run_dir)
+    assert framework, "the source's messages carry no timestamps; the check below is empty"
+    for wall in framework:
+        with pytest.raises(branch.BranchError):
+            branch.validate(store, dataclasses.replace(legal, as_of=wall), source_run=source)
 
 
 @pytest.mark.parametrize("as_of", [
     None,
-    "2026-05-25T15:30:45Z",
-    dt.datetime(2026, 5, 25, 15, 30, 45),
-    dt.datetime(2026, 5, 25, 17, 30, 45, tzinfo=dt.timezone(dt.timedelta(hours=2))),
-])
-def test_a_spec_whose_clock_is_not_aware_utc_is_refused(tmp_path, as_of):
+    _clock.z_seconds(R),
+    R.replace(tzinfo=None),
+    R.astimezone(dt.timezone(dt.timedelta(hours=2))),
+], ids=["none", "a-string", "naive", "plus-two-hours"])
+def test_a_spec_whose_clock_is_not_aware_utc_is_refused(recorded_branch, as_of):
     """    A spec's moment must be an aware, zero-offset datetime, refused as a `BranchError`.
 
     The shape check is separate from the agreement check above and fails first, because the two
@@ -1131,10 +1161,19 @@ def test_a_spec_whose_clock_is_not_aware_utc_is_refused(tmp_path, as_of):
     fault at the caller, and a mismatch is a spec pointed at the wrong branch point. Refused as
     `BranchError` specifically, because that is the class `run_investigation`'s store-setup
     handler names — a `TypeError` out of here escapes it entirely, leaving the sqlite connection
-    open and the wire log still registered in `observe._ACTIVE_PATHS`."""
-    branch = branch_mod()
-    store, run_dir, _session_id, path_ids = legal_source(
-        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
+    open and the wire log still registered in `observe._ACTIVE_PATHS`.
 
+    #1255: the spec at the same branch point's moment is admitted first (the positive arm this
+    test lacked: a `validate` that refused the branch point itself passed every case). Rev 5
+    C4: that moment is the snapshot's run-clock reading `R`; every bad spelling here names `R`
+    itself (as text, naive, or at +02:00 — the same instant), so only the shape check refuses
+    it and an agreement check alone would not."""
+    branch = branch_mod()
+    store, run_dir, branch_id, source = recorded_branch
+
+    assert branch.validate(store, spec_at(store, run_dir, branch_id, as_of=R),
+                           source_run=source) is None, (
+        "the spec at the snapshot's run-clock reading was refused, so the refusal below pins "
+        "nothing")
     with pytest.raises(branch.BranchError):
-        branch.validate(store, spec_at(store, run_dir, path_ids[-1], as_of=as_of), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[-1], as_of=as_of)).source_run_dir))
+        branch.validate(store, spec_at(store, run_dir, branch_id, as_of=as_of), source_run=source)

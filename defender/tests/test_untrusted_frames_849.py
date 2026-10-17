@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from defender.agents import MAIN_DEF  # noqa: E402
@@ -174,7 +176,7 @@ def test_a_runtime_agents_own_run_dir_read_stays_unframed(tmp_path):
     dir is private workspace, not a shared one — `_bound_and_wrap` consults the cross-agent
     predicate only under `_is_learning_role`, so main's own report comes back bare."""
     deps, run = _scene(tmp_path, MAIN_DEF)
-    assert _tool_read_file(deps, str(run / "report.md")) == "trusted\n"
+    assert _tool_read_file(deps, model_path(run / "report.md", run_dir=run)) == "trusted\n"
 
 
 # F-24: the ceiling on the lane
@@ -188,7 +190,7 @@ def test_the_cat_lane_caps_a_captured_payload_at_the_capture_ceiling(tmp_path):
     deps, run = _scene(tmp_path, T1106.fixture_gather_def(), stdout=body.encode())
     payload = _payload(run, body)
 
-    out = _tool_bash(deps, f"cat {payload}")
+    out = _tool_bash(deps, f"cat {model_path(payload, run_dir=run)}")
 
     assert f"showing the first {CAPTURE_CAP}" in out
     assert "[bash]" in out
@@ -204,8 +206,9 @@ def test_the_two_lanes_return_the_same_head_of_the_same_payload(tmp_path):
     deps, run = _scene(tmp_path, T1106.fixture_gather_def(), stdout=body.encode())
     payload = _payload(run, body)
 
-    through_cat = _stdout_of(_tool_bash(deps, f"cat {payload}"))
-    through_read = FRAME_RE.search(_tool_read_file(deps, str(payload))).group("body")
+    through_cat = _stdout_of(_tool_bash(deps, f"cat {model_path(payload, run_dir=run)}"))
+    through_read = FRAME_RE.search(
+        _tool_read_file(deps, model_path(payload, run_dir=run))).group("body")
 
     assert through_cat[:CAPTURE_CAP] == through_read[:CAPTURE_CAP] == body[:CAPTURE_CAP]
 
@@ -217,7 +220,7 @@ def test_a_reduced_return_under_the_ceiling_is_verbatim(tmp_path):
     deps, run = _scene(tmp_path, T1106.fixture_gather_def(), stdout=b"count\n3\n")
     payload = _payload(run, "z" * (CAPTURE_CAP + 5000))
 
-    out = _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT count(*) FROM data'")
+    out = _tool_bash(deps, f"cat {model_path(payload, run_dir=run)} | defender-sql 'SELECT count(*) FROM data'")
 
     assert _stdout_of(out) == "count\n3\n"
     assert "[bash]" not in out
@@ -246,11 +249,14 @@ def test_the_ceiling_names_the_operand_that_set_it(tmp_path):
     summary.parent.mkdir(parents=True, exist_ok=True)
     summary.write_text("authored, and capped far higher\n", encoding="utf-8")
 
-    out = _tool_bash(deps, f"cat {summary} {payload}")
+    m_payload, m_summary = model_path(payload, run_dir=run), model_path(summary, run_dir=run)
+    out = _tool_bash(deps, f"cat {m_summary} {m_payload}")
 
     assert f"showing the first {CAPTURE_CAP}" in out, "the authored operand raised the ceiling"
-    assert str(payload) in out
-    assert str(summary) not in out.split("[bash]", 1)[1]
+    # #1255 C5: the hint names the operand as the model handed it — its model path — and never
+    # the host path (which used to be asserted here).
+    assert m_payload in out
+    assert m_summary not in out.split("[bash]", 1)[1]
 
 
 def test_an_already_reduced_overflow_is_not_told_to_re_run_its_own_pipe(tmp_path):
@@ -261,7 +267,7 @@ def test_an_already_reduced_overflow_is_not_told_to_re_run_its_own_pipe(tmp_path
     deps, run = _scene(tmp_path, T1106.fixture_gather_def(), stdout=b"agg\n" * (CAPTURE_CAP // 2))
     payload = _payload(run, "q" * 10)
 
-    out = _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT user FROM data GROUP BY 1'")
+    out = _tool_bash(deps, f"cat {model_path(payload, run_dir=run)} | defender-sql 'SELECT user FROM data GROUP BY 1'")
 
     assert f"showing the first {CAPTURE_CAP}" in out
     assert tools._BASH_REDUCED_HINT in out
@@ -288,7 +294,7 @@ def test_stderr_is_held_to_the_same_ceiling_as_stdout(tmp_path):
     payload = _payload(run, "p" * 10)
     deps.box.result = BoxResult(1, b"", b"E" * (CAPTURE_CAP + 5000))
 
-    out = _tool_bash(deps, f"cat {payload} | defender-sql 'bad'")
+    out = _tool_bash(deps, f"cat {model_path(payload, run_dir=run)} | defender-sql 'bad'")
 
     assert f"showing the first {CAPTURE_CAP}" in out
     assert "E" * (CAPTURE_CAP + 5000) not in out
@@ -303,7 +309,7 @@ def test_the_cap_lands_inside_the_frame(tmp_path):
     deps, run = _scene(tmp_path, T1106.fixture_gather_def(), stdout=body.encode())
     payload = _payload(run, body)
 
-    out = _tool_bash(deps, f"cat {payload}")
+    out = _tool_bash(deps, f"cat {model_path(payload, run_dir=run)}")
 
     # #875: the delimiter is minted at wrap time and recovered from the output.
     salt = frame_salt_of(out, "untrusted")

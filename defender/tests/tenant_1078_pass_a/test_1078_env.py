@@ -66,6 +66,13 @@ def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path,
     return Path(run_dir), episode_dir
 
 
+def _box_env(run_dir: Path) -> dict[str, str]:
+    """The env a run's box is created with, read off the real `docker run` argv builder."""
+    argv = H.mod("runtime.box")._create_argv(
+        "defender-r1", Path(run_dir), H.DEFENDER, H.mod("runtime.box._spec").DEFAULT_SPEC).argv
+    return dict(argv[i + 1].partition("=")[::2] for i, a in enumerate(argv) if a == "--env")
+
+
 def _corpus_paths(corpus_root: str | Path) -> set[Path]:
     """The investigation documents the corpus reader actually LOADED from `corpus_root`."""
     corpus, _report = H.mod("skills.invlang.corpus").load_corpus(corpus_root)
@@ -167,19 +174,23 @@ def test_corpus_for_a_fresh_run_holds_the_record_and_sidecars(tmp_path, monkeypa
 # ======================================================================================
 
 def test_d5_derived_export_parity(tmp_path, monkeypatch):
-    """run_env and infra_env both export DEFENDER_RUNS_BASE=run_dir.parent: <root>/T/runs for
-    a fresh run and <ep>/runs for a sibling."""
+    """run_env exports DEFENDER_RUNS_BASE=run_dir.parent: <root>/T/runs for a fresh run and
+    <ep>/runs for a sibling. The BOX exports the model view's constant `/runs` for both.
+
+    Flipped by #1255 (design rev 4, P1): the box used to export the same host parent as the
+    host env, which named the episode's runs folder inside a sibling's box — an arm tell (O2)
+    and host layout (O3). The host half is unchanged."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
-    box = H.mod("runtime.box")
     fresh = _fresh_run(root, "r1")
     sibling, episode_dir = _sibling_run(tmp_path, root, tmp_path / "episodes")
     for run_dir, expected in ((fresh, H.runs_dir(root, TENANT)),
                               (sibling, episode_dir / "runs")):
         host = H.run_common().run_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"]
-        boxed = box.infra_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"]
-        assert host == boxed == str(run_dir.parent), (host, boxed, run_dir)
+        boxed = _box_env(run_dir)["DEFENDER_RUNS_BASE"]
+        assert host == str(run_dir.parent), (host, run_dir)
         assert Path(host) == expected, f"{run_dir}'s runs base is {host}, not {expected}"
+        assert boxed == "/runs", (boxed, run_dir)
 
 
 def test_box_remedy_text_rewritten_to_name_the_data_root(tmp_path):
@@ -242,11 +253,12 @@ def test_run_env_export_clobbers_stale_runs_base(tmp_path, monkeypatch):
     box = H.mod("runtime.box")
     assert H.run_common().run_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"] == \
         str(run_dir.parent)
-    assert box.infra_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"] == str(run_dir.parent)
     argv = box._create_argv("defender-r1", run_dir, H.DEFENDER,
                             H.mod("runtime.box._spec").DEFAULT_SPEC).argv
     exported = [a for a in argv if a.startswith("DEFENDER_RUNS_BASE=")]
-    assert exported == [f"DEFENDER_RUNS_BASE={run_dir.parent}"], exported
+    # #1255 (design rev 4, P1): the box's value is the model view's constant, which still
+    # overwrites the stale inherited one.
+    assert exported == ["DEFENDER_RUNS_BASE=/runs"], exported
 
 
 def test_box_env_allowlist_survives_knob_retirement(tmp_path):
@@ -264,13 +276,15 @@ def test_box_env_allowlist_survives_knob_retirement(tmp_path):
     plant_alert(run_dir)
     argv = H.mod("runtime.box")._create_argv(
         "defender-r1", run_dir, H.DEFENDER, H.mod("runtime.box._spec").DEFAULT_SPEC).argv
-    assert f"DEFENDER_RUNS_BASE={run_dir.parent}" in argv, (
-        "the box no longer receives the derived runs base the in-box shim requires")
+    # #1255 (design rev 4, P1): the in-box value is the model view's `/runs`.
+    assert "DEFENDER_RUNS_BASE=/runs" in argv, (
+        "the box no longer receives the runs base the in-box shim requires")
 
 
 def test_box_environment_for_a_sibling_under_the_old_episodes_base(tmp_path, monkeypatch):
-    """A pass-A sibling's box env exports DEFENDER_RUNS_BASE=run_dir.parent, its episode's
-    runs dir under the old episodes base (O4's gap until (B))."""
+    """A pass-A sibling's box env exports DEFENDER_RUNS_BASE=/runs, the model view's constant
+    (#1255 P1), and names nothing of its episode — it used to be run_dir.parent, its
+    episode's runs dir under the old episodes base."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     old_episodes = tmp_path / "old-episodes-base"
@@ -278,8 +292,11 @@ def test_box_environment_for_a_sibling_under_the_old_episodes_base(tmp_path, mon
     assert run_dir.parent == episode_dir / "runs"
     assert root.resolve() not in run_dir.resolve().parents, (
         "the sibling landed under the data root — that is pass (B)'s layout, not (A)'s")
-    env = H.mod("runtime.box").infra_env(H.DEFENDER, run_dir)
-    assert env["DEFENDER_RUNS_BASE"] == str(episode_dir / "runs")
+    # Flipped by #1255 (design rev 4, P1 / O2): a sibling's box exports the same `/runs` a
+    # natural run's does — it used to export its episode's runs folder.
+    env = _box_env(run_dir)
+    assert env["DEFENDER_RUNS_BASE"] == "/runs", env["DEFENDER_RUNS_BASE"]
+    assert str(episode_dir) not in " ".join(env.values()), env
 
 
 # ======================================================================================

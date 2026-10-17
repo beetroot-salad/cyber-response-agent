@@ -11,9 +11,10 @@ import json
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
+from collections.abc import Callable, Iterator
 from typing import Any
 
-from pydantic_ai.messages import RetryPromptPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import ModelRequest, RetryPromptPart, ToolCallPart, ToolReturnPart
 
 from defender import _clock
 from defender.run_repository import Run, RUN_LAYOUT, RunPaths, artifact_dir
@@ -119,9 +120,10 @@ def session_for_run(store: Any, run_dir: Path, *, source_run: Run) -> str:
 def branch_point_time(store: Any, run_dir: Path, branch_message_id: int, *, source_run: Run) -> datetime:
     """The moment the branch point was written — the clock a sibling resumes into.
 
-    Read from the store's message timestamps. The maximum over the prefix, since a resumed
-    lineage can interleave and T0 must not precede evidence the sibling inherits. Truncated to
-    whole seconds so it round-trips through the `Z`-seconds format `validate` compares against.
+    The run clock's reading in the branch point's fork snapshot (rev 5 C4), whole seconds so it
+    round-trips through the `Z`-seconds format `validate` compares against. Not the framework's
+    message timestamps, which are wall times a natural run's clock need not agree with; those
+    are used only for a source with no snapshot, which `validate` refuses.
     """
     session = session_for_run(store, run_dir, source_run=source_run)
     path = session_store.path_row_ids(store, session)
@@ -130,7 +132,13 @@ def branch_point_time(store: Any, run_dir: Path, branch_message_id: int, *, sour
             f"message {branch_message_id} is not on {run_dir}'s own main session, so it has no "
             "branch-point time — the id has to be one this run's main path actually holds")
     prefix = session_store.hydrate(store, session, role="analysis")
-    return _as_of_of(prefix[: path.index(branch_message_id) + 1], run_dir, branch_message_id)
+    upto = prefix[: path.index(branch_message_id) + 1]
+    from . import _snapshot  # _snapshot reads this module's frontier
+    snapshot = _snapshot.load(store, session, _snapshot.request_count(upto))
+    if snapshot is None:
+        # No snapshot: `validate` refuses this source (N4), whatever moment is named here.
+        return _as_of_of(upto, run_dir, branch_message_id)
+    return snapshot.fork_time
 
 
 def _as_of_of(prefix: list, run_dir: Path, branch_message_id: int) -> datetime:
@@ -298,3 +306,61 @@ def _lead_of(name: str) -> str:
     """The lead a per-lead entry belongs to: the name up to the first dot (`l-001/`,
     `l-001.lead.json`, `l-001.md`). Suffix-stripping, so an unknown shape is not dropped."""
     return name.split(".", 1)[0]
+
+
+def carried_retries(prefix: list) -> dict[str, int]:
+    """The retry count each tool carries into the step after `prefix` — the framework's own
+    bookkeeping, replayed over the conversation (rev 5 C1).
+
+    The framework keeps a tool's count across later steps until that tool succeeds: at each
+    step, a tool with a returned call is cleared, and a tool whose call was refused for retry
+    counts one more on what it carried (`pydantic_ai.ToolManager.for_run_step`). Those counts
+    live only in the framework's run and cannot be seeded into a resumed one, so a branch
+    point at which any tool carries one is a step a resumed run would take differently."""
+    retries: dict[str, int] = {}
+    for message in prefix:
+        if not isinstance(message, ModelRequest):
+            continue
+        failed = {p.tool_name for p in message.parts
+                  if isinstance(p, RetryPromptPart) and p.tool_name}
+        succeeded = {p.tool_name for p in message.parts if isinstance(p, ToolReturnPart)}
+        if not failed and not succeeded:
+            continue
+        carried = {tool: n for tool, n in retries.items() if tool not in succeeded}
+        carried.update({tool: retries.get(tool, 0) + 1 for tool in failed})
+        retries = carried
+    return {tool: n for tool, n in retries.items() if n}
+
+
+def lead_records(run: Run) -> Iterator[tuple[str, tuple[Any, ...]]]:
+    """The per-lead write-once records `run`'s folder holds, as `(kind, args)` — each lead's
+    claim (`("lead_claim", (lead,))`), raw payloads (`("payload", (lead, seq))`) and gather
+    summary (`("gather_summary", (lead,))`) — recognised by the exact name the layout gives
+    them: an entry the layout would not name (a stray file, a planted link's odd name) is not
+    a record and is left out. Directories are judged without following a link."""
+    paths = RunPaths(run.run_dir)
+    if artifact_dir(paths.gather_raw):
+        for entry in sorted(paths.gather_raw.iterdir()):
+            lead = _lead_of(entry.name)
+            if artifact_dir(entry):
+                for payload in sorted(entry.iterdir()):
+                    seq = _lead_of(payload.name)
+                    if seq.isascii() and seq.isdecimal() and _named(
+                            lambda: RUN_LAYOUT.payload(entry.name, int(seq)).name, payload.name):  # noqa: B023 — called at once
+                        yield "payload", (entry.name, int(seq))
+            elif _named(lambda: RUN_LAYOUT.lead_claim(lead).name, entry.name):  # noqa: B023 — called at once
+                yield "lead_claim", (lead,)
+    if artifact_dir(paths.gather_summaries):
+        for entry in sorted(paths.gather_summaries.iterdir()):
+            lead = _lead_of(entry.name)
+            if _named(lambda: RUN_LAYOUT.gather_summary(lead).name, entry.name):  # noqa: B023 — called at once
+                yield "gather_summary", (lead,)
+
+
+def _named(layout_name: Callable[[], str], actual: str) -> bool:
+    """Whether `actual` is exactly the layout's name for a record (`False` when the layout
+    refuses the record's components)."""
+    try:
+        return layout_name() == actual
+    except ValueError:
+        return False

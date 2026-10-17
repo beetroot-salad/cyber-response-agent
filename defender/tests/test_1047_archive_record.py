@@ -324,13 +324,15 @@ def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path
         "defender-run-1047", run_dir, tmp_path / "srv" / "defender",
         BoxSpec(rootfs="python:3.11-slim"), (),
     ).argv
-    writable = [
-        spec.split("target=", 1)[1].split(",", 1)[0]
-        for spec in argv if spec.startswith("type=bind,") and "readonly" not in spec
-    ]
+    rw_specs = [spec for spec in argv if spec.startswith("type=bind,") and "readonly" not in spec]
+    writable = [spec.split("source=", 1)[1].split(",", 1)[0] for spec in rw_specs]
     assert writable == [str(run_dir)], (
         f"the box's writable binds are {writable}; O3's whole argument is that there is "
         "exactly one and it is the run dir")
+    # #1255 (design rev 4, P1): the box sees that bind at the model view's `/runs/current`; the
+    # sidecar's containment is judged on the bind's host SOURCE, which is the run dir.
+    assert [spec.split("target=", 1)[1].split(",", 1)[0] for spec in rw_specs] == [
+        "/runs/current"], rw_specs
     assert not str(sidecar).startswith(str(run_dir) + "/"), (
         f"{sidecar} is inside the box's own rw bind — the record would be forgeable by the "
         "subject it is about")

@@ -180,12 +180,16 @@ def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_no
     assert on_minted is not None, "the fold push produced no block (it failed open)"
     block = text[len("the record"):]
     assert block.startswith("\n\n"), text
-    assert str(lesson.resolve()) in block, block
+    # #1255 (design rev 4, P1 outbound): lessons are named by the checkout's model path.
+    # (The hit line's `- ` lead is matched too: the planted tree ends in `/defender`, so a bare
+    # `/defender/lessons/…` would also be a substring of the host realpath.)
+    model_lesson = f"- /defender/lessons/{lesson.name} — matched"
+    assert model_lesson in block, block
     assert F.FOLD_HEADER in block.strip().splitlines()[0], block
 
     document = importlib.import_module("defender.runtime.tools._document")
     recall = document._frontier_recall(deps, "", F.FOLDING_DOC)
-    assert str(lesson.resolve()) in recall, f"the document tool produced no block: {recall!r}"
+    assert model_lesson in recall, f"the document tool produced no block: {recall!r}"
     assert F.WRITE_RETURN_HEADER in recall, recall
     assert engine in sys.modules, f"neither consumer loaded the moved engine {engine}"
 

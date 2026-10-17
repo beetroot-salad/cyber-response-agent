@@ -56,6 +56,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from defender import run_common  # noqa: E402
@@ -212,8 +214,28 @@ class FakeDocker:
             return (0, "<no value>\n", "")
         return (0, f"{self.existing}\n", "")
 
-    @staticmethod
-    def _all_succeed(call: _DockerCall) -> tuple[int, str, str]:
+    def _through_binds(self, inside: Path) -> Path:
+        """Where an in-box path lives on the host: through the bind table of the create this
+        double saw (nested mounts winning), as a real daemon resolves it; unchanged when no bind
+        covers it. Since #1255 the run box mounts each tree at a fixed model path
+        (`/runs/current`, …), so an in-box path is no longer the host path it reads."""
+        creates = [c.argv for c in self.calls if c.verb == "run"]
+        if not creates:
+            return inside
+        argv = creates[-1]
+        binds = []
+        for i, tok in enumerate(argv[:-1]):
+            if tok == "--mount":
+                parts = dict(f.split("=", 1) for f in argv[i + 1].split(",") if "=" in f)
+                if parts.get("source") and parts.get("target"):
+                    binds.append((Path(parts["target"]), Path(parts["source"])))
+        covering = [(t, src) for t, src in binds if inside.is_relative_to(t)]
+        if not covering:
+            return inside
+        target, source = max(covering, key=lambda b: len(b[0].parts))
+        return source / inside.relative_to(target)
+
+    def _all_succeed(self, call: _DockerCall) -> tuple[int, str, str]:
         """The default daemon: everything works, INCLUDING reading a file back.
 
         `(0, "", "")` for every verb is not an all-succeed daemon — it is a daemon whose
@@ -236,7 +258,7 @@ class FakeDocker:
         if call.verb == "exec" and "python3" in call.argv and "-c" in call.argv:
             return (0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
         if call.verb == "exec" and len(call.argv) > 1:
-            target = Path(call.argv[-1])
+            target = self._through_binds(Path(call.argv[-1]))
             if target.is_file():
                 return (0, target.read_text(encoding="utf-8"), "")
         return (0, "", "")
@@ -316,6 +338,12 @@ def _deps(env, fake_box):
     the injection point — the policy, roots and gate are the real compiled article; only the
     thing that would have spawned a container is faked."""
     return bind(MAIN_DEF, env.run, defender_dir=env.dfn, box=fake_box)
+
+
+def _m(env, host: Path) -> str:
+    """The model's spelling of a path under this tree's run folder or defender tree (#1255 P1:
+    a model hands back model paths; the gate decides on them)."""
+    return model_path(host, run_dir=env.run, defender_dir=env.dfn)
 
 
 def _bash(env, cmd, which="main"):
@@ -1133,7 +1161,7 @@ def test_mid_run_exec_failure_degrades_to_a_tool_error(gate_env):
     positive control below), and only the frameless case becomes a tool error. The refuted C39
     shape is deliberately not asserted: no assertion here depends on which stream the daemon
     chose or on its line endings, because that shape already changed under us once."""
-    cmd = f"cat {gate_env.run}/report.md"
+    cmd = f"cat {_m(gate_env, gate_env.run / 'report.md')}"
 
     faulting = _deps(gate_env, BoxRecorder(fault=BoxFault("no frame on stdout")))
     with pytest.raises(ModelRetry):
@@ -1279,10 +1307,15 @@ def test_no_box_failure_path_executes_in_process(tmp_path, gate_env):
     satisfy this test."""
     secret = "MARKER-e2b7-executed-in-process"
     (gate_env.run / "report.md").write_text(secret + "\n", encoding="utf-8")
-    faulting = _deps(gate_env, BoxRecorder(fault=BoxFault("daemon unreachable")))
+    fault_box = BoxRecorder(fault=BoxFault("daemon unreachable"))
+    faulting = _deps(gate_env, fault_box)
 
     with pytest.raises(ModelRetry) as e:
-        runtime_tools._tool_bash(faulting, f"cat {gate_env.run}/report.md")
+        runtime_tools._tool_bash(faulting, f"cat {_m(gate_env, gate_env.run / 'report.md')}")
+    # Control (#1255 RC-3): the gate admitted the command and the FAULTING BOX was reached, so
+    # the negative below is the box-fault path's — not a gate refusal that never ran anything.
+    assert len(fault_box.calls) == 1, (
+        "the command never reached the box, so the no-fallback negative was not exercised")
     assert secret not in str(e.value)
 
     fn = _fn_node(BASH_PY, "_tool_bash")
@@ -1372,11 +1405,15 @@ def test_decide_bash_runs_host_side_before_every_box_call(gate_env):
     assert denied.calls == [], "a DENIED command reached the box"
 
     allowed = BoxRecorder(result=BoxResult(0, b"{}\n", b""))
-    cmd = f"cat {gate_env.run}/report.md"
+    report = _m(gate_env, gate_env.run / "report.md")
+    cmd = f"cat {report}"
     runtime_tools._tool_bash(_deps(gate_env, allowed), cmd)
     assert len(allowed.calls) == 1
-    approved = _bash(gate_env, cmd).pipelines
-    assert allowed.calls[0]["pipelines"] == list(approved)
+    # #1255 C8/C11: what the box receives is the command's own decomposition in the model view —
+    # one pipeline, one stage, `cat <model path>` — stated literally, because how the gate's own
+    # functions spell their inputs is the implementer's choice (C11).
+    crossed = [[list(st.argv) for st in pl.stages] for pl in allowed.calls[0]["pipelines"]]
+    assert crossed == [[["cat", report]]], crossed
 
 
 def test_ground_truth_read_denylist_still_denies_on_both_surfaces(gate_env):

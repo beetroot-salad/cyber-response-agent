@@ -20,6 +20,7 @@ import pytest
 from pydantic import ValidationError
 
 from defender._model import model
+from defender.tests import _branch_947 as B947
 
 
 # ---------------------------------------------------------------------------------------
@@ -143,14 +144,19 @@ def test_every_ported_record_with_a_forward_reference_is_complete_at_import(modu
 # ---------------------------------------------------------------------------------------
 
 
-_GOOD = dict(source_run_dir=Path("/x"), branch_message_id=3, continuation_prompt="go",
+#: #1255 (D1, P4) COMPAT: the continuation prompt is offered only while `BranchSpec` still
+#: declares it (`_branch_947.declares_retired_prompt`), so every mistyped-field case below
+#: reaches its own refusal on both sides of the change. That the field is GONE is
+#: `test_920_branch_seam`'s demand and `test_branch_spec_field_types_are_read_off_the_class`'s.
+#: The mistyped-prompt case that stood in the table below retired with the field (D1).
+_RETIRED_PROMPT = {B947.RETIRED_PROMPT_FIELD: "go"} if B947.declares_retired_prompt() else {}
+_GOOD = dict(source_run_dir=Path("/x"), branch_message_id=3, **_RETIRED_PROMPT,
              as_of=datetime(2026, 1, 1, tzinfo=UTC))
 
 
 @pytest.mark.parametrize(("field_name", "bad"), [
     ("branch_message_id", "59"),
     ("branch_message_id", True),
-    ("continuation_prompt", None),
     ("source_run_dir", "/tmp/x"),
     ("as_of", "2026-01-01T00:00:00Z"),
 ])
@@ -167,7 +173,8 @@ def test_branch_spec_refuses_a_mistyped_field_as_branch_error(field_name, bad):
 def test_branch_spec_accepts_the_positional_form_too():
     from defender.runtime.branch import BranchSpec
 
-    spec = BranchSpec(Path("/x"), 3, "go", datetime(2026, 1, 1, tzinfo=UTC))
+    # #1255 (D1, P4): positional order is (source, message, [prompt while it exists], as_of).
+    spec = BranchSpec(Path("/x"), 3, *_RETIRED_PROMPT.values(), datetime(2026, 1, 1, tzinfo=UTC))
     assert spec.branch_message_id == 3
 
 
@@ -378,10 +385,13 @@ def test_unwrap_before_keeps_pydantics_arity_checks():
     naming a field a positional already filled are both refused, as stdlib does."""
     from defender.runtime.branch import BranchSpec
 
-    with pytest.raises(TypeError, match="takes 4 positional argument"):
-        BranchSpec(Path("/x"), 3, "go", datetime(2026, 1, 1, tzinfo=UTC), "EXTRA")  # type: ignore[call-arg]
+    # #1255 (D1, P4): four positional fields while the prompt exists, three after.
+    arity = 3 + len(_RETIRED_PROMPT)
+    fields = (Path("/x"), 3, *_RETIRED_PROMPT.values(), datetime(2026, 1, 1, tzinfo=UTC))
+    with pytest.raises(TypeError, match=f"takes {arity} positional argument"):
+        BranchSpec(*fields, "EXTRA")  # type: ignore[call-arg]
     with pytest.raises(TypeError, match=r"multiple values for argument\(s\) \['branch_message_id'\]"):
-        BranchSpec(Path("/x"), 3, "go", datetime(2026, 1, 1, tzinfo=UTC), branch_message_id=99)  # type: ignore[call-arg]
+        BranchSpec(*fields, branch_message_id=99)  # type: ignore[call-arg]
 
 
 def test_branch_spec_field_types_are_read_off_the_class():
@@ -390,8 +400,8 @@ def test_branch_spec_field_types_are_read_off_the_class():
     one refuses at import."""
     from defender.runtime.branch import _spec
 
-    expected = {"source_run_dir": Path, "branch_message_id": int,
-                "continuation_prompt": str, "as_of": datetime}
+    # #1255 (D1, P4): the continuation prompt ceased to be a field of the spec.
+    expected = {"source_run_dir": Path, "branch_message_id": int, "as_of": datetime}
     assert expected == _spec._FIELD_TYPES
     assert set(_spec._WHY) == set(_spec._FIELD_TYPES)
 

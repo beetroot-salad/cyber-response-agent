@@ -37,6 +37,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
@@ -392,13 +394,16 @@ def test_a_curator_on_a_symlinked_repo_root_reads_and_writes_as_today(spelling, 
     assert (real_corpus / "new.md").read_text(encoding="utf-8") == "edited line\n"
 
 
-@pytest.mark.parametrize("spelling", ["relative", "absolute-through-link", "absolute-resolved"])
+@pytest.mark.parametrize("spelling", ["relative", "model-absolute"])
 def test_main_on_a_run_dir_under_a_symlinked_ancestor_reads_and_appends_as_today(
     spelling, tmp_path
 ):
     """The run dir sits under a symlinked ancestor (the macOS `/tmp` shape): the root is the
-    host's spelling and is followed. Every spelling reads a plain file, and `append_block` lands
-    in `investigation.md`, exactly as today."""
+    host's spelling and is followed. Both spellings a model can hold — relative, and the model
+    path `/runs/current/notes.txt` (#1255 P1, C9: the host-side mapping lands it on the
+    link-spelled run folder) — read a plain file, and `append_block` lands in
+    `investigation.md`, exactly as today. The two HOST spellings (through the link, and
+    resolved) are refused: the model view holds neither (#1255 C11: host paths are refused)."""
     real_base = tmp_path / "real"
     real_base.mkdir()
     link_base = tmp_path / "linked"
@@ -407,8 +412,11 @@ def test_main_on_a_run_dir_under_a_symlinked_ancestor_reads_and_appends_as_today
     deps, _run = _main(tmp_path, run=link_base / "run")
     (real_base / "run" / "notes.txt").write_text("plain notes\n", encoding="utf-8")
 
-    read_path = _spellings(link_base / "run", real_base / "run", "notes.txt")[spelling]
+    read_path = {"relative": "notes.txt", "model-absolute": "/runs/current/notes.txt"}[spelling]
     assert "plain notes" in _tool_read_file(deps, read_path)
+    for host in (str(link_base / "run" / "notes.txt"), str(real_base / "run" / "notes.txt")):
+        refusal = _refused(lambda host=host: _tool_read_file(deps, host))
+        assert "plain notes" not in refusal, f"a host spelling was read: {host}"
 
     _tool_append_block(deps, "+ first\n")
     _tool_append_block(deps, "+ second\n")
@@ -744,7 +752,8 @@ def test_a_double_slash_spelling_reads_as_today(tmp_path):
     reaching its root through a symlink."""
     deps, run = _main(tmp_path)
     (run / "notes.txt").write_text("plain notes\n", encoding="utf-8")
-    assert "plain notes" in _tool_read_file(deps, "/" + str(run / "notes.txt"))
+    # #1255 P1: the model's own spelling (`//runs/current/notes.txt`), the double slash kept.
+    assert "plain notes" in _tool_read_file(deps, "/" + model_path(run / "notes.txt", run_dir=run))
 
 
 def test_a_refused_record_read_must_say_what_refused_it():

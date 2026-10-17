@@ -4,7 +4,9 @@ A sibling world does not replay a snapshot. It queries the live estate through
 `WorldRegistry`, a `ModuleVerbRegistry` subclass whose verbs run FOR REAL against the adapter
 and then answer to the world. (#1224 replaced #920's staging applier with each world's live
 oracle: a world with no facts is served its base answer, `passthrough`; a world with facts is
-served by an oracle turn, whose contract is `tests/live_oracle_1224/`.)
+served by an oracle turn, whose contract is `tests/live_oracle_1224/`. #1255 D3: a world with no
+facts also answers a question the source never asked through an oracle turn, which serves the
+base unchanged here — `control_oracle` scripts it.)
 
 **The ledger is the gate.** The hazard is a response reaching the defender with no record of
 the decision behind it — silent scenario deletion, a run that looks fine and measures nothing.
@@ -36,6 +38,7 @@ off that text before anything is served. Fakes enter through the constructor's o
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 import contextlib
 import json
 from dataclasses import dataclass
@@ -95,12 +98,17 @@ from defender.runtime.verbs import (  # noqa: E402
 )
 from defender.tests._engine_helpers import fake_model  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests.live_oracle_1224 import _spec1224 as S24  # noqa: E402
 from defender.tests.live_oracle_1224._spec1224 import build_registry  # noqa: E402
 
 #: The estate a real branched run queries: the shipped adapters and the shipped gather grant.
 #: Read through `PATHS`, the same seam `build_agent_core` defaults to, so a tree that moves its
 #: adapters moves this with it.
 REAL_ADAPTERS = PATHS.adapters_dir
+
+#: #1255 D5's ledger decision for a control world whose oracle turn served something other than
+#: its base. Spelled as the word itself: which constant the ledger names it by is the ledger's.
+RECONSTRUCTED = "reconstructed"
 
 
 @functools.cache
@@ -254,19 +262,44 @@ def logger(tmp_path):
 
 
 #: The default world for tests whose subject is not the world: it asserts no facts, so every
-#: decision it produces is `passthrough` and no oracle turn is ever taken.
+#: answer it serves is its base unchanged, `passthrough`. (#1255 D3: a live read still takes an
+#: oracle turn, which serves that base unchanged — a test that serves one hands
+#: `control_oracle(...)`.)
 UNTOUCHED_WORLD = World("w1")
 
 
 def world_registry(
     adapters: Path, grant: VerbGrant, ledger_path: Path, *,
-    world: Any = UNTOUCHED_WORLD,
+    world: Any = UNTOUCHED_WORLD, **oracle_side: Any,
 ) -> WorldRegistry:
-    """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`."""
+    """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`.
+    `oracle_side` is `control_oracle(...)` for a test that serves a live read."""
     return build_registry(
         read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path),
-        as_of=AS_OF, tenant=T1106.fixture_run_tenant(),
+        as_of=AS_OF, tenant=T1106.fixture_run_tenant(), **oracle_side,
     )
+
+
+def control_oracle(base: Mapping[str, Any]) -> dict[str, Any]:
+    """The oracle side of a world with no facts that serves a live read. #1255 D3: every world,
+    the control included, answers a question the source never asked through its oracle, and
+    every estate here leaves the family's recording empty, so a live read takes an oracle turn.
+    This double serves `base` — the fake adapter's answer to that read, call ordinal included —
+    back unchanged with an empty claim, so the row stays `passthrough`; its box is a recording
+    sandboxed one, so no turn reaches the production box. Whether the turn is TAKEN is #1255's
+    to pin (`test_1255_world_serving.py`, `test_1224_serving.py`), not this file's."""
+    return {"oracle": S24.oracle(then=S24.submit(dict(base), S24.EMPTY_CLAIM)).model,
+            "verifier": S24.passing_verifier().model, "box": S24.sandboxed_box()[0]}
+
+
+def estate_host(host: Any, call: int = 1) -> dict:
+    """The fake estate's `get-host` answer when it is the run's `call`-th adapter call."""
+    return {"host": host, "owner": "estate", "call": call}
+
+
+def estate_esql(query: str, call: int = 1) -> dict:
+    """The fake estate's `esql` answer when it is the run's `call`-th adapter call."""
+    return {"query": query, "call": call}
 
 
 # 1. structural coverage: every granted verb, and no route to a bare body
@@ -449,6 +482,7 @@ def test_serving_through_the_wrapper_writes_a_row_carrying_the_decision(tmp_path
     ctx = run_ctx(tmp_path)
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"),
+        **control_oracle(estate_host("canary-1")),
     )
 
     payload = reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -470,8 +504,9 @@ def test_the_vocabulary_splits_into_the_tier_the_seam_and_the_world():
     sibling forked, and `base` is a family-tier read of a key the capture never held. Both are
     `world_id=None` and neither is a world's to claim; the split between them is
     `test_947_ledger_tiers.py`. #1224's world decisions are `passthrough`, `oracle` and
-    `real-error`; the retired staging decisions are not a new row's to name."""
-    world_decisions = {PASSTHROUGH, ORACLE, REAL_ERROR}
+    `real-error`, and #1255 D5 adds `reconstructed` (a control world's oracle turn that changed
+    its base); the retired staging decisions are not a new row's to name."""
+    world_decisions = {PASSTHROUGH, ORACLE, RECONSTRUCTED, REAL_ERROR}
     assert world_decisions | FAMILY_SOURCES | {REFUSED, FAULT} == SOURCES
     assert BASE in FAMILY_SOURCES
     assert CAPTURED in FAMILY_SOURCES
@@ -662,6 +697,7 @@ def test_the_same_key_twice_is_one_adapter_call_and_one_payload(tmp_path):
     ctx = run_ctx(tmp_path)
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"),
+        **control_oracle(estate_host("canary-1")),
     )
     served = reg.verbs("cmdb")["get-host"]
 
@@ -734,18 +770,21 @@ def test_a_world_reopened_from_disk_replays_its_own_kept_base_read(tmp_path):
     different world asking the same uncaptured key reads live for itself."""
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    first = build_registry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
+    first = build_registry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
+                           **control_oracle(estate_host("canary-1")))
     from_a = first.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     reopened = build_registry(
-        read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
+        read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
+        **control_oracle(estate_host("canary-1")))
     again = reopened.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     assert from_a == again
     assert len(adapter_calls(ctx, "get-host")) == 1
 
     other = build_registry(
-        read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
+        read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
+        **control_oracle(estate_host("canary-1", call=2)))
     other.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     assert len(adapter_calls(ctx, "get-host")) == 2, "one world's live read served another"
@@ -760,11 +799,12 @@ def test_two_spellings_of_one_question_are_one_key(tmp_path):
     the estate twice at two different moments."""
     ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
+    body = "FROM logs-* | LIMIT 5"
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"),
+        **control_oracle(estate_esql(body)),
     )
     served = reg.verbs("elastic")["esql"]
-    body = "FROM logs-* | LIMIT 5"
 
     first = served(ctx, query=body, limit=5)
     second = served(ctx, limit=5, query=body)
@@ -816,13 +856,14 @@ def test_a_ledger_write_failure_ends_the_run_and_keeps_the_failure_it_records(tm
 
 def test_a_world_with_no_facts_reaches_the_adapter_unchanged(tmp_path):
     """    A world asserting no facts sends its query to the adapter byte-identical, and reports
-    `passthrough` — no oracle turn, no rewrite. A difference observed there is corrupt by
-    construction rather than something to explain."""
+    `passthrough` — no rewrite: its oracle turn (#1255 D3) serves that base unchanged. A
+    difference observed there is corrupt by construction rather than something to explain."""
     ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     body = "FROM logs-nginx.access-*\n| LIMIT 5"
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1", facts=()),
+        **control_oracle(estate_esql(body)),
     )
 
     reg.verbs("elastic")["esql"](ctx, query=body)
@@ -881,6 +922,7 @@ def test_the_control_worlds_rows_are_its_own_never_the_familys(tmp_path):
 
     reg = world_registry(
         fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=ControlWorld(),
+        **control_oracle(estate_esql(body)),
     )
     reg.verbs("elastic")["esql"](ctx, query=body)
 
@@ -900,7 +942,8 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     reg = build_registry(
-        read_roster(adapters), FAKE_GRANT, world=World("A"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
+        read_roster(adapters), FAKE_GRANT, world=World("A"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
+        **control_oracle(estate_host("canary-1")))
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 

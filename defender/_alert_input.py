@@ -410,20 +410,24 @@ def verified_document(bound: _io.Bound, alert_name: str | PurePath,
     return document if isinstance(document, dict) else None
 
 
-def verified_input(alert_path: Path, record_path: Path, *, run_name: str) -> tuple[bytes, str]:
+def verified_input(alert_path: Path, record_path: Path, *, run_name: str | None) -> tuple[bytes, str]:
     """The stored alert's bytes and the text of the record they match: both read once, the
     bytes' digest compared with the record's. Raises `AlertReplaced` (a fixed reason naming
-    `run_name`, carrying no byte of either file) when the record is missing or malformed, the
+    `run_name` — or "this run" when it is `None`, for a reason the model reads (#1255 C5) —
+    carrying no byte of either file) when the record is missing or malformed, the
     alert is unreadable, or the digest differs."""
     text, _reason = _io.read_guarded(record_path)
     raw, _reason = _io.read_bytes_guarded(alert_path)
     return verify_input_bytes(raw, text, run_name=run_name)
 
 
-def verify_input_bytes(raw: bytes | None, text: str | None, *, run_name: str) -> tuple[bytes, str]:
+def verify_input_bytes(
+    raw: bytes | None, text: str | None, *, run_name: str | None,
+) -> tuple[bytes, str]:
     """Verify already-read original bytes against the recorded digest."""
+    which = "this run" if run_name is None else f"run {run_name}"
     refusal = AlertReplaced(
-        f"the alert stored for run {run_name} does not match the digest its record carries "
+        f"the alert stored for {which} does not match the digest its record carries "
         "(or one of the two is missing) — the run's input was replaced or damaged, and nothing "
         "is read from it")
     record = None if text is None else parse_alert_record(text)
@@ -435,7 +439,9 @@ def verify_input_bytes(raw: bytes | None, text: str | None, *, run_name: str) ->
     return raw, text
 
 
-def verified_alert(alert_path: Path, record_path: Path, *, run_name: str) -> tuple[bytes, AlertRecord]:
+def verified_alert(
+    alert_path: Path, record_path: Path, *, run_name: str | None,
+) -> tuple[bytes, AlertRecord]:
     """The stored alert's bytes and the record they match (see `verified_input`)."""
     raw, text = verified_input(alert_path, record_path, run_name=run_name)
     record = parse_alert_record(text)

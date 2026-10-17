@@ -41,6 +41,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender import run_common
 from defender.run_repository import PROVENANCE, RunPaths
 from defender.scripts.workspace_map import _unlisted
@@ -115,7 +117,7 @@ def gather_scenario(run_dir: Path, *, run_id: str):
     against an injected registry (bash). Returns the two replay models."""
     rec = VerbRecorder()
     main = ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
+        Turn(tool_calls=[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})]),
         Turn(tool_calls=[("gather", {
             "lead_id": LEAD, "system": "elastic", "goal": "measure this lead",
             "what_to_summarize": ["auth events"],
@@ -273,7 +275,7 @@ def test_a_driven_run_leaves_no_meta_json_in_the_run_dir(tmp_path, monkeypatch):
     assert not (run_dir / "meta.json").exists(), "the builder still writes the metadata file"
 
     replay = ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
+        Turn(tool_calls=[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})]),
         Turn(text="Done."),
     ])
     drive(run_dir, run_id=run_dir.name, main=replay)

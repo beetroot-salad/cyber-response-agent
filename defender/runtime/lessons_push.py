@@ -42,6 +42,15 @@ def corpus_dir(deps: AgentDeps, *, lane: str) -> Path | None:
     return corpus
 
 
+def shown_path(deps: AgentDeps) -> Callable[[Path], str]:
+    """How a pushed lesson's path is named to the role: its model path in the run's view
+    (#1255 P1); a role without one is shown the resolved host path."""
+    view = deps.view
+    if view is not None:
+        return view.to_model
+    return lambda p: str(p.resolve())
+
+
 def shape(hits: Iterable[Hit]) -> list[tuple[str, int]]:
     """Which lessons at what score: the identity a block is compared on. Sorted, because the
     ranking is reordered by which frontier item won, and that alone must not re-emit an
@@ -89,7 +98,7 @@ def compose_fold(
         hits = match_loaded(frontier, list(iter_lessons(corpus)))
         if not hits:
             return record_text, None
-        block = render(hits, lead=FOLD_LEAD)
+        block = render(hits, lead=FOLD_LEAD, show=shown_path(deps))
     except Exception as e:  # noqa: BLE001 — fail open; the frontier row mints regardless
         _logger.warning(f"{_FOLD_LANE} fold lessons push failed, omitting it: {e!r}")
         return record_text, None

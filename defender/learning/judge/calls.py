@@ -3,7 +3,10 @@ definition of a BLOCKED CALL (A2, A14).
 
 The served ledger (`served/<token>.<X>.jsonl`, the host's) owns what was served or blocked; the
 query table (`worlds/<X>/executed_queries.jsonl`) owns call order and the pre-branch rows. The
-two are joined on the call id both carry — exactly, never on `(system, verb, params)`:
+two are joined on the call id — exactly, never on `(system, verb, params)`. The ledger row
+carries the id; the table row does not (#1255 G4: the model reads that table), and the id a
+table row is joined by is its run's host-only call join's for the row's `(lead_id, seq)`
+(`family.read_query_table` hands each row back carrying it under `CALL_ID`):
 
 * a table row whose id names this run is the run's own call; its ledger partner is the ledger
   row carrying the same id (none: the call is UNSERVED);

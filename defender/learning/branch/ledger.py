@@ -10,8 +10,9 @@ failure this table exists to make visible.
 
 There is no `query_id` column: the seam sits below `QueryCapture`, where a model-supplied
 `query_id` is resolved. The run's `executed_queries.jsonl` records it against the same call:
-a row written through the query tool carries the call's host-written `call_id` (A12, #1234)
-on both tables, which is the join; their `(system, verb, params)` must agree on it.
+a row here carries the call's host-written `call_id` (A12, #1234), and the run's host-only call
+join (#1255 G4/G6) pairs that id with the call's table row by its `(lead_id, seq)`; their
+`(system, verb, params)` must agree on it.
 """
 
 from __future__ import annotations
@@ -50,11 +51,17 @@ CAPTURED = "captured"
 #: The live oracle served this call (#1224): its submission passed the host checks and the
 #: verifier, and it differs from the base answer.
 ORACLE = "oracle"
+#: The control world's oracle served this call an answer that differs from its base (#1255 D5):
+#: a base read live, reconstructed as the world stood at the fork. Not `oracle`: the control
+#: world has no facts, so a reconstruction is baseline, never "shown its facts" — the judge reads
+#: only `oracle` as an altered call.
+RECONSTRUCTED = "reconstructed"
 #: The real system errored on the call's base read; the error passed through untouched (O4).
 REAL_ERROR = "real-error"
 #: `staged` (and `patched`, now unnamed) are the retired staging decisions (#1224): an archived
 #: row may carry one, and it is refused as a new row's decision.
-SOURCES = frozenset({BASE, PASSTHROUGH, REFUSED, FAULT, CAPTURED, ORACLE, REAL_ERROR})
+SOURCES = frozenset({BASE, PASSTHROUGH, REFUSED, FAULT, CAPTURED, ORACLE, RECONSTRUCTED,
+                     REAL_ERROR})
 #: The family-tier labels — rows every sibling replays, with `world_id=None`. `base` is a live
 #: read of a key the capture never recorded, so counting `base` rows measures the residual a
 #: primed base cannot make deterministic.
@@ -75,14 +82,16 @@ class LedgerError(Exception):
 
 
 def payload_text(payload: Any) -> str:
-    """The canonical bytes for a payload; the only spelling of them.
+    """A payload's canonical form, for COMPARING answers: `sort_keys` makes two dumps of one
+    answer compare equal.
 
-    `sort_keys` makes two dumps of one answer compare equal. The source run's captured sidecars
-    were written without it, so priming must re-dump through this; any near-copy would make
-    every primed row a silent miss.
+    Never the bytes a world serves (#1255 G8): a world serves an answer in the spelling the
+    investigator would get from the system itself — the source's own sidecar for a recorded
+    answer, the query tool's spelling (`record_query.payload_text_of`) for a live read or an
+    oracle's submission. A row is found by its request key, which is canonical whatever its
+    payload's spelling.
 
-    `default=str` stops a `datetime`, `Decimal` or tuple raising mid-serve, and applies on both
-    the capture and live sides so they degrade the same way.
+    `default=str` stops a `datetime`, `Decimal` or tuple raising mid-serve.
     """
     return json.dumps(payload, sort_keys=True, default=str)
 
@@ -168,7 +177,7 @@ class ServedCall:
     verifier_verdict: dict | None = None
     attempts: int | None = None
     #: The call's host-written id (`record_query.next_call_id`, A12): the query tool's, the
-    #: same id the call's query-table row carries. `None` for a call no query tool allocated
+    #: same id the run's call join pairs with the call's query-table row (#1255 G6). `None` for a call no query tool allocated
     #: one to (the family primer's rows, a registry driven directly); the row then has no key.
     call_id: str | None = None
 
@@ -266,6 +275,7 @@ class Ledger:
                 "outside the episode or onto the capture its siblings replay") from None
         ledger = cls(path=served.path, base_path=episode.served_base.path)
         ledger._served = served
+        ledger._unrecorded_path = episode.served_unrecorded.path
         return ledger
 
     def declare(self) -> Ledger:
@@ -295,6 +305,8 @@ class Ledger:
     def __post_init__(self) -> None:
         #: This world's `served_world` record, the ledger's one write lane; set by `for_world`.
         self._served: AppendRecord | None = None
+        #: The primer's skip record beside the base (#1255 D6); set by `for_world`.
+        self._unrecorded_path: Path | None = None
         #: Family tier only, keyed by request key: `base_payload` never reads a world's own
         #: rows, so memoizing them would only hold every served payload in memory.
         self._memo: dict[str, str] = {}
@@ -334,6 +346,19 @@ class Ledger:
         A key the capture never recorded gets a live read per world, which may differ.
         """
         return self._memo.get(request_key(system, verb, params))
+
+    def unrecorded_keys(self) -> frozenset[str]:
+        """The request keys of the calls the source asked whose answer the base lacks — the call
+        failed, or its payload was unreadable — from the primer's skip record
+        (`capture.unrecorded_line`, #1255 D6). A world serves such a call through its oracle at
+        the fork time, never as a fixed pre-branch answer. An episode primed before the record
+        existed (or a ledger not built by `for_world`) has none: the empty set."""
+        if self._unrecorded_path is None:
+            return frozenset()
+        return frozenset(
+            request_key(str(row.get("system")), str(row.get("verb")), row.get("params"))
+            for row in read_jsonl_rows(self._unrecorded_path)
+            if isinstance(row.get("system"), str) and isinstance(row.get("verb"), str))
 
     def _absorb(self, path: Path) -> None:
         """Fold one file's family-tier rows into the memo, first row wins.

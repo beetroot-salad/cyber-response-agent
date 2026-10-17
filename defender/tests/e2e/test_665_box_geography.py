@@ -181,9 +181,21 @@ def test_path_pythonpath_from_one_shared_helper(tmp_path):
     before any granted command runs — including PYTHONPATH, which run_common.run_env does NOT
     set today (brief RF1). Drives the future shared helper."""
     run_dir = make_run_dir(tmp_path)
-    env = box_mod.infra_env(DEFENDER, run_dir)  # future shared helper — AttributeError at HEAD
-    assert env["PYTHONPATH"] == str(DEFENDER.parent), "the shared helper did not supply PYTHONPATH"
-    assert str(DEFENDER / "bin") in env["PATH"], "the shared helper did not supply the infra PATH"
+    # #1255 (design rev 4, P1): the run box's PATH and PYTHONPATH are the model view's
+    # constants — the shims at the checkout's `/defender/bin`, and no host path in either. They
+    # used to be this host's `<checkout>/bin` and `<checkout>/..`. Read off the run box's real
+    # create argv, which is where the helper's values land.
+    argv = box_mod._create_argv("defender-run-665", run_dir, DEFENDER,
+                                box_mod.BoxSpec(rootfs="python:3.11-slim"), ()).argv
+    env = dict(argv[i + 1].partition("=")[::2] for i, a in enumerate(argv) if a == "--env")
+    assert env.get("PYTHONPATH"), "the shared helper did not supply PYTHONPATH"
+    assert str(DEFENDER.parent) not in env["PYTHONPATH"], env["PYTHONPATH"]
+    # The package is `defender`, mounted at `/defender`, so its import root is `/` — what the
+    # helper derives today as the checkout's parent (`_derived_infra_env`: PYTHONPATH = workdir =
+    # `defender_dir.parent`), now in the model view.
+    assert "/" in env["PYTHONPATH"].split(":"), env["PYTHONPATH"]
+    assert "/defender/bin" in env["PATH"].split(":"), "the shared helper did not supply the infra PATH"
+    assert str(DEFENDER) not in env["PATH"], env["PATH"]
 
 
 # What the RENDERED box env carries for one key, given what the caller's request env supplied.

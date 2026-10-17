@@ -55,6 +55,8 @@ from defender.tests.test_920_estate_seam import (  # noqa: E402
     FAKE_GRANT,
     World,
     adapter_calls,
+    control_oracle,
+    estate_host,
     fake_estate,
     fresh_ledger,
     run_ctx,
@@ -200,11 +202,13 @@ def test_a_served_call_at_the_limit_records_its_row_and_keeps_its_base_read(tmp_
     """The positive control on the same address: at the limit the same call reaches the estate
     adapter once, is served, and leaves its readable record — the world's own `passthrough`
     row, and its live base read kept in the world's oracle store (#1224: never a ledger row,
-    M16) — each carrying the params whole."""
+    M16) — each carrying the params whole. (#1255 D3: the live read takes the world's oracle
+    turn, which serves it unchanged.)"""
     ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
-    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
-    ctx = run_ctx(tmp_path)
     host = chain(LIMIT - 1)
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"),
+                         **control_oracle(estate_host(host)))
+    ctx = run_ctx(tmp_path)
 
     payload = reg.verbs("cmdb")["get-host"](ctx, host=host)
 

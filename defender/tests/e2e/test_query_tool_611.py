@@ -45,6 +45,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.capabilities.abstract import AbstractCapability  # noqa: E402
@@ -240,13 +242,14 @@ def raising(rec: VerbRecorder, exc: BaseException, systems: tuple[str, ...] = ("
 def test_query_returns_wrapped_truncated_view_and_payload_note(tmp_path):
     """query_returns_wrapped_truncated_view_and_payload_note — the tool returns an exit-code
     line, the SALT-WRAPPED truncated view, and the ABSOLUTE `[record_query] raw payload:`
-    note. Not a bare payload_ref."""
+    note. Not a bare payload_ref. Since #1255 (design rev 4, P1 outbound) the absolute path is
+    the MODEL view's (`/runs/current/gather_raw/...`), never the host run folder's."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs | LIMIT 2"}), DONE,
     ])
     seen = r.gather_saw
-    payload_abs = str(r.run_dir / "gather_raw" / LEAD / "0.json")
+    payload_abs = f"/runs/current/gather_raw/{LEAD}/0.json"
 
     assert rec.only().params == {"native_query": "FROM logs | LIMIT 2", "limit": 10}
 
@@ -291,7 +294,7 @@ def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
     payload_abs = r.run_dir / "gather_raw" / LEAD / "0.json"
 
     gdeps = bind(_tenants1106.fixture_gather_def(), r.run_dir, defender_dir=DEFENDER)
-    out = runtime_tools._tool_read_file(gdeps, str(payload_abs))
+    out = runtime_tools._tool_read_file(gdeps, model_path(payload_abs, run_dir=r.run_dir))
 
     assert len(re.findall(r"<run-[0-9a-f]+-untrusted>", out)) == 1
     assert len(re.findall(r"</run-[0-9a-f]+-untrusted>", out)) == 1
@@ -317,7 +320,7 @@ def test_query_return_wrap_positive_control(tmp_path):
     payload_abs = run_dir / "gather_raw" / LEAD / "0.json"
     if sql_turn_idx is not None:
         turns[sql_turn_idx] = Turn(tool_calls=[("bash", {
-            "command": f"cat {payload_abs} | defender-sql 'SELECT count(*) AS n FROM data'",
+            "command": f"cat {model_path(payload_abs, run_dir=run_dir)} | defender-sql 'SELECT count(*) AS n FROM data'",
         })])
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -816,8 +819,8 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
         Turn(text="done"),
     ])
     gather = ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
-        Turn(tool_calls=[("bash", {"command": f"cat {run_dir / 'alert.json'} | wc -l"})]),
+        Turn(tool_calls=[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})]),
+        Turn(tool_calls=[("bash", {"command": f"cat {model_path(run_dir / 'alert.json', run_dir=run_dir)} | wc -l"})]),
         Turn(tool_calls=[("template_search", {"pattern": "sshd"})]),
         DONE,
     ])
@@ -1195,9 +1198,10 @@ ROW_KEYS = {
     # `""` on every row that kept its dispatched system, which is all of them but the
     # above-guard rejections #855 coarsened.
     "system_key",
-    # #1234 A12: the call's host-written id (`record_query.next_call_id`), the one key its
-    # served-ledger rows share.
-    "call_id",
+    # #1255 G4 reverses #1234 A12's `call_id` column: the table is in the gather agent's read
+    # scope, and on an arm the id spelled the world token. The call's host-written id now lives
+    # only in the host's records (the served ledger and a host-only join keyed by
+    # `(lead_id, seq)`), never on this row.
 }
 
 
@@ -1366,7 +1370,7 @@ def test_gather_bash_runs_a_declared_defender_sql_over_the_esql_payload_it_captu
 
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='q1138')
     payload_abs = run_dir / "gather_raw" / LEAD / "0.json"
-    command = (f"cat {payload_abs} | defender-sql --rows values --names columns "
+    command = (f"cat {model_path(payload_abs, run_dir=run_dir)} | defender-sql --rows values --names columns "
                "'SELECT count(*) AS n, sum(failed) AS s FROM data'")
     main = ReplayFn([
         Turn(tool_calls=[("gather", {

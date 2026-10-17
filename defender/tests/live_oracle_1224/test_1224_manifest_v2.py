@@ -842,14 +842,20 @@ def test_input_manifest_has_no_branch_point_clock(tmp_path):
     No read is ever issued unbounded because the clock is missing (O6). Observed at the shared
     loader, the sibling's loader and the world registry a sibling builds; the positive control
     is a well-formed clock bounding the one read a control-world call makes. (The launcher
-    writes the clock itself; a manifest without one reaches a reader only by being edited.)"""
+    writes the clock itself; a manifest without one reaches a reader only by being edited.)
+
+    #1255 D3: that control-world call is one the source never asked (the episode records
+    nothing), so it now goes through the control's oracle, which is told the same clock (was
+    M07=A: no oracle turn)."""
     FamilyError = _family_error()
-    control_oracle = S.oracle()
+    control_oracle = S.oracle(S.submit(_BASE_PAYLOAD, S.EMPTY_CLAIM))
     reg, est, _ep, ctx = _serving(tmp_path / "clocked", _doc(), "a", oracle=control_oracle,
                                   verifier=S.passing_verifier())
     S.call(reg, "idp", "query", ctx, q="user:alice")
     assert [c["as_of"] for c in est.calls()] == [S.AS_OF_DT.isoformat()]
-    assert control_oracle.requests == 0, "the control world (no facts) took an oracle turn"
+    assert control_oracle.requests >= 1, (
+        "the control world served a question the source never asked as a raw live read")
+    assert S.AS_OF in control_oracle.all_seen(), "the control's oracle was not told the clock"
 
     for i, as_of in enumerate((None, "yesterday afternoon", "2026-13-45T99:99:99Z")):
         doc = _doc()

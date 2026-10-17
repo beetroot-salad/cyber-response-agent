@@ -130,13 +130,15 @@ class VerbContext:
     tenant: Annotated[_RunTenant, SkipValidation]
     capture: Any = None
     #: The run's one live state (#1235), set by the query tool and lead-0 from the deps they
-    #: run under. The world registry pauses its investigator clock for as long as an oracle
-    #: turn holds the call; a context with none (pre-flight's replay, the ticket writer) has no
-    #: clock to pause. `SkipValidation`: the run's object itself, never a copy.
+    #: run under. It carries the run clock (#1255): an adapter stamps a capture with its reading
+    #: (`RunState.now`), and the world registry pauses it for as long as an oracle turn holds
+    #: the call. A context with none (pre-flight's replay, the ticket writer) belongs to no run
+    #: and has no run clock: it stamps the wall clock. `SkipValidation`: the run's object itself, never a copy.
     run_state: Annotated[RunState | None, SkipValidation] = None
-    #: The moment a branched-world call is served as of; `None` for the ordinary run, which
-    #: uses the wall clock. Every world of a family, the base included, carries the branch
-    #: point's moment, so no branch arm reads the wall clock (that would make it unreplayable).
+    #: The moment a branched-world call is served as of — the world's CUT-OFF (an unbounded
+    #: window ends here); `None` for the ordinary run. Every world of a family, the base
+    #: included, carries the branch point's moment. It bounds what is read and never stamps a
+    #: capture (#1255: capture stamps are the run clock's, `run_state`).
     #:
     #: Set by the estate registry on every call. A `datetime` rather than a string
     #: because systems format timestamps differently; not a callable because a function as a

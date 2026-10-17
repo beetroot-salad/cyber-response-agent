@@ -146,7 +146,7 @@ def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
     try:
         return branch_cli.main(
             ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID),
-             "--continuation-prompt", P.CONTINUATION],
+             *T.retired_continuation_argv()],
             spawn=spawn, **seams)
     except SystemExit as refused:
         return refused
@@ -431,8 +431,9 @@ def test_1120_the_tenants_root_surface_is_gone_and_template_dir_stays(
     assert run_exit.value.code == 2
     assert "--tenants-root" in capsys.readouterr().err
     with pytest.raises(SystemExit) as launch_exit:
-        branch_cli.parse_branch_args(["--tenant", H.TID, "r1", "1", "--continuation-prompt",
-                                      "x", "--tenants-root", str(tmp_path)])
+        branch_cli.parse_branch_args(["--tenant", H.TID, "r1", "1",
+                                      *T.retired_continuation_argv(),
+                                      "--tenants-root", str(tmp_path)])
     assert launch_exit.value.code == 2
     assert "--tenants-root" in capsys.readouterr().err
 
@@ -451,7 +452,7 @@ def test_1120_the_tenants_root_surface_is_gone_and_template_dir_stays(
     assert _tenants.template_dir(H.REPO_ROOT) == H.REPO_ROOT / "knowledge" / "tenant-template"
     assert run_py.parse_args([str(alert), "--tenant", H.TID]).tenant == H.TID
     assert branch_cli.parse_branch_args(
-        ["--tenant", H.TID, "r1", "1", "--continuation-prompt", "x"]).tenant == H.TID
+        ["--tenant", H.TID, "r1", "1", *T.retired_continuation_argv()]).tenant == H.TID
 
 
 # ======================================================================================
