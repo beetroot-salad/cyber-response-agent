@@ -117,6 +117,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -261,7 +262,7 @@ def _dispatch(lead: str, system: str) -> tuple[str, dict]:
 
 def _run(
     root: Path, *, verbs, turns: list[Turn], run_id: str, system: str = "elastic",
-    lead: str = LEAD, planted: list[dict] | None = None,
+    lead: str = LEAD, planted: list[dict] | None = None, tenant: Any = None,
 ) -> _Res:
     """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
     `turns` against the INJECTED verb registry. Everything between the two fakes — dispatch,
@@ -278,7 +279,7 @@ def _run(
     main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
                      Turn(text="Investigation complete.")])
     gather = ReplayFn(turns)
-    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
+    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, tenant=tenant)
     return _Res(run_dir, main, gather, summary)
 
 
@@ -659,6 +660,9 @@ class GrantScopedVerbs(VerbRegistry):
 
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))
+
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        return frozenset(self._table.get(system, {}))
 
     def verbs(self, system: str):
         return self._table[system]
@@ -1436,8 +1440,12 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
     whole run (O-5a) and none of its calls reaches `_grant_check`, so the load-error rows this
     demand is about are now those of an adapter that changed during the run."""
     registry, relink = unloadable_adapter(tmp_path / "tree")
+    from defender.tests.tenant_1107_settings import _spec1107 as S
+
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="dispositions:\n  elastic:\n    probe: {roles: [gather]}\n")
     r = _run(
-        tmp_path / "run", verbs=registry, run_id="d807-loaderr",
+        tmp_path / "run", verbs=registry, run_id="d807-loaderr", tenant=S.tenant_folder_of(root),
         turns=_after_start(relink, [
             q("elastic", "probe", {"native_query": "FROM logs"}),
             q("elastic", "probe", {"native_query": "FROM logs"}),
@@ -1478,8 +1486,12 @@ def test_load_error_repeat_is_answered_by_the_breaker_not_the_run_kill(tmp_path)
 
     #1256: as above, the adapter breaks after the run's start (`unloadable_adapter`)."""
     registry, relink = unloadable_adapter(tmp_path / "tree")
+    from defender.tests.tenant_1107_settings import _spec1107 as S
+
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="dispositions:\n  elastic:\n    probe: {roles: [gather]}\n")
     r = _run(
-        tmp_path / "run", verbs=registry, run_id="d878-loaderr",
+        tmp_path / "run", verbs=registry, run_id="d878-loaderr", tenant=S.tenant_folder_of(root),
         turns=_after_start(relink, [q("elastic", "probe", {"native_query": "FROM logs"})] * 5
                            + [DONE]))
     assert relink.broken == 1, "premise: the adapter was never broken after the run's start"

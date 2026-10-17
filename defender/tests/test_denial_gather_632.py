@@ -714,7 +714,16 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
 
     # The run starts over the importable file; the lead's call meets it broken.
     relink.restore()
-    r = run_gather(tmp_path / "run", verbs=reg, system="cmdb",
+    from defender.tests.tenant_1107_settings import _spec1107 as S
+
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="""dispositions:
+  elastic:
+    query: {roles: [gather]}
+  cmdb:
+    get-host: {roles: [gather]}
+""")
+    r = run_gather(tmp_path / "run", verbs=reg, system="cmdb", tenant=S.tenant_folder_of(root),
                    turns=[AfterStart(q("cmdb", "list-hosts"), relink.break_), DONE],
                    run_id="d38-unloadable")
     assert relink.broken == 2, "premise: the adapter was not broken after the run's start"

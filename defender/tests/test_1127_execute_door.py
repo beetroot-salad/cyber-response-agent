@@ -27,7 +27,7 @@ class _Registry:
     def __init__(self) -> None:
         self.asked: list[tuple[str, str]] = []
 
-    def decide_call(self, system: str, verb: str, params: dict):  # noqa: ANN201
+    def authorize_call(self, system: str, verb: str, params: dict):  # noqa: ANN201
         self.asked.append((system, verb))
         raise AssertionError("the grant was decided for a call too deep to store")
 

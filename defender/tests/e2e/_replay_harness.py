@@ -242,6 +242,9 @@ class FakeVerbs(VerbRegistry):
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))
 
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        return frozenset(self._table.get(system, {}))
+
     def verbs(self, system: str) -> Mapping[str, Callable[..., Any]]:
         return self._table[system]
 

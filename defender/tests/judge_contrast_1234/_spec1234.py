@@ -1966,9 +1966,11 @@ class InProcessSiblings:
             return out
 
         try:
+            from defender.runtime.verbs import read_roster
+
             return mod(RUN).main(tail, lifecycle=lifecycle, visualize=_no_visualize,
                                  preflight=_no_preflight, oracle=oracle.model,
-                                 verifier=self.verifier.model)
+                                 verifier=self.verifier.model, roster=read_roster(self.est.adapters))
         except SystemExit as stop:
             return 0 if stop.code is None else (stop.code if isinstance(stop.code, int) else 2)
         except Exception as escaped:  # noqa: BLE001 — recorded for the scenario; rc 1 like a crashed child

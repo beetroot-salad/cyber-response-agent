@@ -568,16 +568,14 @@ class VerbRegistry:
     def verbs(self, system: str) -> Mapping[str, Verb]:
         raise NotImplementedError
 
-    def _cold_verb_names(self, system: str) -> frozenset[str] | None:
-        """Verb names `system` declares, without importing; `None` if there is no cold source,
-        in which case `decide` falls back to `self.verbs(system)`. Real-adapter subclasses
-        must override this so a refusal never imports an adapter."""
-        return None
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        """Declared names from data, without importing or resolving adapter callables."""
+        raise NotImplementedError
 
-    def decide(self, system: str, verb: str) -> VerbDecision:
+    def authorize(self, system: str, verb: str) -> VerbDecision:
         """The grant decision point.
 
-        Decided from the grant first; no adapter is imported unless the grant admits the call.
+        Decided from grants and cold declared names; no adapter callable is resolved.
         A verb the system does not declare (including near-misses) is UNDECLARED; DENIED is
         only for a real, withheld verb. A wholly ungranted system is also UNDECLARED, which
         carries agent-visible retry semantics (no denial record, agent-fixable).
@@ -588,14 +586,7 @@ class VerbRegistry:
         """
         if not self.grant.allows(system, verb):
             if system in self.grant.systems:
-                cold = self._cold_verb_names(system)
-                if cold is not None:
-                    real = verb in cold
-                else:
-                    try:
-                        real = verb in self.verbs(system)
-                    except KeyError:
-                        real = False
+                real = verb in self._cold_verb_names(system)
                 if real:
                     # A withheld verb is a table row without this role; point at the table.
                     withheld = (
@@ -614,7 +605,7 @@ class VerbRegistry:
             # The grant reaches this system nowhere. A cold read (never an import) tells a
             # typo from an ungranted real verb; an ungranted adapter must not be executed.
             cold = self._cold_verb_names(system)
-            declared_here = cold is not None and verb in cold
+            declared_here = verb in cold
             if not declared_here:
                 return VerbDecision(
                     UNDECLARED, None,
@@ -632,6 +623,10 @@ class VerbRegistry:
                 f"{self.grant.role!r} holds no grant reaching the {system!r} system at "
                 f"all.{fix}",
             )
+        return VerbDecision(GRANTED, None, None)
+
+    def resolve(self, system: str, verb: str) -> VerbDecision:
+        """Resolve an authorized call and validate its declared class; may import adapters."""
         try:
             verbs = self.verbs(system)
         except KeyError:
@@ -648,12 +643,23 @@ class VerbRegistry:
             )
         return VerbDecision(GRANTED, fn, None)
 
-    def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
-        """`decide` for a call the model is actually making, as opposed to verb discovery.
+    def authorize_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
+        """Cold authorization for an actual call, allowing registries to record refusals."""
+        return self.authorize(system, verb)
 
-        Separate so a registry that records served calls (`estate.registry.WorldRegistry`) does
-        not record listings. `params` is for that record; the decision is `decide`'s alone."""
-        return self.decide(system, verb)
+    def resolve_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
+        """Callable resolution for an authorized, runnable call."""
+        return self.resolve(system, verb)
+
+    def decide(self, system: str, verb: str) -> VerbDecision:
+        """Compatibility decision combining cold authorization and callable resolution."""
+        decision = self.authorize(system, verb)
+        return self.resolve(system, verb) if decision.outcome == GRANTED else decision
+
+    def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
+        """Combined actual-call path for callers that need no intervening status gate."""
+        decision = self.authorize_call(system, verb, params)
+        return self.resolve_call(system, verb, params) if decision.outcome == GRANTED else decision
 
 
 class ModuleVerbRegistry(VerbRegistry):

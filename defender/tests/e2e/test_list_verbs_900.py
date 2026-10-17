@@ -295,6 +295,11 @@ class _ScopedVerbs(VerbRegistry):
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))
 
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        entry = self._table.get(system, {})
+        return frozenset(entry) if isinstance(entry, dict) else frozenset(
+            verb for granted_system, verb, _ in self.grant.entries if granted_system == system)
+
     def verbs(self, system: str):
         entry = self._table[system]
         if isinstance(entry, BaseException):
