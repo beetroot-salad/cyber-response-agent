@@ -39,6 +39,7 @@ from defender._paths import adapters_under, name_roots, root_spellings
 from defender.learning.branch.redaction import redact_model_visible
 from defender.runtime import circuit_breaker
 from defender.runtime.verb_dispositions import HEALTH_CHECK, gather_query_systems
+from defender.runtime.verb_grant import GrantError
 from defender.runtime.verbs import fresh_adapter_module, redact_settings_path
 # The run record's fault type, through the record's own module: the import edge into
 # `scripts/` stays `run_tenant`'s (#1080 O1's named pair, retired by #1172/#1121).
@@ -103,8 +104,8 @@ class NoUsableSystem(Exception):  # noqa: N818 — named for what it refuses, li
 # =============================================================================================
 
 def granted_systems(grants: RunGrants) -> frozenset[str]:
-    """Every system a run's grants reach — gather's and the correlation lead's."""
-    return grants.gather.systems | grants.correlation.systems
+    """The gather role defines startup scope; correlation is validated as its narrowing."""
+    return grants.gather.systems
 
 
 @dataclass(frozen=True)
@@ -204,12 +205,18 @@ def judge_run(roster: RosterRead, tenant: RunTenant, *, defender_dir: Path) -> R
 
     The adapters are `roster`'s — the tree the run reads, never an injected registry (K2) — each
     imported afresh (`fresh_adapter_module`), never through the call-time cache. A granted
-    system the roster does not hold is not judged here: a registry built over that roster
-    refuses such a grant at construction (C11)."""
+    system the roster does not hold refuses startup as an invalid grant (C11), before any
+    adapter check runs. The registry still validates the granted verbs at construction."""
     scope = ReasonScope(tenant=tenant, defender_dir=Path(defender_dir),
                         adapters_root=Path(roster.root))
     down: dict[str, StartCause] = {}
-    for system in sorted(granted_systems(tenant.grants) & set(roster.accepted)):
+    systems = granted_systems(tenant.grants)
+    missing = systems - set(roster.accepted)
+    if missing:
+        raise GrantError(
+            f"{tenant.table_pointer}: gather grants system(s) absent from the adapters roster "
+            f"under {roster.root}: {', '.join(sorted(missing))}")
+    for system in sorted(systems):
         cause = judge_adapter(
             functools.partial(fresh_adapter_module, roster, system), tenant=tenant, scope=scope)
         if cause is not None:

@@ -60,6 +60,7 @@ from defender.runtime import system_status  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.run_tenant import RunTenant  # noqa: E402
 from defender.runtime.system_status import RunSystems  # noqa: E402
+from defender.runtime.verb_grant import GrantError  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     RegistryError,
@@ -488,10 +489,10 @@ def _judge_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path) -
     once, when the run starts. Never in the tenant resolution `tenant.py setup` and
     `defender-policy` share: whether a system is usable is a run's question, not the tenant's
     (D4)."""
-    systems = system_status.judge_run(roster, tenant, defender_dir=defender_dir)
     try:
+        systems = system_status.judge_run(roster, tenant, defender_dir=defender_dir)
         system_status.require_usable(tenant.grants, systems.down)
-    except system_status.NoUsableSystem as refusal:
+    except (GrantError, system_status.NoUsableSystem) as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.tenant_id!r} cannot be used: {refusal}")
     return systems
 
