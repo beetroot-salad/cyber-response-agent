@@ -266,6 +266,13 @@ def _pre_trip(system: str = "elastic") -> Callable[[Path], None]:
     return plant
 
 
+def _config_fault() -> BaseException:
+    """A missing elastic config faults before reaching the backend."""
+    return S.sym("scripts.adapters.faults", "ConfigFault")(
+        "config file not found: the tenant's settings/systems/elastic/config.env - this "
+        "tenant's settings do not configure this system")
+
+
 def _fail_alerts(exc: Callable[[], BaseException]) -> S.Backend:
     """Every `elastic.alerts` call raises `exc()` — an adapter's own fault class."""
     return _backend(fault=T.Fault(fail_on=("elastic.alerts",)), exc=exc)

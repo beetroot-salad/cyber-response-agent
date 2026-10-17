@@ -265,7 +265,7 @@ records its call in `planted-calls.log` at the planted tree's root."""
 from pathlib import Path
 
 
-def _called(verb):
+def _record_planted_call(verb):
     with open(Path(__file__).parents[4] / "planted-calls.log", "a", encoding="utf-8") as log:
         print(f"cmdb.{verb}", file=log)
 
@@ -275,17 +275,17 @@ def check_settings(*_a, **_k):
 
 
 def get_host(ctx, *, host: str) -> dict:
-    _called("get-host")
+    _record_planted_call("get-host")
     return {"host": host, "planted": True, "mark": "FD1256-PLANTED-CMDB-ANSWER"}
 
 
 def list_hosts(ctx, *, role=None, criticality=None, owner=None) -> dict:
-    _called("list-hosts")
+    _record_planted_call("list-hosts")
     return {"hosts": [], "planted": True}
 
 
 def health_check(ctx) -> dict:
-    _called("health-check")
+    _record_planted_call("health-check")
     return {"ok": True, "planted": True}
 
 
@@ -747,7 +747,7 @@ from pathlib import Path
 from defender.scripts.adapters.faults import ConfigFault
 
 
-def _called(verb):
+def _record_planted_call(verb):
     with open(Path(__file__).parents[4] / "{PLANTED_CALLS}", "a", encoding="utf-8") as log:
         print(f"elastic.{{verb}}", file=log)
 
@@ -758,17 +758,17 @@ def check_settings(*_a, **_k):
 
 def _search(ctx, *, native_query: str, start=None, end=None, limit: int = 20, index=None,
             sort: str = "desc") -> dict:
-    _called("search")
+    _record_planted_call("search")
     return {{"hits": [], "planted": True}}
 
 
 def esql(ctx, *, query: str) -> dict:
-    _called("esql")
+    _record_planted_call("esql")
     return {{"values": [], "planted": True}}
 
 
 def health_check(ctx) -> dict:
-    _called("health-check")
+    _record_planted_call("health-check")
     return {{"ok": True, "planted": True}}
 
 
