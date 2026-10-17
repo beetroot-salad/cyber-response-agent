@@ -12,7 +12,6 @@ from pathlib import Path
 from defender import _git
 
 from .auth import CLOCK_SKEW, ForgejoIdentity
-from .forgejo import ForgeAddress
 
 #: Linux UAPI (include/uapi/linux/{memfd,fcntl}.h). Standalone Python builds can omit
 #: os.memfd_create, its flags, or fcntl's seal names, depending on their build headers.
@@ -48,25 +47,20 @@ def network_git(
     args: Sequence[str],
     *,
     repo: Path,
-    address: ForgeAddress,
+    origin: str,
     identity: ForgejoIdentity,
     env: dict[str, str],
     timeout: float,
 ) -> str:
-    """Put the Bearer header in a URL-scoped, sealed config inherited by this git call.
-    The command line and environment name only its descriptor, never the JWT. Redirects
-    are refused, hooks disabled and ambient credential helpers cleared. Rewrites to any
-    other repository or server do not match this config's URL scope.
+    """Authenticate a transfer in GitTransport's isolated repository and environment.
+
+    The URL is explicit; no tenant or operator configuration is read by this process.
+    Only the sealed descriptor carries the JWT, never argv, environment or a disk file.
     """
     token = identity.token(min_validity=timeout + CLOCK_SKEW)
-    # Use the configured spelling: git URL matching treats repository path case literally.
-    origin = _git.git(["config", "--get", "remote.origin.url"], cwd=repo, env=env)
-    if ForgeAddress.parse(origin) != address:
-        raise ValueError("The git origin changed before authentication")
     config = f'[http "{origin}"]\nextraHeader = Authorization: Bearer {token}\n'
     fd = _sealed(config.encode("utf-8"))
     try:
-        # A URL-specific clone setting beats an unscoped -c, so refuse redirects at both levels.
         return _git.git_network(
             [
                 "-c",
@@ -77,12 +71,6 @@ def network_git(
                 "core.hooksPath=/dev/null",
                 "-c",
                 "http.followRedirects=false",
-            "-c",
-            f"http.{origin}.followRedirects=false",
-                "-c",
-                "http.extraHeader=",
-                "-c",
-                f"http.{origin}.extraHeader=",
                 "-c",
                 f"include.path=/dev/fd/{fd}",
                 "-c",

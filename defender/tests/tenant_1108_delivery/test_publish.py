@@ -285,33 +285,33 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
     baseline = min(_timed(d.publish)[0] for _ in range(2))
     head = git(tenant.knowledge, "rev-parse", "HEAD")
     newer = advance_remote(repo, tmp_path)
-    red_tenant, red_remote, _ = build_tenant(tmp_path, "red", root=tenant.data_root)
-    mod = target()
-    with LockHolder(tenant, tmp_path / "holder") as holder:
-        for attempt in (d.publish, lambda: d.start_batch("busy", lanes=LANES)):
-            times = []
-            for _ in range(3):
-                elapsed, (_, error, hung) = _timed(attempt)
-                assert not hung, "a second taker waited on the lock instead of failing fast"
-                assert isinstance(error, mod.LockBusy), error
-                assert isinstance(error, mod.DeliveryRefused)
-                assert str(holder.pid) in str(error), "the refusal must name the holder"
-                times.append(elapsed)
-            assert min(times) < baseline + 1.0, \
-                f"a second taker waited ({min(times):.2f} s against {baseline:.2f} s with the lock free)"
-        assert git(tenant.knowledge, "rev-parse", "HEAD") == head
-        assert _current(tenant) == (first.commit, first.path)
-        assert _exports(tenant) == sorted([first.commit, "current"])
-        drafts = tenant.dir / "drafts"
-        assert not drafts.exists() or not any(drafts.iterdir()), \
-            "a draft or its temporary was made under a busy lock"
-        assert git(tenant.knowledge, "for-each-ref", "--format=%(refname)", "refs/heads") == "refs/heads/main"
-        red_forge = ForgeHTTP(origin=configured_origin(red_tenant.knowledge))
-        red = mod.TenantDelivery.open(red_tenant, defender_dir=DEFENDER, client=red_forge.client, identity=fixture_identity(str(red_tenant.id)))
-        assert red.publish().commit == git(red_remote, "rev-parse", "main")
-    assert sorted(p.name for p in (tenant.dir / "forge").iterdir()) == ["git-credentials"], \
-        "the lock (or anything else) landed in forge/, which stays the credential's alone"
-    assert d.publish().commit == newer
+    with build_tenant(tmp_path, "red", root=tenant.data_root) as (red_tenant, red_remote, _):
+        mod = target()
+        with LockHolder(tenant, tmp_path / "holder") as holder:
+            for attempt in (d.publish, lambda: d.start_batch("busy", lanes=LANES)):
+                times = []
+                for _ in range(3):
+                    elapsed, (_, error, hung) = _timed(attempt)
+                    assert not hung, "a second taker waited on the lock instead of failing fast"
+                    assert isinstance(error, mod.LockBusy), error
+                    assert isinstance(error, mod.DeliveryRefused)
+                    assert str(holder.pid) in str(error), "the refusal must name the holder"
+                    times.append(elapsed)
+                assert min(times) < baseline + 1.0, \
+                    f"a second taker waited ({min(times):.2f} s against {baseline:.2f} s with the lock free)"
+            assert git(tenant.knowledge, "rev-parse", "HEAD") == head
+            assert _current(tenant) == (first.commit, first.path)
+            assert _exports(tenant) == sorted([first.commit, "current"])
+            drafts = tenant.dir / "drafts"
+            assert not drafts.exists() or not any(drafts.iterdir()), \
+                "a draft or its temporary was made under a busy lock"
+            assert git(tenant.knowledge, "for-each-ref", "--format=%(refname)", "refs/heads") == "refs/heads/main"
+            red_forge = ForgeHTTP(origin=configured_origin(red_tenant.knowledge))
+            red = mod.TenantDelivery.open(red_tenant, defender_dir=DEFENDER, client=red_forge.client, identity=fixture_identity(str(red_tenant.id)), origin=configured_origin(red_tenant.knowledge))
+            assert red.publish().commit == git(red_remote, "rev-parse", "main")
+        assert sorted(p.name for p in (tenant.dir / "forge").iterdir()) == ["git-credentials"], \
+            "the lock (or anything else) landed in forge/, which stays the credential's alone"
+        assert d.publish().commit == newer
 
 
 def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tmp_path):
@@ -483,12 +483,12 @@ _INTERRUPTED_PUBLISH = """
 import json, os, resource, signal, sys
 from pathlib import Path
 from defender.tests import _tenants1106 as tenants
-from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, target, fixture_identity
+from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, target, fixture_identity, configured_origin
 root, tenant_id, marker, size, limit = (Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4]),
                                         int(sys.argv[5]))
 mod = target()
 tenant = tenants.accept(root, tenant_id)
-d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client, identity=fixture_identity(str(tenant.id)))
+d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP(origin=configured_origin(tenant.knowledge)).client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
 clone = os.path.abspath(tenant.knowledge)
 in_clone = os.path.join(clone, "agent", "lessons", marker)
 signal.signal(signal.SIGXFSZ, signal.SIG_DFL)  # a write past the limit kills, as a power cut would
@@ -577,12 +577,12 @@ _PAUSED_PUBLISH = """
 import json, os, sys, time
 from pathlib import Path
 from defender.tests import _tenants1106 as tenants
-from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, lock_probe, target, fixture_identity
+from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, lock_probe, target, fixture_identity, configured_origin
 root, tenant_id, marker, ready, go, trace = (Path(sys.argv[1]), sys.argv[2], sys.argv[3],
                                              Path(sys.argv[4]), Path(sys.argv[5]), Path(sys.argv[6]))
 mod = target()
 tenant = tenants.accept(root, tenant_id)
-d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client, identity=fixture_identity(str(tenant.id)))
+d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP(origin=configured_origin(tenant.knowledge)).client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
 clone = os.path.abspath(tenant.knowledge)
 current = os.path.join(os.path.realpath(tenant.dir / "exports"), "current")
 in_clone = os.path.join(clone, "agent", "lessons", marker)

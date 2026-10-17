@@ -204,7 +204,7 @@ root, tenant_id, remote, batch_id, cap, mode = (Path(sys.argv[1]), sys.argv[2], 
 mod = target()
 tenant = tenants.accept(root, tenant_id)
 http = ForgeHTTP(remote=remote, origin=configured_origin(tenant.knowledge))
-d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)))
+d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 if mode == "crash":
     d.start_batch(batch_id, lanes=LANES)

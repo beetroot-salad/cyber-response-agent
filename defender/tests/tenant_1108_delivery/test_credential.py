@@ -23,11 +23,9 @@ import pytest
 from ._identity import VaultHTTP, token as identity_token
 
 from ._support import (
-    BARE_NO_UPKEEP,
     LANES,
     TOKEN,
     ForgeHTTP,
-    GitHTTP,
     bounded,
     delivery,
     forge_pulls,
@@ -294,7 +292,7 @@ def test_a_downgrade_to_plain_http_at_the_same_host_and_port_gets_no_token(http_
     git(tenant.knowledge, "remote", "set-url", "origin", f"https://127.0.0.1:{port}/tenants/blue.git")
     git(tenant.knowledge, "config", f"url.http://127.0.0.1:{port}/.insteadOf", f"https://127.0.0.1:{port}/")
     credentials.write_text(f"https://bot:{TOKEN}@127.0.0.1:{port}\n", encoding="utf-8")
-    d = delivery(http_repo, ForgeHTTP())
+    d = delivery(http_repo, ForgeHTTP(), network_timeout=1)
     _, error, hung = bounded(d.publish, seconds=60)
     assert not hung, "git waited on a prompt"
     assert error is None or isinstance(error, target().DeliveryRefused), error
@@ -382,21 +380,6 @@ def test_the_credential_never_rides_in_a_process_argument_or_environment(http_re
     assert spawns.carrying(_secrets(TOKEN)) == []
 
 
-@pytest.fixture
-def rewritten(http_repo, tmp_path):
-    """The clone's `url.<other>.insteadOf` sends origin's git traffic to ANOTHER smart-HTTP
-    server (another port), so the one helper, scoped to the parsed forge address, has no
-    answer and git reaches its prompt path. Yields that other server."""
-    tenant, remote, _credentials, server = http_repo
-    other_root = tmp_path / "other-served"
-    (other_root / "tenants").mkdir(parents=True)
-    git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, remote, other_root / "tenants" / "blue.git")
-    other = GitHTTP(other_root)
-    try:
-        git(tenant.knowledge, "config", f"url.{other.url}/.insteadOf", f"{server.url}/")
-        yield other
-    finally:
-        other.close()
 
 
 def test_a_url_rewritten_to_another_server_gets_neither_the_token_nor_a_prompt(
@@ -427,7 +410,7 @@ out = {}
 try:
     tenant = tenants.accept(Path(sys.argv[2]), sys.argv[3])
     http = ForgeHTTP(origin=configured_origin(tenant.knowledge))
-    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)))
+    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
     later.publish()
     out["published"] = True
 except mod.DeliveryRefused as refused:
@@ -484,13 +467,13 @@ def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
     assert verdict.get("published") or "refused" in verdict, verdict
 
 
-def test_a_git_run_that_asks_for_the_credential_again_and_again_succeeds(http_repo, spies):
+def test_clone_push_urls_do_not_select_a_delivery_destination(http_repo, spies):
     """Every push URL in one git invocation receives the scoped Bearer header.
     The descriptor can be read repeatedly without helpers, prompts or disk writes."""
     tenant, remote, credentials, server = http_repo
     log = _armed(http_repo, spies)
     before = _state(credentials)
-    url = f"{server.url}/tenants/blue.git"
+    url = "http://127.0.0.1:1/tenants/other.git"
     for _ in range(3):
         git(tenant.knowledge, "config", "--add", "remote.origin.pushurl", url)
     http = ForgeHTTP()
@@ -593,10 +576,9 @@ def test_git_does_not_send_bearer_to_another_repository_on_the_same_server(http_
     origin = f"{server.url}/tenants/blue.git"
     git(tenant.knowledge, "config", f"url.{server.url}/tenants/other.git.insteadOf", origin)
     d = delivery(http_repo, ForgeHTTP())
-    with pytest.raises(target().DeliveryRefused):
-        d.publish()
+    d.publish()
     assert server.authorizations
-    assert not any(server.authorizations)
+    assert all(auth == "Bearer " + TOKEN for auth in server.authorizations)
     _silent(log)
 
 

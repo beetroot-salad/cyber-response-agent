@@ -37,7 +37,7 @@ Production deployment and drain wiring are not defined yet; delivery remains dor
 P4. The host-side API is `defender.learning.author.version_control.TenantDelivery`.
 `delivery.py` owns publish → draft/batch → commit → push/PR and revert. `repository.py`
 owns git semantics, `forgejo.py` the concrete Forgejo API, `auth.py` Vault identities, and
-`credentials.py` git's credential channel. Export, batch and durable-record helpers live
+`credentials.py` git's credential channel. `transport.py` owns the isolated transfer context. Export, batch and durable-record helpers live
 in that same package. The legacy GitHub author path stays separate until P4.
 
 Use Forgejo 17.0.0 or newer with [Authorized Integrations](https://forgejo.org/docs/v17.0/user/api/authorized-integrations/)
@@ -59,7 +59,7 @@ For each tenant:
    and supplies an authenticated `httpx.Client` to `ForgejoIdentity(tenant_id=..., issuer=...,
    role=..., audience=..., client=...)`. The issuer is normally
    `https://vault.example/v1/identity/oidc`. Supply that identity explicitly to
-   `TenantDelivery.open(..., identity=..., client=<Forgejo HTTP client>)`. Vault login,
+   `TenantDelivery.open(..., origin=<Forgejo clone URL>, identity=..., client=<Forgejo HTTP client>)`. Vault login,
    renewal, CA trust and workload isolation belong to deployment wiring; this module does
    not discover credentials from a clone, command line, environment or home directory.
 
@@ -67,11 +67,22 @@ The identity fetches signed JWTs from Vault, checks tenant/issuer/audience/lifet
 and refreshes before a bounded operation would outlive the cached token. Forgejo verifies
 signatures and enforces repository and claim restrictions. API calls use Bearer headers;
 git receives a URL-scoped Bearer header through a sealed anonymous memory descriptor. JWTs
-are absent from process arguments, environment variables and disk files. Network git resets
-credential helpers, disables hooks and prompts, refuses redirects, and kills the process
-group when its wall timeout expires. Agent boxes receive exported files, never this identity
-or either authenticated client. Use HTTPS for Forgejo in deployment; HTTP is for isolated
-local fixtures only.
+are absent from process arguments, environment variables and disk files. Every transfer
+creates a temporary bare repository with a private home, empty template, and owned git
+configuration. Only the tenant object database and its hash format are shared; clone refs,
+hooks, remotes, includes, system/user config, config environment injection, proxies and
+tracing settings are excluded. The destination is supplied explicitly to the factory,
+never selected through `origin`, `pushurl` or URL rewrite rules in the clone.
+
+Fetch writes objects into the tenant database and atomically imports only the explicit
+`refs/remotes/origin/*` branch mappings after the authenticated process has ended. Push
+supplies one commit-to-review-branch refspec, with tag following and submodule recursion
+disabled. Credentials, no-prompt/no-hook/redirect policy, maintenance settings and the wall
+timeout are owned by the transfer context. Git's complete process group is killed on exit;
+the credential descriptor is closed before local ref hooks can run. Agent boxes receive
+exported files, never either authenticated client. HTTPS trust for git comes from the host
+trust store; inherited CA/proxy environment overrides are intentionally excluded. Use HTTPS
+for Forgejo in deployment; HTTP is for isolated local fixtures only.
 
 The default dev-container image is 17.0.0. Existing volumes are not migrated automatically;
 back them up and follow Forgejo's upgrade procedure before restarting an older installation.

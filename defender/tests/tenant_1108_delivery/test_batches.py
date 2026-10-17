@@ -31,6 +31,7 @@ from ._support import (
     opened,
     target,
     fixture_identity,
+    configured_origin,
 )
 
 
@@ -109,7 +110,7 @@ def test_publishing_after_a_batch_starts_never_changes_its_draft_or_branch(repo,
     draft = files_under(batch.draft_root)
     export = files_under(batch.export.path)
     newer = advance_remote(repo, tmp_path)
-    other = target().TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client, identity=fixture_identity(str(tenant.id)))
+    other = target().TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP(origin=configured_origin(tenant.knowledge)).client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
     assert other.publish().commit == newer
     assert target().current_export(tenant).commit == newer
     assert files_under(batch.draft_root) == draft

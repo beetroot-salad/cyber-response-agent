@@ -349,38 +349,42 @@ class ForgeHTTP:
 # Real tenant repositories
 # ---------------------------------------------------------------------------------------
 
-def build_tenant(tmp_path, tenant_id="blue", *, root=None):
-    """An accepted tenant whose knowledge folder is a real clone of a real bare `origin`,
-    reached over git's local transport behind a network-shaped origin URL; its credential
-    entry agrees with that origin. Returns `(tenant, bare remote, credential file)`."""
+@contextlib.contextmanager
+def build_tenant(tmp_path, tenant_id="blue", *, root=None, object_format="sha1"):
+    """An accepted tenant with a real HTTP remote. Yields its tenant, bare repository and
+    ignored legacy credential sentinel; the server lives until the context exits."""
     root = root if root is not None else tmp_path / "data"
     tenants.place_tenant(root, tenant_id)
     tenant = tenants.accept(root, tenant_id)
     clone = tenant.knowledge
     (tenant.agent / "lessons").mkdir()
     (tenant.agent / "lessons" / "seed.md").write_text("seed\n", encoding="utf-8")
-    git(clone, "init", "-b", "main")
+    git(clone, "init", "-b", "main", f"--object-format={object_format}")
     git(clone, "config", "user.name", "P3")
     git(clone, "config", "user.email", "p3@test.invalid")
     git(clone, "add", ".")
     git(clone, "commit", "-m", "seed")
-    remote = tmp_path / ("origin.git" if tenant_id == "blue" else f"{tenant_id}-origin.git")
+    remote = tmp_path / "tenants" / f"{tenant_id}.git"
+    remote.parent.mkdir(exist_ok=True)
     git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, clone, remote)
-    origin = f"http://forge.invalid:3000/tenants/{tenant_id}.git"
-    git(clone, "remote", "add", "origin", origin)
-    # Git performs real local transport; delivery still validates the actual network origin.
-    git(clone, "config", f"url.{remote}.insteadOf", origin)
-    git(clone, "fetch", "origin")
-    credentials = tenant.dir / "forge" / "git-credentials"
-    credentials.parent.mkdir()
-    credentials.write_text("http://bot:ignored-legacy-secret@forge.invalid:3000\n", encoding="utf-8")
-    credentials.chmod(0o600)
-    return tenant, remote, credentials
+    server = GitHTTP(tmp_path, token=fixture_identity(tenant_id).token())
+    try:
+        origin = f"{server.url}/tenants/{tenant_id}.git"
+        git(clone, "remote", "add", "origin", origin)
+        git(clone, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
+        credentials = tenant.dir / "forge" / "git-credentials"
+        credentials.parent.mkdir()
+        credentials.write_text("ignored legacy credential\n", encoding="utf-8")
+        credentials.chmod(0o600)
+        yield tenant, remote, credentials
+    finally:
+        server.close()
 
 
 @pytest.fixture
 def repo(tmp_path):
-    return build_tenant(tmp_path)
+    with build_tenant(tmp_path) as built:
+        yield built
 
 
 def delivery(repo, http, **options):
@@ -392,6 +396,7 @@ def delivery(repo, http, **options):
     if http.address is None and origin is not None:
         http.serve(origin)
     options.setdefault("identity", fixture_identity(str(repo[0].id)))
+    options.setdefault("origin", origin)
     return target().TenantDelivery.open(repo[0], defender_dir=DEFENDER, client=http.client, **options)
 
 
@@ -715,7 +720,7 @@ class GitHTTP:
                 outer._serve(self)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01), daemon=True)
         self.thread.start()
 
     @property
@@ -894,7 +899,7 @@ tenant = tenants.accept(root, tenant_id)
 http = ForgeHTTP(remote=remote, origin=configured_origin(tenant.knowledge))
 out = {}
 try:
-    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)))
+    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
     result = getattr(later, verb)(*args)
     status = result.status
     out["status"] = status if isinstance(status, str) else repr(status)
@@ -1096,3 +1101,20 @@ def bounded(fn, *, seconds=30.0, fifos=()):
                     os.close(os.open(fifo, flags | os.O_NONBLOCK))
         thread.join(10)
     return box.get("result"), box.get("error"), hung
+
+
+@pytest.fixture
+def rewritten(http_repo, tmp_path):
+    """The clone's `url.<other>.insteadOf` sends origin's git traffic to ANOTHER smart-HTTP
+    server (another port), so the one helper, scoped to the parsed forge address, has no
+    answer and git reaches its prompt path. Yields that other server."""
+    tenant, remote, _credentials, server = http_repo
+    other_root = tmp_path / "other-served"
+    (other_root / "tenants").mkdir(parents=True)
+    git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, remote, other_root / "tenants" / "blue.git")
+    other = GitHTTP(other_root)
+    try:
+        git(tenant.knowledge, "config", f"url.{other.url}/.insteadOf", f"{server.url}/")
+        yield other
+    finally:
+        other.close()

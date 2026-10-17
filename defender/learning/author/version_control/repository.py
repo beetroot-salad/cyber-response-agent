@@ -14,21 +14,9 @@ if TYPE_CHECKING:
 from defender import _git, _io
 
 from .auth import CLOCK_SKEW, TOKEN_TTL, ForgejoIdentity
-from .credentials import network_git
 from .forgejo import ForgejoForge, PullRequest
 from .model import _REGULAR_MODES, ChangeSet, DeliveryRefused
-
-#: Settings every git process on a tenant repository runs with, so none outlives the call
-#: that started it: no automatic maintenance or gc (a fetch, merge or commit otherwise spawns
-#: `git maintenance run --auto --detach`, which keeps working on the clone after the call
-#: returns and the tenant's lock is released), and no file-system monitor daemon.
-_NO_BACKGROUND_GIT = (
-    ("maintenance.auto", "false"),
-    ("maintenance.autoDetach", "false"),
-    ("gc.auto", "0"),
-    ("gc.autoDetach", "false"),
-    ("core.fsmonitor", "false"),
-)
+from .transport import _NO_BACKGROUND_GIT, GitTransport
 
 
 def _local_env() -> dict[str, str]:
@@ -113,6 +101,7 @@ class GitRepository:
         path: Path,
         *,
         tenant_id: str,
+        origin: str,
         identity: ForgejoIdentity,
         client: httpx.Client,
         network_timeout: float = NETWORK_TIMEOUT,
@@ -142,7 +131,6 @@ class GitRepository:
                 raise DeliveryRefused(
                     f"tenant repository is missing its main ref {ref}"
                 )
-        origin = _git.git(["config", "--get", "remote.origin.url"], cwd=path, env=env)
         forge = ForgejoForge(origin=origin, identity=identity, client=client)
         forge.repository_id()
         forge.verify_main_protection()
@@ -176,25 +164,14 @@ class GitRepository:
         )
         return tip or None
 
-    def _network(self, args: Sequence[str]) -> str:
-        if self._git(["config", "--get", "remote.origin.url"]) != self.origin:
-            raise DeliveryRefused(
-                "the tenant's origin changed after its identity was accepted"
-            )
-        return network_git(
-            args,
-            repo=self.path,
-            address=self.forge.address,
-            identity=self.identity,
-            env=_local_env(),
-            timeout=self.network_timeout,
-        )
+    def _transport(self) -> GitTransport:
+        return GitTransport(self.path, self.origin, self.identity, self.network_timeout)
 
     def fetch(self) -> None:
-        self._network(["fetch", "origin"])
+        self._transport().fetch()
 
     def push(self, commit: str, branch: str) -> None:
-        self._network(["push", "--quiet", "origin", f"{commit}:refs/heads/{branch}"])
+        self._transport().push(commit, branch)
 
     def entries(self, rev: str, paths: Sequence[str], *, recursive: bool):
         return _tree_entries(self.path, rev, paths, _local_env(), recursive=recursive)

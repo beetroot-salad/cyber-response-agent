@@ -18,9 +18,8 @@ import pytest
 
 from defender import _git
 from defender.learning.author.version_control.auth import ForgejoIdentity
-from defender.learning.author.version_control.credentials import network_git
 from defender.learning.author.version_control.forgejo import ForgeAddress, ForgejoForge
-from defender.learning.author.version_control.repository import _local_env
+from defender.learning.author.version_control.transport import GitTransport
 
 pytestmark = pytest.mark.live
 
@@ -82,17 +81,8 @@ def test_real_forgejo_accepts_scoped_short_lived_jwt(tmp_path):
         _git.git(["init", "-b", "main"], cwd=tmp_path)
         _git.git(["remote", "add", "origin", config["origin"]], cwd=tmp_path)
 
-        def network(args):
-            return network_git(
-                args,
-                repo=tmp_path,
-                address=address,
-                identity=identity,
-                env=_local_env(),
-                timeout=30,
-            )
-
-        network(["fetch", "origin"])
+        transport = GitTransport(tmp_path, config["origin"], identity, 30)
+        transport.fetch()
         _git.git(["reset", "--hard", "origin/main"], cwd=tmp_path)
         _git.git(
             [
@@ -108,12 +98,13 @@ def test_real_forgejo_accepts_scoped_short_lived_jwt(tmp_path):
             cwd=tmp_path,
         )
         branch = "lessons/jwt-" + uuid.uuid4().hex
-        network(["push", "origin", f"HEAD:refs/heads/{branch}"])
+        commit = _git.git(["rev-parse", "HEAD"], cwd=tmp_path)  # lint-oracle: ok — identify the fixture commit passed to transport; not an expected-value oracle
+        transport.push(commit, branch)
         assert forge.open_pr(
             base="main", head=branch, title="JWT fixture", body="Fixture"
         )
         with pytest.raises(_git.GitError):
-            network(["push", "origin", "HEAD:refs/heads/main"])
+            transport.push(commit, "main")
         for rejected in [
             jwt(exp=int(time.time()) - 60),
             jwt(tenant_id="other"),
@@ -127,13 +118,5 @@ def test_real_forgejo_accepts_scoped_short_lived_jwt(tmp_path):
         other = ForgeAddress.parse(config["other_origin"])
         response = client.get(other.api, headers={"Authorization": "Bearer " + value})
         assert response.status_code in {403, 404}
-        _git.git(["remote", "set-url", "origin", config["other_origin"]], cwd=tmp_path)
         with pytest.raises(_git.GitError):
-            network_git(
-                ["fetch", "origin"],
-                repo=tmp_path,
-                address=other,
-                identity=identity,
-                env=_local_env(),
-                timeout=30,
-            )
+            GitTransport(tmp_path, config["other_origin"], identity, 30).fetch()

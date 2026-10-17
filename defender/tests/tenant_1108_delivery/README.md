@@ -1,3 +1,11 @@
+> Network isolation update: `TenantDelivery.open` now also requires an explicit `origin=`
+> URL. Every transfer uses a temporary bare git directory with owned configuration and a
+> private home, sharing only the tenant object database. Tests use real loopback HTTP
+> remotes rather than clone URL rewrites. `test_transport.py` covers annotated-tag exclusion
+> on finish/deliver/revert, hostile clone/includes/system/user/environment config, explicit
+> destinations, and SHA-1/SHA-256 object sharing. Historical inherited-config behavior below
+> is superseded by this boundary.
+
 > Current implementation update (PR #1253): the credential-file contract below is
 > historical. The current public API is `defender.learning.author.version_control`.
 > `TenantDelivery.open(..., identity=ForgejoIdentity(...))` requires an explicit host-side

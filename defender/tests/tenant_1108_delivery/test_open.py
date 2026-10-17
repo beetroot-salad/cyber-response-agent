@@ -52,15 +52,16 @@ def test_a_repository_read_without_an_integer_id_is_refused(repo, reply):
 @pytest.mark.parametrize(("fault", "reason"), [("unversioned", "version|git"), ("local-origin", "network|origin"), ("main", "main")])
 def test_delivery_refuses_unusable_tenant_with_named_reason(repo, fault, reason):
     tenant, _, credentials = repo
+    options = {}
     if fault == "unversioned":
         shutil.rmtree(tenant.knowledge / ".git")
     elif fault == "local-origin":
-        git(tenant.knowledge, "remote", "set-url", "origin", "/tmp/local.git")
+        options["origin"] = "/tmp/local.git"
     else:
         git(tenant.knowledge, "branch", "-m", "other")
         git(tenant.knowledge, "update-ref", "-d", "refs/remotes/origin/main")
     with pytest.raises(target().DeliveryRefused, match=reason):
-        delivery(repo, ForgeHTTP())
+        delivery(repo, ForgeHTTP(), **options)
 
 
 @pytest.mark.parametrize("protection", [{"protected": False, "user_can_push": False}, {"protected": True, "user_can_push": True}, {"protected": True}, {"user_can_push": False}, {"protected": "true", "user_can_push": False}, {"protected": True, "user_can_push": 0},

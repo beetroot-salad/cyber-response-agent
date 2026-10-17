@@ -69,6 +69,7 @@ class TenantDelivery:
         defender_dir: Path,
         client: httpx.Client,
         identity: ForgejoIdentity,
+        origin: str,
         network_timeout: float = NETWORK_TIMEOUT,
     ) -> TenantDelivery:
         with _refusals():
@@ -76,6 +77,7 @@ class TenantDelivery:
                 accepted_tenant.knowledge,
                 tenant_id=str(accepted_tenant.id),
                 identity=identity,
+                origin=origin,
                 client=client,
                 network_timeout=network_timeout,
             )
