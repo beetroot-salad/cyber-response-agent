@@ -159,6 +159,15 @@ The contract adversary on `86acc4e9` (its own green base, applied here blind, an
 - **Local git's hooks** (ruling: not pinned): the seams no longer say local git keeps them (choice 31).
 - **Recorded, no harm:** M11 (a PR's head compared with its row's `base.repo_id` rather than the repository read's id) is equivalent in practice, since every row the repository's own listing returns has our repository as its base. M10 and M21 were already killed.
 
+### Continuation repair (2026-10-17)
+
+A guard mutation of the recovered implementation removed its process-group kill. The
+publish-fetch exception row initially survived: the subprocess context waited until curl's
+low-speed timeout ended the helper naturally. The exception and interrupt rows now use a
+trickling connection and bound exception propagation as well as checking for leftover
+processes. Waiting for curl to stop is no longer accepted as prompt cleanup. This repair was
+reviewed during the continuation, not by an independent cold reviewer.
+
 ### Validation (amendment 3)
 
 Against the base, a scratch implementation, and the contract adversary's base and its mutants, after the contract adversary repair. The collection, base and scratch runs ran on the files as committed, then the adversary's base and each of its mutants, then this author's mutants, in one hold of the lock; four mutants for the rulings ran in a second.
