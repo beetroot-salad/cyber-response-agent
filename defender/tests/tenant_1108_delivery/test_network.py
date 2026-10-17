@@ -168,7 +168,9 @@ def test_an_exception_or_interrupt_during_network_git_leaves_no_process(http_rep
     exception, or an interrupt, into the call in the main thread. It leaves the call (an
     exception may come out as `DeliveryRefused`), and nothing is left running: the process
     group was killed on the way out. A route that need not reach git and does not completes
-    normally instead."""
+    normally instead. The connection trickles above curl's low-speed limit, and return is
+    bounded too: merely waiting for curl to give up cannot substitute for killing the group.
+    """
     tenant, server = http_repo[0], http_repo[3]
 
     def handler(signum, frame):
@@ -177,14 +179,17 @@ def test_an_exception_or_interrupt_during_network_git_leaves_no_process(http_rep
     try:
         call, stall, required = _stalled_route(
             http_repo, tmp_path, route,
-            then=lambda: signal.pthread_kill(threading.main_thread().ident, signal.SIGUSR1))
+            then=lambda: signal.pthread_kill(threading.main_thread().ident, signal.SIGUSR1),
+            trickle=True)
         expected = (raised,) if raised is _Interrupt else (raised, target().DeliveryRefused)
+        started = time.monotonic()
         try:
             error = None
             try:
                 call()
             except expected as caught:
                 error = caught
+            elapsed = time.monotonic() - started
             reached = stall.reached.is_set()
             left = _left(tenant, server)
         finally:
@@ -197,6 +202,7 @@ def test_an_exception_or_interrupt_during_network_git_leaves_no_process(http_rep
     else:
         assert error is None, error
     assert left == [], f"a process outlived the call: {left}"
+    assert elapsed < _TIMEOUT + _SLACK, f"{route} took {elapsed:.1f} s to propagate the exception"
 
 
 def test_network_git_has_a_finite_wall_timeout_by_default(repo):
