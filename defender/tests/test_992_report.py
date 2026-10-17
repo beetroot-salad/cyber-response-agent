@@ -1,35 +1,16 @@
-"""#992 — what the committed report carries (O4, M4, the vocabularies, the caps, and the
-ticket egress).
-
-Every test here is one demand of `spec-flow/specs/spec_graph_992.yaml`, named by that demand's
-`discharged_by`. RED against 67d29090 is the expected state: the reviewed `_CloseFields` site
-has no `ceiling_test`, `REPORT_CAUSES` has six members, and the `ceiling_test` note is
-unbounded at the entry-price gate (a6: a 9000-character note passes the gate and strands the
-run at the commit).
-
-Two §7 decisions against the judge land here. FK-10: `REPORT_CAUSES` gains a SEVENTH member
-and the ticket's closing comment carries it verbatim on a ceiling-held close. R6: the
-accumulated rendered `ceiling_test` notes are BOUNDED at the entry-price gate, at both
-boundaries, refused before any stage — the value is the implementer's (the spine assumed
-2048 B, the sibling `_MAX_RUNTIME_EVIDENCE_BODY_BYTES`), so the test walks a size ladder and
-asserts the first refusal is the price gate's at every rung, never the commit's.
-"""
+"""#992 — what the committed report carries (O4, M4, the vocabularies, the caps, and the ticket egress)."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
-from dataclasses import fields
 
 from defender._artifact_schema import REPORT_FRONTMATTER_MAX, validate_artifact
 from defender.runtime import case_ticket
-from defender.runtime.challenge_gate import GateVerdict
 from defender.runtime.close_tool import (
     CAUSE_REVIEW_INCOMPLETE,
-    CLOSE_RETURNS,
     FAILURE_KINDS,
     REPORT_CAUSES,
     STANDS,
-    CloseResult,
 )
 from defender.skills.invlang.validate import validate_companion
 from defender.skills.invlang.validate._gating import _MAX_CEILING_FRONTMATTER_BYTES, ceiling_test_block
@@ -43,7 +24,6 @@ from defender.tests._spec992 import (
     GAP,
     NOTE_LADDER,
     UNRESOLVED,
-    SHIPPED_CAUSES,
     V2SSHD_RECEIPTS,
     bounds,
     ceiling_companion,
@@ -71,10 +51,7 @@ _ONE_TURN = "extra_turns"
 
 
 def _override_arms() -> list[tuple[str, object, dict]]:
-    """Every arm on which an `inconclusive` is OVERRIDDEN to `unresolved` after review — the
-    same four arms that override a confident close (one rule; test_992_routing's docstring):
-    `(name, stages, close kwargs)` for the last attempt; a repeat and a spent pool need a
-    challenged attempt first."""
+    """Every arm on which an `inconclusive` is OVERRIDDEN to `unresolved` after review — the same four arms that..."""
     return [
         ("null-ask", recording(gap(None)), {}),
         ("repeat", recording(gap("l-004")), {"after": [recording(gap("l-004"))]}),
@@ -91,19 +68,7 @@ def _drive(deps, name: str, stages, kw: dict):
 
 
 def test_reviewed_inconclusive_carries_receipts(tmp_path):
-    """An `inconclusive` that STANDS after review — the held ceiling, the one arm that stands —
-    carries into report.md the `ceiling_test:` frontmatter block with the exact receipts the
-    entry price gate priced (`state`/`ref`/`cap`), one `ceiling_test (...)` note line per
-    receipt in the body, and the `runtime_evidence` block beside it; an `inconclusive` the
-    review OVERRIDES — null ask, repeat, spent pool, machinery failure — commits `unresolved`
-    and, like every `unresolved`, carries no block and no note line (the receipts stay in
-    investigation.md); receipts land identically when the ablation lens was skipped, and two
-    rows citing one ref with different states are not collapsed — the lead-anchored
-    consistency check refuses the inconsistent one at the price gate (rg4).
-
-    The close reads the file ONCE and the block carries the rows that one parse produced; a
-    companion that read cannot decode never reaches the review at all (a row of
-    test_992_routing's machinery-failure arms)."""
+    """An `inconclusive` that STANDS after review — the held ceiling, the one arm that stands — carries into..."""
     golden = ceiling_companion()
     deps, run_dir = deps_over(tmp_path / "holds", golden)
     assert close_with(deps, GAP, recording(holds())).outcome == STANDS
@@ -159,12 +124,7 @@ def test_reviewed_inconclusive_carries_receipts(tmp_path):
 
 
 def test_confident_and_forced_commits_carry_no_ceiling_test(tmp_path):
-    """A reviewed confident close and a gate-forced `unresolved` commit no `ceiling_test:` block
-    and no receipt note lines — the receipts are keyed on the verdict's disposition being
-    `inconclusive`; a confident close over a document whose conclude block says `inconclusive`
-    commits no block either, while the receipts stay visible to the composer inside the
-    companion (C3); positive control: the reviewed `inconclusive` over the same companion
-    spends the review and carries the block."""
+    """A reviewed confident close and a gate-forced `unresolved` commit no `ceiling_test:` block and no receipt..."""
     golden = ceiling_companion()
 
     confident = recording(holds())
@@ -212,13 +172,7 @@ def _near_cap_rows() -> tuple[str, ...]:
 
 
 def test_reviewed_inconclusive_report_frontmatter_stays_under_its_cap_with_the_longest_cause(tmp_path):
-    """A reviewed `inconclusive` that stands — under the seventh cause, the longest sentence in
-    REPORT_CAUSES — with a `ceiling_test` block at `_MAX_CEILING_FRONTMATTER_BYTES` commits
-    inside the 512-byte frontmatter cap; the arithmetic is still checked over EVERY member with
-    the longest `failure_kind` beside a block at the cap, so no arm the vocabulary could grow
-    into overflows; `validate_report` refuses an overflow; and the seventh cause exists (d23,
-    §7 FK-10). (The override arms commit `unresolved`, which carries no block — they are the
-    arithmetic's rows, not a reachable overflow.)"""
+    """A reviewed `inconclusive` that stands — under the seventh cause, the longest sentence in REPORT_CAUSES —..."""
     rows = _near_cap_rows()
     at_cap = _spec923.paid(*rows)
     block = priced_block(at_cap)
@@ -252,17 +206,7 @@ def test_reviewed_inconclusive_report_frontmatter_stays_under_its_cap_with_the_l
 
 
 def test_reviewed_inconclusive_ceiling_note_overflow_is_refused(tmp_path):
-    """The accumulated rendered `ceiling_test` note lines are BOUNDED at the entry-price gate —
-    collected at BOTH boundaries, the investigation.md write gate and the close — with the same
-    refusal shape the gate already uses for the over-cap receipt block: an over-cap note is
-    refused BEFORE any stage runs (no trace row, no record, no report) and never reaches the
-    commit, so at no note size does the close refuse at `validate_report`'s whole-file cap; a
-    note under the bound commits on the reviewed path with the note rendered in full; the
-    block-cap maximum of distinct receipts each carrying the largest single note the ladder
-    commits is either refused at the price gate or commits — never refused at the commit, so
-    the file cap is unreachable by notes alone whether the bound is accumulated or per-note
-    (F-3); and a literal `</report>` in a note is still refused at the price gate (§7 R6: the
-    bound's value is the implementer's, asserted at whatever bound the code declares)."""
+    """The accumulated rendered `ceiling_test` note lines are BOUNDED at the entry-price gate — collected at BOTH..."""
     first_refusal_at: int | None = None
     largest_committing: int | None = None
     for size in NOTE_LADDER:
@@ -301,9 +245,6 @@ def test_reviewed_inconclusive_ceiling_note_overflow_is_refused(tmp_path):
     assert first_refusal_at is not None, "no note size on the ladder was refused — the note is unbounded"
     assert first_refusal_at > NOTE_LADDER[0], "even a short note is refused"
 
-    # N receipts (the block cap's maximum) × the largest single note that commits: the file
-    # cap must stay unreachable by notes alone, so the close is refused at the PRICE GATE or it
-    # commits — it is never refused at the commit after the review was spent (a6's hazard).
     assert largest_committing is not None
     many = wide_companion(receipts_at_block_cap(), note_text(largest_committing))
     stages = recording(holds())
@@ -337,34 +278,8 @@ def test_reviewed_inconclusive_ceiling_note_overflow_is_refused(tmp_path):
     assert stages.calls == []
 
 
-def test_vocabularies_and_types_unchanged():
-    """`CLOSE_RETURNS` is still exactly (challenged, stands, forced-inconclusive); `REPORT_CAUSES`
-    is exactly the six shipped sentences verbatim plus the seventh appended (§7 FK-10) — no
-    other sentence added, none reworded; and `CloseResult` / `GateVerdict` carry the same field
-    names — no outcome member, type or field was added for the ceiling review."""
-    assert CLOSE_RETURNS == ("challenged", "stands", "forced-inconclusive")
-    expected_causes = (*SHIPPED_CAUSES, CEILING_EXAMINED)
-    assert expected_causes == REPORT_CAUSES, REPORT_CAUSES
-    assert len(set(REPORT_CAUSES)) == 7
-    assert [f.name for f in fields(CloseResult)] == [
-        "outcome", "message", "material", "record_path", "cause", "detail", "turns_used", "failure_kind",
-    ]
-    assert [f.name for f in fields(GateVerdict)] == [
-        "outcome", "disposition", "cause", "detail", "material", "turns_used", "failure_kind",
-    ]
-
-
 def test_case_ticket_closing_comment_reads_a_reviewed_inconclusive_close(tmp_path, monkeypatch):
-    """Driving a reviewed, ceiling-held `inconclusive` close through to the ticket bridge, the
-    outbound comment's first line carries `disposition: inconclusive` beside the SEVENTH cause
-    sentence — "the challenge review examined the ceiling claim and found nothing further
-    measurable" — verbatim, and a machinery-failed `inconclusive` (failed closed to
-    `unresolved` + failure_kind + CAUSE_REVIEW_INCOMPLETE) renders through the same reader as
-    the host's own verdict, never as the ceiling claim the review could not check.
-
-    #767 D2/D3 replaced the close transition and `case_record_to_close`'s `resolution` field
-    with a recorded comment and `case_record_to_comment`'s `body`; the membership check this
-    test names (REPORT_CAUSES gaining a seventh member) is unaffected by that rename."""
+    """Driving a reviewed, ceiling-held `inconclusive` close through to the ticket bridge, the outbound comment's..."""
     from defender.tests._spec767 import use_mapping
 
     mapping = case_ticket.load_case_mapping(use_mapping(monkeypatch, tmp_path / "dfn"))

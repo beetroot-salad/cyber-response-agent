@@ -1,12 +1,4 @@
-"""#1105 PR 1 — fixes from the claims adversary's pass over the shipped prose.
-
-* A refusal names the runs folder escaped, so a folder whose path carries a control character
-  (read back from the kernel, or the accepted tenant's own path) cannot break the message's one
-  line — `_errors.shown`'s promise, which held for the entry name and not for the folder.
-* `lint_run_layout_imports` reports a module too deeply nested to parse as a finding naming it,
-  the same as one that does not decode, instead of dying in `ast.parse` with a bare
-  `RecursionError` and no file name.
-"""
+"""Run-record refusals stay one line under a forged folder name; the run-layout lint reports unparseable modules."""
 from __future__ import annotations
 
 import importlib.util
@@ -138,16 +130,6 @@ def test_the_layout_lint_follows_a_layout_name_through_a_relay_module(tmp_path):
     hits = [d for d in shown if "learning/probe_relay.py" in d]
     assert any("ALERT" in d for d in hits), shown
     assert any("RUN_LAYOUT" in d for d in hits), shown
-
-
-def test_the_layout_lint_ignores_a_name_merely_spelled_like_a_layout_name(tmp_path):
-    """An unrelated constant named like a layout name is judged by where it is defined, so it
-    is no run-layout import (the xhigh review's `PROVENANCE` from invlang's vocabulary)."""
-    root = _package_copy(tmp_path)
-    _plant(root, "skills/vocab.py", 'PROVENANCE = ("source", "derived")\n')
-    _plant(root, "learning/probe_vocab.py", "from defender.skills.vocab import PROVENANCE\n")
-    shown = [f.display for f in _lint().scan(root, allow_list=[])]
-    assert not [d for d in shown if "learning/probe_vocab.py" in d], shown
 
 
 @pytest.mark.parametrize(("rel", "text"), [

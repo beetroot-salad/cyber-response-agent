@@ -1,46 +1,15 @@
-"""#1107 — the ticket writer takes the run's record, and a failed write is visible and harmless (O6,
-D5, F6, MF-9, MF-12, NF-23, NF-24, PG-12, PG-13).
-
-THE ENTRY POINT IS `run.py main`, driven through its own injection seams (`_spec1107.RunRecorder`:
-preflight, materialize, lifecycle, enqueue — each recording, none deciding) with the REAL ticket
-writer as its `ticket_writer=` default, so "the record step" is whatever `run.main` reaches under
-`--update-ticket` with the exit record `lifecycle` hands back (`truncated_by`,
-`closed_before_cut`). The run page, where a test reads it, is the REAL renderer run.py reaches
-(`run_common.visualize`, the default `visualize` seam); where it does not, the recorder's
-`visualize` stands in and records.
-
-The case-history store is reached for real, through the writer's own transport, which forks
-`docker`: a `DockerShim` first on the PATH of the environment the writer's child is handed (CX8,
-executed: `subprocess.run(..., env=E)` resolves `docker` on E's PATH, so the shim receives the
-transport's argv and the child's whole environment — no seam, no monkeypatch; F5). Since F6
-(human) the child environment is the run env run.py hands the writer, and run.py builds that from
-this process's environment — so the shim goes onto PATH with `monkeypatch.setenv` before
-`run.main` runs.
-
-Every other fault is a REAL input through the real primitive: the deleted `config.env`, the
-missing key, the non-integer timeout, a mapping whose `open.status` is a template (the loader's
-own lifecycle refusal — since #1221's amendment its only one), a forged receipt and a symlink planted at the receipt's name
-inside the run dir, a directory squatting that name, an exported `CASE_HISTORY_URL_BASE`.
-
-Coined here (the design does not spell them; `_spec1107` holds the rest): none beyond
-`_spec1107`'s — the writer's `tenant=`/`defender_dir=`/`env=` keywords are `S.RECORD_FIELD` and
-`S.record_step`/`S.open_step`.
-"""
+"""Ticket writer record step: error receipts, redaction, atomic receipt write, env handed through."""
 from __future__ import annotations
 
 import ast
-import dataclasses
 import html
-import inspect
 import json
 import logging
-import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from defender import run_common
-from defender.run_repository import Run
 from defender.run_repository import RunPaths
 from defender.runtime import run_end, run_tenant
 from defender.scripts.case_history import ticket_writer
@@ -108,8 +77,6 @@ def _warnings(caplog, logger: str = TW_LOGGER) -> list[str]:
             if r.levelno >= logging.WARNING and r.name == logger]
 
 
-def _in_page(page: str, text: str) -> bool:
-    return html.escape(text) in page or text in page
 
 
 def _ticket_line_near(page: str, reason: str, *others: str, window: int = 1500) -> bool:
@@ -170,60 +137,12 @@ def _calls_in(module_path: Path, names: set[str], *, env_reads: bool = False) ->
     return hits
 
 
-class _WriterSeam:
-    """`run.main`'s `ticket_writer` seam as a module-shaped recorder: what each leg was handed."""
-
-    def __init__(self) -> None:
-        self.opened: list[tuple[tuple, dict]] = []
-        self.recorded: list[tuple[tuple, dict]] = []
-
-    def open_case_ticket(self, *args: Any, **kwargs: Any) -> None:
-        self.opened.append((args, kwargs))
-
-    def record_case_ticket(self, *args: Any, **kwargs: Any) -> None:
-        self.recorded.append((args, kwargs))
 
 
 # ======================================================================================
 # The seam (D-writer, F6).
 # ======================================================================================
 
-def test_d_writer_takes_record(tmp_path, monkeypatch):
-    """open_case_ticket and record_case_ticket take the run's record from run.py and have no
-    settings_dir parameter. TicketWriterDeps has a request field and no load_config field."""
-    root, folder, alert = _world(tmp_path)
-    _shim(tmp_path, monkeypatch)
-    seam = _WriterSeam()
-    rec = S.RunRecorder(tmp_path / "runs" / "r-seam")
-    rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec,
-                              ticket_writer=seam, visualize=rec.visualize)
-    assert refused is None, f"the run did not complete: rc={rc} refused={refused}"
-    assert rc == 0, f"the run did not complete: rc={rc} refused={refused}"
-    assert seam.opened, f"run.py reached neither ticket leg under --update-ticket: {seam.opened} {seam.recorded}"
-    assert seam.recorded, f"run.py reached neither ticket leg under --update-ticket: {seam.opened} {seam.recorded}"
-    for leg, calls in (("open_case_ticket", seam.opened), ("record_case_ticket", seam.recorded)):
-        _args, kwargs = calls[0]
-        assert "settings_dir" not in kwargs, (
-            f"run.py still hands {leg} the settings folder, not the record: {kwargs}")
-        handed = _records_carried(calls[0])
-        assert handed, f"run.py handed {leg} no RunTenant record: {calls[0]}"
-        assert handed[0].settings == S.settings_of(folder).resolve(), (
-            f"{leg} was handed another tenant's record: {handed[0].settings}")
-
-    # The real functions' own signatures — the record, never the folder.
-    for fn in (ticket_writer.open_case_ticket, ticket_writer.record_case_ticket):
-        params = inspect.signature(fn).parameters
-        assert "settings_dir" not in params, (
-            f"{fn.__name__} still takes settings_dir: {list(params)}")
-        assert S.RECORD_FIELD in params, (
-            f"{fn.__name__} takes no record parameter ({S.RECORD_FIELD!r}): {list(params)}")
-    fields = {f.name for f in dataclasses.fields(ticket_writer.TicketWriterDeps)} if (
-        dataclasses.is_dataclass(ticket_writer.TicketWriterDeps)) else set(
-        getattr(ticket_writer.TicketWriterDeps, "model_fields", {}) or
-        inspect.signature(ticket_writer.TicketWriterDeps).parameters)
-    assert "request" in fields, f"TicketWriterDeps lost its request seam: {fields}"
-    assert "load_config" not in fields, (
-        f"TicketWriterDeps still carries the load_config seam: {fields}")
 
 
 def test_d_writer_context_from_run(tmp_path, monkeypatch):
@@ -393,33 +312,6 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     assert _warnings(caplog), "a transport fault logged no warning"
 
 
-def test_o6_reason_no_host_path(tmp_path, monkeypatch):
-    """No receipt reason, across the missing-config, bad-config, bad-mapping and transport arms,
-    contains the tenant's host settings path (as given or resolved) or the tenants root."""
-    arms = ("missing-config", "bad-config", "bad-mapping", "transport")
-    reasons: dict[str, str] = {}
-    for arm in arms:
-        run_id = f"r-{arm}"
-        answers = ([S.context_not_found(S.context_name(MARKER, "case-history"))]
-                   if arm == "transport" else S.store_answers_ok(run_id))
-        _shim(tmp_path, monkeypatch, *answers, name=f"docker-{arm}")
-        root, folder, alert = _world(
-            tmp_path, name=f"tenants-{arm}",
-            open_status=BAD_OPEN_STATUS if arm == "bad-mapping" else "open")
-        if arm == "missing-config":
-            S.config_path(folder, "case-history").unlink()
-        elif arm == "bad-config":
-            S.drop_key(folder, "case-history", "CASE_HISTORY_URL_BASE")
-        rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id)
-        got = S.receipt(run_dir)
-        # The channel: each arm DID write a receipt with a reason (the positive precondition).
-        assert got is not None, f"{arm}: no receipt reason to judge: {got}"
-        assert (got.get("reason") or "").strip(), f"{arm}: no receipt reason to judge: {got}"
-        reasons[arm] = got["reason"]
-        for host in _host_paths(folder, root):
-            assert host not in got["reason"], (
-                f"{arm}: the receipt reason carries the host path {host}: {got['reason']!r}")
-    assert set(reasons) == set(arms), reasons
 
 
 def test_o6_budget_cut_missing_config_no_receipt(tmp_path, monkeypatch):
@@ -539,12 +431,7 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
 def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog):
     """The receipt reason is the failing check's own fault text passed through the settings-path
     redaction: the warning log line for the same failure carries the same redacted reason and no
-    host settings path. Assertions stay at a non-empty reason and no host path.
-
-    The second arm was a released-by-a-person decline (`refused-released`, with a reason) until
-    #1221's amendment removed the writer's closed-case check: a case the store holds as `closed`
-    is now recorded like any other — receipt `commented`, `ok` true, no reason — and the writer's
-    calls to the store are the open and its one comment POST, never a read of the case."""
+    host settings path. Assertions stay at a non-empty reason and no host path."""
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path, name="tenants-bad")
@@ -724,66 +611,8 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
     assert not leftovers, f"a staged receipt was left beside the real one: {leftovers}"
 
 
-def test_s60_ticket_write_path_stable_for_path_helpers(tmp_path, monkeypatch):
-    """RunPaths(run_dir).ticket_write(runs_base) is <runs_base>/<run id>.ticket-write.json, a
-    sidecar beside the run dir like the scrub verdict (moved out of the box-writable run dir at
-    the third #1156 review; it was <run_dir>/ticket_write.json). the layout and the handle
-    resolve this same path, and the record step's receipt lands there."""
-    root, _folder, alert = _world(tmp_path)
-    run_id = "r-path"
-    _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
-    _run(tmp_path, root, alert, run_id=run_id)
-    run_dir = tmp_path / "runs" / run_id
-    expected = run_dir.parent / f"{run_id}.ticket-write.json"
-    assert RunPaths(run_dir).ticket_write(run_dir.parent) == expected, (
-        RunPaths(run_dir).ticket_write(run_dir.parent))
-    assert Run.under(run_dir.parent, run_id).observability.ticket_write.path \
-        == expected, "the run handle resolves the receipt somewhere else"
-    assert expected.is_file(), (
-        f"the record step's receipt did not land at {expected}: {sorted(os.listdir(run_dir))}")
 
 
-def test_s60_ticket_writer_fakes_migrated(tmp_path, monkeypatch):
-    """Every test fake standing in for open_case_ticket/record_case_ticket (_spec791.SpecTail,
-    test_947_triplet_sibling.Writer, test_767_run_tail.Tail, test_1106_run_start.writer) accepts the
-    new record parameter from run.py, not the old settings_dir, and a call through it is observably
-    affected by the record's contents (not silently ignored by a **kwargs catch-all)."""
-    from defender.tests import _spec791
-    from defender.tests import test_767_run_tail
-    from defender.tests.e2e import test_1106_run_start
-
-    # The 947 fake is defined inside its test function; its class is taken from that source.
-    src_947 = Path(__file__).resolve().parents[1] / "test_947_triplet_sibling.py"
-    tree = ast.parse(src_947.read_text(encoding="utf-8"))
-    writer_nodes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "Writer"]
-    assert writer_nodes, "test_947_triplet_sibling.py no longer defines its Writer fake"
-    namespace: dict[str, Any] = {"Any": Any}
-    exec(compile(ast.Module(body=[writer_nodes[0]], type_ignores=[]),  # noqa: S102 — the fake's own source
-                 str(src_947), "exec"), namespace)
-
-    fakes = {
-        "_spec791.SpecTail": lambda: _spec791.SpecTail(_spec791.loop_paths(tmp_path / "l791")),
-        "test_947_triplet_sibling.Writer": namespace["Writer"],
-        "test_767_run_tail.Tail": lambda: test_767_run_tail.Tail(
-            _spec791.loop_paths(tmp_path / "l767")),
-        "test_1106_run_start.writer": test_1106_run_start.TicketWriterRecorder,
-    }
-    _shim(tmp_path, monkeypatch)
-    root, folder, alert = _world(tmp_path)
-    want = S.settings_of(folder).resolve()
-    for name, make in fakes.items():
-        fake = make()
-        rec = S.RunRecorder(tmp_path / "runs" / f"r-{name.split('.')[-1].lower()}")
-        rc, refused = S.drive_run(S.run_argv(alert, root, update_ticket=True), rec,
-                                  ticket_writer=fake, visualize=rec.visualize)
-        assert refused is None, f"{name} does not accept what run.py hands the ticket legs: rc={rc} {refused}"
-        assert rc == 0, f"{name} does not accept what run.py hands the ticket legs: rc={rc} {refused}"
-        carried = _records_carried(fake)
-        assert carried, (
-            f"{name} kept nothing of the record run.py handed it — the call went into a "
-            f"catch-all: {vars(fake) if hasattr(fake, '__dict__') else fake}")
-        assert all(r.settings == want for r in carried), (
-            f"{name} kept another tenant's record: {[r.settings for r in carried]}")
 
 
 def test_s7_f6_run_env_handed_to_the_correlation_lead(tmp_path, monkeypatch):

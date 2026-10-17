@@ -1,26 +1,4 @@
-"""#631 — S1/S2: the run's integrity surface, and the two authoring paths that reach
-`investigation.md` without the gate the constraint lives inside.
-
-The bound on spend is only a bound if the RECORD of spend is not forgeable, so the
-carve-out is scoped to the WHOLE run integrity surface — budget.json,
-circuit_breaker.json, wire_logs/llm_requests.jsonl, tool_trace.jsonl, the queries table,
-gather_summaries/ and alert.json — and the mechanism is a POSITIVE ALLOW-LIST of
-exactly {investigation.md}, deliberately tighter than the `.md` suffix
-filter the two sibling curators take. (#774/R1: report.md left this allow-list
-entirely — the close tool is now its only writer — so the allow-list narrowed
-further still, from the two-name set this suite originally pinned to one.)
-
-RED AGAINST HEAD IS THE EXPECTED STATE, and here the refutations are the point:
-PO51 (executed) established MAIN's compiled `write_allow` is the single unrestricted
-pattern `<run_dir>(?:/[^\\x00]*)?` and that `decide_write` returns allow=True for
-budget.json today; Q2/Q10 (executed) established the `.md` suffix form does NOT close
-gather_summaries (those files are `{lead_id}.md`, NOT `.json` as the residue claimed)
-and admits arbitrary `.md` at arbitrary depth including `gather_raw/evil.md`; PBW2
-(executed) established `_copy_shared_inputs` authors a file NAMED investigation.md
-over the fs lane with the validator never consulted; PBW2D established `decide_write`
-allowlists on the RESOLVED path but selects the validator on the UNRESOLVED operand.
-Every assertion below pins the demanded correction, never today's behaviour.
-"""
+"""#631 — S1/S2: the run's integrity surface, and the two authoring paths that reach `investigation.md` without the gate the constraint lives inside."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -65,10 +43,6 @@ BAD_INVLANG = "```yaml\nfoo: bar\n```\n"
 INTEGRITY_SURFACE = (
     "budget.json",
     "circuit_breaker.json",
-    # Under `wire_logs/` since the wire log moved out of every reader's run-dir read shape.
-    # Named at its real path so the census keeps covering the artifact and not a stale name:
-    # MAIN's write allow-list is one file, so both spellings deny, and only one of them is
-    # the file whose forgery this suite exists to refuse.
     "wire_logs/llm_requests.jsonl",
     "tool_trace.jsonl",
     "executed_queries.jsonl",
@@ -95,22 +69,8 @@ def _report_text() -> str:
     return "---\ncase_id: c-1\ndisposition: benign\nconfidence: low\n---\n\nDone.\n"
 
 
-
 def test_model_cannot_disable_enforcement(tmp_path):
-    """A model that writes to files or runs bash cannot turn the enforcement FLAG off
-    mid-run: the flag is read in-process from the environment, MAIN's bash lane is
-    shell=False with no env-mutating grant, and a child process that sets the variable
-    leaves the parent's os.environ untouched.
-
-    SCOPE, narrowed by the phase-C cold pass: this demand is about the FLAG. The "and
-    writes are clamped to run_dir" clause was DELETED rather than reworded, because
-    that clamp is the boundary of the region CONTAINING the enforcement state — which
-    is what test_model_cannot_author_its_own_budget_state exists for. C7 came back
-    `unrefuted` under a genuine executed break attempt: 7 env-mutating bash forms, 10
-    write targets, all denied.
-
-    The positive control is test_enforce_flag_defaults_off: the flag IS settable
-    in-process by the operator, so this negative cannot pass by the read being dead."""
+    """A model that writes to files or runs bash cannot turn the enforcement FLAG off mid-run: the flag is read..."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
@@ -145,39 +105,8 @@ def test_model_cannot_disable_enforcement(tmp_path):
     assert os.environ.get(FLAG) == before, "a child process mutated the parent's flag"
 
 
-
 def test_model_cannot_author_its_own_budget_state(tmp_path):
-    """MAIN cannot author or edit the record its own enforcement decision reads: a
-    write_file or edit_file call targeting budget.json is refused, so the model can
-    neither reset tool_calls and subagent_spawns nor move started_at forward to buy
-    itself a fresh wall clock — and the same refusal covers the whole run integrity
-    surface, because a bound on spend that leaves the RECORD of spend forgeable is not
-    a bound.
-
-    Bound on EVERY surface the content could reach, and driven INSIDE the bounded
-    tail — with write_file still granted as a tail-tier tool — because that is exactly
-    where the design's own guarantee lives: the window granted to fund the report is
-    granted over the record that bounds the window. Do NOT discharge this by demoting
-    write_file out of the tail; that breaks O2 and is the wrong repair.
-
-    GATHER is deliberately not asserted here and the asymmetry is the point (PO52,
-    executed: its write_allow is EMPTY by construction). The bash lane is bound
-    anyway, probed CLOSED by PO53, because an unbound closed surface is one refactor
-    away from being an unbound open one.
-
-    The positive control is
-    test_report_write_is_refused_and_investigation_write_still_succeeds (#774/R1: report.md
-    itself left the tail's allow-list, so the tail-tier mechanism's own positive control here
-    now drives investigation.md — still model-writable, still tail-tier — rather than
-    report.md).
-
-    #1235: the driven leg — a refused bash redirect at `budget.json`, then reading the file
-    back to see the forged counter had not landed — retired. The run's budget is its
-    process's memory and no decision reads `budget.json`, so the file's content no longer
-    witnesses anything; that a file in the run folder moves no count is pinned in
-    `test_budget_enforcement_631.test_a_budget_file_in_the_run_folder_moves_no_count` and
-    driven end to end in the #1235 e2e suite. The gate half stays: the names are still
-    refused as writes, as the rest of the integrity surface is."""
+    """MAIN cannot author or edit the record its own enforcement decision reads: a write_file or edit_file call..."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
@@ -195,12 +124,6 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
         assert not permission.decide_bash(command, run_dir=run_dir,
                                           defender_dir=DEFENDER, policy=policy).allow
 
-    # #810: the forge used to be driven as `write_file` at budget.json, refused by the write
-    # allowlist. MAIN no longer HAS a verb that takes a write path — `append_block` is bound to
-    # investigation.md in the handler — so the model cannot NAME budget.json through the tool
-    # surface at all. The gate assertions above still pin the allowlist for every caller that
-    # can, and the bash-redirect refusals above the one path the model has left. Unnameable
-    # plus refused, rather than nameable and refused.
     assert MAIN_DEF.tools.write is False, (
         "MAIN holds a path-taking writer again — budget.json is nameable from the model"
     )
@@ -208,15 +131,7 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
 
 
 def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path):
-    """#774/R1 UPDATE. `report.md` left MAIN's write allow-list entirely (the close tool is
-    now its only writer), so under whatever narrowing refuses the budget-state write,
-    `investigation.md` still commits successfully while `report.md` is refused just like the
-    rest of the integrity surface — the run's actual (still model-writable) artifact is
-    unaffected, on the same address and under the complementary condition.
-
-    This test used to assert the OPPOSITE (report.md succeeding) before R1; the narrowing
-    that closes the budget-state hole and the one that removes report.md are two different
-    narrowings on the same allow-list, and both now hold at once."""
+    """#774/R1 UPDATE. `report.md` left MAIN's write allow-list entirely (the close tool is now its only writer),..."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
@@ -228,11 +143,6 @@ def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path
                                        defender_dir=DEFENDER, policy=policy)
     assert not decision.allow, "report.md is no longer model-writable after R1"
 
-    # The driven half, on MAIN's post-#810 surface: `append_block` lands investigation.md, and
-    # report.md has no verb to reach it with — the model cannot supply a write path at all, so
-    # the second leg is no longer a refused call but an unmakeable one. The gate assertions
-    # above keep pinning the allow-list itself for every caller that CAN name a path. (#1235:
-    # no budget is opened first — the run's budget is the RunState handed to drive_agent.)
     from defender.runtime.run_state import RunState
 
     drive_agent(MAIN_DEF, run_dir,
@@ -243,34 +153,7 @@ def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path
 
 
 def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
-    """MAIN's compiled write scope is a POSITIVE ALLOW-LIST of exactly
-    investigation.md (#774/R1 narrowed this off report.md too — the close tool is
-    now report.md's only writer): every other path under the run dir is refused,
-    including the ones a `.md` suffix filter would have admitted —
-    gather_summaries/{lead_id}.md and an arbitrary .md at arbitrary depth such as
-    gather_raw/evil.md, which is a write into the one subtree MAIN is positively
-    forbidden to READ.
-
-    The suffix form is REJECTED as the mechanism, and Q2/Q10 (executed) are why: it is
-    a FILENAME filter, not a subtree narrowing, because decide_write's containment
-    check applies NO path shapes. `_main_write_shape`'s "+ any case artifact it
-    authors" enumerates to the EMPTY SET (Q2d), so nothing legitimate is lost.
-    crosses_validation is false for the narrowed form: the invlang gate is a BASENAME
-    equality check orthogonal to the allowlist pattern, so investigation.md still
-    validates under it (the positive control shows it still lands).
-
-    COST ACCEPTED, recorded so it is not re-litigated: every future MAIN-authored
-    artifact needs an explicit allow-list edit.
-
-    The scope is asserted BEHAVIOURALLY, over decide_write's decisions — not by
-    inspecting build_write_allow's parameter names (blind reader R18/R26: a signature
-    check pins a spelling `allow_list`, which a correct implementation naming it
-    `allowed` or threading a dataclass would fail). And the probe set includes ALLOWED
-    basenames at DEPTH (blind reader R21): `sub/report.md`, `gather_raw/investigation.md`
-    — a rule matching an allowed basename ANYWHERE under the run dir (rather than the
-    resolved full path) would admit those, which is the exact resolved-vs-basename defect
-    test_a_write_through_an_alias_to_investigation_md_is_still_validated catches on the
-    validator side."""
+    """MAIN's compiled write scope is a POSITIVE ALLOW-LIST of exactly investigation.md (#774/R1 narrowed this..."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
     admitted = set()
@@ -295,29 +178,8 @@ def test_main_write_scope_is_an_explicit_allow_list(tmp_path):
     )
 
 
-
-
-
 def test_a_write_through_an_alias_to_investigation_md_is_still_validated(tmp_path):
-    """The invlang validator is selected on the RESOLVED path, so a write through an
-    alias that resolves to investigation.md is refused with the same validator message
-    the direct write gives.
-
-    PBW2D (executed): decide_write matches write_allow against `rp = path.resolve()`
-    but selects the validator on `path.name`, the UNRESOLVED operand — so identical
-    text is refused through `investigation.md` and ALLOWED through a symlink named
-    `alias.md` that resolves to it. IT SURVIVES S2 VERBATIM, probed under both shapes:
-    S2 narrows WHICH PATHS are writable, it does not change WHICH NAME the validator
-    keys on, and under S2 the gap is arguably SHARPER since the allow-list makes those
-    two names the only worthwhile aliasing targets.
-
-    A DISTINCT DEFECT from the fs-lane gap, minted separately on purpose: folding the
-    two into one demand would let a single fix appear to discharge both. Recorded as a
-    mechanism gap rather than a live break — the probe found no `ln` grant and no
-    symlink-creating primitive on MAIN's lane.
-
-    The positive control is test_a_valid_investigation_md_still_lands_through_every_
-    authoring_path."""
+    """The invlang validator is selected on the RESOLVED path, so a write through an alias that resolves to..."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
     real = run_dir / "investigation.md"
@@ -344,13 +206,8 @@ def test_a_write_through_an_alias_to_investigation_md_is_still_validated(tmp_pat
     )
 
 
-
-
-
 def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
-    """Drive ONE real `query` call on a real GATHER agent against an injected verb
-    registry — the tool boundary is where the value is accepted, so the fault enters
-    the way a model's own call enters it."""
+    """Drive ONE real `query` call on a real GATHER agent against an injected verb registry — the tool boundary..."""
     class Verbs(VerbRegistry):
         def __init__(self):
             super().__init__(VerbGrant(role="gather", entries=(("elastic", "esql", "r"),)))
@@ -393,28 +250,7 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
 
 
 def test_a_query_row_carrying_a_non_finite_param_is_still_strict_json(tmp_path):
-    """A query call whose params carry a non-finite value appends a row every line of
-    which parses under a STRICT JSON reader — json.loads with a raising parse_constant
-    succeeds — so no bare NaN or Infinity token reaches the queries table.
-
-    PBW3N (executed) refuted the fourth limb of the W3 waiver candidate: `append_jsonl`
-    is `fh.write(json.dumps(row) + "\\n")` with no `allow_nan=False`, so a
-    model-chosen non-finite float lands a bare token that is NOT valid RFC-8259 JSON.
-    Every Python reader in this tree accepts it, which is why nothing has ever
-    noticed; jq, Go and Rust do not.
-
-    REACHABLE BY ACCIDENT, NOT ONLY BY INTENT — which is why the fixture is the
-    ordinary-looking numeric literal `1e400` rather than an adversarial one: the
-    `query` tool declares `params: dict[str, Any]`, so pydantic accepts it and
-    SILENTLY OVERFLOWS it to `inf`, which the writer emits as a bare `Infinity`. AND
-    IT ESCAPES THE RUN: params ride verbatim into actor_view and out through
-    render_actor_view_yaml as `.inf`, into the artifact that reaches the checked-in
-    lessons corpus.
-
-    The demand pins the OBSERVABLE, not the mechanism — satisfied either by rejecting
-    the value at the tool boundary or by coercing it before it reaches append_jsonl.
-    The positive control forbids the blanket fix: see
-    test_hostile_string_params_still_produce_exactly_one_row."""
+    """A query call whose params carry a non-finite value appends a row every line of which parses under a STRICT..."""
     run_dir = _run_dir(tmp_path)
     _drive_one_query(run_dir, {"threshold": 1e400, "count": 42.5, "index": "logs"})
 
@@ -438,17 +274,7 @@ def test_a_query_row_carrying_a_non_finite_param_is_still_strict_json(tmp_path):
 
 
 def test_hostile_string_params_still_produce_exactly_one_row(tmp_path):
-    """Ordinary params round-trip byte-identical, and the sharp string cases — an
-    embedded newline and U+2028 — still produce exactly one line and one row.
-
-    THE POSITIVE CONTROL, and it is load-bearing rather than ceremonial: it is what
-    stops the non-finite fix from being a blanket param sanitizer, which would quietly
-    mangle legitimate query text the protocol already handles correctly. PBW3S
-    (executed) retired three of the waiver's four limbs with 17 hostile rows — every
-    one exactly ONE line, 17 written and 17 read back, byte-exact round trip, and no
-    forged row appearing as its own row. The mechanism is json.dumps' default
-    ensure_ascii=True, which escapes every character str.splitlines() would honour,
-    INCLUDING the three a bytes-level split would miss (U+0085, U+2028, U+2029)."""
+    """Ordinary params round-trip byte-identical, and the sharp string cases — an embedded newline and U+2028 —..."""
     hostile = {
         "index": "logs-*",
         "newline": 'a\nb',

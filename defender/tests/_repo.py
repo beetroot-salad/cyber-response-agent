@@ -41,8 +41,7 @@ from defender import _git
 #: The two mechanisms are INDEPENDENT, which is why the corpus carries both: `-z` alone fixes
 #: the quoting and not the tearing, a NUL split alone fixes the tearing and not the quoting.
 #: Only `-z` READ as NUL-delimited answers for all three. Measured on git 2.47.3 with the
-#: default `core.quotePath=true`; `test_hostile_names.py` is the executed probe and re-grounds
-#: this comment on every run. Deliberately NOT in the corpus: `it's` (a single quote is not
+#: default `core.quotePath=true`; re-measure with `git ls-files` on a hostile name if it is in doubt. Deliberately NOT in the corpus: `it's` (a single quote is not
 #: quoted and contains no whitespace, so it breaks neither reader and only pads the fixture).
 #:
 #: A tree reader that answers correctly over these three answers correctly over the names

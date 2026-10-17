@@ -1,28 +1,4 @@
-"""#767 — what a gather lead's CAPTURE holds of a ticket reply (since #1221: the store's answer).
-
-Three demands of `spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`, named by their
-`discharged_by`. They need the whole pipe: what the capture persists is a statement about
-everything between `handler(args)` and `_record`, and nothing short of driving the real query
-tool can observe it. #1221 removed D4's release screen from that span, so the capture, the
-archive surface and the model's turn now all hold the reply as the store answered it — an open
-case's comments included — and a case re-opened between two reads changes neither read.
-
-Sited in `tests/` rather than in `tests/e2e/` and carrying `pytestmark = pytest.mark.e2e`, the
-way `tests/test_denial_gather_632.py` already does: the marker is what CI selects on, and the
-spec-graph checkers scan the suite directory the graph names without descending into it.
-
-Built on the machinery that already exists — `tests/_verb_authorization_632.run_gather` drives
-a REAL run whose main agent dispatches one gather lead against an INJECTED verb registry, with
-the query tool, the grant decision, the capture capability, the payload view and the two tables
-all production. A new scenario is a verb table and two `Turn`s, not fresh plumbing.
-
-THE MAPPING IS THE SHIPPED ONE HERE, deliberately: a driven run reads the committed playground
-tenant's settings (#1106) for its mapping and its grants alike, so repointing it at a fixture
-tenant would change the run rather than the mapping. The agent identity is therefore READ OFF
-the shipped file (`shipped_comment_author`), which also makes these tests a statement about the
-file an operator edits (O5). A closed case's status is the store's own `closed`
-(`CLOSED_STATUS`): since #1221's amendment the mapping names no released status at all.
-"""
+"""#767 — what a gather lead's capture holds of a ticket reply: the store's answer, whole, through the real query tool."""
 from __future__ import annotations
 
 import copy
@@ -61,10 +37,7 @@ def _comment(author: str, body: str) -> dict[str, Any]:
 
 
 def _seed(author: str, *, closed: bool = True) -> dict[str, Any]:
-    """The e2e seed (the `d6_e2e_seed` clause): one closed case carrying two agent comments
-    and an analyst's, one open case carrying an agent's and an analyst's. `closed=False`
-    re-opens the first case, which the no-retroactive-scrub demand drives across two calls in
-    one run."""
+    """The e2e seed (the `d6_e2e_seed` clause)."""
     closed_ticket = {
         "key": CLOSED_KEY,
         "summary": CORRELATION_SUMMARY,
@@ -87,10 +60,7 @@ def _seed(author: str, *, closed: bool = True) -> dict[str, Any]:
 
 
 def _registry(payloads: list[dict[str, Any]]) -> ScopedFakeVerbs:
-    """A ticket system whose `list-tickets` answers the next seeded store state per call.
-
-    A fake of the STORE: it hands back an envelope and classifies nothing.
-    The grant is gather's real one for this pair (`ticket.list-tickets`, c2)."""
+    """A ticket system whose `list-tickets` answers the next seeded store state per call."""
     served: list[dict[str, Any]] = []
 
     def list_tickets(ctx: VerbContext, *, label: str = "", **rest: Any) -> Any:
@@ -119,11 +89,7 @@ def _rows_with_payloads(run) -> list[tuple[dict, Any]]:
 
 def test_767_the_capture_carries_the_store_payload(tmp_path: Path):
     """d_capture_carries_the_screened_payload, after #1221 — COHERENCE, bound at the UNMOVED
-    reader's own edge. The offline collectors join on `executed_queries.jsonl` and
-    `gather_raw/`, and they inherit EXACTLY the reply the store gave: the capture equals the
-    store's answer, so an open case's comments — an agent's and an analyst's — are as present
-    in the capture as in the model's turn. (#1221 removed the release screen that ran between
-    the handler and `_record` and once dropped them.)"""
+    reader's own edge."""
     seed = _seed(shipped_comment_author())
     run = run_gather(
         tmp_path, verbs=_registry([seed]),
@@ -141,14 +107,7 @@ def test_767_the_capture_carries_the_store_payload(tmp_path: Path):
 
 
 def test_767_an_archived_world_carries_the_capture_whole(tmp_path: Path):
-    """d_archived_world_carries_only_screened_capture, after #1221. A branched world's staged
-    tree carries only what the ORDINARY capture already wrote (F8/F9; the branch estate's
-    stagers cover elastic and nothing else), and since #1221 that capture is the store's whole
-    answer — so the surface a world archives holds every comment the store served, an open
-    case's included, and nothing the capture did not write.
-
-    Asserted over the whole surface a world archives — `executed_queries.jsonl` and every file
-    under `gather_raw/` — because the archive copies the tree and not a row."""
+    """d_archived_world_carries_only_screened_capture, after #1221."""
     run = run_gather(
         tmp_path, verbs=_registry([_seed(shipped_comment_author())]),
         system="ticket", turns=[q("ticket", "list-tickets"), DONE], run_id="s767-archive",
@@ -169,22 +128,7 @@ def test_767_an_archived_world_carries_the_capture_whole(tmp_path: Path):
 
 
 def test_767_a_later_revocation_does_not_touch_an_existing_capture(tmp_path: Path):
-    """d_capture_not_retroactively_scrubbed — NEGATIVE, settled premise 41. A re-open after
-    the fact does not touch an already-persisted capture: nothing is a retroactive scrub.
-
-    Driven as the pair the premise describes, inside ONE run: the same store is read twice,
-    with the case RE-OPENED between the calls, so the first capture and the second are both
-    on disk and can be compared. The first must still hold what it held. Since #1221 a ticket's
-    lifecycle state decides nothing about what is served, so the second holds the re-opened
-    case's comments too — each capture is exactly the store's answer at its call.
-
-    Its positive control is `d_capture_carries_the_screened_payload` — a capture that DOES
-    carry the agent text — so "the earlier capture is untouched" is not "no capture was ever
-    written".
-
-    KNOWN LIMIT, stated rather than implied: this demand is about the absence of a scrub, and
-    no mechanism in this design could produce one. It is written to fail if a future retention
-    or revocation feature reaches back into a written run dir."""
+    """d_capture_not_retroactively_scrubbed — NEGATIVE, settled premise 41."""
     author = shipped_comment_author()
     before, reopened = _seed(author), _seed(author, closed=False)
     run = run_gather(

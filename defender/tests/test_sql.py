@@ -1,20 +1,4 @@
-"""Tests for the defender-sql aggregation shim (runtime/sql_engine/sql.py).
-
-Pins two contracts:
-
-1. **Aggregation.** A JSON payload or NDJSON piped on stdin is exposed as
-   the table `data` with `read_json_auto` inference — the payload's own
-   top-level keys are the columns, with no wrapper envelope — so the
-   caller's SQL (structs, `unnest`, GROUP BY) computes the answer. The
-   tier-2 fallback for a source with no native aggregation.
-2. **Sandbox.** The caller's SQL runs after the connection is sealed, so it
-   cannot read files (including the held-out ground-truth the read-deny
-   protects), write files, or re-enable access. This is what lets the shim
-   be auto-approved for the gather subagent, which handles untrusted data.
-
-Skipped when duckdb isn't installed (it lives in the `runtime` extra, not
-`dev`/CI), mirroring the live/llm markers.
-"""
+"""The defender-sql shim: aggregation over a stdin payload exposed as table `data`, and a sealed sandbox (no file read/write, no re-enabling access). Skipped without duckdb."""
 from __future__ import annotations
 
 import importlib.util

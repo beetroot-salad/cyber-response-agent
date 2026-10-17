@@ -1,8 +1,4 @@
-"""Unit coverage for the shared git facade (``defender._git``).
-
-Exercises the primitive against a real throwaway repo — git is local/deterministic, so
-the facade is tested for real, not against a fake runner (the #389 / #460 philosophy).
-"""
+"""Unit coverage for the shared git facade (`defender._git`) against a real throwaway repo."""
 from __future__ import annotations
 
 import os

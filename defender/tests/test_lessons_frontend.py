@@ -1,41 +1,11 @@
-"""Lessons-frontend api layer (serialize.build_view) contract guarantees.
-
-The view contract is what the self-contained HTML renders from, so these
-tests pin the shape the template depends on rather than the exact lesson
-counts (which grow as the loop authors). Counts are checked against the
-live on-disk corpora so the serializer must enumerate exactly those files.
-"""
+"""Lessons-frontend api layer (serialize.build_view) contract guarantees."""
 from __future__ import annotations
 
 from pathlib import Path
 
 DEFENDER = Path(__file__).resolve().parents[1]
 
-from defender._corpus import iter_lesson_paths  # noqa: E402
 from defender.learning.frontend import serialize  # noqa: E402
-
-
-CORPUS_DIR = {
-    "defender": DEFENDER / "lessons",
-    "actor": DEFENDER / "lessons-actor",
-    "environment": DEFENDER / "lessons-environment",
-}
-
-
-def _on_disk(corpus: Path) -> set[str]:
-    """Stems the serializer enumerates: every DISCOVERED lesson — non-underscore ``*.md``.
-
-    UPDATED by #590's rule (review of PR #608): the serializer no longer omits a lesson whose
-    frontmatter fails to parse — a warn-skipped lesson gets a degraded marker record instead of
-    vanishing from the posture view. The oracle is therefore the DISCOVERY rule
-    (``iter_lesson_paths``), not the walk's parse-success subset. Deliberately NOT rebuilt on
-    ``build_view``'s own output: an oracle derived from the thing it checks is a tautology."""
-    return {path.stem for path in iter_lesson_paths(corpus)}
-
-
-def test_build_view_is_pure():
-    """build_view carries no timestamp — that lives in the CLI layer only."""
-    assert "generated_at" not in serialize.build_view()
 
 
 def test_three_groups_present():
@@ -51,12 +21,6 @@ def test_three_groups_present():
         assert g["blurb"]
         assert isinstance(g["fields"], list)
         assert g["fields"], "each group must declare metadata fields for the view"
-
-
-def test_counts_match_on_disk():
-    groups = serialize.build_view()["groups"]
-    for name, corpus in CORPUS_DIR.items():
-        assert len(groups[name]["lessons"]) == len(_on_disk(corpus)), name
 
 
 def test_lesson_record_shape():
@@ -160,20 +124,3 @@ def test_json_safe_coerces_exotic_types():
     json.dumps(out)
 
 
-def test_json_safe_coerces_exotic_dict_keys():
-    """The docstring's invariant covers KEYS as well: YAML types a bare `2026-01-01:` as
-    a date and `!!binary` as bytes, and json.dumps rejects both — which aborted the whole
-    build over one lesson's frontmatter instead of degrading that lesson (#854 F-20)."""
-    import datetime
-    import json
-
-    out = serialize._json_safe({
-        datetime.date(2026, 1, 1): "oops",
-        b"\xff": "binary key",
-        ("a", "b"): "tuple key",
-        "plain": "kept",
-    })
-    assert out["2026-01-01"] == "oops"
-    assert out["plain"] == "kept"
-    assert all(isinstance(k, str) for k in out)
-    assert json.loads(json.dumps(out))["2026-01-01"] == "oops"

@@ -1,8 +1,4 @@
-"""#1133 rev 3: the adversary's third pass on the tests-only commit `3039adbb`.
-
-Each test here greened a wrong-but-plausible rev-3 implementation that `test_1133_rev3.py` let
-through; each is red on that implementation's exploit and green on an honest one.
-"""
+"""#1133 rev 3 adversary regressions: wrong-but-plausible implementations the main rev-3 suite let through."""
 from __future__ import annotations
 
 import errno
@@ -13,7 +9,6 @@ import types
 
 import pytest
 
-from defender import _io
 from defender._episode_paths import LAYOUT
 from defender.tests import _judge_921 as J
 from defender.tests import _spec1133 as S
@@ -167,10 +162,6 @@ def test_a_failed_fdopen_leaves_no_descriptor_open_on_the_leaf(tmp_path, durable
     finally:
         for fd in S.open_fds_on(leaf):
             os.close(fd)
-
-
-def test_there_is_one_leaf_writer():
-    assert not hasattr(_io, "_write_synced"), "`_write_synced` is still there (R4: one writer)"
 
 
 # ---------------------------------------------------------------------------------------

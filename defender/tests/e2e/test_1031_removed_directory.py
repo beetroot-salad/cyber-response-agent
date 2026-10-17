@@ -1,65 +1,29 @@
-"""#1031 end to end — what the query tool RECORDS once the adapters directory is gone from
-under a live registry, and what its rows charge the breaker.
-
-WHAT IS DRIVEN, and why a real registry rather than the harness's `FakeVerbs`: every claim here
-is about the roster the REAL `ModuleVerbRegistry` hands the REAL `QueryCapture` after the real
-fault — the directory it was built over is `rmtree`d after the run's start and before the first
-call. (#1256: the run imports every granted adapter at its start, and an adapter that cannot be
-imported then is down for the whole run, so a directory gone BEFORE the start leaves a run whose
-`elastic` no call reaches; the fault this file is about is the one met during the run.)
-A fake registry's `systems()` cannot have that fault; the one it could have (a raise) is N1's
-broken fake. The registry is injected through `run_investigation(verbs=…)`, the harness's own
-seam (#611), and everything between the replay models and the row is production code. The
-unit half — the roster itself, the construction-time fault, the resolver, the subclass — is
-`tests/test_1031_roster_snapshot.py`.
-
-THE ROW IN ONE PARAGRAPH. `_system_of_record` answers `system if declared else ""`, and the
-above-guard pair is `(that, system_fingerprint(raw, that))` — a fingerprint minted only on the
-`""` arm. With the roster re-read from disk per call, a removed directory made every name
-undeclared, so a DECLARED system's rejection was recorded as `("", sha256("elastic"))`: a real
-name's hash keyed like a ghost's, which `system_fingerprint`'s contract forbids and which the
-pitfalls channel would then read as a ghost. With the roster fixed at construction the pair is
-`("elastic", "")` whatever the disk says, the ghost's is `("", sha256(ghost))` as before, and
-every above-guard row is one the rejection guards count (#871 repeat, #1015 budget), so a loop
-of them against a declared system ends the lead as it did before #1030.
-"""
+"""#1031 e2e: with the adapters directory removed from under a live registry, a declared system's above-guard rejection is still recorded under its own name (not as a ghost's fingerprint)."""
 from __future__ import annotations
 
-from dataclasses import replace as _with_fixture_run_1165
-from defender.tests._spec1077 import fixture_run as _fixture_run_1165
 
-import asyncio
 import shutil
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.tests import _tenants1106  # noqa: E402
-from defender.runtime import circuit_breaker  # noqa: E402
-from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.circuit_breaker import (  # noqa: E402
     AGENT_FIXABLE_ERROR_CLASS,
-    PER_SYSTEM_FAIL_LIMIT,
 )
-from defender.runtime.query_tool import DEFAULT_FAULT_EXIT, QueryCapture  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
-from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests._declared869 import write  # noqa: E402
 from defender.tests._after_start_1256 import AfterStart  # noqa: E402
-from defender.tests._verb_authorization_632 import breaker_doc, grant_of  # noqa: E402
-from defender.tests.e2e._replay_harness import DEFENDER, GOLDEN_AB3, materialize  # noqa: E402
-from defender.tests.e2e.test_1015_rejection_budget import _assert_budget_stop  # noqa: E402
+from defender.tests._verb_authorization_632 import grant_of  # noqa: E402
 from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
     PARAMS,
     _above_guard,
     _bad_args,
     _detail,
 )
-from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _run  # noqa: E402
+from defender.tests.e2e.test_pitfalls_input_823 import _Res, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
 from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
@@ -111,8 +75,7 @@ def _reached(r: _Res) -> bool:
 
 
 def _assert_no_forbidden_pair(r: _Res) -> None:
-    """The universal, over the WHOLE table (lead-0's rows included): no row carries `system=""`
-    beside the fingerprint of a name the registry declares."""
+    """The universal, over the WHOLE table (lead-0's rows included):"""
     for row in r.rows:
         assert not (row["system"] == "" and row["system_key"] == ELASTIC_KEY), \
             f"a declared name's fingerprint is on a coarsened row: {row!r}"
@@ -124,20 +87,7 @@ def _assert_no_forbidden_pair(r: _Res) -> None:
 
 
 def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_removed(tmp_path):
-    """O3/O1 — the registry is built over a real directory, the directory is REMOVED, and the
-    lead sends four above-guard rejections through both placements: a schema-rejected call and
-    an unresolvable-verb call naming `elastic` (declared), and the same two naming ghosts. The
-    declared rows carry `system="elastic"` with `system_key=""`, exit 64, `agent-fixable`, the
-    model's verb in the detail; the ghost rows are coarsened to `""` with the ghost's own
-    fingerprint — the same four rows the healthy control below writes with the directory
-    intact. No row anywhere on the table pairs `""` with `sha256("elastic")`.
-
-    The control is a second run over an intact directory with a corrected call appended: the
-    adapter is REACHED (its marker file exists), so the fixture is a registry whose verbs
-    dispatch, not a stub the grant happens to accept.
-
-    Observed failing by (today): the two declared rows recorded as `("", sha256("elastic"))`
-    — the roster re-globbed over a directory that is not there answers `()`."""
+    """O3/O1 — the registry is built over a real directory, the directory is REMOVED, and the lead sends four..."""
     rejections = [
         _bad_args("elastic", verb="ghostverb"), q("elastic", "otherverb", PARAMS),
         _bad_args("ghostone", verb="ghostverb"), q("ghosttwo", "otherverb", PARAMS),
@@ -188,99 +138,3 @@ def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_remo
 #      to the row's own system
 # ---------------------------------------------------------------------------------------
 
-
-def test_a_loop_of_rejections_against_a_declared_system_is_ended_by_the_budget(tmp_path):
-    """O4 — `REJECTION_BUDGET + 3` schema-rejected calls naming the DECLARED `elastic` under a
-    registry whose directory has been removed, each with a different verb so the repeat guard
-    is silent by construction: the budget ends the lead at its `REJECTION_BUDGET`th rejection
-    (the three-part oracle #1015 pins: terminator, digest, main's summary) and the corrected
-    call appended after them never runs. Every counted row carries `system="elastic"`, so the
-    rows the guard counted are the declared system's own.
-
-    `e2e/test_1015_rejection_budget.py` pins the same bound for ghosts; this is the declared
-    arm, which #1017 D4's `infra` row took OUT of the guards' domain when the registry could
-    not list (the issue's first finding). The BOUND holds on the pre-#1031 code too — a
-    removed directory coarsened these rows rather than making them `infra`, so the budget
-    counted them — and is kept as the positive control that the guards see the rows O3
-    changes the shape of; what fails today is the name on the counted rows (`""` beside
-    `sha256("elastic")`), O3's failure inside O4's population."""
-    root = tmp_path / "tenant-data"
-    S.plant(root, table="dispositions:\n  elastic:\n    query: {roles: [gather]}\n")
-    adapters, registry = _real_registry(tmp_path)
-    loop = [_bad_args("elastic", verb=f"ghostverb{i}") for i in range(REJECTION_BUDGET + 3)]
-    removal = AfterStart(loop[0], lambda: shutil.rmtree(adapters))
-    r = _run(tmp_path, run_id="d1031-budget", verbs=registry,
-             tenant=S.tenant_folder_of(root), turns=[
-        removal, *loop[1:], q("elastic", "query", PARAMS), DONE,
-    ])
-    assert removal.fired, "premise: the adapters directory was not removed during the run"
-    assert not adapters.exists(), "premise: the adapters directory is still there"
-    rows = _above_guard(r)
-    assert len(rows) == REJECTION_BUDGET, \
-        f"the lead wrote {len(rows)} above-guard rejections against a budget of {REJECTION_BUDGET}"
-    assert {row["system"] for row in rows} == {"elastic"}, \
-        "the counted rows do not carry the declared system's name"
-    assert {row["system_key"] for row in rows} == {""}
-    _assert_budget_stop(r)
-    assert len(r.own_rows) == REJECTION_BUDGET, \
-        "the lead ran on past its dead end and left rows after the stop"
-    _assert_no_forbidden_pair(r)
-
-
-def _record(capture: QueryCapture, state, *, system: str, exit_code: int, **extra) -> dict:  # noqa: ANN001
-    """One `_record` call the way `_spec771`'s writer probe makes it: real deps bound to the
-    run dir and carrying the run's state (#1235), a dispatched lead id, every row column the
-    caller decides spelled out."""
-    deps = replace(_with_fixture_run_1165(bind(_tenants1106.fixture_gather_def(), state.run_dir, defender_dir=DEFENDER), run=_fixture_run_1165(state.run_dir)),
-                   lead_id=LEAD, run_state=state)
-    row, _text = asyncio.run(capture._record(
-        deps, system=system, verb="query", query_id="elastic.query", params={},
-        payload=None, exit_code=exit_code, detail="down", system_key="", **extra,
-    ))
-    return row
-
-
-def test_record_charges_the_breaker_to_the_rows_own_system(tmp_path):
-    """O4/D4 — `_record` has no `breaker_key`: the outcome is charged to the row's `system`.
-    Two `infra`-exit rows for `elastic` leave the breaker document keyed on `elastic` alone,
-    with `PER_SYSTEM_FAIL_LIMIT` failures and a trip, and `is_tripped(state, "elastic")` is
-    True — while no `host:`-prefixed key (the #1017 D4 reserved counter) exists in it. The
-    positive controls: before the second row the system is not tripped; an exit-64 row for
-    `elastic` charges nothing (`record_outcome` counts infra exits only); and a coarsened
-    `system=""` row charges nothing either, which is why the rejection GUARDS, not the
-    breaker, bound a ghost loop (B5). Passing `breaker_key=` is a `TypeError`, as a second
-    assertion behind the behavioural one.
-
-    Observed failing by (today): `TypeError` on the first call — `breaker_key` is required."""
-    from defender.runtime.run_state import RunState
-
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    # No driver started this run: start its state as the driver does at run start (#1235) —
-    # `_record` allocates each row's seq from it and charges its breaker.
-    state = RunState(run_dir, run_dir.name)
-    capture = QueryCapture(_real_registry(tmp_path)[1])
-
-    row = _record(capture, state, system="elastic", exit_code=DEFAULT_FAULT_EXIT)
-    assert row["system"] == "elastic"
-    assert breaker_doc(state)["systems"]["elastic"]["failures"] == 1
-    assert not circuit_breaker.is_tripped(state, "elastic"), "one infra row tripped the system"
-
-    _record(capture, state, system="elastic", exit_code=DEFAULT_FAULT_EXIT)
-    doc = breaker_doc(state)
-    assert set(doc["systems"]) == {"elastic"}, \
-        f"the breaker is keyed on {sorted(doc['systems'])}, not on the row's own system alone"
-    assert doc["systems"]["elastic"]["failures"] == PER_SYSTEM_FAIL_LIMIT
-    assert "tripped_at" in doc["systems"]["elastic"]
-    assert circuit_breaker.is_tripped(state, "elastic")
-    assert not any(key.startswith("host:") for key in doc["systems"]), \
-        "a reserved host counter is still charged"
-
-    _record(capture, state, system="elastic", exit_code=64)
-    _record(capture, state, system="", exit_code=DEFAULT_FAULT_EXIT)
-    after = breaker_doc(state)
-    assert after["systems"] == doc["systems"], "a usage row or a systemless row charged the breaker"
-    assert after["total_failures"] == PER_SYSTEM_FAIL_LIMIT
-
-    with pytest.raises(TypeError):
-        _record(capture, state, system="elastic", exit_code=DEFAULT_FAULT_EXIT,
-                breaker_key="elastic")

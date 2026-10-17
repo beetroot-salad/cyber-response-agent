@@ -120,7 +120,7 @@ def check_signatures(report: Report, verbs) -> None:
     makes. `declared_params` sees only keyword-only params, so a positional param can never
     be bound by the model.
 
-    Mirrors the checks `test_verbs_registry_declares_surface` applies to shipped adapters, so
+    Mirrors the checks CI's verbs-registry test applies to shipped adapters, so
     this gate is no weaker than CI."""
     broken: list[str] = []
     for name in sorted(verbs):

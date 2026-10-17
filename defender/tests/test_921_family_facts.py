@@ -1,22 +1,4 @@
-"""#921 — a world's row: the facts read off X's own archived record (`family.read_world`).
-
-#1224 retired the mechanical half's bucket table: `holding_queried`, `scope_discriminated` and
-"a doctored answer was served" were keyed on the manifest's holding system and the staged/
-patched ledger words, all three gone with cluster staging, and the judge MODEL now decides each
-world's bucket (O11). What survives is the row the model is shown beside the archive — every
-fact read off X's OWN ledger, X's OWN archived document and report, and the manifest, never
-another world and never the comparator — and the tier rule that sets a world aside:
-
-* **J2** — the row population is filtered on the world's COMPOSED token; a family-tier `base`
-  row in X's file is not X's own (`served_nothing` reads X's own rows alone).
-* **J3** — the reader inherits `_absorb`'s first-row-wins, re-validates `source` against the
-  ledger's words on read, and SKIPS a malformed line while recording the count on the row.
-* **J4** — `resolution_moved` reads ANY qualifying row past `fences_at`.
-* **J5** — an ABSENT archived document makes the world `ungradable`, named with its missing
-  input; a MALFORMED input does too, marked `malformed`; a DUPLICATE label, or one colliding
-  with a real run, is refused at manifest load. (#1224, S8: an absent served ledger is a world
-  no call reached, not a missing input — whether a world ran is its own record's to say.)
-"""
+"""#921 — a world's row: the facts read off X's own archived record (`family.read_world`)."""
 from __future__ import annotations
 
 import json

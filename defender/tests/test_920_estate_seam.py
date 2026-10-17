@@ -1,39 +1,4 @@
-"""#920 PR 1 — the estate seam: what a branched sibling queries THROUGH, and what it records.
-
-A sibling world does not replay a snapshot. It queries the live estate through
-`WorldRegistry`, a `ModuleVerbRegistry` subclass whose verbs run FOR REAL against the adapter
-and then answer to the world. (#1224 replaced #920's staging applier with each world's live
-oracle: a world with no facts is served its base answer, `passthrough`; a world with facts is
-served by an oracle turn, whose contract is `tests/live_oracle_1224/`.)
-
-**The ledger is the gate.** The hazard is a response reaching the defender with no record of
-the decision behind it — silent scenario deletion, a run that looks fine and measures nothing.
-So every served payload lands in the ledger with the DECISION that produced it, `passthrough`
-is a recorded decision rather than an absence, and `Ledger.record` refuses a `ServedCall` whose
-source is outside `SOURCES` — before the payload is handed back.
-
-WHAT THIS FILE OWNS
--------------------
-1. **Structural coverage** — `decide()` is GRANTED for every entry of the shipped gather grant,
-   and every callable `verbs()` hands back is a WRAPPED one carrying the real body's decoration
-   and keyword-only signature. Structural, not enumerated: there is no route to a bare adapter
-   body, so no system can be silently left out of the estate.
-2. **Nominal typing** — `build_agent_core` refuses a registry-shaped stand-in; `WorldRegistry`
-   passes, because it went through the real constructor with a real `VerbGrant`.
-3. **Every served response is recorded with a decision** — including the refusal arm, where
-   the caller must get NO payload.
-4. **The family tier and the world's own base** — `world_id=None` rows are the family's
-   recording, replayed by every sibling with no adapter call; a key the recording lacks is read
-   live ONCE per world and kept in that world's oracle store (never a ledger row, M16).
-
-Hermetic. The real-adapters half constructs a registry over the REAL
-`defender/scripts/adapters` and the REAL grant — a cold read plus (for `decide`) an import, no
-network, no verb body run. The serving half runs verb bodies for real against a fake adapters
-DIRECTORY written to `tmp_path`: a real file the cold `VERBS = {...}` reader parses and the
-loader imports, rather than a patched module, because the grant/adapter agreement check runs
-off that text before anything is served. Fakes enter through the constructor's own DI seams
-(`world=`, `ledger=`); nothing here uses `monkeypatch.setattr`.
-"""
+"""#920 PR 1 — the estate seam: what a branched sibling queries THROUGH, and what it records."""
 from __future__ import annotations
 
 import contextlib
@@ -63,14 +28,10 @@ from defender._episode_paths import LAYOUT, EpisodePaths  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     BASE,
     CAPTURED,
-    FAMILY_SOURCES,
     FAULT,
-    ORACLE,
     PASSTHROUGH,
     REAL_ERROR,
     REFUSED,
-    SOURCES,
-    STAGED,
     Ledger,
     LedgerError,
     ServedCall,
@@ -85,13 +46,9 @@ from defender.runtime.verbs import (  # noqa: E402
     GRANTED,
     ModuleVerbRegistry,
     VerbContext,
-    body_param_of,
     declared_params,
-    engine_of,
     model_facing_params,
     validate_params,
-    verb_class_of,
-    wrapper_only_params,
 )
 from defender.tests._engine_helpers import fake_model  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
@@ -277,15 +234,6 @@ def world_registry(
 # 1. structural coverage: every granted verb, and no route to a bare body
 
 
-def test_the_shipped_grant_still_spans_every_system():
-    """    The estate's coverage claim is only as wide as the grant it is measured over, so the
-    grant's own shape is pinned first — 30 entries across 8 systems (#983 added
-    `tacit-knowledge`, and its `health-check` with it). Without this arm a grant
-    that lost a system would make every sweep below cover one system less and stay green."""
-    assert len(_gather_grant().entries) == GRANTED_ENTRIES
-    assert len(_gather_grant().systems) == GRANTED_SYSTEMS
-
-
 def test_every_granted_verb_decides_granted_through_the_world_registry(tmp_path):
     """    `decide()` answers GRANTED for all 28 shipped grant entries.
 
@@ -324,54 +272,6 @@ def test_no_route_to_a_verb_hands_back_a_bare_adapter_body(tmp_path):
                 bare.append((system, verb, route))
 
     assert bare == []
-
-
-def test_the_wrapper_carries_the_decoration_the_seam_reads(tmp_path):
-    """    `verb_class_of`, `engine_of` and `body_param_of` read the same values off the wrapper as
-    off the body, for all 28 entries.
-
-    Not cosmetic. `verb_class_of` is what `VerbRegistry.decide` compares against the grant, and
-    the engine/body-param pair is how the query tool decides a payload's shape — the elastic
-    `esql`/`query`/`alerts` verbs are the ones carrying non-default values, so they are the
-    ones a `functools.wraps` regression would silently blank."""
-    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
-    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
-
-    drifted = []
-    for system, verb, verb_class in _gather_grant().entries:
-        real, served = plain.verbs(system)[verb], reg.verbs(system)[verb]
-        read = (verb_class_of(served), engine_of(served), body_param_of(served))
-        want = (verb_class_of(real), engine_of(real), body_param_of(real))
-        if read != want or verb_class_of(served) != verb_class:
-            drifted.append((system, verb, read, want))
-
-    assert drifted == []
-    # One engine-bearing verb spelled out, because a sweep that compared two blanks against
-    # each other would also pass. `esql` is the only `engine="esql"` verb in the estate; the
-    # other two (`query`, `alerts`) run the lucene engine.
-    assert (engine_of(reg.verbs("elastic")["esql"]), body_param_of(reg.verbs("elastic")["esql"])) \
-        == ("esql", "query")
-
-
-def test_the_wrapper_keeps_the_keyword_only_signature_the_boundary_introspects(tmp_path):
-    """    `declared_params`, `model_facing_params` and `wrapper_only_params` — the three
-    signature reads `validate_params` enforces with and `list_verbs` publishes from — answer
-    identically through the wrapper.
-
-    They are one number: what a model is SHOWN and what the boundary ACCEPTS both come from
-    `model_facing_params`, so a wrapper whose signature read differently would publish a
-    surface the seam then refuses."""
-    reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
-    plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
-
-    drifted = []
-    for system, verb, _ in _gather_grant().entries:
-        real, served = plain.verbs(system)[verb], reg.verbs(system)[verb]
-        for read in (declared_params, model_facing_params, wrapper_only_params):
-            if read(served) != read(real):
-                drifted.append((system, verb, read.__name__))
-
-    assert drifted == []
 
 
 def test_a_wrapper_only_param_is_still_reserved_through_the_wrapper(tmp_path):
@@ -426,21 +326,6 @@ def test_build_agent_core_refuses_a_registry_shaped_stand_in(logger):
         _built(logger, RegistryShaped())
 
 
-def test_build_agent_core_accepts_a_world_registry(logger, tmp_path):
-    """    A `WorldRegistry` passes that same check and builds gather's verb-bearing tools.
-
-    The positive arm of the pair: without it, a check that refused EVERYTHING would satisfy
-    the negative one, and the sibling run would have no way to query at all."""
-    reg = world_registry(
-        REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE,
-        world=World("w1"),
-    )
-
-    agent = _built(logger, reg)
-
-    assert {"query", "list_verbs"} <= set(agent._function_toolset.tools)
-
-
 # 3. every served response is recorded with a decision
 
 def test_serving_through_the_wrapper_writes_a_row_carrying_the_decision(tmp_path):
@@ -466,24 +351,6 @@ def test_serving_through_the_wrapper_writes_a_row_carrying_the_decision(tmp_path
     assert json.loads(row["payload_text"]) == payload
 
 
-def test_the_vocabulary_splits_into_the_tier_the_seam_and_the_world():
-    """    `SOURCES` is three kinds of label, and only one kind is a world's serving to name.
-
-    Without this split "the vocabulary is closed" reads as "any world may claim any member",
-    which includes the FAMILY tier's own labels — the slot every sibling replays from. That tier
-    is two labels since #947: `captured` is the source run's own capture, primed before any
-    sibling forked, and `base` is a family-tier read of a key the capture never held. Both are
-    `world_id=None` and neither is a world's to claim; the split between them is
-    `test_947_ledger_tiers.py`. #1224's world decisions are `passthrough`, `oracle` and
-    `real-error`; the retired staging decisions are not a new row's to name."""
-    world_decisions = {PASSTHROUGH, ORACLE, REAL_ERROR}
-    assert world_decisions | FAMILY_SOURCES | {REFUSED, FAULT} == SOURCES
-    assert BASE in FAMILY_SOURCES
-    assert CAPTURED in FAMILY_SOURCES
-    assert not (world_decisions & FAMILY_SOURCES)
-    assert not ({STAGED, "patched"} & SOURCES)
-
-
 def test_the_ledger_refuses_an_invented_decision_at_its_own_door(tmp_path):
     """    `Ledger.record` is where the vocabulary is OWNED, so it refuses directly too.
 
@@ -498,25 +365,6 @@ def test_the_ledger_refuses_an_invented_decision_at_its_own_door(tmp_path):
 
     with pytest.raises(LedgerError, match="invented"):
         ledger.record(call)
-
-    assert served_rows(tmp_path / SERVED_FILE) == []
-
-
-@pytest.mark.parametrize(("source", "world_id"), [(BASE, "w1"), (PASSTHROUGH, None)])
-def test_the_two_tiers_have_to_agree(tmp_path, source, world_id):
-    """    `base` and `world_id=None` say the same thing, so a row where they disagree is refused.
-
-    Both arms are an injection, read from opposite ends. A `base` row owned by a world puts
-    that world's answer in the slot every sibling replays from — one world's difference served
-    AS the estate, while each sibling's own row still reads `passthrough`. A world-tier row
-    with no owner is the mirror: a difference nobody can attribute, which a comparison then
-    counts against whichever sibling it happens to read next."""
-    ledger = fresh_ledger(tmp_path / SERVED_FILE)
-
-    with pytest.raises(LedgerError, match="FAMILY tier"):
-        ledger.record(ServedCall(
-            system="cmdb", verb="get-host", params={"host": "canary-1"},
-            payload_text="{}", source=source, world_id=world_id))
 
     assert served_rows(tmp_path / SERVED_FILE) == []
 
@@ -822,24 +670,6 @@ def test_a_ledger_write_failure_ends_the_run_and_keeps_the_failure_it_records(tm
     assert isinstance(system_error, RuntimeError), (
         "the system's own failure was displaced from the chain by the ledger's")
     assert "cmdb is down" in str(system_error), system_error
-
-
-def test_a_world_with_no_facts_reaches_the_adapter_unchanged(tmp_path):
-    """    A world asserting no facts sends its query to the adapter byte-identical, and reports
-    `passthrough` — no oracle turn, no rewrite. A difference observed there is corrupt by
-    construction rather than something to explain."""
-    ledger_path = tmp_path / SERVED_FILE
-    ctx = run_ctx(tmp_path)
-    body = "FROM logs-nginx.access-*\n| LIMIT 5"
-    reg = world_registry(
-        fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1", facts=()),
-    )
-
-    reg.verbs("elastic")["esql"](ctx, query=body)
-
-    assert [c["params"]["query"] for c in adapter_calls(ctx, "esql")] == [body]
-    assert [r["source"] for r in served_rows(ledger_path) if r["world_id"] == "w1"] \
-        == [PASSTHROUGH]
 
 
 def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):

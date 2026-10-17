@@ -1,22 +1,4 @@
-"""#691 — the corpus-name DOMAIN (M7 + MD-6). The per-spawn corpus name is a bind INPUT
-(F89: the corpus-scoped policy must exist when ``bind`` returns), so its validity is decided AT
-BIND. M7 is the single-segment shape rule (``len(Path(name).parts) == 1``, refusing ``""`` / ``"."``
-/ multi-segment / absolute / ``..``-bearing); §7's D2 pins MD-6 on top — an EXACT-MATCH membership
-rule against the three shipped corpora. A rejected name RAISES ``ValueError`` at bind; an accepted
-name binds and resolves its corpus dir under the worktree tree.
-
-RED against HEAD by construction: the corpus name rides on ``RunScope`` (the M1/#0 bind input,
-absent today), so ``bind_curator`` dies at ``RunScope(corpus_name=…)`` with a ``TypeError`` — the
-missing mechanism — before M7 ever runs. Once #0 builds the field + M7/MD-6, each test discriminates
-on its own member address. Every reject is paired with an accept control on the same address (a
-shipped name binds and roots its corpus where the name says).
-
-Reconciliation applied (70-resolutions D2, MD-6): a name that shape-normalises to a single but
-NON-shipped segment (``"./x"`` → ``"x"``) is a MEMBERSHIP reject, not an accept — so the ``./``
-normalisation demand is exercised on a shipped name (``"./lessons"``), where normalisation and
-membership agree. The spec_graph's ``distinguished[./x]`` member is the shape probe (x7/f14); MD-6
-subsumes the non-shipped tail.
-"""
+"""The curator corpus-name domain: single-segment names only, never a whole-tree authoring scope."""
 from __future__ import annotations
 
 import pytest
@@ -58,8 +40,6 @@ def _assert_bind_accepts(wt, run_dir, name: str, expect_corpus_name: str):
     return deps
 
 
-
-
 @pytest.mark.parametrize(("case", "name"), [
     # x7/f14: ``'./x'`` has ``parts == 1`` and resolves under the tree. Tested on a SHIPPED
     # name because MD-6 (D2) makes a normalised non-shipped tail a membership reject —
@@ -91,9 +71,7 @@ def test_the_names_that_resolve_to_the_tree_itself(tmp_path):
 def test_the_standing_prohibition_on_a_whole_tree_authoring_scope(tmp_path):
     """A committed demand (curator-glm-port.yaml:112, g23) already forbids a whole-``defender_dir``
     write_allow; this change is the FIRST able to produce that shape FROM A NAME (via M1's corpus
-    carrier). M7-as-corrected must keep it unreachable: ``""`` / ``"."`` are rejected at bind, and no
-    accepted name roots the write scope at ``defender_dir`` — a shipped bind ADMITS an in-corpus
-    ``.md`` write but DENIES a top-of-tree ``defender/<x>.md`` write (the scope is a strict subdir)."""
+    carrier)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     _assert_bind_rejects_name(wt, rd, "")
     _assert_bind_rejects_name(wt, rd, ".")

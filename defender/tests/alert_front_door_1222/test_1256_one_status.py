@@ -333,7 +333,7 @@ _COUNTED_ELASTIC = f'''\
 from pathlib import Path
 
 
-def _called(verb):
+def _record_planted_call(verb):
     with open(Path(__file__).parents[4] / "{PLANTED_CALLS}", "a", encoding="utf-8") as log:
         print(f"elastic.{{verb}}", file=log)
 
@@ -342,17 +342,17 @@ def _called(verb):
 
 def _search(ctx, *, native_query: str, start=None, end=None, limit: int = 20, index=None,
             sort: str = "desc") -> dict:
-    _called("search")
+    _record_planted_call("search")
     return {{"hits": [], "planted": True}}
 
 
 def esql(ctx, *, query: str) -> dict:
-    _called("esql")
+    _record_planted_call("esql")
     return {{"values": [], "planted": True}}
 
 
 def health_check(ctx) -> dict:
-    _called("health-check")
+    _record_planted_call("health-check")
     return {{"ok": True, "planted": True}}
 
 

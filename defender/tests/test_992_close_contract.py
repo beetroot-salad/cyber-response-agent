@@ -1,18 +1,4 @@
-"""#992 — the close's contract once `inconclusive` spends the review (demand #0, O1, M1, the
-key flow, and the driver's own lanes).
-
-Every test here is one demand of `spec-flow/specs/spec_graph_992.yaml`, named by that demand's
-`discharged_by`. RED against 67d29090 is the expected state: `NO_REVIEW_DISPOSITIONS` still
-carries `inconclusive`, so every close below that should spend a review commits first with
-`CAUSE_NOT_REVIEWED` and dispatches nothing.
-
-Two ledger corrections shape this module. C16 is REFUTED (G4/x1): no replay here is "repaired"
-against an unbound bundle, because the harness binds a `holds` composer by default — the
-unbound spellings are driven on purpose where a demand is about them. And the per-close review
-floor is TWO calls, not three (x10/a2): the ablation lens is dispatched only when a strong
-belief move cites an edge, so the sparse companion is the two-call fixture and the golden the
-three-call one.
-"""
+"""#992 — the close's contract once `inconclusive` spends the review (demand #0, O1, M1, the key flow, and the driver's own lanes)."""
 from __future__ import annotations
 
 import asyncio
@@ -58,18 +44,11 @@ from defender.tests._spec992 import (
     trace_rows,
 )
 
-#: The causes a STANDING `inconclusive` may commit after §7 FK-10: the five the design named
-#: plus the seventh member for the ceiling-held arm. `CAUSE_NOT_REVIEWED` is `unresolved`'s
-#: alone (d0's resolution).
-#: The one sentence an `inconclusive` close can STAND under: every other arm overrides it to
-#: `unresolved` (one rule for every reviewed disposition — test_992_routing's docstring).
 STANDING_CAUSES = frozenset({CEILING_EXAMINED})
 
 
 def _tool_lane_return(tmp_path: Path, disposition: str, stages) -> str:
-    """The string the MODEL is handed back by the registered close tool, through MAIN's real
-    composition root and a scripted model — the tool lane, as distinct from the sync host
-    entry."""
+    """The string the MODEL is handed back by the registered close tool, through MAIN's real composition root and..."""
     from pydantic_ai.models import override_allow_model_requests
 
     from defender.tests._invlang_warn_836 import build_main_agent
@@ -97,16 +76,7 @@ def _tool_lane_return(tmp_path: Path, disposition: str, stages) -> str:
 
 
 def test_inconclusive_close_return_contract(tmp_path):
-    """Driving the sync host close with `inconclusive` and a bound bundle returns a
-    `CloseResult` whose `outcome` is one of the same three a confident close returns; on
-    `stands` report.md carries `disposition: inconclusive`, `outcome: stands`, the seventh
-    CEILING_EXAMINED member as `cause` — never CAUSE_NOT_REVIEWED, which is `unresolved`'s
-    alone (§7 FK-10) — no `failure_kind`, and the numbered record carries `verdict: stands` /
-    `reviewed_disposition: inconclusive` / `reviewed: true`; when the machinery breaks the
-    close fails CLOSED like any other — `forced-inconclusive`, `disposition: unresolved`, a
-    `failure_kind` key — with the record still naming `inconclusive` as what was under review;
-    on `challenged` no report.md exists, the record says `challenged`, and the message carries
-    the ask inside a fresh untrusted frame; the tool lane returns exactly `result.message`."""
+    """Driving the sync host close with `inconclusive` and a bound bundle returns a `CloseResult` whose `outcome`..."""
     # `stands` — the review completed and held the ceiling claim.
     deps, run_dir = deps_over(tmp_path / "stands", ceiling_companion())
     stood = close_investigation(deps, GAP, stages=recording(holds()).bundle())
@@ -155,10 +125,7 @@ def test_inconclusive_close_return_contract(tmp_path):
 
 
 def test_inconclusive_spends_the_review(tmp_path):
-    """An `inconclusive` close that has paid its entry price dispatches the support lens, the
-    ablation lens (when a strong belief move cites an edge) and the composer — each leaves an
-    `ok: true` trace row under wire_logs — and its record and report never carry
-    CAUSE_NOT_REVIEWED."""
+    """An `inconclusive` close that has paid its entry price dispatches the support lens, the ablation lens (when..."""
     stages = recording(holds())
     deps, run_dir = deps_over(tmp_path, ceiling_companion())
     result = close_with(deps, GAP, stages)
@@ -175,11 +142,7 @@ def test_inconclusive_spends_the_review(tmp_path):
 
 
 def test_no_review_set_is_exactly_unresolved(tmp_path):
-    """Driving every member of DISPOSITION_ENUM on its own lane (the four model members
-    through the model lane, `unresolved` through `forced=True`), only `unresolved` commits
-    without a stage call; `inconclusive` now joins the three confident members in spending a
-    review, and a confident member on the forced lane still spends it — `NO_REVIEW_DISPOSITIONS`
-    is exactly `(unresolved,)` by observation, and the `forced` flag buys no bypass of its own."""
+    """Driving every member of DISPOSITION_ENUM on its own lane (the four model members through the model lane,..."""
     spent_nothing: set[str] = set()
     for member in sorted(DISPOSITION_ENUM):
         stages = recording(holds())
@@ -205,13 +168,7 @@ def test_no_review_set_is_exactly_unresolved(tmp_path):
 
 
 def test_gates_ahead_of_the_review_spend_no_stage(tmp_path):
-    """An `inconclusive` close that owes its entry price, is refused as already closed, sits
-    inside the flagged-row window, or fails the structure check is refused before any stage is
-    called — no lens or composer runs and no trace row is written; a malformed `state`/`cap`
-    field, receipts pushing the block past `_MAX_CEILING_FRONTMATTER_BYTES`, and an absent or
-    empty companion are refused at the same price gate, and a second close attempt after a
-    terminal commit is refused before any price or stage with report.md never re-written.
-    Positive control: the same bundle on a paid close is dispatched."""
+    """An `inconclusive` close that owes its entry price, is refused as already closed, sits inside the..."""
     from defender.tests._invlang_warn_836 import WARN_ROW, attr_block
 
     pre_gate = {
@@ -255,10 +212,7 @@ def test_gates_ahead_of_the_review_spend_no_stage(tmp_path):
 
 
 def test_inconclusive_close_whose_record_has_no_strong_belief_move(tmp_path):
-    """An `inconclusive` close whose record carries no strong belief move dispatches the
-    support lens and the composer only — two calls — writes a `skipped` ablation trace row
-    carrying no `ok` key, and the composer's ceiling sentence is unchanged (a2: the two-call
-    floor is the base behaviour on a confident close today)."""
+    """An `inconclusive` close whose record carries no strong belief move dispatches the support lens and the..."""
     stages = recording(holds())
     deps, run_dir = deps_over(tmp_path, sparse_companion())
     result = close_with(deps, GAP, stages)
@@ -275,11 +229,7 @@ def test_inconclusive_close_whose_record_has_no_strong_belief_move(tmp_path):
 
 
 def test_first_close_attempt_refused_pre_gate_leaves_no_residue(tmp_path):
-    """An `inconclusive` close refused before the gate (entry price owed) leaves `ReviewState`
-    untouched — turns 0, raised_asks empty, closed False — and writes no trace row and no
-    record: the only ReviewState writers are `_route` on CHALLENGED and `_commit`. Positive
-    control: a challenged `inconclusive` attempt on a paid companion DOES write the watermark
-    and a numbered record."""
+    """An `inconclusive` close refused before the gate (entry price owed) leaves `ReviewState` untouched — turns..."""
     stages = recording(holds())
     deps, run_dir = deps_over(tmp_path / "refused", _spec923.gapless())
     refusal(deps, GAP, stages)
@@ -306,10 +256,7 @@ def _challenged_inconclusive(tmp_path: Path):
 
 
 def test_forced_close_ignores_inflight_review_bookkeeping(tmp_path):
-    """The driver's forced `unresolved` close after a challenged `inconclusive` neither resets
-    nor routes on `turns`/`raised_asks`; the driver's guard consults `closed` only, and the
-    forced commit leaves the counters as the challenge left them — the forced close dispatches
-    no stage and commits `unresolved` with `closed` set."""
+    """The driver's forced `unresolved` close after a challenged `inconclusive` neither resets nor routes on..."""
     deps, run_dir = _challenged_inconclusive(tmp_path)
     before = review_state(deps)
     turns, asks = before.turns, dict(before.raised_asks)
@@ -331,11 +278,7 @@ def test_forced_close_ignores_inflight_review_bookkeeping(tmp_path):
 
 
 def test_driver_forced_unresolved_survives_after_a_challenged_inconclusive(tmp_path):
-    """A run whose `inconclusive` close was challenged and which then exhausts the tool-retry
-    budget is force-closed `unresolved` by the driver with `cause: CAUSE_NOT_REVIEWED` and no
-    `ceiling_test` block — the receipts remain in investigation.md — exactly as any run cut
-    short is; the earlier challenged attempt's record and trace rows survive on disk beside
-    the forced `unresolved` report."""
+    """A run whose `inconclusive` close was challenged and which then exhausts the tool-retry budget is..."""
     deps, run_dir = _challenged_inconclusive(tmp_path)
     challenged_record = record(run_dir, 1)
     challenged_rows = {role: trace_rows(run_dir, role) for role in trace_files(run_dir)}
@@ -358,13 +301,7 @@ def test_driver_forced_unresolved_survives_after_a_challenged_inconclusive(tmp_p
 
 
 def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
-    """A run whose `inconclusive` close was challenged and which then hits the request ceiling
-    is force-closed `unresolved` by the driver exactly as a retry-exhausted run is: one
-    post-loop close for every exit that stops the model before it can close, not one written
-    into each arm. `inconclusive` is the disposition that by definition arrives near
-    exhaustion, and a challenge spends the extra turn, so this is the ceiling's ordinary
-    customer — a run ending here with no report.md dead-letters at persist. The forced close
-    dispatches no stage, and the challenged attempt's numbered record survives beside it."""
+    """A run whose `inconclusive` close was challenged and which then hits the request ceiling is force-closed..."""
     from defender.runtime import driver
     from defender.tests._invlang_warn_836 import build_main_agent
 
@@ -387,22 +324,7 @@ def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
 
 
 def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
-    """The other two exits that stop the model — the tool budget's kill and the circuit
-    breaker's abort — do NOT take the post-loop forced close: no report.md, the challenged
-    attempt's record intact, the review state still open, and the exit reason naming what
-    cut the run short. Neither is a finding about the case (the breaker says the environment
-    is unreachable and asks for escalation; the budget kill fires on the tool tail or the
-    wall clock running out, never on the case), and everything downstream reads
-    a report.md as one — the ticket lane closes the ticket on any readable report where a
-    missing one leaves it open, the episode reader grades a world with a report where it
-    skips one without, the held-out scorer counts `unresolved` as a wrong disposition rather
-    than a missing run. Until the host's report carries the exit class, these two end as
-    they did before #992. Positive control in the two tests above: the request ceiling and
-    the retry budget — exits the model owns — still get the close.
-
-    Each kill is raised from the model call, the seam the real kills reach the loop through
-    (a tool hook and a gather agent both propagate them past `agent.iter`); what is under
-    test is the driver's classification, not where the kill originated."""
+    """The other two exits that stop the model — the tool budget's kill and the circuit breaker's abort — do NOT..."""
     from defender.hooks.budget_enforcer import BudgetKill
     from defender.runtime import driver, session_store
     from defender.runtime.circuit_breaker import RunAborted
@@ -441,13 +363,7 @@ def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
 
 
 def test_disposition_threaded_seams(tmp_path):
-    """`composer_projection` accepts the reviewed disposition and renders a different host
-    sentence for `inconclusive` than for a confident close, and `_route` receives it — the gate
-    never re-derives which disposition it is reviewing from anything but the argument the
-    close handed it: the gate driven with `inconclusive` over a companion that concludes
-    `inconclusive` STANDS on `disposition: inconclusive`, and driven with a confident keyword
-    over the same companion stands on that keyword. The override arms take no disposition at
-    all: driven to one, the gate hands back the host's own verdict whichever keyword entered."""
+    """`composer_projection` accepts the reviewed disposition and renders a different host sentence for..."""
     from defender.runtime import challenge_gate
     from defender.runtime.review.projector import composer_projection, parse_investigation
 

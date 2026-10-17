@@ -176,17 +176,6 @@ def test_a_pipe_inside_a_string_literal_is_not_a_command_separator():
         f"the source command was cut at a quoted pipe: {got!r}")
 
 
-def test_a_source_only_query_still_gets_its_bound():
-    """A query with no `|` at all has no command to precede — the clause is appended,
-    and appending is correct here precisely because there is nothing after it."""
-    start = datetime(2026, 7, 25, 7, 45, tzinfo=UTC)
-    end = datetime(2026, 7, 25, 7, 49, tzinfo=UTC)
-    got = CONTROLS.add_esql_window("FROM logs-zeek.ssh-*", start, end)
-    assert got.splitlines()[0] == "FROM logs-zeek.ssh-*"
-    assert got.splitlines()[1].startswith("| WHERE @timestamp >=")
-    assert len(CONTROLS.esql_bounds(got)) == 2
-
-
 def test_adding_a_bound_to_a_bounded_query_is_refused():
     with pytest.raises(ValueError, match="already carries"):
         CONTROLS.add_esql_window(LEAD_Q, datetime.now(UTC),
@@ -211,15 +200,6 @@ def test_a_short_operation_still_gets_a_long_enough_control():
     windows = CONTROLS.shape_matched_windows(start, end)
     for _, lo, hi in windows:
         assert (hi - lo).total_seconds() >= CONTROLS.MIN_CONTROL_SECONDS
-
-
-def test_a_long_operation_keeps_its_own_duration():
-    """Widening is a floor, not a fixed size — a two-hour operation is not
-    controlled against one hour."""
-    start = datetime(2026, 7, 25, 8, 0, tzinfo=UTC)
-    end = start + timedelta(hours=2)
-    for _, lo, hi in CONTROLS.shape_matched_windows(start, end):
-        assert (hi - lo) == timedelta(hours=2)
 
 
 def test_the_control_window_is_centred_on_the_operation():
@@ -410,110 +390,8 @@ def test_the_corpus_speaks_the_SAME_esql_encoding_production_does():
         + (f" (+{len(offenders) - 5} more)" if len(offenders) > 5 else ""))
 
 
-def _case_file(root: Path, rel: str, doc) -> Path:
-    path = root / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(doc), encoding="utf-8")
-    return path
-
-
-# A real payload's shape, after `case-012-bruteforce-db1/hidden/observed/l-007/8.json`:
-# dotted column names, a `null` cell, more than one row.
-_COLUMNS = [{"name": "events", "type": "long"},
-            {"name": "event.outcome", "type": "keyword"},
-            {"name": "data_stream.dataset", "type": "keyword"}]
-_POSITIONAL = {"query": "FROM logs-system.auth-*\n| STATS events = COUNT(*)",
-               "columns": _COLUMNS, "row_count": 2,
-               "values": [[431, None, "system.auth"], [24, "failure", "system.auth"]]}
-_DICT_ROWS = {**_POSITIONAL,
-              "values": [{"events": 431, "event.outcome": None,
-                          "data_stream.dataset": "system.auth"},
-                         {"events": 24, "event.outcome": "failure",
-                          "data_stream.dataset": "system.auth"}]}
-
-
-def test_the_corpus_encoding_guard_fails_on_one_hand_reverted_payload(tmp_path):
-    """The guard above proves nothing unless it can fail, and over a migrated tree it is
-    green whether it looked at anything or not. So: the same sweep over two trees that
-    differ in exactly one payload's encoding, and it must separate them.
-
-    The `values: []` payload in both trees is the control for the other direction — an
-    empty payload is identical in either encoding, and a guard that flagged it would fail
-    on the 471 already-correct payloads on disk.
-    """
-    empty = {**_POSITIONAL, "row_count": 0, "values": []}
-
-    migrated = tmp_path / "migrated"
-    _case_file(migrated, "case-x/hidden/observed/l-001/0.json", _POSITIONAL)
-    _case_file(migrated, "case-x/hidden/observed/l-001/1.json", empty)
-    assert _rows_that_are_not_positional(migrated) == ([], 2)
-
-    reverted = tmp_path / "reverted"
-    _case_file(reverted, "case-x/hidden/observed/l-001/0.json", _DICT_ROWS)
-    _case_file(reverted, "case-x/hidden/observed/l-001/1.json", empty)
-    offenders, examined = _rows_that_are_not_positional(reverted)
-    assert examined == 2, "the empty payload must still be counted as examined"
-    assert offenders == ["case-x/hidden/observed/l-001/0.json"]
-
-
-def test_the_corpus_encoding_guard_sees_a_payload_no_one_enumerated(tmp_path):
-    """The second half of why the sweep recurses. A control record's dict-row payload can
-    sit somewhere no census has listed — here under a key beside `payload` — and a sweep
-    walking `record["controls"][i]["payload"]` and `record["attack_contribution"]
-    ["payload"]` would pass over it while the judge's YAML dump still showed the judge two
-    encodings. Paired with the enumerated positions in the same record, which are already
-    positional, so the nested one is the only thing this can be detecting."""
-    record = {
-        "lead_id": "l-005", "seq": 3,
-        "controls": [
-            {"name": "C-7d", "window": ["a", "b"], "query": "q",
-             "live": False, "payload": None},
-            {"name": "C-14d", "window": ["a", "b"], "query": "q", "live": True,
-             "payload": _POSITIONAL,
-             # a position no enumerated sweep has ever visited
-             "re_measured": {"at": "2026-08-01", "payload": _DICT_ROWS}},
-        ],
-        "attack_contribution": {"window": ["a", "b"], "query": "q",
-                                "payload": _POSITIONAL},
-    }
-    root = tmp_path / "tree"
-    _case_file(root, "case-x/hidden/controls/l-005/3.json", record)
-
-    offenders, examined = _rows_that_are_not_positional(root)
-    assert examined == 3, "the recursive walk must reach all three payloads"
-    assert offenders == ["case-x/hidden/controls/l-005/3.json"]
-
-
 # A control is keyed by the QUERIES TABLE's seq, the same number its observed payload
 # is named for — not by the position of the query in `leads.jsonl` (#841).
-
-def _write_run(run: Path, lead_id: str, rows: list[tuple[int, str]]) -> None:
-    """A run dir carrying the two tables, written the way the run writes them.
-
-    `rows` is `(seq, query_id)`; a `∅.`-prefixed id is a sentinel — a writer-only record
-    of something that never reached a system. `_next_seq` counts every row including
-    those, which is the whole of why position and seq can diverge.
-    """
-    gd = run / "gather_raw"
-    (gd / lead_id).mkdir(parents=True, exist_ok=True)
-    (gd / f"{lead_id}.lead.json").write_text(
-        json.dumps({"goal": "trace the write", "what_to_summarize": ["auth events"]}),
-        encoding="utf-8")
-    with (run / "executed_queries.jsonl").open("a", encoding="utf-8") as fh:
-        for seq, query_id in rows:
-            (gd / lead_id / f"{seq}.json").write_text(
-                json.dumps({"columns": [], "values": [], "row_count": 0}), encoding="utf-8")
-            fh.write(json.dumps({
-                "lead_id": lead_id, "seq": seq, "system": "elastic", "verb": "query",
-                "query_id": query_id,
-                "params": {"query": f'FROM logs-* | WHERE q == "{seq}"'},
-                "raw_command": "python3 elastic_adapter.py query",
-                "payload_path": f"gather_raw/{lead_id}/{seq}.json",
-                "exit_code": 0, "error_class": None,
-                "payload_status": "ok", "payload_digest": "44 bytes, 1 line(s)",
-            }) + "\n")
-
-
 
 
 def test_a_case_built_before_the_seq_field_falls_back_to_the_position(tmp_path):

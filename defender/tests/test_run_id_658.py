@@ -12,10 +12,7 @@ TENANT_ID = "t658"
 
 
 def _set_up_tenant(tmp_path, monkeypatch):
-    """A fresh, accepted tenant under its own data root — every run names its tenant, and there
-    is no default (#1078); its runs base (`.runs`) is the test's stand-in for the old,
-    directly-controllable runs base. Set up from the fixture tenant the way an operator does
-    (#1120), so `materialize_run` is handed the `Tenant` `accept_tenant` returns."""
+    """A fresh, accepted tenant under its own data root — every run names its tenant, and there"""
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
     return set_up_tenant(data_root, TENANT_ID)
@@ -82,10 +79,7 @@ def test_materialize_rejects_an_invalid_explicit_run_id_before_writing(
 
 @pytest.mark.parametrize("run_id", MIXED_CASE_RUN_IDS)
 def test_run_id_slug_accepts_mixed_case_and_materialize_refuses_it(tmp_path, monkeypatch, run_id):
-    """The slug grammar is case-blind (a container name may carry either case); the run
-    DIRECTORY is not — one admission rule (`_run_id.refuse_bad_run_id`) holds at the host's
-    materialisation and at the handle's constructors, and the host's own minted ids are
-    folded to pass it."""
+    """The slug grammar is case-blind (a container name may carry either case); the run"""
     assert is_valid_run_id(run_id)
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")

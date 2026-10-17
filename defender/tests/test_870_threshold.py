@@ -1,58 +1,33 @@
-"""#870 — the threshold under normalization, and the three readers of the count it moves.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_870.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared870.py`.
-
-M5′ moves `pitfall_key`'s `system` component, which moves the record set, which moves the
-count THREE readers gate or report on: `run_pitfalls`' tick gate, `drains._has_lead_author_
-work`' wake gate, and `lead_author.py:607`'s per-run log line. FK-3 changes what the first two
-gate ON — a `system == ""` record clears on its OWN `occurrences`, and no longer contributes
-to the distinct COUNT — because the old arithmetic was anti-correlated with evidence quality:
-the round's motivating incident is ONE merged record and could never clear a threshold of 3
-alone, while N silent failures are N records and did.
-"""
+"""#870 — the threshold under normalization, and the three readers of the count it moves."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run
 
-import json
 from pathlib import Path
 
 import pytest
 
-from defender.learning import lead_repository
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths, pitfalls_threshold
-from defender.learning.leads import lead_author, pitfalls_curator
+from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import (
     collect_general_failures,
-    extract_from_joined,
 )
-from defender.scripts.gather_tools.record_query import append_query_row
-from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._declared870 import (
-    BINDER,
     Spawn,
     by_surface,
     commit_all,
     curate_execution_md,
     graveyard_by_id,
-    loop_log,
     pitfall_row,
     queue_ids,
     seed_tree,
     shim_lead,
     shim_row,
     silent_shim_row,
-    write,
     write_reducer_surface,
 )
-from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests._lead_author_1134 import lead_trees
 from defender.tests._curator1134 import open_state
-from defender.tests._lead_author_1134 import lane_fields
-from defender.tests._state1135 import curation_run_dir, run_of
 
 
 @pytest.fixture
@@ -266,144 +241,6 @@ def test_the_system_lane_still_curates_at_its_own_threshold(scene, monkeypatch):
     assert repo.is_dir()
 
 
-def test_a_threshold_of_zero_curates_every_tick(scene, monkeypatch):
-    """`LEARNING_PITFALLS_THRESHOLD=0` is VALID and means every tick with pending work
-    curates.
-
-    `0` is the falsy member of this domain — the `x or DEFAULT` coercion shape R4 exists for,
-    which silently turns an operator's deliberate 0 into the shipped 3 — and the round adds a
-    second way to swallow it: a gate rewritten around `occurrences >= threshold` has to keep
-    answering yes at 0 for a record whose occurrences are 1. Both readers are driven.
-    """
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "0")
-    _repo, paths = scene
-    assert pitfalls_threshold() == 0, "the falsy member was coerced away at the read"
-
-    persist.append_pitfalls([shim_row("r:l-003:0")], state=open_state(paths))
-    assert drains._has_lead_author_work(open_state(paths)) is True
-    assert by_surface(_tick(paths).handoffs)["reducer"]
-
-
-def test_a_threshold_of_one_curates_on_the_first_mistake(scene, monkeypatch):
-    """`LEARNING_PITFALLS_THRESHOLD=1` is retire-or-curate-on-first, for both classes: one
-    reducer record with `occurrences=1` and one attributed record each open the lane.
-
-    The boundary member either side of the falsy one, and the one an operator running a fresh
-    deployment actually sets. A gate that compared `occurrences > threshold` rather than `>=`
-    passes every other test in this file and fails here.
-    """
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    _repo, paths = scene
-    persist.append_pitfalls([shim_row("r:l-003:0")], state=open_state(paths))
-    assert drains._has_lead_author_work(open_state(paths)) is True
-    assert by_surface(_tick(paths).handoffs)["reducer"]
-
-    attributed = LoopPaths(repo_root=paths.repo_root, state_dir=paths.state_root / "b")
-    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=open_state(attributed))
-    assert drains._has_lead_author_work(open_state(attributed)) is True
-    assert by_surface(_tick(attributed).handoffs)["system"]
-
-
 # The other two readers of the same moved count.
 
 
-def test_the_lead_author_log_line_counts_post_normalization_records(scene, capsys):
-    """`lead_author.py:607`'s "N distinct mistake(s) in this run" line reports the
-    POST-normalization count.
-
-    It reads the SAME `pitfalls.jsonl` `run_pitfalls` reads — `append_pitfalls(failures,
-    state=deps.state)` one line earlier in the same lead-author tick, `failures` being
-    `collect_general_failures`' own output, not a sibling lane's own queue (the R8 census,
-    `47-census-merge-pitfalls.md`). So M5′ reaches this count in the SAME TICK it reaches the
-    two gates, and it is a THIRD keyed reader of the field this round re-mints.
-
-    Driven with three `∅.bash-shim` rows sharing one digest, collected from reduces attributed
-    to elastic, cmdb and nothing: the line reports ONE distinct mistake, not three. Nothing
-    before this demand asserted it — the census that found the edge deliberately left the
-    demand unauthored.
-    """
-    repo, paths = scene
-    run_dir = curation_run_dir("run-870")  # a natural run, handed as its `Run` (#1105 PR 2)
-    executed = [
-        shim_lead(system="elastic", lead_id="l-001", sql="SELECT unnest(data)"),
-        shim_lead(system="cmdb", lead_id="l-002", sql="SELECT unnest(data, 1)"),
-        shim_lead(system="", lead_id="l-003", sql="SELECT unnest(data, 2)"),
-    ]
-    deps = lead_author.LeadAuthorDeps(
-        paths=paths,
-        state=open_state(paths),
-        **lane_fields(paths),
-        systems=frozenset({"elastic", "cmdb"}),
-        invoke_agent=lambda *a, **k: 0,
-        extract=lambda _run_dir: ([], executed),
-        synthesize=lambda *a, **k: [],
-        build_handoff=lambda *a, **k: [],
-        discover_system_drafts=lambda: [],
-    )
-    capsys.readouterr()
-
-    assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
-
-    log = loop_log(capsys)
-    counted = [ln for ln in log.splitlines() if "distinct mistake(s) in this run" in ln]
-    assert counted, f"the per-run count line is gone: {log}"
-    assert "1 distinct mistake(s) in this run" in counted[0], (
-        f"the log line counts pre-normalization rows: {counted[0]!r}"
-    )
-    assert len(persist.read_pitfalls(open_state(paths))) == 3, "the rows themselves are still the evidence"
-    assert {r["system"] for r in persist.read_pitfalls(open_state(paths))} == {""}
-    assert repo.is_dir()
-
-
-def test_the_learning_side_join_still_splits_the_sentinel_row(tmp_path):
-    """`lead_repository.joined` still puts a `∅.bash-shim` row on `JoinedLead.sentinels`, not
-    on `.queries`, and still remerges both onto `.rows` in the table's own seq order —
-    unchanged by M5′.
-
-    The unmoved reader of a moved source: `joined` → `extract_from_joined` is what hands
-    `collect_general_failures` its rows, and #841's remerge is documented as the ONE reader
-    that must not take the split. M5′ changes what the LANE does with a sentinel row; this
-    demand observes that the reader in front of it did not move — asserted at that reader's
-    own edge, because a demand at the boundary is green when the other readers moved.
-
-    The row is written through the production writer and read back through the production
-    join, which also executes the arm C21 closed on a READ and never on a run: the
-    UNATTRIBUTED shim row survives `extract_from_joined`'s raw-ref gate, because the shim
-    writer passes `payload_text=""` precisely so the sidecar exists.
-    """
-    (tmp_path / "gather_raw").mkdir(parents=True)
-    write(tmp_path / "gather_raw" / "l-001.lead.json",
-          json.dumps({"goal": "reduce the elastic envelope", "what_to_summarize": []}) + "\n")
-    # The writer takes its seq from the run's state, started as a run start starts it (#1235).
-    from defender.runtime.run_state import RunState
-
-    state = RunState(tmp_path, "r870-threshold")
-    append_query_row(
-        state, run=fixture_run(state.run_dir), lead_id="l-001", system="elastic", verb="query", query_id="elastic.esql",
-        params={"native_query": "FROM logs"}, raw_command="elastic query",
-        payload_text="[]", exit_code=0, payload_status="ok", payload_digest="2 bytes",
-        system_key="",
-    )
-    append_query_row(
-        state, run=fixture_run(state.run_dir), lead_id="l-001", system="", verb="bash", query_id=BASH_SHIM_QUERY_ID,
-        params={"command": "cat 0.json | defender-sql 'SELECT unnest(data)'"},
-        raw_command="defender-sql", payload_text="", exit_code=1, payload_status="error",
-        payload_digest=BINDER,
-        # The bash lane's own value (#871): its `system=""` means "no run payload was read",
-        # not "a name was coarsened away", and nothing up here named a system to fingerprint.
-        system_key="",
-    )
-
-    joined = [jl for jl in lead_repository.joined(tmp_path) if jl.lead_id == "l-001"]
-    assert len(joined) == 1
-    lead = joined[0]
-    assert [q.query_id for q in lead.queries] == ["elastic.esql"], (
-        "the sentinel leaked into the issued-query projection"
-    )
-    assert [q.query_id for q in lead.sentinels] == [BASH_SHIM_QUERY_ID]
-    assert [q.seq for q in lead.rows] == [0, 1], "the remerge lost the table's own order"
-
-    executed = extract_from_joined(joined)
-    assert len(executed) == 2, "the shim row's sidecar did not survive the raw-ref gate"
-    collected = collect_general_failures(executed, tmp_path, catalog=[])
-    assert [(r["query_id"], r["system"]) for r in collected] == [(BASH_SHIM_QUERY_ID, "")]

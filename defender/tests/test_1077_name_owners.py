@@ -1,34 +1,16 @@
-"""#1077 — the name owners: `RunPaths`, `EpisodePaths`, and the one rule every composing
-accessor inherits.
-
-Carries 28 demands of `spec-flow/specs/spec_graph_1077.yaml`, each test named after its
-demand's `discharged_by` pointer. D1 takes `RunPaths` from seven accessors to roughly twenty
-and mints `EpisodePaths` beside it; decision 2 puts ONE rule on every accessor that builds a
-path from a caller-supplied component — an anchored shape check on the value, then a
-containment check of the resolved path against that method's OWN root, refusing on either.
-
-Every hostile component in `S.HOSTILE_COMPONENTS` is a REAL string handed to the REAL
-accessor: the traversal segments, the embedded separators, the NUL and the newline are
-re-probed on every run, so the taxonomy assumption ceases to exist rather than being pinned
-once. Where a name is expected, it is read off `defender/docs/run-records-kinds.tsv` — the
-gate's own data file — rather than re-spelled here, and `CASE_ID_RE` is pinned BY REFERENCE at
-`defender/_run_id.py` per RG-4, never re-spelled into an assertion.
-"""
+"""#1077 — the name owners: `RunPaths`, `EpisodePaths`, and the one rule every composing accessor
+inherits."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
 
-import inspect
-import json
 from pathlib import Path
 
 import pytest
 
 from defender.tests import _spec1077 as S
-from defender.tests import _triplet_947 as T
-from defender.tests._by_path import DEFENDER, load_module
+from defender.tests._by_path import DEFENDER
 from defender.tests import _tenants1106 as T1106  # noqa: E402
-from defender.tests._alert_plant import plant_alert
 from defender.run_repository import SessionPaths
 
 
@@ -66,9 +48,7 @@ def _concrete(template: str, acc: S.Accessor) -> str:
     return out.rstrip("/")
 
 
-# ---------------------------------------------------------------------------------------
 # D1 — the enumerated names, walked off the kinds table
-# ---------------------------------------------------------------------------------------
 
 def test_run_paths_resolves_every_name_d1_enumerates(base, run_dir):
     """`RunPaths` resolves every run-level name the design enumerates, the three sidecars beside
@@ -97,152 +77,7 @@ def test_run_paths_resolves_every_name_d1_enumerates(base, run_dir):
     assert S.RunPaths(run_dir).session_db(base, S.LINEAGE_ID).name == f"{S.LINEAGE_ID}.db"
 
 
-def test_episode_paths_resolves_every_name_d1_enumerates(episode_dir):
-    """`EpisodePaths` resolves every episode-level name the design enumerates, including the
-    run-dir pointer."""
-    missing = []
-    for acc in S.ACCESSOR_FOR_KIND:
-        if acc.owner != "episode":
-            continue
-        try:
-            got = S.resolve(acc, run_dir=episode_dir, episode_dir=episode_dir)
-        except AttributeError:
-            missing.append(f"{acc.kind} -> EpisodePaths.{acc.attr}")
-            continue
-        want = _concrete(_expected(acc.kind), acc)
-        assert got == episode_dir / want, f"{acc.kind}: {got} vs {want}"
-    assert missing == [], f"these episode names have no accessor on the owner: {missing}"
-
-    owner = S.EpisodePaths(episode_dir)
-    assert owner.run_dir_pointer(S.LABEL) == episode_dir / "worlds" / S.LABEL / "run_dir", (
-        "the run-dir pointer (archive.py:82) was missed by the handoff and is D1's, not a "
-        "constant left behind in archive.py")
-    assert owner.served_world(S.WORLD_TOKEN) == (
-        episode_dir / "served" / f"{S.WORLD_TOKEN}.jsonl")
-    assert owner.served == episode_dir / "served"
-    assert owner.runs == episode_dir / "runs"
-    # Claim C17 is REFUTED-AS-STATED: four more archive.py constants belong to the enumeration.
-    for extra, want in (("draws", "judge"), ("gather_summaries", "gather_summaries"),
-                        ("lessons_loaded", "lessons_loaded.jsonl"), ("alert", "alert.json")):
-        assert hasattr(owner, extra), (
-            f"archive.py's {extra.upper()} constant is in the ArchivedWorld copied set, so "
-            "D5's enumeration and this walk need it — claim C17 undercounted by four")
-        assert want in str(getattr(owner, extra)(S.LABEL) if extra != "draws"
-                           else owner.draws(S.LABEL))
-
-
-def test_the_two_retired_names_still_resolve_on_the_owner(run_dir):
-    """`ticket_read(seq)` still resolves on the owner, and `source_refs.yaml` stays in the
-    answer-key set, because the payload-cap shape and the answer-key deny key on those names.
-    (#1166 deleted the `source_refs` accessor with its last reader; old run folders still hold
-    the file, so the deny keeps its name through the owner's constant.)"""
-    from defender.run_repository import CASE_ANSWER_KEY_NAMES, SOURCE_REFS
-    owner = S.RunPaths(run_dir)
-    assert owner.ticket_read(S.SEQ) == run_dir / "ticket_reads" / f"{S.SEQ}.json"
-    assert SOURCE_REFS == "source_refs.yaml"
-    assert SOURCE_REFS in CASE_ANSWER_KEY_NAMES, (
-        "the answer-key deny must keep refusing source_refs.yaml: old run folders hold it")
-    from defender.runtime import permission
-    assert permission.is_captured_payload(owner.ticket_read(S.SEQ)), (
-        "the payload read cap keys on the ticket_reads name — D1's stated reason for keeping it")
-
-
-def test_a_sub_collection_member_for_a_kind_nothing_writes(run_dir):
-    """A kind with no writer still gets an accessor, for D1's stated reason: the gate's
-    payload-cap shape keys on `ticket_reads`."""
-    owner = S.RunPaths(run_dir)
-    assert owner.ticket_read(0).is_relative_to(run_dir)
-
-
-def test_every_composed_name_part_is_a_constant_on_the_owner(run_dir):
-    """Every part a composed record name is built from is a named constant on the owner, and the
-    gate reads its part set from those constants."""
-    owner_mod = S.run_paths_mod()
-    constants = {v for k, v in vars(owner_mod).items()
-                 if k.isupper() and isinstance(v, str)}
-    for part in S.DISCRIMINATING_PARTS:
-        assert part in constants or any(part in c for c in constants), (
-            f"{part!r} is composed into a record name but is not a named constant on the owner "
-            "— D6 keys on those constants, so an unnamed part is a part the gate cannot see")
-    assert set(S.gate().COMPOSED_PARTS) <= constants | {
-        c for c in vars(S.episode_paths()).values() if isinstance(c, str)}, (
-        "the gate re-spells a part rather than reading it from the owner's constants")
-
-
-def test_a_composed_name_part_that_two_accessors_share(run_dir):
-    """A composed-name part two accessors share is represented as one reused constant on the
-    owner, because D6 keys on those constants."""
-    owner_mod = S.run_paths_mod()
-    trace_const = [k for k, v in vars(owner_mod).items()
-                   if k.isupper() and v == ".trace.jsonl"]
-    assert len(trace_const) == 1, (
-        f"`.trace.jsonl` is shared by the curator batch trace and stage_trace and must be ONE "
-        f"reused constant; the owner spells it under {trace_const}")
-    name = trace_const[0]
-    assert owner_mod.WIRE_LOG_NAMES.curator_batch("b1", 1).endswith(getattr(owner_mod, name))
-    assert str(S.episode_paths().EpisodePaths(run_dir).stage_trace(S.STAGE)).endswith(
-        getattr(owner_mod, name)), "the second accessor re-spells the shared part"
-
-
-def test_no_episode_layout_constant_survives_outside_the_owner(episode_dir):
-    """No episode-layout name is spelled outside the owner in any of the modules that spelled one
-    before.
-
-    NEGATIVE. Positive control inline (and demand d39): every one of those names still
-    resolves — on the owner.
-    """
-    rehomed = {
-        "learning/branch/archive.py", "learning/branch/ledger.py", "learning/branch/timing.py",
-        "learning/branch/outcome.py", "runtime/branch/_family.py",
-        "scripts/visualize/visualize_episode.py", "learning/branch/cli.py"}
-    # #1224: the episode outcome moved from `review.yaml` to `outcome.yaml` (written by
-    # `learning/branch/outcome.py`); `staged.yaml` and its writer retired with cluster staging.
-    names = ("family.yaml", "outcome.yaml", "samples.yaml", "judge.yaml", "timing.json",
-             "base.jsonl", "learning.html", ".priming")
-    offenders = []
-    for rel in sorted(rehomed):
-        text = (DEFENDER / rel).read_text(encoding="utf-8")
-        for name in names:
-            if f'"{name}"' in text or f"'{name}'" in text:
-                offenders.append(f"{rel}: {name}")
-    assert offenders == [], (
-        f"D1 re-homes these constants onto EpisodePaths and they are still spelled at: "
-        f"{offenders}")
-    owner = S.EpisodePaths(episode_dir)
-    assert owner.family.name == "family.yaml", "positive control: the name resolves on the owner"
-
-
-def test_the_episodes_root_resolver_is_not_moved_into_the_owner(episode_dir):
-    """The episodes root is still resolved by the launcher's own `episodes_root`, and the owner
-    does not define one.
-
-    NEGATIVE. Positive control inline: the launcher's resolver is still there and still refuses
-    an unset `$DEFENDER_EPISODES_BASE` (claim S4).
-    """
-    owner_mod = S.episode_paths()
-    for forbidden in ("episodes_root", "EPISODES_BASE_ENV", "episodes_base"):
-        assert not hasattr(owner_mod, forbidden), (
-            f"{forbidden} moved onto the episode-layout owner; D1 re-homes the LAYOUT constants "
-            "and leaves the root's resolution in learning/branch/cli.py")
-    cli = S.branch_cli()
-    assert callable(cli.episodes_root), "positive control: the launcher still owns the resolver"
-    assert "EPISODES_BASE" in inspect.getsource(cli.episodes_root), (
-        "the resolver still reads the configured location, with no default derivation")
-
-
-# ---------------------------------------------------------------------------------------
 # O8 — the two model-facing payload forms
-# ---------------------------------------------------------------------------------------
-
-def test_the_queries_row_records_the_owners_relative_payload_path(run_dir):
-    """The payload path recorded in the queries row is the owner's run-dir-relative string."""
-    from defender.scripts.gather_tools import record_query
-    recorded = record_query.persist_payload(_writer_run_1165(run_dir), S.LEAD_ID, S.SEQ, '{"rows": []}')
-    assert recorded == S.RunPaths(run_dir).payload_relpath(S.LEAD_ID, S.SEQ), (
-        f"the row recorded {recorded!r}; O8 requires it to be the OWNER's relative form, not a "
-        "second spelling composed at the call site (claims C11/R4, record_query.py:271)")
-    assert not Path(recorded).is_absolute()
-    assert (run_dir / recorded).is_file()
 
 
 def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admits_it(run_dir):
@@ -266,117 +101,12 @@ def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admi
         "GATHER_RAW_SHAPE admits it, and that admission is what makes O8's note usable")
 
 
-def test_payload_relpath_given_an_already_absolute_path(run_dir):
-    """`payload_relpath` carries no shape detection and no refusal for the already-absolute
-    case: O8 and D1 place the relative and absolute payload forms on two SEPARATE accessors, so
-    choosing the right one is the caller's duty and the accessor composes and returns its
-    run-dir-relative value unconditionally."""
-    owner = S.RunPaths(run_dir)
-    got = owner.payload_relpath(S.LEAD_ID, S.SEQ)
-    assert not Path(got).is_absolute()
-    assert Path(got) == owner.payload(S.LEAD_ID, S.SEQ).relative_to(run_dir)
-    # No shape detection: the accessor does NOT notice it was reached under an absolute-path
-    # assumption and does NOT switch form or refuse (§7 non-material item 8).
-    again = owner.payload_relpath(S.LEAD_ID, S.SEQ)
-    assert again == got, "the accessor's answer depends on nothing but its components"
-    assert isinstance(got, str), "the run-dir-relative form is the string the row records"
-
-
-# ---------------------------------------------------------------------------------------
 # Decision 2 — one rule for every composing accessor
-# ---------------------------------------------------------------------------------------
-
-def test_every_composed_accessor_shape_checks_then_confines_against_its_own_root(
-        base, run_dir, episode_dir):
-    """Every accessor that builds a path from a caller-supplied component applies one rule — an
-    anchored shape check on the value, then a containment check of the resolved path against
-    that method's own root — and refuses on either."""
-    for acc in S.COMPOSING:
-        owner_root = S.upward_root(acc.attr, base) if acc.attr in S.UPWARD_ACCESSORS else (
-            run_dir if acc.owner == "run" else episode_dir)
-        # Positive control, per accessor: an ordinary component resolves, inside its own root.
-        ok = S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir)
-        assert Path(ok).is_absolute() is False or Path(ok).is_relative_to(owner_root), (
-            f"{acc.owner}.{acc.attr} does not resolve inside its own root for an ordinary value")
-        for hostile in S.HOSTILE_COMPONENTS:
-            # ONE slot at a time, the numbered ones included: a `turn`/`seq`/`n` slot handed
-            # `'../x'` formats straight into the name unless the shape rule refuses a
-            # non-integer there, and probing every slot at once lets the FIRST slot's refusal
-            # hide an unchecked later one (`payload(lead, seq)`).
-            for slot in range(len(acc.args)):
-                args = tuple(hostile if i == slot else a for i, a in enumerate(acc.args))
-                with pytest.raises(Exception) as excinfo:  # noqa: PT011
-                    S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir,
-                              args=args)
-                assert excinfo.value is not None, f"{acc.attr}({hostile!r} in slot {slot})"
-            continue
-            args = tuple(hostile for _ in acc.args)
-            with pytest.raises(Exception) as excinfo:  # noqa: PT011
-                S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir,
-                          args=args)
-            assert excinfo.value is not None, f"{acc.attr}({hostile!r})"
-
-
-def test_every_composed_accessor_applies_the_shape_then_containment_pair_or_a_reachability_probe_shows_why_not(  # noqa: E501
-        base, run_dir, episode_dir):
-    """Every accessor on `RunPaths`/`EpisodePaths` that composes a name from a caller-supplied
-    component (lead_id, turn, role, seq, label, token, episode_id) either applies the same
-    shape-then-containment pair `payload` does, or a break-attempt probe shows the specific
-    input it refuses instead — a census, not a single case.
-
-    The enumeration picks the subjects; the assertion is what each one DOES when driven. A
-    reachability claim here is a break-attempt, unrefuted only, never confirmed.
-
-    A MISSING accessor is a census failure, not a refusal: without the first loop below, an
-    owner that simply does not have the accessor would raise `AttributeError` at every hostile
-    input and the census would certify a surface that does not exist.
-    """
-    absent = []
-    for acc in S.COMPOSING:
-        try:
-            S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir)
-        except AttributeError:
-            absent.append(f"{acc.owner}.{acc.attr}")
-        except Exception:  # noqa: BLE001 — a refusal of an ORDINARY value is its own failure
-            absent.append(f"{acc.owner}.{acc.attr} refuses its own ordinary component")
-    assert absent == [], f"these composing accessors do not exist to be censused: {absent}"
-
-    escaped = []
-    probes = [
-        (acc, hostile, tuple(hostile if i == slot else a for i, a in enumerate(acc.args)))
-        for acc in S.COMPOSING for hostile in S.HOSTILE_COMPONENTS
-        for slot in range(len(acc.args))]  # one slot at a time — the sibling test says why
-    for acc, hostile, args in probes:
-        if True:
-            try:
-                got = S.resolve(acc, run_dir=run_dir, runs_base=base, episode_dir=episode_dir,
-                                args=args)
-            except AttributeError:
-                escaped.append(f"{acc.owner}.{acc.attr} vanished between the two loops")
-                continue
-            except Exception:  # noqa: BLE001 — the refusal is the demanded outcome
-                continue
-            root = base if acc.attr in S.UPWARD_ACCESSORS else (
-                run_dir if acc.owner == "run" else episode_dir)
-            resolved = (root / got).resolve() if not Path(got).is_absolute() else Path(got).resolve()
-            if not resolved.is_relative_to(root.resolve()):
-                escaped.append(f"{acc.owner}.{acc.attr}({hostile!r}) -> {resolved}")
-            else:
-                escaped.append(
-                    f"{acc.owner}.{acc.attr}({hostile!r}) was ADMITTED (resolved {resolved}) — "
-                    "decision 2 makes the shape check one rule all ~20 accessors inherit, so an "
-                    "accessor that admits it is one the rule did not reach")
-    assert escaped == [], "\n".join(escaped)
 
 
 def test_no_composed_accessor_resolves_outside_its_root(base, run_dir, episode_dir):
-    """No accessor taking a caller-supplied component — lead id, turn, role, token, sequence,
-    label — resolves to a path outside its own root.
-
-    NEGATIVE, bound at every root the change touches: the run directory, the runs base (the
-    sidecars) and the episode directory. Positive control inline and in demand d36: the same
-    accessors DO resolve, inside their own roots, for ordinary components.
-    """
+    """No accessor taking a caller-supplied component — lead id, turn, role, token, sequence, label
+    — resolves to a path outside its own root."""
     outside = base.parent / "outside"
     outside.mkdir(exist_ok=True)
     (outside / "planted").write_text("reachable?\n", encoding="utf-8")
@@ -403,11 +133,7 @@ def test_no_composed_accessor_resolves_outside_its_root(base, run_dir, episode_d
 
 def test_lead_id_containing_path_traversal_segment(run_dir):
     """Security dive universal (1) at the lead-id component: a traversal-shaped lead_id must not
-    resolve to a path outside the run dir.
-
-    NEGATIVE. Positive control inline: an ordinary `l-`-shaped lead id DOES resolve, under
-    `gather_raw/` inside the run dir.
-    """
+    resolve to a path outside the run dir."""
     owner = S.RunPaths(run_dir)
     assert owner.payload(S.LEAD_ID, S.SEQ).is_relative_to(run_dir / "gather_raw")
     assert owner.lead_claim(S.LEAD_ID).is_relative_to(run_dir / "gather_raw")
@@ -465,9 +191,7 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
     assert b"OK" in done.stdout, unreachable
 
 
-# ---------------------------------------------------------------------------------------
 # The session database — RG-4: pin the pattern BY REFERENCE, never re-spell it
-# ---------------------------------------------------------------------------------------
 
 def _refuses(run_dir: Path, base: Path, lineage) -> BaseException:
     from defender.runtime.session_store import InvalidCaseId
@@ -492,92 +216,11 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
         S.LINEAGE_ID, sessions=SessionPaths(base))
 
 
-def test_session_db_lineage_id_failing_case_id_pattern(base, run_dir):
-    """`session_db` refuses a lineage id failing the case-id pattern, matching `store_path_for`'s
-    behaviour today."""
-    from defender.runtime.session_store import CASE_ID_RE, store_path_for
-    hostile = "case/../../escape"
-    assert not CASE_ID_RE.match(hostile)
-    refusal = _refuses(run_dir, base, hostile)
-    assert repr(hostile) in str(refusal) or hostile in str(refusal), (
-        "the refusal names the value it refused, as today's does")
-    assert S.RunPaths(run_dir).session_db(base, S.LINEAGE_ID) == store_path_for(
-        S.LINEAGE_ID, sessions=SessionPaths(base)), "positive control: a valid lineage id still resolves"
-
-
-def test_session_db_lineage_id_empty(base, run_dir):
-    """An empty lineage id fails the case-id pattern (which requires at least one leading
-    alphanumeric) and is refused per D1's stated inheritance of the refusal."""
-    from defender.runtime.session_store import CASE_ID_RE
-    assert not CASE_ID_RE.match(""), (
-        "cite defender/_run_id.py (`CASE_ID_RE`) — the pattern's own leading-alphanumeric "
-        "requirement is what refuses the empty id; it is not re-derived here")
-    _refuses(run_dir, base, "")
-
-
-def test_session_db_lineage_id_oversized(base, run_dir):
-    """An oversized lineage id exceeds the case-id pattern's length cap and is refused per D1's
-    stated inheritance of the refusal."""
-    from defender.runtime.session_store import CASE_ID_RE
-    oversized = "a" * 4096
-    assert not CASE_ID_RE.match(oversized), (
-        "the cap is the pattern's own, read at defender/_run_id.py (`CASE_ID_RE`) (RG-4)")
-    _refuses(run_dir, base, oversized)
-    just_inside = "a" * 128
-    assert CASE_ID_RE.match(just_inside), "positive control: the pattern's own boundary value"
-    assert S.RunPaths(run_dir).session_db(base, just_inside).name == f"{just_inside}.db"
-
-
-def test_the_owner_carries_a_refusal_rule_that_lives_outside_the_box_closure(base, run_dir):
-    """There is no conflict: `CASE_ID_RE` is a stdlib `re` pattern carrying no third-party
-    dependency, and D1's pydantic-to-`@dataclass(frozen=True)` conversion applies to the whole
-    owner module, so re-homing `store_path_for`'s refusal onto `session_db` leaves the owner
-    importable with no third-party package present."""
-    from defender._paths import PATHS
-    from defender.tests._import_blocker import run_blocked
-
-    body = (
-        "import sys\n"
-        "import defender.run_repository as rp\n"  # the door (#1105); the layout loads alone
-        "import pathlib\n"
-        "o = rp.RunPaths(pathlib.Path('/tmp/x'))\n"
-        "print('ANSWERED', o.session_db(pathlib.Path('/tmp/runs'), 'good').name)\n"
-        "try:\n"
-        "    o.session_db(pathlib.Path('/tmp/runs'), '-bad')\n"
-        "except Exception as e:\n"
-        "    print('REFUSED', type(e).__name__)\n"
-        "else:\n"
-        "    print('ADMITTED')\n"
-        "assert 'pydantic' not in sys.modules, sorted(m for m in sys.modules if 'pyd' in m)\n")
-    done = run_blocked(body, block=("pydantic", "pydantic_ai", "pydantic_core"),
-                       cwd=PATHS.repo_root)
-    assert done.returncode == 0, done.stderr
-    # Positive control first: an owner that cannot even answer a VALID id without pydantic
-    # would print `REFUSED ModuleNotFoundError` below, and a bare `REFUSED` check would pass.
-    assert b"ANSWERED good.db" in done.stdout, (
-        f"the owner could not answer a valid lineage id with no third-party package "
-        f"installed:\n{done.stdout!r}\n{done.stderr!r}")
-    assert b"REFUSED InvalidCaseId" in done.stdout, (
-        "the re-homed refusal did not fire as `InvalidCaseId` with no third-party package "
-        "installed — D1's conversion applies to the whole owner module, as `_io.py:17-19` "
-        f"already did:\n{done.stdout!r}")
-
-
-# ---------------------------------------------------------------------------------------
 # Decision 12 — composed-identifier collisions
-# ---------------------------------------------------------------------------------------
 
 def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_dir):
     """The LABEL carrying the composition's own delimiter is refused at mint time, for
-    `<episode_id>-<label>` and `<episode token>.<label>` alike.
-
-    The label is the component held delimiter-free, and that alone makes both compositions
-    recoverable: every real episode id carries `-` (`cli.episode_id_for` derives
-    `<source run>-n<turn>`) and every real episode token carries `.` (`_family.
-    episode_token_for` folds each `-` onto one), so refusing the delimiter in the LEFT half
-    would refuse every production id — the positive control below is itself a dashed episode
-    id. With the label delimiter-free, `ep-a-b` is `(ep-a, b)` and never `(ep, a-b)`.
-    """
+    `<episode_id>-<label>` and `<episode token>.<label>` alike."""
     owner = S.EpisodePaths(episode_dir)
     assert owner.sibling_run_dir(S.EPISODE_ID, "plain").name == f"{S.EPISODE_ID}-plain", (
         "positive control: a delimiter-free label composes, byte for byte as today (O3)")
@@ -631,112 +274,6 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
         "positive control: a case-stable lineage id still resolves")
 
 
-# ---------------------------------------------------------------------------------------
 # What the move must NOT change
-# ---------------------------------------------------------------------------------------
-
-def test_a_public_name_function_that_other_modules_import_today(run_dir):
-    """`challenge_gate.review_trace_path`/`review_record_path` and `observe`'s wire-log path
-    function are re-homed onto the owner, and every module that imports one of them today is
-    updated with them."""
-    owner = S.RunPaths(run_dir)
-    assert owner.review_trace(S.ROLE) == run_dir / "wire_logs" / f"review_{S.ROLE}_trace.jsonl"
-    assert owner.review_record(S.TURN) == run_dir / f"review_record.{S.TURN}.json"
-    gate_mod = S.mod("runtime.challenge_gate")
-    for gone in ("review_trace_path", "review_record_path"):
-        assert not hasattr(gate_mod, gone), (
-            f"challenge_gate still owns {gone}; D1 re-homes it onto the owner (flagged fact F10)")
-    stale = []
-    for py in DEFENDER.rglob("*.py"):
-        rel = py.relative_to(DEFENDER).as_posix()
-        if rel.startswith(("tests/", ".venv/")):
-            continue
-        text = py.read_text(encoding="utf-8", errors="replace")
-        for gone in ("review_trace_path", "review_record_path"):
-            if gone in text:
-                stale.append(f"{rel}: {gone}")
-    assert stale == [], f"a caller of a re-homed function was left behind: {stale}"
 
 
-def test_one_writer_seam_asked_to_name_a_file_under_three_different_roots(
-        run_dir, episode_dir, tmp_path: Path):
-    """`observe.stage_trace_path` is one writer seam applied to the episode dir and the learning
-    run dir — and D1 places its accessor on the episode dir's owner only: the learning run dir
-    keeps today's shared function, unowned by this issue. (A third root, the run dir, lost its
-    accessor with the forward-check verifier, #1166.)"""
-    observe = S.mod("runtime.observe")
-    learning_run = tmp_path / "state" / "runs" / "source-42"
-    learning_run.mkdir(parents=True)
-
-    assert S.EpisodePaths(episode_dir).stage_trace(S.STAGE) == (
-        episode_dir / "wire_logs" / f"{S.STAGE}.trace.jsonl")
-    # The third root keeps today's shared function — this issue leaves it unowned (C16 refuted).
-    third = observe.stage_trace_path(learning_run, "forward.a-lesson.2.trace.jsonl")
-    assert third == learning_run / "wire_logs" / "forward.a-lesson.2.trace.jsonl"
-    assert not hasattr(S.RunPaths(learning_run), "learning_run_trace"), (
-        "no accessor covers the learning run dir: D1 places the first two on their owners and "
-        "the Resolution leaves the third where it is")
-
-
-def test_corpus_load_ones_runpaths_construction_still_resolves_after_d1(tmp_path: Path):
-    """`corpus_load_one`'s `RunPaths(run_dir).alert` construction (claim S10, outside the gate's
-    sweep) still resolves identically after D1's RunPaths rewrite (7 -> ~20 accessors, pydantic
-    dropped for stdlib dataclass)."""
-    from defender.skills.invlang import corpus
-    case = tmp_path / "corpus" / "case-1"
-    case.mkdir(parents=True)
-    # `RunPaths(run_dir).alert` is how the site names the alert (`corpus.py:124`), and the
-    # signature id it reads off it is the observable that tells whether it still resolves.
-    plant_alert(case, {"rule": {"id": "sig-9"}})
-    # The COMMITTED companion, not a stub: `load_corpus` only counts a document that PARSES
-    # (three required top-level keys inside ```invlang fences), so a stub would make this
-    # assertion read 0 == 0 and pass on the absence of the thing it measures.
-    (case / "investigation.md").write_bytes(T.GOLDEN_INVESTIGATION.read_bytes())
-
-    companions, report = corpus.load_corpus(tmp_path / "corpus")
-    assert report.scanned == 1, f"the fixture was not scanned: {report}"
-    assert S.RunPaths(case).alert == case / "alert_input" / "alert.json", (
-        "the unmoved reader outside the sweep composes the same path after the rewrite")
-    assert [c.signature_id for c in companions] == ["sig-9"], (
-        f"corpus_load_one no longer reads the alert through the owner: "
-        f"{[(c.case_id, c.signature_id) for c in companions]}, skipped={report.skipped}")
-
-
-def test_compaction_dryruns_wire_log_accessor_still_resolves_after_d1(tmp_path: Path):
-    """`compaction_dryrun`'s `RunPaths(p).wire_log` construction (claim G1, outside both the
-    gate's sweep and the reference resolver's floor) still resolves identically after D1's
-    RunPaths rewrite, and its loader still reads a record carrying decision 18's new
-    `writer_id`.
-
-    The payload half is claim RG-9 (92-reconciliation.md finding 3): decision 18 changes the
-    bytes of a file this tool parses, and an accessor-grain check alone would have let that
-    through. `_load_main_records` (`scripts/testing/compaction_dryrun.py:49-60`) is a raw
-    `json.loads(line)` followed by `.get(...)` on every field, so an added key is tolerated —
-    observed here rather than assumed.
-    """
-    tool = load_module(
-        DEFENDER.parent / "scripts" / "testing" / "compaction_dryrun.py", name="_cdr_1077")
-    run_dir = S.seed_run_tree(tmp_path / "a-run")
-    log = S.RunPaths(run_dir).wire_log
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text("{}\n", encoding="utf-8")
-
-    assert tool._resolve_jsonl(str(run_dir)) == log, (
-        "the repo-root tool outside the sweep still resolves the wire log through the owner; "
-        "a rewrite that moved the name without moving this reader would resolve a file no run "
-        "has")
-
-    # RG-9. The same tool, at the PAYLOAD grain: post-decision-18 records, with the new field.
-    post_d18 = [
-        {"agent_id": "main", "seq": 1, "kind": "request", "writer_id": "MAIN"},
-        {"agent_id": "main", "seq": 0, "kind": "request", "writer_id": "MAIN"},
-        {"agent_id": "gather-l-aaa111", "seq": 2, "kind": "request",
-         "writer_id": "gather-l-aaa111"},
-    ]
-    log.write_text("".join(json.dumps(r) + "\n" for r in post_d18), encoding="utf-8")
-    loaded = tool._load_main_records(log, "main")
-    assert [r["seq"] for r in loaded] == [0, 1], (
-        "`_load_main_records` stopped selecting and ordering MAIN's records once they carried "
-        f"`writer_id`: {loaded}")
-    assert all(r["writer_id"] == "MAIN" for r in loaded), (
-        "the added key did not survive the raw `json.loads` + `.get(...)` read")

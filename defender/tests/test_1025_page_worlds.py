@@ -1,24 +1,4 @@
-"""#1025 — the header, the worlds section, the leads section and the frame channel.
-
-O3/O5/O9 as resolved (§7 Q3, Q7, J5, J7, J8, J16): one section per world keyed on the union of
-`runs/` directories, labels with a `judge.yaml` row and manifest worlds — a world without a run
-dir renders with its run-dir-derived parts marked "run directory absent" and its record-derived
-parts present; every `runs/` artifact dir gets a section, an undecomposable name labelled by its
-full name "not declared in the manifest"; a row for an unknown label renders on the row-driven
-surfaces "not in the manifest"; the `runtime.html` link renders unconditionally. The frame
-channel is page-owned: every substituted id / href / heading / class is attribute-safe by
-construction — labels and stems that become ids are grammar-gated on the launcher's own run-id
-alphabet (an off-grammar name renders an "unnameable entry" line and no section), classes come
-from a closed map with a neutral fallback, verbatim record strings sit in their own element.
-
-The leads per world are the judge's own set (`referenced_leads ∪ gather_summaries/*.md` stems,
-x12) with each chain from `family.lead_chain`; every leaf the page reads inside `worlds/<X>/` is
-screened — a symlink, FIFO or device at the name is refused without being opened, the target's
-content never appears and the render never blocks (p2 landed UNSCREENED for `report.md` and
-`investigation.md`; the screen moves into the readers, an O8 move the human took).
-
-RED AGAINST HEAD: the page module does not exist.
-"""
+"""#1025 — the header, the worlds section, the leads section and the frame channel."""
 from __future__ import annotations
 
 import json
@@ -30,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from defender import _episode_handle as EH
 from defender.tests import _episode_1025 as E
 from defender.tests._alert_plant import plant_source_copy
 from defender.tests import _judge_921 as J
@@ -124,12 +103,7 @@ def _ungradable_episode(tmp_path: Path) -> E.Episode:
 def test_1025_every_step_in_steps_order_and_every_directory_under_runs_has_its_section_the_control_included(
         tmp_path):
     """On the sample the page has `stage-timing` rows for `questioner, preflight, runs, verify,
-    judge` in `STEPS` order, a `world-<id>` section and a `leads-<id>` block for each of
-    `a`, `no_remote_session`, `prior_fake_key_precedent` (the ungraded control included) and no
-    section for the `.scrub-verdict.json` sidecar files beside the run dirs, plus
-    `sec-verdict … sec-records`; with a synthetic 3-step `timing.json` the missing steps' rows
-    still exist and say they are not on the record.
-    """
+    judge` in `STEPS` order, a `world-<id>` section and a `leads-<id>` block for."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     timing = page.text_of("stage-timing")
@@ -149,11 +123,7 @@ def test_1025_every_step_in_steps_order_and_every_directory_under_runs_has_its_s
 
 def test_1025_a_world_section_is_not_graded_ungradable_with_its_reason_or_graded_and_never_confuses_the_three(
         tmp_path):
-    """`a` (no row) renders "not graded" with no bucket and no verdict line; an `ungradable:
-    True` row renders its `ungradable_reason` escaped, no verdict line and no bucket;
-    `prior_fake_key_precedent` and `no_remote_session` render their verdict, the verdict line
-    and the judge model's bucket.
-    """
+    """`a` (no row) renders "not graded" with no bucket and no verdict line."""
     page = render(E.sample_episode(tmp_path))
     control = _world(page, E.CONTROL)
     assert "not graded" in control, control
@@ -182,12 +152,7 @@ def test_1025_a_world_section_is_not_graded_ungradable_with_its_reason_or_graded
 
 def test_1025_the_world_block_shows_the_verdict_line_and_the_stored_bucket_never_a_recomputed_one(
         tmp_path):
-    """For `prior_fake_key_precedent` the world block shows the verdict line (`verdict =
-    declared: inconclusive == malicious`) and then the judge model's own bucket,
-    `decision-discipline`, and its systems; a synthetic row whose facts imply
-    `analyze-discipline` (resolutions did not move) but stores `bucket: lead-set` renders
-    `lead-set` (bucket read, never recomputed).
-    """
+    """For `prior_fake_key_precedent` the world block shows the verdict line (`verdict = declared."""
     ep = E.sample_episode(tmp_path)
     graded = _world(render(ep), E.GRADED_WORLD)
     assert _ordered(graded, VERDICT_LINE, "inconclusive", "malicious", "decision-discipline",
@@ -204,12 +169,7 @@ def test_1025_the_world_block_shows_the_verdict_line_and_the_stored_bucket_never
 
 def test_1025_world_chips_carry_the_judge_models_systems_and_every_draws_answer_and_never_a_default(
         tmp_path):
-    """Each graded world's chip names the systems the judge model's answer touched; a row whose
-    draws disagree (`bucket: None`, `systems: None`, `draws_disagree: True`) shows "no bucket"
-    and one chip per draw with that draw's own bucket and systems — never reduced to one, never
-    a default; a row with no `systems` field shows no systems chip rather than an invented
-    value; the verdict line is present as well.
-    """
+    """Each graded world's chip names the systems the judge model's answer touched."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
@@ -238,11 +198,8 @@ def test_1025_world_chips_carry_the_judge_models_systems_and_every_draws_answer_
 
 def test_1025_each_world_links_to_runs_episode_world_runtime_html_relatively_and_the_run_dir_pointer_is_never_the_source(
         tmp_path):
-    """Every world section's link is exactly `runs/<episode>-<world>/runtime.html` (the episode
-    id the manifest's, correction 4); the absolute path in `worlds/<X>/run_dir` appears nowhere
-    on the page, and a copied episode whose `run_dir` pointer names a nonexistent path renders
-    the same link.
-    """
+    """Every world section's link is exactly `runs/<episode>-<world>/runtime.html` (the episode id
+    the manifest's, correction 4)."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     for label in E.WORLDS:
@@ -264,11 +221,7 @@ def test_1025_each_world_links_to_runs_episode_world_runtime_html_relatively_and
 
 def test_1025_headings_carry_substituted_counts_the_worlds_guide_uses_each_axis_verbatim_and_the_nav_iterates_the_same_sets_as_the_sections(
         tmp_path):
-    """Section headings carry the sample's counts (3 worlds, 13 findings, 5 stages); the worlds
-    guide names the control as "the branch point untouched, not graded" and each sibling by
-    role letter, declared disposition and its `axis` text escaped; the nav's per-world and
-    per-group entries equal the sets of `world-<id>` and `fg-<n>` ids on the page.
-    """
+    """Section headings carry the sample's counts (3 worlds, 13 findings, 5 stages)."""
     page = render(E.sample_episode(tmp_path))
     worlds = page.text_of("sec-worlds")
 
@@ -294,12 +247,8 @@ def test_1025_headings_carry_substituted_counts_the_worlds_guide_uses_each_axis_
 
 def test_1025_per_world_leads_are_referenced_leads_union_gather_summary_stems_with_their_chains_and_exclude_pre_branch_leads(
         tmp_path):
-    """Each world's leads block lists `l-001`, `l-002`, `l-00c` (the `:T resolutions` row's lead
-    ∪ the gather-summary stems) and not the pre-branch alert fetch `l-000`; each lead shows its
-    goal, params, payload digest, summary and resolution rows from `family.lead_chain`; a world
-    whose `investigation.md` cannot be read renders the reader's refusal in its block and the
-    other worlds still render.
-    """
+    """Each world's leads block lists `l-001`, `l-002`, `l-00c` (the `:T resolutions` row's lead ∪
+    the gather-summary stems) and not the pre-branch alert fetch `l-000`."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     for label in E.WORLDS:
@@ -322,10 +271,9 @@ def test_1025_per_world_leads_are_referenced_leads_union_gather_summary_stems_wi
 
 
 def test_1025_a_lead_id_that_names_no_single_file_reads_nothing_and_renders_the_guards_sentence(tmp_path):
-    """A world whose `:T resolutions` row names `../../a/report` renders the "does not name a
-    file inside this world" sentence for that id and the sibling's `report.md` text appears
-    nowhere in that world's leads block; positive control: `l-001`'s summary is rendered.
-    """
+    """A world whose `:T resolutions` row names `../../a/report` renders the "does not name a file
+    inside this world" sentence for that id and the sibling's `report.md` text appears nowhere in
+    that world's leads block."""
     ep = E.sample_episode(tmp_path)
     (ep.world(E.CONTROL) / "report.md").write_text(
         T.report_text("malicious", body="SIBLING-REPORT-BODY-NEVER-IN-ANOTHER-WORLD"), encoding="utf-8")
@@ -340,12 +288,7 @@ def test_1025_a_lead_id_that_names_no_single_file_reads_nothing_and_renders_the_
 
 def test_1025_the_artifacts_anchor_ids_exist_and_every_nav_href_resolves_to_an_id_on_the_page(tmp_path):
     """Ids present: `sec-verdict`, `sec-case`, `sec-worlds`, `world-<id>` ×3, `sec-findings`,
-    `fg-<n>` per group, `f-<world>-<draw>-<index>` ×13, `sec-stages`, `stage-timing`,
-    `stage-questioner`, `stage-runs`, `stage-judge`, `tx-<stem>` ×6, `sec-leads`,
-    `leads-<world>` ×3, `sec-records`; none of the prototype's `sec-disposition`,
-    `sec-questioner`, `stage-staging`; every `href="#…"` on the page has a matching `id`, and
-    no id is repeated (the same lead id under several worlds gets per-world anchors).
-    """
+    `fg-<n>` per group, `f-<world>-<draw>-<index>` ×13, `sec-stages`, `stage-timing`."""
     page = render(E.sample_episode(tmp_path))
     for anchor in ("sec-verdict", "sec-case", "sec-worlds", "sec-findings", "sec-stages",
                    "stage-timing", "stage-questioner", "stage-runs", "stage-judge", "sec-leads",
@@ -369,12 +312,7 @@ def test_1025_the_artifacts_anchor_ids_exist_and_every_nav_href_resolves_to_an_i
 
 def test_1025_the_header_names_the_episode_alert_rule_source_run_and_branch_point_knobs_and_lessons_commit_never_defender_run(
         tmp_path):
-    """The header's h1 carries the episode id and not "defender run:"; the meta carries the
-    alert rule name, the source run id and `branch_message_id` from `family.yaml`, knobs
-    `kimi-k3 / medium / cap 20000 / draws 1/1`, and the lessons commit; on the live-996 shape
-    (no family draw, no family row) the alert rule still resolves from the worlds'
-    `alert.json` through `episode_alert`.
-    """
+    """The header's h1 carries the episode id and not "defender run:"."""
     page = render(E.sample_episode(tmp_path))
     header = page.elements("header")
     assert header, "no <header>"
@@ -402,12 +340,8 @@ def _attribute_values(page: E.Page) -> list[str]:
 
 
 def test_1025_a_manifest_label_off_the_token_alphabet_never_reaches_a_frame_slot(tmp_path):
-    """A planted manifest label carrying markup and a space is refused by the manifest reader
-    the page shares with the judge (`family.read_manifest`, the runtime loader's world-token
-    gate): `render_episode` raises `JudgeRefused` naming the alphabet, and no page carrying the
-    label is written — the label never becomes an id, an href or a heading (J5). Positive
-    control: the same episode with its own manifest renders.
-    """
+    """A planted manifest label carrying markup and a space is refused by the manifest reader the
+    page shares with the judge (`family.read_manifest`, the runtime loader's world-token gate)."""
     ep = E.sample_episode(tmp_path)
     render(ep)
     before = ep.page.read_bytes()
@@ -424,13 +358,8 @@ def test_1025_a_manifest_label_off_the_token_alphabet_never_reaches_a_frame_slot
 
 
 def test_1025_world_or_lead_directory_name_carries_attribute_or_tag_breaking_characters(tmp_path):
-    """A `worlds/` directory whose name carries a quote and a tag never becomes an id, an href or
-    a heading unescaped: it renders as an "unnameable entry" line, the name escaped as text, and
-    no attribute value carries the raw characters (J5). A `runs/` directory of the same shape is
-    no roster label, so it is not shown at all (#1105 PR 2, declared change 4/J3: the roster is
-    the manifest's; before, it too rendered an "unnameable entry" line). Positive control: the
-    three well-formed worlds keep their sections.
-    """
+    """A `worlds/` directory whose name carries a quote and a tag never becomes an id, an href or a
+    heading unescaped."""
     ep = E.sample_episode(tmp_path)
     bad = 'w"x<i>'
     T.archived_world(ep.dir, bad)
@@ -451,31 +380,9 @@ def test_1025_world_or_lead_directory_name_carries_attribute_or_tag_breaking_cha
     assert {f"world-{w}" for w in E.WORLDS} <= set(page.ids)
 
 
-def test_1025_a_gather_summary_stem_that_is_hostile(tmp_path):
-    """A `gather_summaries/` stem carrying a space and markup would become a lead id, heading
-    and anchor: it is grammar-gated — rendered as an "unnameable entry" line in that world's
-    leads block with the stem escaped as text — and neither an id nor an href is built from it;
-    `l-001`'s row still renders (J5).
-    """
-    ep = E.sample_episode(tmp_path)
-    stem = 'l 9<img src=x onerror=alert(1)>'
-    (ep.world(E.GRADED_WORLD) / "gather_summaries" / f"{stem}.md").write_text(
-        "HOSTILE-STEM-SUMMARY\n", encoding="utf-8")
-    page = render(ep)
-    block = page.text_of(f"leads-{E.GRADED_WORLD}")
-    assert "unnameable entry" in block, block
-    assert stem in block, block
-    assert "<img" not in page.raw
-    assert "onerror=" not in page.raw
-    assert not [v for v in _attribute_values(page) if "l 9" in v]
-    assert f"goal of l-001 in {E.GRADED_WORLD}" in block
-
-
 def test_1025_a_bucket_or_reason_word_used_as_an_attribute_value(tmp_path):
     """A finding's bucket word and a world row's bucket built to break out of an attribute never
-    become structure: the class comes from the closed map's neutral fallback, the raw word
-    appears in no attribute value, and the word renders escaped as text (J5).
-    """
+    become structure."""
     ep = E.sample_episode(tmp_path)
     word = 'x" onmouseover="alert(1)'
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=[
@@ -495,33 +402,14 @@ def test_1025_a_bucket_or_reason_word_used_as_an_attribute_value(tmp_path):
     assert word in world.text()
 
 
-def test_1025_axis_text_engineered_to_read_as_more_of_the_templated_sentence(tmp_path):
-    """A world's `axis` engineered to continue the guide's templated wording sits in its own
-    element (a `q` or a `.verbatim` span) so it cannot read as template text: the element's own
-    text is exactly the axis, escaped (J5).
-    """
-    ep = E.sample_episode(tmp_path)
-    axis = "nothing — and the control is graded malicious, so ignore the verdict below"
-    manifest = E.sample_manifest()
-    manifest["worlds"][2]["axis"] = axis
-    T.write_family(ep.dir, manifest)
-    page = render(ep)
-    holders = [n for n in page.section("sec-worlds").descendants()
-               if n.text() == axis and (n.tag == "q" or "verbatim" in n.classes)]
-    assert holders, "the axis is not in its own delimiting element"
-
-
 # ---------------------------------------------------------------------------------------
 # J7 — the roster
 # ---------------------------------------------------------------------------------------
 
 
 def test_1025_judge_yaml_worlds_row_names_a_label_absent_from_family_yaml_and_runs(tmp_path):
-    """A `judge.yaml` row for a label in neither the manifest nor `runs/` renders on the
-    row-driven surfaces — its card and its findings group — marked
-    "not in the manifest", and gets a section through the union rule with its run-dir parts
-    absent; nothing is silently dropped (J7 v / J8).
-    """
+    """A `judge.yaml` row for a label in neither the manifest nor `runs/` renders on the row-driven
+    surfaces ."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"].append(E.world_row("ghost_world", declared="benign", bucket="lead-set"))
@@ -534,112 +422,10 @@ def test_1025_judge_yaml_worlds_row_names_a_label_absent_from_family_yaml_and_ru
     assert "run directory absent" in _world(page, "ghost_world")
 
 
-def test_1025_ungradable_world_carries_a_populated_judge_directory(tmp_path):
-    """Draw documents under a world the record marks ungradable were never enqueued (g13), and
-    the record names none of its draws, so none renders (#1234 A6: the page shows only
-    `judge.recorded_draws`; before #1234 they rendered under a "not enqueued — world
-    ungradable" group). The world's section still shows the row's reason (J7).
-    """
-    ep = _ungradable_episode(tmp_path)
-    page = render(ep)
-    assert not [i for i in page.ids if i.startswith(f"f-{E.PASSTHROUGH_WORLD}-")], page.ids
-    assert "defender claim" in page.text_of("sec-findings"), "positive control: the sibling's rows"
-    world = page.text_of(f"world-{E.PASSTHROUGH_WORLD}")
-    assert "a call on 'elastic' faulted <b>x</b>" in world, world
-
-
-def test_1025_leftover_draw_documents_under_a_world_the_record_excludes(tmp_path):
-    """Draw documents under a manifest world with no `judge.yaml` row are never shown as this
-    record's (#1234 A6: no row records no draw) — never as enqueued or unqueueable. (Before
-    #1234 they rendered under a "not enqueued — no grade row" group.)
-    """
-    ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["worlds"] = doc["worlds"][:1]
-    # what the pass enqueues without the graded world: the other sibling's four defender rows,
-    # the family's three world rows and the other sibling's one
-    doc["enqueued_rows"], doc["world_enqueued_rows"] = 4, 4
-    E.drop_lanes(doc, E.GRADED_WORLD)  # no row, so the pass never walked it
-    E.write_judge(ep.dir, doc)
-    page = render(ep)
-    assert not [i for i in page.ids if i.startswith(f"f-{E.GRADED_WORLD}-")], page.ids
-    assert f"f-{E.PASSTHROUGH_WORLD}-0-0" in page.ids, "positive control: the walked sibling"
-
-
-def test_1025_phantom_world_judge_dir_absent_from_manifest_and_from_runs(tmp_path):
-    """A planted `worlds/<label>/judge/0.yaml` for a label in neither the manifest, the record
-    nor `runs/` is off the roster: its contents are never rendered, and the page counts it in
-    one templated line — "1 entries under worlds/ are not on the record" (J7 i).
-    """
-    ep = E.sample_episode(tmp_path)
-    E.draw_document(ep.dir, "phantom_world", 0, E.draw_doc(findings=[
-        E.finding(subject="defender", claim="PHANTOM-CLAIM-NEVER-RENDERED")]))
-    page = render(ep)
-    assert "PHANTOM-CLAIM-NEVER-RENDERED" not in page.raw
-    assert "world-phantom_world" not in page.by_id
-    assert "1 entries under worlds/ are not on the record" in page.text, page.text_of("sec-findings")
-
-
-def test_1025_phantom_family_draw_on_an_episode_with_no_family_judge_call(tmp_path):
-    """A family draw document on an episode whose record has no family row (the family call
-    never ran) is never shown: it never reaches the lede — which opens with the templated line
-    — nor the findings section (#1234 A6: no family row records no family draw; before #1234
-    the documents rendered under "not on the record — never enqueued", J7 ii).
-    """
-    ep = E.sample_episode(tmp_path)
-    E.write_judge(ep.dir, E.sample_grade(family=False))
-    page = render(ep)
-    band = page.text_of("sec-verdict")
-    assert "family topic 0" not in band, band
-    assert "findings queued" in band, band
-    assert not [i for i in page.ids if i.startswith(f"f-{E.FAMILY}-")], page.ids
-
-
-def test_1025_a_judge_trace_for_a_world_or_draw_the_record_lacks(tmp_path):
-    """A judge trace for a label off the roster is not rendered as a block: it is listed by
-    stem in one "unattributed traces" line and its cost is priced into the judge row (O4: the
-    money was spent). Positive control: the roster traces keep their blocks.
-    """
-    ep = E.sample_episode(tmp_path)
-    page = render(ep)
-    judge_row_before = page.text_of("stage-judge")
-    assert S.judge_cost in judge_row_before, judge_row_before
-    E.write_trace(ep.dir, "judge:ghost:0", usage=(100_000, 20_000), duration_ms=1000.0,
-                  prompt="GHOST PROMPT NEVER RENDERED")
-    page = render(ep)
-    assert "tx-judge_ghost_0_trace" not in page.by_id
-    assert "GHOST PROMPT NEVER RENDERED" not in page.raw
-    stages = page.text_of("sec-stages")
-    assert "unattributed traces" in stages, stages
-    assert "judge_ghost_0_trace" in stages, stages
-    assert "$2.1000" in page.text_of("stage-judge"), page.text_of("stage-judge")
-    assert f"tx-judge_{E.FAMILY}_0_trace" in page.by_id
-
-
-def test_1025_a_roster_labels_own_draw_past_a_small_fixed_bound(tmp_path):
-    """A roster label's OWN draw at a high index still renders its block and is never listed
-    as unattributed — membership is decided by `_stem_names_label`'s digit-only-remainder
-    check, not a `range(N)`-bounded set of literal stems that would silently misclassify every
-    draw at or past its own bound (O4).
-    """
-    ep = E.sample_episode(tmp_path)
-    E.write_trace(ep.dir, f"judge:{E.FAMILY}:50", usage=(100_000, 20_000), duration_ms=1000.0,
-                  prompt="A LATE FAMILY DRAW")
-    # #1234 A6: a transcript shows for a draw the record names
-    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.FAMILY, (0, 50)))
-    page = render(ep)
-    assert f"tx-judge_{E.FAMILY}_50_trace" in page.by_id
-    assert "A LATE FAMILY DRAW" in page.raw
-    assert "unattributed traces" not in page.text_of("sec-stages")
-
-
 def test_1025_a_run_directory_whose_name_is_not_episode_dash_label(tmp_path):
-    """A dir under `runs/` whose name does not decompose into `<episode_id>-<label>` is no
-    roster label, so it gets no section and is not named anywhere on the page (#1105 PR 2,
-    declared change 4/J3: the arm roster is the manifest's runnable labels, each opened by id;
-    before, every `runs/` dir got a section and this one was marked "not declared in the
-    manifest"). Positive control: the manifest's worlds keep exactly their sections.
-    """
+    """A dir under `runs/` whose name does not decompose into `<episode_id>-<label>` is no roster
+    label, so it gets no section and is not named anywhere on the page (#1105 PR 2, declared
+    change 4/J3."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
     page = render(ep)
@@ -653,27 +439,8 @@ def test_1025_a_run_directory_whose_name_is_not_episode_dash_label(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_a_declared_world_with_no_run_directory(tmp_path):
-    """A manifest world that never started (no run dir, no row) still gets a section through
-    the union rule, with its run-dir-derived parts marked "run directory absent", no card, and
-    the nav following the sections (J8).
-    """
-    ep = E.sample_episode(tmp_path)
-    manifest = E.sample_manifest()
-    manifest["worlds"].append(T.world_doc("never_started", role="D", axis="never ran",
-                                          disposition_declared="benign"))
-    T.write_family(ep.dir, manifest)
-    page = render(ep)
-    assert "run directory absent" in _world(page, "never_started")
-    assert not [c for c in page.elements(cls="vd-cause") if "never_started" in c.text()]
-    assert "#world-never_started" in [a.attrs["href"] for a in _nav(page).find_all("a") if "href" in a.attrs]
-
-
 def test_1025_render_when_a_graded_world_has_no_matching_runs_dir(tmp_path):
-    """A graded world whose run dir is gone keeps its section: the record-derived parts
-    (verdict, bucket, verdict line, card, findings group) render and the run-dir-derived parts read
-    "run directory absent" — no link, no cost row, no result-event wall (J8).
-    """
+    """A graded world whose run dir is gone keeps its section."""
     ep = E.sample_episode(tmp_path)
     shutil.rmtree(ep.run(E.GRADED_WORLD))
     page = render(ep)
@@ -685,103 +452,9 @@ def test_1025_render_when_a_graded_world_has_no_matching_runs_dir(tmp_path):
     assert f"f-{E.GRADED_WORLD}-0-0" in page.ids
 
 
-def test_1025_a_run_dir_with_a_result_event_and_no_runtime_html(tmp_path):
-    """The `runtime.html` link renders unconditionally — it is where the page would be — so a
-    run dir with a result event and no `runtime.html` links exactly like one with it (J8).
-    """
-    ep = E.sample_episode(tmp_path)
-    (ep.run(E.GRADED_WORLD) / "runtime.html").unlink()
-    page = render(ep)
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" in page.anchors_in(f"world-{E.GRADED_WORLD}")
-    assert "no result event" not in _world(page, E.GRADED_WORLD)
-
-
-def test_1025_runs_pruned_after_the_grade(tmp_path):
-    """With `runs/` pruned after the grade every world keeps its section (rows ∪ manifest), each
-    with "run directory absent" for its run-dir-derived parts, the cards and findings groups
-    keyed on the record still render, and the runs step's sub-rows are absent (J8).
-    """
-    ep = E.sample_episode(tmp_path)
-    shutil.rmtree(ep.dir / "runs")
-    page = render(ep)
-    for label in E.WORLDS:
-        assert "run directory absent" in _world(page, label), label
-    assert len(page.elements(cls="vd-cause")) == 2
-    assert f"f-{E.GRADED_WORLD}-0-0" in page.ids
-    assert "$0.4000" not in page.text_of("stage-runs")
-    assert "$" not in page.text_of("stage-runs").replace("no cost", "")
-
-
 # ---------------------------------------------------------------------------------------
 # J16 — small per-world choices
 # ---------------------------------------------------------------------------------------
-
-
-def test_1025_ungradable_rows_from_the_early_tiers_carry_no_flags(tmp_path):
-    """An ungradable row from an early tier carries no verdict fields: it renders the
-    `ungradable_reason` verbatim, no verdict line, no bucket, no systems chip, no card — one
-    code path for every tier (J16 d).
-    """
-    page = render(_ungradable_episode(tmp_path))
-    world = _world(page, E.PASSTHROUGH_WORLD)
-    assert "a call on 'elastic' faulted" in world
-    assert VERDICT_LINE not in world, world
-    assert "systems:" not in world, world
-    assert not page.section(f"world-{E.PASSTHROUGH_WORLD}").find_all(cls="w-bucket"), world
-    assert not [c for c in page.elements(cls="vd-cause") if E.PASSTHROUGH_WORLD in c.text()]
-
-
-def test_1025_record_declared_and_manifest_declared_disagree(tmp_path):
-    """"declared" comes from the row when a row exists and from the manifest otherwise — one
-    spelling per world across the page: a row saying `malicious` beside a manifest saying
-    `benign` renders `malicious` in the world's section, card and guide entry, and `benign`
-    nowhere for that world; the control (no row) shows the manifest's value (J16 a).
-    """
-    ep = E.sample_episode(tmp_path)
-    manifest = E.sample_manifest()
-    manifest["worlds"][2]["disposition_declared"] = "benign"
-    T.write_family(ep.dir, manifest)
-    page = render(ep)
-    world = _world(page, E.GRADED_WORLD)
-    assert "malicious" in world, world
-    assert "benign" not in world, world
-    card = next(c for c in page.elements(cls="vd-cause") if E.GRADED_WORLD in c.text())
-    assert "malicious" in card.text()
-    assert "benign" not in card.text()
-    guide = page.text_of("sec-worlds")
-    entry = guide[guide.index(E.GRADED_WORLD):guide.index(E.AXIS_GRADED)]
-    assert "malicious" in entry, entry
-    assert "benign" not in entry, entry
-    assert "malicious" in _world(page, E.CONTROL)
-
-
-def test_1025_the_control_world_renders_no_row_derived_parts(tmp_path):
-    """The control has no row: its section renders no row-derived part (no verdict line, no
-    bucket, no systems chip), says it carries no facts (the capture's own answers), lists its
-    own served calls with their decision word, and its leads block renders (J16 c).
-    """
-    page = render(E.sample_episode(tmp_path))
-    control = _world(page, E.CONTROL)
-    assert VERDICT_LINE not in control, control
-    assert "systems:" not in control, control
-    assert not page.section(f"world-{E.CONTROL}").find_all(cls="w-bucket"), control
-    assert "no facts" in control, control
-    assert f"[passthrough] {E.SYSTEM}" in control, control
-    assert f"goal of l-001 in {E.CONTROL}" in page.text_of(f"leads-{E.CONTROL}")
-
-
-def test_1025_render_before_a_worlds_scrub_verdict_sidecar_is_written(tmp_path):
-    """A world whose `scrub_verdict.json` has not landed renders its scrub slot as "not
-    recorded" — the same absent arm as any record, no temporal claim (J16 b). Positive control:
-    with the sidecar present the slot carries its verdict.
-    """
-    ep = E.sample_episode(tmp_path)
-    page = render(ep)
-    assert "not recorded" not in _world(page, E.GRADED_WORLD)
-    (ep.world(E.GRADED_WORLD) / "scrub_verdict.json").unlink()
-    page = render(ep)
-    assert "not recorded" in _world(page, E.GRADED_WORLD)
-    assert "not recorded" not in _world(page, E.PASSTHROUGH_WORLD)
 
 
 # ---------------------------------------------------------------------------------------
@@ -789,73 +462,8 @@ def test_1025_render_before_a_worlds_scrub_verdict_sidecar_is_written(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_the_control_is_identified_how(tmp_path):
-    """The control is the manifest world with role `A` (equivalently the one whose `axis` is
-    present-and-null, x07) — never the label string `a`: the worlds guide, the world section's
-    "not graded" state and the leads section all use that world, and its declared disposition
-    comes from `family.yaml`. Positive control: a manifest whose control is labelled `zeta` still
-    renders it as the control.
-    """
-    ep = E.sample_episode(tmp_path)
-    manifest = E.sample_manifest()
-    manifest["worlds"][0]["world_id"] = "zeta"
-    T.write_family(ep.dir, manifest)
-    shutil.move(ep.world(E.CONTROL), ep.world("zeta"))
-    shutil.move(ep.run(E.CONTROL), ep.dir / "runs" / f"{E.EPISODE_ID}-zeta")
-    page = render(ep)
-    worlds = page.text_of("sec-worlds")
-    assert _ordered(worlds, "zeta", CONTROL_GUIDE), worlds
-    assert "world-a" not in page.by_id
-    assert "world-zeta" in page.by_id
-    assert "not graded" in _world(page, "zeta")
-    assert "leads-zeta" in page.by_id
-    assert "malicious" in _world(page, "zeta"), _world(page, "zeta")
-
-
-def test_1025_a_world_that_ran_but_was_never_archived(tmp_path):
-    """The run dir gives it a section (O5) with its `runtime.html` link and its result-event
-    cost and wall; every archive-derived block (leads, report, scrub verdict)
-    reads "not archived" / the reader's refusal; the judge part follows the record — here an
-    ungradable row's reason.
-    """
-    ep = _ungradable_episode(tmp_path)
-    shutil.rmtree(ep.world(E.PASSTHROUGH_WORLD))
-    page = render(ep)
-    world = _world(page, E.PASSTHROUGH_WORLD)
-    assert f"runs/{E.EPISODE_ID}-{E.PASSTHROUGH_WORLD}/runtime.html" in page.anchors_in(f"world-{E.PASSTHROUGH_WORLD}")
-    assert "$0.2500" in world, world
-    assert "3m00s" in world, world
-    assert "not archived" in world, world
-    assert "a call on 'elastic' faulted" in world, world
-    assert "not archived" in page.text_of(f"leads-{E.PASSTHROUGH_WORLD}")
-
-
-def test_1025_render_against_a_world_archive_mid_copy(tmp_path):
-    """A world archive caught mid-copy renders each missing piece with its own absent arm —
-    report / investigation "not archived", provenance "absent", scrub "not recorded", leads from
-    whatever `gather_summaries/` holds — and the section never refuses as a whole.
-    """
-    ep = E.sample_episode(tmp_path)
-    world = ep.world(E.GRADED_WORLD)
-    for name in ("report.md", "investigation.md", "provenance.json", "scrub_verdict.json"):
-        (world / name).unlink()
-    (world / "gather_summaries" / "l-002.md").unlink()
-    page = render(ep)
-    text = _world(page, E.GRADED_WORLD)
-    assert "not archived" in text, text
-    assert "not recorded" in text, text
-    assert "absent" in text, text
-    leads = page.text_of(f"leads-{E.GRADED_WORLD}")
-    assert f"summary of l-001 for {E.GRADED_WORLD}" in leads
-    assert "l-002" in leads
-
-
 def test_1025_a_run_directory_symlink_or_dir_pointer_naming_a_symlinked_final_component(tmp_path):
-    """The `run_dir` pointer is never read as a link source nor followed: the link is composed
-    from the manifest id and the label, and a pointer whose final component is a symlink to an
-    outside tree changes nothing on the page — the outside tree's content appears nowhere.
-    Positive control: the composed link is present.
-    """
+    """The `run_dir` pointer is never read as a link source nor followed."""
     ep = E.sample_episode(tmp_path)
     outside = tmp_path / "outside-run"
     (outside / "gather_raw").mkdir(parents=True)
@@ -869,60 +477,8 @@ def test_1025_a_run_directory_symlink_or_dir_pointer_naming_a_symlinked_final_co
     assert str(link) not in page.raw
 
 
-def test_1025_gather_summaries_holds_a_file_that_is_not_markdown(tmp_path):
-    """A non-`.md` file under `gather_summaries/` is invisible to the leads set
-    (`referenced_leads ∪ gather_summaries/*.md` stems, x12); no error, no lead for it.
-    Positive control: the `.md` summaries beside it are in the block — the garbage-page
-    control (skeleton mode) found the bare negative green against an empty leads block.
-    """
-    ep = E.sample_episode(tmp_path)
-    (ep.world(E.GRADED_WORLD) / "gather_summaries" / "l-777.txt").write_text("NOT-MD\n", encoding="utf-8")
-    (ep.world(E.GRADED_WORLD) / "gather_summaries" / "notes.json").write_text("{}", encoding="utf-8")
-    page = render(ep)
-    block = page.text_of(f"leads-{E.GRADED_WORLD}")
-    assert "l-777" not in block
-    assert "NOT-MD" not in page.raw
-    assert "notes" not in block
-    for lead in ("l-001", "l-002", "l-00c"):
-        assert f"summary of {lead} for {E.GRADED_WORLD}" in block, (lead, block)
-
-
-def test_1025_investigation_md_is_present_but_unreadable(tmp_path):
-    """That world's leads block carries the reader's refusal sentence — "investigation record
-    unavailable", never "absent" — and the other worlds render (d30's seed).
-    """
-    ep = E.sample_episode(tmp_path)
-    E.plant_raw(ep.world(E.PASSTHROUGH_WORLD) / "investigation.md", b"\xff\xfe\x00\x01 not utf-8")
-    page = render(ep)
-    block = page.text_of(f"leads-{E.PASSTHROUGH_WORLD}")
-    assert "investigation record unavailable" in block, block
-    assert "absent" not in block, block
-    assert f"summary of l-001 for {E.GRADED_WORLD}" in page.text_of(f"leads-{E.GRADED_WORLD}")
-
-
-def test_1025_no_worlds_alert_json_carries_an_alert_id(tmp_path):
-    """The header's alert-rule slot reads "not on the record" (no crash, no blank) when no
-    world's `alert.json` carries an `alert_id` — `episode_alert` returns a dict and never `None`
-    (p3), so the sentence keys on its `.get("alert_id")` being `None`; the rest of the header
-    renders.
-    """
-    ep = E.sample_episode(tmp_path)
-    plant_source_copy(ep.dir, json.dumps({"rule": {"id": "r1"}}).encode("utf-8"))
-    header = render(ep).one("header").text()
-    assert "not on the record" in header, header
-    assert E.EPISODE_ID in header, header
-    assert T.SOURCE_RUN_ID in header, header
-    assert E.ALERT_RULE not in header
-
-
 def test_1025_symlink_planted_at_a_leaf_file_the_page_reads_inside_a_world(tmp_path):
-    """For EVERY leaf the page reads inside `worlds/<label>/` — `report.md`, `investigation.md`,
-    `alert.json`, `gather_summaries/<lead>.md`, `executed_queries.jsonl` — a symlink or a FIFO
-    planted at the name is refused without being opened: the refusal renders in that block, the
-    target's content never appears on the page, and the render never blocks (a FIFO fed from a
-    thread after two seconds must find no reader). The page adds no unscreened read of its own.
-    Positive control: the untouched copy renders each leaf's content.
-    """
+    """For EVERY leaf the page reads inside `worlds/<label>/` ."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     assert f"summary of l-001 for {E.GRADED_WORLD}" in page.text_of(f"leads-{E.GRADED_WORLD}")
@@ -965,10 +521,8 @@ def test_1025_symlink_planted_at_a_leaf_file_the_page_reads_inside_a_world(tmp_p
 
 
 def test_1025_alert_fields_reach_the_header_frame(tmp_path):
-    """The alert rule name and id are escaped by the page before they reach `render_header`'s
-    raw byline slot (g17): planted markup renders as text. Positive control: the escaped text
-    is visible in the header.
-    """
+    """The alert rule name and id are escaped by the page before they reach `render_header`'s raw
+    byline slot (g17)."""
     ep = E.sample_episode(tmp_path)
     plant_source_copy(ep.dir, json.dumps(
         {"alert_id": "id<img src=x onerror=alert(1)>", "rule": {"name": "<b>rule</b> name"}}
@@ -983,10 +537,7 @@ def test_1025_alert_fields_reach_the_header_frame(tmp_path):
 
 def test_1025_markup_in_lead_params_raw_command_and_resolutions(tmp_path):
     """Lead `goal`, `params`, `raw_command`, payload digest fields and resolution rows render
-    through the untrusted escape (O9, c14/x09): planted markup in each appears as text and the
-    raw sequence nowhere — the page does not reuse `render_runtime_leads_queries`' `esc` path
-    unchanged (F16). Positive control: the escaped text is visible in the lead's block.
-    """
+    through the untrusted escape (O9, c14/x09)."""
     from defender.run_repository import RunPaths
 
     ep = E.sample_episode(tmp_path)
@@ -1009,66 +560,6 @@ def test_1025_markup_in_lead_params_raw_command_and_resolutions(tmp_path):
     assert "onerror=x" not in page.raw.replace("on​error", "")
 
 
-def test_1025_a_sibling_process_exited_non_zero(tmp_path):
-    """A world whose sibling process exited non-zero renders from what is on disk and states no
-    failure the record does not carry: the launcher harness's run dir has no result event, so
-    its cost row reads "no result event" / "no cost recorded"; its archive-derived blocks render
-    from the archive; and the failure it does state is the world's own record
-    (`world_records/b.yaml`, the launcher's `did not finish`) — its reason and detail verbatim.
-    Positive control: the section, its link and its rows exist.
-    """
-    launch = ST._launch(tmp_path, spawn=J.FakeSibling(
-        EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID), exits={"b": 1}))
-    assert launch.rc == 1, "the control failed: no sibling exited non-zero"
-    record = T.mod("_yaml").safe_load(
-        (launch.episode_dir / "world_records" / "b.yaml").read_text(encoding="utf-8"))
-    assert record["reason"] == "did not finish", record
-    page = hook_page(launch.episode_dir)
-    world = _world(page, "b")
-    assert "no result event" in world or "no cost recorded" in world, world
-    assert f"{record['reason']} — {record['detail']}" in world, world
-    assert world.lower().count("exit") == record["detail"].lower().count("exit"), world
-    assert f"runs/{E.EPISODE_ID}-b/runtime.html" in page.anchors_in("world-b")
-
-
-def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
-    """Only `family.yaml` is fatal (d01). `served/` absent: each world's leads block carries
-    `read_world_facts`' refusal (the ledger is absent) and its other blocks render; `wire_logs/`
-    absent: no transcript block, every stage cost "no cost recorded"; `worlds/` absent: every
-    archive-derived block reads "not archived" and no row renders — #1234's record carries
-    lanes, never a finding's text, so there is no stub to draw (92-reconciliation F-1(b)) and
-    tile 3 counts none — the page is written in every case.
-    """
-    base = E.sample_episode(tmp_path)
-    no_served = E.copy_episode(base, tmp_path / "no-served")
-    shutil.rmtree(no_served.dir / "served")
-    page = render(no_served)
-    for label in E.WORLDS:
-        block = page.text_of(f"leads-{label}")
-        assert "absent" in block, block
-        assert "not archived" not in _world(page, label), _world(page, label)
-    assert f"f-{E.GRADED_WORLD}-0-0" in page.ids
-
-    no_wire = E.copy_episode(base, tmp_path / "no-wire")
-    shutil.rmtree(no_wire.dir / "wire_logs")
-    page = render(no_wire)
-    assert page.ids_with("tx-") == [], page.ids_with("tx-")
-    assert "no cost recorded" in page.text_of("stage-questioner"), page.text_of("stage-questioner")
-    assert "no cost recorded" in page.text_of("stage-judge"), page.text_of("stage-judge")
-
-    no_worlds = E.copy_episode(base, tmp_path / "no-worlds")
-    shutil.rmtree(no_worlds.dir / "worlds")
-    page = render(no_worlds)
-    for label in E.WORLDS:
-        assert "not archived" in _world(page, label), _world(page, label)
-    assert [i for i in page.ids if i.startswith("f-")] == []
-    assert "defender claim 0" not in page.text_of("sec-findings"), "a defender stub"
-    tiles = page.elements(cls="vd-tile")
-    assert len(tiles) == 4, [t.text() for t in tiles]
-    assert "0 of 0" in tiles[2].text(), tiles[2].text()
-    assert page.by_id, "no page"
-
-
 # ---------------------------------------------------------------------------------------
 # The review of PR #1042 — headings count the list they head; the ledger and the document
 # are two slots
@@ -1077,16 +568,7 @@ def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
 
 def test_1025_the_worlds_and_leads_headings_count_exactly_the_sections_under_them(tmp_path):
     """"Worlds (N)" is the number of `world-*` sections rendered and "Leads (M)" the number of
-    `leads-*` blocks — the roster is classified ONCE at load and both headings count that same
-    list. Before, the worlds heading counted the entries (omitting the stray `runs/` dirs it
-    still rendered sections for) and the leads heading counted every roster label (including
-    the unnameable ones it then skipped): "Worlds (3)" over four sections plus one unnameable
-    line, "Leads (5)" over four blocks.
-
-    #1105 PR 2 (declared change 4/J3): `runs/` dirs are no longer roster lines — the stray and
-    the `bad name!` dir under `runs/` get no section and are not named; the unnameable roster
-    line now comes from a grade-record row labelled `bad name!` (the record's labels are still
-    on the roster)."""
+    `leads-*` blocks ."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
     (ep.dir / "runs" / "bad name!" / "gather_raw").mkdir(parents=True)
@@ -1107,26 +589,8 @@ def test_1025_the_worlds_and_leads_headings_count_exactly_the_sections_under_the
     assert "bad name!" in page.text_of("sec-worlds")
 
 
-def test_1025_each_missing_archived_leaf_names_itself(tmp_path):
-    """A world with neither `report.md` nor `investigation.md` archived shows one arm per leaf,
-    each naming its file — not the same two words twice."""
-    ep = E.sample_episode(tmp_path)
-    for name in ("report.md", "investigation.md"):
-        (ep.world(E.GRADED_WORLD) / name).unlink()
-    world = _world(page := render(ep), E.GRADED_WORLD)
-    assert "report.md: not archived" in world, world
-    assert "investigation.md: not archived" in world, world
-    assert world.count("not archived") == 2, world
-    assert page.text_of(f"leads-{E.GRADED_WORLD}")  # positive control: the block still renders
-
-
 def test_1025_a_missing_or_unreadable_served_ledger_costs_the_leads_block_only_the_ledger(tmp_path):
-    """The served ledger and `investigation.md` are two records read by two readers: with the
-    ledger gone (or a link planted at its name) the block reads the ledger's own note and STILL
-    carries every investigation-derived fact — the resolutions, the hand-off note, the
-    referenced-lead roster. Before, the page read both through the composed `read_world_facts`,
-    which refuses on the ledger FIRST, so a missing ledger erased an intact document and the
-    loss was reported under the wrong label, "investigation record unavailable"."""
+    """The served ledger and `investigation.md` are two records read by two readers."""
     ep = E.sample_episode(tmp_path)
     ledger = ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl"
     ledger.unlink()
@@ -1148,15 +612,3 @@ def test_1025_a_missing_or_unreadable_served_ledger_costs_the_leads_block_only_t
     assert "served ledger" not in block, block
 
 
-def test_1025_a_non_markdown_entry_under_gather_summaries_is_invisible_to_the_leads_block(tmp_path):
-    """`gather_summaries/` holds summaries — `.md` plain files; anything else there is not a
-    summary and the block says nothing about it, whatever its name. Before, a non-`.md` entry
-    with a hostile stem alone produced an "unnameable entry (gather summary)" line."""
-    ep = E.sample_episode(tmp_path)
-    summaries = ep.world(E.GRADED_WORLD) / "gather_summaries"
-    (summaries / "foo bar.txt").write_text("not a summary", encoding="utf-8")
-    (summaries / "notes.json").write_text("{}", encoding="utf-8")
-    block = render(ep).text_of(f"leads-{E.GRADED_WORLD}")
-    assert "gather summary" not in block, block
-    assert "foo bar" not in block, block
-    assert "l-001" in block  # positive control

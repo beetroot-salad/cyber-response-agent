@@ -1,23 +1,4 @@
-"""#1105 PR 1 — the two `_io` changes outside the package (amendment A, DV-1; OQ-5 (a), D3.4).
-
-* `_io.hold(root, *, follow=False)`: the repository's one held runs-folder handle is opened
-  no-follow. It opens with `_STEP_FLAGS` (`O_PATH|O_NOFOLLOW|O_CLOEXEC`) and judges the
-  descriptor by `fstat`, as `_step` judges each folder below a root (R41-02, R41-03, R41-23):
-  a link at the root, dangling or not, is `OSError(ELOOP, "refusing to create through a
-  symlinked path component")`; a regular file or a FIFO is `NotADirectoryError`; an absent path
-  is `FileNotFoundError`. Ancestors are host configuration and are followed (P1). The default
-  `follow=True` keeps today's behaviour, which follows a link root (R41-01).
-* `Bound.read(name, *, max_bytes=N)`: reads no more than N bytes of the file, so the episode
-  record reader (which asks for the cap plus one byte) can tell an over-cap record from one
-  within the cap without reading it whole. Without the keyword `Bound.read` keeps today's
-  whole-file read (R41-16).
-
-Both are new keywords on existing functions, so at base 80888efb each call raises
-`TypeError: … unexpected keyword argument`; the tests turn that into `pytest.fail(...)`, an
-assertion-class red. The byte count is observed through `_io`'s own `os_=` seam, with an `os`
-proxy that delegates every call and only counts the bytes each read hands back — it injects
-nothing.
-"""
+"""`_io.hold(follow=False)` refuses a link root; `Bound.read(max_bytes=N)` reads no more than N bytes."""
 from __future__ import annotations
 
 import errno

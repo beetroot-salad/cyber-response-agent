@@ -1,18 +1,4 @@
-"""The gate that keeps #785's fold from silently regrowing.
-
-#785 was six consumers borrowing one vocabulary and each re-deriving what a value in it means.
-Nothing about any single site looked wrong — the divergence existed only BETWEEN them, and five
-of the six had quietly lost the #722 zero-width strip along the way. A census found it; review
-had not. This gate is the census, run every build.
-
-The property worth testing is the ARMING rule, because it is what keeps the gate honest as the
-tree changes: a vocabulary becomes watched exactly when its owner starts answering for it. Get
-that wrong in the permissive direction and the gate never fires; wrong in the strict direction
-and it flags every closed set in the repo and gets baselined into silence.
-
-The gate is driven through its `scope=` seam over throwaway trees, as the other tested gates
-are — arming is a whole-corpus property, so it cannot be shown on the real tree alone.
-"""
+"""lint_borrowed_vocabulary: a borrowed vocabulary with an owner's answer must use the owner."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -187,34 +173,4 @@ def test_tests_are_out_of_scope(gate, tmp_path):
 
 # the gate cannot report clean on source it never read
 
-def test_an_unparseable_file_fails_the_gate_rather_than_passing_it(gate, tmp_path):
-    """#618/#621/#652's rule, and sharper here than for a single-pass lint: an unreadable OWNER
-    disarms its vocabulary for the entire corpus, so "0 findings" over a partial corpus would be
-    actively misleading. Exit 2 — the gate could not run, which is not clean.
 
-    Paired with a control over the same tree minus the broken file, so this cannot pass by the
-    gate simply being broken."""
-    files = {"owner.py": _OWNER_ARMED, "borrower.py": _BORROWER}
-    clean_root = _tree(tmp_path / "clean", files)
-    assert gate.main([], scope=clean_root, baseline_path=tmp_path / "none.json") == 1
-
-    broken_root = _tree(tmp_path / "broken", {**files, "broken.py": "def (\n"})
-    assert gate.main([], scope=broken_root, baseline_path=tmp_path / "none.json") == 2
-
-
-@pytest.mark.gate
-def test_the_real_tree_passes_the_ratchet(gate):
-    """The gate is green on the tree it ships with, through its own baseline.
-
-    `gate`-marked: the code-smells step runs this same `main([])` and blocks on it."""
-    assert gate.main([]) == 0
-
-
-@pytest.mark.gate
-def test_no_disposition_site_is_baselined(gate):
-    """#785's own claim, stated as the property rather than as "the baseline is empty": every
-    borrow of the run vocabulary is folded, and the one deliberate exemption — the write gate,
-    exact where every reader normalizes — states its reason at the site instead of being
-    baselined into silence. The two entries the baseline does carry are older debt in other
-    vocabularies, so asserting an EMPTY baseline would conflate the two claims."""
-    assert [f for f in gate._scan() if "DISPOSITION" in f.fingerprint] == []

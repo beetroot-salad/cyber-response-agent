@@ -1,14 +1,4 @@
-"""Tests for defender/hooks/inject_system_skill_description.py.
-
-Driven through `read_description` — the function the live callers reach
-(`descriptor_index`, gather's system index, built once at run start and rendered at use since
-#1256 r4 — it replaced `descriptor_catalog`; the #289 experiment's `run_arms.py:55`). These used to run through the module's `claude -p` PreToolUse
-`main()`, which asserted a stdin/stdout hook contract nothing invokes any more;
-the frontmatter shapes each one really pins are asserted directly now.
-
-`descriptor_index` itself is pinned by `test_verbs_registry_containment.py` and
-`tests/e2e/test_query_tool_611.py` (through `_system_index_1256`).
-"""
+"""`read_description` frontmatter reading for system skills (one-liner, block scalar, missing file, path traversal)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -69,11 +59,5 @@ def test_silent_noop_when_skill_file_missing(tmp_path):
 
 
 def test_path_traversal_via_system_name_is_blocked(tmp_path):
-    """A name carrying separators resolves outside `skills_dir` and is rejected.
-
-    The retired hook had a system-key regex restricting the name to
-    identifier-shape chars, so a traversal payload never reached this function;
-    the guard here is what held if it ever did, and it is now the only guard —
-    so it is pinned on its own rather than behind that regex.
-    """
+    """A name carrying separators resolves outside `skills_dir` and is rejected."""
     assert read_description("../../etc/passwd", skills_dir=tmp_path) is None

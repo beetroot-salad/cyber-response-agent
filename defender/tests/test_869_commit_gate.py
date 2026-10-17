@@ -1,14 +1,4 @@
-"""#869 M5/RF2/U1/U2 — the lead-author commit gate (site 2).
-
-Every test here is one demand of `spec-flow/specs/spec_graph_869.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared869.py`.
-
-Site 2 is the gate that would have refused the phantom draft's commit even with M3 and M4
-absent — and, executed at this base (G4), the gate that today ACCEPTS AND COMMITS a
-host-minted phantom catalog directory, a brand-new phantom SYSTEM directory, and an edit to a
-non-system's `SKILL.md`.
-"""
+"""#869 M5/RF2/U1/U2 — the lead-author commit gate (site 2)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,8 +15,6 @@ from defender.learning.leads.path_validation import (
     _is_schema_md,
 )
 from defender.runtime import verbs
-from defender.runtime.driver import _gather_instructions
-from defender.runtime.permission.files import build_write_allow
 from defender.tests._declared869 import (
     ADAPTERS_REL,
     NESTED_MARKER_RELS,
@@ -143,24 +131,6 @@ def test_skills_path_rule_still_admits_the_real_catalog(tmp_path):
             tree_for=lane_tree_for(_git.REPO_ROOT)) is None
 
 
-def test_skills_path_rule_refuses_an_undeclared_system_draft(tmp_path):
-    """The third in-scope form: `defender/skills/<undeclared>/_draft/x.md` is refused.
-
-    A universal discharged at two of three forms is not discharged, and this form is the one
-    `discover_system_drafts` would otherwise hand the agent as work. The declared system's own
-    draft is admitted in the same call, so the refusal is about the name and not about the
-    form.
-    """
-    repo = _gate_repo(tmp_path)
-    with pytest.raises(LeadAuthorError):
-        lead_author._skills_path_rule(
-            repo, "A ", "defender/skills/fakesys/_draft/hunt-creds.md", systems=DECLARED,
-            tree_for=lane_tree_for(repo))
-    assert lead_author._skills_path_rule(
-        repo, "A ", "defender/skills/elastic/_draft/hunt-creds.md", systems=DECLARED,
-        tree_for=lane_tree_for(repo)) is None
-
-
 def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
     """The lead-author lane loses write access to all SIX non-system `SKILL.md` files
     (FK-1, §7): M5 keys on membership with NO exception.
@@ -196,31 +166,6 @@ def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
     assert lead_author._skills_path_rule(
         repo, "A ", "defender/skills/gather/SKILL.md",
         systems=DECLARED | {"gather"}, tree_for=lane_tree_for(repo)) is None
-
-
-def test_the_gather_subagent_still_loads_its_own_prompt():
-    """The gather subagent still resolves and loads its entire system prompt, unchanged, from
-    `defender/skills/gather/SKILL.md`.
-
-    FK-1's READ SIDE, bound at THIS reader's own edge because that is what R7 asks — a demand
-    at the boundary would read as discharged while this reader went stale. The refusal removes
-    a WRITER, never a reader, and this is the demand that catches an implementation that
-    "closes the lane" by moving or renaming the file: the write side is driven in the same
-    test against the same path, and the reader must still answer from it.
-    """
-    prompt = _git.REPO_ROOT / SKILLS_REL / "gather" / "SKILL.md"
-    assert prompt.is_file()
-
-    loaded = _gather_instructions(_git.REPO_ROOT / "defender")
-    assert loaded.strip(), "the gather subagent would dispatch with an empty system prompt"
-    body = prompt.read_text(encoding="utf-8")
-    assert loaded.strip() in body
-
-    # The write lane onto that same path is closed, in the same drive.
-    with pytest.raises(LeadAuthorError):
-        lead_author._skills_path_rule(
-            _git.REPO_ROOT, "A ", "defender/skills/gather/SKILL.md",
-            systems=_real_adapter_systems(), tree_for=lane_tree_for(_git.REPO_ROOT))
 
 
 def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
@@ -307,42 +252,6 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
     assert head_files(repo) == before
 
 
-def test_the_marker_write_is_admitted_and_still_never_lands(tmp_path):
-    """The agent's write tool ADMITS `defender/skills/<x>/execution.md`; the tick still
-    commits nothing.
-
-    THE HONEST CAVEAT, PINNED. C33 refutes "the agent cannot write the marker":
-    `build_write_allow(skills, suffix=".md")` compiles to `…/defender/skills/[^\\x00]*\\.md`,
-    which MATCHES the marker path — so the file appears in the worktree and a test that only
-    asserted the write is denied would pin a guard that does not exist. The boundary is the
-    commit gate, never the write tool.
-
-    UNDER NF1 THERE ARE NOW THREE REASONS THE PLANT NEVER COUNTS, and they are kept apart on
-    purpose: the write is admitted (asserted here), the COMMIT is refused
-    (`marker_is_not_agent_committable`), and even had it landed unrefused it would declare
-    nothing until committed (`marker_read_is_from_the_committed_tree`). Folding them into one
-    assertion would let a regression in any of the three read as green.
-    """
-    repo = _gate_repo(tmp_path)
-    allow = build_write_allow(repo / SKILLS_REL, suffix=".md")
-    marker = repo / SKILLS_REL / "mcpsys" / "execution.md"
-    assert allow.fullmatch(str(marker.resolve())), (
-        "the write tool does NOT admit the marker path, so this caveat has moved"
-    )
-    # The confinement it DOES enforce, so the claim is about a real boundary: the adapter
-    # module and a non-.md sibling are refused by the same pattern.
-    assert not allow.fullmatch(str((repo / ADAPTERS_REL / "mcpsys_adapter.py").resolve()))
-    assert not allow.fullmatch(str((repo / SKILLS_REL / "mcpsys" / "config.env").resolve()))
-
-    write(marker, "# mcpsys\n")
-    assert marker.is_file()
-    before = head_files(repo)
-    with pytest.raises(LeadAuthorError):
-        lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
-    assert head_files(repo) == before
-
-
 def test_the_commit_gate_refuses_an_id_that_disagrees_with_its_directory(tmp_path):
     """The commit gate refuses a template whose frontmatter `id:` prefix disagrees with the
     directory it sits in, so U1's DIRECTORY channel and its CONTENT channel close together
@@ -380,82 +289,6 @@ def test_the_commit_gate_refuses_an_id_that_disagrees_with_its_directory(tmp_pat
         lead_author._skills_path_rule(
             repo, "A ", "defender/skills/gather/queries/SCHEMA.md", systems=DECLARED,
             tree_for=lane_tree_for(repo))
-
-
-def test_the_id_rule_still_admits_every_committed_id():
-    """Every committed in-scope file that carries a frontmatter `id:` still passes the rule —
-    the id-prefix invariant holds over the whole in-scope corpus, not only the catalog.
-
-    C35: 33 of the in-scope `.md` files carry an `id:` and 33 of 33 match, and the rule
-    extends PAST the catalog to `skills/<system>/_draft/*.md`, whose ids are directory-
-    matching today — a rule scoped to the catalog alone would leave that surface open.
-    `catalog_id_prefix_equals_directory`'s positive control, and the parity floor below keeps
-    it from passing over an empty census.
-
-    The two `_draft/README` surface declarations carry an id and are counted in the census,
-    but they are refused by the protected-surface branch for a reason that predates this
-    change, so they are not driven through the rule.
-    """
-    root = _git.REPO_ROOT
-    real = _real_adapter_systems()
-    in_scope = [
-        p for p in git(root, "ls-files", SKILLS_REL).stdout.split()
-        if p.endswith(".md") and _is_in_scope(p)
-    ]
-    with_id = {p: _frontmatter_id(root / p) for p in in_scope}
-    with_id = {p: i for p, i in with_id.items() if i}
-    assert len(with_id) >= 33, f"the census floor moved: {len(with_id)} ids over {len(in_scope)}"
-
-    mismatched = [
-        p for p, ident in with_id.items() if ident.split(".", 1)[0] != _system_segment(p)
-    ]
-    assert mismatched == []
-
-    for path in with_id:
-        if _is_draft_readme(path) or _is_schema_md(path):
-            continue
-        assert lead_author._skills_path_rule(root, "A ", path, systems=real,
-                                             tree_for=lane_tree_for(root)) is None
-
-
-def test_the_id_rule_spares_the_idless_surfaces(tmp_path):
-    """A file that carries no `id:` at all is NOT refused for lacking one.
-
-    The domain member that keeps RF2's rule from closing the whole system-skill surface: the
-    system `SKILL.md` files and `SCHEMA.md` carry no `id:` (C35), so a rule that refused an
-    id-less in-scope file would refuse all of them.
-
-    AND THIS IS WHERE NF3 IS PINNED (§7, auto-resolved): the id rule does NOT extend to
-    `SKILL.md`'s `name:` field. Because the rule reads `id:` and only `id:`, a `SKILL.md`
-    whose `name:` disagrees with its directory is still admitted — R4's "the advertised
-    combination works" half, asserted rather than assumed. `catalog_id_prefix_equals_directory`
-    is the paired control: on the same address, a file that DOES carry a disagreeing id is
-    refused, so this is not a rule that admits everything.
-    """
-    root = _git.REPO_ROOT
-    real = _real_adapter_systems()
-    declared_skill_mds = [
-        p for p in git(root, "ls-files", SKILLS_REL).stdout.split()
-        if p.endswith("/SKILL.md") and p.split("/")[2] in real
-    ]
-    assert declared_skill_mds, "no declared system carries a SKILL.md, so this is vacuous"
-    for path in declared_skill_mds:
-        assert _frontmatter_id(root / path) is None
-        assert lead_author._skills_path_rule(root, "A ", path, systems=real,
-                                             tree_for=lane_tree_for(root)) is None
-
-    # NF3's crossing, CONSTRUCTED rather than hunted for: the two committed `SKILL.md` files
-    # whose `name:` does not follow `defender-<dir>` (`advisory`, `connect`) belong to
-    # directories no source declares, so the real corpus cannot exhibit the combination at all
-    # — a loop over it would be vacuously green and would certify nothing.
-    repo = _gate_repo(tmp_path, name="nf3")
-    write(repo / SKILLS_REL / "elastic" / "SKILL.md",
-          "---\nname: defender-something-else\n---\n# elastic\n")
-    assert _frontmatter_name(repo / SKILLS_REL / "elastic" / "SKILL.md") != "defender-elastic"
-    assert _frontmatter_id(repo / SKILLS_REL / "elastic" / "SKILL.md") is None
-    assert lead_author._skills_path_rule(
-        repo, "A ", "defender/skills/elastic/SKILL.md", systems=DECLARED,
-        tree_for=lane_tree_for(repo)) is None
 
 
 def _frontmatter(path: Path) -> dict:

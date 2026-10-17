@@ -1,14 +1,4 @@
-"""#773 — M7's bounded deferral, O9's conservation, and the tick's two counters.
-
-RED AGAINST HEAD BY CONSTRUCTION: there is no `deferrals` counter on this channel today —
-`counter_key` is used only by the pitfalls lane (C14/C18) — and no disposition for a
-finding that "could not land through no fault of its own".
-
-O9's shape is the reason every test here asserts THREE things about a deferral: that it is
-bounded (the counter moves and the ceiling graveyards), that it is reported (the held
-report names it with its count), and that it is not silent (the row is neither consumed nor
-lost).
-"""
+"""#773: bounded deferral, conservation of findings, and the tick's deferral/attempt counters."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,17 +24,7 @@ def _orphan_tick(tmp_path, **kw):
 
 def _defer_again(sc, filler_id: str) -> int:
     """Reseed the queue with whatever is pending plus a fresh, disposable finding, and drive
-    one more tick over `orphan` riding uncited alongside it.
-
-    `verify_agent_report` (the drain's pre-existing, unrelated-to-M7 self-report/tree
-    cross-check, §7 FK-3) refuses a `committed` claim outright when NOTHING in the corpus
-    changed this tick — so a retry batch containing `orphan` alone, with the curator writing
-    nothing, is not a shape M7's per-id deferral ever gets to see; it is caught one gate
-    earlier as a lying report. `_orphan_tick`'s own FIRST tick avoids this because `a`'s
-    lesson keeps the corpus genuinely dirty while `orphan` rides along uncited — this helper
-    keeps every RETRY tick in that same mixed shape by seeding one throwaway finding the
-    curator legitimately writes and commits each time, so `orphan` alone is never the tick's
-    entire story."""
+    one more tick over `orphan` riding uncited alongside it."""
     filler = S.finding_row(filler_id, run_id=filler_id)
     # `finding_row`'s default `direction="adversarial"` wants `benign` on the source run —
     # `build_scene`'s own auto-seeding rule (`_spec773.py`), mirrored here since this finding
@@ -56,11 +36,7 @@ def _defer_again(sc, filler_id: str) -> int:
 
 
 def _hold_append_lock(store: dict):
-    """Grab the queue's append lock the moment the curator spawn runs.
-
-    `_tick` releases that lock after reading the batch, so this is the one seam from which a
-    test can make the tick's CLOSING rotation contend for it — the window every lock-wait
-    demand below is about."""
+    """Grab the queue's append lock the moment the curator spawn runs."""
 
     def grab(*args):
         cfg = args[2]
@@ -80,10 +56,7 @@ def test_a_deferred_row_bumps_the_deferrals_counter_and_graveyards_at_the_ceilin
     tmp_path,
 ):
     """A deferred row is re-queued carrying an incremented `deferrals` count, and at the
-    ceiling it leaves the queue for the graveyard.
-
-    Both halves of "bounded": the counter moves on every deferring tick, and the ceiling
-    `cfg.max_attempts` ends it. Driven over real consecutive ticks, not asserted of one."""
+    ceiling it leaves the queue for the graveyard."""
     sc = _orphan_tick(tmp_path, max_attempts=2)
     assert sc.run() == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1
@@ -95,11 +68,7 @@ def test_a_deferred_row_bumps_the_deferrals_counter_and_graveyards_at_the_ceilin
 
 def test_every_deferred_finding_is_named_in_the_held_reports_deferred_group_773(tmp_path):
     """Every deferred finding is named in the held report's `deferred` group each tick, with
-    its ID and its COUNT — and no per-row free-text reason field.
-
-    §7 FK-16: "count" sits inside O9's own obligation text, and the reason is always one of
-    two shapes the group name already implies. A deferral with no report line is the
-    "silently" O9 forbids."""
+    its ID and its COUNT — and no per-row free-text reason field."""
     sc = _orphan_tick(tmp_path)
     assert sc.run() == 0
     [line] = sc.report_lines()
@@ -109,12 +78,7 @@ def test_every_deferred_finding_is_named_in_the_held_reports_deferred_group_773(
 
 def test_the_deferral_rotation_passes_the_configured_repo_lock_wait_773(tmp_path):
     """M7's deferral bump threads `timeout_seconds=cfg.repo_lock_wait_seconds`, the same wait
-    #952 threads through every locked rotation.
-
-    The drain holds the repo lock while it waits here, and that lock serialises every
-    channel — an unbounded wait would let one wedged appender stall all of them. Observed as
-    a bound: with a 1-second wait and the append lock held, the tick gives up quickly rather
-    than blocking."""
+    #952 threads through every locked rotation."""
     held: dict = {}
     sc = _orphan_tick(tmp_path, repo_lock_wait_seconds=1)
     sc.curator.also = _hold_append_lock(held)
@@ -131,12 +95,7 @@ def test_the_deferral_rotation_passes_the_configured_repo_lock_wait_773(tmp_path
 
 
 def test_deferrals_and_attempts_counters_move_independently_across_ticks_773(tmp_path):
-    """Two named counters on one row, each bumped only by its own event: a deferring tick
-    moves `deferrals` and leaves `attempts` alone, and a faulting tick moves `attempts` and
-    leaves `deferrals` alone.
-
-    C18 grounds the primitive — `retire`'s `counter_key` names WHAT is being counted, and
-    the pitfalls lane already runs two ceilings through it. Both directions, one row."""
+    """Two named counters on one row, each bumped only by its own event."""
     sc = _orphan_tick(tmp_path)
     assert sc.run() == 0
     row = sc.pending_by_id()["orphan"]
@@ -152,11 +111,7 @@ def test_deferrals_and_attempts_counters_move_independently_across_ticks_773(tmp
 
 
 def test_a_deferred_rows_count_after_ten_consecutive_deferring_ticks_773(tmp_path):
-    """A row cannot still be live and re-queued after ten deferring ticks: the ceiling
-    graveyards it long before, so `deferrals` never reaches ten on a queued row.
-
-    "Never forever" is the half of O9 a counter alone does not deliver — the ceiling has to
-    actually end it, which is asserted over real repeated ticks."""
+    """A row cannot still be live and re-queued after ten deferring ticks."""
     sc = _orphan_tick(tmp_path, max_attempts=3)
     for _ in range(10):
         S.seed(sc.paths, sc.channel, sc.pending() or [])
@@ -170,12 +125,7 @@ def test_a_deferred_rows_count_after_ten_consecutive_deferring_ticks_773(tmp_pat
 def test_a_deferral_that_reaches_the_ceiling_773(tmp_path):
     """The bump that REACHES the ceiling graveyards on that same call — `retire`'s boundary
     is `>=`, evaluated and acted on in the call that does the bump, with no grace tick — and
-    the graveyard record carries its own `deferred_ceiling` reason.
-
-    §7 FK-17: the boundary is pinned as the EXISTING primitive behaves, so this lane cannot
-    silently diverge from the pitfalls lane using the same primitive; the distinct reason is
-    the observability gap the probe surfaced, so a deferral exit is greppable apart from a
-    fault exit."""
+    the graveyard record carries its own `deferred_ceiling` reason."""
     sc = _orphan_tick(tmp_path, max_attempts=1)
     assert sc.run() == 0
     assert "orphan" not in sc.pending_by_id()
@@ -186,12 +136,7 @@ def test_a_deferral_that_reaches_the_ceiling_773(tmp_path):
 
 def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
     """The wake gate is UNCHANGED — a deferred row is ordinary pending work, not a held one
-    — and the spin that buys is bounded: a row deferred on consecutive ticks reaches the
-    graveyard within `max_attempts` ticks.
-
-    §7 FK-18: changing the wake gate widens this change into #881's territory, so the
-    ceiling is what bounds the waste. "Never forever" is only a sentence until the bound is
-    tested, so the tick count is asserted, not the mechanism."""
+    — and the spin that buys is bounded."""
     from defender.learning.core import drains
 
     sc = _orphan_tick(tmp_path, max_attempts=3)
@@ -210,36 +155,9 @@ def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
     assert "orphan" not in sc.pending_by_id()
 
 
-def test_drain_ticks_own_loop_continuation_is_unaffected_by_the_new_row_fields_773(tmp_path):
-    """The drain tick's own reading of the pending queue — does the tick continue or stop —
-    is unchanged by M6/M7 adding a `deferrals` counter to
-    the row shape.
-
-    R7 obligation g10, driven at the UNMOVED reader's own edge: `_pending_queue_counts` is
-    what the wake gate compares against its threshold, and `held_reason` is still the one
-    field it reads as "not work" (#881/O2). A tick over a queue carrying the new fields
-    still finds its work and still returns 0."""
-    from defender.learning.core import drains
-
-    sc = _orphan_tick(tmp_path, max_attempts=5)
-    assert sc.run() == 0
-    authorable, held = drains._pending_queue_counts(sc.cfg.state, sc.cfg.channel)
-    assert (authorable, held) == (1, 0)
-
-    S.seed(sc.paths, sc.channel, sc.pending())
-    sc.curator.writes = {"l2.md": S.lesson("orphan")}
-    sc.curator.committed = ["orphan"]
-    assert sc.run() == 0
-    assert LESSON2 in sc.head_files()
-
-
 def test_max_attempts_one_retires_on_the_first_failure_773(tmp_path):
     """With `max_attempts = 1`, a single `RETIRE_SET`-class fault retires the batch on that
-    same tick: the row leaves the queue for the graveyard immediately.
-
-    R4 obligation g3 — the tightest boundary value of the ceiling M7 threads through
-    `retire()`, exercised directly rather than inferred from the shipped default of 3.
-    GL2 grounds the fault's membership."""
+    same tick."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -257,27 +175,7 @@ def test_max_attempts_one_retires_on_the_first_failure_773(tmp_path):
 
 
 def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_once_773(tmp_path):
-    """The POSITIVE CONTROL for the test above: two files citing the SAME finding, every pair
-    GOOD or EXEMPT, and the finding lands `consumed_committed` exactly ONCE — one row in
-    consumed.jsonl, not two, and absent from every other list.
-
-    The companion clause FK-2 added to `o4_committed_recomputed_from_tree` reads
-    "consumed_committed iff an approved file cites it AND no other approved-or-refused-in-this-batch
-    file citing the same finding disagrees". The disagreement arm is pinned by the test above;
-    this is the agreement arm, and without it the suite never distinguished "the drain defers on
-    disagreement" from "the drain defers whenever a finding is multiply cited" — the conflated
-    reading passes every assertion in the disagreement test.
-
-    ONCE IS THE LOAD-BEARING WORD. M5 recomputes `committed` by walking the approved files and
-    asking which batch ids each cites, so a finding cited by N approved files is reached N times;
-    whether that yields one consumption or N depends on the recompute collecting into a set
-    rather than a list. Both files really commit, so the multiplicity is genuine and not an
-    artifact of the fixture. Asserted as a count over the raw consumed rows, because
-    `consumed_by_id()` is keyed BY finding id and would silently collapse a duplicate into one
-    entry — the exact failure this test exists to catch.
-
-    (Added at the phase-F repair; the blind conservation reader found the symmetric case
-    untested.)"""
+    """The POSITIVE CONTROL for the test above."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("shared", run_id="shared")],
@@ -294,12 +192,7 @@ def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_onc
 
 
 def test_every_batch_row_reaches_exactly_one_disposition_773(tmp_path):
-    """The conservation invariant, over a tick that produces all three endings at once: every
-    batch row ends in exactly one of `consumed_committed`, `consumed_skip`, or
-    deferred-and-re-queued (#1166 retired the fourth, `consumed_forward_bad`).
-
-    §7 FK-2 added the deferred ending. A row in two endings, or in none, is the failure this
-    pins — and it is the property phase F's conservation reconciliation is written against."""
+    """The conservation invariant, over a tick that produces all three endings at once."""
     sc = S.build_scene(
         tmp_path,
         rows=[
@@ -325,12 +218,7 @@ def test_every_batch_row_reaches_exactly_one_disposition_773(tmp_path):
 
 def test_a_batch_row_the_curator_mentions_nowhere_and_no_file_cites_773(tmp_path):
     """A row the curator mentions in no bucket and that no changed file cites stays queued
-    EXACTLY as it was, with no counter of any kind bumped.
-
-    C3: a row named in neither the held nor the consumed list of the queue rotation is
-    left untouched — the probe watched `r2` survive a rotation that named only `r0` and
-    `r1`. It is distinct from O4's deferral case, which is a row the curator DID report and
-    no approved file cites."""
+    EXACTLY as it was, with no counter of any kind bumped."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("named", run_id="named"), S.finding_row("ghost", run_id="ghost")],
@@ -346,11 +234,7 @@ def test_a_batch_row_the_curator_mentions_nowhere_and_no_file_cites_773(tmp_path
 def test_rotation_runs_exactly_once_per_tick_even_when_the_commit_step_returned_none_773(
     tmp_path,
 ):
-    """Rotation runs exactly once per tick whatever M5 returned: the `None` branch does not
-    short-circuit it, and the tick's consumed rows land exactly once.
-
-    Observed as a count over the consumed ledger — a second rotation would write a second
-    copy of every consumed row."""
+    """Rotation runs exactly once per tick whatever M5 returned."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("dup", run_id="dup"), S.finding_row("skip", run_id="skip")],
@@ -367,14 +251,7 @@ def test_rotation_runs_exactly_once_per_tick_even_when_the_commit_step_returned_
 
 
 def test_a_tick_that_both_defers_a_row_and_closes_its_rotation_773(tmp_path):
-    """A tick that defers a row and then closes its rotation writes the queue ONCE: the
-    deferred row is re-queued carrying its incremented counter in the same rewrite, so a
-    closing rotation holding pre-bump copies cannot silently reset the count.
-
-    §7 FK-23 removes the race by construction rather than by discipline. This is the
-    QUIETEST way the change can break — the count simply never reaches the ceiling and O9's
-    "never forever" fails with no symptom — so the assertion is that a SECOND deferring tick
-    reads 2, not 1."""
+    """A tick that defers a row and then closes its rotation writes the queue ONCE."""
     sc = _orphan_tick(tmp_path, max_attempts=9)
     assert sc.run() == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1
@@ -385,11 +262,7 @@ def test_a_tick_that_both_defers_a_row_and_closes_its_rotation_773(tmp_path):
 
 def test_a_finding_faulted_and_deferred_in_the_same_tick_773(tmp_path):
     """A `RETIRE_SET` fault unwinds BEFORE M5–M7 run at all, so no finding is ever charged
-    both counters in one tick: a faulting tick bumps `attempts` only and leaves every
-    `deferrals` counter exactly where it was.
-
-    §7 FK-24 confirms the structural reading all three readers inferred from N8's ordering —
-    what was missing was a sentence, and this is that sentence made executable."""
+    both counters in one tick."""
     sc = _orphan_tick(tmp_path, max_attempts=9)
     assert sc.run() == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1
@@ -405,11 +278,7 @@ def test_a_finding_faulted_and_deferred_in_the_same_tick_773(tmp_path):
 def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation_773(
     tmp_path,
 ):
-    """A NEGATIVE demand: the fault path bypasses M4–M7 entirely — no deferral bump, no
-    commit. All three are downstream of the try/undo region completing.
-
-    Its positive control is the same scene without the fault, where all three DO happen, so
-    "none of them fired" cannot pass on a tick that never does any of them."""
+    """A NEGATIVE demand."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("bad", run_id="bad"), S.finding_row("orphan", run_id="orphan")],
@@ -441,13 +310,7 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
 
 
 def test_repo_lock_wait_exceeded_at_the_closing_rotation_773(tmp_path):
-    """A commit that already LANDED is never undone by a later rotation failure: the tick
-    fails loudly, the tree is correct, and the queue is stale until a retry.
-
-    §7 FK-19(1). M5's commit precedes the closing rotation, so this window is real, and the
-    only outcome that does not require a new rollback mechanism is the one the key flow's
-    ordering already implies. Undoing the commit here would delete lessons already in
-    history and leave the next tick staring at a corpus full of deletions."""
+    """A commit that already LANDED is never undone by a later rotation failure."""
     held: dict = {}
     sc = S.build_scene(
         tmp_path,
@@ -466,12 +329,7 @@ def test_repo_lock_wait_exceeded_at_the_closing_rotation_773(tmp_path):
 
 
 def test_repo_lock_wait_exceeded_specifically_on_the_deferral_bump_773(tmp_path):
-    """The deferral bump is ATOMIC with its lock acquisition: a timeout leaves the counter
-    exactly where it was, and the retry that follows cannot double-bump it.
-
-    §7 FK-19(2). This is the property O9's ceiling depends on — a double bump graveyards a
-    finding early, which O9 calls a violation in the other direction ("never re-authored on
-    more than `max_attempts` ticks" cuts both ways)."""
+    """The deferral bump is ATOMIC with its lock acquisition."""
     held: dict = {}
     sc = _orphan_tick(tmp_path, repo_lock_wait_seconds=1, max_attempts=9)
     sc.curator.also = _hold_append_lock(held)
@@ -493,11 +351,7 @@ def test_repo_lock_wait_exceeded_specifically_on_the_deferral_bump_773(tmp_path)
 
 def test_a_locked_rotation_that_expires_waiting_for_the_append_lock_773(tmp_path):
     """A rotation that expires against a busy appender leaves the queue exactly as it was —
-    no row half-rotated, no counter half-bumped — and surfaces as a stuck tick.
-
-    `TimeoutError` is deliberately outside `RETIRE_SET` (GL2's three members): a busy lock is
-    not the batch's fault, so the row keeps its attempt budget and the channel says so on its
-    stuck report rather than wedging in silence."""
+    no row half-rotated, no counter half-bumped — and surfaces as a stuck tick."""
     held: dict = {}
     sc = _orphan_tick(tmp_path, repo_lock_wait_seconds=1)
     before = sc.pending()

@@ -1,24 +1,4 @@
-"""#1106 — inside a run, gather works on the RUN's tenant: its verbs are handed the run's tenant
-record, and what it is told it may reach is its tenant's grant (O2 gather's `query`, O3).
-
-Driven end to end through the REAL `driver.run_investigation` on the replay harness, with the
-run's accepted `Tenant` handed in as the driver's new input (#1106 M4: nothing reads a table at
-import, so the run carries its tenant; its grants are that tenant's own table, #1107). Two lanes
-are observed on what the fakes RECEIVED:
-
-  * the `query` lane — the verb context the query tool builds for a model-dispatched call
-    carries the run's tenant record (M3), so an adapter's `load_config` reads THAT
-    tenant's `config.env` values; never the checkout's committed copy;
-  * the dispatch prompt — gather's descriptor index ("Systems of record") and its template
-    index are narrowed to the run's gather grant, which is a consumer of the process-level
-    grant before #1106 (`driver._dispatch_catalogs` read `GATHER_DEF.verb_grant`). Tenant A
-    reaches cmdb and elastic, tenant B identity and threat-intel; each prompt must name its
-    own tenant's systems and not the other's.
-
-Every fixture tenant carries the id the committed fixture is set up under (`playground`) under
-a tmp root, so a
-lane that resolved the checkout's folder by id would be caught by value.
-"""
+"""#1106 e2e through the real driver: gather's query verbs are handed the run's tenant record, config faults name the settings folder not its host path, and the dispatch advertises exactly the run tenant's granted systems."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -111,17 +91,7 @@ def test_a_query_verb_is_handed_the_runs_tenant_record(tmp_path):
 
 def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_host_path(
         tmp_path):
-    """The settings half is host-only (#1106): the fault a missing `config.env` leaves in the
-    run's tenant record reaches the models naming the settings folder, never locating it — no
-    model-visible text and no run-dir table holds the data root.
-
-    #1256 moves WHERE that fault reaches them. cmdb is granted and its `config.env` is gone, so
-    cmdb's own settings check fails at run start and cmdb is down from the start: MAIN is told
-    so, with the check's reason, before it plans (O-3), and its cmdb lead is refused without
-    running the verb (O-1, O-4). Until #1256 the lead's call ran and the fault came back as
-    that call's result, in the gather model's view and the queries table's failure digest; now
-    the call never runs (the verb records nothing, the lead has no row) and the reason reaches
-    MAIN instead. The control is the lane test above: the same verb, configured, answers."""
+    """The settings half is host-only (#1106):"""
     tenant = _tenant(tmp_path, T.TABLE_A, "fault")
     (tenant.settings / "systems" / "cmdb" / "config.env").unlink()
     transport = T.mod("scripts.adapters._stub_transport")

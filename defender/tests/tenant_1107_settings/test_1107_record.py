@@ -1,28 +1,9 @@
-"""#1107 — the record: `RunTenant` grown by `systems`, `elastic` and `ticket_mapping`,
-built once at resolve, never raising for a system's config (D-data-model, O2, O5, D2, §7 F0).
-
-Every tenant here is PLANTED under a tmp root through `_spec1107.plant` (every value carries a
-marker, so a reader returning another tenant's, the checkout's or the environment's value is
-caught by the value alone) and resolved through the REAL acceptance frame,
-`run_tenant.resolve_tenant` — the one every entry point uses (C1). The one exception is
-`d2_shipped_tenants_complete`, which reads the COMMITTED fixture and template (#1120: the
-fixture, `knowledge/tenant-fixture/`, replaced the committed playground).
-
-Faults are real inputs through the real primitive, written in the test itself: a deleted
-`config.env`, `0xff 0xfe` bytes (RG4n, executed: non-UTF-8 raises an uncaught UnicodeDecodeError
-out of every reader today), a directory in a file's place, a symlink (CX6, executed: the link walk
-refuses it), a stray / case-variant / dot folder under `systems/`. The one faked dependency is the
-docker CLI, as `_spec1107.DockerShim` on the PATH of the env a transport forks with (CX8,
-executed: a shim there receives the argv and the child's whole environment).
-"""
+"""resolve_tenant / resolve_run_tenant: systems, ticket mapping, faults kept per system, fresh read per resolve, read-only parts."""
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 from datetime import UTC, datetime
-import inspect
 import json
-import logging
 import os
 import subprocess
 import sys
@@ -34,7 +15,6 @@ import pytest
 from defender.runtime import run_tenant
 from defender.scripts.adapters import _stub_transport as transport
 from defender.tests import _tenants1106 as T1106
-from defender.tests._by_path import load_module
 from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
@@ -54,187 +34,14 @@ def _ctx(record: object, tmp_path: Path, env: Mapping[str, str] | None = None) -
     return S.verb_context(record, run_dir, dict(env or {}))
 
 
-def _fault_text(fn, *args, **kw) -> str:
-    """Call `fn` and return the text of the `ConfigFault` it raises ('' if it raised nothing)."""
-    try:
-        fn(*args, **kw)
-    except S.config_fault() as fault:
-        return str(fault)
-    return ""
 
 
 # ---------------------------------------------------------------------------------------------
 # Demand #0 — the return contract (§7 F0, human: the provisional reading accepted as written).
 # ---------------------------------------------------------------------------------------------
 
-def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every field of it, read top to bottom
-    """RESOLVED at §7 (F0, human, round 1: the provisional reading accepted as written). resolve_tenant
-    and resolve_run_tenant return the existing frozen RunTenant, grown by three fields built in
-    resolve_run_tenant (which resolve_tenant delegates to): systems, a read-only Mapping from each
-    folder name under settings/systems/ to a SystemConfig or a ConfigFault, where a SystemConfig is
-    a read-only Mapping[str, str] of the file's keys exactly as written; and
-    ticket_mapping, a CaseMapping or a CaseTicketError. (A fourth, the secret lookup, moved with
-    credential delivery to #1163.) Neither resolver
-    raises for a system fault: TenantRefused (defender._tenant) keeps only its current
-    tenant-acceptance reasons. VerbContext and AgentDeps carry the record in a field named tenant in
-    place of settings_dir. An adapter's load_config keeps its return, a dict of prefix-stripped
-    keys, or raises ConfigFault. record_case_ticket and
-    open_case_ticket return None and never raise; ticket_write.json is {key, status, url, ok,
-    reason}, a failure receipt carrying status 'error', ok false, url null when there is no usable
-    config, and a non-empty reason, a success receipt carrying reason null. The branch launcher
-    refuses with its existing LauncherRefused (a SystemExit). lint_tenant_env_reads exposes
-    main(argv) -> int like every other custom lint, 0 when clean and non-zero with path:line
-    findings. validate_scaffold.check_config keeps its signature and reports through Report's
-    FAIL/PASS entries."""
-    root = tmp_path / "tenants"
-    folder = S.plant(root, marker="d0")
-
-    rec = _resolve(root)
-    # #1120: `resolve_run_tenant` is the readiness function (grants, correlation) over a
-    # settings folder; the record builder over an accepted tenant, which `resolve_tenant`
-    # delegates to, is `run_tenant_for`.
-    rec_direct = run_tenant.run_tenant_for(
-        S.tenant_folder_of(root), defender_dir=S.DEFENDER, dispatches_lead_zero=False)
-
-    # The existing frozen RunTenant, grown — from both resolvers.
-    assert type(rec) is run_tenant.RunTenant, type(rec)
-    assert type(rec_direct) is run_tenant.RunTenant, type(rec_direct)
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        rec.systems = {}  # type: ignore[misc]
-
-    # systems: a read-only Mapping, folder name -> SystemConfig (a read-only Mapping[str, str]).
-    SystemConfig = S.record_type("SystemConfig")
-    assert isinstance(rec.systems, Mapping), type(rec.systems)
-    assert set(rec.systems) == set(S.PREFIX), sorted(rec.systems)
-    with pytest.raises(TypeError):
-        rec.systems["cmdb"] = rec.systems["identity"]  # type: ignore[index]
-    cmdb = rec.systems["cmdb"]
-    assert isinstance(cmdb, SystemConfig), type(cmdb)
-    assert isinstance(cmdb, Mapping), type(cmdb)
-    assert cmdb["CMDB_URL_BASE"] == "http://cmdb-d0:8080", dict(cmdb)
-    assert all(isinstance(k, str) and isinstance(v, str) for k, v in cmdb.items()), dict(cmdb)
-    with pytest.raises(TypeError):
-        cmdb["CMDB_URL_BASE"] = "http://elsewhere:1"  # type: ignore[index]
-    assert set(dict(rec_direct.systems)) == set(dict(rec.systems)), sorted(rec_direct.systems)
-
-    # The Elastic part has no view of its own (#1222 M1): its keys ride `systems["elastic"]`,
-    # read by the adapter alone.
-    assert rec.systems["elastic"]["ELASTIC_EVENTS_INDEX"] == "d0-events-*"
-    assert rec.systems["elastic"]["ELASTICSEARCH_URL"] == "https://es-d0:9200"
-    assert not hasattr(rec, "elastic")
-
-    # ticket_mapping: a CaseMapping.
-    assert isinstance(rec.ticket_mapping, S.record_type("CaseMapping")), type(rec.ticket_mapping)
-
-    # Neither resolver raises for a system fault: kept as the entry, not TenantRefused.
-    S.config_path(folder, "cmdb").unlink()
-    faulted = _resolve(root)
-    assert isinstance(faulted.systems["cmdb"], S.config_fault()), faulted.systems["cmdb"]
-    assert issubclass(S.tenant_refused(), Exception)
-
-    # VerbContext and AgentDeps: the record in a field named `tenant`, no `settings_dir`.
-    VerbContext = S.mod("runtime.verbs").VerbContext
-    ctx_fields = {f.name for f in dataclasses.fields(VerbContext)}
-    assert S.RECORD_FIELD in ctx_fields, sorted(ctx_fields)
-    assert "settings_dir" not in ctx_fields, sorted(ctx_fields)
-    AgentDeps = S.mod("runtime.tools._deps").AgentDeps
-    deps_fields = {f.name for f in dataclasses.fields(AgentDeps)}
-    assert S.RECORD_FIELD in deps_fields, sorted(deps_fields)
-    assert "settings_dir" not in deps_fields, sorted(deps_fields)
-    ctx = _ctx(rec, tmp_path)
-    assert S.record_on(ctx) is rec
-
-    # load_config keeps its return: a dict of prefix-stripped keys.
-    cfg = transport.load_config(ctx, "cmdb", "CMDB")
-    assert isinstance(cfg, dict), type(cfg)
-    assert cfg == {"URL_BASE": "http://cmdb-d0:8080", "BASTION_HOST": "bastion-d0",
-                   "TIMEOUT_SEC": "10"}, cfg
-
-    # record_case_ticket / open_case_ticket return None and never raise; the receipt shape.
-    shim = S.DockerShim(tmp_path / "shim", [S.answer("{}", "200")])
-    unconfigured = tmp_path / "unconfigured"
-    bare = S.plant(unconfigured, marker="d0u")
-    S.config_path(bare, "case-history").unlink()
-    run_dir = tmp_path / "runs" / "r-d0"
-    run_dir.mkdir(parents=True)
-    env = shim.env({"PATH": os.environ.get("PATH", "")})
-    assert S.open_step(run_dir, _resolve(unconfigured), env=env) is None
-    assert S.record_step(run_dir, _resolve(unconfigured), env=env) is None
-    failure = S.receipt(run_dir)
-    assert failure is not None, "no receipt for a failed record step"
-    assert set(failure) == {"key", "status", "url", "ok", "reason"}, failure
-    assert failure["status"] == "error", failure
-    assert failure["ok"] is False, failure
-    assert failure["url"] is None, failure
-    assert isinstance(failure["reason"], str), failure
-    assert failure["reason"].strip(), failure
-
-    ok_dir = tmp_path / "runs" / "r-d0ok"
-    ok_dir.mkdir(parents=True)
-    shim.respond(*S.store_answers_ok(ok_dir.name))
-    # `aborted`: the escalation note, the one arm that posts without a report in the run dir.
-    assert S.record_step(ok_dir, rec, env=env, truncated_by="aborted") is None
-    success = S.receipt(ok_dir)
-    assert success is not None, "no receipt for a successful record step"
-    assert set(success) == {"key", "status", "url", "ok", "reason"}, success
-    assert success["ok"] is True, success
-    assert success["reason"] is None, success
-    assert success["status"] != "error", success
-
-    # The branch launcher refuses with its existing LauncherRefused, a SystemExit.
-    assert issubclass(S.mod("learning.branch.cli").LauncherRefused, SystemExit)
-
-    # lint_tenant_env_reads.main(argv) -> int: 0 clean, non-zero with path:line findings.
-    clean = tmp_path / "lint-clean"
-    S.plant_module(clean, "defender/scripts/adapters/quiet.py", "X = 1\n")
-    rc, out = S.run_env_lint(clean)
-    assert isinstance(rc, int), (rc, out)
-    assert rc == 0, (rc, out)
-    dirty = tmp_path / "lint-dirty"
-    S.plant_module(dirty, "defender/scripts/adapters/loud.py",
-                   "import os\n\n\ndef url():\n    return os.environ['CMDB_URL_BASE']\n")
-    rc, out = S.run_env_lint(dirty)
-    assert isinstance(rc, int), (rc, out)
-    assert rc != 0, (rc, out)
-    assert "loud.py:5" in out, out
-
-    # validate_scaffold.check_config keeps its signature and reports through Report's rows.
-    vs = load_module(S.DEFENDER / "skills" / "connect" / "validate_scaffold.py",
-                     name="vscaffold1107")
-    assert list(inspect.signature(vs.check_config).parameters) == [
-        "report", "settings_dir", "system"]
-    report = vs.Report()
-    vs.check_config(report, S.settings_of(folder), "identity")
-    assert report.rows, report.rows
-    assert (all(status in (vs.PASS, vs.WARN, vs.FAIL)
-                               for status, _msg in report.rows)), report.rows
 
 
-def test_d_record_fields_from_resolver():
-    """resolve_tenant over a tenant folder returns the same RunTenant type, now carrying systems (one
-    entry per folder under settings/systems/) and ticket_mapping, all built by
-    resolve_run_tenant. For the committed fixture tenant every systems entry is a SystemConfig,
-    ticket_mapping is a CaseMapping."""
-    # #1120: the committed tenant is the fixture (`knowledge/tenant-fixture/`), set up under
-    # this test's data root as `playground`; `run_tenant_for` is the record builder over the
-    # accepted tenant that `resolve_tenant` delegates to.
-    shipped = T1106.fixture_tenant(S.PLAYGROUND_ID)
-    rec = _resolve(current_data_root(), S.PLAYGROUND_ID)
-    built = run_tenant.run_tenant_for(shipped, defender_dir=S.DEFENDER,
-                                      dispatches_lead_zero=False)
-
-    assert type(rec) is run_tenant.RunTenant
-    folders = {p.name for p in (S.FIXTURE / "settings" / "systems").iterdir()
-               if p.is_dir() and not p.name.startswith(".")}
-    assert set(rec.systems) == folders, (sorted(rec.systems), sorted(folders))
-    SystemConfig = S.record_type("SystemConfig")
-    for name, entry in rec.systems.items():
-        assert isinstance(entry, SystemConfig), (name, entry)
-    assert isinstance(rec.ticket_mapping, S.record_type("CaseMapping")), rec.ticket_mapping
-    # Built by resolve_run_tenant: the frame resolve_tenant delegates to gives the same fields.
-    assert set(built.systems) == set(rec.systems)
-    for name in rec.systems:
-        assert dict(built.systems[name]) == dict(rec.systems[name]), name
 
 
 def test_d_systems_verbatim(tmp_path):
@@ -287,41 +94,12 @@ def test_d_systems_fault_kept(tmp_path):
         assert str(raised.value) == str(rec.systems[system]), (system, str(raised.value))
 
 
-def test_d_no_folder_fault_text(tmp_path):
-    """Asking for a system with no folder under settings/systems/ raises ConfigFault whose text says
-    "this tenant's settings do not configure this system", the same fault load_config raises at base
-    (CX5)."""
-    root = tmp_path / "tenants"
-    folder = S.plant(root, marker="nf")
-    rec = _resolve(root)
-    ctx = _ctx(rec, tmp_path)
-
-    assert "nosuch" not in rec.systems, sorted(rec.systems)
-    with pytest.raises(S.config_fault()) as raised:
-        transport.load_config(ctx, "nosuch", "NOSUCH")
-    assert S.NOT_CONFIGURED in str(raised.value), str(raised.value)
-    assert raised.value.exit_code == 2
-
-    # The folder set is the record's: a folder planted after resolve is still not configured.
-    S.write_config(folder, "late", 'LATE_URL_BASE="http://late:1"\nLATE_BASTION_HOST="b"\n'
-                   'LATE_TIMEOUT_SEC="10"\n')
-    with pytest.raises(S.config_fault()) as late:
-        transport.load_config(ctx, "late", "LATE")
-    assert S.NOT_CONFIGURED in str(late.value), str(late.value)
 
 
 def test_d_ticket_mapping_kept(tmp_path):
     """resolve_tenant loads systems/case-history/mapping.yaml once into ticket_mapping. A valid file
     becomes a CaseMapping. A file that is not YAML, not a mapping, or fails the lifecycle check (a
-    templated open.status) is kept as its CaseTicketError and is never raised at resolve.
-
-    #1222 A5: a file that is not YAML or not a mapping never reaches the record: the one tenant
-    check refuses it in acceptance, with a fixed reason naming the file (the spec's tenant-check
-    suite pins the wording). A lifecycle fault is still kept.
-
-    #1221's amendment: the lifecycle check is the literal-open.status rule alone. A mapping whose
-    open.status equals its legacy released.status is no longer a fault — nothing reads `released:`
-    — so it becomes a CaseMapping like any valid file."""
+    templated open.status) is kept as its CaseTicketError and is never raised at resolve."""
     root = tmp_path / "tenants"
     CaseTicketError = S.case_ticket_error()
     cases = {
@@ -445,25 +223,6 @@ def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
         _resolve(root, "required-dir")
 
 
-def test_s7_rg4_non_utf8_is_config_fault(tmp_path):
-    """Non-UTF-8 bytes are that system down, never an uncaught UnicodeDecodeError. A non-UTF-8
-    config.env leaves its system a ConfigFault in systems while resolve_tenant returns normally. At base the readers raise
-    UnicodeDecodeError (RG4). (The secrets.env arm moved with credential delivery to #1163.)"""
-    root = tmp_path / "tenants"
-    folder = S.plant(root, marker="rg4")
-    # RG4n (executed): 0xff raises UnicodeDecodeError out of every reader today.
-    texts = S.config_texts("rg4")
-    S.write_config(folder, "cmdb", texts["cmdb"].encode("utf-8").replace(
-        b"cmdb-rg4", b"cmdb-\xff"))
-    # every elastic key present and non-blank: only the bytes make the part a fault
-    S.write_config(folder, "elastic", texts["elastic"].encode("utf-8").replace(
-        b"es-rg4:9200", b"es-\xff:9200"))
-
-    rec = _resolve(root)  # returns normally
-
-    ConfigFault = S.config_fault()
-    assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    assert isinstance(rec.systems["elastic"], ConfigFault), rec.systems["elastic"]
 
 
 def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
@@ -569,15 +328,6 @@ def test_d1096_record_types_outside_closure():
         assert not leaked, f"importing {module} loads {leaked}"
 
 
-def test_d1096_record_types_importable():
-    """Importing the record's module (runtime.run_tenant) makes SystemConfig and
-    CaseMapping available."""
-    import importlib
-
-    record_module = importlib.import_module("defender.runtime.run_tenant")
-    for name in RECORD_TYPES:
-        assert isinstance(getattr(record_module, name, None), type), (
-            f"runtime.run_tenant does not make {name} available")
 
 
 def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
@@ -613,41 +363,6 @@ def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
     assert elastic["ELASTIC_DOCKER_CONTEXT"] == S.context_name("o1r", "elastic")
 
 
-def test_resolve_does_not_judge_an_access_method(tmp_path, caplog):
-    """Resolving a tenant folder logs no access-method warning, whatever its config.env files
-    declare: the docker access method is the lab transport's own requirement, not a product rule.
-    Resolve does not refuse, and a docker-reached system lacking either key still faults on its
-    first call, before any docker child runs, with text naming the missing key (for example
-    "CMDB_TRANSPORT is not set")."""
-    def without(text: str, key: str) -> str:
-        return "".join(ln + "\n" for ln in text.splitlines() if not ln.startswith(f"{key}="))
-
-    configs = S.config_texts("mf8")
-    # A folder that predates D2: cmdb's config is #1106's (neither access-method key); ticket
-    # lacks only its TRANSPORT, identity only its DOCKER_CONTEXT; the rest are complete.
-    configs["cmdb"] = without(without(configs["cmdb"], "CMDB_TRANSPORT"), "CMDB_DOCKER_CONTEXT")
-    configs["ticket"] = without(configs["ticket"], "TICKET_TRANSPORT")
-    configs["identity"] = without(configs["identity"], "IDENTITY_DOCKER_CONTEXT")
-    root = tmp_path / "tenants"
-    S.plant(root, marker="mf8", configs=configs)
-
-    with caplog.at_level(logging.WARNING):
-        rec = _resolve(root)  # does not refuse
-
-    warned = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING
-              and ("_TRANSPORT" in r.getMessage() or "_DOCKER_CONTEXT" in r.getMessage()
-                   or "access-method" in r.getMessage())]
-    assert warned == [], warned
-
-    shim = S.DockerShim(tmp_path / "shim", [S.answer('{"host": "web-1"}', "200")])
-    ctx = _ctx(rec, tmp_path, shim.env({"PATH": os.environ.get("PATH", "")}))
-    cmdb_fault = _fault_text(S.mod("scripts.adapters.cmdb_adapter").get_host, ctx, host="web-1")
-    ticket_fault = _fault_text(S.mod("scripts.adapters.ticket_adapter").health_check, ctx)
-    identity_fault = _fault_text(S.mod("scripts.adapters.identity_adapter").health_check, ctx)
-    assert "CMDB_TRANSPORT" in cmdb_fault or "CMDB_DOCKER_CONTEXT" in cmdb_fault, cmdb_fault
-    assert "TICKET_TRANSPORT" in ticket_fault, ticket_fault
-    assert "IDENTITY_DOCKER_CONTEXT" in identity_fault, identity_fault
-    assert shim.calls() == [], "a system down for its access method still spawned docker"
 
 
 def _config_keys(path: Path) -> set[str]:

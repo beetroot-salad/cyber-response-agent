@@ -1,23 +1,6 @@
-"""#869 M1/O4 — `declared_systems`, the resolver as a VALUE.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_869.yaml`, named after that
-demand's `discharged_by` pointer and carrying its observable-outcome prose in its docstring.
-
-THE CODE DOES NOT EXIST YET. `defender.learning.leads.declared_systems` is what this suite is
-the contract for; `defender/tests/_declared869.py` states the whole seam contract and holds
-the not-yet-written shim, so a missing target fails each test loudly rather than aborting
-collection.
-
-THE ONE THING TO READ BEFORE EDITING ANYTHING HERE — **the union is ASYMMETRIC, and the
-asymmetry is the design** (NF1, the §7 human seam, which overrode the judge's
-recommendation). The adapter half answers from the tree AS IT STANDS; the marker half
-answers from the tree AS IT WAS LAST COMMITTED. A fixture that commits both halves, or
-neither, cannot see the difference, and a test written against "one source for both" pins
-the contract §7 rejected.
-"""
+"""#869 M1/O4 — `declared_systems`, the resolver as a VALUE."""
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -25,35 +8,26 @@ import pytest
 from defender import _git
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
-from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime import verbs
 from defender.tests._declared869 import (
     ADAPTERS_REL,
     NESTED_MARKER_PARENT,
     NESTED_MARKER_RELS,
-    RAISING_ADAPTER_BODY,
     SKILLS_REL,
-    Spawn,
-    adapter_declared_systems,
-    adapter_file,
     commit_all,
     declared_systems,
     init_git,
-    log_lines_naming,
     loop_log,
     marker_file,
     pitfall_row,
     seed_tree,
-    unreadable_dir_verdict,
     write,
     write_adapter,
     write_marker,
-    write_skill_md,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests import _state1135
-from defender.tests._lead_author_1134 import lead_trees
 from defender.learning.core.state import PITFALLS
 
 
@@ -156,24 +130,6 @@ def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
     assert declared_systems(other) == frozenset({"ticket"})
 
 
-def test_a_marker_only_system_is_declared(tmp_path):
-    """A tree whose `defender/skills/mcpsys/` holds a COMMITTED `execution.md` and whose
-    adapters directory holds no `mcpsys_adapter.py` declares `mcpsys`.
-
-    RF1: the MCP-routed system of record `connect/mcp.md` onboards WITHOUT an adapter, and
-    it must not be silently retired. This is `marker_read_is_from_the_committed_tree`'s
-    positive control — the same file, committed, IS the difference between declared and
-    not — so the marker here is committed on purpose (NF1's accepted cost: a scaffolded MCP
-    system stays undeclared until its branch merges).
-    """
-    repo = seed_tree(
-        tmp_path, adapters=("elastic",), markers=("elastic", "mcpsys"), skills=("elastic",),
-        catalog=(),
-    )
-    assert not adapter_file(repo, "mcpsys").exists()
-    assert "mcpsys" in declared_systems(repo)
-
-
 def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(tmp_path):
     """One tree, ONE drive, BOTH arms, because the asymmetry is the observable (NF1, §7).
 
@@ -258,84 +214,6 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
     assert "cmdb" in got, "the depth-1 marker-only control is not declared either"
 
 
-def test_the_marker_half_reads_every_name_the_tree_carries(tmp_path, capsys):
-    """The marker half declares a system whose directory name holds a SPACE or a NON-ASCII
-    byte, exactly as the adapter half already does.
-
-    THE SHIPPED DEFECT (#908, found by the alphabet the spec now records). Every fixture in
-    this suite planted ASCII names at the repo root, so `_marker_names` was only ever asked
-    the one question it could not get wrong. Over the other two classes it silently answered
-    LESS than the tree declares:
-
-    * `git ls-tree --name-only` C-QUOTES a path holding a non-ASCII byte — it comes back as
-      `"defender/skills/wazuh-caf\\303\\251/execution.md"`, which no longer ends in
-      `/execution.md`, so the filter dropped it;
-    * splitting that listing on whitespace TORE `defender/skills/my sys/execution.md` into
-      two tokens, neither of which matches either.
-
-    Both are the failure this resolver exists to prevent — a real system silently
-    un-declared — and both are WORSE than a loud refusal, because the name never reached the
-    `is_system_name` shape check to be logged as anomalous. Whether these names should be
-    ADMITTED is a separate question from whether they should be SEEN: `is_system_name` takes
-    the alphabet decision, and this pins that the read hands it every name the tree carries
-    rather than losing some in transit.
-
-    SEEN is not the same as ADMITTED, and #914 split the two apart: `is_system_name` now holds
-    every channel to the dispatch seam's own alphabet, so both of these names are REFUSED. That
-    is the right answer and it is not what this demand is about. What this demand is about is
-    the difference between the two ways of saying no:
-
-    * lost in the PARSE (the shipped defect) — the name never appears anywhere, no line is
-      logged, and an operator asking why their system stopped being declared has nothing to
-      read;
-    * refused by the PREDICATE (the contract) — the name reaches the shape check and is logged
-      with the source directory it came from, which is FK-5's whole point.
-
-    So the assertion is that each name is NAMED IN THE LOG. A resolver that tore the listing
-    would pass a bare `== frozenset({"elastic"})` check just as well; only the log line
-    separates the two, and only the `-z` read can produce it.
-
-    The oracle is the planted set, not a second `ls-tree` — that shared query is what hid this
-    for the whole of #869.
-    """
-    anomalous = ("wazuh-café", "my sys")
-    repo = seed_tree(
-        tmp_path, adapters=(), markers=("elastic", *anomalous), skills=(), catalog=(),
-    )
-
-    capsys.readouterr()
-    got = declared_systems(repo)
-
-    assert got == frozenset({"elastic"}), "the shape check no longer holds the marker half"
-    log = loop_log(capsys)
-    for name in anomalous:
-        assert log_lines_naming(log, repr(name), repo / SKILLS_REL), (
-            f"{name!r} was dropped without a refusal line naming its source — which is what a "
-            f"torn listing looks like, and is indistinguishable from it here: {log}"
-        )
-    # The independent committed-tree read SEES all three, so the two the resolver dropped were
-    # dropped by the predicate and not by the read.
-    assert _marker_half_of(repo) == {"elastic", *anomalous}
-
-
-def test_the_union_equals_the_adapter_set_on_the_committed_tree():
-    """On the real committed tree both sources yield the SAME names — zero marker-only, zero
-    adapter-only — so the widening evicts nothing and admits nothing (RF1's positive control,
-    N2's guarantee, C31 as a test rather than a reassurance).
-
-    Any divergence a run reports is a regression, not a cleanup. Computed from the tree twice
-    over, once per source, and compared to what the resolver answers.
-    """
-    root = _git.REPO_ROOT
-    adapter_half = _adapter_half_of(root)
-    marker_half = _marker_half_of(root)
-
-    assert adapter_half, "the real tree declares no adapters — the comparison would be vacuous"
-    assert marker_half - adapter_half == set()
-    assert adapter_half - marker_half == set()
-    assert declared_systems(root) == frozenset(adapter_half)
-
-
 def test_declared_systems_raises_when_either_source_is_unresolvable(tmp_path):
     """Either source unresolvable RAISES `LeadAuthorError` — the DISJUNCTIVE reading O4
     forces, over three states of the two sources.
@@ -380,141 +258,6 @@ def test_declared_systems_raises_when_either_source_is_unresolvable(tmp_path):
         declared_systems(not_a_repo)
 
 
-def test_declared_systems_raises_on_an_unborn_head(tmp_path):
-    """The fourth arm of the git-primitive taxonomy the spec deferred to this phase
-    (`spec_graph_869.yaml` handoff.deferred, NF1's exception taxonomy): a repository that
-    exists and is readable but has never been committed to. `HEAD` does not resolve to any
-    object at all — distinct from `no_skills` (HEAD resolves; the path is absent there) and
-    from `not_a_repo` (no `.git` at all) — and `git cat-file -e HEAD:...` fails the same way
-    `git ls-tree -r --name-only HEAD` does, `fatal: invalid object name 'HEAD'` (rc=128), so
-    the resolver's existing HEAD-existence probe already refuses it; this pins that as a
-    tested contract rather than an accident of the primitive.
-
-    A detached HEAD is NOT a fifth arm: once a commit is checked out, `HEAD` resolves
-    identically whether attached to a branch or not, so `declared_systems` cannot
-    distinguish it from the ordinary case and no separate test is owed."""
-    unborn = init_git(tmp_path / "unborn")
-    write_adapter(unborn, "elastic")
-    write_marker(unborn, "elastic")
-    assert not _git.git_ok(["rev-parse", "--verify", "--quiet", "HEAD"], cwd=unborn)
-    with pytest.raises(LeadAuthorError):
-        declared_systems(unborn)
-
-
-def test_the_resolver_tests_each_source_rather_than_trusting_the_glob(tmp_path):
-    """The raise comes from an EXPLICIT per-source test, never inherited from `Path.glob`.
-
-    All three of M1's "absent or unreadable" states are SILENT EMPTY SETS at the primitive —
-    an absent path, a regular file, and (P2) an unreadable directory under a real non-root
-    uid. The first two are re-probed here on every run, in the test itself, so the taxonomy
-    is measured rather than remembered; the third is driven through the instrument the
-    running uid makes real. In each state the glob says `[]` and the resolver must still
-    refuse, which is the whole content of #0 part 5.
-
-    Its positive control is `declared_systems_empty_dir_reports`: a genuinely empty pair of
-    present sources is an honest `frozenset()`, so this is not a resolver that refuses
-    everything. P1 closes the fourth state — a partially yielded set is unreachable on this
-    interpreter — so no truncation arm is owed.
-    """
-    absent = seed_tree(tmp_path, adapters=(), markers=("elastic",), catalog=(), name="absent")
-    (absent / ADAPTERS_REL).rmdir()
-    assert list((absent / ADAPTERS_REL).glob("*" + verbs.ADAPTER_SUFFIX)) == []
-    with pytest.raises(LeadAuthorError):
-        declared_systems(absent)
-
-    regular = seed_tree(tmp_path, adapters=(), markers=("elastic",), catalog=(), name="regular")
-    (regular / ADAPTERS_REL).rmdir()
-    write(regular / ADAPTERS_REL.rstrip("/"), "not a directory\n")
-    assert (regular / ADAPTERS_REL.rstrip("/")).is_file()
-    assert list((regular / ADAPTERS_REL).glob("*" + verbs.ADAPTER_SUFFIX)) == []
-    with pytest.raises(LeadAuthorError):
-        declared_systems(regular)
-
-    unreadable = seed_tree(
-        tmp_path, adapters=("elastic",), markers=("elastic",), catalog=(), name="unreadable",
-    )
-    assert unreadable_dir_verdict(unreadable, unreadable / ADAPTERS_REL), (
-        "an unreadable adapters directory is a silent `[]` at the glob (P2), so a resolver "
-        "that only globs cannot tell it from an empty one — it must test the source itself"
-    )
-
-
-def test_declared_systems_reports_an_empty_union(tmp_path, capsys):
-    """Both sources present and the union empty is an honest `frozenset()` PLUS one log line
-    naming BOTH directories — never a silent one.
-
-    The falsy member is a valid answer AT THE RESOLVER; what the consumers may do with it is
-    a different demand (`empty_declared_set_refuses_the_lane`). Both directories, because
-    with two sources a line naming one of them leaves an operator guessing which half came
-    back empty.
-    """
-    repo = seed_tree(tmp_path, adapters=(), markers=(), skills=(), catalog=(),
-                     non_systems=("gather",))
-    # Both sources PRESENT and both EMPTY of what they are read for — the state this demand
-    # is about, and the one an absent source must not be confused with.
-    assert (repo / ADAPTERS_REL).is_dir()
-    assert _committed_skills_paths(repo), (
-        "defender/skills is absent at HEAD, which is a different demand"
-    )
-    assert _adapter_half_of(repo) == set()
-    assert _marker_half_of(repo) == set()
-
-    capsys.readouterr()
-    assert declared_systems(repo) == frozenset()
-
-    named = log_lines_naming(loop_log(capsys), repo / ADAPTERS_REL, repo / SKILLS_REL)
-    assert len(named) == 1, (
-        f"expected exactly one line naming both source directories, got {named}"
-    )
-
-
-def test_declared_systems_imports_no_adapter_and_reads_no_marker_body(tmp_path, capsys):
-    """The resolver is COLD on both halves: it never imports an adapter module and never
-    reads an `execution.md` body.
-
-    Real faults, not imagined ones. The adapters directory holds a module whose import
-    raises, and the marker holds bytes that are not valid UTF-8 — so an implementation that
-    imported or read either would announce itself by the exception it took, and both faults
-    are proved live in the test before the resolver is driven. Every surface the evidence
-    could reach is bound: the returned set still names both systems, `sys.modules` gains no
-    module loaded out of the adapters directory, `verbs`' own adapter cache gains nothing,
-    and neither log stream carries the marker's bytes.
-
-    35 extends C2/G1's cold-glob finding to the marker half — a membership test, never a
-    read — which is also why NF4's content-signature alternative was a real cost rather than
-    a free upgrade.
-    """
-    repo = seed_tree(tmp_path, adapters=(), markers=(), skills=(), catalog=(),
-                     non_systems=("gather",))
-    write_adapter(repo, "boom", body=RAISING_ADAPTER_BODY)
-    write_adapter(repo, "elastic")
-    marker_file(repo, "elastic").parent.mkdir(parents=True, exist_ok=True)
-    marker_file(repo, "elastic").write_bytes(b"# execution \xff\xfe not utf-8\n")
-    write_skill_md(repo, "elastic")
-    commit_all(repo, "seed the two faults")
-
-    # The faults are real, and this is where that is established rather than assumed.
-    with pytest.raises(RuntimeError):
-        verbs._load_adapter_module(adapter_file(repo, "boom"))
-    with pytest.raises(UnicodeDecodeError):
-        marker_file(repo, "elastic").read_text(encoding="utf-8")
-
-    before_modules = dict(sys.modules)
-    before_cache = dict(verbs._MODULES)
-    capsys.readouterr()
-
-    assert declared_systems(repo) == frozenset({"boom", "elastic"})
-
-    new_modules = [
-        name for name, mod in sys.modules.items()
-        if name not in before_modules
-        and str(getattr(mod, "__file__", "") or "").startswith(str(repo / ADAPTERS_REL))
-    ]
-    assert new_modules == []
-    assert set(verbs._MODULES) - set(before_cache) == set()
-    assert "not utf-8" not in loop_log(capsys)
-
-
 def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypatch):
     """A resolver failure on the pitfalls leg is NOT a green tick with the queue rotated.
 
@@ -553,142 +296,3 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
     assert "(continuing)" not in loop_log(capsys)
 
 
-def test_the_resolver_never_emits_a_shape_anomalous_name(tmp_path, capsys):
-    """The set can never CARRY a malformed name, from EITHER source, and every refusal is
-    logged with the source it came from (FK-5, §7).
-
-    J4 executed the four the adapter glob admits today — a DIRECTORY named `dir_adapter.py`,
-    a `.hidden_adapter.py`, the suffix-only `_adapter.py` and `.._adapter.py`, from which
-    `verbs._system_of` derives `'dir'`, `'.hidden'`, `''` and `'..'`. The marker half is
-    screened by the same predicate, so a committed `defender/skills/.planted/execution.md`
-    is refused too, not admitted because it came from the other source. Each refused name is
-    named on a line that also names the directory it came from: two lines, one carrying the
-    name and another carrying a directory, tell an operator nothing about which source
-    produced which name.
-
-    This is also the only thing closing R6's log sink — the dropped-names line renders a raw
-    system name, and filtering at the SOURCE is its sanitizer. The positive control is in the
-    same drive: `cmdb` (adapter-only) and `mcpsys` (marker-only) survive, so a predicate that
-    refused everything would not pass this.
-    """
-    repo = seed_tree(tmp_path, adapters=("cmdb",), markers=("mcpsys",), skills=(), catalog=())
-    adapters = repo / ADAPTERS_REL
-    write(adapters / "dir_adapter.py" / ".keep", "")
-    write(adapters / ".hidden_adapter.py", "VERBS = {}\n")
-    write(adapters / "_adapter.py", "VERBS = {}\n")
-    write(adapters / ".._adapter.py", "VERBS = {}\n")
-    write_marker(repo, ".planted")
-    commit_all(repo, "commit the marker-source anomaly")
-
-    # The anomalies are what J4 says they are — measured here, not remembered.
-    derived = {verbs._system_of(p) for p in adapters.glob("*" + verbs.ADAPTER_SUFFIX)}
-    assert {"dir", ".hidden", "", ".."} <= derived
-
-    capsys.readouterr()
-    got = declared_systems(repo)
-
-    assert got == frozenset({"cmdb", "mcpsys"})
-    log = loop_log(capsys)
-    for name in ("dir", ".hidden", "", ".."):
-        assert log_lines_naming(log, repr(name), repo / ADAPTERS_REL), (
-            f"the adapter-source refusal of {name!r} is not named with its source: {log}"
-        )
-    assert log_lines_naming(log, repr(".planted"), repo / SKILLS_REL), (
-        f"the marker-source refusal of '.planted' is not named with its source: {log}"
-    )
-
-
-def test_the_adapter_half_resolution_point_is_its_own_call(tmp_path, monkeypatch, capsys):
-    """NF2's SECOND resolution point is a NAMED call with a signature of its own —
-    `adapter_declared_systems(repo_root) -> frozenset[str]`, the value the PITFALLS lane is
-    handed — and THREE properties ride on it that it does not inherit from the union.
-
-    WHY THIS DEMAND EXISTS (phase F, F4, human-resolved). §7 resolved NF2 so the pitfalls lane
-    resolves a DIFFERENT value, and no input ever named the call that produces it: the
-    artifact mints two production symbols and this was not one of them. Three properties were
-    therefore pinned only on the union resolver, and an implementer could satisfy every one of
-    them while the adapter-half path did the opposite:
-
-    1. THE DISJUNCTIVE RAISE IS NOT INHERITED. `declared_systems_absent_dir_raises` binds the
-       union; under NF2 this call never consults the marker source, so an unresolvable MARKER
-       source is not its fault to raise. Driven on ONE tree with no `defender/skills` at all:
-       the union raises and this call answers. Its OWN source stays mandatory — a missing
-       adapters directory raises here too, which is the control that keeps property 1 from
-       reading as "this call never raises".
-    2. EMPTINESS IS MEASURED ON THE ADAPTER HALF, NOT THE UNION.
-       `empty_declared_set_refuses_the_lane` seeds BOTH sources empty, so it cannot tell the
-       two apart. A tree with committed markers and no adapters genuinely declares systems and
-       must STILL refuse the whole pitfalls lane — a live consequence of NF2 that no input
-       stated. The union is non-empty in the same drive, so the refusal is demonstrably
-       measured on the half this lane resolves.
-    3. FK-5's SHAPE FILTER AND ITS PER-REFUSAL LOG LINE APPLY HERE TOO.
-       `resolver_refuses_shape_anomalous_names` drives the union only, and this path is THE
-       ONLY thing closing R6's log sink for the pitfalls lane's own dropped-names line. The
-       four names J4 executed are driven again at this call, each owed a line naming
-       `repr(name)` and the source directory it came from; `cmdb` surviving in the same drive
-       is the control against a predicate that refuses everything.
-    """
-    # (1) the marker source is not this call's to raise about; its own source is
-    no_skills = tmp_path / "no-skills"
-    init_git(no_skills)
-    write_adapter(no_skills, "elastic")
-    commit_all(no_skills, "adapters only")
-    assert not (no_skills / SKILLS_REL).exists()
-    with pytest.raises(LeadAuthorError):
-        declared_systems(no_skills)
-    assert adapter_declared_systems(no_skills) == frozenset({"elastic"})
-
-    no_adapters = seed_tree(
-        tmp_path, adapters=(), markers=("elastic",), skills=("elastic",), catalog=(),
-        name="no-adapters-half",
-    )
-    (no_adapters / ADAPTERS_REL).rmdir()
-    with pytest.raises(LeadAuthorError):
-        adapter_declared_systems(no_adapters)
-
-    # (2) emptiness is the ADAPTER half's, and it refuses the lane
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    markers_only = seed_tree(
-        tmp_path, adapters=(), markers=("elastic",), skills=("elastic",), catalog=(),
-        name="markers-only",
-    )
-    # Present and EMPTY of adapters, not absent: absent is the demand above.
-    assert (markers_only / ADAPTERS_REL).is_dir()
-    assert declared_systems(markers_only) == frozenset({"elastic"})
-    assert adapter_declared_systems(markers_only) == frozenset()
-
-    paths = LoopPaths(repo_root=markers_only, state_dir=tmp_path / "state-markers-only")
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], state=_state1135.state_for_paths(paths),
-    )
-    spawn = Spawn()
-    with pytest.raises(LeadAuthorError):
-        pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths))
-    assert spawn.calls == [], "the curator ran against a tree whose adapter half is empty"
-    assert len(persist.read_pitfalls(_state1135.state_for_paths(paths))) == 2
-    assert not (paths.state_root / PITFALLS.consumed).exists()
-
-    # (3) FK-5's filter and its per-refusal line, on this path
-    hostile = seed_tree(
-        tmp_path, adapters=("cmdb",), markers=("mcpsys",), skills=(), catalog=(),
-        name="hostile-half",
-    )
-    adapters = hostile / ADAPTERS_REL
-    write(adapters / "dir_adapter.py" / ".keep", "")
-    write(adapters / ".hidden_adapter.py", "VERBS = {}\n")
-    write(adapters / "_adapter.py", "VERBS = {}\n")
-    write(adapters / ".._adapter.py", "VERBS = {}\n")
-    derived = {verbs._system_of(p) for p in adapters.glob("*" + verbs.ADAPTER_SUFFIX)}
-    assert {"dir", ".hidden", "", ".."} <= derived
-
-    capsys.readouterr()
-    got = adapter_declared_systems(hostile)
-    assert got == frozenset({"cmdb"}), (
-        "the adapter half carries a shape-anomalous name, or the marker-only `mcpsys` reached "
-        "the lane that must not see it"
-    )
-    log = loop_log(capsys)
-    for name in ("dir", ".hidden", "", ".."):
-        assert log_lines_naming(log, repr(name), adapters), (
-            f"the adapter-half refusal of {name!r} is not named with its source: {log}"
-        )

@@ -1,20 +1,4 @@
-"""#1049 — the primitive: `_io.bind(root)` and the bound reader's `read` / `read_jsonl` / `under`.
-
-The resolved shape (70-resolutions.md, 47-dispositions-v2.md): the root enters ONCE, at the
-bind; a name is a sequence of plain components by construction; every component is opened
-no-follow from the previous directory handle and the handle is `fstat`-classified; the answer
-is a frozen `RecordRead` in exactly one of three states — present / absent / refused — and the
-refusal is `f"{name}: {reason}"`, the whole relative name as given, said once. Nothing is
-`lstat`ed ahead of an open; nothing is remembered between reads.
-
-Every shape here is a real entry planted on the filesystem by `_record_1049.plant_shape` and
-re-probed on every run; the only fake is `RecordingOs`, a pass-through recorder entering
-through `bind`'s `os_=` seam. The permission arms are `@NOT_ROOT` (uid 0 ignores mode bits;
-CI is non-root — g2/v2-1 executed them as uid 65534 via `setpriv`).
-
-RED AGAINST BASE by construction: `_io.bind` does not exist, and every test imports it per
-call through `R.io()` so the failure is the missing primitive, once per test.
-"""
+"""#1049 — the primitive: `_io.bind(root)` and the bound reader's `read` / `read_jsonl` / `under`."""
 from __future__ import annotations
 
 import dataclasses
@@ -39,23 +23,16 @@ def root(tmp_path: Path) -> Path:
     R.restore_tree(r)
 
 
-# ---------------------------------------------------------------------------------------
 # d-00 — the bind contract
-# ---------------------------------------------------------------------------------------
 
 
 def test_1049_a_bound_reader_answers_exactly_one_of_present_absent_or_refused(root):
     """bind(root) is the only operation that takes a path; bound.read(name, errors='strict')
     answers a frozen RecordRead in exactly one state — present (text is a str, possibly empty:
     an empty file is text '', a read, not absent), absent (absent=True: ENOENT at any
-    component), refused (refusal=f'{name}: {reason}', the whole relative name as given, once,
-    no component attribution) — and bound.read_jsonl(name) answers (rows, malformed,
-    RecordRead) with the same RecordRead it would answer for the text. A name is a str in
-    POSIX spelling (or a PurePath rendered as_posix) split on '/' into plain components and
-    echoed exactly as given (a constructible name is echoed exactly as given — './family.yaml'
-    and 'worlds//w/report.md' are no longer expressible); two calls are two walks — nothing
-    is remembered between them.
-    """
+    component), refused (refusal=f'{name}: {reason}', the whole relative name as given, once, no
+    component attribution) — and bound.read_jsonl(name) answers (rows, malformed, RecordRead)
+    with the same RecordRead it would answer for the text."""
     bound = R.bind(root)
     plain = R.plant_shape(root, "plain")
     empty = R.plant_shape(root, "empty_file")
@@ -108,18 +85,14 @@ def test_1049_a_bound_reader_answers_exactly_one_of_present_absent_or_refused(ro
     assert R.state(bound.read(later)) == "absent"
 
 
-# ---------------------------------------------------------------------------------------
 # d-01 — absent is ENOENT, at whichever step
-# ---------------------------------------------------------------------------------------
 
 
 def test_1049_nothing_at_the_name_is_absent_and_nothing_else_is(root, tmp_path):
-    """bound.read over a name with nothing at it answers absent=True with no refusal; the
-    decision is ENOENT out of the walk's OWN open, at whichever step — nothing at the leaf,
-    or a missing parent component (absent_parent) — and an absent ROOT makes every name
-    absent (F-C: the fault is the bind's, the observable is per name). A dangling parent is
-    NOT absent (RF-R3: it is refused at that component, d-02's row).
-    """
+    """bound.read over a name with nothing at it answers absent=True with no refusal; the decision
+    is ENOENT out of the walk's OWN open, at whichever step — nothing at the leaf, or a missing
+    parent component (absent_parent) — and an absent ROOT makes every name absent (F-C: the
+    fault is the bind's, the observable is per name)."""
     bound = R.bind(root)
     leaf_absent = R.plant_shape(root, "absent")
     parent_absent = R.plant_shape(root, "absent_parent")
@@ -141,22 +114,18 @@ def test_1049_nothing_at_the_name_is_absent_and_nothing_else_is(root, tmp_path):
     assert read.absent is False
 
 
-# ---------------------------------------------------------------------------------------
 # d-02 — the shape table: present-but-not-the-record
-# ---------------------------------------------------------------------------------------
 
 
 def test_1049_every_present_but_not_the_record_shape_is_refused_with_the_relative_name(root, tmp_path):
-    """A symlink, hard link, directory, fifo, dangling link, undecodable bytes, a file OR a
-    fifo squatting a parent component, an over-long name, a SYMLINKED parent and a DANGLING
-    parent each answer absent=False with refusal '<name>: <reason>' — the alias shapes with
+    """A symlink, hard link, directory, fifo, dangling link, undecodable bytes, a file OR a fifo
+    squatting a parent component, an over-long name, a SYMLINKED parent and a DANGLING parent
+    each answer absent=False with refusal '<name>: <reason>' — the alias shapes with
     ALIAS_READ_REFUSAL (ELOOP; EMLINK for the hard link; the two parent aliases off the
-    intermediate `O_PATH` handle's own S_ISLNK, v2-1), the parent-is-file with 'Not a directory', the
-    over-long name with 'File name too long' (rg1), the undecodable with the codec's own
-    message — the WHOLE relative name said once (RF-R6), and the reason is never 'None'
-    (D-J6). A symlink whose target is itself unreadable is exactly one ELOOP refusal; a file
-    at the ROOT makes every name '<name>: Not a directory'.
-    """
+    intermediate `O_PATH` handle's own S_ISLNK, v2-1), the parent-is-file with 'Not a
+    directory', the over-long name with 'File name too long' (rg1), the undecodable with the
+    codec's own message — the WHOLE relative name said once (RF-R6), and the reason is never
+    'None' (D-J6)."""
     assert R.ALIAS == R.io().ALIAS_READ_REFUSAL, "the suite's alias sentence drifted from _io's"
     bound = R.bind(root)
     for shape, reason in R.REFUSED_SHAPES.items():
@@ -184,21 +153,18 @@ def test_1049_every_present_but_not_the_record_shape_is_refused_with_the_relativ
     assert bound.read(R.plant_shape(root, "plain")).text == "plain text\n"
 
 
-# ---------------------------------------------------------------------------------------
 # d-03 — permission faults are refused, never absent (NOT_ROOT)
-# ---------------------------------------------------------------------------------------
 
 
 @NOT_ROOT
 def test_1049_a_mode_000_file_or_parent_is_refused_never_absent(root, tmp_path):
-    """A mode-000 file, a readable file AND an absent name under a mode-000 parent (never
-    absent — v2-1: EACCES for both as uid 65534) answer refusal '<name>: Permission denied'
-    with absent=False; a name under a search-only (0o111) parent READS — the intermediate
-    step is an `O_PATH` handle, granted on search permission alone, as traversing the path
-    by name always was (the row the portable O_RDONLY flag set refused; Linux-only by
-    decision); a mode-000 ROOT answers the same per name, six independent
-    '<name>: Permission denied' slots and no aggregate (F-C).
-    """
+    """A mode-000 file, a readable file AND an absent name under a mode-000 parent (never absent —
+    v2-1: EACCES for both as uid 65534) answer refusal '<name>: Permission denied' with
+    absent=False; a name under a search-only (0o111) parent READS — the intermediate step is an
+    `O_PATH` handle, granted on search permission alone, as traversing the path by name always
+    was (the row the portable O_RDONLY flag set refused; Linux-only by decision); a mode-000
+    ROOT answers the same per name, six independent '<name>: Permission denied' slots and no
+    aggregate (F-C)."""
     bound = R.bind(root)
     denied = R.strerror(errno.EACCES)
     for shape in R.PERMISSION_SHAPES:
@@ -221,60 +187,17 @@ def test_1049_a_mode_000_file_or_parent_is_refused_never_absent(root, tmp_path):
     assert sentences == [f"{n}: {denied}" for n in names], sentences
 
 
-# ---------------------------------------------------------------------------------------
 # d-04 — the open decides; nothing is asked of the name ahead of it
-# ---------------------------------------------------------------------------------------
 
 
-def test_1049_the_primitive_asks_nothing_of_the_name_ahead_of_the_open(root):
-    """The bind, read and read_jsonl make no lstat, stat(, exists, is_symlink, entry_present,
-    artifact_*, resolve or realpath call anywhere (an AST census over the three bodies and
-    the bound reader's class names none of those); a recording os seam sees exactly one open
-    per component and one fstat per opened handle — absent-vs-refused is the open's own
-    answer, and an ENOENT, or a symlink, at a component stops the walk there with no further open.
-    """
-    rec = R.RecordingOs()
-    bound = R.bind(root, os_=rec)
-    deep = R.plant_shape(root, "deep")
-    assert R.state(bound.read(deep)) == "present"
-    opens = rec.component_opens
-    assert len(opens) == 2, [(o[0], o[2]) for o in opens]
-    component_fds = [o[3] for o in opens]
-    assert sorted(rec.fstats) == sorted(component_fds), (rec.fstats, component_fds)
-    assert not (set(rec.asked) & R.FORBIDDEN_OS_NAMES), rec.asked
-
-    for shape, steps in (("absent", 1), ("absent_parent", 1), ("symlinked_parent", 1),
-                         ("dangling_parent", 1), ("symlink", 1), ("parent_is_file", 1)):
-        rec = R.RecordingOs()
-        name = R.plant_shape(root, shape)
-        R.bind(root, os_=rec).read(name)
-        assert len(rec.component_opens) == steps, (shape, [(o[0], o[3]) for o in rec.component_opens])
-        assert not (set(rec.asked) & R.FORBIDDEN_OS_NAMES), (shape, rec.asked)
-        # the JSONL twin walks the same way
-        rec2 = R.RecordingOs()
-        R.bind(root, os_=rec2).read_jsonl(name)
-        assert len(rec2.component_opens) == steps, shape
-
-    forbidden = {"lstat", "stat", "exists", "is_symlink", "entry_present", "artifact_file",
-                 "artifact_dir", "resolve", "realpath", "is_file", "is_dir", "readlink",
-                 "read_plain", "read_guarded", "read_jsonl_rows_guarded"}
-    for target in (R.io().bind, type(bound)):
-        tree = R.parsed(target)
-        assert not (R.called_names(tree) & forbidden), (target, R.called_names(tree) & forbidden)
-        assert not (R.attribute_names(tree) & forbidden), (target, R.attribute_names(tree) & forbidden)
-
-
-# ---------------------------------------------------------------------------------------
 # d-05 — no refusal names the root
-# ---------------------------------------------------------------------------------------
 
 
 def test_1049_no_refusal_the_primitive_formats_contains_the_root(root, tmp_path):
     """Over every shape in d-02 and d-03 (the parent rows included), neither str(root) nor
-    os.path.realpath(root) nor the root's parent is a substring of the refusal; only the
-    name as given is — and a root reached through a symlinked spelling is not named in that
-    spelling either. Positive control: every shape IS refused, each said.
-    """
+    os.path.realpath(root) nor the root's parent is a substring of the refusal; only the name as
+    given is — and a root reached through a symlinked spelling is not named in that spelling
+    either."""
     link_spelling = tmp_path / "episode-by-link"
     link_spelling.symlink_to(root)
     spellings = {str(root), os.path.realpath(root), str(root.parent), str(link_spelling),
@@ -296,57 +219,17 @@ def test_1049_no_refusal_the_primitive_formats_contains_the_root(root, tmp_path)
     assert len(said) == 2 * (len(R.REFUSED_SHAPES) + 2)
 
 
-# ---------------------------------------------------------------------------------------
 # d-06 — errors=
-# ---------------------------------------------------------------------------------------
 
 
-def test_1049_strict_is_the_default_and_replace_is_the_only_admitted_alternative(root):
-    """With the default errors='strict' an undecodable byte is a refusal; with
-    errors='replace' the same bytes read as text with U+FFFD — the gather-summary read's
-    policy; any other value ('ignore', 'surrogateescape', 'bogus') raises ValueError naming
-    no path at the read call, before any open (a recording os seam sees none) — rg2's
-    LookupError-at-the-first-bad-byte is unreachable.
-    """
-    rec = R.RecordingOs()
-    bound = R.bind(root, os_=rec)
-    bad = R.plant_shape(root, "undecodable")
-    strict = bound.read(bad)
-    assert R.state(strict) == 'refused'
-    assert bound.read(bad, errors='strict') == strict
-    replaced = bound.read(bad, errors="replace")
-    assert R.state(replaced) == 'present', replaced
-    assert '�' in replaced.text, replaced
-    assert "not text" in replaced.text
-
-    before = len(rec.opens)
-    for handler in ("ignore", "surrogateescape", "bogus", ""):
-        with pytest.raises(ValueError) as caught:  # noqa: PT011 - the message is asserted below: no path, no root
-            bound.read(bad, errors=handler)
-        message = str(caught.value)
-        assert '/' not in message, message
-        assert str(root) not in message, message
-        assert not isinstance(caught.value, LookupError), "the codec's own LookupError leaked"
-    assert len(rec.opens) == before, "a bad errors= reached an open"
-
-
-# ---------------------------------------------------------------------------------------
 # d-07 — the JSONL twin
-# ---------------------------------------------------------------------------------------
 
 
 def test_1049_read_jsonl_answers_rows_malformed_and_the_same_record_read(root):
-    """bound.read_jsonl over an absent name answers ([], 0, absent); over a refused shape —
-    a refused PARENT included — ([], 0, refused naming the relative name); over a readable
-    file the rows, the count of non-blank lines that were not rows, and a RecordRead carrying
-    the text. The tolerant policy is _jsonl_rows_of's, the per-line rule
-    read_jsonl_rows_guarded shares (rg3): a line that parses but is not an object is one
-    malformed row; a repeated key keeps its last value; a final row without a newline counts
-    and trailing blank lines are neither rows nor malformed; rows and the RecordRead come off
-    ONE walk, so rows non-empty with a refusal is impossible; a ledger whose every line is
-    undecodable reads as replaced text with N malformed rows and no refusal — errors='replace'
-    is fixed on the twin; a torn last line is one malformed row, never a refusal.
-    """
+    """bound.read_jsonl over an absent name answers ([], 0, absent); over a refused shape — a
+    refused PARENT included — ([], 0, refused naming the relative name); over a readable file
+    the rows, the count of non-blank lines that were not rows, and a RecordRead carrying the
+    text."""
     bound = R.bind(root)
     absent = R.plant_shape(root, "absent")
     rows, malformed, rec = bound.read_jsonl(absent)
@@ -382,9 +265,7 @@ def test_1049_read_jsonl_answers_rows_malformed_and_the_same_record_read(root):
     assert R.state(bound.read(name)) == "refused", "positive control: strict refuses the same bytes"
 
 
-# ---------------------------------------------------------------------------------------
 # D-J1 — the component grammar
-# ---------------------------------------------------------------------------------------
 
 
 NOT_A_NAME = ("", ".", "..", "/etc/hostname", "worlds/../x", "a//b", "./family.yaml", "a\x00b",
@@ -393,15 +274,11 @@ NOT_A_NAME = ("", ".", "..", "/etc/hostname", "worlds/../x", "a//b", "./family.y
 
 
 def test_1049_a_name_that_is_not_a_sequence_of_plain_components_cannot_be_constructed(root, tmp_path):
-    """Over '', '.', '..', '/etc/hostname', 'worlds/../x', 'a//b', './family.yaml', 'a\\x00b',
-    'a/' and PurePosixPath('/abs'): constructing the name — through bound.read, bound.read_jsonl
-    and bound.under alike — raises ValueError whose message carries no '/'-bearing spelling
-    and no root, and a recording os seam sees no open; bound.read(name, errors='bogus')
-    raises ValueError naming no path before any open. Positive control: 'worlds/w/report.md'
-    and 'gather_summaries/l-0.md' construct and answer one of the three states, and a lead id
-    carrying an inner '/' only deepens the walk under the root (it names 'a/b' inside
-    gather_summaries/, never a sibling).
-    """
+    """Over '', '.', '..', '/etc/hostname', 'worlds/../x', 'a//b', './family.yaml', 'a\x00b', 'a/'
+    and PurePosixPath('/abs'): constructing the name — through bound.read, bound.read_jsonl and
+    bound.under alike — raises ValueError whose message carries no '/'-bearing spelling and no
+    root, and a recording os seam sees no open; bound.read(name, errors='bogus') raises
+    ValueError naming no path before any open."""
     rec = R.RecordingOs()
     bound = R.bind(root, os_=rec)
     outside = tmp_path / "outside.md"
@@ -427,25 +304,16 @@ def test_1049_a_name_that_is_not_a_sequence_of_plain_components_cannot_be_constr
     assert R.state(bound.under("gather_summaries").read("a/b.md")) == "present"
 
 
-# ---------------------------------------------------------------------------------------
 # D-V3 — the per-component walk
-# ---------------------------------------------------------------------------------------
 
 
 def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_the_handle_is_classified_by_fstat(root):
     """Each intermediate component is opened os.open(c, O_PATH|O_NOFOLLOW|O_CLOEXEC,
     dir_fd=<previous handle>) and the HANDLE is fstat-classified: S_ISDIR → it is the next
-    dir_fd; S_ISLNK (a symlink, live or dangling — O_PATH|O_NOFOLLOW opens the link itself)
-    → refused ALIAS_READ_REFUSAL; ENOENT → absent; any other non-directory handle (a file, a
-    fifo — an O_PATH open never wedges) → refused 'Not a directory'; any other OSError → its
-    strerror. The leaf is opened O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC from the last handle
-    and fstat-classified (S_ISREG and st_nlink>1 → EMLINK alias; not S_ISREG → alias). Every
-    handle is closed on every path; nothing is cached between reads; the walk is per name from
-    the root handle every time. A recording os seam sees exactly one open per component and
-    one fstat per opened handle and no lstat/stat/exists anywhere. Linux-only: os.open
-    supports dir_fd and O_PATH/O_NOFOLLOW/O_NONBLOCK/O_CLOEXEC/O_DIRECTORY are present, and
-    the primitive's source names O_PATH for the step. The EACCES arms are d-03's.
-    """
+    dir_fd; S_ISLNK (a symlink, live or dangling — O_PATH|O_NOFOLLOW opens the link itself) →
+    refused ALIAS_READ_REFUSAL; ENOENT → absent; any other non-directory handle (a file, a fifo
+    — an O_PATH open never wedges) → refused 'Not a directory'; any other OSError → its
+    strerror."""
     assert os.open in os.supports_dir_fd
     for flag in ("O_PATH", "O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY"):
         assert hasattr(os, flag), flag
@@ -519,19 +387,14 @@ def test_1049_every_component_is_opened_no_follow_from_the_previous_handle_and_t
     assert R.io()._ROOT_FLAGS & os.O_PATH, "the root handle is no longer O_PATH"
 
 
-# ---------------------------------------------------------------------------------------
 # s-22 — a hard link refuses BOTH names
-# ---------------------------------------------------------------------------------------
 
 
 def test_a_hard_link_makes_a_second_unrelated_record_refuse_too(root):
-    """Hard-linking record A's file to a scratch name makes A's OWN name refused too —
-    '<A's name>: refusing to read through a non-plain or aliased entry' (EMLINK, nlink 2),
-    root-free, and nothing ties the two refusals (g1, g13: a hard link to family.yaml made the
-    manifest itself refused). Fixture consequence for every hard-link arm in this suite: link
-    a scratch file, never a live record. Positive control: with the second name gone, A reads
-    again.
-    """
+    """Hard-linking record A's file to a scratch name makes A's OWN name refused too — '<A's name>:
+    refusing to read through a non-plain or aliased entry' (EMLINK, nlink 2), root-free, and
+    nothing ties the two refusals (g1, g13: a hard link to family.yaml made the manifest itself
+    refused)."""
     bound = R.bind(root)
     record = R.write_bytes(root / "family.yaml", "worlds: []\n")
     assert bound.read("family.yaml").text == "worlds: []\n"

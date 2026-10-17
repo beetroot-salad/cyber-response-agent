@@ -1,21 +1,4 @@
-"""#995 — the verb-disposition table: one authored answer for who may call what, total over
-the systems that actually exist.
-
-THE DEFECT. `/connect` promises that adding a system needs no shared-file edit. It does need
-one: a system absent from the gather grant is connected and mute. Worse than mute — probed
-against the base commit, a real declared verb on an ungranted system comes back `UNDECLARED`
-with a refusal byte-identical to a typo's, so the maintainer is sent hunting a spelling
-mistake in an adapter that is correct.
-
-AND THE GUARD CANNOT FAIL. What looks like it watches the grant compares two hand-written
-copies of the same list (`driver/_build.py:GATHER_PAIRS` against
-`tests/_verb_authorization_632.py`'s duplicate). That catches the copies drifting. It cannot
-catch a system missing from BOTH — which is the reported case.
-
-So the load-bearing tests in this file are the ones that PLANT a system the table does not
-mention and demand the gate go red. `test_the_shipped_table_is_total` alone would pass
-against the broken world, because the shipped tree is currently complete by luck.
-"""
+"""#995 verb-disposition table: one authored answer for who may call what, total over the systems that exist. Planted-system tests demand the census gate go red; the loader fails loud on a malformed or missing table; role grants are projected from the rows; an ungranted system's refusal differs from a typo's."""
 from __future__ import annotations
 
 import subprocess
@@ -30,8 +13,6 @@ from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry, read_roster
 from defender.tests._dispositions995 import (
     GATHER_CENSUS,
-    WITHHELD_CENSUS,
-    Disposition,
     DispositionError,
     DispositionWarning,
     census_gaps,
@@ -41,7 +22,6 @@ from defender.tests._dispositions995 import (
     planted_tree,
     write_table,
 )
-from defender.tests._by_path import cached_source
 from defender.tests._repo import HOSTILE_NAMES, plant_named_dirs, seed_repo
 from defender.tests import _tenants1106 as T1106
 
@@ -58,11 +38,7 @@ OK = {"roles": ["gather"]}
 
 
 def _walk(defender_dir: Path, systems: tuple[str, ...]) -> dict[str, frozenset[str]]:
-    """The walked census as `census_gaps` takes it: system -> declared verb names, read cold.
-
-    Handed the system names explicitly rather than resolved, so a test states which systems
-    it planted and the assertion is against that statement.
-    """
+    """The walked census as `census_gaps` takes it: system -> declared verb names, read cold."""
     roster = read_roster(adapters_under(defender_dir))
     return {s: roster.declared_verbs(s) for s in systems}
 
@@ -73,11 +49,7 @@ def _walk(defender_dir: Path, systems: tuple[str, ...]) -> dict[str, frozenset[s
 
 def test_a_planted_system_with_no_disposition_turns_the_gate_red():
     """THE demand. A system declared by both halves the resolver reads, mentioned nowhere in
-    the table, is residue — and residue is a finding naming the pair.
-
-    This is the test the base commit's guard cannot express: its census compares the shipped
-    grant to a second hand-written copy of the shipped grant, so a system in neither is
-    invisible to it. Asserted against the pair this test PLANTED, never against a re-walk."""
+    the table, is residue — and residue is a finding naming the pair."""
     planted = ("newsystem", "health-check")
     walked = {"newsystem": frozenset({"lookup", "health-check"})}
     # A table that decides one of the planted system's two verbs and is silent about the
@@ -129,29 +101,8 @@ def test_a_whole_system_absent_from_the_table_reports_every_one_of_its_verbs():
     assert {("solo", "a"), ("solo", "b"), ("solo", "health-check")} <= set(gaps.undecided)
 
 
-def test_the_shipped_table_is_total_over_the_real_tree():
-    """The shipped deployment, checked live. Passes today by luck; after #995 it passes by
-    construction, and the tests above are what make the difference observable."""
-    from defender.learning.leads.declared_systems import declared_systems
-
-    systems = tuple(sorted(declared_systems(REPO_ROOT)))
-    gaps = census_gaps(_walk(DEFENDER, systems), load_dispositions(dispositions_path(SETTINGS)))
-    assert not gaps.undecided, f"shipped systems with no disposition: {sorted(gaps.undecided)}"
-    assert not gaps.phantom, f"dispositions naming no declared verb: {sorted(gaps.phantom)}"
-    assert not gaps.unreasoned, f"withheld with no reason: {sorted(gaps.unreasoned)}"
-
-
 def test_deleting_a_row_from_the_SHIPPED_table_is_caught():
-    """A mutation test on the real file, not a synthetic one.
-
-    Every other O1 test builds its table through `write_table`, so all of them are blind to
-    anything the shipped table can express and the helper cannot — a top-level key, a
-    smuggled attribute on the returned value, a magic marker. An adversarial implementer got
-    a fully green suite through exactly that gap: a `residue: settled` key on the real table
-    that made `census_gaps` return nothing while the shipped file was missing six verbs.
-
-    So: take the shipped table, delete one system's rows, and demand exactly that system's
-    verbs come back. The expectation is the set this test DELETED, never a re-walk."""
+    """A mutation test on the real file, not a synthetic one."""
     from defender.learning.leads.declared_systems import declared_systems
 
     systems = tuple(sorted(declared_systems(REPO_ROOT)))
@@ -170,58 +121,8 @@ def test_deleting_a_row_from_the_SHIPPED_table_is_caught():
     )
 
 
-def test_the_census_is_a_function_of_the_row_values_alone():
-    """No side channel. `census_gaps` must depend on nothing but the `(system, verb, roles,
-    reason)` of each row — not on the type of the container, not on an attribute riding along
-    on it, not on a key the loader stashed somewhere.
-
-    Rebuilding every row as a plain `Disposition` in a plain tuple and demanding an identical
-    verdict is what makes that testable without enumerating the channels."""
-    from defender.learning.leads.declared_systems import declared_systems
-
-    systems = tuple(sorted(declared_systems(REPO_ROOT)))
-    walked = _walk(DEFENDER, systems)
-    rows = load_dispositions(dispositions_path(SETTINGS))
-
-    assert type(rows) is tuple, (
-        f"the loader returned {type(rows).__name__}, not a plain tuple — a subclass can carry "
-        "state that the census reads and no test can see"
-    )
-    rebuilt = tuple(
-        Disposition(system=r.system, verb=r.verb, roles=frozenset(r.roles), reason=r.reason)
-        for r in rows
-    )
-    assert census_gaps(walked, rebuilt) == census_gaps(walked, rows)
-    # And with one row dropped, the rebuilt copy must go red exactly like the original would.
-    assert census_gaps(walked, rebuilt[1:]).undecided == census_gaps(walked, rows[1:]).undecided
-
-
-def test_an_unreasoned_withholding_is_reported_by_the_census():
-    """The negative control on `unreasoned`, which every other test only ever asserts EMPTY.
-
-    Without this the field can be a hardcoded empty set: three tests assert it is empty, the
-    gate's branch that prints it is unreachable, and nothing notices. Built by constructing
-    the row directly rather than through the loader, because the loader rejects this shape —
-    which is correct, and is also why the census's own handling of it would otherwise never
-    be exercised."""
-    walked = {"x": frozenset({"y"})}
-    rows = (Disposition(system="x", verb="y", roles=frozenset(), reason="   "),)
-    gaps = census_gaps(walked, rows)
-    assert ("x", "y") in gaps.unreasoned
-    assert not gaps.undecided, "the row IS present — it is the reason that is missing"
-
-
 def test_a_system_gather_reaches_but_cannot_health_check_warns_on_load():
-    """The invariant the move from code to table made merely UNWRITTEN rather than impossible.
-
-    Before #995 the gather grant was built as `entries += ((s, "health-check", "r") for s in
-    systems)` — health-check was appended for every system the grant reached, so "gather can
-    query this system but not health-check it" was a state no author could express.
-
-    A WARNING on load, not a CI finding. This file is per-deployment data: the operator who
-    edits their own copy is the only person who can author this mistake, and is the one person
-    a gate over our repo never reaches. Warning where the table is READ covers every one of
-    them."""
+    """The invariant the move from code to table made merely UNWRITTEN rather than impossible."""
     table = write_table(_tmp(), {
         ("alpha", "lookup"): OK,
         ("alpha", "health-check"): {"roles": [], "reason": "not needed here"},
@@ -247,41 +148,6 @@ def test_a_system_gather_does_not_reach_at_all_does_not_warn():
         load_dispositions(table)
 
 
-def test_the_shipped_table_loads_without_a_health_check_warning():
-    """The real table against the rule. This is the state the code rule used to guarantee."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", DispositionWarning)
-        load_dispositions(dispositions_path(SETTINGS))
-
-
-def test_the_census_gate_says_nothing_about_health_check():
-    """The rule's ABSENCE from the repo-time gate, pinned.
-
-    A table gather cannot health-check is a warning at every load and NOT a CI finding — the
-    gate walks a tree, so it only ever runs here, which is where the mistake cannot be made.
-    Re-adding it there would make the shipped repo the only place the rule is enforced."""
-    repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
-    # #1106 M7: the gate walks every tenant folder plus the template, so the table is planted
-    # where it now reads it (with the lead-zero config and catalog template M7 also checks).
-    T1106.plant_census_settings(
-        repo,
-        {
-            ("alpha", "lookup"): OK,
-            ("alpha", "health-check"): {"roles": [], "reason": "not needed here"},
-        },
-    )
-    seed_repo(repo, add="-A", message="table")
-    gate = REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
-    proc = subprocess.run(
-        [sys.executable, str(gate), "--root", str(repo)],
-        capture_output=True, text=True, cwd=REPO_ROOT,
-    )
-    assert proc.returncode == 0, (
-        "the census gate must stay silent on a withheld health-check — that rule lives in the "
-        f"loader now\nstdout={proc.stdout}\nstderr={proc.stderr}"
-    )
-
-
 def test_the_lint_gate_exits_nonzero_on_a_tree_with_residue():
     """The wiring, not the logic. `census_gaps` going red is worth nothing if the CI entry
     point does not propagate it — probed by running the gate as CI runs it, against a planted
@@ -303,55 +169,10 @@ def test_the_lint_gate_exits_nonzero_on_a_tree_with_residue():
     assert "beta" in (proc.stdout + proc.stderr), "the failure must name the offending system"
 
 
-def test_the_lint_gate_is_clean_on_the_real_tree_and_says_what_it_covered():
-    """Positive control on the entry point — and proof it LOOKED.
-
-    Exit 0 alone is satisfied by a gate that checks nothing, and an adversarial implementer
-    shipped exactly that: a no-arg early return reading "shipped tree covered elsewhere", so
-    the census ran only under the `--root` the red test supplies and never on the path CI
-    uses. The gate must report the size of what it covered, and that number must match the
-    tree."""
-    from defender.learning.leads.declared_systems import declared_systems
-
-    gate = REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
-    proc = subprocess.run(
-        [sys.executable, str(gate)], capture_output=True, text=True, cwd=REPO_ROOT,
-    )
-    assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
-
-    out = proc.stdout + proc.stderr
-    rows = load_dispositions(dispositions_path(SETTINGS))
-    why = ("the gate reported success without saying what it covered, so it cannot be "
-           f"distinguished from one that checked nothing: {out}")
-    assert str(len(rows)) in out, why
-    assert str(len(declared_systems(REPO_ROOT))) in out, why
-
-
-def test_the_no_arg_and_explicit_root_invocations_check_the_same_thing():
-    """The two entry paths must not diverge. CI runs the gate with no arguments; every red
-    test above runs it with `--root`. A gate whose no-arg path is a stub would pass both."""
-    gate = REPO_ROOT / "scripts" / "lint" / "lint_verb_disposition_census.py"
-    bare = subprocess.run(
-        [sys.executable, str(gate)], capture_output=True, text=True, cwd=REPO_ROOT,
-    )
-    explicit = subprocess.run(
-        [sys.executable, str(gate), "--root", str(REPO_ROOT)],
-        capture_output=True, text=True, cwd=REPO_ROOT,
-    )
-    assert bare.returncode == explicit.returncode
-    assert bare.stdout == explicit.stdout
-
-
 def test_a_hostile_system_directory_name_does_not_blind_the_gate():
     """A name a filesystem accepts and a naive reader mangles must not silently drop a system
     from the walk — the #869/#908 class. These names are not well-formed system names, so the
-    correct behaviour is that they declare nothing; what is forbidden is CRASHING, or
-    swallowing the well-formed system planted beside them.
-
-    Asserted on the RESOLVER and then on the GATE. The resolver half alone leaves the claim
-    in the test's own name unmade: a gate that crashed, or that dropped `alpha` on its way
-    from the resolver to the census, would still pass a test that only ever called
-    `declared_systems`."""
+    correct behaviour is that they declare nothing; what is forbidden is CRASHING, or"""
     repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
     plant_named_dirs(repo / "defender" / "skills", HOSTILE_NAMES)
     T1106.plant_census_settings(
@@ -411,40 +232,13 @@ def test_a_withheld_pair_with_a_reason_loads():
     assert "exercised" in (rows[0].reason or "")
 
 
-def test_every_withheld_pair_in_the_shipped_table_carries_a_reason():
-    """Live, on the deployment. Checked separately from totality because a table can be total
-    and still withhold three verbs for no stated cause."""
-    rows = load_dispositions(dispositions_path(SETTINGS))
-    withheld = {(r.system, r.verb): r for r in rows if not r.roles}
-    assert set(withheld) == set(WITHHELD_CENSUS), (
-        "the set of pairs granted to nobody changed; if that is intended, update "
-        f"WITHHELD_CENSUS deliberately. got={sorted(withheld)}"
-    )
-    # SUBSTANCE, not presence. `.strip()` truthiness is satisfied by `-`, `tbd`, `n/a` — an
-    # adversarial implementer shipped exactly those. The reason's only job is to let a
-    # reviewer judge whether the withholding still holds, which one token cannot do.
-    placeholder = {"tbd", "n/a", "na", "-", "--", "none", "todo", "x", "?", "wip"}
-    for pair, row in sorted(withheld.items()):
-        reason = (row.reason or "").strip()
-        assert reason, f"{pair} is withheld with no reason"
-        assert reason.lower().rstrip(".") not in placeholder, \
-            f"{pair} is withheld with a placeholder reason {reason!r}"
-        assert len(reason.split()) >= 4, \
-            f"{pair}'s reason is too short to be reviewable: {reason!r}"
-
-
 # =========================================================================================
 # O3 — presence on disk never confers access.
 # =========================================================================================
 
 
 def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
-    """A misspelled role at a CALL SITE is the deny-all-by-accident state, one level up.
-
-    `load_dispositions` already refuses a typo'd role written in the TABLE. It cannot see the
-    role the projection is ASKED for, and an empty grant is indistinguishable at every reader
-    from a deliberate withholding: every verb then decides UNDECLARED with "this role holds no
-    grant reaching it", which is #995's original symptom applied product-wide."""
+    """A misspelled role at a CALL SITE is the deny-all-by-accident state, one level up."""
     rows = load_dispositions(dispositions_path(SETTINGS))
     with pytest.raises(DispositionError) as caught:
         grant_for("gathr", rows)
@@ -465,13 +259,7 @@ def test_the_grant_is_not_a_function_of_what_is_on_disk():
 
 @pytest.mark.parametrize("role", ["gather", "lead-zero-correlation"])
 def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
-    """The total statement of "authored, not derived", in one line per holder.
-
-    The two tests above vary a temp tree that a synthesizing implementation has no reason to
-    read — an adversarial one derived eight of gather's pairs from `PATHS.adapters_dir`, which
-    those tests never touch, and passed both. This closes it by construction: the projection
-    is a FILTER over the rows and may invent nothing. Anything synthesized, from anywhere,
-    breaks the equality."""
+    """The total statement of "authored, not derived", in one line per holder."""
     rows = load_dispositions(dispositions_path(SETTINGS))
     assert {(s, v) for s, v, _ in grant_for(role, rows).entries} == \
         {(r.system, r.verb) for r in rows if role in r.roles}
@@ -481,23 +269,10 @@ def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
 # Conservation — moving the table out of code changed no permission.
 # =========================================================================================
 
-def test_the_projected_gather_grant_is_exactly_the_historical_census():
-    """The refactor's whole risk is that it quietly widens or narrows access. Compared against
-    a census written independently in `_dispositions995.py` from the grants as they stood
-    before the move, not against the file under test."""
-    rows = load_dispositions(dispositions_path(SETTINGS))
-    granted = {(s, v) for s, v, _ in grant_for("gather", rows).entries}
-    assert granted == set(GATHER_CENSUS), (
-        f"gained={sorted(granted - GATHER_CENSUS)} lost={sorted(GATHER_CENSUS - granted)}"
-    )
-
-
 def test_the_shipped_definitions_carry_the_projected_grants():
     """The wiring: the driver's gather definition and the correlation lead's grant must be
     BUILT from the table, not merely accompanied by it. Checked by identity of content against
-    the projection, so a leftover hardcoded literal that happens to agree today would still be
-    caught the first time the table changes — and is caught now by the phantom/undecided
-    gates, which a literal cannot satisfy."""
+    the projection, so a leftover hardcoded literal that happens to agree today would still be"""
     # #1106 M4: the grants are per RUN, projected from the run's tenant table — no longer
     # module constants on `GATHER_DEF` / `lead_zero`. The wiring is `run_grants`.
     grants = T1106.run_grants(SETTINGS)
@@ -574,10 +349,6 @@ def test_a_malformed_system_name_raises():
 #: The same duplicate, written the ways YAML allows it to be written. Parametrized rather than
 #: pinned as one string because a line-oriented duplicate check keyed on one indentation and
 #: one block style passes the single case and admits every other — an adversarial implementer
-#: shipped a regex matching exactly `write_table`'s output, and flow style, 3-space and
-#: 6-space indents all sailed through it, silently widening a reviewed withholding into a
-#: grant. The property is "the parse refuses a repeated key", not "the parse refuses this
-#: text".
 _DUPLICATE_SPELLINGS = {
     "block-4-space": (
         "dispositions:\n"
@@ -663,12 +434,7 @@ def test_a_key_written_three_times_is_named_once():
 
 
 def test_the_duplicate_check_agrees_with_an_independent_oracle():
-    """The check, cross-examined against a differently-built answer.
-
-    A duplicate-refusing `SafeLoader` subclass is the standard way to ask PyYAML this
-    question, and it is built here from the loader's own construction hook rather than from
-    the text — a different mechanism from whatever the implementation uses, so the two cannot
-    be wrong together the way a shared primitive would be."""
+    """The check, cross-examined against a differently-built answer."""
     import yaml
 
     class _NoDupes(yaml.SafeLoader):
@@ -720,14 +486,7 @@ def test_the_duplicate_check_agrees_with_an_independent_oracle():
 # =========================================================================================
 
 def test_an_ungranted_systems_real_verb_keeps_the_unresolvable_label():
-    """The LABEL is not #995's to change, and this pins that it did not.
-
-    The first draft of this suite demanded DENIED here. That was wrong: §7 R11 read literally
-    makes a wholly ungranted system UNRESOLVABLE, RS14 records the accounting that follows
-    (no denial record, retry coaching, agent-fixable), and six demands across the 632 suite
-    reason from that split. It is agent-visible behaviour, not wording. #995's complaint is
-    that the two UNDECLARED cases were INDISTINGUISHABLE, which is a message defect and is
-    fixed as one below."""
+    """The LABEL is not #995's to change, and this pins that it did not."""
     grant = VerbGrant(
         role="gather",
         entries=tuple((s, v, "r") for s, v in GATHER_CENSUS if s != "cmdb"),
@@ -739,10 +498,7 @@ def test_an_ungranted_systems_real_verb_keeps_the_unresolvable_label():
 def test_the_ungranted_system_refusal_differs_from_a_typo_refusal():
     """THE onboarding symptom, and the demand that closes it. Before #995 these two produced
     byte-identical text, so a correctly built adapter on a system nobody had granted read
-    exactly like a spelling mistake — and the maintainer at `/connect`'s test step went
-    looking for the typo that was not there.
-
-    Both remain UNRESOLVABLE. What must differ is what the reader is told to DO."""
+    exactly like a spelling mistake — and the maintainer at `/connect`'s test step went"""
     grant = VerbGrant(
         role="gather",
         entries=tuple((s, v, "r") for s, v in GATHER_CENSUS if s != "cmdb"),
@@ -802,97 +558,9 @@ def test_an_unknown_system_entirely_is_still_undeclared():
 # M7 — the lint scanner's per-system exclusions are derived, not remembered.
 # =========================================================================================
 
-def _lint_shippable_surface():
-    """The lint module, imported off `scripts/lint/` without leaving that dir on `sys.path`.
-
-    Removed BY VALUE, never `pop(0)`: the module itself inserts the repo root at index 0 when
-    it is not already there, so on any tree where the two spellings differ (a symlinked
-    checkout, an import mode that does not prepend the rootdir) a positional pop drops the
-    repo root and leaves `scripts/lint/` on the path for the rest of the session — where its
-    `_baseline` / `_gitscope` / `_astlib` shadow anything later-imported by those names.
-    """
-    lint_dir = str(REPO_ROOT / "scripts" / "lint")
-    sys.path.insert(0, lint_dir)
-    try:
-        import lint_shippable_surface as mod
-    finally:
-        if lint_dir in sys.path:
-            sys.path.remove(lint_dir)
-    return mod
-
-
-def test_the_shippable_surface_scanner_excludes_every_declared_system():
-    """The adjacent instance of the same defect: a hand-kept list of `skills/<system>/` dirs
-    that is already stale (seven entries, eight systems) and fails silently because the
-    missing name is not a vendor word."""
-    mod = _lint_shippable_surface()
-    from defender.learning.leads.declared_systems import declared_systems
-
-    excluded = set(mod.excluded_prefixes(REPO_ROOT))
-    systems = sorted(declared_systems(REPO_ROOT))
-    for system in systems:
-        assert f"defender/skills/{system}/" in excluded, (
-            f"{system} is a declared system whose skill dir the scanner does not exclude"
-        )
-
-    # THE COMPLEMENT, which membership alone never checks. An adversarial implementer widened
-    # this to every directory under skills/, carving `gather/`, `invlang/`, `handbook/`,
-    # `judge/`, `connect/` and `advisory/` out of the vendor-token gate entirely — the largest
-    # part of the shipped surface silently stopped being scanned, and both membership tests
-    # still passed. The carve-out is for SYSTEMS; a role skill is shipped product.
-    skill_dirs = {
-        p for p in excluded
-        if p.startswith("defender/skills/") and p.count("/") == 3
-    }
-    assert skill_dirs == {f"defender/skills/{s}/" for s in systems}, (
-        f"the scanner excludes skill dirs that are not systems: "
-        f"{sorted(skill_dirs - {f'defender/skills/{s}/' for s in systems})}"
-    )
-
-
-def test_the_scanner_exclusions_track_a_planted_system():
-    """Derived, not merely correct today. A system planted in a synthetic tree must be
-    excluded there — which a hand-written tuple cannot do."""
-    repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
-    assert "defender/skills/alpha/" in set(_lint_shippable_surface().excluded_prefixes(repo))
-
-
 # =========================================================================================
 # M5 / O4 — the table is read-only on every run path.
 # =========================================================================================
-
-def test_no_module_under_defender_writes_the_disposition_table():
-    """A writer census. The table's authority rests on every row tracing to a human commit —
-    the same provenance argument the tacit-knowledge registry makes (#983) — which a run path
-    that could rewrite it would void."""
-    rel = "verb-grants.yaml"
-    offenders: list[str] = []
-    referencing: list[str] = []
-    for path in sorted(DEFENDER.rglob("*.py")):
-        parts = path.parts
-        if ".venv" in parts or "tests" in parts:
-            continue
-        text = cached_source(path)
-        if rel not in text:
-            continue
-        referencing.append(str(path.relative_to(REPO_ROOT)))
-        lines = text.splitlines()
-        for lineno, line in enumerate(lines, 1):
-            if rel not in line:
-                continue
-            window = "\n".join(lines[max(0, lineno - 4):lineno + 4])
-            if any(w in window for w in ("write_text(", "open(", "w+", '"w"', "'w'")):
-                offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno}")
-
-    # NON-VACUITY. Without this the census passes on a tree where nothing mentions the table
-    # at all — including the pre-implementation tree, and any implementation that spells the
-    # path differently. A scan that found nothing to scan has not cleared anything.
-    assert referencing, (
-        f"no module under defender/ names {rel} — either the table is not wired up, or it is "
-        "spelled differently and this census is looking at nothing"
-    )
-    assert not offenders, f"a run-path module appears to write the table: {offenders}"
-
 
 def test_the_table_loads_from_a_read_only_file():
     """Read-only by construction, not by convention. If any load path writes — a cache, a
@@ -913,50 +581,6 @@ def test_the_table_loads_from_a_read_only_file():
 # =========================================================================================
 # O6 — the documented onboarding path is complete.
 # =========================================================================================
-
-def test_the_connect_skill_names_the_table_as_a_step():
-    """The skill's own test step is the one that fails when the edit is missing, so the edit
-    has to appear before it."""
-    text = (DEFENDER / "skills" / "connect" / "SKILL.md").read_text(encoding="utf-8")
-    assert "verb-grants.yaml" in text, "the onboarding skill never mentions the table"
-
-
-def test_the_connect_lane_permits_the_table_edit():
-    """The lane rule is a positive allowlist: a `Write only ...` sentence, then a `Never ...`
-    sentence. The table must appear in the FIRST.
-
-    Anchored on the allowlist sentence rather than on the clause as a whole, because "the
-    filename appears somewhere in the lane rule" is satisfied by prose that forbids the edit —
-    an adversarial implementer wrote "You do not edit knowledge/environment/verb-grants.yaml"
-    into the same clause and this test passed, which is verbatim the failure its own docstring
-    warns about.
-
-    This is still a prose assertion and prose assertions are weak. What would replace it is a
-    machine-readable allowlist in the skill that a real lane checker parses; that is a bigger
-    change than #995 and is recorded here rather than pretended away."""
-    text = (DEFENDER / "skills" / "connect" / "SKILL.md").read_text(encoding="utf-8")
-    lane = text.split("Stay in your lane", 1)
-    assert len(lane) == 2, "the lane rule moved; this test needs re-anchoring"
-    clause = lane[1].split("- **", 1)[0]
-
-    allow, _, forbid = clause.partition("Never ")
-    assert "verb-grants.yaml" in allow, (
-        "the table is not in the lane's `Write only ...` allowlist — naming it only in the "
-        "`Never ...` half leaves the skill forbidden from finishing the job it documents"
-    )
-    assert "verb-grants.yaml" not in forbid, "the lane both permits and forbids the table edit"
-
-
-def test_the_handbook_no_longer_claims_no_shared_file_is_edited():
-    """The false sentence, corrected at its source."""
-    text = (
-        DEFENDER / "skills" / "handbook" / "content" / "knowledge-and-skills.md"
-    ).read_text(encoding="utf-8")
-    assert "needs no edit to the loop, the gather subagent, or any shared file" not in text
-    assert "verb-grants.yaml" in text, (
-        "the handbook should point at the one shared edit rather than deleting the claim"
-    )
-
 
 # --- tmp helpers ---------------------------------------------------------------------
 

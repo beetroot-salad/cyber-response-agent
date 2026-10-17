@@ -1,4 +1,4 @@
-"""Regression tests for the claims adversary's findings on #1107: each one fails without its fix."""
+"""Regression tests for settings-reader findings: each fails without its fix."""
 from __future__ import annotations
 
 import importlib.util

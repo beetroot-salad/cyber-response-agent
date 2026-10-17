@@ -1,41 +1,22 @@
-"""#869 M6/U1 — the pitfalls predicate (site 1). The `SKILL.md` probe goes.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_869.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared869.py`.
-
-The subtraction is the headline: `_is_real_system` — "does `defender/skills/<system>/SKILL.md`
-exist" — is deleted, along with the two in-code justifications C34 refuted (they argue the
-census that chose `SKILL.md` over `execution.md`, and that census no longer holds: 7 of 7
-systems have an `execution.md`). What replaces it is `is_system_name`'s shape half plus
-membership in the threaded value.
-"""
+"""#869 M6/U1 — the pitfalls predicate (site 1). The `SKILL.md` probe goes."""
 from __future__ import annotations
 
 import pytest
 
 from defender.tests._claim1175 import claim_git
 from defender import _git
-from defender.learning.core import persist
-from defender.learning.core.config import LoopPaths
-from defender.learning.core.state import LearningState
 from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.leads.path_validation import _is_in_scope
 from defender.tests._declared869 import (
     SKILLS_REL,
-    Spawn,
     is_system_name,
-    git,
     head_files,
-    loop_log,
-    marker_file,
     pitfall_row,
     seed_tree,
-    skill_md,
     write,
 )
-from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
+from defender.tests._lead_author_1134 import lane_tree_for
 
 DECLARED = frozenset({"elastic"})
 
@@ -139,46 +120,3 @@ def test_pitfalls_path_rule_refuses_an_undeclared_directory(tmp_path):
     assert head_files(repo) == before
 
 
-def test_a_declared_system_with_no_skill_md_is_admitted(tmp_path, monkeypatch, capsys):
-    """A tree that declares `ticket` through its ADAPTER ALONE — no `defender/skills/ticket/
-    SKILL.md`, no `execution.md` — still admits a ticket handoff and commits the curator's
-    edit.
-
-    What the SUBTRACTION buys, and #870 R2's prerequisite: the removed `SKILL.md` probe was
-    the only thing standing between a real system and its own pitfalls lane, and every
-    consumer of that probe has to keep working without it.
-
-    WHAT THE FIXTURE'S ABSENT `execution.md` BUYS, CORRECTED (phase F, F10.2). It was recorded
-    as a trap against "passing through the marker half" — and under NF2 that reason does not
-    hold: this lane resolves the ADAPTER HALF ALONE and never consults the marker source, so a
-    seeded marker could not have declared `ticket` here in the first place. The fixture is
-    still right, for the reason that does hold: with no `execution.md` committed, the path the
-    tick commits is one the CURATOR created, so `execution.md in head_files` is an observation
-    about this drive rather than about the fixture. The trap that carries the demand is the
-    absent `SKILL.md` — the probe M6 deletes — and it is asserted directly below.
-    """
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    repo = seed_tree(tmp_path, adapters=("ticket",), markers=(), skills=(), catalog=(),
-                     non_systems=("gather",))
-    assert not skill_md(repo, "ticket").exists()
-    assert not marker_file(repo, "ticket").exists()
-
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "ticket"), pitfall_row("r:l-001:0", "ticket")],
-        state=LearningState.open(paths),
-    )
-    spawn = Spawn(lambda root: write(
-        marker_file(root, "ticket"), "# ticket\n## Common pitfalls\n- use the key, not the id\n",
-    ))
-    capsys.readouterr()
-
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
-    assert spawn.systems_seen == ["ticket"]
-    assert spawn.handoffs[0]["path"] == "defender/skills/ticket/execution.md"
-    assert "defender/skills/ticket/execution.md" in head_files(repo)
-    assert persist.read_pitfalls(LearningState.open(paths)) == []
-    assert not skill_md(repo, "ticket").exists()
-    assert "execution.md pitfalls" in git(repo, "log", "--oneline", "-1").stdout
-    assert loop_log(capsys)

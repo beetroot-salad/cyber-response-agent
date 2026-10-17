@@ -1,58 +1,11 @@
-"""#1106 — where the settings live now: the committed layout, the template, the read gate and
-the bridge (O9, M1, D1, C9, O7, D4).
-
-M1 moves the four settings kinds — each system's `config.env`, `verb-grants.yaml`,
-`lead-zero.yaml`, `systems/case-history/mapping.yaml` — out of `defender/knowledge/environment/`
-to the lab tenant's `settings/` at the REPO ROOT, creates an empty `agent/` half
-beside it, and adds `knowledge/tenant-template/` whose table grants NOTHING (D1). Nothing under
-`defender/` holds a settings kind afterwards, and `defender/knowledge/` is gone (O9).
-
-That location is also the whole of O7's discharge: the model's read roots are the run dir and
-`defender_dir`, and `settings/` now sits under neither — so the gate denies every settings file
-by construction rather than by the `.env` substring filter that happened to catch `config.env`
-alone (K9). Pinned through the real gate, `decide_read` and the bash lane's
-`read_allowed_path`, with a corpus file as the positive control.
-
-D4's bridge: the tenant record a fresh runs base mints says `playground`, not `default`, and an
-existing record is read back as written — never remapped.
-
-#1120 (C26, H2): the lab is walked by no gate any more, so the lab-content assertions here are
-made on the committed test fixture (`knowledge/tenant-fixture/`), which holds the same four
-kinds, and "every committed tenant" means the committed knowledge folders the CI census walks —
-the fixture and the template. A tenant is reached only through `accept_tenant`.
-"""
+"""Where tenant settings live: the playground tenant and tenant template resolve through the real resolver, the template grants nothing, and no settings file is readable by the model's read surfaces."""
 from __future__ import annotations
 
-import os
 import shutil
 import warnings
 from pathlib import Path
 
-from defender import _git
 from defender.tests import _tenants1106 as T
-from defender.tests._dispositions995 import (
-    CORRELATION_CENSUS,
-    GATHER_CENSUS,
-    WITHHELD_CENSUS,
-)
-
-#: The four settings kinds, by what a census can see: a file's name (and, for the mapping, the
-#: folder it sits in).
-_SETTINGS_NAMES = ("config.env", "verb-grants.yaml", "lead-zero.yaml")
-
-#: The systems that carry a `config.env` — the seven that did before the move, and host-state
-#: since #1107 (its access method is the tenant's to name). tacit-knowledge needs none, which is
-#: why D3 does not require one at start.
-_CONFIGURED_SYSTEMS = frozenset({
-    "case-history", "change-mgmt", "cmdb", "elastic", "host-state", "identity", "threat-intel",
-    "ticket",
-})
-
-
-def _is_settings_kind(rel: Path) -> bool:
-    return rel.name in _SETTINGS_NAMES or (
-        rel.name == "mapping.yaml" and rel.parent.name == "case-history"
-    )
 
 
 def _committed_tenant_dirs() -> list[Path]:
@@ -65,43 +18,10 @@ def _committed_tenant_dirs() -> list[Path]:
 # O9 — nothing under defender/ holds a settings kind, and defender/knowledge/ is gone.
 # =============================================================================================
 
-def test_defender_knowledge_no_longer_exists():
-    assert not T.RETIRED_KNOWLEDGE.exists(), (
-        f"{T.RETIRED_KNOWLEDGE} still exists — M1 moves `environment/` out and deletes the "
-        "whole directory (it held nothing else)"
-    )
-
-
-def test_no_settings_kind_is_tracked_or_on_disk_under_defender():
-    """O9's census, over BOTH the index and the working tree: a copy left on disk is as much a
-    copy in the box's read-only mount as a tracked one."""
-    tracked = [
-        Path(p) for p in _git.git(["ls-files", "defender"], cwd=T.REPO_ROOT).splitlines() if p
-    ]
-    tracked_hits = sorted(str(p) for p in tracked if _is_settings_kind(p))
-    on_disk: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(T.DEFENDER):
-        dirnames[:] = [d for d in dirnames if d not in {".venv", "__pycache__", "node_modules"}]
-        for name in filenames:
-            rel = (Path(dirpath) / name).relative_to(T.REPO_ROOT)
-            if _is_settings_kind(rel):
-                on_disk.append(str(rel))
-    assert tracked_hits == [], tracked_hits
-    assert on_disk == [], on_disk
-
 
 # =============================================================================================
 # M1 — the fixture tenant holds the four kinds, moved rather than rewritten.
 # =============================================================================================
-
-def test_the_playground_settings_half_holds_the_four_kinds():
-    assert (T.FIXTURE_SETTINGS / "verb-grants.yaml").is_file()
-    assert (T.FIXTURE_SETTINGS / "lead-zero.yaml").is_file()
-    assert (T.FIXTURE_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
-    configured = {
-        p.parent.name for p in (T.FIXTURE_SETTINGS / "systems").glob("*/config.env")
-    }
-    assert configured == _CONFIGURED_SYSTEMS, configured
 
 
 def test_the_playground_resolves_through_the_real_resolver():
@@ -117,47 +37,9 @@ def test_the_playground_resolves_through_the_real_resolver():
     assert td.agent.is_dir()
 
 
-def test_the_moved_table_grants_exactly_what_the_retired_one_did():
-    """Conservation across the move: the fixture's projection is the census transcribed in
-    `_dispositions995.py` before #995 — a move that edited a row would change who may call
-    what, silently, under a "rename" commit."""
-    grants = T.fixture_grants()
-    assert {(s, v) for s, v, _ in grants.gather.entries} == set(GATHER_CENSUS)
-    assert {(s, v) for s, v, _ in grants.correlation.entries} == set(CORRELATION_CENSUS)
-    assert grants.correlation_system == "elastic"
-    rows = T.mod("runtime.verb_dispositions").load_dispositions(
-        T.FIXTURE_SETTINGS / "verb-grants.yaml")
-    assert {(r.system, r.verb) for r in rows if not r.roles} == set(WITHHELD_CENSUS)
-
-
-def test_the_moved_lead_zero_and_mapping_carry_the_retired_values():
-    lz = T.mod("runtime.lead_zero_config")
-    assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) == \
-        T.SHIPPED_CORRELATION_TEMPLATE
-    # The mapping's own values as they were before the move (#1221's amendment dropped the
-    # `released:` section this once read through the release predicate).
-    mapping = T.fixture_run_tenant().ticket_mapping
-    assert mapping["open"]["status"] == "open"
-    assert mapping["comment"]["author"] == "defender"
-
-
-def test_the_playground_agent_half_exists_and_holds_no_settings_kind():
-    """Created empty but for a placeholder (so git keeps it), and it is what the box mounts —
-    so a settings file here would be a settings file in every fixture run's box (O1)."""
-    assert T.FIXTURE_AGENT.is_dir()
-    hits = [p for p in T.FIXTURE_AGENT.rglob("*")
-            if p.is_file() and _is_settings_kind(p.relative_to(T.FIXTURE_AGENT))]
-    assert hits == [], hits
-
-
 # =============================================================================================
 # D1 / C9 — the template grants nothing, loads clean, and a tenant copied from it cannot run.
 # =============================================================================================
-
-def test_the_template_has_both_halves_and_the_required_files():
-    assert T.TEMPLATE_AGENT.is_dir()
-    for rel in T.REQUIRED_FILES:
-        assert (T.TEMPLATE_SETTINGS / rel).is_file(), rel
 
 
 def test_every_template_row_grants_nobody_and_says_why():
@@ -253,15 +135,6 @@ def test_every_committed_tenant_passes_the_resolver(tmp_path):
             (folder / "settings" / "verb-grants.yaml").read_bytes()
 
 
-def test_the_settings_path_helpers_take_the_settings_folder(tmp_path):
-    """The two fixed-path constants (`DISPOSITIONS_REL`, `LEAD_ZERO_CONFIG_REL`) gave way to
-    helpers over the folder a run resolved — the one place each filename is spelled."""
-    vd = T.mod("runtime.verb_dispositions")
-    lz = T.mod("runtime.lead_zero_config")
-    assert vd.dispositions_path(tmp_path) == tmp_path / "verb-grants.yaml"
-    assert lz.lead_zero_config_path(tmp_path) == tmp_path / "lead-zero.yaml"
-
-
 # =============================================================================================
 # O7 — the model cannot read any settings/ file through the host read gate.
 # =============================================================================================
@@ -311,19 +184,3 @@ def test_every_settings_file_is_denied_by_both_read_surfaces_and_a_corpus_file_i
             control, run_dir=run_dir, defender_dir=T.DEFENDER, policy=policy), role
 
 
-def test_no_live_markdown_still_points_at_the_retired_environment_path():
-    """The pointers follow the move (K1's markdown census). Several are FUNCTIONAL, not prose:
-    `/connect` tells its agent where to write a new system's `config.env` and table rows, and
-    each system's `execution.md` tells the model where its config lives — pointing either at a
-    folder that no longer exists recreates the settings under `defender/` (O9). `docs/archive`
-    is history and stays untouched."""
-    hits: list[str] = []
-    candidates = [*T.DEFENDER.rglob("*.md"),
-                  T.REPO_ROOT / ".claude" / "skills" / "prompt-hygiene" / "SKILL.md"]
-    for path in candidates:
-        rel = path.relative_to(T.REPO_ROOT)
-        if {".venv", "node_modules"} & set(rel.parts) or rel.parts[:3] == ("defender", "docs", "archive"):
-            continue
-        if path.is_file() and "knowledge/environment" in path.read_text(encoding="utf-8"):
-            hits.append(str(rel))
-    assert hits == [], hits

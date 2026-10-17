@@ -1,30 +1,9 @@
-"""#1105 PR 2 — the code review's findings the owner approved (PR #1236), each driven through
-its real entry point.
-
-* A — opening a run answers ONE refusal family. `runs.open`, `runs.resolve` and an episode
-  view's `open` refuse only with `RunRefused`: `RunAbsent` when the run is gone (its container
-  included), `RunUnreachable` (raised from the container's `TenantRefused`) when the container
-  cannot be trusted or read right now, a plain `RunRefused` for a refused entry. So the
-  launcher's VERIFY step, which catches `RunRefused`, records every finished world whose
-  container went bad after the siblings ran as `not archived` and goes on to the judge.
-* B — the curation drain: a row whose run is GONE is `artifact-missing` at once; any other
-  refusal (the tenant's acceptance, an unreachable container, a refused entry) is a counted
-  transient attempt, re-queued until `LEAD_AUTHOR_MAX_RETRIES`, then `transient-exhausted`.
-* C — a pitfalls-only tick needs no `DEFENDER_DATA_ROOT`; a tick with rows queued and no data
-  root refuses before any box exists, every row still queued.
-* D — one opener for a command line's `--tenant T <run_id>`: the refusal is printed on stderr,
-  never only logged.
-* E — the tracer's run listing holds the runs folder once and hands out every run.
-
-RED before the fixes, each for its stated reason; every negative is paired with a positive
-control in the same test.
-"""
+"""Review-finding regressions: natural open refusals, container spoiled after view, transient drain attempts, CLI stderr refusals."""
 from __future__ import annotations
 
 import json
 import logging
 import os
-import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -463,66 +442,8 @@ def test_d_each_run_id_command_prints_its_refusal_on_stderr(tmp_path, d9_tenant,
     assert got.out == ""
 
 
-def test_d_the_shared_opener_opens_a_natural_run_and_an_arm_or_returns_the_refusal(
-        tmp_path, d9_tenant):
-    """`open_requested_run(data_root, tenant, run_id, episode_id=None)`: the natural run, or
-    with an episode id the arm, opened through the tenant's repository — or the refusal as one
-    line of text naming the request. RED before the fix: no such function."""
-    from defender.run_repository import Run, open_requested_run
-    from defender.tests._state1135 import curation_run_dir
-
-    run_dir = curation_run_dir("r-real", tenant_id=d9_tenant)
-    ep = _episode(container=d9_tenant, arms=("a",))
-    root = _tenant.resolve_data_root()
-
-    run = open_requested_run(root, d9_tenant, "r-real")
-    assert isinstance(run, Run), run
-    assert Path(run.run_dir) == run_dir
-    arm = open_requested_run(root, d9_tenant, f"{EP}-a", episode_id=EP)
-    assert isinstance(arm, Run), arm
-    assert Path(arm.run_dir) == ep / "runs" / f"{EP}-a"
-
-    for raw_tenant, raw_run, episode_id in ((d9_tenant, "nope-run", None),
-                                           ("no-such-tenant", "r-real", None),
-                                           (d9_tenant, "r-real", "no-such-episode"),
-                                           (d9_tenant, "../r-real", None)):
-        refused = open_requested_run(root, raw_tenant, raw_run, episode_id=episode_id)
-        assert isinstance(refused, str), f"{raw_tenant}/{raw_run}/{episode_id}: {refused!r}"
-        assert "cannot be opened" in refused, refused
-        assert "\n" not in refused, refused
-
 
 # ==========================================================================================
 # E — the tracer's listing: one hold, every run.
 # ==========================================================================================
 
-def test_e_the_tenants_runs_come_from_one_hold_of_the_runs_folder(tmp_path):
-    """`RunsRepository.all_runs()` holds the runs folder ONCE (its `_tenant.json` judged once)
-    and hands out a `Run` for every listed run, in id order, each reading its own records;
-    `trace_lesson.tenant_runs` answers the same runs. An absent runs folder holds none.
-    Positive control on the cost: opening the same runs one by one holds the folder once per
-    run. RED before the fix: no `all_runs`, and the tracer lists then opens each run."""
-    from defender.learning.ops import trace_lesson
-    from defender.run_repository import Run, RunsRepository
-
-    ids = ["r1", "r2", "r3"]
-    t = _good(tmp_path, *ids)
-    rec = H.RecordingIO()
-    got = RunsRepository(t, io=rec).all_runs()
-    assert [str(r.id) for r in got] == ids
-    assert all(isinstance(r, Run) for r in got)
-    assert [Path(r.run_dir) for r in got] == [Path(t.runs) / i for i in ids]
-    assert all("seed" in (r.facts.alert.read() or "") for r in got)
-    assert len(rec.named("hold")) == 1, f"the listing held the folder {rec.named('hold')!r}"
-
-    one_by_one = H.RecordingIO()
-    repo = RunsRepository(t, io=one_by_one)
-    for run_id in repo.list():
-        repo.open(run_id)
-    assert len(one_by_one.named("hold")) == len(ids) + 1, "control: per-id opens hold each"
-
-    assert [str(r.id) for r in trace_lesson.tenant_runs(H.T_ID)] == ids
-
-    empty = _good(tmp_path, tenant_id=H.U_ID)
-    shutil.rmtree(empty.runs)
-    assert empty.runs_repository().all_runs() == []

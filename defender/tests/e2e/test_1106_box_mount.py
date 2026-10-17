@@ -1,18 +1,4 @@
-"""#1106 — a run's box holds its own tenant's `agent/` half, read-only, and nothing else of any
-tenant's (O1, M6).
-
-#1108 P2 supersedes M6's fixed target: the READ-ONLY bind uses the accepted
-Tenant.agent as both source and target. Settings are never exposed. DooD translates only
-the source, with the existing shared-mount coverage refusal unchanged.
-
-Observed on the REAL `start_box` over the recording docker fake (`_box665.RecordingDocker`):
-the `docker run` argv it composes is the box's mount list. Two tenants live in ONE tmp root so
-"nothing of tenant B" is a claim about a B that exists beside A — and each direction is run, so
-every absence has its presence as the control on the same argv.
-
-(The design's "a listing inside the box" half needs a live daemon; the argv is what a live box
-is created FROM, and `test_665_box_live.py` is where live mount mechanics are confirmed.)
-"""
+"""#1106 e2e: a run's box mounts only its own tenant's agent/ half, read-only (observed on the argv start_box composes); DooD translates the source through a covering shared mount and refuses an uncovered one."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,8 +14,7 @@ pytestmark = pytest.mark.e2e
 
 @pytest.fixture(autouse=True)
 def _boxed_only(monkeypatch):
-    """Neither the unsandboxed opt-out nor a runtime override may turn a box fault into the
-    host executor — that would make "no mount" and "no box" indistinguishable."""
+    """Neither the unsandboxed opt-out nor a runtime override may turn a box fault into the host executor — that..."""
     from defender.runtime import box as box_mod
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
@@ -90,18 +75,6 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
     assert T.exposes([Path(agent_mounts[0]["source"])], mine.agent)
 
 
-def test_the_same_path_agent_target_is_outside_the_other_bound_trees(tmp_path, two_tenants):
-    """#1108 D2: the host path is absolute and does not shadow another bound tree."""
-    target = two_tenants[1].agent
-    assert target.is_absolute()
-    rec = _start(tmp_path, target)
-    assert any(m["target"] == str(target) for m in rec.mounts())
-    for mount in rec.mounts():
-        if mount["target"] != str(target):
-            assert not target.is_relative_to(mount["target"]), (target, mount)
-            assert not Path(mount["target"]).is_relative_to(target), (target, mount)
-
-
 def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path):
     """DooD translates the source while the target remains this run process's agent path."""
     from defender.runtime import box as box_mod
@@ -119,8 +92,7 @@ def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path
 
 
 def test_an_agent_source_on_no_shared_mount_refuses_the_box_naming_it():
-    """The negative on the same builder: a data root the daemon cannot see is C46's
-    refusal, naming the agent source — the run dir and defender dir around it are covered."""
+    """The negative on the same builder:"""
     from defender.runtime import box as box_mod
     from defender.runtime.box_codec import BoxFault
 

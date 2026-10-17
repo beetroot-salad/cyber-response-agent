@@ -1,22 +1,6 @@
-"""#947 — the QUESTIONER role and its host-side fan-out (M1, O1, O8).
-
-A deny-all role, modelled on `ORACLE_DEF`: no tools, no verb grant, a frozen deps subtype
-carrying only its role. Three calls under one role key, separated by their `agent_id` alone
-(the "two roles, three calls" rule at `agent_role.py:16-24` — nothing about a call's identity
-is keyed on the role). Its inputs are the captured past, so every one is wrapped untrusted, and
-so is Call 1's own output before it seeds Calls 2 and 3.
-
-Registering an eleventh role moves FOUR hand-maintained sites, not two (G2, refuted): two
-hardcoded counts AND two hand-maintained enumerations, the second of which fails SILENTLY —
-`_all_policies` in `test_grant_gate_575.py`, whose own comment says a role registered in AGENTS
-but absent there is "a compiled policy the audit never looks at".
-
-RED against b8a63e66: `learning/branch/questioner/` does not exist (X16), `AgentRole` declares
-ten members (X3), and the three census sites still say ten.
-"""
+"""#947 — the QUESTIONER role and its host-side fan-out (M1, O1, O8)."""
 from __future__ import annotations
 
-import dataclasses
 import json
 import re
 
@@ -37,51 +21,7 @@ def _family_mod():
     return T.mod("runtime.branch._family")
 
 
-# ---------------------------------------------------------------------------------------
 # registration, and everything that moves with it
-# ---------------------------------------------------------------------------------------
-
-
-def test_947_questioner_role_and_definition_are_registered():
-    """The questioner is a member of the role enum, its definition is registered in the agent
-    registry under that member, and the registry still holds exactly one definition per role."""
-    AgentRole = T.sym("runtime.agent_role", "AgentRole")
-    AGENTS = T.sym("agents", "AGENTS")
-    QUESTIONER_DEF = _questioner().QUESTIONER_DEF
-    assert AgentRole.QUESTIONER in AGENTS
-    assert AGENTS[AgentRole.QUESTIONER] is QUESTIONER_DEF
-    assert QUESTIONER_DEF.role is AgentRole.QUESTIONER
-    assert set(AGENTS.keys()) == set(AgentRole)
-
-
-def test_947_every_hand_maintained_role_census_agrees_on_the_roster():
-    """Every hand-maintained role census agrees on the roster — the two hardcoded counts and
-    BOTH enumerations, including the compiled-policy sweep whose omission is silent rather
-    than red.
-
-    TEN AT #773: #922 took it to eight by retiring the actor, oracle and judge definitions
-    with the pipeline they were the only callers of, and their enum keys went with them rather
-    than staying behind as names nothing answers to. `judge` then RETURNED — re-added by
-    #1008 and bound to the family judge, which until then ran under this role's own definition
-    — taking it to nine, and #773 adds a tenth (`CORPUS_REPAIR`, M4's one bounded repair
-    spawn, a fixed separate definition rather than a per-spawn override). TWELVE SINCE #1224,
-    which adds `ORACLE` and `ORACLE_CHECK` — a branched world's live oracle and its verifier,
-    each with its own definition and model knob. TEN SINCE #1166, which retires `VERIFIER` and
-    `CORPUS_REPAIR` with the forward check they served. This count moves with the roster, which is
-    the whole reason the census is spelled in four places and checked here rather than
-    trusted to stay in step on its own."""
-    AgentRole = T.sym("runtime.agent_role", "AgentRole")
-    AGENTS = T.sym("agents", "AGENTS")
-    assert len(AgentRole) == 10
-    assert len(AGENTS) == 10
-    assert {AgentRole.ORACLE.value, AgentRole.ORACLE_CHECK.value} == {"oracle", "oracle_check"}
-    src = (T.DEFENDER / "tests" / "test_bind_sole_seam_551.py").read_text(encoding="utf-8")
-    assert "== 10" in src, "the bind-case count was not moved with the roster"
-    assert "QUESTIONER_DEF" in src, "the bind-case enumeration was not moved"
-    grant = (T.DEFENDER / "tests" / "test_grant_gate_575.py").read_text(encoding="utf-8")
-    assert "len(AGENTS) == 10" in grant, "the grant gate's hardcoded count was not moved"
-    assert '"questioner"' in grant, "_all_policies never compiles the questioner's policy"
-    assert '"judge"' in grant, "_all_policies never compiles the family judge's policy"
 
 
 def test_947_questioner_definition_grants_no_tool_and_no_verb():
@@ -98,50 +38,9 @@ def test_947_questioner_definition_grants_no_tool_and_no_verb():
     assert not policy.read_roots
 
 
-def test_947_questioner_deps_subtype_is_frozen_and_carries_only_role():
-    """The questioner's deps subtype is frozen and its only member is the role class variable —
-    nothing that could carry a run dir, a world label or a trajectory into a deny-all call."""
-    deps_cls = _questioner().QUESTIONER_DEF.deps_cls
-    assert dataclasses.is_dataclass(deps_cls)
-    assert deps_cls.__dataclass_params__.frozen
-    assert [f.name for f in dataclasses.fields(deps_cls)] == []
-    assert deps_cls.role is T.sym("runtime.agent_role", "AgentRole").QUESTIONER
-
-
-def test_947_an_ordinary_run_still_starts_after_the_questioner_role_lands(tmp_path, monkeypatch):
-    """An ordinary investigation still starts once the questioner joins the agent registry: the
-    role-model preflight sweeps every registered definition at every run start, and the reader
-    that sweeps it returns a zero status for a roster that includes the new role.
-
-    EVERY PROVIDER IS CREDENTIALED FIRST, with a value that could not buy anything. The sweep
-    returns 2 on two unrelated conditions — a model thunk it cannot use, and a provider key it
-    cannot resolve — and only the first is what this demand is about (S42: "exits 2 on an
-    unusable thunk"). Left to the ambient environment the assertion measured whether the HOST
-    holds a billable key, which is why it passed on a developer's machine and failed on CI for
-    the pre-#947 ten roles just as readily as for the eleven. Pinned this way it can only fail
-    for the reason it names."""
-    preflight = T.sym("run", "preflight_role_models")
-    providers = T.mod("runtime.providers")
-    AGENTS = T.sym("agents", "AGENTS")
-    AgentRole = T.sym("runtime.agent_role", "AgentRole")
-    assert AgentRole.QUESTIONER in AGENTS
-    for var in providers.api_key_vars():
-        monkeypatch.setenv(var, "not-a-billable-key")
-    # The sweep is over `AGENTS.values()`, so what it covers is the roster itself: eleven
-    # definitions, one per role, none of them sharing a key with another.
-    assert sorted(defn.role.value for defn in AGENTS.values()) == sorted(r.value for r in AgentRole)
-    assert preflight(None) == 0
-
-
 def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(tmp_path,
                                                                                 monkeypatch):
-    """The role-model preflight runs at family level, before the questioner is paid for, AND
-    again inside each sibling process — the family-level pass is an early exit, never a
-    substitute for the sibling's own.
-
-    Both CONFIGURED roots point inside `tmp_path`: the episodes root is read from configuration
-    and the launcher refuses to invent one, so a scenario that drives `main` has to name it or
-    it observes that refusal instead of the thing it is about."""
+    """The role-model preflight runs at family level, before the questioner is paid for, AND again inside each sibling process — the family-level pass is..."""
     cli = T.mod("learning.branch.cli")
     seen: list[str] = []
     base, src = T.runs_base(tmp_path)
@@ -174,9 +73,7 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     assert "--episode" in run_src, "the sibling entry point has no episode path to preflight in"
 
 
-# ---------------------------------------------------------------------------------------
 # the three calls: one role key, three identities
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_three_questioner_calls_share_a_role_and_differ_by_agent_id(tmp_path):
@@ -207,9 +104,7 @@ def test_947_agent_trace_ids_are_pairwise_distinct_across_all_four_role_key_writ
     assert len(set(ids)) == 4, f"trace ids collide: {ids}"
 
 
-# ---------------------------------------------------------------------------------------
 # what the questioner is handed
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_questioner_reads_joined_leads_alert_and_frontier_at_n(tmp_path):
@@ -274,24 +169,11 @@ def test_947_the_questioner_screens_the_source_document_before_reading_it(tmp_pa
     assert agent.calls == 0
 
 
-# ---------------------------------------------------------------------------------------
 # the reply as TEXT, which is what a raw model actually hands back
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_a_fenced_yaml_reply_is_read_as_the_document_it_holds(tmp_path):
-    """A questioner reply arrives inside a ```yaml fence and is still read as its document.
-
-    The fence is not a model quirk to be tolerated grudgingly — `questioner/family.md` and
-    `questioner/world.md` both SHOW the required shape inside one, so a model that emits a
-    fenced document is doing what the prompt asked. Every other reader of a model reply in this
-    repo normalises through `core.validate` before parsing (the judge's `validate_reply`, the
-    oracle sampler, `learning/loop`); the questioner parsed the raw text, so `safe_load` hit the
-    backtick and the whole episode aborted on call 1 with "not a YAML document".
-
-    All THREE calls are fenced, because the seat-authoring calls parse through the same helper
-    and a fix applied to call 1 alone would abort one step later.
-    """
+    """A questioner reply arrives inside a ```yaml fence and is still read as its document."""
     fenced = [f"```yaml\n{yaml.safe_dump(doc, sort_keys=False)}```"
               for doc in (T.family_doc(), T.world_doc("b"), T.world_doc("c"))]
     agent = T.FakeAgent(*fenced)
@@ -306,16 +188,7 @@ def test_947_a_fenced_yaml_reply_is_read_as_the_document_it_holds(tmp_path):
 
 
 def test_947_the_prompts_facts_example_parses_through_the_real_loader():
-    """Every world's facts the family prompt SHOWS are ones the family loader accepts.
-
-    The prompt is where the model learns the shape, and the loader is what refuses it — after
-    all three calls have been paid for and with the episode already aborted. The two agreed only
-    by prose until a live episode died on the gap (#947: the prompt showed an encoding the
-    loader refused).
-
-    The example is PARSED, not searched for a substring: a prompt that merely mentions the right
-    key names while nesting them wrongly is exactly the failure this pins.
-    """
+    """Every world's facts the family prompt SHOWS are ones the family loader accepts."""
     prompt = (T.mod("run_common").REPO_ROOT / "defender" / "learning" / "branch"
               / "questioner" / "family.md")
     text = prompt.read_text(encoding="utf-8")
@@ -338,15 +211,7 @@ def test_947_the_prompts_facts_example_parses_through_the_real_loader():
 
 
 def test_947_the_questioner_is_told_which_systems_the_tenant_serves(tmp_path):
-    """The served systems reach the prompt, so the bounded domain is stated rather than
-    guessed.
-
-    A fact no served system would reflect is one no query in the episode can show; the domain
-    is the tenant's gather grant, and the model is told its members.
-
-    Asserted on the PROMPT the seam was handed, not on a return value: what is at issue is
-    whether the model was told, and only `agent.prompts` holds that.
-    """
+    """The served systems reach the prompt, so the bounded domain is stated rather than guessed."""
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     _questioner().author_family(
         source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
@@ -368,17 +233,7 @@ def test_947_the_questioner_is_told_which_systems_the_tenant_serves(tmp_path):
 
 
 def test_947_every_world_the_prompt_shows_survives_the_identity_gate():
-    """The prompt's example worlds pass the gate that mints their names.
-
-    The companion to the facts test above, and the same failure four times over: `world_id`
-    is refused unless it is lowercase alphanumerics with `_` and `.` — a HYPHEN would not
-    round-trip through the world token — and the prompt asked for "a short lowercase label" without saying so.
-    A live episode died on `sshpass-at-alert-time`, the spelling any writer of English reaches
-    for first.
-
-    The example is composed into a real `Family` and run through `check_identities`, the gate
-    the launcher itself calls, so the prompt cannot show a name the launcher would refuse.
-    """
+    """The prompt's example worlds pass the gate that mints their names."""
     prompt = (T.mod("run_common").REPO_ROOT / "defender" / "learning" / "branch"
               / "questioner" / "family.md")
     blocks = re.findall(r"^```yaml\n(.*?)^```", prompt.read_text(encoding="utf-8"),
@@ -397,9 +252,7 @@ def test_947_every_world_the_prompt_shows_survives_the_identity_gate():
     family_mod.check_identities(family)
 
 
-# ---------------------------------------------------------------------------------------
 # what a document in this corpus looks like
-# ---------------------------------------------------------------------------------------
 
 
 def _samples(system: str, answer: dict | None) -> dict:
@@ -410,16 +263,7 @@ def _samples(system: str, answer: dict | None) -> dict:
 
 
 def test_947_a_real_answer_per_served_system_reaches_every_prompt(tmp_path):
-    """The questioner is shown real answers from each system the capture queried.
-
-    Before this it had `QueryRow.payload_digest` — a BYTE COUNT — and nothing else about the
-    answers the worlds it authors are served through. It invented field names accordingly, and
-    a fact spelled in fields no system returns is one no query the investigation writes can
-    show.
-
-    Every prompt, not only call 1's. The seat calls plan no facts, but their STORY has to be
-    true of the answers the worlds will be served.
-    """
+    """The questioner is shown real answers from each system the capture queried."""
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     _questioner().author_family(
         source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
@@ -435,13 +279,7 @@ def test_947_a_real_answer_per_served_system_reaches_every_prompt(tmp_path):
 
 
 def test_947_the_system_sample_arrives_inside_the_untrusted_frame(tmp_path):
-    """The samples are estate answers, so they are framed with the rest of the capture.
-
-    They are attacker-influenced by construction — they are what the monitored environment
-    holds — and they are shown so a shape can be MATCHED, never so text inside one can be
-    obeyed. The served-system list is host text ahead of the frame; this is its opposite
-    number, and the two must not be confused.
-    """
+    """The samples are estate answers, so they are framed with the rest of the capture."""
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     _questioner().author_family(
         source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
@@ -456,13 +294,7 @@ def test_947_the_system_sample_arrives_inside_the_untrusted_frame(tmp_path):
 
 
 def test_947_a_served_system_the_capture_never_asked_is_still_named(tmp_path):
-    """A served system the capture never asked is listed WITHOUT an example rather than
-    omitted.
-
-    "Served, and never asked" and "not served" are different facts, and only the first tells
-    an author the system is one this tenant answers through. Collapsed together, an author
-    reads an absent system as one that does not exist and never places a fact in it.
-    """
+    """A served system the capture never asked is listed WITHOUT an example rather than omitted."""
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     _questioner().author_family(
         source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),

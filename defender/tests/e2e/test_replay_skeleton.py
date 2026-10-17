@@ -1,15 +1,4 @@
-"""Golden-replay e2e scripts — deterministic + hermetic.
-
-These replay the artifact-write subset of REAL vendored runs through the real
-`driver.run_investigation` loop and diff the produced run dir against the golden
-(`fixtures-e2e/golden-v2sshd/`, `fixtures-e2e/golden-sshpivot-ab3/`). They prove
-the HAPPY path of the whole-runtime seam: the write path, invlang validation, the
-role-dependent Bash gate, and the two-table gather capture all fire end-to-end.
-
-The replay *machinery* (ReplayFn/DenyProbe/Turn/drive/materialize/…) lives in
-`_replay_harness.py`; this module is just the scripts. The driver's error
-handling + the gate-as-feedback recovery loop are in `test_replay_error_paths.py`.
-"""
+"""Golden-replay e2e scripts — deterministic + hermetic."""
 from __future__ import annotations
 
 import re
@@ -87,17 +76,7 @@ def test_replay_golden_v2sshd(tmp_path):
 
 def test_replay_full_run_ab3(tmp_path, monkeypatch):
     """Increment (a): replay a FULL real gather run (ab3-B, 10 turns) — bash,
-    read_file, write_file AND gather dispatch — through the real driver loop.
-
-    Scope: this is a MAIN-LOOP e2e test, so `gather` is faked at its return
-    boundary (it's a separately-tested unit — test_gather_capture owns its
-    internals; re-driving it would couple this test to it). Everything else is
-    real: the bash/read/write tools and the permission
-    gate's decide_bash / decide_read / decide_write / invlang paths all fire. We
-    assert the authored artifact (investigation.md) reconstructs byte-for-byte and
-    re-validates clean through the live gate. The two-table / gather_raw capture
-    belongs to the nested-gather replay (test_nested_gather_capture).
-    """
+    read_file, write_file AND gather dispatch — through the real driver loop."""
     run_id = "replay-ab3"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -184,12 +163,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
 
 def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path):
     """The gate's other arm, end to end: the composer finds a gap and can name no measurement
-    that would settle it, so the drafted `malicious` never reaches disk.
-
-    The pair with `test_replay_full_run_ab3` is the whole point — same machinery, same
-    confident draft, one bundle apart. A suite in which every review answers `holds` cannot
-    tell a reviewer that ran from a close that reached no reviewer at all, which is exactly
-    what the replays were unable to distinguish while the seam defaulted to a live bundle."""
+    that would settle it, so the drafted `malicious` never reaches disk."""
     run_id = "replay-gap"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     inv_text = (GOLDEN_AB3 / "investigation.md").read_text()
@@ -252,17 +226,7 @@ def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn, reason_subs
 
 
 def test_main_cannot_name_a_write_path_at_all(tmp_path):
-    """The successor to the retired `write-escape` deny bounce (#810).
-
-    That arm drove `write_file` at a path outside the run dir and asserted the allowlist
-    refused it. Main no longer HAS a verb that accepts a write path: `append_block` is bound
-    to `<run_dir>/investigation.md` in the handler, so a model that wants to write elsewhere
-    has nothing to say it with. Unreachable beats denied — but only if it is actually
-    unreachable, so this asserts both halves: no path-taking writer is registered, and the
-    one writer that is lands on the transcript and creates nothing else THE MODEL COULD HAVE
-    ASKED FOR — the one HOST-WRITTEN exception is `run_end.sidecar_path`'s own record
-    (#1047), unconditional beside every run dir and on a path no tool call the model issues
-    can ever name."""
+    """The successor to the retired `write-escape` deny bounce (#810)."""
     run_id = "no-write-path"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -290,14 +254,7 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
 
 def test_role_flip_data_access_is_role_dependent():
     """The crown-jewel contrast, asserted directly: data-source access is ROLE-DEPENDENT —
-    gather may reach a system, main may not.
-
-    #611 moved WHERE that role-dependence lives. It used to be the bash lane (main denied the
-    adapter command, gather ran it captured); now NO role runs an adapter from bash — the reader
-    lane denies the command for BOTH roles — and the role distinction is the typed `query` tool:
-    it is declared on GATHER_DEF and not on MAIN_DEF, so 'which agent may reach a data source'
-    stays policy-as-data on the AgentDefinition (visible to compile_policy / `defender-policy
-    explain`), exactly where the deleted capability bit used to be audited."""
+    gather may reach a system, main may not."""
     cmd = "defender-elastic query foo"
     run, dfn = Path("/run"), Path("/dfn")
     assert not permission.decide_bash(
@@ -307,7 +264,6 @@ def test_role_flip_data_access_is_role_dependent():
             _tenants1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)).allow
     assert GATHER_DEF.tools.query is True
     assert MAIN_DEF.tools.query is False
-
 
 
 _PAYLOAD = [{"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana",

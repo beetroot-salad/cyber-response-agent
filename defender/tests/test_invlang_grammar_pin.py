@@ -53,20 +53,7 @@ def _documented_headers() -> list[tuple[str, str, list[str]]]:
 
 
 def _is_hyp_declaration(tag: str, name: str) -> bool:
-    """The two sites that DECLARE a hypothesis, as opposed to hanging a
-    sub-block off one.
-
-    `:H l-NNN.new_hypotheses` is the mid-run fork's spelling and carries the
-    same 9-col header; since #817 the lead site runs the same
-    `_is_current_hyp_header` check, so drift costs it the same whole-block
-    rejection. Both are compared as SETS, matching that check — the header is
-    pinned on membership, not order.
-
-    The parser owns WHICH names those are (`HYP_DECLARATION_BLOCK_RE`) rather
-    than a local `endswith`: only `l-<id>.new_hypotheses` is a declaration site
-    (`_LEAD_PREFIX_RE`), so a looser test here would pin a documented header the
-    parser silently drops.
-    """
+    """The two sites that DECLARE a hypothesis, as opposed to hanging a sub-block off one."""
     return bool(parser.HYP_DECLARATION_BLOCK_RE.match(f":{tag} {name}"))
 
 

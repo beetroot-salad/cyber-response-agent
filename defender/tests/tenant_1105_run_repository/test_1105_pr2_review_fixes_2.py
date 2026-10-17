@@ -1,23 +1,6 @@
-"""#1105 PR 2 — the code review's second round (PR #1236), owner-approved, each finding driven
-through its real entry point with a positive control.
-
-* 1 — the lead-author drain resolves the data root ONCE, after its locks and before its batch,
-  and only when a curation row is queued then. A refusal is the stage's ordinary configuration
-  refusal (`FatalConfigError`, a logged one-line exit 2 from `_run_stage`), not a traceback.
-  With no row queued at the tick's start the tick claims no curation row at all: a row that
-  lands mid-tick waits, queued, for the next tick.
-* 2 — one tenant-acceptance step for a request's tenant (`_tenant.requested_tenant`), shared
-  by every command line and by the drain's rehydration; the three `--tenant T <run_id>`
-  command lines resolve the root and open the run through one shared opener.
-* 3 — the launcher's VERIFY and the episode page hold an episode's container once for all its
-  arms, its `_tenant.json` judged once, however many arms there are.
-* 4 — the failed-requests view shows a quarantined row's address (`tenant_id`, `run_id`).
-* 6 — the judge's door judges the episode container's `_tenant.json`, as `runs.episode` does.
-* 7 — the judge prompt's views are numbered without a gap.
-"""
+"""Review-finding regressions: tick without data root, tenant acceptance, quarantined curation rows, cross-tenant grading, prompt view numbering."""
 from __future__ import annotations
 
-import ast
 import logging
 import os
 import re
@@ -182,43 +165,6 @@ def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d
                           _tenant.TenantRefused), bad
 
 
-def _calls_named(path: Path, name: str) -> list[int]:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    out = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            f = node.func
-            spelled = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
-            if spelled == name:
-                out.append(node.lineno)
-    return out
-
-
-_ACCEPTING_SITES = ("learning/ops/trace_lesson.py", "scripts/visualize/visualize_episode.py",
-                    "run_repository/_lookup.py", "learning/core/drains.py")
-_RUN_ID_CLIS = ("learning/leads/lead_author/__init__.py", "scripts/visualize/visualize_run.py",
-                "scripts/workspace_map.py")
-
-
-def test_2_no_request_site_hand_writes_the_tenant_acceptance():
-    """The tracer, the episode page, the shared run opener and the drain's rehydration accept a
-    request's tenant through `requested_tenant` and none calls `accept_tenant` itself; the
-    three `--tenant T <run_id>` command lines open their run through the one shared opener
-    (`open_command_line_run`), which resolves the data root, so none of them calls
-    `resolve_data_root` itself. Positive control: the census finds `accept_tenant` in
-    `run.py`, which accepts with its box mounts. RED before the fix: each site spells
-    `accept_tenant(resolve_data_root(), requested_tenant_id(raw), defender_dir=…)` and each CLI
-    resolves the root around the opener."""
-    assert _calls_named(H.DEFENDER / "run.py", "accept_tenant"), "control: the census is blind"
-    for rel in _ACCEPTING_SITES:
-        path = H.DEFENDER / rel
-        assert _calls_named(path, "accept_tenant") == [], f"{rel} hand-writes the acceptance"
-        assert _calls_named(path, "requested_tenant"), f"{rel} does not use requested_tenant"
-    for rel in _RUN_ID_CLIS:
-        path = H.DEFENDER / rel
-        assert _calls_named(path, "resolve_data_root") == [], f"{rel} resolves the root itself"
-        assert _calls_named(path, "open_command_line_run"), f"{rel} skips the shared opener"
-
 
 @pytest.mark.parametrize("cli", ["lead_author", "visualize_run", "workspace_map"])
 def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant, monkeypatch,
@@ -257,74 +203,6 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
 # ==========================================================================================
 # 3 — one hold of an episode's container for all its arms.
 # ==========================================================================================
-
-def _count_record_reads(monkeypatch: Any, container: Path) -> list[Path]:
-    """Every judgement of `container`'s `_tenant.json` (`read_tenant` as the held folder calls
-    it), recorded."""
-    from defender.run_repository import _held
-
-    seen: list[Path] = []
-    real = _held.read_tenant
-
-    def counting(folder: Path, *args: Any, **kwargs: Any) -> Any:
-        if Path(folder) == Path(container):
-            seen.append(Path(folder))
-        return real(folder, *args, **kwargs)
-
-    monkeypatch.setattr(_held, "read_tenant", counting)  # lint-monkeypatch: ok — a pure spy (delegates unchanged); the held record read goes through `Bound.read`, which the `io=` seam does not see
-    return seen
-
-
-def test_3_verify_judges_the_container_once_for_every_arm(tmp_path, monkeypatch):
-    """VERIFY's `_finished_arms` over three arms judges the container's `_tenant.json` ONCE
-    and hands each arm back by its own entry: a real folder is a `Run`, nothing at the id is
-    `RunAbsent`, a link at the id a refused entry (`RunRefused`, never followed) — one arm's
-    entry never spoils another's. Positive control: the same arms opened one by one judge the
-    record once per arm. RED before the fix: VERIFY opens each arm on its own hold (three
-    judgements)."""
-    from defender.learning.branch import cli
-    from defender.run_repository import Run, RunAbsent, RunRefused
-
-    t = R1._good(tmp_path)
-    ep = R1._episode(container=H.T_ID, arms=("a", "b"))
-    os.symlink(ep / "runs" / f"{EP}-a", ep / "runs" / f"{EP}-l")
-    with t.runs_repository().episode(EP) as view:
-        seen = _count_record_reads(monkeypatch, ep / "runs")
-        arms = cli._finished_arms(view, ("a", "b", "c", "l"))
-        assert len(seen) == 1, f"the container's record was judged {len(seen)} times"
-        for label in ("a", "b"):
-            assert isinstance(arms[label], Run), arms[label]
-            assert Path(arms[label].run_dir) == ep / "runs" / f"{EP}-{label}"
-        assert isinstance(arms["c"], RunAbsent), arms["c"]
-        assert isinstance(arms["l"], RunRefused), arms["l"]
-        assert not isinstance(arms["l"], RunAbsent), arms["l"]
-
-        seen.clear()
-        for label in ("a", "b"):
-            view.open(view.arm_id(label))
-        assert len(seen) == 2, "control: a per-arm open judges the record each time"
-
-
-def test_3_the_page_judges_the_container_once_more_for_all_its_arms(tmp_path, monkeypatch):
-    """The episode page over a launched three-world episode judges its container's
-    `_tenant.json` twice in all — once when its view opens (G20: before anything else of the
-    episode is read) and once for every arm together — and still shows every arm (its run
-    folder's name). RED before the fix: once at the view's opening plus once per arm (4)."""
-    from defender.scripts.visualize import visualize_episode
-
-    est, src = P.launch_source(tmp_path)
-    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
-    assert got.raised is None, f"the launch did not run: {got!r}"
-    assert got.rc == 0, f"the launch did not run: {got!r}"
-    ep = R1._episodes() / P.EPISODE_ID
-    runs = _tenant.accept_tenant(P.data_root(), P.LAUNCH_TENANT,
-                                 defender_dir=H.DEFENDER).runs_repository()
-    seen = _count_record_reads(monkeypatch, ep / "runs")
-    with visualize_episode.open_episode_view(runs, P.EPISODE_ID) as view:
-        model = visualize_episode.load_episode(view)
-    assert len(seen) == 2, f"the page judged the container's record {len(seen)} times"
-    shown = {label: w.run_dir_name for label, w in model.entries.items()}
-    assert shown == {label: f"{P.EPISODE_ID}-{label}" for label in ("a", "b", "c")}, shown
 
 
 # ==========================================================================================

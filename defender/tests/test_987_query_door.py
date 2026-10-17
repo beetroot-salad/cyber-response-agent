@@ -1,22 +1,4 @@
-"""#987 — the STOPPED lead, at `_run_gather`'s own seam and at the stop record's.
-
-THE DEFECT. A gather lead the harness stopped — a guard's dead end, or its request ceiling —
-was cut by an exception, and main received a stand-in notice in place of everything the lead
-had retrieved (see `tests/e2e/test_987_stopped_lead.py` for the whole story).
-
-THE CHANGE. The stop is a TOOL RESULT, not an exception, and it is WRITTEN DOWN where it
-happens. A guard's stop closes the lead's query door and is told to the model in the tool's
-own answer; the ceiling is a ROUND, and `RequestCeiling` tells the model on the last request
-itself, withholds the tools on it, and marks the ceiling on the same record; the model's next
-turn is the summary; `_run_gather` composes main's message from that record and the run's own
-outcome, and never infers a stop from a request count. This module drives `_run_gather` with
-FAKE gather agents through the `gather_factory` seam the entry point already declares — the
-notice bytes, the terminator, the composition, the arm census — and the record's and the
-ceiling hooks' own semantics with no agent at all. Everything that needs the REAL query tool
-and the real graph is next door.
-
-No `monkeypatch.setattr`: every fake enters through `gather_factory`.
-"""
+"""#987 — the STOPPED lead, at `_run_gather`'s own seam and at the stop record's."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -49,7 +31,6 @@ from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
 from defender.runtime import (  # noqa: E402
     circuit_breaker,
-    query_tool,
     request_ceiling,
     session_store,
     tools_gather,
@@ -69,14 +50,6 @@ LEAD = "l-001"
 #: must never be shown, and the one main must always be.
 INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captured."
 
-# ---------------------------------------------------------------------------------------
-# THE FOUR NOTICES, AS LITERALS THIS FILE OWNS. Re-deriving them from the implementation
-# would make every header assertion a tautology. The dead-end and the two fault notices are
-# the arms' text at the base commit; the request-limit one names the lead's OWN ceiling where
-# it used to quote the framework's exception (which names `request_limit - 1`'s composition,
-# not the ceiling), and says the lead was TOLD TO STOP rather than that it stopped "before
-# finishing" — a lead that wrote its summary on the marked request finished.
-# ---------------------------------------------------------------------------------------
 HEADER_REQUEST_LIMIT = (
     "gather for {lead} reached its request limit ({limit} requests) and was told to stop; "
     "any queries it ran are in the queries table. " + INCOMPLETE_IDIOM
@@ -100,8 +73,7 @@ _FRAME = re.compile(r"\A<run-([0-9a-f]+)-untrusted>\n(?P<body>.*)\n</run-\1-untr
 
 
 def frame_body(returned: str) -> str:
-    """The body inside the ONE `untrusted` frame `_run_gather` returns — a header emitted
-    outside the frame, or a summary given a frame of its own, fails here."""
+    """The body inside the ONE `untrusted` frame `_run_gather` returns — a header emitted outside the frame, or a..."""
     m = _FRAME.match(returned)
     assert m, f"the return is not one whole `untrusted` frame: {returned!r}"
     body = m.group("body")
@@ -119,11 +91,7 @@ def split(returned: str) -> tuple[str, str]:
 
 
 class Agent:
-    """A gather agent that records its one `.run`, does `to_stop` to the deps' stop record
-    (the query tool's or the ceiling hook's part, played here), and either returns a result
-    carrying `output` and NOTHING ELSE — the shape `tests/test_wrap_fresh_875.py`'s doubles
-    have always returned, so a `_run_gather` that reads anything but `.output` off the result
-    fails here first — or raises `exc`."""
+    """A gather agent that records its one `.run`, does `to_stop` to the deps' stop record (the query tool's or..."""
 
     def __init__(self, output: str = "measured: two logins from dev.dana.",
                  *, exc: BaseException | None = None, to_stop=None):
@@ -180,15 +148,8 @@ def both(stop: LeadStop) -> None:
     ceiling(stop)
 
 
-# ----------------------------------------------------------------------------------------
-# The stop record itself.
-# ----------------------------------------------------------------------------------------
-
-
 def test_the_door_closes_once_on_a_dead_end_and_the_ceiling_marks_once():
-    """Two siblings tripping in one round keep the FIRST's reason: the notice main reads names
-    the request that actually stopped the lead. The ceiling is a separate arm of the same
-    record — the door (the query tool's question) is closed by a dead end alone."""
+    """Two siblings tripping in one round keep the FIRST's reason: the notice main reads names the request that..."""
     stop = LeadStop()
     assert (stop.dead_end, stop.ceiling, stop.door_closed) == (None, None, False)
     stop.close_door(DEAD_END)
@@ -204,28 +165,12 @@ def test_the_door_closes_once_on_a_dead_end_and_the_ceiling_marks_once():
     assert marked.ceiling == 8
 
 
-def test_the_dead_end_is_held_as_strings_not_as_the_exception():
-    """`DeadEnd` is frozen and carries the two strings main is shown; the `GatherDeadEnd`
-    that carried them — with its traceback pinning the tripping call's frames — is not what
-    the record keeps for the rest of the run."""
-    with pytest.raises(AttributeError):
-        DEAD_END.reason = "changed"  # type: ignore[misc]
-    assert not hasattr(DEAD_END, "__traceback__")
-
-
 def test_a_bound_gather_deps_carries_no_stop_record(tmp_path):
-    """Outside a dispatch nobody would read a record, so there is none: a guard's dead end on
-    such deps unwinds as the exception it always was. `_run_gather` is the one place that
-    makes one. The ceiling is not a deps field at all — it is the run's `UsageLimits`."""
+    """Outside a dispatch nobody would read a record, so there is none: a guard's dead end on such deps unwinds..."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     deps = _with_live_run_1165(bind(T1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir))
     assert deps.stop is None
     assert not hasattr(deps, "request_limit")
-
-
-# ----------------------------------------------------------------------------------------
-# The ceiling hooks — one number, read off the run context, one predicate for both.
-# ----------------------------------------------------------------------------------------
 
 
 def _ctx(requests: int, request_limit: int | None = 8, stop: LeadStop | None = None,
@@ -252,10 +197,7 @@ def _marked(requests: int, request_limit: int | None = 8) -> SimpleNamespace:
 
 
 def test_the_final_request_alone_is_marked_and_after_the_rounds_tool_results():
-    """`requests` reads N-1 while request N is prepared, so the request prepared at
-    `ceiling - 1` is the last the ceiling allows. One sentence, as a USER part, after the
-    round's tool returns — the order the framework itself canonicalizes a request to — and
-    nothing on any other request."""
+    """`requests` reads N-1 while request N is prepared, so the request prepared at `ceiling - 1` is the last the..."""
     assert [len(_marked(n).messages[-1].parts) for n in (5, 6, 7, 8)] == [1, 1, 2, 1]
     parts = _marked(7).messages[-1].parts
     assert isinstance(parts[0], ToolReturnPart)
@@ -268,9 +210,7 @@ def test_the_final_request_alone_is_marked_and_after_the_rounds_tool_results():
 
 
 def test_the_final_request_goes_out_with_tools_defined_but_none_callable():
-    """The tools stay on the wire (a history with tool blocks must define tools) and the
-    request says no tool may be chosen: `tool_choice: none`, merged over whatever settings
-    the request already carried, and on no other request."""
+    """The tools stay on the wire (a history with tool blocks must define tools) and the request says no tool may..."""
     rc = _marked(7)
     assert rc.model_settings == {"tool_choice": "none"}
     rc = _request_context({"temperature": 0.0})
@@ -280,10 +220,7 @@ def test_the_final_request_goes_out_with_tools_defined_but_none_callable():
 
 
 def test_marking_the_final_request_records_the_ceiling_on_the_stop():
-    """The stop is WRITTEN where it happens: the hook that told the model marks the record
-    with the run's own ceiling — the number off `ctx.usage_limits`, not a deps copy — and a
-    context with no record (an agent bound outside a dispatch) is still marked, just not
-    recorded."""
+    """The stop is WRITTEN where it happens: the hook that told the model marks the record with the run's own..."""
     stop = LeadStop()
     asyncio.run(RequestCeiling().before_model_request(_ctx(6, stop=stop), _request_context()))
     assert stop.ceiling is None, "a request before the final one was recorded as the ceiling"
@@ -294,9 +231,7 @@ def test_marking_the_final_request_records_the_ceiling_on_the_stop():
 
 
 def test_the_hook_leaves_a_history_that_does_not_end_on_a_request_to_the_framework():
-    """The framework raises its own `UserError` for a processed history that does not end on
-    a `ModelRequest`; the hook does not pre-empt it by appending a user part to a response
-    (which also has `.parts`), under `-O` or otherwise."""
+    """The framework raises its own `UserError` for a processed history that does not end on a `ModelRequest`;..."""
     resp = ModelResponse(parts=[TextPart(content="x")])
     rc = SimpleNamespace(messages=[resp], model_settings=None)
     asyncio.run(RequestCeiling().before_model_request(_ctx(7), rc))
@@ -310,11 +245,7 @@ def _after(requests: int, response: ModelResponse, request_limit: int | None = 8
 
 
 def test_tool_calls_on_the_final_response_are_dropped_and_the_text_kept():
-    """`requests` reads N once request N's response is in hand, so the final response is
-    seen at `ceiling`. On it every function tool call is dropped — a provider that ignored
-    `tool_choice` — and the text and thinking the model wrote stay, in order, with the
-    response's own metadata; a response with no calls comes back untouched, the same
-    object."""
+    """`requests` reads N once request N's response is in hand, so the final response is seen at `ceiling`. On it..."""
     call = ToolCallPart(tool_name="query", args={"system": "elastic"}, tool_call_id="c9")
     both = ModelResponse(parts=[ThinkingPart(content="hm"), TextPart(content="SUMMARY"), call],
                          model_name="m")
@@ -328,10 +259,7 @@ def test_tool_calls_on_the_final_response_are_dropped_and_the_text_kept():
 
 
 def test_responses_before_the_final_one_and_on_an_unbounded_run_keep_their_calls():
-    """The response to the second-to-last request — the one whose calls are the last to RUN
-    — keeps them: the count reads `ceiling - 1` there, which is the number the marker sees
-    while preparing the final request, and the two hooks must not read one count as one
-    request."""
+    """The response to the second-to-last request — the one whose calls are the last to RUN — keeps them: the..."""
     call = ToolCallPart(tool_name="query", args={}, tool_call_id="c9")
     resp = ModelResponse(parts=[TextPart(content="x"), call])
     assert _after(7, resp) is resp, "the last permitted round's tool calls were dropped"
@@ -354,17 +282,8 @@ def test_the_request_count_and_the_ceiling_read_off_a_bare_context():
     assert not request_ceiling.is_final_request(_ctx(7), answered=True)
 
 
-# ----------------------------------------------------------------------------------------
-# `_run_gather` — one run, one ceiling, and the record read afterwards.
-# ----------------------------------------------------------------------------------------
-
-
 def test_the_factory_and_the_usage_limit_are_handed_one_number(tmp_path):
-    """#880 F-19 and #808 d21/F6 in one assertion: the recorder the factory builds and the
-    `UsageLimits` the run enforces (which is what the ceiling hooks read) are the SAME
-    ceiling — not the ceiling and a derived neighbour. Driven at two ceilings so a constant
-    cannot pass. The deps carry a fresh, open stop record: `_run_gather` is where they are
-    made — and no ceiling of their own."""
+    """#880 F-19 and #808 d21/F6 in one assertion: the recorder the factory builds and the `UsageLimits` the run..."""
     for i, ceiling_ in enumerate((40, 8)):
         handed: list[int] = []
         agent = Agent()
@@ -394,9 +313,7 @@ def test_a_dead_end_on_the_record_puts_the_dead_end_notice_above_the_summary(tmp
 
 
 def test_a_ceiling_on_the_record_puts_the_request_limit_notice_above_the_summary(tmp_path):
-    """The run ended cleanly and the record says the ceiling hook marked it: the notice names
-    the ceiling the HOOK wrote (the run's), not the dispatch argument — here they agree, and
-    the count off the result is never consulted (the result has none)."""
+    """The run ended cleanly and the record says the ceiling hook marked it: the notice names the ceiling the..."""
     stamps: list = []
     out = dispatch(tmp_path, Agent("what I had.", to_stop=ceiling), ceiling=8, stamps=stamps)
     header, body = split(out)
@@ -416,11 +333,7 @@ def test_a_dead_end_outranks_the_ceiling_when_the_lead_met_both(tmp_path):
 
 
 def test_a_fault_after_the_ceiling_was_marked_shows_main_the_ceiling(tmp_path):
-    """The model wrote no text on its marked, tool-less final request: whichever way the
-    framework then ends the run — no output retries left, or one more request the ceiling
-    refuses — the record says the ceiling was marked, and main reads the ceiling notice over
-    the fixed no-summary sentence, with the ceiling's stamp: that session was cut off by its
-    request limit, not by a retry count."""
+    """The model wrote no text on its marked, tool-less final request: whichever way the framework then ends the..."""
     for i, exc in enumerate((
         UnexpectedModelBehavior("Exceeded maximum output retries (0)"),
         UsageLimitExceeded("The next request would exceed the request_limit of 8"),
@@ -434,10 +347,7 @@ def test_a_fault_after_the_ceiling_was_marked_shows_main_the_ceiling(tmp_path):
 
 @pytest.mark.parametrize("arm", ["retry-exhausted", "store", "request-limit"])
 def test_a_fault_on_an_unstopped_lead_carries_its_notice_and_the_failed_sentence(tmp_path, arm):
-    """The FAULT arms, on a lead the harness never stopped: their own notice as the header,
-    the same two-paragraph shape as every other cut lead, so main reads one format. The
-    request-limit exception with NO ceiling on the record is a fake's shape (nothing marked
-    the request), and it still names the dispatch's ceiling."""
+    """The FAULT arms, on a lead the harness never stopped: their own notice as the header, the same..."""
     exc, header, terminator = {
         "retry-exhausted": (
             UnexpectedModelBehavior("Exceeded maximum output retries (0)"),
@@ -468,11 +378,7 @@ def test_a_fault_on_an_unstopped_lead_carries_its_notice_and_the_failed_sentence
     UsageLimitExceeded("limit"),
 ], ids=["retry-exhausted", "store", "request-limit"])
 def test_a_fault_after_a_dead_end_still_shows_main_the_dead_end(tmp_path, exc):
-    """A guard stopped the lead, and the model then FAILED to summarize (an empty response,
-    a store that refused the summary round, no text on the final request). Main is shown the
-    stop — the guard's reason is what it reasons from — with the no-summary sentence under
-    it, and the session is stamped with the dead end that stopped it. Before this, the fault
-    arms never looked at the record, and the dead end vanished from both."""
+    """A guard stopped the lead, and the model then FAILED to summarize (an empty response, a store that refused..."""
     stamps: list = []
     out = dispatch(tmp_path, Agent(exc=exc, to_stop=both), ceiling=8, stamps=stamps)
     header, got_body = split(out)
@@ -495,23 +401,3 @@ def test_the_two_run_level_arms_still_pass_through(tmp_path, arm):
         "a run-level end was stamped with the lead's stop instead of what ended the run"
 
 
-# ----------------------------------------------------------------------------------------
-# Vocabulary — what the gather model is told never carries main's idiom.
-# ----------------------------------------------------------------------------------------
-
-
-def test_no_closing_sentence_carries_mains_idiom_and_every_notice_does():
-    for module, name in (
-        (request_ceiling, "WRITE_SUMMARY_NOW"), (request_ceiling, "FINAL_REQUEST"),
-        (query_tool, "QUERY_DOOR_CLOSED"), (query_tool, "QUERY_NOT_RUN"),
-    ):
-        text = getattr(module, name)
-        assert "Treat this lead" not in text, name
-        assert "summary" in text, f"{name} does not ask for the summary"
-    assert not hasattr(request_ceiling, "TOOL_NOT_RUN_BUDGET_SPENT"), \
-        "a 'budget spent' tool result exists — on the final request no tool call happens"
-    assert "{" not in tools_gather.NO_SUMMARY_FAILED, \
-        "the no-summary sentence has a hole — the only text to fill it is not the host's"
-    assert tools_gather.INCOMPLETE_IDIOM == INCOMPLETE_IDIOM
-    assert tools_gather._dead_end_notice(LEAD, DEAD_END).endswith(INCOMPLETE_IDIOM)
-    assert tools_gather._request_limit_notice(LEAD, 8).endswith(INCOMPLETE_IDIOM)

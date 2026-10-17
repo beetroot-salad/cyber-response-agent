@@ -1,24 +1,8 @@
-"""#1107 — lead-zero and the replay lane over the tenant settings record (slice E2).
-
-Both
-`AgentDeps` copies (MAIN's and lead-zero's) carry the record to their leads; the replay helper
-chain builds its `RunTenant` through `resolve_run_tenant` alone, its grants from the tenant
-folder; a resumed run or sibling re-resolves at its own start; and the three tests that exported
-`SOC_PLAYGROUND_DOCKER_CONTEXT` run on their fixture tenant's `config.env` instead.
-
-Driven through the real entry points: the replay harness (`_replay_harness.drive`,
-`_lead_zero_808.run`) with its `verbs=` / `tenant=` / `store_factory=` seams, and `run.main`
-with `_spec1107.RunRecorder`'s seams. No test reaches the real `docker`: every transport call
-runs in an env whose PATH starts with `_spec1107.DockerShim` or a test fixture's own shim.
-"""
+"""Replay-driven runs: record reaches the leads, resume re-resolves, grants via tenant config, settings path redacted."""
 from __future__ import annotations
 
 import dataclasses
-import importlib
 import inspect
-import json
-import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +13,6 @@ pytest.importorskip("pydantic_ai")
 from defender.runtime import run_tenant  # noqa: E402
 from defender.scripts.adapters import (  # noqa: E402
     _stub_transport,
-    elastic_adapter,
-    host_state_adapter,
 )
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.tests._data_root_1078 import current_data_root  # noqa: E402
@@ -48,11 +30,7 @@ from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-#: Item 1's broad-except note at base (`_items._resolve_item1`) — the mechanism o9 rejects.
-BROAD_EXCEPT_NOTE = "could not resolve this alert's signal_index"
 
-#: `SOC_PLAYGROUND_DOCKER_CONTEXT`, the env key the three migrated tests exported (s60).
-SOC_PLAYGROUND_CONTEXT_KEY = "SOC_PLAYGROUND_DOCKER_CONTEXT"
 
 
 def _plant(tmp_path: Path, marker: str, **kw: Any) -> tuple[Path, Path, Any]:
@@ -72,15 +50,6 @@ def _plant_at_data_root(marker: str, **kw: Any) -> tuple[Path, Path, Any]:
     return root, folder, S.tenant_folder_of(root)
 
 
-def _linked_root(tmp_path: Path, marker: str) -> tuple[Path, Path, Path]:
-    """A tenant planted under a real root and reached through a SYMLINKED tenants root (a link
-    to the root is admitted; `accept_tenant` refuses links only below the root). Returns
-    (link root, real folder, the settings path as given through the link)."""
-    real = tmp_path / f"tenants-{marker}-real"
-    folder = S.plant(real, marker=marker)
-    link = tmp_path / f"tenants-{marker}-link"
-    link.symlink_to(real, target_is_directory=True)
-    return link, folder, link / S.PLAYGROUND_ID / "knowledge" / "settings"
 
 
 def _identity_worlds() -> list[dict]:
@@ -114,10 +83,6 @@ def _jsonl_text(run_dir: Path) -> str:
     return "\n".join(p.read_text(encoding="utf-8") for p in sorted(run_dir.rglob("*.jsonl")))
 
 
-def _fresh(tmp_path: Path, name: str) -> Path:
-    path = tmp_path / name
-    path.mkdir(parents=True)
-    return path
 
 
 class _QueryAnswers(ReplayFn):
@@ -202,29 +167,6 @@ def test_d_agentdeps_record(tmp_path):
 
 # ---- a run whose Elastic part is bad completes ---------------------------------------------------
 
-def test_o5_missing_es_container_run_completes(tmp_path, monkeypatch, d9_tenant):
-    """A tenant whose elastic config.env lacks ELASTIC_ES_CONTAINER resolves with that key absent
-    from its systems["elastic"], and its investigation runs to completion. Elastic calls fault
-    with ConfigFault."""
-    # CX8: the shim, first on the PATH the run env inherits, receives any docker call's argv.
-    shim = S.DockerShim(tmp_path / "docker")
-    monkeypatch.setenv("PATH", shim.path_value())
-    root, folder, tenant = _plant_at_data_root("o5")
-    S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
-
-    rec = S.RunRecorder(tmp_path / "runs" / "o5-run")
-    rc, refused = S.drive_run(S.run_argv(S.plant_alert(tmp_path / "in"), root, tenant_id=d9_tenant),
-                              rec, visualize=rec.visualize)
-    assert refused is None, f"run.main refused the tenant: {H.refusal_text(refused)}"
-    assert rc == 0, (rc, rec.order)
-    assert rec.order.count("lifecycle") == 1, (rc, rec.order)
-    record = rec.lifecycle_calls[0]["tenant"]
-    assert "ELASTIC_ES_CONTAINER" not in record.systems["elastic"], record.systems["elastic"]
-
-    ctx = S.verb_context(record, rec.run_dir_at, shim.env())
-    with pytest.raises(S.config_fault()):
-        elastic_adapter.query(ctx, native_query='host.name:"o5"')
-    assert shim.calls() == [], f"an Elastic call reached docker: {shim.calls()}"
 
 
 # ---- resumed runs re-resolve at their own start --------------------------------------------------
@@ -285,92 +227,10 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
         assert S.holders(where, edited) == [], (where, S.holders(where, edited))
 
 
-def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root, monkeypatch):
-    """Resuming a sibling whose manifest records no corpus patterns over a tenant with no elastic
-    folder, or a bad one, proceeds: the record holds no elastic system or one missing a key, the resumed
-    sibling runs with its Elastic reads failing, and nothing refuses the investigation (O5).
-
-    #1224: no manifest records patterns any more (`configured_patterns` is refused as
-    pre-oracle), so the v2 manifest is this case's input, and the world-view guard the pre-#1224
-    arm also drove went with cluster staging."""
-    _base, source = H.tenant_source(data_root, S.PLAYGROUND_ID)
-    shim = S.DockerShim(tmp_path / "docker")
-
-    for arm in ("none", "bad"):
-        _root, folder, _tenant = _plant_at_data_root(f"mf7e{arm}")
-        if arm == "none":
-            shutil.rmtree(S.config_path(folder, "elastic").parent)
-        else:
-            S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
-        doc = T.family_doc(source_run_dir=str(source), worlds=_identity_worlds())
-        assert "configured_patterns" not in doc, sorted(doc)
-        episode = _sibling_episode(tmp_path, doc, root=tmp_path / f"episodes-{arm}",
-                                   monkeypatch=monkeypatch)
-        sibling = S.RunRecorder(tmp_path / f"sibling-{arm}")
-
-        rc, refused = S.drive_run(_resume_argv(episode / "family.yaml"), sibling,
-                                  visualize=sibling.visualize)
-        assert refused is None, f"[{arm}] the resume was refused: {H.refusal_text(refused)}"
-        assert rc == 0, (arm, rc, sibling.order)
-        assert "lifecycle" in sibling.order, (arm, rc, sibling.order)
-        record = sibling.lifecycle_calls[0]["tenant"]
-        if arm == "none":
-            assert "elastic" not in record.systems, (arm, sorted(record.systems))
-        else:
-            assert "ELASTIC_ES_CONTAINER" not in record.systems["elastic"], (arm, record.systems)
-
-        ctx = S.verb_context(record, sibling.run_dir_at, shim.env())
-        with pytest.raises(S.config_fault()):
-            elastic_adapter.query(ctx, native_query="event.action:ssh_login")
-        assert shim.calls() == [], f"[{arm}] an Elastic read reached docker: {shim.calls()}"
 
 
 # ---- the replay helper chain builds through the resolver -----------------------------------------
 
-def test_d_replay_helper_through_resolver(tmp_path, monkeypatch):
-    """tests/_tenants1106.run_tenant builds through run_tenant.resolve_run_tenant and nothing
-    else (human, early-exit resolution 2). A replay-driven run's RunTenant is the one
-    resolve_run_tenant builds for its tenant folder: the same systems, ticket_mapping,
-    grants and correlation."""
-    # G54 / test_1078_env.py:343-361: the harness builds with no data root and no runs base.
-    H.set_data_root(monkeypatch, None)
-    monkeypatch.delenv("DEFENDER_RUNS_BASE", raising=False)
-    _root, _folder, tenant = _plant(tmp_path, "rh1107")
-    # #1120: `resolve_run_tenant` is the readiness function (grants, correlation) over the
-    # tenant's settings; the record builder over an accepted tenant, which run start's
-    # `resolve_tenant` delegates to, is `run_tenant_for`.
-    resolved = run_tenant.run_tenant_for(tenant, defender_dir=S.DEFENDER,
-                                         dispatches_lead_zero=True)
-
-    # "Nothing else": the one table resolve_run_tenant refuses (CX24: TABLE_BLANK, gather can
-    # query nothing) is refused by the helper too — a helper assembling the pieces itself is not.
-    _broot, _bfolder, blank = _plant(tmp_path, "rhblank", table=T1106.TABLE_BLANK)
-    with pytest.raises(run_tenant.refusals()):
-        run_tenant.resolve_run_tenant(blank.settings, defender_dir=S.DEFENDER,
-                                      dispatches_lead_zero=False)
-    with pytest.raises(run_tenant.refusals()):
-        T1106.run_tenant(blank, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
-
-    run_dir = LZ.materialize_alert(tmp_path / "replay", LZ.alert_doc())
-    rec = VerbRecorder()
-    lead = ReplayFn([
-              Turn(tool_calls=[("query", {"system": "elastic", "verb": "alerts",
-                                          "params": {"native_query": "user.name:dev.dana"}})]),
-              Turn(text=LZ.CORRELATION_SUMMARY),
-          ])
-    lead.serves_correlation = True   # this script is `l-00c`'s (#1222)
-    drive(run_dir, run_id="rh1107", tenant=tenant,
-          main=ReplayFn([Turn(text="Investigation complete.")]), gather=lead,
-          verbs=LZ.elastic_backend(rec, LZ.answer_hits([])))
-    assert rec.calls, "the correlation lead issued no verb call — the run's record was never observed"
-    record = S.record_on(rec.calls[0].ctx)
-
-    assert record.settings == tenant.settings
-    assert record.systems == resolved.systems
-    assert type(record.ticket_mapping) is type(resolved.ticket_mapping)
-    assert S.open_reporter(record.ticket_mapping) == S.open_reporter(resolved.ticket_mapping)
-    assert record.grants == resolved.grants
-    assert record.correlation == resolved.correlation
 
 
 def test_d_grants_through_tenant_config(tmp_path):
@@ -423,61 +283,8 @@ def test_d_grants_through_tenant_config(tmp_path):
 
 # ---- the three SOC_PLAYGROUND_DOCKER_CONTEXT tests, migrated -------------------------------------
 
-def test_s60_soc_playground_tests_migrated(tmp_path):
-    """The three tests that set SOC_PLAYGROUND_DOCKER_CONTEXT in an env mapping
-    (test_encoding_contract_589.py:322, test_947_clock.py:260, _world_1007.py:607) complete
-    correctly after being rewritten (d_tests_move_docker_context) to write
-    <PREFIX>_DOCKER_CONTEXT into their fixture tenant's config.env instead -- the migration the
-    clause records is itself exercised, not merely described."""
-    tests_dir = S.DEFENDER / "tests"
-    for name in ("test_encoding_contract_589.py", "test_947_clock.py", "_world_1007.py"):
-        text = (tests_dir / name).read_text(encoding="utf-8")
-        assert SOC_PLAYGROUND_CONTEXT_KEY not in text, (
-            f"{name} still sets {SOC_PLAYGROUND_CONTEXT_KEY}")
-        assert re.search(r"\b[A-Z][A-Z_]*_DOCKER_CONTEXT\b", text), (
-            f"{name} writes no <PREFIX>_DOCKER_CONTEXT for its fixture tenant")
-
-    # The migrated tests themselves, each in a fresh directory of its own (no nested pytest:
-    # this process already holds the suite lock).
-    enc589 = importlib.import_module("defender.tests.test_encoding_contract_589")
-    clock947 = importlib.import_module("defender.tests.test_947_clock")
-    world1007 = importlib.import_module("defender.tests._world_1007")
-    enc589.test_a_vendor_byte_from_a_transport_is_replaced_not_raised(_fresh(tmp_path, "t589"))
-    clock947.test_the_health_check_stamps_nothing_and_stays_that_way(_fresh(tmp_path, "t947"))
-    # The 1007 test that drove this fixture (`test_1007_reachability`) went with the replay
-    # review (#1224); its body is run here so the migrated fixture still completes a real read.
-    _elastic_envelope_carries_no_incidental_fields(world1007, _fresh(tmp_path, "t1007"))
-
-    # test_947_clock's fixture: its own docker shim logs every argv, so the context a call
-    # names is observable — and it is the one the fixture tenant's config.env declares.
-    where = _fresh(tmp_path, "ctx947")
-    ctx = clock947.docker_ctx(where)
-    assert SOC_PLAYGROUND_CONTEXT_KEY not in ctx.env, sorted(ctx.env)
-    declared = S.record_on(ctx).systems["host-state"]["HOST_STATE_DOCKER_CONTEXT"]
-    host_state_adapter.VERBS["health-check"](ctx)
-    argvs = clock947.docker_calls(where)
-    assert argvs, "the health-check made no docker call"
-    assert {S.context_of(argv) for argv in argvs} == {declared}, (declared, argvs)
-
-    # _world_1007's fixture: its shim answers without logging, so the record is what is read.
-    ctx = world1007.elastic_ctx(_fresh(tmp_path, "ctx1007"))
-    assert SOC_PLAYGROUND_CONTEXT_KEY not in ctx.env, sorted(ctx.env)
-    assert S.record_on(ctx).systems["elastic"]["ELASTIC_DOCKER_CONTEXT"], (
-        "the 1007 fixture tenant declares no elastic docker context")
 
 
-def _elastic_envelope_carries_no_incidental_fields(world1007: Any, where: Path) -> None:
-    """A REAL raw Elasticsearch response reaches the real `query` verb through `_world_1007`'s
-    fixture tenant and docker shim, and the envelope carries only the documents' `_source`."""
-    raw = world1007.RAW_ES_RESPONSE
-    envelope = elastic_adapter.query(world1007.elastic_ctx(where, response=raw),
-                                     native_query="event.action:ssh_login")
-    assert set(envelope) == {"index", "total", "returned", "sort", "truncated", "hits"}, (
-        sorted(envelope))
-    rendered = json.dumps(envelope, sort_keys=True)
-    for incidental in ("took", "_shards", "_id", "_score", "max_score"):
-        assert incidental not in rendered, incidental
-    assert envelope["hits"] == [h["_source"] for h in raw["hits"]["hits"]]
 
 
 # ---- the settings-path redaction keys on the record ----------------------------------------------

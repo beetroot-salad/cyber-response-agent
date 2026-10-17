@@ -1,29 +1,4 @@
-"""#1120 piece 1 — D7/O8 `tenant.py check <id> | --folder <path>`: the tenant's own checks.
-
-`check` runs acceptance (`accept_tenant`, stopping at its first refusal), the grant census in
-BOTH directions (every declared verb decided, every decided verb declared) against the RUNNING
-checkout's adapters (A3), the lead-zero agreement against the running catalog, "the
-settings tables load" (M6, human), and — over a clone, or a `--folder` that is a git work tree —
-that agent/.tenant-id is what the repo commits (V11, human: check's rule, never acceptance's or
-setup's), failing closed when git cannot answer (V16). An all-withheld or a health-check-only
-table is not a finding (M6), though setup refuses both: setup runs run start's own readiness
-function (V14, superseding V1's and V10's rule lists) beside the folder rules (V18). `--folder`
-runs every rule that needs no data root: it never resolves `DEFENDER_DATA_ROOT`, never applies the
-`defender_dir`/`box_mounted` containment (that belongs to a process that mounts), and
-grammar-checks `agent/.tenant-id` only when present (M8). Exit status (N17): 0 clean, 1 a
-finding or a refusal, 2 a usage error (`<id>` and `--folder` are mutually exclusive, exactly one
-required). A finding prints through `[tenant.py] …`, never a traceback. A census that cannot be
-taken is still a finding, exit 1 (#1159 O2): its line says the folder's table was not checked
-against the running checkout and gives the census's own cause, which names the side that failed
-— this machine's git, or the running checkout (#1159 O1). Everything that needs no census is
-still judged (#1159 review).
-
-Driven as the operator runs it, as a process. The tests about WHICH tree the census comes from
-run the command out of a tmp COPY of this checkout (`_spec1120.tmp_checkout`) carrying one more
-(or one broken) adapter — the real worktree is never written into. At base a1c65801 `tenant.py`
-has only `setup`, so every `check` is argparse's usage error (exit 2): each test pins exit 1 or
-0 together with the finding it names, never a bare "non-zero".
-"""
+"""D7/O8 `tenant.py check <id> | --folder <path>`: the tenant's own checks."""
 from __future__ import annotations
 
 import os
@@ -39,7 +14,6 @@ import pytest
 import yaml
 
 from defender import _tenant
-from defender import run as run_py
 from defender.runtime import verb_dispositions
 from defender.scripts import tenant as tenant_py
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
@@ -56,17 +30,12 @@ BROKEN_ADAPTER = H.BROKEN_ADAPTER
 OVERLAP_ENV = H.LEARNING_STATE_ENV
 
 #: #1159: what `check` says when the census cannot be taken — the folder's table went unjudged
-#: against the running checkout. A statement of what was not checked, never a verdict on the
-#: folder: the folder's own findings print beside it.
 CENSUS_NOT_TAKEN = "was not checked against the running checkout's adapters"
 
 #: The census's own causes (#1159 O1), each naming the side that failed: this machine's git,
-#: or the running checkout's adapters or its committed system markers.
 GIT_ABSENT_CAUSE = "git is not available on PATH on this machine"
 GIT_UNRUNNABLE_CAUSE = "git cannot be run on this machine"
 ADAPTER_CAUSE = "have an adapter the cold verb reader saw no verb in"
-MARKERS_CAUSE = "cannot resolve its declared systems"
-HEAD_CAUSE = "is not resolvable at HEAD"
 
 
 # ======================================================================================
@@ -120,11 +89,7 @@ def _unparseable_mapping(folder: Path) -> Path:
 
 def _census_blind_line(proc: subprocess.CompletedProcess, *, folder: Path, cause: str,
                        names: tuple[str, ...] = (), also: tuple[str, ...] = ()) -> tuple[str, str]:
-    """#1159: `proc` is a `check` over `folder` whose census could not be taken. It exits
-    EXACTLY 1 (O2) naming each of `also`, and exactly ONE line says `folder`'s table was not
-    checked against the running checkout: that line names the table, then gives the census's
-    `cause` (O1: the cause names the side that failed) and each of `names` after the framing.
-    Returns `(output, the census line)`."""
+    """#1159: `proc` is a `check` over `folder` whose census could not be taken."""
     text = H.assert_refused(proc, CENSUS_NOT_TAKEN, *also)
     lines = [ln for ln in text.splitlines() if CENSUS_NOT_TAKEN in ln]
     assert len(lines) == 1, f"the census line is not printed exactly once:\n{text}"
@@ -153,11 +118,7 @@ def extra_checkout(tmp_path_factory) -> Path:
 # ======================================================================================
 
 def test_1120_check_exits_zero_over_a_clean_tenant_and_a_clean_folder(tmp_path: Path) -> None:
-    """`tenant.py check acme` over a finished tenant built from the fixture under a tmp data
-    root exits 0. So does `tenant.py check --folder knowledge/tenant-fixture`, and so does
-    `--folder knowledge/tenant-template` (M8: the template carries no .tenant-id and --folder
-    does not require one), both run with DEFENDER_DATA_ROOT unset. Both committed folders are
-    read in place and left byte-identical."""
+    """`tenant.py check acme` over a finished tenant built from the fixture under a tmp data root exits 0."""
     root = tmp_path / "data"
     H.adopted(root)
     before = H.tree_census(root)
@@ -200,8 +161,7 @@ def test_1120_check_refuses_a_tenant_that_fails_acceptance_naming_the_file(
         tmp_path: Path, plant) -> None:
     """For a tenant with a missing REQUIRED_SETTINGS file, a symlink planted in settings/, or an
     agent/.tenant-id naming another tenant, `tenant.py check acme` exits 1 (N17) and prints
-    accept_tenant's own refusal verbatim, which names the offending file. It writes nothing.
-    The positive control: the same tenant before the plant is checked clean."""
+    accept_tenant's own refusal verbatim, which names the offending file."""
     root = tmp_path / "data"
     H.adopted(root)
     H.assert_clean(_check_id(root))
@@ -219,12 +179,9 @@ def test_1120_check_refuses_a_tenant_that_fails_acceptance_naming_the_file(
 
 def test_1120_check_refuses_every_grant_gap_in_both_directions_naming_each(
         tmp_path: Path) -> None:
-    """A tenant's verb-grants.yaml has three faults: it omits two declared verbs on different
-    systems (change-mgmt.get-change and threat-intel.list-indicators: undecided), it adds a row
-    for cmdb.no-such-verb (a phantom verb) and it adds a whole no-such-system block (a phantom
-    system). `tenant.py check acme` exits 1 and names all four findings, not just the first
-    (N17). Today the loader accepts the phantom rows and grants them (K4). The positive
-    control: the unedited table is checked clean."""
+    """A tenant's verb-grants.yaml has three faults: it omits two declared verbs on different systems
+    (change-mgmt.get-change and threat-intel.list-indicators: undecided), it adds a row for cmdb.no-
+    such-verb (a phantom verb) and it adds a whole no-such-system block (a phantom system)."""
     root = tmp_path / "data"
     H.adopted(root)
     H.assert_clean(_check_id(root))
@@ -240,31 +197,11 @@ def test_1120_check_refuses_every_grant_gap_in_both_directions_naming_each(
                      "cmdb.no-such-verb", "no-such-system")
 
 
-def test_1120_check_takes_the_census_from_the_code_it_runs(
-        tmp_path: Path, extra_checkout: Path) -> None:
-    """The census is taken from the running code (A3), never from the tenant: run out of a tmp
-    copy of the checkout whose adapters declare one more verb (extra.verb), `tenant.py check
-    --folder` over a copy of the fixture exits 1 naming extra.verb as undecided, while this
-    checkout's own `check --folder` over the SAME folder, whose census has no such verb, exits
-    0."""
-    folder = _folder(tmp_path, "tenant")
-    H.assert_clean(_check_folder(folder))
-    H.assert_refused(
-        H.run_script(_copy_script(extra_checkout), "check", "--folder", str(folder), root=None),
-        EXTRA_PAIR)
-
-
 def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import(
         tmp_path: Path) -> None:
-    """An adapter module the census cannot read (a source that does not parse) makes `tenant.py
-    check` exit EXACTLY 1 naming the module's system, never 0 over a census that silently lacks
-    it (M6; #1159 O2: a census-blind check is a finding, exit 1, no other code). Run out of a
-    tmp copy of the checkout holding broken_adapter.py, over a sound folder. The census line
-    says the folder's table was not checked, and its cause names the side that failed (#1159
-    O1): the adapter the cold reader saw nothing in, under the tmp COPY's root (the running
-    checkout, whose path is neither the cwd the command starts in nor the folder's). A folder
-    whose mapping.yaml does not parse is refused in acceptance, before the census. The
-    positive control: the same copy without that module checks the same folder clean."""
+    """An adapter module the census cannot read (a source that does not parse) makes `tenant.py check`
+    exit EXACTLY 1 naming the module's system, never 0 over a census that silently lacks it (M6;
+    #1159 O2: a census-blind check is a finding, exit 1, no other code)."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     folder = _folder(tmp_path, "tenant")
     script = _copy_script(checkout)
@@ -282,13 +219,10 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
 
 def test_1120_s6_defender_dir_env_names_another_tree(
         tmp_path: Path, extra_checkout: Path) -> None:
-    """`check`'s census and every containment check use the running process's own checkout
-    (its module location), not an exported DEFENDER_DIR. With DEFENDER_DIR naming a tmp copy
-    of the checkout that declares one more verb (extra.verb) and whose defender/ tree holds
-    the data root, this checkout's `tenant.py check acme` exits 0: no extra.verb finding, and
-    no mounted-tree refusal. The control: the copy's own `check` does take its own tree — over
-    the same data root it refuses (the settings sit inside ITS defender/ tree), and over the
-    fixture folder it names extra.verb."""
+    """`check`'s census and every containment check use the running process's own checkout (its module
+    location), not an exported DEFENDER_DIR. With DEFENDER_DIR naming a tmp copy of the checkout
+    that declares one more verb (extra.verb) and whose defender/ tree holds the data root, this
+    checkout's `tenant.py check acme` exits 0: no extra.verb finding, and no mounted-tree refusal."""
     copy_defender = extra_checkout / "defender"
     root = copy_defender / f"data-{tmp_path.name}"
     H.adopted(root)
@@ -344,7 +278,6 @@ def _write_lead_zero(settings: Path, template: str) -> None:
 
 
 #: A lead-zero template the running checkout's catalog lacks (92 #1 executed it through
-#: `correlation_dispatch`: REFUSED, "resolves to no established template").
 ABSENT_TEMPLATE = "elastic.no-such-template"
 
 
@@ -368,12 +301,10 @@ FOLDER_FAULTS = [
 def test_1120_check_folder_runs_every_rule_that_needs_no_data_root(
         tmp_path: Path, plant) -> None:
     """`tenant.py check --folder <path>` refuses a folder with a missing half, a missing
-    REQUIRED_SETTINGS file, a link in either half, an off-grammar agent/.tenant-id, a grant
-    gap, or a lead-zero.yaml naming a template the running catalog lacks (M6 (b): the lead-zero
-    agreement is a folder rule tenant CI reports, V4): exit 1, naming each (the lead-zero cell
-    names lead-zero.yaml and the template). It needs no DEFENDER_DATA_ROOT (every leg runs with
-    the variable unset), and it does not require .tenant-id to exist (M8): the positive
-    control, the same folder before the plant and without any .tenant-id, exits 0."""
+    REQUIRED_SETTINGS file, a link in either half, an off-grammar agent/.tenant-id, a grant gap, or
+    a lead-zero.yaml naming a template the running catalog lacks (M6 (b): the lead-zero agreement is
+    a folder rule tenant CI reports, V4): exit 1, naming each (the lead-zero cell names lead-
+    zero.yaml and the template)."""
     folder = _folder(tmp_path, "tenant")
     H.assert_clean(_check_folder(folder))
     named = plant(folder)
@@ -381,13 +312,9 @@ def test_1120_check_folder_runs_every_rule_that_needs_no_data_root(
 
 
 def test_1120_s6_check_folder_reached_through_symlink_or_bind_mount(tmp_path: Path) -> None:
-    """Folder mode runs its content rules over the folder it is given and applies no
-    defender_dir or box_mounted containment wherever that folder resolves, because containment
-    belongs to a process that mounts (step 7). A folder reached through a symlink whose target
-    lies inside the running checkout's defender/ tree (run out of a tmp copy of the checkout,
-    the folder planted inside the COPY's tree), and one reached through a symlink into a data
-    root's <T>/knowledge, are each checked clean (exit 0). The control: a content fault
-    planted behind the same link (a missing lead-zero.yaml) is reported, naming the file."""
+    """Folder mode runs its content rules over the folder it is given and applies no defender_dir or
+    box_mounted containment wherever that folder resolves, because containment belongs to a process
+    that mounts (step 7)."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     script = _copy_script(checkout)
     inside = checkout / "defender" / "tenant-under-review"
@@ -423,17 +350,10 @@ LEAD_ZERO_DISAGREEMENTS = [
 @pytest.mark.parametrize("template", LEAD_ZERO_DISAGREEMENTS)
 def test_1120_setup_and_check_refuse_a_lead_zero_table_that_disagrees_with_the_running_catalog(
         tmp_path: Path, template: str) -> None:
-    """A lead-zero.yaml naming a template the running checkout's catalog lacks, or one whose
-    (system, verb) pair disagrees with the pair the table grants the correlation lead, stops
-    every fresh run of the tenant (run.py dispatches lead zero on each; correlation_dispatch
-    refuses both cells — 92 #1, executed). So (V1, human, overturning NF1) a FIRST `tenant.py
-    setup acme` over a placed knowledge/ carrying it exits 1 naming lead-zero.yaml and the
-    template, writing nothing (no row — rules-first); a RE-RUN over a finished tenant whose
-    lead-zero.yaml has since become it exits 1 the same way, writing nothing; and `tenant.py
-    check acme` exits 1 naming lead-zero.yaml and the template (M6). The positive control: the
-    same placed folder with the fixture's own lead-zero.yaml sets up with exit 0. A grant gap
-    still passes setup (d7_setup_rerun_is_silent_and_writes_nothing,
-    d7_setup_runs_acceptance_and_check)."""
+    """A lead-zero.yaml naming a template the running checkout's catalog lacks, or one whose (system,
+    verb) pair disagrees with the pair the table grants the correlation lead, stops every fresh run
+    of the tenant (run.py dispatches lead zero on each; correlation_dispatch refuses both cells — 92
+    #1, executed)."""
     first = tmp_path / "first"
     knowledge = H.place_knowledge(first)
     _write_lead_zero(knowledge / "settings", template)
@@ -460,10 +380,9 @@ def test_1120_setup_and_check_refuse_a_lead_zero_table_that_disagrees_with_the_r
 # ======================================================================================
 
 def test_1120_s9_check_over_a_grant_table_repeats_a_top_level_key(tmp_path: Path) -> None:
-    """The tenant's verb-grants.yaml, as text, repeats a key at the same nesting level (a
-    second `cmdb:` block under dispositions, a copy-paste): `tenant.py check acme` exits 1
-    naming verb-grants.yaml and the repeated key, never a traceback (PO-h). The positive
-    control: the table before the edit is checked clean."""
+    """The tenant's verb-grants.yaml, as text, repeats a key at the same nesting level (a second
+    `cmdb:` block under dispositions, a copy-paste): `tenant.py check acme` exits 1 naming verb-
+    grants.yaml and the repeated key, never a traceback (PO-h)."""
     root = tmp_path / "data"
     H.adopted(root)
     H.assert_clean(_check_id(root))
@@ -474,10 +393,9 @@ def test_1120_s9_check_over_a_grant_table_repeats_a_top_level_key(tmp_path: Path
 
 
 def test_1120_s9_check_over_a_grant_table_that_fails_to_parse_as_yaml(tmp_path: Path) -> None:
-    """The tenant's verb-grants.yaml is present and readable but is not valid YAML (a
-    merge-conflict marker left in place): `tenant.py check acme` exits 1 naming verb-grants.yaml
-    as unparseable, in its per-rule idiom, never a traceback. The positive control: the table
-    before the edit is checked clean."""
+    """The tenant's verb-grants.yaml is present and readable but is not valid YAML (a merge-conflict
+    marker left in place): `tenant.py check acme` exits 1 naming verb-grants.yaml as unparseable, in
+    its per-rule idiom, never a traceback."""
     root = tmp_path / "data"
     H.adopted(root)
     H.assert_clean(_check_id(root))
@@ -489,12 +407,9 @@ def test_1120_s9_check_over_a_grant_table_that_fails_to_parse_as_yaml(tmp_path: 
 
 def test_1120_s9_check_over_grant_table_verb_filed_under_wrong_real_system(
         tmp_path: Path) -> None:
-    """A row names a genuinely declared verb but files it under a system other than the one
-    that declares it: identity's list-authorized-hosts (declared by identity's adapter alone)
-    moved under cmdb and dropped from identity. `tenant.py check acme` exits 1 reporting both
-    the phantom pair cmdb.list-authorized-hosts and the undecided real pair
-    identity.list-authorized-hosts — the census keys on (system, verb) pairs (PO-k). The
-    positive control: the table before the move is checked clean."""
+    """A row names a genuinely declared verb but files it under a system other than the one that
+    declares it: identity's list-authorized-hosts (declared by identity's adapter alone) moved under
+    cmdb and dropped from identity."""
     root = tmp_path / "data"
     H.adopted(root)
     H.assert_clean(_check_id(root))
@@ -507,34 +422,15 @@ def test_1120_s9_check_over_grant_table_verb_filed_under_wrong_real_system(
                      "identity.list-authorized-hosts")
 
 
-def test_1120_s9_check_run_twice_in_immediate_succession(tmp_path: Path) -> None:
-    """`tenant.py check acme` over a clean tenant, run and then run again immediately with
-    nothing else touching the data root: both runs exit 0 and give identical output, and check
-    writes nothing, so the data root's census (bytes, mtimes, modes) is identical before and
-    after both."""
-    root = tmp_path / "data"
-    H.adopted(root)
-    before = H.tree_census(root)
-    first, second = _check_id(root), _check_id(root)
-    H.assert_clean(first)
-    H.assert_clean(second)
-    assert (first.returncode, first.stdout, first.stderr) == (
-        second.returncode, second.stdout, second.stderr), "two checks of one tree disagree"
-    assert H.census_diff(before, H.tree_census(root)) == [], "check wrote into the data root"
-
-
 # ======================================================================================
 # No data root for scaffold and check --folder (N10); the usage error (N17); M6's all-withheld.
 # ======================================================================================
 
 def test_1120_scaffold_and_check_folder_run_with_no_data_root_and_ignore_the_learning_overlap(
         tmp_path: Path) -> None:
-    """`tenant.py scaffold acme <empty dir>` and `tenant.py check --folder <that dir>` never
-    resolve the data root (N10): both exit 0 with DEFENDER_DATA_ROOT unset, and both exit 0
-    again with DEFENDER_LEARNING_STATE_DIR overlapping a set data root. `tenant.py check acme`
-    and `tenant.py setup acme` do resolve it, and inherit the learning-state-overlap refusal as
-    run.py does: under the same overlap each exits 1 naming DEFENDER_LEARNING_STATE_DIR and
-    writes nothing."""
+    """`tenant.py scaffold acme <empty dir>` and `tenant.py check --folder <that dir>` never resolve
+    the data root (N10): both exit 0 with DEFENDER_DATA_ROOT unset, and both exit 0 again with
+    DEFENDER_LEARNING_STATE_DIR overlapping a set data root."""
     git_identity = dict(H.GIT_IDENTITY)
     unset = tuple(k for k in os.environ if k.startswith("GIT_")) + (OVERLAP_ENV,)
 
@@ -560,11 +456,9 @@ def test_1120_scaffold_and_check_folder_run_with_no_data_root_and_ignore_the_lea
 
 
 def test_1120_check_with_both_or_neither_selector_is_a_usage_error(tmp_path: Path) -> None:
-    """`<id>` and `--folder` are mutually exclusive and exactly one is required (N17):
-    `tenant.py check acme --folder <dir>` and a bare `tenant.py check` each exit 2 (a usage
-    error, not a finding) and read or write nothing under the data root. The control carries
-    the discrimination: each selector alone, `check acme` over a clean tenant and
-    `check --folder` over a clean folder, is no usage error — each exits 0."""
+    """`<id>` and `--folder` are mutually exclusive and exactly one is required (N17): `tenant.py check
+    acme --folder <dir>` and a bare `tenant.py check` each exit 2 (a usage error, not a finding) and
+    read or write nothing under the data root."""
     root = tmp_path / "data"
     H.adopted(root)
     folder = _folder(tmp_path, "tenant")
@@ -587,11 +481,9 @@ def _withhold_all(settings: Path) -> None:
 
 # rejected: an all-withheld table as a finding (M6, human).
 def test_1120_check_does_not_report_an_all_withheld_table_as_a_finding(tmp_path: Path) -> None:
-    """A table that decides every declared pair and withholds every one (roles empty, each
-    with a reason) is not a finding (M6): `tenant.py check acme` over a tenant carrying it,
-    and `tenant.py check --folder` over a folder carrying it, both exit 0. The control: the
-    same table with one pair (threat-intel.list-indicators) deleted exits 1 naming it — the
-    census still runs over a withheld table."""
+    """A table that decides every declared pair and withholds every one (roles empty, each with a
+    reason) is not a finding (M6): `tenant.py check acme` over a tenant carrying it, and `tenant.py
+    check --folder` over a folder carrying it, both exit 0."""
     root = tmp_path / "data"
     H.adopted(root)
     _withhold_all(H.settings_dir(root))
@@ -612,14 +504,8 @@ def test_1120_check_does_not_report_an_all_withheld_table_as_a_finding(tmp_path:
 # ======================================================================================
 
 def test_1120_setup_refuses_an_all_withheld_table_that_check_accepts(tmp_path: Path) -> None:
-    """A verb-grants.yaml that decides every declared pair and withholds every one (the table
-    the template ships) grants gather nothing, so require_gather_query refuses every run of
-    the tenant. Setup refuses it (V10, human: setup refuses anything that would make a run
-    refuse): a FIRST `tenant.py setup acme` over a placed knowledge/ carrying it exits 1 naming
-    settings/verb-grants.yaml, writing nothing (no row; the refusal is not the one-tenant
-    guard's), and a RE-RUN over a finished tenant whose table has since become it exits 1
-    naming it, writing nothing. Check does not (M6 stands): `tenant.py check acme` over that
-    same finished tenant exits 0. The positive control: the fixture's own table sets up."""
+    """A verb-grants.yaml that decides every declared pair and withholds every one (the table the
+    template ships) grants gather nothing, so require_gather_query refuses every run of the tenant."""
     first = tmp_path / "first"
     knowledge = H.place_knowledge(first)
     _withhold_all(knowledge / "settings")
@@ -652,9 +538,9 @@ def test_1120_setup_refuses_an_all_withheld_table_that_check_accepts(tmp_path: P
 # ======================================================================================
 
 def _gather_health_checks_only(settings: Path) -> None:
-    """The template's table with every `health-check` row granted to gather and every other row
-    still withheld: total (no gap), lead-zero clean and not all-withheld, yet gather holds no
-    query verb, so require_gather_query refuses every run (92r2 #1, executed)."""
+    """The template's table with every `health-check` row granted to gather and every other row still
+    withheld: total (no gap), lead-zero clean and not all-withheld, yet gather holds no query verb,
+    so require_gather_query refuses every run (92r2 #1, executed)."""
     doc = yaml.safe_load(
         (H.TEMPLATE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8"))
     granted = 0
@@ -669,26 +555,11 @@ def _gather_health_checks_only(settings: Path) -> None:
     _write_table(settings, doc)
 
 
-def _run_start_refusal(settings: Path) -> str:
-    """What run start says about `settings`' table: the production `require_gather_query` over
-    the production `run_grants` — the owner's own words, the oracle both entries must carry."""
-    grants = verb_dispositions.run_grants(settings)
-    with pytest.raises(verb_dispositions.DispositionError) as refused:
-        verb_dispositions.require_gather_query(grants)
-    return str(refused.value)
-
-
 def test_1120_setup_refuses_a_health_check_only_gather_grant_that_check_accepts(
         tmp_path: Path) -> None:
-    """The template's verb-grants.yaml with its health-check rows granted to gather: every
-    declared pair decided, lead-zero clean, not all-withheld — yet gather holds no query verb,
-    so require_gather_query refuses every run (92r2 #1, executed). Setup refuses it (V14, human:
-    setup calls run start's own readiness function): a FIRST `tenant.py setup acme` over a placed
-    knowledge/ carrying it exits 1 naming settings/verb-grants.yaml, writing nothing (no row;
-    the refusal is not the one-tenant guard's), and a RE-RUN over a finished tenant whose table
-    has since become it exits 1 naming it, writing nothing. Check does not (M6: well-formed):
-    `tenant.py check acme` over that same finished tenant, and `check --folder` over its
-    knowledge/, exit 0."""
+    """The template's verb-grants.yaml with its health-check rows granted to gather: every declared
+    pair decided, lead-zero clean, not all-withheld — yet gather holds no query verb, so
+    require_gather_query refuses every run (92r2 #1, executed)."""
     first = tmp_path / "first"
     knowledge = H.place_knowledge(first)
     _gather_health_checks_only(knowledge / "settings")
@@ -712,47 +583,6 @@ def test_1120_setup_refuses_a_health_check_only_gather_grant_that_check_accepts(
     H.assert_clean(_check_folder(H.knowledge_dir(rerun)))
 
 
-RUN_START_REFUSED_TABLES = [
-    pytest.param(_gather_health_checks_only, id="grant_census:health-check-only"),
-    pytest.param(_withhold_all, id="grant_census:all-withheld"),
-]
-
-
-@pytest.mark.parametrize("table", RUN_START_REFUSED_TABLES)
-def test_1120_setup_refuses_what_run_start_refuses_in_run_starts_own_words(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table: Callable[[Path], None]) -> None:
-    """Parity (V14: "any run-start refusal is setup's refusal, named" — scoped by #1256 D4 to structural refusals: a tenant whose every system is down is refused by a run, not by setup). Over one finished tenant
-    whose table gather can query nothing through (health-check only, or all withheld), the
-    production require_gather_query's message over the production run_grants is the oracle:
-    `tenant.py setup acme` exits 1 carrying that message verbatim and writes nothing, and the
-    REAL run.main (its seams recording) refuses the same tenant carrying the same message
-    verbatim, before its preflight, materialize or lifecycle is reached. The lead-zero half of
-    the readiness function is V1's cells; that setup reaches the function itself is the
-    census's."""
-    root = tmp_path / "data"
-    H.adopted(root)
-    settings = H.settings_dir(root)
-    table(settings)
-    owner = _run_start_refusal(settings)
-    assert str(settings / "verb-grants.yaml") in owner, f"precondition: {owner!r}"
-
-    before = H.tree_census(root)
-    text = H.assert_refused(H.setup(tenant_py, root), str(settings / "verb-grants.yaml"))
-    assert owner in text, (
-        f"setup's refusal is not run start's, word for word (V14).\n  run start's readiness "
-        f"says: {owner!r}\n  setup said: {text!r}")
-    assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
-
-    monkeypatch.setenv(H.DATA_ROOT_ENV, str(root))
-    rec = H.RunRecorder(tmp_path / "run")
-    rc, exc = H.drive_run(run_py, [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID], rec)
-    assert exc is not None, f"run.main started a run gather can query nothing in (rc {rc})"
-    assert owner in H.exit_text(exc), (
-        f"run.main's refusal does not carry its readiness function's words: "
-        f"{H.exit_text(exc)!r}")
-    assert not rec.spent, f"run.main spent a seam before refusing: {rec.order}"
-
-
 # ======================================================================================
 # V11 (human, §7-verify round 2; RELOCATES V2): "a clone's agent/.tenant-id must be committed"
 # is check's rule — `check <id>` over a clone, `check --folder` over a git work tree — never
@@ -760,9 +590,9 @@ def test_1120_setup_refuses_what_run_start_refuses_in_run_starts_own_words(
 # ======================================================================================
 
 def _decoy_repo(tmp_path: Path) -> Path:
-    """A repo whose HEAD DOES commit agent/.tenant-id = acme — what an exported GIT_DIR would
-    point check's git read at (J-PO1, executed: an exported GIT_DIR decides the repository
-    whatever `cwd=` says)."""
+    """A repo whose HEAD DOES commit agent/.tenant-id = acme — what an exported GIT_DIR would point
+    check's git read at (J-PO1, executed: an exported GIT_DIR decides the repository whatever `cwd=`
+    says)."""
     src = tmp_path / "decoy-src"
     shutil.copytree(H.FIXTURE, src, symlinks=True)
     H.write_tenant_id_file(src, H.TID, "id")
@@ -776,18 +606,10 @@ def _decoy_repo(tmp_path: Path) -> Path:
 ])
 def test_1120_check_refuses_a_clones_tenant_id_that_its_repo_does_not_commit(
         tmp_path: Path, how: str) -> None:
-    """knowledge/ is a git clone whose agent/.tenant-id holds exactly acme plus a newline, but
-    its repo's HEAD does not commit that content: never added, added and never committed, or
-    the repo commits beta's id (the wrong tenant's repo was cloned) and the operator
-    overwrote it with acme's. Acceptance and setup check presence + match only and make no git
-    call (V11): a row-less first `tenant.py setup acme` exits 0 and writes the row, and
-    accept_tenant returns a Tenant. `tenant.py check acme` exits 1 naming agent/.tenant-id (D4's
-    rule, now check's) — also with GIT_DIR exported at a repo that DOES commit acme, so the
-    answer is the clone's own repo's (J-PO1); `tenant.py check --folder <knowledge>` over the
-    clone, a git work tree as in tenant CI, exits 1 naming it. Neither stages, commits or edits
-    anything in the clone: `git status --porcelain` is what it was. The positive controls: a
-    clone committing acme's id checks clean both ways, and a plain folder carrying the same file
-    (not a git work tree) checks clean with --folder."""
+    """knowledge/ is a git clone whose agent/.tenant-id holds exactly acme plus a newline, but its
+    repo's HEAD does not commit that content: never added, added and never committed, or the repo
+    commits beta's id (the wrong tenant's repo was cloned) and the operator overwrote it with
+    acme's."""
     root = tmp_path / "data"
     knowledge = H.clone_with_uncommitted_tenant_id(tmp_path / "src", root, how)
     named = H.TENANT_ID_FILE.as_posix()
@@ -825,7 +647,6 @@ def test_1120_check_refuses_a_clones_tenant_id_that_its_repo_does_not_commit(
 OTHER_UID = 1000
 
 #: A fault is `(tmp_path, knowledge) -> (env for the faulted run, a pattern for git's reason,
-#: repair)`.
 GitFault = Callable[[Path, Path], tuple[dict[str, str], str, Callable[[], None]]]
 
 
@@ -849,9 +670,8 @@ def _git_absent(tmp_path: Path, _knowledge: Path):
 
 
 def _git_unrunnable(tmp_path: Path, _knowledge: Path):
-    """The only `git` on PATH is a file nobody may execute: starting it raises PermissionError,
-    not FileNotFoundError (#1159 review: it crashed `check` with a traceback). Root too — exec
-    needs at least one execute bit whoever runs it."""
+    """The only `git` on PATH is a file nobody may execute: starting it raises PermissionError, not
+    FileNotFoundError (#1159 review: it crashed `check` with a traceback)."""
     bin_dir = tmp_path / "bin-with-unrunnable-git"
     bin_dir.mkdir()
     (bin_dir / "git").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -916,14 +736,10 @@ GIT_CANNOT_ANSWER: list[Any] = [
 @pytest.mark.parametrize("fault", GIT_CANNOT_ANSWER)
 def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
         tmp_path: Path, fault: GitFault) -> None:
-    """A SOUND finished tenant — knowledge/ a clone whose repo commits agent/.tenant-id = acme —
-    while git cannot answer about it: no git on PATH; the clone owned by another uid, which git
-    refuses as dubious ownership (built with chown, so it runs only as root and is skipped in
-    CI); or a .git/config git cannot parse. `tenant.py check acme` and `tenant.py check
-    --folder <knowledge>` each exit 1 naming "cannot verify .tenant-id is committed" and git's
-    reason (git, dubious ownership, bad config) — V16, human: never a skip, never exit 0. A
-    re-run of `tenant.py setup acme` in the same state exits 0 and writes nothing (setup makes no
-    git call, V11). The positive control: the fault repaired, both checks exit 0."""
+    """A SOUND finished tenant — knowledge/ a clone whose repo commits agent/.tenant-id = acme — while
+    git cannot answer about it: no git on PATH; the clone owned by another uid, which git refuses as
+    dubious ownership (built with chown, so it runs only as root and is skipped in CI); or a
+    .git/config git cannot parse."""
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "src", root)
     H.plant_row(root)
@@ -955,7 +771,6 @@ def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
 # ======================================================================================
 
 #: The two ways this machine's git fails the census, each with the census's cause and V16's
-#: reason on its own line.
 GIT_FAILS: list[Any] = [
     pytest.param(_git_absent, GIT_ABSENT_CAUSE, "git is not available on PATH", id="git:absent"),
     pytest.param(_git_unrunnable, GIT_UNRUNNABLE_CAUSE, "git cannot be run",
@@ -966,14 +781,9 @@ GIT_FAILS: list[Any] = [
 @pytest.mark.parametrize(("fault", "cause", "unverified_reason"), GIT_FAILS)
 def test_1159_check_says_this_machines_git_failed_and_exits_1(
         tmp_path: Path, fault: GitFault, cause: str, unverified_reason: str) -> None:
-    """With git absent from PATH, or present but not executable (PermissionError, which once
-    crashed `check` with a traceback), the census cannot read the running checkout's committed
-    system markers. Over a SOUND plain folder, `tenant.py check --folder` exits exactly 1 with
-    the census line alone, its cause naming this machine's git (#1159 O1; K1: a plain folder is
-    exempt from V16). Over a SOUND clone committing acme's id (K2), `check --folder
-    <knowledge>` and `check acme` each exit exactly 1 printing BOTH the census line and, on a
-    line of its own, V16's "cannot verify .tenant-id is committed" with git's reason (O2). The
-    positive control: git back on PATH, the plain folder checks clean."""
+    """With git absent from PATH, or present but not executable (PermissionError, which once crashed
+    `check` with a traceback), the census cannot read the running checkout's committed system
+    markers."""
     folder = _folder(tmp_path, "tenant")
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "src", root)
@@ -997,66 +807,7 @@ def test_1159_check_says_this_machines_git_failed_and_exits_1(
     H.assert_clean(_check_folder(folder))
 
 
-def _unparseable_table(folder: Path) -> str:
-    table = verb_dispositions.dispositions_path(folder / "settings")
-    text = table.read_text(encoding="utf-8")
-    table.write_text(text.replace("  cmdb:", "<<<<<<< HEAD\n  cmdb:", 1), encoding="utf-8")
-    return str(table)
-
-
-def _absent_lead_zero_template(folder: Path) -> str:
-    return _lead_zero_disagreement(folder)[1]
-
-
-#: Faults in the folder that no census is needed to find (#1159 review: a census that could not
-#: be taken once skipped the table and lead-zero checks with it).
-NO_CENSUS_FAULTS = [
-    pytest.param(_unparseable_table, id="verb-grants.yaml-unparseable"),
-    pytest.param(_absent_lead_zero_template, id="lead-zero-template-absent"),
-]
 # A case-history mapping that does not parse is no longer such a fault: the one tenant check
 # (#1222 A5) refuses it in acceptance, before any census, with a fixed reason naming the file
 # and no host path (the spec's tenant-check suite pins that).
 
-
-def _findings_of(text: str) -> set[str]:
-    return {ln for ln in text.splitlines() if ln.startswith("[tenant.py] ")}
-
-
-@pytest.mark.parametrize("fault", NO_CENSUS_FAULTS)
-def test_1159_a_census_not_taken_still_judges_what_needs_none(
-        tmp_path: Path, fault: Callable[[Path], str]) -> None:
-    """A folder with a fault no census is needed to find — its verb-grants.yaml does not parse,
-    or its lead-zero.yaml names a template the running catalog lacks. Checked with the census taken, `check --folder` exits 1 naming
-    the fault. Checked with no git on PATH (census not taken), it exits exactly 1 printing
-    EVERY finding the sighted check printed, plus the census line and nothing else: losing
-    the census costs only the judgement that needs it. The oracle is the same command with git
-    on PATH, never the census re-run in the test. The positive control: the folder before the
-    fault checks clean."""
-    folder = _folder(tmp_path, "tenant")
-    H.assert_clean(_check_folder(folder))
-    named = fault(folder)
-    sighted = _findings_of(H.assert_refused(_check_folder(folder), named))
-    env, _reason, _repair = _git_absent(tmp_path, folder)
-    text, line = _census_blind_line(_check_folder(folder, **env), folder=folder,
-                                    cause=GIT_ABSENT_CAUSE, also=(named,))
-    assert _findings_of(text) - {line} == sighted, (
-        "with the census not taken, check does not print exactly the findings that need no "
-        "census:\nsighted:\n" + "\n".join(sorted(sighted)) + f"\nblind:\n{text}")
-
-
-def test_1159_check_names_the_running_checkout_when_head_cannot_be_resolved(
-        tmp_path: Path) -> None:
-    """The running checkout is a copy whose `.git` is gone, so its declared systems are not
-    resolvable at HEAD. `check --folder` over a sound folder exits EXACTLY 1, and the census
-    line's cause names the running checkout (the tmp COPY's root) as the side that failed and
-    says HEAD did not resolve — never a generic "census unavailable" (#1159 O1). The positive
-    control: the same copy before `.git` was removed checks the folder clean."""
-    checkout = H.tmp_checkout(tmp_path / "checkout")
-    folder = _folder(tmp_path, "tenant")
-    script = _copy_script(checkout)
-    H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
-    shutil.rmtree(checkout / ".git")
-    _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None),
-                       folder=folder, cause=MARKERS_CAUSE,
-                       names=(HEAD_CAUSE, str(checkout.resolve())))

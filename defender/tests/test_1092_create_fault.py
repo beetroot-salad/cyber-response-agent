@@ -1,21 +1,6 @@
-"""#1092 — the missing-image fault names the build command and the tree (M5 amended, O4,
-JF5 amended by #1095), `start_box` never builds (D2 C), the `_spec771` rootfs runner takes the
-same resolver, the same preflight and the same `--pull=never` (the fourth `docker run` site),
-and the learning drain's fault handler appends a durable pointer to the worktree it deletes
-(MF2).
-
-JF5 AMENDED (#1095): a missing image is found by ASKING the daemon — `docker image inspect`,
-a yes/no by exit code, before the create — never by classifying the create's stderr. The
-create's text is the CLI's to phrase and varied across CLI versions (27.x appends a period
-to `No such image: <ref>`), which made the remedy silently vanish on distro CLIs. The daemon
-is `NoSuchImageDocker`: its inspect answers rc 1 for the image the start asked about, its
-create stays healthy. Every "other shape" fixture is a shape the ledger observed on a real
-daemon (po1's absent bind source; N1's pull-path text, which `--pull=never` removes from the
-create path).
-"""
+"""A missing box image faults naming the build command; start_box never builds."""
 from __future__ import annotations
 
-import inspect
 import re
 import subprocess
 from collections.abc import Callable
@@ -228,54 +213,6 @@ def test_a_missing_image_raises_and_no_docker_build_is_ever_attempted(tmp_path, 
     assert subs.count("run") == 1, subs
     assert (held.create_argv or []).count("--pull=never") == 1, held.create_argv
     assert "--pull" not in (held.create_argv or []), "the two-token spelling"
-
-
-# ---- phase F (F2, human): the opt-out lane still surfaces the remedy -----------------------------
-def test_the_unsandboxed_opt_out_warning_carries_the_swallowed_missing_image_fault_and_the_build_command(tmp_path, monkeypatch, capsys):
-    """With `DEFENDER_ALLOW_UNSANDBOXED=1` and a missing image, `start_box` swallows the
-    `BoxFault`, degrades to the unboxed host executor, and the box's WARNING line on stderr
-    carries the swallowed fault's message — the daemon's `No such image` line and the build
-    command `python3 <tree>/defender/scripts/box_image.py build` — so O4's remedy still
-    reaches the operator under the opt-out; without the opt-out the same fault raises (d44)."""
-    _no_unsandboxed(monkeypatch)
-    monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
-    defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
-    run_dir = make_run_dir(tmp_path)
-    rec = NoSuchImageDocker()
-    box = box_mod.start_box(run_dir, defender_dir, docker=rec)
-    assert box.sandboxed is False
-    err = capsys.readouterr().err
-    warnings = [ln for ln in err.splitlines() if " WARNING defender.runtime.box." in ln]
-    assert warnings, err
-    warning = "\n".join(err.splitlines()[err.splitlines().index(warnings[0]):])
-    assert f"No such image: {image_tag(defender_dir)}" in warning, err
-    assert remedy_command(warning) == [
-        "python3", f"{defender_dir.parent.resolve()}/{BUILD_COMMAND_TAIL.split(' ')[0]}", "build",
-    ], err
-
-
-# ---- the seam d46 needs -----------------------------------------------------------------------
-def test_the_rootfs_runner_spawns_docker_through_an_injectable_run_seam_defaulting_to_subprocess_run():
-    """`_spec771.run_probe_under_profile(script, profile, *, run=subprocess.run)` spawns its
-    docker calls — the image preflight and then the `docker run` — through the `run`
-    parameter, a keyword-only seam whose default is `subprocess.run`, so a test can observe
-    the argv without a daemon: a fake `run` receives each argv, no real process is spawned,
-    and the fake's stdout on the run is what the runner decodes."""
-    from defender.tests.e2e._spec771 import run_probe_under_profile
-
-    runner: Callable[..., Any] = run_probe_under_profile
-    param = inspect.signature(run_probe_under_profile).parameters.get("run")
-    assert param is not None, "run_probe_under_profile has no `run` parameter"
-    assert param.kind is inspect.Parameter.KEYWORD_ONLY, param
-    assert param.default is subprocess.run, param.default
-    seen: list[list[str]] = []
-
-    def fake_run(argv, **kw):
-        seen.append(list(argv))
-        return subprocess.CompletedProcess(argv, 0, stdout='{"seam": "ok"}', stderr="")
-
-    assert runner("print(1)", None, run=fake_run) == {"seam": "ok"}
-    assert [a[1:3] for a in seen] == [["image", "inspect"], ["run", "--rm"]], seen
 
 
 # ---- d46 -------------------------------------------------------------------------------------

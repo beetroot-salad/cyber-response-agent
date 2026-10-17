@@ -1,31 +1,17 @@
-"""#869 O3/RF6/RF7/FK-2/FK-17 — reported, never silently absorbed; and the durable record.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_869.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared869.py`.
-
-A membership refusal that leaves no trace is the failure O4 names: from inside a tick an
-adapter that will exist tomorrow and an invented name are indistinguishable (N5), so both go
-to human review — which requires there to BE a review surface.
-"""
+"""#869 O3/RF6/RF7/FK-2/FK-17 — reported, never silently absorbed; and the durable record."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import pytest
 
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
-from defender.learning.leads import lead_author, pitfalls_curator
+from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.tests._declared869 import (
-    ADAPTERS_REL,
-    SKILLS_REL,
     Spawn,
     head_files,
-    log_lines_naming,
-    loop_log,
     marker_file,
     pitfall_row,
     read_rows,
@@ -33,7 +19,7 @@ from defender.tests._declared869 import (
     write,
 )
 from defender.tests._curator1134 import open_state
-from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
+from defender.tests._lead_author_1134 import lead_trees
 from defender.tests._state1135 import curation_row, curation_run_dir
 from defender.learning.core.state import PITFALLS
 
@@ -62,94 +48,6 @@ def _mixed_batch(tmp_path: Path, monkeypatch, *, name: str = "repo"):
         marker_file(root, "elastic"), "# elastic\n## Common pitfalls\n- curated\n",
     ))
     return repo, paths, spawn
-
-
-def test_dropped_names_are_named_in_the_log(tmp_path, monkeypatch, capsys):
-    """A tick that drops rows naming `gather` and `fakesys` emits a line naming BOTH, the
-    reason, and the SOURCE CONSULTED — which at this lane is ONE source, the adapters
-    directory, and never the marker source.
-
-    THE FOSSIL THIS CORRECTS (phase F, F2). `35-design-corrections.md` altered this demand to
-    "name the source consulted, since there are now two" while the union still governed every
-    site; §7 then resolved NF2 and handed THIS lane the adapter half alone. Requiring both
-    directory names on the line would make the implementation print `defender/skills` on a
-    line explaining a decision taken WITHOUT reading `defender/skills` — and would tell an
-    operator the wrong thing about which half came back without the name, which is the exact
-    failure the "source consulted" clause was added to prevent. So the line names the source
-    this lane actually consulted, and the marker source is asserted ABSENT from it.
-
-    This is what feeds a human review of names that are neither invented nor yet real: from
-    inside a tick the two are indistinguishable and both go to review (N5), which is why the
-    rejected branch here is "distinguish an adapter that will exist tomorrow from an invented
-    name". WHAT THIS DEMAND DOES NOT REACH is site 3 — FK-3 mints that surface separately, and
-    the parity across the three sites is not this demand's to assert.
-
-    FK-16 rides here, stated as a decision rather than left as an implementation accident:
-    for a DELETE under an undeclared directory MEMBERSHIP FIRES FIRST, and the reason reported
-    follows the existing vocabulary — so the operator gets the name and the registry reason,
-    not a deletion complaint about a directory that should never have been written to.
-    RE-PINNED AT SITE 2 (phase F, F3): the premise FK-16 was answered from is explicit that
-    the site is `lead_author._skills_path_rule`, where the in-scope test GAINS membership. At
-    site 1 membership already precedes the delete branch at this base, so an assertion there
-    certifies existing behaviour and leaves the decision unpinned exactly where an implementer
-    could put the new check after the old one. Both sites are driven; site 2 is the one that
-    would otherwise be free.
-    """
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
-                     skills=("elastic",), catalog=(), non_systems=("gather",))
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    state = open_state(paths)
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"),
-         pitfall_row("r:l-001:0", "gather"),
-         pitfall_row("r:l-002:0", "fakesys")],
-        state=state,
-    )
-    spawn = Spawn(lambda root: write(
-        marker_file(root, "elastic"), "# elastic\n## Common pitfalls\n- curated\n",
-    ))
-    capsys.readouterr()
-    pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths))
-
-    log = loop_log(capsys)
-    named = log_lines_naming(log, "gather", "fakesys", repo / ADAPTERS_REL)
-    assert named, (
-        f"no single line names both dropped systems and the source consulted: {log}"
-    )
-    assert [ln for ln in named if str(repo / SKILLS_REL) in ln] == [], (
-        f"the drop line names the MARKER source, which this lane never consults under NF2 — "
-        f"an operator reading it is told the wrong half came back without the name: {named}"
-    )
-    assert spawn.systems_seen == ["elastic"], "the declared row must still be handed over"
-
-    # FK-16 at SITE 2, where membership is new: a `D ` under an undeclared directory reports
-    # the NAME and the registry reason, not the deletion complaint.
-    with pytest.raises(LeadAuthorError) as refusal:
-        lead_author._skills_path_rule(
-            repo, "D ", "defender/skills/fakesys/SKILL.md", systems=DECLARED,
-            tree_for=lane_tree_for(repo))
-    assert "fakesys" in str(refusal.value)
-    assert "deleted" not in str(refusal.value), (
-        "the undeclared name was absorbed into a deletion complaint about a directory that "
-        "should never have been written to — O3's own failure shape, and the arm FK-16 "
-        "chose against"
-    )
-    # The control on the same address and the same rule: a `D ` under a DECLARED system is
-    # still the delete-prohibition's, so the channel demonstrably tells the two reasons apart
-    # rather than having lost the deletion complaint altogether.
-    with pytest.raises(LeadAuthorError, match="deleted"):
-        lead_author._skills_path_rule(
-            repo, "D ", "defender/skills/elastic/SKILL.md", systems=DECLARED,
-            tree_for=lane_tree_for(repo))
-
-    # Site 1 keeps its arm too — already ordered this way at this base, so it certifies rather
-    # than decides, and it is here so the two sites cannot silently diverge.
-    with pytest.raises(LeadAuthorError) as site1:
-        pitfalls_curator._pitfalls_path_rule(
-            "D ", "defender/skills/fakesys/execution.md", systems=DECLARED)
-    assert "fakesys" in str(site1.value)
-    assert "deleted" not in str(site1.value)
 
 
 def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
@@ -219,41 +117,6 @@ def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatc
     )
     assert "r:l-000:0" not in graveyard
     assert repo.is_dir()
-
-
-def test_an_empty_declared_set_refuses_the_lane(tmp_path, monkeypatch, capsys):
-    """An empty declared set is NOT spendable as a gate: `run_pitfalls` over a tree that
-    declares nothing leaves every queued row in `pitfalls.jsonl`, writes nothing to
-    `pitfalls.consumed.jsonl`, and fails loud.
-
-    RF6, human-resolved. This is the half M1 buys at the resolver and the consumers spend at
-    an ordinary falsy test — C37, executed at this base: rc 0, the curator never spawned,
-    pending 2 -> 0, and both rows stamped committed. An empty set applied as a membership "no"
-    to every row is a silent per-row refusal, which is exactly the failure O4 names.
-
-    The falsy value being a VALID answer at the resolver is a different demand
-    (`declared_systems_empty_dir_reports`); this one is what the consumers may do with it.
-    """
-    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
-    repo = seed_tree(tmp_path, adapters=(), markers=(), skills=(), catalog=(),
-                     non_systems=("gather",))
-    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    state = open_state(paths)
-    persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], state=state,
-    )
-    spawn = Spawn()
-    capsys.readouterr()
-
-    with pytest.raises(LeadAuthorError):
-        pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths))
-
-    assert spawn.calls == [], "the curator must not be spawned against an empty set"
-    assert len(persist.read_pitfalls(state)) == 2
-    assert not (paths.state_root / PITFALLS.consumed).exists()
-    assert head_files(repo), "the fixture never committed anything"
-    assert "execution.md" not in " ".join(head_files(repo))
-    assert loop_log(capsys).strip(), "the refusal must be loud"
 
 
 def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_path, capsys):

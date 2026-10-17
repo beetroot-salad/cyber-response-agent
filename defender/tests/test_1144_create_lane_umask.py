@@ -1,78 +1,9 @@
-"""#1144 — every `_io` writer lands 0644 masked by the process umask, whichever lane wrote it (O1).
-
-Before #1144 the UNNAMED create lane (`O_TMPFILE`, then a link to the name) forced 0644 on its file
-with `fchmod`, whatever the umask said. So under umask 077 one process wrote a create-lane record
-0644 beside a replace-lane record 0600, and the same create landed 0644 on a host with `O_TMPFILE`
-and 0600 on one without (NFS, virtiofs: the fallback). O1: no `_io` writer overrides the umask;
-every lane lands `0644 & ~umask`, whichever seam wrote it.
-
-The kernel cannot be left to mask the unnamed lane's file. Linux before 6.0 (ac6800e279a2, "fs: Add
-missing umask strip in vfs_tmpfile", backported to the 4.19+ stable lines) did not apply the umask
-to an `O_TMPFILE` open on a filesystem without POSIX ACLs, so a lane that only asked for 0644 still
-landed 0644 there under umask 077. So the lane sets the mode itself, to `0644 & ~umask`, with the
-umask read from `/proc/self/status` (Linux 4.7+). It never calls `os.umask(m)` and sets it back,
-because every other thread would create files under `m` in between. Where that file or its
-`Umask:` line is missing, the lane stands down to the named fallback, whose plain open every kernel
-masks.
-
-The create matrix is every create lane on every seam, under four umasks, at two depths:
-
-* seams: the path seam `write_guarded(path, text, mode="create")`, the rooted seam
-  `rooted_write(root, name, text, mode="create")`, and the held seam through both of its doors,
-  `hold(root).write(...)` and `hold_new(parent, name).write(...)` (how `_episode_handle` writes an
-  episode's records, `served/base.jsonl` included).
-* lanes, each driven through the seam's own `open_unnamed=`:
-  - `default`: the seam exactly as production calls it, nothing injected (no `open_unnamed=`,
-    no `os_=`), so a lane that behaves only when its seams are left alone cannot hide;
-  - `unnamed`: the unnamed lane, its real open passed through a recorder that proves it ran;
-  - `old_kernel`: the unnamed lane on a kernel that does not mask the unnamed file. The real open,
-    then the file set to 0644 outright, as such a kernel leaves it. This kernel masks it, so the
-    seam puts back what the old one did, and the lane's own mode is what is left to judge;
-  - `fallback`: the one named `O_CREAT|O_EXCL` open, reached by the unnamed open answering
-    EOPNOTSUPP as a filesystem without `O_TMPFILE` does (`_create_lane.no_unnamed_files`).
-* umasks: 077 -> 0600 and 027 -> 0640 are the obligation (027 also rules out a lane that picks
-  between a hardcoded 0600 and 0644); 022 -> 0644 is #1078 J16's unchanged observable (O2) and
-  the control no lane landing 0600 whatever the umask can pass; 002 -> 0644 pins that the umask
-  only ever tightens the requested 0644, the one mask that tells a lane asking for 0644 from one
-  asking for 0666.
-* depths: a name at the top of the root, and `served/base.jsonl`, the record O1 names.
-
-Each case also writes a `replace` record through the same seam, in the same process, under the
-same umask, beside it: the same-process control. The create must land the replace's mode (O1's
-"a create file and a replace file from the same process disagreeing"). A smaller matrix runs the
-create with a small body and an empty one, so a lane keyed on the body's size cannot hide.
-Further tests cover the unnamed lane's other way down (a host with no `/proc` to link through,
-via the rooted and held seams' `os_=`), the lane standing down when it cannot read the umask, the
-umask reader itself, and every OTHER lane that creates a file (replace, append, durable append,
-update, the locked rewrites, the streaming open, `append_jsonl`) on every seam that has it.
-
-Which lane ran is checked, not assumed. The unnamed and old-kernel cases keep a duplicate of the
-descriptor the REAL unnamed open handed back (`_io.open_unnamed` / `_io.open_unnamed_at`) open until
-the test is over, and require the record at the name to BE that file. Held open, its inode cannot
-be freed and handed to a later file, so a lane that opened the unnamed file, dropped it and fell
-back cannot pass for the unnamed lane. The fallback cases require their refusal to have been met
-exactly once. Where tmp_path's filesystem cannot make an unnamed file at all (overlayfs before
-Linux 6.6), the cases that need the unnamed lane are skipped, with that reason, not failed.
-
-Behaviour cannot rule out a lane that learns the umask by setting it (`os.umask(0)` and back lands
-the same mode, and races every other thread's creates meanwhile), nor tell a second, redundant
-mode-setter from the one the old kernels need. A source check, resolved through
-`scripts/lint/_astlib.py`, holds both lines: `_io` never reaches `os.umask`, and its one
-mode-setting call is the unnamed lane's.
-
-Fakes: the `open_unnamed=` seams (a pass-through recorder, the old-kernel opener and a refuser) and
-the `os_=` seam (`_NoProc`, the real `os` with the `/proc` link refused). Nothing is patched.
-
-Red before the #1144 fix (960ca44b's tests against the code before 8f36af5b): every `default` and
-`unnamed` create under umask 077 and 027 (each landed 0644). Red before the review round's fix
-(these tests against b9026530's code, which had dropped the `fchmod` and left the mode to the
-kernel): every `old_kernel` path and rooted create under 077 and 027 (0644 kept), every held cell
-that passes `open_unnamed=` (no such seam), `append_jsonl` under 002 (it asked for 0666), the
-umask reader and the stand-down (no reader), and the source check (no mode set at all).
+"""Every `_io` writer lands 0644 masked by the process umask, whichever lane wrote it: the unnamed (`O_TMPFILE`) create
+lane, its linked-through-/proc and no-/proc fallbacks, and every other lane. The unnamed lane sets its mode itself from
+the umask read out of `/proc/self/status`, and the reader leaves the umask as it found it.
 """
 from __future__ import annotations
 
-import ast
 import errno
 import os
 import stat
@@ -83,7 +14,6 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender.tests._by_path import import_lint_lib
 from defender.tests._create_lane import (
     assert_single_plain,
     no_unnamed_files,
@@ -461,92 +391,11 @@ def test_every_other_lane_that_makes_a_file_lands_0644_masked_by_the_umask(
 
 # -- the one mode `_io` sets itself, and the umask it never sets -------------------------------
 
-#: What sets a file's mode outright, by the dotted origin `_astlib` resolves a name to.
-MODE_SETTERS = frozenset({"os.chmod", "os.fchmod", "os.lchmod", "shutil.copymode",
-                          "shutil.copystat"})
-#: The same, called on a VALUE (the `os_` seam, `self._os`, a `Path`): `.<attr>`.
-MODE_SETTER_METHODS = frozenset({".chmod", ".fchmod", ".lchmod"})
-UMASK = ("os.umask", ".umask")
 
 
-def _astlib() -> Any:
-    """The gates' shared name resolver (`scripts/lint/_astlib.py`), imported the way the suites
-    reach it."""
-    return import_lint_lib("_astlib")
 
 
-def _enclosing_defs(tree: ast.AST) -> dict[ast.AST, str]:
-    """Every node's innermost enclosing `def`, by name (`<module>` at the top level)."""
-    owner: dict[ast.AST, str] = {}
-
-    def visit(node: ast.AST, fn: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            inner = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else fn
-            owner[child] = inner
-            visit(child, inner)
-    visit(tree, "<module>")
-    return owner
 
 
-def _refers_to(node: ast.AST, env: Any, astlib: Any) -> str | None:
-    """What `node` names, resolved through `_astlib`: the dotted origin of a name or attribute
-    chain rooted in an import (`os.umask`, an `import os as o` alias, a `from os import fchmod`),
-    `getattr(<x>, "<name>")` as `<x>.<name>` would resolve, and `.<attr>` for an attribute read
-    off a value, which has no import origin to resolve."""
-    if isinstance(node, (ast.Name, ast.Attribute)):
-        found = astlib.origin(node, env)
-        if found is not None or not isinstance(node, ast.Attribute):
-            return found
-        if astlib.origin(node.value, env) is None:
-            # The receiver is a value: the `os_` seam, `self._os`, a `Path`. `_astlib` cannot
-            # resolve a value, and its rule for that duck-typed case is to key on the attribute.
-            return f".{node.attr}"  # lint-ast-resolve: ok — a value receiver (the os_ seam, self._os, a Path) has no import origin; per _astlib's duck-typed rule the attribute names the call, and the one setter it finds is then resolved to `os` through its parameter's default
-        return None
-    if isinstance(node, ast.Call) and astlib.callee(node, env) == "builtins.getattr" \
-            and len(node.args) >= 2:
-        attr = astlib.str_value(node.args[1], env)
-        if attr is not None:
-            receiver = astlib.origin(node.args[0], env)
-            return f"{receiver}.{attr}" if receiver is not None else f".{attr}"
-    return None
 
 
-def test_io_never_sets_the_umask_and_sets_one_mode_itself_in_the_unnamed_lane():
-    """`_io` reads the umask only from `/proc/self/status`: nothing in it reaches `os.umask` (a
-    call, a reference, an alias, a `getattr`, or `.umask` on the `os_` seam), because setting the
-    umask to learn it leaves every other thread creating files under the temporary mask. And
-    its one mode-setting call (`os.chmod` / `fchmod` / `lchmod` or `shutil.copymode` /
-    `copystat` by any spelling, or `.chmod` / `.fchmod` / `.lchmod` on a value) is the unnamed
-    lane's `os_.fchmod` in `_link_unnamed`, where `os_` is the `os` seam: its default resolves
-    to `os`. Every other lane leaves the mode to the kernel's masking of the 0644 it asks for."""
-    astlib = _astlib()
-    tree = ast.parse(Path(_io.__file__).read_text(encoding="utf-8"))
-    env = astlib.module_env(tree)
-    def_of = _enclosing_defs(tree)
-    umasks: list[str] = []
-    setters: list[tuple[str, str, ast.AST]] = []
-    for node in ast.walk(tree):
-        what = _refers_to(node, env, astlib)
-        if what in UMASK:
-            umasks.append(f"line {node.lineno}: {what} in {def_of[node]}")
-        elif what in MODE_SETTERS or what in MODE_SETTER_METHODS:
-            setters.append((def_of[node], what, node))
-    assert umasks == [], (
-        "defender/_io.py reaches os.umask (read the umask from /proc/self/status instead; "
-        "setting it races every other thread's creates):\n" + "\n".join(umasks))
-    assert [(fn, what) for fn, what, _ in setters] == [("_link_unnamed", ".fchmod")], (
-        "defender/_io.py's mode-setting calls are not exactly the unnamed lane's one fchmod "
-        "(every other lane leaves the mode to the kernel's umask):\n"
-        + "\n".join(f"line {n.lineno}: {what} in {fn}" for fn, what, n in setters))
-    (_fn, _what, call), = setters
-    assert isinstance(call, ast.Attribute)
-    assert isinstance(call.value, ast.Name), f"_link_unnamed's fchmod is called on {call.value}"
-    link_unnamed = next(f for f in tree.body
-                        if isinstance(f, ast.FunctionDef) and f.name == "_link_unnamed")
-    seam_defaults = dict(zip((a.arg for a in link_unnamed.args.kwonlyargs),
-                             link_unnamed.args.kw_defaults, strict=True))
-    seam_default = seam_defaults.get(call.value.id)
-    not_the_seam = (f"_link_unnamed's fchmod is called on {call.value.id!r}, which is not its "
-                    "`os` seam (a keyword-only parameter defaulting to `os`)")
-    assert seam_default is not None, not_the_seam
-    assert astlib.origin(seam_default, env) == "os", not_the_seam

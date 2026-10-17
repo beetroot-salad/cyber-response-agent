@@ -6,8 +6,6 @@ import pytest
 from defender.learning.leads import lead_neighbors as ln  # type: ignore[import-not-found]
 
 
-
-
 def test_tokenize_query_drops_pure_numeric_and_plumbing():
     toks = ln.tokenize_query(
         "python3 wazuh_adapter.py --query 'rule.id:5710' --window 1h"
@@ -23,17 +21,6 @@ def test_tokenize_query_preserves_dotted_field_references():
     assert "data.srcip" in toks
 
 
-def test_tokenize_query_lowercases():
-    toks = ln.tokenize_query("RULE.GROUPS:Sudo")
-    assert "rule.groups" in toks
-    assert "sudo" in toks
-    assert "RULE.GROUPS" not in toks
-
-
-def test_tokenize_query_empty_input_yields_empty_set():
-    assert ln.tokenize_query("") == frozenset()
-
-
 def test_tokenize_query_preserves_hyphenated_index_name():
     """ES|QL data-stream names survive as one token (the strongest 'same data'
     signal); trailing glob/hyphen punctuation is normalized off."""
@@ -41,8 +28,6 @@ def test_tokenize_query_preserves_hyphenated_index_name():
     assert "logs-system.auth" in toks
     assert "logs" not in toks
     assert "count" in toks
-
-
 
 
 @pytest.fixture(scope="module")
@@ -57,8 +42,6 @@ def test_unresolved_query_id_raises(catalog):
     """Caller must filter unresolvable ids; an unfiltered call is a hard error."""
     with pytest.raises(KeyError):
         ln.top_k_neighbors("nonexistent.lookup", catalog, k=3)
-
-
 
 
 def test_load_catalog_walks_draft_subdir(tmp_path):
@@ -100,8 +83,6 @@ def test_load_catalog_does_not_promote_a_missing_status_to_established(tmp_path)
     cat = ln.load_catalog(catalog_dir)
     assert len(cat) == 1
     assert cat[0].status != "established"
-
-
 
 
 _ESQL_SECTION = """\

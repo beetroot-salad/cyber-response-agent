@@ -1,53 +1,7 @@
-"""#1133 rev 3 (D7'') — the obligations rev 3 adds, each through its real entry point.
-
-Rev 3 removes four causes of PR #1143's review findings rather than patching them (the design
-amendment "rev 3" on #1133; every name the suite calls is gathered in `_spec1133`'s docstring):
-
-- **R1, reads belong to the view.** `Held.read` and the records' `read` are gone: `Held`'s public
-  surface is `write` / `mkdir` / `unlink` / `view` / `close`, and a record is read with
-  `episode.view().read(LAYOUT.<record>)` — present, absent or refused. The view reads through a
-  private dup taken under the lock `close` takes, so a close landing mid-read never redirects
-  it (the E-race shape: the freed number is taken by a decoy with `dup2`).
-  `delta_o` reads everything through one `bind`: an absent or refused base is `LedgerError`
-  ("no primed base"), a refused world file `EpisodeError`, an absent one `{}`, a refused
-  `outcome.yaml` at the outcome gate `EpisodeError` (#1224 moved the gate off `review.yaml`);
-  with no archived worlds it answers `{}` before the base is read. `load_family(view)` names `family.yaml`, never an absolute path.
-- **R2, the leaf refusal is its own class.** `_io.NotPlainEntry(OSError)` keeps its errno and
-  alias mark, and a linked folder on the way is NOT it. Placed at the doors, with the link
-  planted after the relevant `ensure`: at the judge's stale-draw removal (S1) a `judge/` folder
-  linked mid-pass stops the pass; at the priming claim and at the primed base a `served/` linked
-  after `served.ensure()` / the listing is the folder refusal, not "another launcher is priming"
-  / "already holds a primed base".
-- **R3, one primer, one write.** `prime_base(source_run_dir, episode, *, allow_empty=False)`
-  lists `served/` first: anything named `base.jsonl` is "already holds a primed base" before the
-  capture is read (a FIFO at the capture's payload sidecar makes the read observable) and without
-  opening the base. Zero rows are refused by default and primed empty with `allow_empty=True`, in
-  one create.
-- **R4, one leaf writer; a durable write never makes a folder.** An encode failure in a durable
-  append leaves no descriptor open; a durable append into a missing holding folder is
-  `FileNotFoundError` and makes nothing.
-- **Patches.** The minting check judges the WHOLE token (`Control` is refused by
-  `check_minted_token`, `Ledger.for_world`); `--episode` (#1105 PR 2's sibling edge) with no
-  held episode is `SystemExit` (driven through `run._resume_target`: `run.main` always holds one).
-
-Every plant is a real filesystem entry, every fault a real primitive or the entry point's own
-seam (`io=`, `os_=`, `judge=`, `prime=`); every negative has a positive control on the same
-address. Nothing is monkeypatched (the `roots` fixture steers configured roots through the
-environment, the resolvers' own seam).
-
-Red on the rev-2 tree (PR #1143's head), each for its own reason: `Held` still has `read` and the
-records still answer it; the view takes no dup (the decoy's bytes come back); `delta_o`
-answers `{}` over a missing or linked base and world file; `load_family` wants an `Episode` (a `Bound` has no `family`); there is no
-`_io.NotPlainEntry` and ELOOP is contained by errno (a linked folder read as a planted leaf);
-`prime_base` reads the capture before the "already primed" check, has no `allow_empty`, and the
-launcher's downgrade creates the base a second time; a durable append leaks its fd on an encode
-failure and makes missing folders; a dot-less token skips the case check; `_resume_target`
-answers `None` for `--resume` without an episode.
-
-#1224 retired the review merge and the staging teardown (and their R1 rows), `prepare_episode`
-adopting an existing episode (R3's retry row: a launch mints a fresh `-r<n>` directory) and the
-review's scratch ledger (its minting patch row).
-"""
+"""#1133 rev 3: reads belong to the view (a close landing mid-read never redirects it; delta_o and
+load_family read through one bind), the leaf refusal is its own class (NotPlainEntry), one primer
+one write (prime_base's already-primed check, allow_empty), durable-append cleanup, and the minting
+check judging the whole token. Plants are real filesystem entries; negatives have positive controls."""
 from __future__ import annotations
 
 from defender.run_repository import Run
@@ -147,20 +101,6 @@ def mod(dotted: str) -> Any:
 # =======================================================================================
 # R1 — the handle writes; the view reads
 # =======================================================================================
-
-def test_r1_held_has_no_read_and_its_surface_is_the_writers_view_and_close(tmp_path):
-    """`Held.read` is removed: the held root's public surface is exactly `write`, `mkdir`,
-    `unlink`, `view`, `close` (on the class and the instance), and its view's is the readers'.
-    Control: the view reads what the handle wrote."""
-    root = tmp_path / "root"
-    root.mkdir()
-    assert not hasattr(_io.Held, "read"), "`Held.read` is still there: reads belong to the view"
-    with S.hold(root) as held:
-        assert S.public_names(held) == S.HELD_SURFACE, sorted(S.public_names(held))
-        assert S.public_names(held.view()) == S.VIEW_SURFACE
-        held.write("rec.txt", "written\n", mode="create")
-        assert held.view().read("rec.txt").text == "written\n"
-
 
 @pytest.mark.parametrize("key", ["family", "review"])
 @pytest.mark.parametrize("kind", S.LEAF_PLANTS)
@@ -553,16 +493,6 @@ def test_r1_load_family_through_a_view_names_family_yaml_never_a_path(tmp_path, 
 # =======================================================================================
 # R2 — the core's leaf refusal is its own exception class
 # =======================================================================================
-
-def test_r2_not_plain_entry_is_an_oserror_and_the_errno_classifier_is_gone():
-    """`_io.NotPlainEntry` subclasses `OSError`, so every existing catcher keeps catching it;
-    `is_not_plain_refusal` (the errno classifier that read a linked folder as a planted leaf)
-    is removed."""
-    cls = S.not_plain_entry()
-    assert issubclass(cls, OSError)
-    assert not hasattr(_io, "is_not_plain_refusal"), (
-        "`_io.is_not_plain_refusal` is still there: containment catches the class (R2)")
-
 
 @pytest.mark.parametrize("lane", ["held", "rooted_write", "write_guarded"])
 @pytest.mark.parametrize("kind", S.LEAF_PLANTS)

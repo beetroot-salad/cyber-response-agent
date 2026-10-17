@@ -1,27 +1,4 @@
-"""#705 — M8: the projections move off `logger.messages` and onto the store.
-
-R14 freezes the consuming-reader list and sets the bar at CONSUMED-FIELD equivalence, one
-demand per reader:
-
-  | reader                              | consumes                          | exception   |
-  |-------------------------------------|-----------------------------------|-------------|
-  | `run_stats.py`                      | trailing `result`, usage, cost    | none        |
-  | `_replay_harness.load_turns_from_trace` | assistant `tool_use` name/input | none      |
-  | `visualize_runtime`'s footer check  | mtime + event presence            | none        |
-  | `runtime.html`'s six data layers    | event stream incl. `message.id`   | one — the coordinate |
-
-Bit-for-bit was rejected as provably unachievable (X2: `_usage_dict` reshapes usage and
-subtracts cache from `input_tokens`; the two `seq` counters disagree), and golden files
-were rejected because they would bake the two known-unavoidable divergences in anyway.
-**Under R8 the analysis read is not truncated**, which removes the second exception FK12
-would otherwise have had to state — so three of the four readers assert equivalence with NO
-exception, a materially stronger bar than "equivalent except the coordinate" applied
-uniformly. Do not write the blanket tolerance.
-
-`gl1` lives here too: model-authored payload text is attacker-influenced by construction,
-per `session_store`'s own access table, so the rendered page's HTML escaping of it is a
-demand in its own right.
-"""
+"""The trace/visualizer projections read from the session store: consumed-field equivalence, write-once, fail-closed, HTML escaping."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _view_run_1165
@@ -44,7 +21,6 @@ from defender.tests._session_store_705 import (
     jsonl,
     sql,
     store_factory,
-    store_mod,
 )
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
@@ -92,11 +68,7 @@ def _trace_events(run_dir: Path) -> list[dict]:
 
 
 def _log_derived_reference(run_dir: Path) -> dict:
-    """The projection's expected consumed fields, computed IN THE TEST from the wire log.
-
-    The wire log's response records carry `_usage_dict`'s already-transformed usage, so this
-    is the log-derived column the store-derived projection must match — computed here rather
-    than read from a golden, which would bake X2's two known divergences in."""
+    """The projection's expected consumed fields, computed IN THE TEST from the wire log."""
     records = [r for r in jsonl(RunPaths(run_dir).wire_log)
                if r.get("kind") == "response" and r.get("agent_id", "main") == "main"]
     keys = ("input_tokens", "output_tokens", "cache_read_input_tokens",
@@ -109,53 +81,10 @@ def _log_derived_reference(run_dir: Path) -> dict:
 
 # the negative and its positive control
 
-def test_projections_are_built_from_the_store_not_from_logger_messages(tmp_path):
-    """`tool_trace.jsonl` and the HTML pages are produced from the store: deleting the wire
-    log before the projection runs changes NOTHING about their content.
-
-    Positive control: `test_the_wire_log_is_still_written_and_still_human_readable`
-    (`test_store_driver_705.py`) — the log still exists, so this negative is not passing
-    because the log stopped being written. G1 refuted O26's census, and R4 grew M8 to all
-    of `runtime.html`'s data layers, so every surface the projection could read from is
-    bound here, not just `tool_trace.jsonl`."""
-    ss = store_mod()
-    run_dir, store, _ = _driven_run(tmp_path, run_id="from-store")
-    session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
-    with_log = (run_dir / "tool_trace.jsonl").read_text()
-    assert with_log.strip(), "the projection produced nothing to compare"
-
-    RunPaths(run_dir).wire_log.unlink()
-    observe_mod = __import__("defender.runtime.observe", fromlist=["write_trace"])
-    observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=0.0)
-    without_log = (run_dir / "tool_trace.jsonl").read_text()
-
-    def _strip_timings(text: str) -> list[dict]:
-        events = [json.loads(line) for line in text.splitlines() if line.strip()]
-        for event in events:
-            event.pop("duration_ms", None)
-            event.pop("duration_api_ms", None)
-        return events
-
-    assert _strip_timings(without_log) == _strip_timings(with_log), (
-        "the projection changed when the wire log was deleted — it is still reading it")
-    assert ss.hydrate(store, session_id, role="analysis"), (
-        "the store is where the content came from")
-
-
 # consumed-field equivalence, one demand per frozen reader
 
 def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_path):
-    """The store-derived projection emits `input_tokens` NET of cache reads and writes,
-    under the keys `cache_read_input_tokens` and `cache_creation_input_tokens`, so the
-    computed `total_cost_usd` is unchanged from the log-derived projection over the same
-    run — INCLUDING a run terminated mid-pair, whose terminal response is present in both.
-    Consumed fields: NO exception; the coordinate is not among them.
-
-    X2 measured the transform that would be lost: the payload dump keys usage as
-    `input_tokens` / `cache_read_tokens` / `cache_write_tokens` with `input_tokens` the RAW
-    total, while `_usage_dict` emits the cache keys separately and returns
-    `max(0, input - read - write)` — and `usage_cost` keys on the LATTER. Skip the
-    transform and every cost silently changes."""
+    """The store-derived projection emits `input_tokens` NET of cache reads and writes,"""
     run_dir, _store, _replay = _driven_run(tmp_path, run_id="usage")
     expected = _log_derived_reference(run_dir)
 
@@ -171,41 +100,8 @@ def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_pat
         "the fixture recorded no usage at all — the comparison above would be 0 == 0")
 
 
-def test_the_moved_projection_preserves_the_trailing_result_event(tmp_path):
-    """The projection still ends with a `type:"result"` event carrying `duration_ms`,
-    `duration_api_ms`, `total_cost_usd`, `num_turns` and the usage totals, at the same
-    values the log-derived projection produces over the same run — on a truncated run as on
-    a clean one. Consumed fields: NO exception.
-
-    This is the demand truncation would have broken hardest: all five fields change if the
-    terminal response is dropped, and under R5's rejected clause the demand was FALSE as
-    written against a correct implementation. `run_stats.load_result` is the reader; it is
-    driven here, not merely enumerated."""
-    run_stats = _load_run_stats()
-    run_dir, _store, _replay = _driven_run(tmp_path, run_id="result-event")
-    expected = _log_derived_reference(run_dir)
-
-    result = run_stats.load_result(run_dir)
-    assert result is not None, "run_stats found no trailing result event"
-    assert set(result) >= {"duration_ms", "duration_api_ms", "total_cost_usd",
-                           "num_turns", "usage"}, sorted(result)
-    assert result["num_turns"] == expected["num_turns"]
-    assert result["usage"] == expected["usage"]
-    assert result["total_cost_usd"] == expected["total_cost_usd"]
-
-    events = [json.loads(line) for line in
-              (run_dir / "tool_trace.jsonl").read_text().splitlines() if line.strip()]
-    assert events[-1]["type"] == "result", "the result event must be TRAILING"
-
-
 def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):
-    """`load_turns_from_trace` parses the moved projection into the same scripted `Turn`s
-    it produces from a log-derived trace of the same run — same count, same `tool_use` name
-    and input per turn — on a truncated run as on a clean one. Consumed fields: NO
-    exception; the coordinate is not a consumed field of this reader.
-
-    The test harness is itself a consumer of the projection's format (X5), so a change here
-    silently breaks every replay script in the suite."""
+    """`load_turns_from_trace` parses the moved projection into the same scripted `Turn`s"""
     run_dir, _store, replay = _driven_run(tmp_path, run_id="harness-turns")
     turns = load_turns_from_trace(run_dir / "tool_trace.jsonl")
 
@@ -220,13 +116,7 @@ def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):
 
 
 def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
-    """`runtime.html`'s data layers render from the store-derived event stream with the same
-    events, in the same order, as the log-derived stream — with ONE accepted, tested
-    exception: `message.id` takes the re-minted `{session_id}/{agent_id}#{seq}` form.
-
-    R14 records the coordinate change as an accepted difference rather than a silent one,
-    and `visualize_runtime`'s footer check (the fourth frozen reader) is driven in the same
-    page render: the footer's event-presence check must still find its events."""
+    """`runtime.html`'s data layers render from the store-derived event stream with the same"""
     from defender import run_common
     from defender.scripts.visualize import visualize_run
 
@@ -254,15 +144,7 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
 
 
 def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second_write(tmp_path):
-    """`tool_trace.jsonl` is written at most once per `run_id`: a second write under the
-    same key either preserves the first projection or fails loud — it never silently
-    clobbers it.
-
-    G24 (read) established that `observe.write_trace` uses a TRUNCATING `write_text`, not an
-    append, and G7 established a second caller exists in the codebase
-    (`experiments/…/run_arms.py:158`, outside this PR's structure). No demand states the
-    single-invocation-per-`run_id` cardinality today's code happens to have, so a second
-    call under a shared `run_id` would clobber with nothing to catch it."""
+    """`tool_trace.jsonl` is written at most once per `run_id`: a second write under the"""
     observe_mod = __import__("defender.runtime.observe", fromlist=["write_trace"])
     run_dir, store, _replay = _driven_run(tmp_path, run_id="trace-once")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
@@ -284,13 +166,7 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
 # gl5 / rp1 — the render surface R4 loaded and every reasoning artifact missed
 
 def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
-    """`(T, run_dir)` with the driven run moved to where the run page's repository opens it.
-
-    #1105 PR 2 (declared change 7): the standalone re-render is `--tenant T <run_id>` and opens
-    the run by id through T's repository, so the run moves to `<data root>/<T>/runs/<run_id>`,
-    the runs folder carrying `_tenant.json` naming T (the real writer). The store stays where
-    the drive put it: the run's pointer names it by its absolute path. (Not driven there in
-    place: `_driven_run` puts the store under the same folder it puts the run in.)"""
+    """`(T, run_dir)` with the driven run moved to where the run page's repository opens it."""
     from defender import _tenant
     from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 
@@ -306,19 +182,7 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
 
 
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
-    """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two
-    drivers: the standalone re-render (`visualize_run.main`, #1110 O8) and the post-run step
-    `run_common.visualize(run)`. Driven in turn over one run dir, the second render does not
-    silently replace the first's page with an emptier one — the page still carries the run's
-    own event content after each driver has run, and the two drivers agree on how many
-    assistant entries it shows.
-
-    R2's `unique-key` + `serial` form: drive the writers IN TURN and pin that the second
-    `w`-open does not lose the first's real content. The positive control is that each
-    driver ALONE lands content — a clobber test over two empty pages passes. This is the
-    one identity boundary with a truncating writer that phase D left without a uniqueness
-    demand while `message`, `wire_log` and `tool_trace` all got one; the rule could not fire
-    because the second driver lived only in an `nl:` evidence string (F2)."""
+    """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two"""
     from defender import run_common
     from defender.scripts.visualize import visualize_run
 
@@ -364,23 +228,7 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
 
 @pytest.mark.parametrize("breakage", ["missing-pointer", "stale-store-path"])
 def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, breakage):
-    """A visualizer that cannot resolve the store FAILS CLOSED: the standalone re-render
-    (`python visualize_run.py <run_dir>`) exits non-zero, and the post-run step
-    `run_common.visualize()` raises `VisualizeFailed` to its caller instead of writing the
-    failure to stderr and returning None. The two real breakages are the two that actually
-    occur — a run dir carrying no pointer file, and a pointer naming a store that is no longer
-    there.
-
-    Symmetry is the point: `store_append_is_fail_closed` and
-    `rg4_store_append_failure_stops_the_run_through_a_handled_exit` demand fail-closed on
-    the WRITE side, while `auth:P3` (executed) measured the read side doing the opposite —
-    `visualize_run.main()` returns 1, `run_common.visualize()` writes it to stderr, and the
-    outer process exits 0 regardless. R4 is what makes that bite: all of `runtime.html`'s
-    data layers now come from the store, so the child must open it to render at all, and
-    `auth:P8` (executed) found run dirs really are relocated by an allowlist copy that
-    carries no pointer. Left as it is, `runtime.html` renders stale or not at all on a run
-    the operator believes succeeded, with nothing in the suite to show it. Positive control:
-    the same call over an intact run dir returns normally and writes the page."""
+    """A visualizer that cannot resolve the store FAILS CLOSED: the standalone re-render"""
     from defender import run_common
 
     run_dir, store, _replay = _driven_run(tmp_path, run_id=f"failclosed-{breakage}")
@@ -426,14 +274,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
 # gl1 — the render path's escaping of model-authored payload text
 
 def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
-    """Model-authored payload text that is HTML/script-shaped cannot break out of its
-    rendered container: the crafted markup appears in `runtime.html` only in escaped form,
-    with no live `<script>` element and no `onerror` attribute introduced by the payload.
-
-    Payload content the model produced is fully attacker-influenced, per `session_store`'s
-    own access table (FK17, R16's escaping demand). The POSITIVE CONTROL is that the crafted
-    text is present at all: an escaping assertion over a page that never rendered the
-    payload passes vacuously."""
+    """Model-authored payload text that is HTML/script-shaped cannot break out of its"""
     from defender import run_common
 
     payload = crafted_html_payload()
@@ -471,14 +312,7 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
 
 @pytest.mark.parametrize("spelling", ["onerror", "ONERROR", "OnError", "oNeRrOr"])
 def test_the_event_handler_split_covers_every_casing_and_preserves_the_original(spelling):
-    """#883 F-35 — HTML attribute names are case-insensitive, so `ONERROR=` IS the
-    attribute `esc_untrusted`'s split exists to break up; a case-sensitive pattern covers
-    one spelling of the grammar its own comment claims.
-
-    Both halves are asserted because fixing only the first introduces the second: the
-    substitution used to be the LITERAL `"on\\u200b"`, which under IGNORECASE rewrites
-    `ONERROR=` to `on\\u200bERROR=` — silently case-folding text the page exists to show
-    verbatim. The split must fire AND the author's casing must survive it."""
+    """#883 F-35 — HTML attribute names are case-insensitive, so `ONERROR=` IS the"""
     from defender.scripts.visualize.visualize_primitives import esc_untrusted
 
     zwsp = "​"

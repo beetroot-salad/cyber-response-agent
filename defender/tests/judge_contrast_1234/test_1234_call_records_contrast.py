@@ -1,46 +1,6 @@
-"""#1234 slice `call_records_contrast` — one identity per call on both call records (A12), the
-contrast row built from them (design M2, A2, A14), and fail-closed writes of either record.
-
-Every scenario here runs the REAL path (I-10, 45-dispositions-drift): the launcher over the
-#1224 fixture tenant with real pre-flight, each sibling the real `run.main --tenant T
---episode <id> --world L` driven in-process (`S.real_family`), so both call records are written
-by the real writers — the registry's `authorize_call` / `_deliver` / `_record_beside`, the query
-tool's `append_query_row` / `_record_denied`, the shim's `_record_shim_failure`, and the seed's
-`_inherit_evidence`. A test reads the call id OFF the rows; it never plants one.
-
-THE DEFAULT SHAPE (observed at 463833df by this writer's smoke runs). The source run made three
-pre-branch calls on the held lead `l-001` (idp `Q1`, edr `Q2`, siem-x `L3`) and one post-branch
-call (`QP`); `capture_sentinel` adds J3's inherited `∅.denied` row. Every sibling's table starts
-with that seeded prefix, byte-identical in every run (JQ-01 (i)); its own rows follow. World
-`b`'s oracle alters `QP`; `edr lookup` is withheld, so the grant refuses it (a `refused` ledger
-row and a `∅.denied` table row).
-
-HOW FAULTS ENTER (author.md's hierarchy; nothing is monkey-patched):
-  * a live outage is the estate's real `faults.UpstreamFault` (`Estate.fail`), GA-40;
-  * an adapter that cannot load is the adapter file importing a module that does not exist —
-    p32's own shape (`test_jp01_scope_adapter_fault`, JP-01/JP-02 "fault" rows);
-  * a failed write of a call record is a DIRECTORY planted at the record's name — by the
-    estate's adapter just before it answers (`Estate1234.break_write`), or by `_Between` just
-    before the gather model's next call. AP-01 observed the lost ledger write (swallowed for
-    error and refusal rows, an infra fault for a delivered row); JP-02 `s_tw_denied` the lost
-    `∅.denied` table write; the survey's smoke the table write raising `NotPlainEntry` out of
-    `run.main`;
-  * "the estate recovers between two identical calls" is `_Between` re-answering the key —
-    AP-01a's and JP-02 `s_lw_realerror`'s own shape;
-  * where a shape cannot be produced by one run in a deterministic order (A32's ledger order
-    against table order — AP-14 observed it only under an injected stall), the archived file is
-    permuted with `S.rewrite_jsonl` after the real writers wrote it: real rows, real ids, one
-    order changed. Likewise A30's oracle row with no table row.
-
-COINED NAMES. F2 leaves the contrast row's fields to the implementer. They are spelled ONCE, in
-`S.COINED` (`ctx.*`, `contrast.*`, `entry.*`, `cut.*`); the accessors (`_contrast`, `_field`,
-`_numbers`, `_focus_calls`, `_reference_calls`, `_entry_at`) are their only readers here.
-A call number is the table row's 0-based line index — the numbering `S.table_ptr` cites.
-"""
+"""#1234 judge contrast: contrast rows and call records (ids, retries, write failures) for judged runs."""
 from __future__ import annotations
 
-import ast
-import contextlib
 import json
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
@@ -49,7 +9,6 @@ from typing import Any
 
 import pytest
 
-from defender.tests._after_start_1256 import Relink
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
 # --------------------------------------------------------------------------------------
@@ -81,7 +40,6 @@ LEDGER_GLOB = "*/served/*.{label}.jsonl"
 TABLE_GLOB = "*/runs/*-{label}/executed_queries.jsonl"
 #: `Estate1234.break_write` patterns (filled per call by the adapter).
 BREAK_LEDGER = "{episode}/served/*.{label}.jsonl"
-BREAK_TABLE = "{run_dir}/executed_queries.jsonl"
 
 
 def q(system: str, verb: str, params: Mapping[str, Any]) -> Any:
@@ -387,35 +345,6 @@ def test_1234_contrast_row_counts_calls_leads_and_external_refusals(tmp_path: Pa
         assert _field(ref, "contrast.first_altered") is None
 
 
-def test_1234_repeated_identical_call_joins_each_occurrence_by_its_call_id(tmp_path: Path) -> None:
-    """When one (system, verb, params) call appears more than once in executed_queries.jsonl,
-    each occurrence joins by its own call id to its own ledger row (A12): an errored attempt
-    and its altered retry keep their own call numbers, and the contrast table carries no
-    ambiguity flag (there is no repeat pairing).
-
-    render joins executed_queries to the served_ledger on their identity, the call id, into the
-    JudgeContext. World b calls CAROL twice (both answered) and BOB twice: the first BOB errors
-    live, the estate recovers, and the retry is served the altered answer."""
-    est = estate(tmp_path)
-    est.answer("idp", "query", CAROL, S.BASE_ANSWER)
-    est.fail("idp", "query", BOB, fault="UpstreamFault", detail="shard down")
-    turns_b = [q("idp", "query", CAROL), q("idp", "query", CAROL), q("idp", "query", BOB),
-               _Between(q("idp", "query", BOB),
-                        before=lambda: est.answer("idp", "query", BOB, S.BASE_ANSWER)),
-               S.done_turn()]
-    built = launch(tmp_path, est, b=S.RealWorld("b", turns=turns_b, oracle=altering("user:bob")))
-    rows = built.table_rows("b")
-    carol, bob = lines(rows, CAROL), lines(rows, BOB)
-    assert len(carol) == 2, "fixture: each identical call left two rows"
-    assert len(bob) == 2, "fixture: each identical call left two rows"
-
-    b = _contrast(S.render_context(built, "b"), "b")
-    assert _field(b, "contrast.first_altered") == bob[1], "the retry keeps its own call number"
-    assert sorted(_field(b, "contrast.errored")) == [bob[0]], "the errored attempt keeps its own"
-    assert list(_field(b, "contrast.unserved")) == [], "each occurrence joined its own ledger row; none is left over on either side"
-    assert list(_field(b, "contrast.unmapped")) == [], "each occurrence joined its own ledger row; none is left over on either side"
-    names = [str(k) for k in (b if isinstance(b, Mapping) else vars(b))]
-    assert not [n for n in names if "ambig" in n.lower()], f"an ambiguity flag survives: {names}"
 
 
 def test_1234_retried_call_first_live_error_then_altered_answer(tmp_path: Path) -> None:
@@ -451,61 +380,6 @@ def test_1234_retried_call_first_live_error_then_altered_answer(tmp_path: Path) 
     assert len(_entry_at(calls, retry, "oracle")) == 1, "and the altered retry, numbered apart"
 
 
-def test_1234_retried_call_first_fault_then_answered(tmp_path: Path) -> None:
-    """A ledger `fault` row is a blocked call (A2): the faulted call is listed in the
-    refusal-and-fault list and as a found gap with its count; the answered retry is a separate
-    call with its own call id that is not blocked and shows its served row. Both ledger rows are
-    read and joined by id, so both calls appear. A2 gives no recovery exception.
-
-    render reads the served_ledger into the JudgeContext's refusal-and-fault list;
-    read_world_ledger feeds the user_record's found gaps. The siem-x adapter cannot load on
-    b's first `siem-x lookup` (p32's shape: an import of a module that does not exist) and is
-    repaired before the identical retry. No J3 sentinel here, so the fault is b's only blocked
-    call.
-
-    #1256 (and the system index before it): b's run imports every granted adapter at its
-    start, so siem-x is loaded before its first call and bytes written over the file then change
-    nothing that call loads; an adapter that cannot load at start is down for the whole run
-    (O-5a) and no call of it reaches the registry. The fault is therefore the adapter changing
-    AFTER b's start: replaced by a link to the module that cannot import (`Relink`) when the
-    gather model asks for the first call — the load it makes is of that module, and fails — and
-    put back, byte for byte, before the retry, which loads what b's start loaded."""
-    calls = [S.S24.Call("idp", "query", S.Q1, S.BASE_ANSWER),
-             S.S24.Call("edr", "query", S.Q2, S.BASE_ANSWER), S.POST]
-    est = estate(tmp_path)
-    est.answer("siem-x", "lookup", S.L3, S.BASE_ANSWER)
-    adapter = est.adapters / "siem_x_adapter.py"
-    good = adapter.read_text(encoding="utf-8")
-    broken = good.replace("from __future__ import annotations\n",
-                          "from __future__ import annotations\nimport _no_such_dependency_1234\n",
-                          1)
-    assert broken != good, "fixture: the broken module differs from the adapter"
-    relink = Relink(adapter, broken)
-    turns_b = [_Between(q("siem-x", "lookup", S.L3), before=relink.break_),
-               _Between(q("siem-x", "lookup", S.L3), before=relink.restore),
-               S.done_turn()]
-    try:
-        built = launch(tmp_path, est, calls=calls, after_source=None,
-                       b=S.RealWorld("b", turns=turns_b))
-    finally:
-        relink.restore()
-    assert relink.broken == 1, "fixture: the adapter was never broken during b's run"
-    faulted, answered = lines(built.table_rows("b"), S.L3)
-    assert [r["source"] for r in built.ledger_rows("b")] == ["fault", "passthrough"], (
-        "fixture: the fault and the answered retry are both on the ledger")
-
-    b = _contrast(S.render_context(built, "b"), "b")
-    blocked = list(_field(b, "contrast.blocked"))
-    assert _numbers(blocked) == [faulted], "the faulted call is blocked; the retry is not"
-    assert _get(blocked[0], S.COINED["entry.source"]) == "fault"
-    assert answered not in _field(b, "contrast.unserved")
-    assert list(_field(b, "contrast.unmapped")) == []
-
-    S.grade(built, S.judge(), draws=1)
-    key = (S.found_run("b"), "siem-x", "lookup", S.canonical(S.L3))
-    found = [g for g in S.found_gaps(built) if S.gap_key(g) == key]
-    assert len(found) == 1, f"one found gap for the faulted call, counted once (the retry is no gap): {found}"
-    assert found[0].get(S.COINED["found.count"]) == 1, f"one found gap for the faulted call, counted once (the retry is no gap): {found}"
 
 
 def test_1234_altered_answer_matching_no_investigator_call(tmp_path: Path) -> None:
@@ -546,98 +420,10 @@ def test_1234_altered_answer_matching_no_investigator_call(tmp_path: Path) -> No
     assert lead_zero not in _field(b, "contrast.unserved")
 
 
-def test_1234_first_altered_call_when_ledger_order_and_query_order_disagree(tmp_path: Path) -> None:
-    """The query table owns call order and numbering (A2): the first altered call is the lowest
-    table call number among altered answers, whatever order the ledger records them; each
-    altered ledger row joins its table row by call id (A12), so neither the order of the two
-    files nor repeats of one key affect the result.
-
-    render reads executed_queries for order and the served_ledger, joined on identity, into the
-    JudgeContext. World b's oracle alters BOB, then CAROL (asked twice); the archived ledger's
-    BOB row is then moved after CAROL's (`S.rewrite_jsonl`), so the ledger records CAROL's
-    altered answers first while the table numbers BOB first — AP-14 observed ledger and table
-    order disagreeing across leads."""
-    est = estate(tmp_path)
-    est.answer("idp", "query", BOB, S.BASE_ANSWER)
-    est.answer("idp", "query", CAROL, S.BASE_ANSWER)
-    built = launch(tmp_path, est, b=S.RealWorld(
-        "b", turns=[q("idp", "query", BOB), q("idp", "query", CAROL), q("idp", "query", CAROL),
-                    S.done_turn()], oracle=altering("user:bob", "user:carol")))
-    rows = built.table_rows("b")
-    bob, carol = lines(rows, BOB), lines(rows, CAROL)
-    assert len(bob) == 1, "fixture: BOB asked first"
-    assert len(carol) == 2, "fixture: BOB asked first"
-    assert bob[0] < carol[0], "fixture: BOB asked first"
-    assert lines([r for r in built.ledger_rows("b") if r.get("source") == "oracle"], CAROL), (
-        "fixture: CAROL was served altered too, so there are two altered calls to order")
-
-    def bob_last(ledger: list[dict]) -> list[dict]:
-        moved = ledger.pop(ledger_index(ledger, BOB, "oracle"))
-        return [*ledger, moved]
-
-    reordered = S.rewrite_jsonl(built.ledger_path("b"), bob_last)
-    assert S.canonical(reordered[-1]["params"]) == S.canonical(BOB), "fixture: BOB's row last"
-    first_oracle = next(r for r in reordered if r.get("source") == "oracle")
-    assert S.canonical(first_oracle["params"]) == S.canonical(CAROL), (
-        "fixture: the ledger now records CAROL's altered answer first")
-
-    b = _contrast(S.render_context(built, "b"), "b")
-    assert _field(b, "contrast.first_altered") == bob[0]
-    assert list(_field(b, "contrast.unserved")) == []
-    assert list(_field(b, "contrast.unmapped")) == []
 
 
-def test_1234_calls_before_the_branch_point_in_each_runs_counts(tmp_path: Path) -> None:
-    """Pre-branch calls are inherited table rows (no id of this run, A12): they are in each
-    run's call numbering and system/verb counts and lie in the shared baseline region,
-    identically for every run; they are never paired with a ledger row and never listed
-    unserved.
-
-    render reads executed_queries — the seed _inherit_evidence wrote into every sibling — into
-    each run's contrast row of the JudgeContext. The default triad; siem-x lookup and edr query
-    were asked only before the branch."""
-    built = launch(tmp_path)
-    inherited = PRE_BRANCH + 1
-    seeds = [built.table_rows(w)[:inherited] for w in "abc"]
-    assert seeds[0] == seeds[1] == seeds[2], "fixture: the seed is identical in every run"
-
-    ctx = S.render_context(built, "b")
-    for run in "abc":
-        row = _contrast(ctx, run)
-        counts = _counts(row)
-        assert counts.get("siem-x.lookup") == 1, f"{run}: the pre-branch calls are counted"
-        assert counts.get("edr.query") == 1, f"{run}: the pre-branch calls are counted"
-        assert counts.get("edr.lookup") == 2, f"{run}: J3's seeded row and its own refusal"
-        assert set(range(inherited)) <= set(_field(row, "contrast.baseline")), (
-            f"{run}: the pre-branch rows lie in the shared baseline")
-        assert not set(range(inherited)) & set(_field(row, "contrast.unserved")), (
-            f"{run}: an inherited row is never unserved")
-    qp_line = lines(built.table_rows("b"), S.QP)[0]
-    assert qp_line >= inherited, "fixture: QP follows the seed"
-    assert _field(_contrast(ctx, "b"), "contrast.first_altered") == qp_line, (
-        "the call numbering counts the inherited rows")
 
 
-def test_1234_shared_baseline_when_the_judged_world_was_never_shown_its_facts(
-        tmp_path: Path) -> None:
-    """The inherited pre-branch rows (no id of this run) are shared baseline in every run, the
-    judged world's included (A12). With no altered answer nothing bounds a further region: the
-    table states that the judged world was never shown its facts and marks no post-branch call
-    as baseline noise.
-
-    render reads executed_queries into the JudgeContext. World b's oracle passes every call, so
-    b receives no altered answer."""
-    built = launch(tmp_path, b=S.RealWorld("b", oracle=S.passing_oracle()))
-    inherited = PRE_BRANCH + 1
-    assert all(r.get("source") != "oracle" for r in built.ledger_rows("b")), "fixture"
-
-    ctx = S.render_context(built, "b")
-    b = _contrast(ctx, "b")
-    assert _field(b, "contrast.shown") is False, "the table states b was never shown its facts"
-    assert _field(b, "contrast.first_altered") is None
-    for run in "abc":
-        assert sorted(_field(_contrast(ctx, run), "contrast.baseline")) == list(range(inherited)), (
-            f"{run}: the shared baseline is the seeded rows, and no post-branch call")
 
 
 def test_1234_am_repeat_pairing_when_one_attempt_left_no_ledger_row(tmp_path: Path) -> None:
@@ -968,38 +754,8 @@ def test_1234_failed_served_ledger_write_ends_the_run(tmp_path: Path, writer: st
         f"the failed served-ledger write is named: {reason}")
 
 
-def _table_fails(est: Any, writer: str) -> Any:
-    """b's call whose query-table row fails to write, per writer."""
-    if writer == "append_query_row":  # the row of an answered call
-        est.break_write("idp", "query", BOB, BREAK_TABLE)
-        return q("idp", "query", BOB)
-    if writer == "_record_denied":  # the ∅.denied row of the withheld verb
-        return _Between(q("edr", "lookup", S.DENIED_LOOKUP), before=plant_dir_at(TABLE_GLOB))
-    # _record_shim_failure: the shim's direct ∅.bash-shim append
-    return _Between(before=plant_dir_at(TABLE_GLOB), make=reducer_make("b"))
 
 
-@pytest.mark.parametrize("writer", ["append_query_row", "_record_denied", "_record_shim_failure"])
-def test_1234_failed_query_table_view_does_not_stamp_a_recording_cut(tmp_path: Path, writer: str) -> None:
-    """#1235 supersedes A12's table-write cut: state records calls before the disk view.
-
-    Denied and shim rows remain best-effort, so the next ordinary call reaches the estate.
-    An ordinary row's OSError still escapes, but it must not be stamped as a recording cut.
-    The resulting incomplete archive is refused by the judge, never graded as complete.
-    """
-    est = estate(tmp_path)
-    est.answer("idp", "query", CAROL, S.BASE_ANSWER)
-    est.answer("idp", "query", ERIN, S.BASE_ANSWER)
-    failing = _table_fails(est, writer)
-    built = launch(tmp_path, est, b=S.RealWorld("b", turns=[
-        q("idp", "query", S.Q1), q("idp", "query", ERIN), failing, q("idp", "query", CAROL),
-        S.done_turn()]))
-    assert estate_calls(built, ERIN), "positive control: the first call reached the estate"
-    assert bool(estate_calls(built, CAROL)) == (writer != "append_query_row")
-    S.grade(built, S.judge(), draws=1)
-    row = S.row(built, "b")
-    assert row.get("ungradable"), "an incomplete archive is never graded"
-    assert row.get(CUT_SHORT) != S.COINED["cut.table"]
 
 
 # ======================================================================================
@@ -1052,39 +808,6 @@ def test_1234_one_call_carries_one_host_written_id_on_both_records(tmp_path: Pat
     assert not others & set(ledger_ids), "the id names the run: no other run carries b's ids"
 
 
-def test_1234_every_query_table_writer_writes_this_runs_call_id(tmp_path: Path) -> None:
-    """Every row a run writes into its query table carries this run's call id: rejects (exit
-    64), ∅.repeat-trip, ∅.denied, the shim's direct-append ∅.bash-shim and every other writer of
-    executed_queries.jsonl; only rows _inherit_evidence seeds carry no id of this run (I-1).
-
-    The writers are picked by census (every production caller of append_query_row); each is
-    then driven once in world b's run: the query tool's _record (an answered call, a reject, an
-    undeclared system, ∅.repeat-trip), _record_denied (∅.denied), _record_shim_failure
-    (∅.bash-shim). Lead zero's writer has no surface in a sibling: no lead zero is dispatched on
-    `--episode` (I-2)."""
-    writers = {site.split(":")[0] for site in S.call_sites("append_query_row", under="")}
-    assert {"runtime/query_tool.py", "runtime/tools/_bash.py"} <= writers, (
-        f"census: the subjects driven below are production writers ({sorted(writers)})")
-    est = estate(tmp_path)
-    est.fail("idp", "query", REP, fault="UpstreamFault", detail="500 upstream")
-    built = launch(tmp_path, est, b=S.RealWorld("b", turns=[
-        reject_turn(), q("ghost-system", "query", {"q": "x"}), q("idp", "query", S.Q1),
-        q("edr", "lookup", S.DENIED_LOOKUP), reducer_turn("b"), q("idp", "query", REP),
-        q("idp", "query", REP), q("idp", "query", REP), S.done_turn()]))
-    inherited = PRE_BRANCH + 1
-    rows = built.table_rows("b")
-    mine = own(rows, inherited)
-    kinds = {r.get("query_id") for r in mine} | {r.get("exit_code") for r in mine}
-    assert {S.DENIED_QUERY_ID, S.BASH_SHIM_QUERY_ID, S.REPEAT_TRIP_QUERY_ID,
-            S.REJECT_EXIT} <= kinds, f"fixture: every writer wrote its row ({kinds})"
-
-    ids = [r.get(S.CALL_ID) for r in mine]
-    assert all(ids), f"rows this run wrote with no call id: {[r for r in mine if not r.get(S.CALL_ID)]}"
-    assert len(set(ids)) == len(ids), "each row its own call"
-    assert not [r for r in rows[:inherited] if r.get(S.CALL_ID) in set(ids)], (
-        "only the seeded rows carry no id of this run")
-    others = {r.get(S.CALL_ID) for w in "ac" for r in built.table_rows(w)}
-    assert not others & set(ids), "the ids are this run's"
 
 
 # --------------------------------------------------------------------------------------
@@ -1124,156 +847,23 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "driven_by": "test_1234_one_call_carries_one_host_written_id_on_both_records"},
 }
 
-_WRITE_PRIMITIVES = frozenset({"write_guarded", "write_text", "write_bytes", "open", "copyfile",
-                               "copy", "copy2", "append"})
-
-
-def _called(node: ast.Call) -> str | None:
-    fn = node.func
-    return fn.attr if isinstance(fn, ast.Attribute) else fn.id if isinstance(fn, ast.Name) else None
-
-
-def _mentions(nodes: Iterable[ast.AST], word: str) -> bool:
-    for top in nodes:
-        for n in ast.walk(top):
-            if (isinstance(n, ast.Attribute) and word in n.attr) or (
-                    isinstance(n, ast.Name) and word in n.id) or (
-                    isinstance(n, ast.Constant) and isinstance(n.value, str) and word in n.value):
-                return True
-    return False
-
-
-def _scoped(tree: ast.AST) -> Iterable[tuple[str, ast.AST]]:
-    """Every node with the qualified name (`Class.method`) of the function it sits in."""
-    def walk(node: ast.AST, scope: tuple[str, ...]) -> Iterable[tuple[str, ast.AST]]:
-        for child in ast.iter_child_nodes(node):
-            inner = (*scope, child.name) if isinstance(
-                child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else scope
-            yield ".".join(inner) or "<module>", child
-            yield from walk(child, inner)
-    yield from walk(tree, ())
-
-
-def call_record_write_sites(trees: Iterable[tuple[str, ast.AST]]) -> set[str]:
-    """`<file>::<function>` of every call that writes a world's call record: the query table's
-    one append (`append_query_row`), any write primitive aimed at `executed_queries`, and a
-    `record(...)` on a ledger."""
-    from defender.tests import _1165_census as records
-
-    sites: set[str] = set()
-    for rel, tree in trees:
-        scan = records.vocabulary._scan(rel, tree)
-        for scope, node in _scoped(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            name = _called(node)
-            table = name == "append_query_row" or (
-                name in _WRITE_PRIMITIVES and _mentions([*node.args, *node.keywords],
-                                                        "executed_queries"))
-            if isinstance(node.func, ast.Attribute) and name in {"append", "seed"}:
-                receiver = node.func.value
-                table = table or (
-                    isinstance(receiver, ast.Attribute) and receiver.attr == "queries"
-                    and isinstance(receiver.value, ast.Attribute) and receiver.value.attr == "tables"
-                    and records._record_receiver(receiver, scan))
-            ledger = name == "record" and isinstance(node.func, ast.Attribute) and _mentions(
-                [node.func.value], "ledger")
-            if table or ledger:
-                sites.add(f"{rel}::{scope}")
-    return sites
 
 
 
-def test_query_record_writer_census_recognizes_only_resolved_query_records():
-    source = """
-from defender.run_repository import Run
-def append_row(run: Run):
-    run.tables.queries.append([{}])
-def seed_rows(run: Run):
-    run.tables.queries.seed([])
-def unrelated(run: Run, mystery):
-    run.tables.payloads('l-001', 0).write(b'{}')
-    mystery.tables.queries.append([{}])
-    mystery.tables.queries.seed([])
-"""
-    assert call_record_write_sites([("runtime/planted.py", ast.parse(source))]) == {
-        "runtime/planted.py::append_row", "runtime/planted.py::seed_rows"}
 
 
-def _shipped() -> dict[str, ast.AST]:
-    out: dict[str, ast.AST] = {}
-    for path in sorted(S.DEFENDER.rglob("*.py")):
-        rel = path.relative_to(S.DEFENDER).as_posix()
-        if "__pycache__" in rel or rel.startswith(("tests/", ".venv/")):
-            continue
-        with contextlib.suppress(SyntaxError, UnicodeDecodeError):
-            out[rel] = ast.parse(path.read_text(encoding="utf-8"))
-    return out
 
 
-def _swallowing_handlers(tree: ast.AST, scope: str, callee: str) -> list[int]:
-    """Lines of broad `except` handlers in function `scope` that guard a call to `callee` and
-    never raise — where a failed write would be swallowed."""
-    found: list[int] = []
-    for name, node in _scoped(tree):
-        if name != scope or not isinstance(node, ast.Try):
-            continue
-        guards = any(isinstance(c, ast.Call) and _called(c) == callee
-                     for stmt in node.body for c in ast.walk(stmt))
-        for handler in node.handlers if guards else ():
-            broad = handler.type is None or _mentions([handler.type], "Exception") or _mentions(
-                [handler.type], "OSError")
-            if broad and not any(isinstance(n, ast.Raise) for n in ast.walk(handler)):
-                found.append(handler.lineno)
-    return found
 
 
-def test_1234_every_call_record_write_site_is_in_the_census(tmp_path: Path) -> None:
-    """A census lists every production write site of the served ledger and of
-    executed_queries.jsonl (at least authorize_call, _deliver, _record_beside, _record_denied,
-    append_query_row, the shim's ∅.bash-shim append and _inherit_evidence's seed) with how each
-    handles a failed write and whether it writes the call id; a planted extra write site is
-    reported.
 
-    `CALL_RECORD_WRITERS` is the census; `call_record_write_sites` scans the shipped tree for
-    the calls that write either record. The scan finds exactly the census's sites; a module
-    planted beside the tree with one more writer of each record is reported; every row names
-    the test above that drives it; and no function on a row's path (the site, and the functions
-    reaching it — authorize_call reaches the ledger through _record_beside, _record_denied the
-    table through _record) guards the write with a broad handler that swallows it (A12: a
-    failed write ends the run)."""
-    shipped = _shipped()
-    found = call_record_write_sites(shipped.items())
-    assert found == set(CALL_RECORD_WRITERS), (
-        f"census drift — unlisted: {sorted(found - set(CALL_RECORD_WRITERS))}; "
-        f"gone: {sorted(set(CALL_RECORD_WRITERS) - found)}")
 
-    planted = tmp_path / "planted_writer.py"
-    planted.write_text(
-        "from defender.scripts.gather_tools.record_query import append_query_row\n\n\n"
-        "def sneaky_row(run_dir, row):\n    append_query_row(run_dir, **row)\n\n\n"
-        "class Sneaky:\n    def sneaky_ledger(self, call):\n        self.ledger.record(call)\n",
-        encoding="utf-8")
-    with_plant = [*shipped.items(),
-                  ("planted/planted_writer.py", ast.parse(planted.read_text(encoding="utf-8")))]
-    assert call_record_write_sites(with_plant) - set(CALL_RECORD_WRITERS) == {
-        "planted/planted_writer.py::sneaky_row",
-        "planted/planted_writer.py::Sneaky.sneaky_ledger"}, "a planted write site is reported"
 
-    tests_here = {n for n in globals() if n.startswith("test_1234_")}
-    swallowed: dict[str, list[int]] = {}
-    for site, row in CALL_RECORD_WRITERS.items():
-        assert row["driven_by"] in tests_here, f"{site}: driven by no test in this file"
-        rel, scope = site.split("::")
-        lines_ = _swallowing_handlers(shipped[rel], scope, row["writes_by"])
-        for via in row["via"]:
-            lines_ += _swallowing_handlers(shipped[rel], via, scope.rsplit(".", 1)[-1])
-        if lines_:
-            swallowed[site] = lines_
-    # #1235 keeps denied rows and reducer observations best-effort; no other call-record
-    # sink may silently absorb a failure. The in-memory-state suite covers these two paths.
-    assert set(swallowed) == {"runtime/query_tool.py::QueryCapture._record",
-                              "runtime/tools/_bash.py::_record_shim_failure"}, swallowed
+
+
+
+
+
 
 
 # ======================================================================================

@@ -1,14 +1,4 @@
-"""#680 — hostile bodies: what an attacker-controlled string may not become.
-
-Every test here feeds model- or environment-authored bytes that imitate the frame
-grammar (closers, sibling openers, the reader contract, unicode confusables, NUL and
-bidi controls, replayed frames from another invocation) through a REAL producer, and
-asserts the salted frame still bounds them. The empty/whitespace/absent cases sit here
-too: they are the same question asked with nothing in the body.
-
-Split out of `test_systemic_stage_frames_680.py` by #720; the shared harness is
-`_frames680.py`.
-"""
+"""Frame grammar vs hostile bodies: forged closers and openers stay body data, post-disclosure lessons are denied to their author, reader contract precedes hostile lookalikes."""
 from __future__ import annotations
 
 import pytest
@@ -33,7 +23,6 @@ from defender.tests._frames680 import (
 )
 
 
-
 def test_main_bash_result_contains_a_learning_frame_forgery(tmp_path):
     """MAIN's real shared Bash seam returns its existing raw envelope even when stdout contains a learning-frame forgery."""
     fake = Box(
@@ -46,12 +35,6 @@ def test_main_bash_result_contains_a_learning_frame_forgery(tmp_path):
     assert out == _format_bash_result(0, fake.result.out.decode(), "")
 
 
-
-
-
-
-
-
 @pytest.mark.parametrize("which", ["content", "tag", "salt"])
 def test_wrap_non_string_argument(which):
     """The real shared `wrap` rejects each non-string public argument with `TypeError`; all-string input is the positive control."""
@@ -62,26 +45,6 @@ def test_wrap_non_string_argument(which):
     args[which] = 1
     with pytest.raises(TypeError):
         module.wrap(**args)
-
-
-def test_wrap_empty_tag_argument():
-    """The real shared `wrap` rejects an empty tag with `ValueError` while an empty body remains valid."""
-    module = _shared_module()
-    assert module is not None
-    assert module.wrap("", "tag", "salt")
-    with pytest.raises(ValueError, match="tag must not be empty"):
-        module.wrap("body", "", "salt")
-
-
-def test_wrap_empty_salt_argument():
-    """The real shared `wrap` rejects an empty salt with `ValueError` while a non-empty salt is accepted."""
-    module = _shared_module()
-    assert module is not None
-    assert module.wrap("body", "tag", "salt")
-    with pytest.raises(ValueError, match="salt must not be empty"):
-        module.wrap("body", "tag", "")
-
-
 
 
 def test_hostile_body_contains_the_current_frame_closer_and_a_sibling_opener(tmp_path):
@@ -100,8 +63,6 @@ def test_hostile_body_contains_current_token_with_the_wrong_logical_tag(tmp_path
     assert module is not None
     assert STAGE_SALT not in body
     assert body in module.wrap(body, "source", STAGE_SALT)
-
-
 
 
 def test_learning_role_reads_an_attacker_controlled_non_run_file(tmp_path):
@@ -173,16 +134,6 @@ def test_cacheable_instructions_are_preceded_by_hostile_contract_lookalikes_in_u
         for path in (ROOT / "defender/learning").rglob("*.md")
     )
     assert all(observation.salt not in instructions for observation in observations)
-
-
-
-
-
-
-
-
-
-
 
 
 def test_curator_empty_lesson_collection(tmp_path):

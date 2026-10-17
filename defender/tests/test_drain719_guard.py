@@ -1,40 +1,6 @@
-"""Issue #719, part 2/5 — the ENUMERATED retire set (decision 8) and what reaches it.
-
-Executable spec, pre-implementation. Rewritten at §7 round 2: decision 8 reversed judge
-recommendation A12 ("the ceiling is total"). There is no bare `except Exception` and no
-re-raise carve-out. Retirement is reachable only from an enumerated set — `AuthorError`,
-`GitError`, `ModelRetry` — and any class outside it stays uncaught, leaving the row queued:
-stuck but recoverable and loud, as today.
-
-**Why, because it is the property these tests exist to protect.** A widened guard plus a total
-ceiling plus terminal retirement into a graveyard nothing reads composed into a path where any
-unnamed exception class permanently deleted a batch of real work every three ticks, with the
-only durable record in a file that has no production reader. The accepted trade is that a novel
-class returns to unbounded retry instead of silent permanent loss.
-
-**The trap inverted, and this module is where it is caught.** Under decision 6 the hazard was
-re-raising `GitError` by reaching for `faults.SYSTEMIC_FAULTS`. Under an allow-list the hazard
-is the mirror image and likelier: an implementer writes the obvious `except AuthorError`,
-silently drops `GitError` and `ModelRetry`, and reverts decision 1 paths 3 and 4 — with a suite
-that only checks *something* retires still green. So membership is asserted PER MEMBER, each
-driven through the real primitive: a real `GitError` out of `commit_corpus` with git's own index
-lock held, and the `ModelRetry` class PJ1c observed. The `AuthorError` case is invisible here —
-it passes under every wrong spelling.
-
-Decision 5 survives as stated (all four channels) but is now a property of the retire SET.
-Decision 6's extent half survives and is CONFIRMATORY rather than load-bearing: A11, B5 and D5
-are carried by non-membership now, not by where a line sits.
-
-**Scope of the set, because a reader meeting only this file would over-read it.** It governs the
-four AUTHOR channels. The pitfalls and lead-author legs keep `run_or_dead_letter`'s own re-raise
-set, which this change does not touch and which contains `GitError` — so a commit-time `GitError`
-retires here and kills the drain there. One class, two classifications, by channel: deliberate,
-carried as the waiver `retirement_classification_differs_across_the_pitfalls_boundary`, and both
-halves asserted rather than merely permitted.
-"""
+"""Drain retire set: only the enumerated failure classes bump attempts and retire; systemic faults propagate; stuck rows surface an operator signal."""
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -60,69 +26,16 @@ from defender.tests import _state1135
 #: `retirement_classification_differs_across_the_pitfalls_boundary`, and both halves are
 #: asserted — the author half below, the pitfalls half in
 #: `test_systemic_faults_propagate_without_bumping_attempts`.
-MEMBERS = (author_shared.AuthorError, GitError, ModelRetry)
-NON_MEMBERS = (StageAbort, FatalConfigError, BoxFault, OSError, RuntimeError, LookupError)
-
-
-def _instance(cls: type[BaseException], note: str) -> BaseException:
-    """Build `cls` the way production raises it.
-
-    `GitError`'s constructor is `(args, returncode, stderr)`, not `(message)` — a
-    single-argument call raises `TypeError` in the test's own setup, which silently truncates
-    any loop that builds instances lazily and leaves the assertions after it unexecuted. That
-    is invisible to reading and to a null-stub pass: the test still collects, still fails
-    against a missing target, and looks like every other red. Every caller here therefore goes
-    through this factory, and the callers build their instances UP FRONT so a wrong shape is
-    one loud failure rather than a quietly shortened loop."""
-    if cls is GitError:
-        return GitError(["commit", "-m", note], 1, "fatal: unable to write new index file")
-    return cls(note)
-
-
-def _raising_gate(exc: BaseException):
-    """A gate that fails. The gate runs outside the clauses that name the retire set, so it is
-    the injection point for "raised where nothing is watching for a member"."""
-
-    def gate(batch, cfg):
-        raise exc
-
-    return gate
-
-
-def _wedge_git(repo: Path) -> None:
-    """Occupy git's index lock, so the next real `git add`/`git commit` in `repo` fails with a
-    real `GitError` — the transient git failure D1/P01 is about, induced through git itself
-    rather than imagined."""
-    (repo / ".git" / "index.lock").write_text("held by this test\n")
-
-
-def _unwedge_git(repo: Path) -> None:
-    (repo / ".git" / "index.lock").unlink()
-
-
-def _git_log(repo: Path) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), "log", "--oneline"],
-        capture_output=True, text=True, check=True,
-    ).stdout
 
 
 # Decision 8 — the trigger is an enumerated set, and A12 is reversed
 
 
-
-
 def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouched(
     tmp_path: Path,
 ):
-    """A12 REVERSED. The judge's recommendation was that anything not explicitly systemic
-    retires — "the ceiling is total". Decision 8 says the opposite, because total plus terminal
-    plus a reader-less graveyard deletes real work on a fault class nobody anticipated.
-
-    A `FileNotFoundError` from inside the authoring call is in no named class. It escapes
-    uncaught across repeated ticks, the row keeps the count it arrived with, and the queue is
-    byte-identical afterwards — unbounded retry, which is the accepted cost of removing the
-    permanent-loss path. Stuck but recoverable and loud, as today."""
+    """A12 REVERSED. The judge's recommendation was that anything not explicitly systemic retires —
+    "the ceiling is total"."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "b/0", attempts=2)]
@@ -148,27 +61,8 @@ def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouc
 def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_signal(
     tmp_path: Path,
 ):
-    """Decision 10 — the "loud" half of decision 8's trade. Reversing A12 was argued as "stuck
-    but recoverable AND LOUD"; the suite pins recoverable, and loud lived only in the rationale.
-    A failure mode deliberately chosen OVER permanent loss is the worse of the two if nobody
-    notices it, so the row that stays queued has to be visible from outside the process.
-
-    THE ORACLE MUST FAIL WHEN THE SIGNAL IS ABSENT, which is what shapes every assertion here.
-    The drain already logs generically on failure, so "a log line was emitted" passes today,
-    passes under an implementation with no stuck-row signal at all, and proves nothing. Four
-    things are therefore asserted that generic logging cannot satisfy:
-
-    the record names the fault CLASS by name, so an operator can tell a decode error from a
-    missing file without reading a traceback; it names the stalled row ids; it CARRIES A COUNT
-    that rises tick over tick, which is what turns "this failed" into "this has been stuck for
-    three ticks"; and it lands on an observation channel, which has no `held_report` — the
-    lessons-local operator report D7 deliberately did not generalise — so the signal cannot be
-    satisfied by reusing that surface for one direction only.
-
-    The paired control is the discriminating half in the other direction: a MEMBER fault on the
-    same channel retires, and must write NOTHING here. Without it an implementation could emit a
-    stuck record on every failure and pass, which would make the signal noise rather than a
-    stuck-row signal."""
+    """Decision 10 — the "loud" half of decision 8's trade. Reversing A12 was argued as "stuck but
+    recoverable AND LOUD"; the suite pins recoverable, and loud lived only in the rationale."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")]
@@ -219,17 +113,9 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
     )
 
 
-
-
 def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(tmp_path: Path):
-    """Decision 5 survives decision 8 unchanged in scope and changed in mechanism: the set is
-    the same on all four drained channels, so a channel naming fewer classes fails here.
-
-    Driven per channel with one member an `except AuthorError` spelling would drop
-    (`ModelRetry`) and one non-member (`StageAbort`), because a parity test that only drives
-    `AuthorError` cannot see either half. No existing findings-channel test discriminates any of
-    this — they all fault with an explicit `AuthorError` — so this demand, not the legacy suite,
-    is what carries decision 5."""
+    """Decision 5 survives decision 8 unchanged in scope and changed in mechanism: the set is the
+    same on all four drained channels, so a channel naming fewer classes fails here."""
     paths = h.make_paths(tmp_path)
     member_seen, non_member_seen = {}, {}
 
@@ -260,29 +146,11 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
     assert set(non_member_seen.values()) == {True}, non_member_seen
 
 
-
-
-
-
 # Decision 1's four paths — each is a named member, which is why each still retires
 
 
-
-
-
-
 def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp_path: Path):
-    """Decision 1 path 4, and the second member an `except AuthorError` spelling drops. PJ1c
-    (executed) found that a boxed bash command stopped from OUTSIDE the process is absorbed by
-    `runtime/tools.py::_tool_bash` into a pydantic-ai `ModelRetry` and reaches neither the
-    per-item nor the systemic path — the batch reports success, nothing is counted, the item
-    never retires.
-
-    Scoped to the drain's own seam: the absorption happens below `cfg.invoke_agent`, so the class
-    PJ1c observed is raised at the injection seam above it. `ModelRetry`'s membership is asserted
-    directly, because the retirement it causes is indistinguishable from an `AuthorError`'s once
-    the row is in the graveyard. The paired control is a genuinely successful batch, which
-    rotates and counts nothing."""
+    """Decision 1 path 4, and the second member an `except AuthorError` spelling drops."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
 
@@ -314,14 +182,9 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
 
 
 def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path: Path):
-    """D5/P13, SIMPLIFIED by decision 8. §7's derivation — that "classify explicitly" meant the
-    lock layer must name its own fault type — was load-bearing only while a type-based re-raise
-    set could over-capture a missing-file `OSError`. Under an allow-list an `OSError` is simply
-    not a member, so this spec no longer requires a named lock fault: a plain `OSError` escaping
-    is the contract.
-
-    Induced for real — the lock path is a directory, so opening it fails at the primitive. The
-    acquisition failure escapes uncaught, nothing is counted, and the queue is untouched."""
+    """D5/P13, SIMPLIFIED by decision 8. §7's derivation — that "classify explicitly" meant the lock
+    layer must name its own fault type — was load-bearing only while a type-based re-raise set
+    could over-capture a missing-file `OSError`."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -345,14 +208,8 @@ def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path
 
 
 def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path: Path):
-    """PJ1b, executed: when the whole-batch wall-clock deadline finally fires it lands as a
-    per-item `AuthorError` through the `TimeoutError` -> `RunUnprocessable` -> `AuthorError`
-    chain. Under decision 8 that chain is exactly what makes it retire — it arrives AS a member,
-    where a bare `TimeoutError` would not, which the second half asserts.
-
-    PJ1a is carried as a constraint, not re-tested: the deadline is SOFT and cannot preempt a
-    blocking boxed call, so nothing here treats the configured timeout as the bound on the stall
-    and no assertion below is about elapsed time."""
+    """PJ1b, executed: when the whole-batch wall-clock deadline finally fires it lands as a per-item
+    `AuthorError` through the `TimeoutError` -> `RunUnprocessable` -> `AuthorError` chain."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -376,18 +233,9 @@ def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path
 
 
 def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
-    """The marker-channel half keeps its own mechanism: the pitfalls and lead-author legs exempt
-    by RE-RAISING through `run_or_dead_letter`, where the author channels exempt by
-    non-membership (C32). Driven through the real pitfalls drain leg, the four named systemic
-    classes propagate out of the tick with no attempt written to any queued row.
-
-    `GitError` is in that re-raise set and this change does not touch it, so a commit-time
-    `GitError` retires on the four author channels and kills the drain here. Both halves are
-    pinned by tests; the asymmetry is recorded as intended in the artifact's waivers rather than
-    left for a cold reader to find.
-
-    Positive control: the converted pitfalls fault is deliberately NOT in that re-raise set, so
-    an `AuthorError` on the same path is dead-lettered into the retire seam and DOES bump."""
+    """The marker-channel half keeps its own mechanism: the pitfalls and lead-author legs exempt by
+    RE-RAISING through `run_or_dead_letter`, where the author channels exempt by non-membership
+    (C32)."""
     from defender.learning.core import drains  # type: ignore[import-not-found]
 
     paths = h.make_paths(tmp_path)

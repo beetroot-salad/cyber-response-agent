@@ -1,11 +1,4 @@
-"""#1120 piece 1 — a folder `tenant.py` cannot read is a refusal, never a traceback (code
-review, max).
-
-The operator's clone now creates `<root>/<T>` before setup runs, so a `<T>` left unreadable
-(another user's clone, umask 077) is an ordinary state. Setup's fresh-root probe listed it
-raw and died with a `PermissionError` traceback; `scaffold` did the same over an unreadable
-target.
-"""
+"""A folder tenant.py cannot read is a refusal, never a traceback."""
 from __future__ import annotations
 
 import os

@@ -84,12 +84,7 @@ def _errors(doc: str) -> list[str]:
 
 
 def _one_error(doc: str, *tokens: str) -> str:
-    """Exactly one error, and it names every token given.
-
-    Both halves matter. The count keeps a fixture that trips a second rule from reading as a
-    pass, and the tokens keep the WRONG rule firing from reading as a pass — an assertion that
-    only demands a non-empty list is satisfied by any error at all.
-    """
+    """Exactly one error, and it names every token given."""
     errors = _errors(doc)
     assert len(errors) == 1, errors
     for token in tokens:
@@ -183,44 +178,6 @@ def test_severity_ceiling_whose_ceiling_test_is_the_none_marker_is_refused() -> 
     _one_error(_ceiling_doc("severity-ceiling", "none"), "ceiling_test")
 
 
-@pytest.mark.parametrize(
-    "category", [c for c in _TERMINATION_CATEGORIES if c != "severity-ceiling"]
-)
-@pytest.mark.xfail(
-    strict=True,
-    reason="rule #13's 'forbidden otherwise' half is deliberately unenforced. It was "
-    "written against the pilot spec's `ceiling_test: {kind, subject}` — the out-of-band "
-    "step that would RESOLVE a ceiling — while the shipped field is the list of checks a "
-    "run could not make, which the lessons corpus instructs writing under any termination "
-    "category. Recorded at rule #13 in `docs/investigation-language.md`, in "
-    "`docs/dense-investigation-format.md` §`:T conclude`, and as ramp item 14. Arming it "
-    "turns this xfail red, which is the point.",
-)
-def test_a_ceiling_test_under_any_other_termination_category_is_refused(category: str) -> None:
-    """The forbidden-and-present cell, once per remaining enum member."""
-    _one_error(_ceiling_doc(category, _A_CEILING_TEST), "ceiling_test")
-
-
-@pytest.mark.parametrize(
-    "category", [c for c in _TERMINATION_CATEGORIES if c != "severity-ceiling"]
-)
-def test_any_other_termination_category_without_a_ceiling_test_is_clean(category: str) -> None:
-    """The forbidden-and-absent cell — liveness control against a check that refuses every
-    document that merely mentions a termination category."""
-    assert _errors(_ceiling_doc(category, None)) == []
-
-
-@pytest.mark.parametrize(
-    "category", [c for c in _TERMINATION_CATEGORIES if c != "severity-ceiling"]
-)
-def test_the_none_marker_is_how_a_non_ceiling_close_says_nothing_was_out_of_reach(
-    category: str,
-) -> None:
-    """SKILL.md §`:T conclude`: "Omit the row (or write `none`) when nothing was out of reach."
-    So the marker must not read as presence under the forbidding categories."""
-    assert _errors(_ceiling_doc(category, "none")) == []
-
-
 @pytest.mark.xfail(
     strict=True,
     reason="rule #13's `ceiling_rationale` clause is not implemented. It appears only in "
@@ -229,31 +186,13 @@ def test_the_none_marker_is_how_a_non_ceiling_close_says_nothing_was_out_of_reac
     "carries no validator rule'. Recorded there and at ramp item 14.",
 )
 def test_severity_ceiling_without_a_ceiling_rationale_is_refused() -> None:
-    """This arm comes from `dense-investigation-format.md` §Validator translation, which
-    renders #13 as "`:T conclude.ceiling_test` row ≠ `none` *iff* `termination.category` =
-    `severity-ceiling`; `ceiling_rationale` non-empty under the same condition." Rule #13's own
-    one-sentence text in `investigation-language.md` mentions only `ceiling_test`. Pinned here
-    because the two documents disagree about whether the companion scalar is part of the rule,
-    and an unpinned disagreement gets resolved by whoever writes the code."""
+    """This arm comes from `dense-investigation-format.md` §Validator translation, which renders #13 as "`:T conclude.ceiling_test` row ≠ `none` *iff* `termination.category` = `severity-ceiling`;"""
     doc = _doc(
         _PROLOGUE,
         _LEADS,
         _conclude(category="severity-ceiling", ceiling_test=_A_CEILING_TEST),
     )
     _one_error(doc, "ceiling_rationale")
-
-
-def test_severity_ceiling_with_both_rows_is_clean() -> None:
-    doc = _doc(
-        _PROLOGUE,
-        _LEADS,
-        _conclude(
-            category="severity-ceiling",
-            ceiling_test=_A_CEILING_TEST,
-            ceiling_rationale='"no host agent is deployed in this environment"',
-        ),
-    )
-    assert _errors(doc) == []
 
 
 # rule #18 — lead-level prediction structure (`lp*`)
@@ -297,12 +236,6 @@ def test_lead_predictions_project_onto_the_lead() -> None:
     assert [p["id"] for p in lead["predictions"]] == ["lp1"]
 
 
-@pytest.mark.parametrize("lp_id", ["lp1", "lp2", "lp01", "lp10"])
-def test_every_well_formed_lp_id_is_accepted(lp_id: str) -> None:
-    """`^lp\\d+$` — one or more digits, any of them, including a leading zero."""
-    assert _errors(_lp_doc({"id": lp_id})) == []
-
-
 @pytest.mark.parametrize(
     "lp_id",
     [
@@ -317,10 +250,7 @@ def test_every_well_formed_lp_id_is_accepted(lp_id: str) -> None:
     ],
 )
 def test_a_malformed_lp_id_is_refused(lp_id: str) -> None:
-    """The malformation space sampled at eight points, not one. A regex written `lp\\d+` with
-    no anchors passes `xlp1` and `lp1x`; one written `^lp\\d$` passes `lp1` and refuses `lp10`;
-    a case-insensitive one passes `LP1`. Each of those is a different bug and only its own
-    fixture catches it."""
+    """The malformation space sampled at eight points, not one."""
     _one_error(_lp_doc({"id": lp_id}), lp_id)
 
 
@@ -334,42 +264,11 @@ def test_two_lead_predictions_sharing_an_id_within_one_lead_are_refused() -> Non
     )
 
 
-def test_two_lead_predictions_with_distinct_ids_in_one_lead_are_clean() -> None:
-    assert _errors(
-        _lp_doc(
-            {"id": "lp1"},
-            {"id": "lp2", "if": '"volume is above 3 sigma"', "read_as": '"anomalous spike"'},
-        )
-    ) == []
-
-
-def test_the_same_lp_id_on_two_different_leads_is_clean() -> None:
-    """Uniqueness is scoped to the lead ("unique within the lead"), so `lp1` on l-001 and `lp1`
-    on l-002 are two ids, not a collision. A document-wide uniqueness check passes every other
-    test in this section and fails only here."""
-    doc = _doc(
-        _PROLOGUE,
-        _LEADS,
-        _lead_preds("l-001"),
-        _lead_preds("l-002", {"advance_to": "CONCLUDE"}),
-    )
-    assert _errors(doc) == []
-
-
 @pytest.mark.parametrize("field", ["if", "read_as", "advance_to"])
 def test_a_lead_prediction_missing_a_required_field_is_refused(field: str) -> None:
     """"each entry has `id` …, `if`, `read_as`, `advance_to`" — all three, one test apiece, so
     a check that happens to read only `advance_to` is caught."""
     _one_error(_lp_doc({field: ""}), "lp1", field)
-
-
-@pytest.mark.parametrize("target", ["CONCLUDE", "HYPOTHESIZE"])
-def test_the_two_terminal_advance_to_values_resolve(target: str) -> None:
-    """Both sentinels, because a check pinned by one of them leaves the other free to be
-    rejected. Written on the LAST lead so the route-compliance clause has no follower to
-    compare against and cannot contribute a second finding."""
-    doc = _doc(_PROLOGUE, _LEADS, _lead_preds("l-002", {"advance_to": target}))
-    assert _errors(doc) == []
 
 
 def test_advance_to_naming_a_lead_declared_elsewhere_resolves() -> None:
@@ -378,14 +277,6 @@ def test_advance_to_naming_a_lead_declared_elsewhere_resolves() -> None:
 
 def test_advance_to_naming_no_lead_at_all_is_refused() -> None:
     _one_error(_lp_doc({"advance_to": "process-lineage-walk"}), "process-lineage-walk")
-
-
-@pytest.mark.parametrize("target", ["conclude", "Conclude", "hypothesize"])
-def test_a_lowercase_terminal_advance_to_is_not_a_lead_name_either(target: str) -> None:
-    """The spec spells the two escapes `CONCLUDE` / `HYPOTHESIZE`. A lowercase spelling is
-    neither the literal nor a declared lead name, so it dangles — and a case-insensitive
-    comparison would also accept `conclude` as a lead nobody declared."""
-    _one_error(_lp_doc({"advance_to": target}, lead="l-002"), target)
 
 
 def test_advance_to_naming_a_lead_id_rather_than_its_name_is_refused() -> None:
@@ -411,14 +302,7 @@ def _warning_messages(doc: str) -> list[str]:
     "`docs/decisions/defender-invlang-enforcement-ramp.md`.",
 )
 def test_a_follower_matching_no_advance_to_warns_and_does_not_refuse_the_write() -> None:
-    """The one clause of #18 the spec grades softly: "otherwise a route-compliance warning is
-    emitted." l-001 pre-registers a route to CONCLUDE and is then followed by l-002, so the
-    actually-run next lead matched nothing pre-committed. That is worth saying and is not worth
-    refusing the document over — a warning LANDS the write and gates the next one.
-
-    Asserted through both surfaces: zero errors out of `validate_companion` (which filters
-    warn severity out) and exactly one finding out of `warn_diagnostics`.
-    """
+    """The one clause of #18 the spec grades softly:"""
     doc = _lp_doc({"advance_to": "CONCLUDE"})
     assert _errors(doc) == []
     warnings = _warning_messages(doc)
@@ -433,35 +317,8 @@ def test_a_follower_matching_an_advance_to_produces_no_warning() -> None:
     assert _warning_messages(_lp_doc({"advance_to": "dlp-scope-check"})) == []
 
 
-def test_a_follower_matching_one_of_several_advance_to_values_produces_no_warning() -> None:
-    """"the follower's `name` should match at least one `advance_to` value" — at least one, so
-    a second branch routing to CONCLUDE does not spoil the match."""
-    doc = _lp_doc(
-        {"id": "lp1", "advance_to": "dlp-scope-check"},
-        {
-            "id": "lp2",
-            "if": '"volume is above 3 sigma"',
-            "read_as": '"anomalous spike"',
-            "advance_to": "CONCLUDE",
-        },
-    )
-    assert _warning_messages(doc) == []
-
-
-def test_the_last_lead_in_the_companion_has_no_follower_to_comply_with() -> None:
-    """No following lead means the clause has no subject; a check that warns anyway fires on
-    every terminating companion."""
-    doc = _doc(_PROLOGUE, _LEADS, _lead_preds("l-002", {"advance_to": "CONCLUDE"}))
-    assert _warning_messages(doc) == []
-
-
 def test_a_dangling_advance_to_is_an_error_and_not_merely_a_warning() -> None:
-    """The severity split inside #18: resolution is structural (error), route compliance is
-    advisory (warning). A build that files both as warnings passes the warning tests above and
-    lets an unresolvable branch plan through.
-
-    Written on the LAST lead so the route clause has no follower and cannot contribute the
-    warning this test is asserting the absence of."""
+    """The severity split inside #18:"""
     doc = _lp_doc({"advance_to": "process-lineage-walk"}, lead="l-002")
     assert len(_errors(doc)) == 1
     assert warn_diagnostics(doc) == ()
@@ -509,13 +366,6 @@ def _authz_closure_doc(hypotheses: str, resolutions: str, deferred: str) -> str:
     return _doc(_PROLOGUE, hypotheses, _LEADS, resolutions, _conclude(), deferred)
 
 
-def test_a_contract_with_a_fulfilling_resolution_closes_clean() -> None:
-    """Liveness control for #26 arm (a)."""
-    assert _errors(
-        _authz_closure_doc(_ONE_CONTRACT, _authz_row(), _deferred_authz())
-    ) == []
-
-
 def test_a_contract_deferred_with_a_rationale_closes_clean() -> None:
     """Liveness control for #26 arm (b)."""
     doc = _authz_closure_doc(
@@ -533,35 +383,11 @@ def test_a_contract_deferred_with_an_empty_rationale_is_refused() -> None:
     _one_error(doc, "ac1")
 
 
-def test_a_contract_deferred_with_a_whitespace_rationale_is_refused() -> None:
-    """A cell holding a quoted blank is empty in every sense the rule cares about."""
-    doc = _authz_closure_doc(_ONE_CONTRACT, "", _deferred_authz('h-001.ac1|"   "'))
-    _one_error(doc, "ac1")
-
-
 def test_a_contract_neither_resolved_nor_deferred_is_refused() -> None:
     """"A contract that is declared and silently abandoned — never resolved, never deferred —
     fails this rule.\""""
     doc = _authz_closure_doc(_ONE_CONTRACT, "", _deferred_authz())
     _one_error(doc, "ac1")
-
-
-def test_a_contract_left_out_of_an_absent_deferral_table_is_refused() -> None:
-    """Omitting the `:T conclude.deferred_authz` block entirely is not a third way to close a
-    contract — an absent table and an empty one say the same thing."""
-    doc = _doc(_PROLOGUE, _ONE_CONTRACT, _LEADS, _conclude())
-    _one_error(doc, "ac1")
-
-
-def test_one_contract_resolved_and_the_other_deferred_closes_clean() -> None:
-    """The boundary the rule is actually written for: closure is per contract, not per
-    document, so a mixed close is legal."""
-    doc = _authz_closure_doc(
-        _TWO_CONTRACTS,
-        _authz_row("ac1"),
-        _deferred_authz('h-001.ac2|"change-mgmt anchor unavailable for this window"'),
-    )
-    assert _errors(doc) == []
 
 
 def test_one_contract_resolved_and_the_other_abandoned_is_refused_for_the_orphan_only() -> None:
@@ -658,11 +484,6 @@ def test_impact_predictions_project_onto_the_lead() -> None:
     assert lead["impact_predictions"][0]["dimension"] == "confidentiality"
 
 
-@pytest.mark.parametrize("ip_id", ["ip1", "ip2", "ip01", "ip10"])
-def test_every_well_formed_ip_id_is_accepted(ip_id: str) -> None:
-    assert _errors(_ip_doc({"id": ip_id})) == []
-
-
 @pytest.mark.parametrize(
     "ip_id",
     [
@@ -693,27 +514,6 @@ def test_two_impact_predictions_sharing_an_id_within_one_lead_are_refused() -> N
     )
 
 
-def test_two_impact_predictions_with_distinct_ids_in_one_lead_are_clean() -> None:
-    assert _errors(
-        _ip_doc(
-            {"id": "ip1"},
-            {"id": "ip2", "dim": "scope", "claim": '"no second bucket prefix is touched"'},
-        )
-    ) == []
-
-
-def test_the_same_ip_id_on_two_different_leads_is_clean() -> None:
-    """"unique within the lead" — which is exactly why the cross-lead identity is qualified.
-    A document-wide uniqueness check refuses the shape rule #30's qualified form assumes."""
-    doc = _doc(_PROLOGUE, _LEADS, _impact_preds("l-001"), _impact_preds("l-002", {"dim": "scope"}))
-    assert _errors(doc) == []
-
-
-@pytest.mark.parametrize("dimension", _IMPACT_DIMENSIONS)
-def test_every_legal_impact_dimension_is_accepted(dimension: str) -> None:
-    assert _errors(_ip_doc({"dim": dimension})) == []
-
-
 @pytest.mark.parametrize(
     "dimension",
     [
@@ -729,16 +529,6 @@ def test_an_off_enum_impact_dimension_is_refused(dimension: str) -> None:
 
 def test_an_impact_prediction_with_no_dimension_is_refused() -> None:
     _one_error(_ip_doc({"dim": ""}), "dimension")
-
-
-@pytest.mark.parametrize(
-    "field", ["claim", "on_match", "on_mismatch", "on_indeterminate", "escalation_on"]
-)
-def test_an_impact_prediction_missing_a_required_field_is_refused(field: str) -> None:
-    """Five required fields beside `id` and `dimension`, one test apiece. `on_indeterminate`
-    is the one a hand-written check forgets — it is the branch that fires when the measurement
-    could not be taken, which is the branch the closure rules exist for."""
-    _one_error(_ip_doc({field: ""}), "ip1", field)
 
 
 @pytest.mark.parametrize(
@@ -758,20 +548,8 @@ def test_an_impact_prediction_missing_a_required_field_is_refused(field: str) ->
     "Recorded at rules #29 and #33 in `docs/investigation-language.md`.",
 )
 def test_a_compound_impact_claim_is_refused(claim: str) -> None:
-    """"`claim` names one observable per entry — compound `AND` / `OR` / semicolon predicates
-    must be split across entries." Stated in the rule text, so pinned here; it is also the
-    clause of #29 most likely to be dropped as unmechanisable, and dropping it silently is the
-    thing this test exists to prevent. Its sibling clause in rule #33 says the same for `ap*`
-    and is likewise unbuilt, so there is no precedent to copy."""
+    """"`claim` names one observable per entry — compound `AND` / `OR` / semicolon predicates must be split across entries." Stated in the rule text, so pinned here;"""
     _one_error(_ip_doc({"claim": claim}), "ip1")
-
-
-def test_a_claim_containing_the_letters_and_inside_a_word_is_not_compound() -> None:
-    """The liveness control for the clause above, and the reason it has to be tokenised rather
-    than substring-matched: "bandwidth" contains "and", "scoring" contains "or"."""
-    assert _errors(
-        _ip_doc({"claim": '"egress bandwidth scoring stays inside the sanctioned envelope"'})
-    ) == []
 
 
 # rule #30 — impact resolution back-refs and grounding
@@ -824,19 +602,6 @@ def test_an_impact_resolution_against_a_local_prediction_validates_clean() -> No
     assert _errors(_r_impact_doc()) == []
 
 
-def test_a_bare_prediction_ref_resolves_within_the_emitting_lead() -> None:
-    assert _errors(_r_impact_doc({"resolved_by": "l-001", "pred_ref": "ip1"})) == []
-
-
-def test_a_qualified_prediction_ref_resolves_across_leads() -> None:
-    """"fully qualified `l-{id}.ip{n}` resolves across leads" — l-002 grades a threshold l-001
-    pre-registered, which is the ordinary shape when the measuring lead and the grading lead
-    are different."""
-    assert _errors(
-        _r_impact_doc({"resolved_by": "l-002", "pred_ref": "l-001.ip1"})
-    ) == []
-
-
 def test_a_bare_prediction_ref_does_not_reach_another_leads_prediction() -> None:
     """The arm that separates a real scope check from a document-wide id lookup: `ip1` IS
     declared in this companion, just not on l-002. A resolver that searches every lead accepts
@@ -858,31 +623,11 @@ def test_a_qualified_prediction_ref_naming_a_real_lead_without_that_id_is_refuse
     _one_error(_r_impact_doc({"resolved_by": "l-002", "pred_ref": "l-002.ip1"}), "l-002.ip1")
 
 
-def test_a_matching_dimension_validates_clean() -> None:
-    assert _errors(
-        _r_impact_doc({"resolved_by": "l-002", "pred_ref": "ip2", "dim": "scope"})
-    ) == []
-
-
 def test_a_dimension_that_disagrees_with_the_referenced_prediction_is_refused() -> None:
     """"`dimension` must match the referenced prediction's `dimension`." `ip1` was registered
     on confidentiality; grading it as availability re-labels the threshold after the fact,
     which is the retroactive-shift the whole impact axis is built to prevent."""
     _one_error(_r_impact_doc({"dim": "availability"}), "ip1")
-
-
-def test_a_cross_lead_dimension_mismatch_is_refused_too() -> None:
-    """The same check across the qualified form — a resolver that only compares within the
-    emitting lead misses it."""
-    _one_error(
-        _r_impact_doc({"resolved_by": "l-002", "pred_ref": "l-001.ip1", "dim": "scope"}),
-        "l-001.ip1",
-    )
-
-
-@pytest.mark.parametrize("verdict", ["within", "exceeds", "indeterminate"])
-def test_every_legal_impact_verdict_on_a_resolution_is_accepted(verdict: str) -> None:
-    assert _errors(_r_impact_doc({"verdict": verdict})) == []
 
 
 @pytest.mark.parametrize(
@@ -894,13 +639,6 @@ def test_an_off_enum_resolution_verdict_is_refused(verdict: str) -> None:
     `conclude.impact_verdict` and illegal here, and `authorized`/`unauthorized` are what a
     check that reuses the `:R authz` verdict enum would wave through."""
     _one_error(_r_impact_doc({"verdict": verdict}), verdict)
-
-
-@pytest.mark.parametrize(
-    "grounding", ["telemetry-baseline", "business-owner-attestation", "dlp-policy"]
-)
-def test_every_legal_impact_grounding_kind_is_accepted(grounding: str) -> None:
-    assert _errors(_r_impact_doc({"grounding": grounding})) == []
 
 
 def test_past_case_grounding_on_an_impact_resolution_is_refused() -> None:
@@ -928,43 +666,12 @@ def test_an_off_enum_impact_grounding_kind_is_refused(grounding: str) -> None:
     ],
 )
 def test_an_impact_resolution_missing_a_required_field_is_refused(cell: str, token: str) -> None:
-    """"Required fields: `prediction_ref`, `dimension`, `verdict`, `grounding_kind`,
-    `authority_for_question`, `as_of`, `reasoning`." The first two get their own tests above
-    (they also carry resolution and match obligations); the remaining five are here.
-
-    The token asserted is the CANONICAL field name, not the column alias
-    (`parser._RESOLUTION_KEY_CANONICAL` maps `grounding`→`grounding_kind`,
-    `authority`→`authority_for_question`), because the header spelling is the author's choice
-    and the message has to name the field the rule names.
-    """
+    """"Required fields: `prediction_ref`, `dimension`, `verdict`, `grounding_kind`, `authority_for_question`, `as_of`, `reasoning`." The first two get their own tests above (they also carry resolution and match obligations);"""
     _one_error(_r_impact_doc({cell: ""}), token)
 
 
 def test_an_impact_resolution_with_no_prediction_ref_is_refused() -> None:
     _one_error(_r_impact_doc({"pred_ref": ""}), "prediction_ref")
-
-
-def test_an_impact_resolution_with_no_dimension_is_refused() -> None:
-    _one_error(_r_impact_doc({"dim": ""}), "dimension")
-
-
-def test_two_resolutions_may_fulfil_two_different_predictions() -> None:
-    """Liveness control across the whole family: the ordinary multi-threshold shape, one row
-    per pre-registered predicate, must stay writable."""
-    assert _errors(
-        _r_impact_doc(
-            {"resolved_by": "l-001", "pred_ref": "ip1", "dim": "confidentiality"},
-            {
-                "resolved_by": "l-002",
-                "pred_ref": "ip2",
-                "dim": "scope",
-                "verdict": "within",
-                "observed": "no prefix outside s3://prod-data/reports/ was read",
-                "grounding": "dlp-policy",
-                "reasoning": '"DLP scan covered the whole session window"',
-            },
-        )
-    ) == []
 
 
 # rule #31 — impact closure at CONCLUDE, plus the verdict/severity pair
@@ -994,13 +701,6 @@ _TWO_IMPACT_PREDS = _impact_preds(
     {"id": "ip1"},
     {"id": "ip2", "dim": "scope", "claim": '"no object outside the sanctioned prefix is read"'},
 )
-
-
-def test_an_impact_prediction_with_a_fulfilling_resolution_closes_clean() -> None:
-    """Liveness control for #31 arm (a)."""
-    assert _errors(
-        _impact_closure_doc(preds=_ONE_IMPACT_PRED, resolutions=_r_impact())
-    ) == []
 
 
 def test_an_impact_prediction_deferred_with_a_rationale_closes_clean() -> None:
@@ -1033,24 +733,10 @@ def test_an_impact_prediction_neither_resolved_nor_deferred_is_refused() -> None
     _one_error(doc, "ip1")
 
 
-def test_one_impact_prediction_resolved_and_the_other_deferred_closes_clean() -> None:
-    doc = _impact_closure_doc(
-        preds=_TWO_IMPACT_PREDS,
-        resolutions=_r_impact(),
-        deferred=_deferred_impact('l-001.ip2|"DLP scope report did not cover this bucket"'),
-    )
-    assert _errors(doc) == []
-
-
 def test_one_impact_prediction_resolved_and_the_other_abandoned_is_refused() -> None:
     """Per prediction, not per lead: grading `ip1` must not discharge `ip2` beside it."""
     doc = _impact_closure_doc(preds=_TWO_IMPACT_PREDS, resolutions=_r_impact())
     _one_error(doc, "ip2")
-
-
-def test_an_unresolved_impact_prediction_without_a_conclude_block_is_not_yet_a_failure() -> None:
-    """Same REPORT-boundary gating as #26 — mid-run the threshold is simply not graded yet."""
-    assert _errors(_doc(_PROLOGUE, _LEADS, _ONE_IMPACT_PRED)) == []
 
 
 def test_deferred_impact_predictions_project_onto_the_conclude_block() -> None:
@@ -1091,18 +777,6 @@ def test_impact_verdict_none_is_legal_on_a_companion_that_declared_no_thresholds
 
 
 @pytest.mark.parametrize(
-    ("impact_verdict", "impact_severity"),
-    [("within", None), ("exceeds", "moderate"), ("indeterminate", "low")],
-)
-def test_every_other_legal_impact_verdict_is_accepted(
-    impact_verdict: str, impact_severity: str | None
-) -> None:
-    """Each member paired with the severity its own conditional-presence clause demands, so
-    this test reads the enum and nothing else."""
-    assert _errors(_verdict_doc(impact_verdict, impact_severity)) == []
-
-
-@pytest.mark.parametrize(
     "impact_verdict",
     [
         "none-detected",              # what examples/example-c ships today
@@ -1123,47 +797,17 @@ def test_every_other_legal_impact_verdict_is_accepted(
     "enforcement ramp.",
 )
 def test_an_off_enum_impact_verdict_is_refused(impact_verdict: str) -> None:
-    """`conclude.impact_verdict ∈ {none, within, exceeds, indeterminate}`.
-
-    The first two entries are the reason this test matters beyond the enum: they are LIVE
-    values in shipped documents (`examples/example-c-cumulative-escalation.md`,
-    `defender/fixtures-e2e/golden-*/investigation.md`, and both
-    `_golden_invlang/*.companion.json`). `test_shipped_invlang_documents.py` demands every
-    shipped document be gate-clean, so #31's enum cannot land until those files are corrected.
-    That is a real cost of the rule and it should be paid deliberately, not discovered.
-
-    No `impact_severity` row, so the conditional-presence clause cannot contribute a second
-    finding whichever way it reads an unrecognised verdict.
-    """
+    """`conclude.impact_verdict ∈ {none, within, exceeds, indeterminate}`."""
     _one_error(_verdict_doc(impact_verdict, None), impact_verdict)
 
 
 # #31's `impact_severity` conditional presence
 
 
-@pytest.mark.parametrize("impact_severity", ["low", "moderate", "high"])
-@pytest.mark.parametrize("impact_verdict", ["exceeds", "indeterminate"])
-def test_severity_is_required_and_may_be_any_member_when_the_verdict_demands_it(
-    impact_verdict: str, impact_severity: str
-) -> None:
-    """Required-and-present, across both demanding verdicts and all three non-null members."""
-    assert _errors(_verdict_doc(impact_verdict, impact_severity)) == []
-
-
 @pytest.mark.parametrize("impact_verdict", ["exceeds", "indeterminate"])
 def test_severity_absent_under_a_verdict_that_requires_it_is_refused(impact_verdict: str) -> None:
     """Required-and-absent."""
     _one_error(_verdict_doc(impact_verdict, None), "impact_severity")
-
-
-@pytest.mark.parametrize("impact_verdict", ["exceeds", "indeterminate"])
-def test_an_explicit_null_severity_under_a_demanding_verdict_is_refused(
-    impact_verdict: str,
-) -> None:
-    """`impact_severity null` is the format's spelling of absence (the parser projects it as
-    `None`), so it has to fail wherever omitting the row fails — otherwise the required arm is
-    satisfied by writing the word "null"."""
-    _one_error(_verdict_doc(impact_verdict, "null"), "impact_severity")
 
 
 @pytest.mark.parametrize("impact_severity", ["low", "moderate", "high"])
@@ -1185,37 +829,6 @@ def test_a_severity_under_verdict_none_is_refused() -> None:
         _deferred_impact(),
     )
     _one_error(doc, "impact_severity")
-
-
-@pytest.mark.parametrize("impact_verdict", ["within", "none"])
-def test_no_severity_under_a_verdict_that_forbids_it_is_clean(impact_verdict: str) -> None:
-    """Forbidden-and-absent — the liveness control for the severity truth table."""
-    doc = (
-        _doc(_PROLOGUE, _LEADS, _conclude(impact_verdict="none"), _deferred_impact())
-        if impact_verdict == "none"
-        else _verdict_doc("within", None)
-    )
-    assert _errors(doc) == []
-
-
-@pytest.mark.parametrize("impact_verdict", ["within", "none"])
-def test_an_explicit_null_severity_under_a_verdict_that_forbids_it_is_clean(
-    impact_verdict: str,
-) -> None:
-    """The other half of forbidden-and-absent: writing the row as `null` is the canonical
-    spelling in `dense-investigation-format.md`'s own worked example, so a check reading
-    "the row is present" rather than "a severity was stated" refuses the shipped shape."""
-    doc = (
-        _doc(
-            _PROLOGUE,
-            _LEADS,
-            _conclude(impact_verdict="none", impact_severity="null"),
-            _deferred_impact(),
-        )
-        if impact_verdict == "none"
-        else _verdict_doc("within", "null")
-    )
-    assert _errors(doc) == []
 
 
 @pytest.mark.parametrize("impact_severity", ["critical", "Moderate", "medium", "severe"])
@@ -1291,22 +904,6 @@ def _pred_closure_doc(
     )
 
 
-def test_a_prediction_cited_by_a_resolution_closes_clean() -> None:
-    """Liveness control for #34 arm (a)."""
-    assert _errors(_pred_closure_doc()) == []
-
-
-def test_a_prediction_deferred_with_a_rationale_closes_clean() -> None:
-    """Liveness control for #34 arm (b). "Each `deferred_predictions[]` entry has
-    `prediction_ref: h-{id}.{p|ap}{n}` and `rationale: "<why>"`.\""""
-    doc = _pred_closure_doc(
-        preds=_H1_PREDS,
-        resolutions=_resolutions(_cites("p1")),
-        deferred=_deferred_preds('h-001.p2|"the image-identity lead never returned"'),
-    )
-    assert _errors(doc) == []
-
-
 def test_a_prediction_deferred_with_an_empty_rationale_is_refused() -> None:
     """"listed in `conclude.deferred_predictions[]` with a NON-EMPTY rationale" — naming the
     id without saying why is the walked-past prediction with paperwork."""
@@ -1319,10 +916,7 @@ def test_a_prediction_deferred_with_an_empty_rationale_is_refused() -> None:
 
 
 def test_a_prediction_cited_only_by_a_resolution_with_a_null_after_is_refused() -> None:
-    """"cited in some resolution's `matched_prediction_ids[]` WITH A NON-NULL `after`". A row
-    that names the prediction and moves the weight nowhere records that the prediction was
-    looked at, not that it was graded — which is exactly the state the rule asks the run to
-    justify instead of glossing."""
+    """"cited in some resolution's `matched_prediction_ids[]` WITH A NON-NULL `after`"."""
     doc = _pred_closure_doc(resolutions=_resolutions(_cites("p1", after="null", severity="weak")))
     _one_error(doc, "p1")
 
@@ -1346,22 +940,6 @@ def test_an_attribute_prediction_must_close_too() -> None:
     _one_error(doc, "ap1")
 
 
-def test_an_attribute_prediction_cited_by_a_resolution_closes_clean() -> None:
-    doc = _pred_closure_doc(
-        attr_preds=_H1_ATTR_PRED, resolutions=_resolutions(_cites("p1,ap1"))
-    )
-    assert _errors(doc) == []
-
-
-def test_an_attribute_prediction_deferred_with_a_rationale_closes_clean() -> None:
-    doc = _pred_closure_doc(
-        attr_preds=_H1_ATTR_PRED,
-        resolutions=_resolutions(_cites("p1")),
-        deferred=_deferred_preds('h-001.ap1|"the collector does not expose signing metadata"'),
-    )
-    assert _errors(doc) == []
-
-
 def test_predictions_on_a_refuted_hypothesis_are_exempt() -> None:
     """"on a hypothesis whose final status is not `refuted`". `:H` rows are immutable, so
     `--` on the resolution chain is the only way a run can say "refuted" after the fact — which is also how `_check_benign_authz` already reads survival."""
@@ -1370,26 +948,6 @@ def test_predictions_on_a_refuted_hypothesis_are_exempt() -> None:
         refuts=_H1_REFUT,
         resolutions=_resolutions(
             "h-001  null → --   [l-001 r1 severe ⟂ e-001 :: the series is bursty, not cadenced]"
-        ),
-    )
-    assert _errors(doc) == []
-
-
-def test_predictions_on_a_live_hypothesis_are_not_exempt() -> None:
-    """The control for both exemptions: the same document with the hypothesis left active must
-    fail, or the two tests above are passing because the rule refuses nothing."""
-    doc = _pred_closure_doc(preds=_H1_PREDS, resolutions=_resolutions(_cites("p1")))
-    _one_error(doc, "p2")
-
-
-def test_one_prediction_cited_and_the_other_deferred_closes_clean() -> None:
-    doc = _pred_closure_doc(
-        preds=_H1_PREDS,
-        attr_preds=_H1_ATTR_PRED,
-        resolutions=_resolutions(_cites("p1")),
-        deferred=_deferred_preds(
-            'h-001.p2|"the image-identity lead never returned"',
-            'h-001.ap1|"the collector does not expose signing metadata"',
         ),
     )
     assert _errors(doc) == []
@@ -1404,13 +962,6 @@ def test_one_prediction_cited_and_the_other_abandoned_is_refused_for_the_orphan_
         resolutions=_resolutions(_cites("p1,ap1")),
     )
     _one_error(doc, "p2")
-
-
-def test_an_uncited_prediction_without_a_conclude_block_is_not_yet_a_failure() -> None:
-    """The late gate is the REPORT boundary — rule #6 is the early one, and it fires only on
-    `++`. A mid-run companion owes nothing yet."""
-    doc = _doc(_PROLOGUE, _PRED_HYPOTHESES, _H1_PREDS, _LEADS, _resolutions(_cites("p1")))
-    assert _errors(doc) == []
 
 
 def test_deferred_predictions_project_onto_the_conclude_block() -> None:

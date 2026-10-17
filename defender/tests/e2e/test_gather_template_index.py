@@ -1,17 +1,4 @@
-"""E2E script for #585 — the template index reaches the gather subagent for real.
-
-The unit spec (`tests/test_gather_template_discovery.py`) pins the index against
-`_gather_prompt` directly. This drives the WHOLE seam: `driver.run_investigation` → the main
-loop's `gather` tool → `_run_gather` → `bind(GATHER_DEF, …)` → `_gather_prompt` → the nested
-gather agent's first request. `ReplayFn.seen` captures that agent's flattened message history,
-so the dispatch prompt the model actually received is observable.
-
-This is the SURVIVAL demand (d17): the workflow that depended on the removed `ls`/`grep`
-discovery route — gather binding a template for its lead — must still complete via its
-substitute. It is the one assertion that survives a refactor of every internal seam.
-
-Replay machinery lives in `_replay_harness.py`.
-"""
+"""E2E script for #585 — the template index reaches the gather subagent for real."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,13 +17,7 @@ pytestmark = pytest.mark.e2e
 
 
 class _KeyRecordingReplay(ReplayFn):
-    """A `ReplayFn` that also records the `model_settings` each request was issued under.
-
-    `AgentInfo` — the second argument every `FunctionModel` callable receives — carries the
-    settings the Agent was BUILT with, which is where `build_agent_core` puts the prompt-cache
-    affinity key. That makes the composition root's own choice observable from inside a driven
-    run, through the seam the harness already injects, with no `monkeypatch.setattr` on the
-    closure (`driver._build_gather`) that makes it."""
+    """A `ReplayFn` that also records the `model_settings` each request was issued under."""
 
     __name__ = "KeyRecordingReplay"
 
@@ -66,18 +47,7 @@ def _draft_ids() -> set[str]:
 
 
 def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
-    """d3 + d4 + d17, through the real driver against the REAL repo corpus.
-
-    The dispatch prompt the gather subagent receives must carry every ESTABLISHED template ID
-    (all systems — not just the dispatched `elastic`) and NO draft id. Gather then binds one of
-    them: it passes a template id it found in the index as `query_id`, and the queries table
-    records that binding — which is the whole point of the change (a bound id is a catalog reuse;
-    a coined id is a miss).
-
-    #835 narrows what "carry" means, and the last block pins the narrowing on the wire rather
-    than only at `_gather_prompt`: every id still arrives, but an off-target system's `## Goal`
-    prose does not.
-    """
+    """d3 + d4 + d17, through the real driver against the REAL repo corpus."""
     from defender.tests.e2e._replay_harness import FakeVerbs
 
     run_id = "tmpl-index"
@@ -144,19 +114,7 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
 
 def test_835_the_composition_root_keys_each_gather_lane_on_its_dispatched_system(tmp_path):
     """The other half of #835, at the seam that actually decides it: `driver._build_gather`'s
-    `cache_key=f"gather:{system}"`.
-
-    The unit tests around it pin the CONTRACT (`gather_factory(agent_id, system, request_limit)`) and the
-    PASSTHROUGH (`build_gather_agent(cache_key=…)` reaches `model_settings`) — but neither
-    reaches the closure that supplies the key, so reverting that one line to `agent_id` left the
-    whole suite green and silently restored a per-lead cache lane. `AgentInfo.model_settings`
-    closes it: the settings the gather Agent was built with are visible from inside a driven run,
-    through the `make_model` seam the harness already injects.
-
-    THREE leads, TWO systems, one run: the two elastic leads must land on ONE lane, and the cmdb
-    lead on a different one. The negative half is what makes it a test of the key rather than of
-    any constant — a `cache_key` that stopped varying with the system would pass the first
-    assertion and fail the second; one that kept varying with the LEAD fails the first."""
+    `cache_key=f"gather:{system}"`."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='cache-lane')
     report_md = ("---\ncase_id: cache-lane\ndisposition: benign\n"
                  "confidence: low\n---\nSynthetic cache-lane test.\n")

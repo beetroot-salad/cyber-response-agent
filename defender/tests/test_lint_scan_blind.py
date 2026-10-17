@@ -1,26 +1,4 @@
-"""The swallow-to-clean fix for the lint gates (#652, generalizing #618/#621).
-
-Eight gates each carried their own copy of::
-
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        tree = ast.parse(text)
-    except (OSError, SyntaxError):
-        continue
-
-so a file the gate could not read or parse silently left the scanned corpus, and the gate
-printed ``0 finding(s)`` and exited 0 — reporting clean on source it never examined. The fix
-routes every one through ``_astlib.read_and_parse`` / ``read_source``, which raise
-``ScanBlind``, and each ``main()`` turns that into **exit 2** (the ``lint_vulture`` /
-``lint_stale_refs`` convention: the gate could not run, which is not clean).
-
-The gates exercised end-to-end here are the three with a ``scope=`` DI seam, which is what
-lets a test point a real gate at a throwaway tree. The remaining five share the identical
-call into ``_astlib``, whose own contract is pinned directly below.
-
-Every exit-2 assertion is paired with a control run over the same tree minus the broken
-file, so none of these can pass by the gate simply being broken.
-"""
+"""Lint gates exit 2 (never clean) when a file in scope cannot be read or parsed."""
 from __future__ import annotations
 
 import importlib

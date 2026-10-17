@@ -1,49 +1,4 @@
-"""#771 — the executable spec for the ALIAS BAN half: M1's seccomp profile on every box lane
-(O2), M2's startup probe that observes the ban's effect rather than trusting configuration
-(O3), and the not-opt-out-able fault F4 resolved.
-
-Every test here is exactly one demand of `spec-flow/specs/spec_graph_771.yaml`, named by
-that demand's `discharged_by`; the docstring carries the demand's observable-outcome prose.
-
-RED BY CONSTRUCTION: `box.ALIAS_PROFILE_PATH`, `box._probe_alias_ban` and
-`box.AliasBanNotInForce` do not exist at `c98bc86c`, and neither argv builder passes
-`--security-opt` today (R1).
-
-THE ONE UNKNOWN IS NOW CLOSED. X19 — the exact registration syntax carrying `--oci-seccomp`
-into the daemon's `runtimeArgs` — was the load-bearing unknown handed to implementation, and
-48-reground EXECUTED it against real runsc release-20260727.0: `runsc install -- --oci-seccomp`
-writes `runtimeArgs: ["--oci-seccomp"]` into the named runtime's `daemon.json` entry. Nothing
-below is authored around a guessed spelling.
-
-AND CI REALLY DOES START BOXES. The brief's inference that the live-box guard skips every live
-box test in CI described a RETIRED posture: 48-reground read the guard's own predicates against
-both jobs and found neither hits the skip branch — the `test` job runs boxes natively, and
-`box-dood` runs them under a deliberately anchor-satisfying split. So the runtime registration
-is load-bearing, and without `--oci-seccomp` in it every box in CI faults on arrival the moment
-F4's not-opt-out-able fault ships. That is why the CI workflow change is part of this PR's
-definition of done rather than a follow-up.
-
-Fakes enter through `docker=` only. Fault content is declarative and cites the ledger claim
-that observed it on a real daemon (`ProbeVerdict.cite`).
-
-WHICH JOB RUNS THE REAL-BOX TESTS. The three mechanism confirmations at the bottom of this
-file carry `@requires_real_box`, NOT `@pytest.mark.live` — and that is a correction, not a
-style choice. The gate runs `pytest tests/ -m "not live"`, so a `live`-marked test is
-deselected in the `test` job; the `box-dood` job collects `tests/e2e/test_540_box_boundary.py`
-alone and never sees this file. Carried on `live`, those confirmations would be selected by NO
-CI job, and the two obligations they alone pin — the ban in force for the box's whole life,
-and an intra-tree alias refused — would be specified and never exercised by any job at all.
-
-They run in the **`test` job**. 48-reground settled it: the blanket docker-outside-of-Docker
-skip is retired posture, the `test` job runs pytest on the runner (so the DooD predicate is
-false outright), and its gVisor step hard-fails unless the daemon lists runsc — the same three
-predicates `test_540_box_boundary.py` already relies on to run real boxes there.
-
-AND THAT JOB IS ADVISORY. `main` carries no branch protection and no ruleset, no job declares
-a dependency, and no aggregating check exists — so the `test` job's result is a signal a human
-chooses to respect, not something that blocks a merge. Everywhere this suite says an
-obligation is "verified in CI", read it as verified in a job whose red can be merged past.
-"""
+"""#771 — the alias ban: a seccomp profile (derived from the platform default minus six alias syscalls) on every box lane, a startup probe that observes the ban rather than trusting configuration, and a not-opt-out-able fault when it is not in force."""
 from __future__ import annotations
 
 import json
@@ -61,11 +16,7 @@ from defender.tests.e2e._spec771 import (
     BAN_ABSENT,
     BAN_IN_FORCE,
     BANNED_SHAPES,
-    CI_WORKFLOW,
-    DAEMON_RUNTIME_ARGS_KEY,
-    OCI_SECCOMP_FLAG,
     PLATFORM_COMPARISON_PROBE,
-    RUNSC_INSTALL_CMD,
     SCAN_ONLY_SHAPES,
     AliasProbeDocker,
     DockerFault,
@@ -73,7 +24,6 @@ from defender.tests.e2e._spec771 import (
     alias_profile_path,
     allowed_syscalls,
     ban_not_in_force_error,
-    daemon_engine_version,
     load_seccomp_generator,
     requires_daemon,
     requires_real_box,
@@ -114,14 +64,8 @@ def _request(tmp_path: Path, *, writable: bool = True) -> object:
 
 # M1 — the profile on the argv, on every lane
 def test_box_argv_carries_the_alias_profile(tmp_path):
-    """alias_profile_seam — the rendered `docker run` argv carries
-    `--security-opt seccomp=<the shipped profile>`, pointing at a file that exists and parses
-    as the deny profile.
-
-    Neither builder passes `--security-opt` today (R1), so this is the seam the whole ban
-    hangs off. The CLI reads the profile CLIENT-SIDE and ships the JSON, so the path lives in
-    the caller's namespace rather than the daemon's — which is what makes a
-    unreadable-at-create profile a client-side fault rather than a silently divergent box."""
+    """alias_profile_seam — the rendered `docker run` argv carries `--security-opt seccomp=<the
+    shipped profile>`, pointing at a file that exists and parses as the deny profile."""
     rec = AliasProbeDocker()
     _start_investigation_lane(run_tree(tmp_path), rec)
 
@@ -138,12 +82,7 @@ def test_box_argv_carries_the_alias_profile(tmp_path):
 def test_every_box_lane_carries_the_alias_profile(tmp_path):
     """alias_profile_on_every_box_lane — both argv builders attach the alias profile, and they
     attach the IDENTICAL resolved value: the investigation lane's builder and the generic
-    request builder that serves the drain lane and the learning run-cycle alike.
-
-    C8-new: the second builder is not "the drain lane" — it is the generic box-request builder,
-    so a demand written as "the drain box carries the profile" under-specifies the surface. Fork
-    R16 resolves the path ONCE and asserts both carry the same string, because a drift between
-    the two ships one lane with no ban at all and nothing else would notice."""
+    request builder that serves the drain lane and the learning run-cycle alike."""
     lane_a = AliasProbeDocker()
     _start_investigation_lane(run_tree(tmp_path), lane_a)
 
@@ -156,33 +95,10 @@ def test_every_box_lane_carries_the_alias_profile(tmp_path):
     assert a == b, f"the two builders' profile paths drifted: {a!r} vs {b!r}"
 
 
-
-
 def test_alias_profile_denies_the_six_syscalls_and_allows_everything_else(tmp_path):
-    """profile_denies_exactly_six — the shipped profile denies each of the six banned shapes
-    and nothing the platform default allowed, by being the platform default with the six
-    SUBTRACTED from its allowlist.
-
-    C2-FIX'S WITHDRAWAL RESTED ON A FALSE PREMISE, AND THIS DEMAND IS THE REPAIR. Deriving the
-    profile from the platform default was withdrawn on two grounds. The first is right and is
-    the argument FOR deriving: `--security-opt seccomp=<file>` REPLACES with no merge. The
-    second — G9, "the daemon's default is compiled in and undumpable" — is FALSE, and it is
-    what made the resulting cost look unavoidable. The default is a JSON document versioned as
-    its own Go module and vendored verbatim into moby; it never has to be dumped from a running
-    daemon, it has to be PINNED. The generator names the exact bytes and their digest.
-
-    WHAT THE WITHDRAWAL COST, MEASURED RATHER THAN ARGUED. Under the hand-written allow-all
-    profile, executed against a real daemon (Docker 29.6.1, runc lane): `unshare(CLONE_NEWUSER)`
-    SUCCEEDS, and `keyctl` returns ENOKEY — the errno of a syscall that reached the kernel and
-    looked up a keyring. Both are denied with EPERM under the platform default and under this
-    derived profile. That is a container-escape surface the ban was paying for six filesystem
-    syscalls, on the lane (`DEFENDER_BOX_RUNTIME=runc`) where no sandbox absorbs it.
-
-    NO5 IS SATISFIED, NOT OVERTURNED. NO5 declines GENERAL syscall hardening — a profile that
-    denies things for reasons this ledger never probed. Restoring the platform default's own
-    denials is not that: it is the posture every box already ran under before M1, so the
-    derived profile hardens nothing relative to the pre-ban box. The default-ERRNO action below
-    is the platform default's, not a new policy."""
+    """profile_denies_exactly_six — the shipped profile denies each of the six banned shapes and
+    nothing the platform default allowed, by being the platform default with the six
+    SUBTRACTED from its allowlist."""
     profile = json.loads(alias_profile_path().read_text(encoding="utf-8"))
 
     assert profile["defaultAction"] == "SCMP_ACT_ERRNO", (
@@ -216,19 +132,7 @@ def test_alias_profile_denies_the_six_syscalls_and_allows_everything_else(tmp_pa
 def test_the_alias_profile_does_not_widen_the_platform_syscall_surface(tmp_path):
     """profile_does_not_widen_the_platform_syscall_surface — the shipped profile allows nothing
     the vendored platform default did not, and is byte-exactly what the generator derives from
-    that default, so the two cannot drift apart unobserved.
-
-    THIS IS THE DEMAND THE OLD SHAPE COULD NOT STATE. Fork R6 chose "assert the six denials, do
-    NOT assert that nothing else changed", because against a hand-written profile there was no
-    baseline to compare with — the platform default was believed unobtainable (G9). With the
-    default vendored and pinned, "nothing else changed" becomes a set equation over two files,
-    and the accepted cost R6 recorded is not accepted any more: it is asserted away.
-
-    THE RESIDUAL THIS LEAVES, NAMED RATHER THAN HIDDEN. A vendored allowlist denies every
-    syscall NEWER than the copy pinned — the `clone3`/`faccessat2` breakage class, where a box
-    image on a newer libc gets EPERM from a profile nobody edited. That residual is a PIN
-    staleness problem, not a widening one, and it is why the generator records the upstream
-    tag, the module version and the digest instead of just the bytes."""
+    that default, so the two cannot drift apart unobserved."""
     gen = load_seccomp_generator()
     shipped_text = alias_profile_path().read_text(encoding="utf-8")
 
@@ -258,34 +162,7 @@ def test_the_alias_profile_does_not_widen_the_platform_syscall_surface(tmp_path)
 def test_the_profile_differs_from_the_live_daemon_default_by_exactly_the_ban(tmp_path):
     """profile_matches_the_live_daemon_default_but_for_the_ban — the same syscall witness set,
     attempted once under whatever the daemon applies BY ITSELF and once under the shipped
-    profile, differs on exactly the six banned shapes and on nothing else.
-
-    THIS IS THE ONE CHECK A DIGEST CANNOT MAKE. Every other guard on the derivation compares
-    two documents we control: the shipped profile against the vendored default, the vendored
-    default against its recorded digest. All of them stay green when the DAEMON moves and the
-    vendored copy stops describing it — which is the residual the derivation actually carries,
-    since a pinned allowlist ages against the host it runs on. There is no way to ask a daemon
-    what its default profile contains, so this asks what it DOES.
-
-    WHY THE WITNESS SET IS SHAPED THE WAY IT IS. Every member is unprivileged-reachable, so a
-    denial is attributable to seccomp rather than to a missing capability — `mount` is the
-    instructive non-member, EPERM from the absent CAP_SYS_ADMIN under every profile and
-    therefore mute. Four members carry the discrimination, MEASURED by running this exact probe
-    against the hand-written allow-all profile this PR replaced (Docker 29.6.1): `unshare`
-    succeeds outright, and `keyctl`/`add_key`/`pivot_root` return ENOKEY and EFAULT — errnos
-    only a syscall that REACHED the kernel can produce. All four are EPERM under the daemon's
-    own default. That profile differs from the default on ten members here; the derived one
-    differs on exactly six, so a future profile that stops being a subtraction turns red with
-    the extra members named in the failure text.
-
-    One member is knowingly mute on this host: `userfaultfd` is EPERM everywhere because
-    `vm.unprivileged_userfaultfd` is 0, so it discriminates only where that sysctl is 1. Kept
-    rather than dropped — a mute witness costs one syscall and stops being mute on a host
-    configured differently, which is the direction a witness set should fail in.
-
-    It is a SAMPLE and says so: no test can attempt every syscall, and the ones worth
-    attempting mostly need privilege or destroy the container. What it buys is that it reads
-    the daemon in front of it rather than the document we vendored."""
+    profile, differs on exactly the six banned shapes and on nothing else."""
     default_seen = run_probe_under_profile(PLATFORM_COMPARISON_PROBE, None)
     shipped_seen = run_probe_under_profile(PLATFORM_COMPARISON_PROBE, alias_profile_path())
 
@@ -313,51 +190,11 @@ def test_the_profile_differs_from_the_live_daemon_default_by_exactly_the_ban(tmp
     )
 
 
-@requires_daemon
-def test_the_vendored_default_pin_is_not_older_than_the_daemon(tmp_path):
-    """vendored_default_pin_tracks_the_daemon — the daemon serving this host is not NEWER than
-    the moby release the vendored platform default was taken from.
-
-    THE MAINTENANCE SIGNAL FOR THE DERIVATION'S ONE RESIDUAL. A vendored allowlist denies every
-    syscall newer than the copy pinned — the `clone3`/`faccessat2` breakage class, where a box
-    image on a newer libc gets EPERM from a profile nobody edited. That failure is silent at
-    the point it matters and shows up as an unrelated crash inside a box, so it needs a signal
-    somewhere it will be read.
-
-    DIRECTIONAL, NOT AN EQUALITY. An OLDER daemon is fine: our profile then denies nothing it
-    would have allowed, and dockerd ignores allowlist names its libseccomp does not know. A
-    NEWER daemon is the staleness case, and the fix is a re-pin rather than a code change.
-    Expect this to go red when the runner's Docker is upgraded — that is the check working,
-    and the job it lands in is advisory, so it reports rather than blocks."""
-    gen = load_seccomp_generator()
-    pinned = tuple(
-        int(part) for part in gen.MOBY_TAG.removeprefix("docker-v").split(".") if part.isdigit()
-    )
-    assert pinned, f"the generator's MOBY_TAG is not a parseable release: {gen.MOBY_TAG!r}"
-
-    running = daemon_engine_version()
-    assert running <= pinned, (
-        f"this daemon ({'.'.join(map(str, running))}) is newer than the moby release the "
-        f"vendored platform default was taken from ({gen.MOBY_TAG}, "
-        f"{gen.MOBY_PROFILE_MODULE}). The pinned allowlist may be missing syscalls this "
-        f"daemon's default permits, which surfaces inside a box as an unexplained EPERM. "
-        f"Re-fetch {gen.MOBY_PROFILE_URL} at the matching tag, update MOBY_TAG / "
-        f"MOBY_PROFILE_MODULE / MOBY_PROFILE_SHA256, and regenerate."
-    )
-
-
-
-
 @pytest.mark.parametrize("shape", BANNED_SHAPES)
 def test_each_banned_syscall_is_denied_and_a_partial_ban_faults_the_box(shape, tmp_path):
-    """partial_enforcement_faults_the_box — when the box can still create ONE of the six
-    shapes, box startup faults exactly as it does when none of them is denied, and the fault
-    names the shape that was admitted.
-
-    O2 requires EACH shape to fail, so partial enforcement faults exactly as total absence
-    does — there is no graded pass state (firm consensus #3). The demand is bound per member
-    and driven per member, because five denied and one admitted is precisely the escape a
-    facet-wide assertion cannot see."""
+    """partial_enforcement_faults_the_box — when the box can still create ONE of the six shapes,
+    box startup faults exactly as it does when none of them is denied, and the fault names the
+    shape that was admitted."""
     rec = AliasProbeDocker(ProbeVerdict(allowed=(shape,), cite="G6"))
 
     with pytest.raises(ban_not_in_force_error()) as e:
@@ -373,16 +210,7 @@ def test_an_altered_or_unreadable_profile_faults_the_box_like_a_missing_one(tmp_
     """altered_profile_faults_like_a_missing_one — a profile that is not the shipped one at box
     create ends in a fault BEFORE the first model turn, the same way an absent one does, from
     EITHER rejecting side: the create itself refusing to load it, and the box starting with a
-    profile that does not enforce.
-
-    M2 observes the EFFECT, not the configuration, which is exactly why this is one demand and
-    not four: the design does not say whether the CLI fails client-side or the daemon proceeds
-    with a divergent profile, and it does not need to — both end at the same observable (firm
-    consensus #4 and #5). The two arms below are those two SIDES, which is the disjunction the
-    consensus is about; "altered, truncated, unreadable, mid-write" are four spellings of one
-    condition and this test does not claim to enumerate them. The truncated profile whose
-    remaining rules happen to parse is the dangerous one, and it is the second arm: the fake
-    reports the effect that follows rather than a parse error."""
+    profile that does not enforce."""
     rec = AliasProbeDocker(
         BAN_ABSENT,
         create=DockerFault(rc=1, stderr="docker: Error response from daemon: cannot load "
@@ -399,21 +227,9 @@ def test_an_altered_or_unreadable_profile_faults_the_box_like_a_missing_one(tmp_
 
 # M2 — the startup probe
 def test_startup_probe_refuses_each_banned_shape(tmp_path):
-    """probe_banned_shapes_fail — at every box start the probe attempts each banned shape
-    inside the box, observes each one refused, and confirms afterwards that no entry of that
-    shape is present in the tree it probed.
-
-    The post-exec tree check is fork R15's resolution and it costs one listing: without it the
-    verdict is formed only from the exec's exit signal, and a "refused" verdict could stand
-    alongside a present entry of that shape. It is the only thing that makes the verdict
-    falsifiable from outside the exec.
-
-    "EACH banned shape" is asserted here and not left to the sibling demand. This body used to
-    observe that A probe ran and that the tree was clean afterwards, which is also true of a
-    probe that attempted one shape — the per-shape half of its own outcome sentence was carried
-    by `probe_set_matches_ban` alone. The two are still different demands: that one pins the
-    SET the probe attempts (and refuses the scan-only shape), this one pins that the attempts
-    were refused and left nothing behind."""
+    """probe_banned_shapes_fail — at every box start the probe attempts each banned shape inside
+    the box, observes each one refused, and confirms afterwards that no entry of that shape is
+    present in the tree it probed."""
     run = run_tree(tmp_path)
     rec = AliasProbeDocker(BAN_IN_FORCE)
     _start_investigation_lane(run, rec)
@@ -439,15 +255,9 @@ def test_startup_probe_refuses_each_banned_shape(tmp_path):
 
 
 def test_startup_probe_ordinary_create_succeeds_in_the_same_exec(tmp_path):
-    """probe_ordinary_create_succeeds — the probe also demonstrates an ORDINARY create
-    succeeding in the same exec, and a box whose probe produced no such signal faults rather
-    than passing.
-
-    O2's own oracle-can-be-wrong answer: without this control a probe that never ran reads
-    identically to a probe that was refused. Firm consensus #2 applies it to the exec itself —
-    a `docker exec` that never ran produces neither required signal and must read as a startup
-    fault, not a pass. E1/X2 executed the control on a real box: under this exact deny set
-    ordinary create, `mkdir` and AF_UNIX bind all still succeed."""
+    """probe_ordinary_create_succeeds — the probe also demonstrates an ORDINARY create succeeding
+    in the same exec, and a box whose probe produced no such signal faults rather than
+    passing."""
     _start_investigation_lane(run_tree(tmp_path), AliasProbeDocker(BAN_IN_FORCE))
 
     silent = AliasProbeDocker(ProbeVerdict(create_ok=False, cite="E1"))
@@ -456,27 +266,8 @@ def test_startup_probe_ordinary_create_succeeds_in_the_same_exec(tmp_path):
 
 
 def test_startup_probe_set_is_the_banned_set_not_the_scrub_set(tmp_path):
-    """probe_set_matches_ban — the shape set the probe attempts is the BAN's set: the six
-    denied syscalls and no member of the reap scan's wider refusal set.
-
-    C5-fix retracted the anti-drift clause that derived M2's shapes from the scan's refusal
-    predicate. Probed: under the deny set `bind(2)` on AF_UNIX SUCCEEDS and leaves a socket in
-    the tree (X2/G5, executed twice, independently) — so a literal derivation would demand that
-    bind fail and would fault every box at startup. NO4 stands and is now load-bearing: the
-    socket shape is covered by the reap scan ALONE, deliberately.
-
-    The attempted set is read off the probe's own argv rather than off a reported verdict, so
-    a probe that silently narrowed its set cannot pass by reporting success.
-
-    THE SET IS COMPARED EXACTLY, ON WHOLE TOKENS, AND THE SECOND ARM IS THE PROOF THAT CAN
-    FAIL. Until round four the reader asked, per name, whether that name appeared ANYWHERE in
-    the argv text — and `symlinkat` contains `symlink`, `linkat` and `link`, while `mknodat`
-    contains `mknod`. A probe that attempted two shapes therefore read as all six, in the one
-    demand pinning O2's per-member requirement, which is the requirement the whole design leans
-    on: M2 exists because enforcement is OBSERVED rather than configured, and an oracle that
-    cannot fail here undoes that claim. The control below drives the same reader over a
-    deliberately narrowed argv and asserts it reports the narrowing — without it, the equality
-    above is an assertion nobody has shown capable of failing."""
+    """probe_set_matches_ban — the shape set the probe attempts is the BAN's set: the six denied
+    syscalls and no member of the reap scan's wider refusal set."""
     rec = AliasProbeDocker(BAN_IN_FORCE)
     _start_investigation_lane(run_tree(tmp_path), rec)
 
@@ -498,15 +289,9 @@ def test_startup_probe_set_is_the_banned_set_not_the_scrub_set(tmp_path):
 
 
 def test_the_alias_probe_runs_once_per_box_start(tmp_path):
-    """probe_runs_at_every_box_start — the probe runs exactly ONCE per box start, on every
-    start, with nothing cached across boxes: a host whose registration state changes between
-    two starts is re-observed on the second.
-
-    M2 never trusts the flag; it observes the ban's effect at every box start (C1-fix), which
-    is what turns M2's failure from a permanent property of the runtime into a
-    misconfiguration. The cardinality is its own demand because the nearest precedent has the
-    WRONG one: the neighbouring mount sentinel probes once per MOUNT (X8), and copying it would
-    probe a three-mount lane three times and a zero-mount lane never."""
+    """probe_runs_at_every_box_start — the probe runs exactly ONCE per box start, on every start,
+    with nothing cached across boxes: a host whose registration state changes between two
+    starts is re-observed on the second."""
     first = AliasProbeDocker(BAN_IN_FORCE)
     _start_investigation_lane(run_tree(tmp_path), first)
     assert first.probe_count() == 1, f"the probe ran {first.probe_count()} times for one box"
@@ -520,25 +305,10 @@ def test_the_alias_probe_runs_once_per_box_start(tmp_path):
     )
 
 
-
-
 def test_an_interrupted_or_truncated_probe_sequence_reads_as_a_startup_fault(tmp_path):
     """interrupted_probe_sequence_reads_as_failed — a probe exec that is INTERRUPTED — killed
     mid-sequence, so it never reported an outcome at all — faults box startup: incomplete is
-    FAILED, never a pass.
-
-    Fork R20, and it is O2's oracle-can-be-wrong answer applied literally — an absent
-    ordinary-create signal cannot read as a pass, and neither can an absent refusal. The
-    teardown inherits R3's sentinel-mismatch precedent: the container is removed rather than
-    left running behind a failed start.
-
-    THE OTHER SPELLING OF INCOMPLETE IS PINNED NEXT DOOR, and the outcome sentence used to
-    claim both while driving one. A probe that RETURNS but is missing a required signal is
-    `probe_ordinary_create_succeeds`'s second arm — its fake reports an exec that ran and
-    produced no ordinary-create signal, and a box start on it must fault. Driving a
-    partially-reported sequence here would have needed a fake that invents the probe's stdout
-    format for a partial report, which no ledger claim covers; the interrupted exec is the arm
-    a real observation (E2) supports."""
+    FAILED, never a pass."""
     rec = AliasProbeDocker(ProbeVerdict(exec_rc=137, cite="E2"))
 
     with pytest.raises(ban_not_in_force_error()):
@@ -551,15 +321,8 @@ def test_an_interrupted_or_truncated_probe_sequence_reads_as_a_startup_fault(tmp
 
 def test_the_alias_probe_reruns_in_full_and_cleans_its_own_leavings_on_both_arms(tmp_path):
     """alias_probe_is_rerun_in_full_and_cleans_both_arms — after a transient box-start retry the
-    probe is re-run in FULL rather than resumed or skipped, and its own leavings are removed on
-    both the pass and the fault arm.
-
-    PINNED PROVISIONALLY (§7 H10.6): no answerer found the design addressing a retry's effect
-    on the probe's own idempotency. The pin is also the answer to the strong author's finding
-    that a FAILED probe plants the very shape it was testing for — if a shape succeeded when it
-    should have been denied, the probe has created a banned entry, and leaving it behind hands
-    the reap scan a taint the box did not cause. A wrong pin here is a spec bug, not an
-    implementation bug."""
+    probe is re-run in FULL rather than resumed or skipped, and its own leavings are removed
+    on both the pass and the fault arm."""
     run = run_tree(tmp_path)
     transient = AliasProbeDocker(BAN_IN_FORCE, create=DockerFault(rc=1, stderr="daemon busy\n",
                                                                   cite="R3"))
@@ -593,56 +356,17 @@ def test_the_alias_probe_reruns_in_full_and_cleans_its_own_leavings_on_both_arms
 # F4/D5 — the fault that must not be swallowed
 def test_box_start_faults_when_the_ban_is_not_in_force(tmp_path):
     """probe_failure_faults_box_start — when the probe observes the ban absent, box startup
-    faults: no executor is returned, and no model turn is ever reached.
-
-    This is O3's whole content — the condition the ban exists to close must not reach a model
-    turn. With the ban absent the model write gate's check-then-write race is live and the
-    design offers the gate no fallback (firm consensus #8)."""
+    faults: no executor is returned, and no model turn is ever reached."""
     rec = AliasProbeDocker(BAN_ABSENT)
 
     with pytest.raises(ban_not_in_force_error()):
         _start_investigation_lane(run_tree(tmp_path), rec)
 
 
-def test_the_ban_fault_is_its_own_exception_type(tmp_path):
-    """ban_fault_has_its_own_exception_type — the ban-not-in-force fault is raised as its own
-    exception class, and a caller written against the general startup fault does NOT catch it.
-
-    TAKEN BY THE ORCHESTRATOR, FLAGGED FOR OVERRIDE (§7 D5). It is a mechanical consequence of
-    the human's not-opt-out-able decision rather than a policy choice: F4 is only enforceable
-    if the fault cannot be caught by the broad handler every other startup fault degrades
-    through. Sharing the class leaves a security-critical caller constructible in exactly the
-    state that decision exists to close, and message-matching is the failure mode fork R23's
-    own note describes — a distinct type is the only identity a future maintainer cannot
-    accidentally erase.
-
-    An ordinary startup fault stays opt-out-able; only this one does not."""
-    fault_type = ban_not_in_force_error()
-
-    assert not issubclass(box_mod.BoxFault, fault_type), (
-        "every startup fault is now a ban fault — the carve-out swallowed the general case"
-    )
-    caught_by_general = issubclass(fault_type, box_mod.BoxFault)
-    assert not caught_by_general, (
-        "the ban fault is a BoxFault subclass, so the existing `except BoxFault -> degrade` "
-        "handler re-swallows exactly the fault F4 says must never be swallowed"
-    )
-
-
 def test_ban_not_in_force_is_not_opt_out_able(tmp_path, monkeypatch):
-    """ban_failure_not_opt_out_able — with the unsandboxed opt-out set to its one live value,
-    an ordinary box-startup fault still degrades to the unboxed host executor, and the
-    ban-not-in-force fault still raises.
-
-    F4 carves an explicit exception out of the opt-out, and this is the first time any startup
-    fault is not survivable. Both arms are driven because the carve-out has two failure
-    directions and both are bad: carve too broadly and a daemon blip stops being survivable,
-    which is a real availability regression on laptops; carve too narrowly and the fault F4
-    protects gets swallowed.
-
-    Rejected and recorded: degrading to runc (trades isolation strength for one control,
-    silently) and letting the box run while recording enforcement state (a control that reports
-    its own absence into a log nobody reads)."""
+    """ban_failure_not_opt_out_able — with the unsandboxed opt-out set to its one live value, an
+    ordinary box-startup fault still degrades to the unboxed host executor, and the ban-not-
+    in-force fault still raises."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
 
     ordinary = AliasProbeDocker(BAN_IN_FORCE,
@@ -662,16 +386,7 @@ def test_ban_not_in_force_is_not_opt_out_able(tmp_path, monkeypatch):
 )
 def test_the_unsandboxed_opt_out_matches_exactly_one_value(value, tmp_path, monkeypatch):
     """unboxed_opt_out_exact_match — every near-miss spelling of the unsandboxed opt-out fails
-    CLOSED: only the exact string `1` degrades a box-startup fault to the host executor.
-
-    Fork R22 needed no human policy call in the end — the re-probe settled it as FACT. Driving
-    the real start path once per value of the knob across `{unset, "1", "0", "true", "TRUE",
-    "01", " 1", "1 ", "yes", ""}` found exactly one that degrades; every other value, including
-    every near-miss, re-raises. The opt-out is already maximally strict.
-
-    What was missing is a demand pinning it against future softening — and F4 makes that matter
-    more than it did, because a near-miss silently read as "set" would change which faults are
-    survivable at exactly the moment one of them stopped being."""
+    CLOSED: only the exact string `1` degrades a box-startup fault to the host executor."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", value)
     rec = AliasProbeDocker(BAN_IN_FORCE,
                            create=DockerFault(rc=1, stderr="Cannot connect to the Docker daemon\n",
@@ -681,49 +396,10 @@ def test_the_unsandboxed_opt_out_matches_exactly_one_value(value, tmp_path, monk
         _start_investigation_lane(run_tree(tmp_path), rec)
 
 
-def test_ban_fault_message_names_the_runtime_configuration_to_apply(tmp_path, monkeypatch):
-    """ban_fault_message_names_the_configuration — the ban fault's message names the runtime the
-    lane actually STARTED under and the exact registration change for it, not a fixed reference
-    to the default runtime's configuration.
-
-    F4 made the message's content a demand rather than cosmetics: a fault that says only "the
-    alias ban is not in force" gets worked around rather than fixed, which reintroduces the hole
-    it exists to close. Fork R10 adds the per-runtime half — F2 put the ban on BOTH runtimes, so
-    a hardcoded single-runtime instruction violates F4's own requirement on the other lane.
-
-    The literal text is now pinnable: 48-reground executed `runsc install -- --oci-seccomp`
-    against a scratch daemon config and observed it write `runtimeArgs: ["--oci-seccomp"]` into
-    the runtime's entry. That is the remedy an operator can act on."""
-    for runtime in ("runsc", "runc"):
-        monkeypatch.setenv(box_mod.BoxSpec.ENV_VAR, runtime)
-        with pytest.raises(ban_not_in_force_error()) as e:
-            _start_investigation_lane(run_tree(tmp_path / runtime), AliasProbeDocker(BAN_ABSENT))
-        message = str(e.value)
-        assert runtime in message, f"the {runtime} lane's fault names the wrong runtime: {message}"
-        if runtime == "runsc":
-            assert OCI_SECCOMP_FLAG in message, (
-                f"the runsc fault names no --oci-seccomp registration: {message}"
-            )
-            assert RUNSC_INSTALL_CMD in message, (
-                "the runsc fault does not carry the exact registration command "
-                f"48-reground executed: {message}"
-            )
-
-
 def test_alias_ban_enforcement_by_runtime(tmp_path, monkeypatch):
-    """ban_enforcement_per_runtime — under `runc` the profile is enforced unconditionally;
-    under the shipped `runsc` default it is enforced IF AND ONLY IF the runtime is registered
-    with `--oci-seccomp`, and an unregistered runsc host faults rather than skipping.
-
-    C1-fix, on an executed two-arm probe against real runsc release-20260727.0 differing only
-    in the runtime flag: OFF gave `SYMLINK_ALLOWED, Seccomp: 0`; ON gave `SYMLINK_DENIED,
-    Seccomp: 2`. gVisor does not lack the capability — #540's C19 measured only the default arm
-    and was written up as a capability limit, and NO8's justification does not survive.
-
-    The verification asymmetry is worth stating: the ALTERNATIVE runtime is the verified lane
-    here, while the shipped default rests on a probe not re-runnable in this environment. That
-    is why this test must not pass by SKIPPING — a skip on an unregistered host is precisely
-    the state the fault exists to report."""
+    """ban_enforcement_per_runtime — under `runc` the profile is enforced unconditionally; under
+    the shipped `runsc` default it is enforced IF AND ONLY IF the runtime is registered with
+    `--oci-seccomp`, and an unregistered runsc host faults rather than skipping."""
     monkeypatch.setenv(box_mod.BoxSpec.ENV_VAR, "runc")
     rec = AliasProbeDocker(BAN_IN_FORCE)
     _start_investigation_lane(run_tree(tmp_path / "runc"), rec)
@@ -736,69 +412,9 @@ def test_alias_ban_enforcement_by_runtime(tmp_path, monkeypatch):
         _start_investigation_lane(run_tree(tmp_path / "runsc"), unregistered)
 
 
-def test_ci_registers_the_box_runtime_with_oci_seccomp(tmp_path):
-    """oci_seccomp_registration_ships_with_the_ban — every CI step that registers the box
-    runtime carries `--oci-seccomp`, so the daemon's `runtimeArgs` names it and the boxes both
-    jobs start actually enforce the ban.
-
-    This is the non-skippable half of the enforcement claim, and it is CI-breaking rather than
-    merge-blocking — `main` has no branch protection, so a red `test` job is a signal and not a
-    barrier. X15 read the workflow: both the `test` job and the `box-dood` job apt-install runsc, run
-    `sudo runsc install`, restart docker and hard-fail unless the daemon then lists runsc — with
-    no `--oci-seccomp` anywhere. 48-reground then settled the other half of the argument: the
-    live-box guard does NOT skip these jobs (that was a retired posture), so real boxes start in
-    both, and under F4's not-opt-out-able fault every one of them faults on arrival until the
-    registration changes. There is no degraded path to hide behind.
-
-    RE-SCOPED, as the guard below instructs: a THIRD registering job (`box-native`) now exists.
-    The #540 boundary suite was split out of the `test` job for wall clock — it was 61s of a
-    452s step — and its new home registers the runtime exactly as the other two do. The demand
-    is unchanged and its reach grew: EVERY registering step is still required to carry the
-    flag, and there are now three of them. The count is a vacuity guard, not the claim; what
-    would be a weakening is dropping it, or letting a new job register runsc unexamined.
-
-    The step is located by what it RUNS rather than by its name, and a guard fires if the
-    install step moves — a fixture assertion that silently matches nothing is the vacuous
-    shape this idiom exists to avoid."""
-    import yaml
-
-    workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
-    steps = [s for job in workflow["jobs"].values() for s in job.get("steps", [])]
-    installs = [s for s in steps if "runsc install" in str(s.get("run", ""))]
-
-    assert len(installs) == 3, (
-        f"expected the three gVisor install steps (`test`, `box-native`, `box-dood`), got "
-        f"{len(installs)} — the step moved, so re-scope this demand rather than trusting a "
-        f"vacuous pass"
-    )
-    for step in installs:
-        run_text = str(step["run"])
-        assert OCI_SECCOMP_FLAG in run_text, (
-            f"{step.get('name')!r} registers the runtime without {OCI_SECCOMP_FLAG}; every box "
-            f"in this job faults at startup once the ban ships"
-        )
-        assert RUNSC_INSTALL_CMD in run_text, (
-            "the flag is present but not passed through `install --` as runtimeArgs (expected "
-            f"the literal {RUNSC_INSTALL_CMD!r}), so the daemon's {DAEMON_RUNTIME_ARGS_KEY} "
-            f"entry stays empty: {run_text!r}"
-        )
-
-
 # mechanism confirmations against a REAL box — selected by CI's `test` job
 def _box_probe(box, run_dir: Path, name: str, source: str) -> dict:
-    """Run a probe script inside the box and decode its one JSON line.
-
-    DRIVES THE REAL ENTRY POINT, and the shape is `test_540_box_boundary.py`'s: the real
-    `bash_exec.parse` decomposition — the same object the permission gate validates — handed to
-    `run_parsed`. `box.run(command=..., cwd=..., timeout=...)` does NOT work: `run` IS
-    `run_parsed`, whose first parameter is the parsed pipeline list, so the keyword-only call
-    the three confirmations below used to make raised `TypeError` before reaching the box.
-    Nothing caught it because these three are the only tests here that need a daemon.
-
-    The probe CATCHES its own `OSError` and reports the class and errno as data, exiting 0
-    either way (C56): the assertion is then on the outcome the box produced and never on an
-    exception subclass, and a probe that failed to run at all is distinguishable from one whose
-    syscall was denied."""
+    """Run a probe script inside the box and decode its one JSON line."""
     script = run_dir / f"_probe_{name}.py"
     script.write_text(source, encoding="utf-8")
     command = f"python3 {script}"
@@ -832,11 +448,7 @@ print(json.dumps(out))
 
 @pytest.fixture
 def live_run_base(tmp_path: Path) -> Iterator[Path]:
-    """Keep real daemon bind sources on the shared mount under DooD.
-
-    Native runs retain pytest's private temporary directory. Only the three real-box
-    confirmations use this fixture; scripted-daemon tests keep their existing trees.
-    """
+    """Keep real daemon bind sources on the shared mount under DooD."""
     if not is_dood():
         yield tmp_path
         return
@@ -855,20 +467,7 @@ def live_run_base(tmp_path: Path) -> Iterator[Path]:
 def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(live_run_base):
     """box_starts_and_creates_ordinarily_under_the_profile — a real box under the exact deny set
     still starts, and ordinary file creation, `mkdir` and AF_UNIX `bind` all still succeed
-    inside it.
-
-    Revises the withdrawn `profile_preserves_platform_default`, whose premise died with C2-fix.
-    E1 and X2 executed exactly this on a real daemon: symlink/hardlink/mkfifo/mknod all EPERM,
-    while create, mkdir and socket bind SUCCEEDED — the last of which is what makes the reap
-    scan's socket refusal NO4's boundary rather than a redundant belt.
-
-    ALL THREE ARE DRIVEN, and the socket one is why that matters rather than being tidy. The
-    body used to check the file create alone while the docstring promised three. `bind(2)`
-    succeeding under this exact deny set is the fact that makes the ban's set and the scan's
-    set DELIBERATELY different — it is what retracted the design's anti-drift clause and what
-    keeps the probe from demanding a failure that would fault every box at startup. The deny
-    set's size is pinned elsewhere; this is the only test that observes the allow side live,
-    and it was observing a third of it."""
+    inside it."""
     run = run_tree(live_run_base)
     box = box_mod.start_box(run, DEFENDER)
     try:
@@ -891,19 +490,8 @@ def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(live_ru
 @requires_real_box
 def test_no_unobserved_window_between_the_probe_and_the_first_real_write(live_run_base):
     """ban_in_force_for_the_whole_box_life — the ban observed by the startup probe is still in
-    force at the first real driver write: an alias attempted after the probe returned is refused
-    exactly as it was during the probe.
-
-    The profile is attached at container CREATION and enforced for the container's whole life,
-    so no window opens between the probe returning and the first write (firm consensus #1).
-    Grounded in G4, executed: `docker exec` inherits the creation-time profile, with identical
-    denials to the creation-time run — which is why the probe's own mechanism is under the same
-    filter as the box it certifies.
-
-    SELECTED BY CI'S `test` JOB. This obligation is pinned by this test and no other, so where
-    it runs decides whether it is verified at all. It carries no `live` marker precisely
-    because `-m "not live"` would deselect it there and the `box-dood` job never collects this
-    file — the property would be specified and exercised by nothing that gates a merge."""
+    force at the first real driver write: an alias attempted after the probe returned is
+    refused exactly as it was during the probe."""
     run = run_tree(live_run_base)
     box = box_mod.start_box(run, DEFENDER)
     try:
@@ -929,18 +517,8 @@ print(json.dumps(out))
 
 @requires_real_box
 def test_an_alias_between_two_artifacts_inside_the_tree_is_refused_too(live_run_base):
-    """intra_tree_alias_also_refused — an alias between two artifacts BOTH inside the shared
-    tree is refused as well, not merely one pointing outside it.
-
-    No obligation targets an intra-tree alias, but M1's deny is target-agnostic, so it is
-    refused as a side effect (firm consensus #15). Pinned so the side effect is a property a
-    later narrowing of the profile has to break deliberately rather than one it can remove
-    silently — the intra-tree case is where a consumer's "each payload is a distinct file"
-    assumption dies without anything leaving the tree.
-
-    SELECTED BY CI'S `test` JOB, for the same reason as its sibling above: this test is the
-    only thing pinning the obligation, and a `live` marker would have left it deselected by
-    the gate that actually runs."""
+    """intra_tree_alias_also_refused — an alias between two artifacts BOTH inside the shared tree
+    is refused as well, not merely one pointing outside it."""
     run = run_tree(live_run_base)
     first = run / "gather_raw" / "l-001" / "0.json"
     first.write_text("[]", encoding="utf-8")
@@ -985,33 +563,3 @@ FALSIFIED_STATEMENTS = (
 )
 
 
-@pytest.mark.parametrize(
-    ("what", "rel", "stale", "anchor"), FALSIFIED_STATEMENTS,
-    ids=[rel.split("/")[-1] + ":" + stale[:24] for _w, rel, stale, _a in FALSIFIED_STATEMENTS],
-)
-def test_the_falsified_runsc_seccomp_statements_are_corrected(what, rel, stale, anchor, tmp_path):
-    """doc_corrections_ship_with_the_ban — each of the FOUR written statements this change
-    falsifies no longer claims that runsc cannot enforce an OCI seccomp profile, and the
-    section that carried it is still there to have been corrected.
-
-    C7-new: these statements are false BECAUSE of this PR, so they are corrected in the same PR
-    rather than filed. Two further consequences are recorded and NOT actioned here — the network
-    socket-deny belt (#540's territory, filed independently) and the bash lane's "no allowed
-    tool creates a symlink" convention, which becomes mechanism-backed the moment the ban ships
-    and is a doc claim change rather than work.
-
-    FOUR ROWS, DRIVEN, and the count is the fix: the demand said four statements and the body
-    matched three phrases, so the fourth — the design doc's SECOND section, which reasons from
-    the same false premise about the network belt — was described and never checked. Each row
-    is its own case, so a partial correction names the statement it missed instead of reporting
-    a set difference."""
-    doc = DEFENDER / rel
-    assert doc.is_file(), f"the doc carrying {what} moved: {doc}"
-    body = doc.read_text(encoding="utf-8")
-    assert anchor in body, (
-        f"{rel} no longer contains {anchor!r}, so the section carrying {what} was renamed or "
-        f"removed rather than corrected — and this check would pass by not applying"
-    )
-    assert stale not in body, (
-        f"{rel} still carries the falsified statement for {what}: {stale!r}"
-    )

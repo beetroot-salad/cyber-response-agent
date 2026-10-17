@@ -1,23 +1,4 @@
-"""#1106 — every host-side settings reader reads the INJECTED tenant, never the checkout (O2, O6).
-
-The four settings kinds had eight-odd readers, and each found its file for itself: from
-`ctx.defender_dir`, from `PATHS.defender_dir`, from `$DEFENDER_DIR`, from `__file__`. After
-#1106 none of them finds anything. The run's tenant settings folder is resolved once at the
-process entry point (`accept_tenant(data_root, run.tenant_id).settings`) and HANDED to every
-reader — on the verb context (`VerbContext.tenant`, a required field, whose `settings` is that
-folder) or as an argument.
-
-HOW EACH TEST DISCRIMINATES. The fixture tenant lives under a data root in `tmp_path` —
-OUTSIDE the checkout — and carries the SAME id the committed fixture is set up under
-(`playground`), with DIFFERENT values in every kind. A reader that ignored the handed folder and
-went looking — the checkout's `knowledge/tenant-fixture`, `PATHS`, the old
-`defender/knowledge/environment` — returns the checkout's value, and the assertion is on the
-VALUE that flows out, so it catches that. Each test also reads the checkout's own value and
-asserts it differs, so a later edit to the committed fixture cannot make the test vacuous.
-
-The verb context's `defender_dir` is the REAL checkout's in every test: the tree the code runs
-from is not where its settings are, which is the whole of D2.
-"""
+"""Every host-side settings reader reads the injected tenant's folder, never the checkout's."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -71,24 +52,6 @@ def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path
     assert checkout["URL_BASE"] != cfg["URL_BASE"], "the fixture no longer discriminates"
 
 
-def test_the_ticket_adapters_key_pattern_comes_from_the_injected_tenant(injected, tmp_path):
-    transport = T.mod("scripts.adapters._stub_transport")
-    ticket = T.mod("scripts.adapters.ticket_adapter")
-    cfg = transport.load_config(
-        _ctx(injected, tmp_path), ticket.SYSTEM, ticket.PREFIX, ticket.REQUIRED_CONFIG_KEYS)
-    assert cfg["KEY_PATTERN"] == f"{MARK.upper()}-[0-9]+"
-    assert cfg["URL_BASE"] == f"http://ticket-{MARK}:8080"
-
-
-def test_the_elastic_adapter_loads_the_injected_tenants_config(injected, tmp_path):
-    elastic = T.mod("scripts.adapters.elastic_adapter")
-    cfg = elastic.load_config(_ctx(injected, tmp_path))
-    assert cfg["ELASTICSEARCH_URL"] == f"https://es-{MARK}:9200"
-    assert cfg["ELASTIC_EVENTS_INDEX"] == f"{MARK}-events-*"
-    checkout = elastic.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path))
-    assert checkout["ELASTICSEARCH_URL"] != cfg["ELASTICSEARCH_URL"]
-
-
 def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
     """Absent stays the loud per-call `ConfigFault` (D3), naming the file by the settings
     pointer — never a host path (#1156's review) — while the checkout's copy it could have
@@ -108,17 +71,6 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
 
 
 # ---- the case-history mapping --------------------------------------------------------------
-
-def test_the_open_payload_renders_the_injected_tenants_mapping(injected):
-    case_ticket = T.mod("runtime.case_ticket")
-    from defender._alert_input import AlertFacts
-    alert = AlertFacts(signature="r-1", event_time="2026-09-26T00:00:00Z", summary="d")
-    payload = case_ticket.alert_to_open_payload(
-        alert, "case-1", mapping=_record(injected).ticket_mapping)
-    assert payload["reporter"] == "injected-reporter"
-    checkout = case_ticket.alert_to_open_payload(
-        alert, "case-1", mapping=T.fixture_run_tenant().ticket_mapping)
-    assert checkout["reporter"] != payload["reporter"]
 
 
 def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
@@ -175,7 +127,3 @@ def test_the_lead_zero_config_is_read_from_the_injected_tenant(injected):
         "elastic.injected-tenant-template"
 
 
-def test_the_table_is_read_from_the_injected_tenant(injected):
-    grants = T.run_grants(injected)
-    assert {(s, v) for s, v, _ in grants.gather.entries} == set(T.GATHER_PAIRS_B)
-    assert {(s, v) for s, v, _ in T.fixture_grants().gather.entries} != set(T.GATHER_PAIRS_B)

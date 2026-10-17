@@ -1,13 +1,4 @@
-"""#632 part 1 — the grant, the scoped registry seam, and the one compiled policy.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_632-verb-authorization.yaml`,
-named by that demand's `discharged_by`. The suite is RED against `d01001e6` by
-construction: the imports name the surface the implementation must build.
-
-Authority order, because the design doc was never revised: `05-early-resolutions.md`
-(R-A1/R-A2) and `70-resolutions.md` (§7) win over `.spec-flow/632-design.md` wherever they
-disagree — D6 in particular is refuted (g10), not narrowed.
-"""
+"""#632 part 1: the verb grant, the scoped registry seam and the compiled policy. A registry cannot be built without a grant, a grant naming an unknown verb fails at load, a verb whose class contradicts its grant cannot be invoked, one broken adapter costs only its own system."""
 from __future__ import annotations
 
 import importlib
@@ -50,17 +41,6 @@ pytestmark = pytest.mark.e2e
 
 #: TWO DEMANDS LEFT THIS FILE WITH #922, AND THEY ARE NOT REPLACED — recorded here rather than
 #: deleted silently, because their absence is a real reduction in what this suite witnesses.
-#:
-#: `test_two_roles_in_one_process_{never_share_a_scoped_registry,each_get_their_own_catalog}`
-#: needed TWO roles holding verb grants in one process. The judge was the second one, and its
-#: grant went with the pipeline (#922) — gather is now the only verb-bearing role that ships.
-#: The property is still true and still worth having; it simply has no witness until a second
-#: role holds a grant again. It cannot be faked with a synthetic definition: what those tests
-#: pinned is that two SHIPPED roles do not share a catalog, and a role invented in the test
-#: proves only that the mechanism can keep two things apart, which was never in doubt.
-#:
-#: Restore them in the change that gives a second role a verb grant. #1008's family judge is
-#: NOT that change — it is deny-all by design and holds no grant.
 
 def _elastic(rec: VerbRecorder, granted=(("elastic", "query"),), declared=("query", "esql")):
     table = recording_table(rec, {"elastic": declared})
@@ -70,13 +50,7 @@ def _elastic(rec: VerbRecorder, granted=(("elastic", "query"),), declared=("quer
 def test_a_verb_registry_cannot_be_constructed_without_a_grant(tmp_path: Path):
     """A verb_registry cannot be built without a verb_grant: every construction route —
     the driver's ternary, the driver's fallback, the judge engine, the memoised catalog
-    builder and the dev scaffold — must supply one, so no execution path can mint a global
-    unscoped registry. The requirement is UNCONSTRUCTABLE, not merely un-passed.
-
-    Deliberately not pinned against `register_tools`' existing "a query tool with no
-    registry has no allowlist" ValueError: `build_agent_core` fills the None before calling
-    it (g17), so that guard is unreachable from the build path and a test on it would pin
-    dead code green."""
+    builder and the dev scaffold — must supply one, so no execution path can mint a global"""
     with pytest.raises(TypeError):
         ModuleVerbRegistry(read_roster(ADAPTERS_DIR))  # type: ignore[call-arg]
 
@@ -95,16 +69,7 @@ def test_a_verb_registry_cannot_be_constructed_without_a_grant(tmp_path: Path):
 def test_the_verb_grant_compiles_into_the_agent_policy(tmp_path: Path):
     """A role's verb_grant is declared on its agent definition beside `bash_shapes` and
     compiles into the same agent policy, so "what may this role do" is assembled in one
-    place. A seam claim, not a signature claim: `compile_policy` builds `bash_allow` by
-    CALLING each bash shape with ResolvedRoots, while a verb grant is static data needing
-    no roots (n11).
-
-    The second half of the seam is the one g16 forces: the policy build must accept the
-    EFFECTIVE ToolSet a stage builds with, not only the one its definition declares. The
-    judge's verb capability is switched on by a runtime `replace()` AFTER `bind` has already
-    compiled its policy, so without this parameter the compiled policy structurally cannot
-    see the judge's capability and the agreement check d61 demands has nothing to compare
-    against. The design names no mechanism here; the seam is the contract."""
+    place. A seam claim, not a signature claim: `compile_policy` builds `bash_allow` by"""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     # #1106 M4: gather is bound with a RUN's grant (the playground tenant's here).
@@ -145,16 +110,7 @@ def test_the_compiled_policy_answers_what_this_role_may_do_with_verbs_beside_bas
 def test_a_role_definition_without_a_grant_gets_an_empty_deny_all(tmp_path: Path):
     """A role definition that names no verb_grant gets an explicit EMPTY DENY-ALL, never
     `None` and never an absent field (§7 R7). Eight of the nine agent definitions get no
-    grant; an absent default would either break their construction or reopen the `None`
-    fallback D1 exists to close. Inertness is rejected: a `None` grant is the state in
-    which re-enabling a capability bit later silently grants everything a stale grant
-    still names.
-
-    The observable that discriminates is `allows` and the non-GRANTED outcome, not the
-    DENIED label: an empty grant reaches no system at all, so under §7 R11 read literally
-    every call it meets is UNRESOLVABLE rather than denied. The failure this excludes is an
-    empty grant reading as 'no filter' — and that failure shows up as GRANTED, whichever
-    refusal label the other branch carries."""
+    grant; an absent default would either break their construction or reopen the `None`"""
     assert MAIN_DEF.verb_grant is not None
     assert MAIN_DEF.verb_grant == DENY_ALL
     assert MAIN_DEF.verb_grant.entries == ()
@@ -181,10 +137,7 @@ def test_a_role_definition_without_a_grant_gets_an_empty_deny_all(tmp_path: Path
 def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
     """A verb_grant naming a `(system, verb)` the registry does not admit fails at LOAD, and
     the check is TOTAL — a phantom verb is caught even in a system the role never calls, and
-    even when that system's adapter would raise on import, because the names are read cold
-    (§7 R10). Load-bearing, not ceremony: five historical pairs name template ids rather
-    than verbs, so a grant derived from run history names five verbs that do not exist
-    (c19)."""
+    even when that system's adapter would raise on import, because the names are read cold"""
     phantom = grant_of("gather", (*GATHER_PAIRS, ("cmdb", "host-trust-edges")))
     with pytest.raises(GrantError) as caught:
         ModuleVerbRegistry(read_roster(ADAPTERS_DIR), phantom)
@@ -225,12 +178,7 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
 def test_grant_authoring_integrity_rejects_a_bad_class_token_and_a_conflicting_duplicate():
     """The verb_class vocabulary is CLOSED at two, and a verb_grant is rejected at load for a
     class token outside it and for one `(system, verb)` declared twice with conflicting
-    classes (§7 R13). A third tier arrives with the deferred write-verb work and brings its
-    own policy question; until then a typo has a vocabulary to be outside of.
-
-    Recorded and NOT built (RS5): a copy-pasted wrong system prefix resolves cleanly — two
-    systems both define `list-roles` — so only the shipped-contents test catches it, and only
-    for today's grant."""
+    classes (§7 R13). A third tier arrives with the deferred write-verb work and brings its"""
     assert frozenset({"r", "rw"}) == VERB_CLASSES
 
     with pytest.raises(GrantError):
@@ -246,10 +194,7 @@ def test_grant_authoring_integrity_rejects_a_bad_class_token_and_a_conflicting_d
 
 def test_a_verb_whose_declared_class_contradicts_its_grant_cannot_be_invoked(tmp_path: Path):
     """A real verb_grant with one verb's declared verb_class contradicting the class the
-    grant expects fails the run CLOSED at first resolution, rather than executing the verb.
-    All 25 non-health-check verbs are `r` today (g3), so the disagreement has to be
-    constructed rather than found — which is exactly what makes it falsifiable against real
-    policy with no invented fixture."""
+    grant expects fails the run CLOSED at first resolution, rather than executing the verb."""
     rec = VerbRecorder()
     table = recording_table(rec, {"elastic": ("query",)})
     registry = ScopedFakeVerbs(table, grant_of("gather", (("elastic", "query"),), verb_class="rw"))
@@ -292,15 +237,7 @@ def test_compiling_a_policy_imports_no_adapter_and_a_broken_one_costs_only_its_o
 def test_health_check_is_granted_uniformly_to_gather(tmp_path: Path):
     """health-check is granted uniformly to gather rather than per system — a deliberate
     uniformity exception, since gather does call it and the split carries no security
-    content. The investigator can call it on any system its verb_grant reaches; a non-gather
-    role cannot call it at all, so the uniformity is an exception inside the grant rather
-    than a hole beside it.
-
-    Two refusal shapes, both non-GRANTED, and the labels follow §7 R11 read literally: a
-    role whose grant names nothing reaches `elastic` nowhere, so its health-check is
-    UNRESOLVABLE, while a role that holds elastic but not this verb would be DENIED. What
-    the uniformity claim needs is that the non-gather role never gets GRANTED — the label is
-    R11's business, not this demand's."""
+    content. The investigator can call it on any system its verb_grant reaches; a non-gather"""
     rec = VerbRecorder()
     table = recording_table(rec, {"elastic": ("query", HEALTH_CHECK)})
 

@@ -1,21 +1,4 @@
-"""Review hardening for the #1067 remainder port (found in review on PR #1075).
-
-Three places where a value's declared type and its actual provenance disagreed. Under stdlib
-`@dataclass` the records built from those values carried the disagreement in silence; under
-`@model` each record checks its fields, so it surfaced as a `ValidationError` out of readers
-documented to tolerate malformed input. Each fix is at the one place the claim is made:
-
-1. `ReportRead.frontmatter` and `Lesson.fm` claimed `str` keys, but they hold the mapping AS
-   YAML BUILT IT — `on:` is `True` under YAML 1.1, a bare date is a `date` — and the report write
-   gate accepts such keys by test (`test_permission_report_629`: a `1:`/`"1":` pair and a date key
-   both commit). The claim was the lie; the fields now say `Any`, and the readers stay total.
-2. `oracle_golden.judge.load_lead_inputs` did `safe_load(...) or {}` and called it a `dict`; a
-   list-rooted `environment.yaml` reached `LeadInputs.environment_notes: dict`. Refused at the
-   load, naming the file.
-3. `record_query.repeat_trip` kept `seq` values that pass `isinstance(_, int)` — which a `bool`
-   does — and `RepeatTrip.first_seq: int | None` refuses `True`. `_text.as_int` is now the one
-   spelling of "an int that is not a bool", beside `as_str`.
-"""
+"""Review hardening for the #1067 remainder port (found in review on PR #1075)."""
 from __future__ import annotations
 
 import datetime

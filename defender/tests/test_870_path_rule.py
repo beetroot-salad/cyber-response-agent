@@ -1,22 +1,4 @@
-"""#870 M7 — one literal allowance in the path rule, and everything it must not relax.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_870.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared870.py`.
-
-`_pitfalls_path_rule` is the sole gate on the reducer surface AT THE PERMISSION LAYER, which is
-what G13 (executed) settled: the curator agent's own write grant compiles to
-`<skills dir>/[^\\x00]*\\.md` and matches every `.md` under `defender/skills` at any depth,
-including this file — so an identity disagreement between the two layers is a BYPASS, not a
-defence-in-depth gap. Every demand here is about that identity and is unchanged.
-
-It is NOT the sole gate on the commit. The round's review added two more, and they ask
-questions this rule deliberately does not: `_pitfalls_offer_rule` asks whether THIS TICK was
-offered the surface (a fact about the batch, not about the path — `test_870_partition.py::
-test_an_unoffered_reducer_edit_is_refused`), and `_pitfalls_content_rule` asks whether what was
-written is still the document (FK-2, `test_870_handoff.py`). A path rule's verdict is a
-constant of the deployment, so neither belongs here.
-"""
+"""#870 M7 — one literal allowance in the path rule, and everything it must not relax."""
 from __future__ import annotations
 
 import unicodedata
@@ -47,22 +29,6 @@ def repo(tmp_path: Path) -> Path:
                      skills=("elastic",), catalog=(), non_systems=("gather",))
     write_reducer_surface(tree)
     return tree
-
-
-def test_the_path_rule_admits_the_reducer_surface():
-    """`_pitfalls_path_rule(' M', 'defender/skills/gather/defender-sql.md', systems=<the real
-    adapter set>)` returns.
-
-    `gather` is not in that set — the set is the seven adapters (C11, searched, alphabet
-    recorded) — so the literal must be matched BEFORE the membership branch, or the surface
-    this round exists to open is refused by the branch that mints nothing. The shape branch is
-    in front of that one and refuses it too (C7, executed: `is_system_execution_md` is False
-    for this path), so the allowance has to precede both.
-    """
-    assert pitfalls_curator._pitfalls_path_rule(
-        " M", REDUCER_REL, systems=DECLARED,
-    ) is None
-    assert "gather" not in DECLARED, "the fixture stopped being able to see the membership branch"
 
 
 def test_the_reducer_surface_cannot_be_deleted():

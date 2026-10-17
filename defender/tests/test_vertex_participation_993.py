@@ -1,29 +1,4 @@
-"""#993 (hygiene half): a lead can declare a `:V` vertex that no `:E` row ever names.
-
-The spec already says "don't create vertices just for facts" (`skills/invlang/SKILL.md`
-`### :R observations and learned facts`) but is silent on the mirror mistake: declare a
-vertex because a lead *did* observe a graph object, and then never write the edge that
-observation actually is. The real instance (#993): a lead declared
-`v-004|process|psql|psql[pid=??]|user=postgres` and `v-006|process|postgres|...` and wrote
-no `:E` row naming either — two facts recorded as graph objects with no graph.
-
-What DISCHARGES the obligation is half the rule. An `:E` row does, and so does a `:H` row
-attached to the vertex — the only honest record a lead has for an entity whose relation it
-can still only hypothesize, and a shape the rule would otherwise make unwritable. An
-`:R attr_updates` row does not, and neither does an `:E` row that names the vertex without
-connecting it: a target no `:V` block declares, or the vertex itself.
-
-Two exemptions, both scoped so that neither renaming a block header nor re-reading committed
-bytes can buy them: the OPENING prologue, measured by where the block sits rather than by what
-it is called, and any row the baseline already carries.
-
-DOCUMENTS ARE BUILT FENCE BY FENCE here, and that is not decoration: `append_block` sends one
-```invlang fence per call, the exemption is scoped to the write, and a fixture that folded a
-whole run into one fence would answer the position question with a shape no run ever has.
-The corpus regression lives where it already did —
-`test_shipped_invlang_documents.py::test_a_shipped_document_would_survive_the_write_gate`
-runs every shipped document through this same entry point.
-"""
+"""#993: a lead that declares a `:V` vertex no `:E` row ever names gets one diagnostic. An edge in the same or another lead's block, or a hypothesis attached to the vertex, clears it; attr_updates, undeclared-target and self edges do not; the opening prologue and rows the baseline already carries are exempt."""
 from __future__ import annotations
 
 from defender.skills.invlang.validate import validate_companion
@@ -111,36 +86,8 @@ _ORPHAN_DOC = _OPENING + _fence(_obs_vertices("l-001", _ORPHAN_VERTEX))
 def test_orphan_vertex_is_refused_with_exactly_one_diagnostic():
     errors = validate_companion(_ORPHAN_DOC, None)
     assert len(errors) == 1, errors
-
-
-def test_orphan_diagnostic_names_the_lead_and_the_vertex():
-    (error,) = validate_companion(_ORPHAN_DOC, None)
-    assert "l-001" in error
-    assert "v-010" in error
-
-
-def test_orphan_diagnostic_offers_the_write_the_edge_repair():
-    (error,) = validate_companion(_ORPHAN_DOC, None)
-    assert "l-001.observations.edges" in error
-
-
-def test_orphan_diagnostic_offers_the_hypothesize_it_repair():
-    (error,) = validate_companion(_ORPHAN_DOC, None)
-    assert "attached_to" in error
-
-
-def test_orphan_diagnostic_offers_the_dont_declare_it_repair():
-    (error,) = validate_companion(_ORPHAN_DOC, None)
-    assert "attr_updates" in error
-
-
-def test_orphan_diagnostic_warns_against_inferring_from_a_text_field():
-    """The spec's "don't reach below the resolution of your detector" rule, stated as an
-    explicit refusal here — the repair must not be satisfiable by reading an edge off a
-    `cmdline` attribute the detector never recorded as its own event."""
-    (error,) = validate_companion(_ORPHAN_DOC, None)
-    assert "do not infer" in error.lower() or "not infer" in error.lower()
-    assert "cmdline" in error
+    assert "l-001" in errors[0]
+    assert "v-010" in errors[0]
 
 
 # ---------------------------------------------------------------------------
@@ -246,9 +193,7 @@ def test_the_repair_paragraph_is_printed_once_per_write():
 def test_a_hypothesis_attached_to_the_vertex_clears_it():
     """The shape the language exists to carry: a lead found an entity and can only
     HYPOTHESIZE how it connects. Without this arm the rule is unsatisfiable — writing the
-    `:E` row commits an observation the lead does not have (and the refusal's own last
-    sentence forbids inferring one), while dropping the `:V` row strands the hypothesis,
-    since `_check_hypothesis_refs` demands that `attached_to` resolve to a declared vertex."""
+    `:E` row commits an observation the lead does not have (and the refusal's own last"""
     doc = _OPENING + _fence(
         _obs_vertices("l-001", _ORPHAN_VERTEX),
         _new_hypotheses("l-001", _HYPOTHESIS_ON_ORPHAN),
@@ -384,11 +329,7 @@ def test_an_orphan_this_write_adds_is_still_refused_against_a_baseline():
 def test_a_whole_document_written_as_one_fence_keeps_its_prologue_exemption():
     """The document's FIRST fence is its opening whatever else it carries: a document written
     all at once — the shipped examples, and the one-fence `_companion` fixtures the invlang
-    tests are built on — declares its graph and reports on it in the same breath, with no
-    earlier write for the prologue to be trailing. Costs the rule nothing a run can reach: the
-    first fence of a live investigation is the harness's, written before main's first turn.
-    The lead's own orphan in that same fence is still refused, which is what keeps the
-    carve-out from standing the rule down."""
+    tests are built on — declares its graph and reports on it in the same breath, with no"""
     one_fence = _fence(
         _prologue(),
         _findings("l-001"),

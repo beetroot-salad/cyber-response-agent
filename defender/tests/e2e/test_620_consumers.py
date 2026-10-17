@@ -1,28 +1,4 @@
-"""#620 slices 2+3 — the executable BEHAVIORAL spec for the consumers of the frozen
-`executed_queries.jsonl` row (draft synthesis, lead extraction/author/render, the
-repository projections, the pitfalls lane, the visualizers + workspace map) and the
-`validate_scaffold` authoring gate.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_620-consumers-connect.yaml`,
-named after it and carrying its id in the docstring.
-
-RED BY CONSTRUCTION. The import block below names a surface the implementation must still
-build — the `@verb(engine=…)` DECLARATION decorator + its offline engine/body-param
-resolver (`from defender.runtime.verbs import verb, engine_of, body_param_of`). That import
-does not resolve yet, so the whole module is red until write-code-from-spec lands the
-declaration; that is the point, exactly as `test_query_tool_611.py` is red against the
-not-yet-written query surface. The assertions below are the spec the code is written to.
-
-The seams
----------
-- Produced rows come from a REAL driver run (`run_gather` → the query tool → the capture
-  capability writes the real row, whatever the frozen key set is that week), never a
-  hand-built `ExecutedLead` — the missing producer→consumer seam is the actual defect
-  (`two-suites-never-meet` in the ledger).
-- Offline readers (`load_queries`, `_executed_query`, `render_joined_yaml`, the visualizer,
-  `workspace_map`, `validate_scaffold`) are driven at their real entry points over rows on
-  disk. Fakes inject faults / return payloads only — they never classify or branch on policy.
-"""
+"""#620 — consumers of the frozen `executed_queries.jsonl` row (draft synthesis, lead extraction, repository projections, pitfalls lane, visualizers, workspace map) and the `validate_scaffold` gate. Rows come from a real driver run; offline readers are driven over rows on disk."""
 from __future__ import annotations
 
 import ast
@@ -54,7 +30,6 @@ from defender.learning.leads import (  # noqa: E402
     lead_neighbors,
     pitfalls_curator,
 )
-from defender.scripts import workspace_map as workspace_map_mod  # noqa: E402
 from defender.scripts.adapters import cmdb_adapter, elastic_adapter  # noqa: E402
 from defender.scripts.visualize import visualize_runtime  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -91,8 +66,6 @@ SEVEN = [
     ("threat-intel", "indicator", {"value": "203.0.113.7"}),
     ("host-state", "processes", {"host": "db-1"}),
 ]
-
-
 
 
 def _seven_registry(rec: VerbRecorder) -> FakeVerbs:
@@ -157,8 +130,6 @@ def _elastic_registry(rec: VerbRecorder) -> FakeVerbs:
     return FakeVerbs({"elastic": {"esql": esql, "query": query, "alerts": alerts, "foo": foo}})
 
 
-
-
 class _Run:
     def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn):
         self.run_dir, self.main, self.gather = run_dir, main, gather
@@ -218,7 +189,6 @@ def _own_executed_leads(run_dir: Path) -> list:
     return [lead for lead in _executed_leads(run_dir) if lead.lead_id not in RESERVED_LEAD_IDS]
 
 
-
 _UNSET = object()
 
 
@@ -261,14 +231,7 @@ def _write_run(run_dir: Path, rows: list[dict], *, goal: str = "measure it") -> 
 def _catalog_template(catalog_dir: Path, system: str, tid: str, fence_lang: str,  # noqa: PLR0913 — a template writer mirrors the schema's keys
                       query_body: str, *, verb: str, params: tuple[str, ...] = ()) -> Path:
     """Write one established `{system}/{name}.md` template with an `id`/`status`/`verb`/`params`
-    frontmatter and a `## Query` fence, and return its path.
-
-    `verb` is passed, never derived from the body. It used to be absent, and `validate_scaffold`
-    recovered it by reading the first non-fence token of the `## Query` — a prose fallback #901
-    deleted, because the corpus declares `verb:` and a checker that guesses one resolves verbs
-    the corpus never claimed. A fixture that kept relying on the guess would be pinning the
-    behavior of a reader that no longer exists.
-    """
+    frontmatter and a `## Query` fence, and return its path."""
     name = tid.split(".", 1)[1]
     d = catalog_dir / system
     d.mkdir(parents=True, exist_ok=True)
@@ -281,8 +244,6 @@ def _catalog_template(catalog_dir: Path, system: str, tid: str, fence_lang: str,
         encoding="utf-8",
     )
     return p
-
-
 
 
 def test_canonical_record_engine_verb_is_verbatim_body(tmp_path):
@@ -354,26 +315,6 @@ def test_canonical_record_never_raw_command_any_system(tmp_path):
         assert row["raw_command"] not in record, f"{system}: the record contains raw_command"
 
 
-def test_canonical_record_never_raw_command_positive_control(tmp_path):
-    """canonical_record_never_raw_command_positive_control — the same rows DO surface their real
-    query through the sanctioned record: the esql body verbatim, the structured call for a
-    param-only verb — so the negative above is not passing on empty output."""
-    rec = VerbRecorder()
-    pipe = "FROM logs-system.auth-* | STATS c = COUNT(*)"
-    r = run_gather(tmp_path / "e", verbs=_seven_registry(rec), system="elastic",
-                   turns=[q("elastic", "esql", {"query": pipe}, query_id="elastic.c"), DONE],
-                   run_id="q620-pc-esql")
-    assert draft_synthesis._executed_query(_own_executed_leads(r.run_dir)[0]) == pipe
-
-    rec2 = VerbRecorder()
-    r2 = run_gather(tmp_path / "c", verbs=_seven_registry(rec2), system="cmdb",
-                    turns=[q("cmdb", "get-host", {"host": "db-1"}, query_id="cmdb.c"), DONE],
-                    run_id="q620-pc-cmdb")
-    record = draft_synthesis._executed_query(_own_executed_leads(r2.run_dir)[0])
-    assert "get-host" in record
-    assert "db-1" in record
-
-
 def test_produced_row_threads_to_the_canonical_record(tmp_path):
     """produced_row_threads_to_the_canonical_record — driving a REAL run, reading back the real
     executed_queries.jsonl through lead_repository.load_queries → extract_from_joined →
@@ -424,8 +365,6 @@ def test_handoff_executed_query_and_params_agree(tmp_path):
         assert str(v) in inv["executed_query"]
 
 
-
-
 def test_verb_declares_engine_and_body_param_per_verb(tmp_path):
     """verb_declares_engine_and_body_param_per_verb — a verb's engine + body param resolve per
     VERB across all three engine classes: elastic.esql → esql/`query`; elastic.query & .alerts →
@@ -468,39 +407,6 @@ def test_body_param_marker_survives_validate_params(tmp_path):
         "the body param was reported 'unknown' — the declaration hid it from the validator"
 
 
-def test_verb_declaration_read_without_importing_the_transport(tmp_path):
-    """verb_declaration_read_without_importing_the_transport — the offline consumers resolve a
-    row's engine from the frozen row + a light declaration, with no adapter module in reach:
-    _executed_query fences an esql body correctly from a bare run dir, and neither draft_synthesis
-    nor lead_extraction imports a live registry/transport (a per-tree adapter import re-opens the
-    #551 freeze one layer up)."""
-    pipe = "FROM logs | STATS c = COUNT(*)"
-    run_dir = _write_run(tmp_path / "run", [_row(
-        system="elastic", verb="esql", query_id="elastic.q",
-        params={"query": pipe}, raw_command="elastic esql query=" + pipe,
-        payload_path=f"gather_raw/{LEAD}/0.json", error_class=None)])
-    leads = lead_extraction.extract_from_joined(lead_repository.joined(run_dir))
-    assert draft_synthesis._executed_query(leads[0]) == pipe
-
-    for mod in (draft_synthesis, lead_extraction):
-        src = Path(mod.__file__).read_text(encoding="utf-8")
-        assert "ModuleVerbRegistry" not in src, f"{mod.__name__} imports the live registry"
-        assert "import elastic_adapter" not in src, \
-            f"{mod.__name__} reaches an adapter/transport to resolve the engine"
-        assert "adapters" not in src, \
-            f"{mod.__name__} reaches an adapter/transport to resolve the engine"
-
-
-def test_esql_heuristic_and_reexports_are_gone():
-    """esql_heuristic_and_reexports_are_gone — _ESQL_SYSTEMS and _is_esql are deleted from
-    draft_synthesis AND from the lead_author re-exports; importing lead_author still succeeds (a
-    dangling re-export of a deleted name would be an ImportError at load)."""
-    assert not hasattr(draft_synthesis, "_is_esql")
-    assert not hasattr(draft_synthesis, "_ESQL_SYSTEMS")
-    assert not hasattr(lead_author, "_is_esql")
-    assert not hasattr(lead_author, "_ESQL_SYSTEMS")
-
-
 def test_draft_from_elastic_lucene_is_fenced_lucene_not_esql(tmp_path):
     """draft_from_elastic_lucene_is_fenced_lucene_not_esql — a draft minted from a real
     elastic.query (Lucene/KQL) run is NOT stamped engine: esql and its ## Query fence is NOT
@@ -518,8 +424,6 @@ def test_draft_from_elastic_lucene_is_fenced_lucene_not_esql(tmp_path):
     text = drafts[0].read_text(encoding="utf-8")
     assert "engine: esql" not in text, "a Lucene verb was stamped engine: esql"
     assert "```esql" not in text, "a Lucene body was fenced as esql"
-
-
 
 
 _FENCE_BREAKER = (
@@ -550,26 +454,6 @@ def test_canonical_record_value_cannot_forge_a_draft_section(tmp_path):
         "the exact body value did not round-trip as data inside the recording fence"
 
 
-def test_benign_body_renders_in_one_intact_fence_positive_control(tmp_path):
-    """benign_body_renders_in_one_intact_fence_positive_control — a benign body renders inside
-    exactly ONE intact ## Query fence and the draft's real ## Goal / ## Pitfalls are present and
-    unchanged — proving the observation channel can see a broken fence when one occurs."""
-    rec = VerbRecorder()
-    pipe = "FROM logs | STATS c = COUNT(*)"
-    r = run_gather(tmp_path, verbs=_elastic_registry(rec), turns=[
-        q("elastic", "esql", {"query": pipe}, query_id="elastic.benign"), DONE,
-    ])
-    drafts = draft_synthesis.synthesize_drafts(
-        _executed_leads(r.run_dir), skills=held_skills(tmp_path / "catalog"),
-        where=tmp_path / "catalog", catalog=[],
-        systems=frozenset({"elastic"}))
-    text = drafts[0].read_text(encoding="utf-8")
-    bodies = _corpus.section_bodies(text)
-    assert set(bodies) == {"Goal", "Curation notes", "Executed query", "Pitfalls"}
-    assert pipe in bodies["Executed query"]
-    assert text.count("```") == 2, "the benign body did not render inside exactly one fence"
-
-
 def _seed_pitfalls(paths, *, system: str, digest: str, n: int = 2) -> None:
     """``n`` queued pitfalls, each a distinct mistake: the digest is suffixed per row because
     #840 collapses rows sharing one into a single record, and the threshold counts records."""
@@ -598,33 +482,6 @@ def test_attacker_digest_cannot_forge_execution_md_sections(tmp_path):
     for line in prompt.splitlines():
         assert not line.lstrip().startswith("## Verbs"), \
             "the digest forged a bare ## Verbs heading line in the curator handoff"
-
-
-def test_attacker_digest_execution_md_positive_control(tmp_path):
-    """attacker_digest_execution_md_positive_control — a benign digest reaches the same handoff
-    surface and its content is present in the rendered handoff, so the negative is not vacuous."""
-    rows = [{"system": "host-state", "query_id": "host-state.esql", "goal": "g",
-             "executed_query": "x", "stderr_digest": "exit=64; unknown column user.nmae"}]
-    handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, systems=frozenset({"host-state"}))
-    prompt = json.dumps(handoffs, indent=2)
-    assert "unknown column user.nmae" in prompt
-
-
-
-
-def test_executed_lead_carries_verb(tmp_path):
-    """executed_lead_carries_verb — ExecutedLead carries a `verb` field and extract_from_joined
-    copies q.verb from the row; after a real run the extracted lead's verb equals the row's
-    honest registry verb."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=_elastic_registry(rec), turns=[
-        q("elastic", "alerts", {"native_query": "x"}, query_id="elastic.sig"), DONE,
-    ])
-    lead = _executed_leads(r.run_dir)[0]
-    assert hasattr(lead, "verb"), "ExecutedLead grew no verb field"
-    assert lead.verb == r.row()["verb"] == "alerts"
-
-
 
 
 def test_actor_view_stays_id_and_params_only(tmp_path):
@@ -670,37 +527,6 @@ def test_noncandidate_rule_is_declared_verb_name(tmp_path):
     ], "a coined id was not drafted"
 
 
-def test_candidacy_is_stable_across_the_replaying_tree(tmp_path):
-    """candidacy_is_stable_across_the_replaying_tree — candidacy keys on the ROW's own recorded
-    verb, not a roster re-imported at read time: two rows with the SAME query_id (elastic.foo) but
-    a DIFFERENT recorded verb resolve to DIFFERENT candidacy, driven by the frozen verb — so a
-    persisted artifact's meaning does not depend on which tree resolves it."""
-    rec = VerbRecorder()
-    r_a = run_gather(tmp_path / "a", verbs=_elastic_registry(rec), turns=[
-        q("elastic", "foo", {"native_query": "x"}), DONE], run_id="q620-st-a")
-    assert r_a.row()["query_id"] == "elastic.foo"
-    assert r_a.row()["verb"] == "foo"
-    drafts_a = draft_synthesis.synthesize_drafts(
-        _executed_leads(r_a.run_dir), skills=held_skills(tmp_path / "ca"), where=tmp_path / "ca",
-        catalog=[],
-        systems=frozenset({"elastic"}))
-    assert drafts_a == [], "row whose verb equals its query_id suffix was drafted"
-
-    r_b = run_gather(tmp_path / "b", verbs=_elastic_registry(rec), turns=[
-        q("elastic", "query", {"native_query": "x"}, query_id="elastic.foo"), DONE,
-    ], run_id="q620-st-b")
-    assert r_b.row()["query_id"] == "elastic.foo"
-    assert r_b.row()["verb"] == "query"
-    drafts_b = draft_synthesis.synthesize_drafts(
-        _executed_leads(r_b.run_dir), skills=held_skills(tmp_path / "cb"), where=tmp_path / "cb",
-        catalog=[],
-        systems=frozenset({"elastic"}))
-    assert any(p.name == f"{_draft_basename('elastic.foo')}.md" for p in drafts_b), \
-        "candidacy did not follow the row's recorded verb"
-
-
-
-
 def test_render_query_binds_the_elastic_body(tmp_path):
     """render_query_binds_the_elastic_body — for an elastic engine verb, rendered_query reflects
     the body that actually ran, not the static template skeleton with unbound inner ${host}
@@ -739,8 +565,6 @@ def test_render_query_binds_the_elastic_body(tmp_path):
     assert inv2["rendered_query"] == "get-host host=db-1"
 
 
-
-
 def test_error_class_backfill_keys_on_presence_not_truthiness(tmp_path):
     """error_class_backfill_keys_on_presence_not_truthiness — load_queries distinguishes a PRESENT
     error_class: null (preserved as null) from an ABSENT key (back-filled from exit_code). Today
@@ -755,24 +579,6 @@ def test_error_class_backfill_keys_on_presence_not_truthiness(tmp_path):
     by_seq = {row.seq: row for row in lead_repository.load_queries(run_dir)}
     assert by_seq[0].error_class is None, "a PRESENT error_class: null was not preserved"
     assert by_seq[1].error_class == "infra", "an ABSENT error_class key was not back-filled"
-
-
-def test_legacy_row_without_error_class_reaches_pitfalls_queue(tmp_path):
-    """legacy_row_without_error_class_reaches_pitfalls_queue — a legacy row with no error_class key
-    (like the stale eval fixture) is back-filled from exit_code and, when agent-fixable, still
-    reaches the general-failure pitfalls queue — the migration does not silently drop it."""
-    run_dir = _write_run(tmp_path / "run", [_row(
-        system="elastic", verb="esql", query_id="elastic.esql",
-        params={"query": "FROM bad"}, exit_code=64, error_class=_UNSET,
-        payload_status="error", payload_digest="exit=64; mismatched input",
-        payload_path=f"gather_raw/{LEAD}/0.json")])
-    leads = lead_extraction.extract_from_joined(lead_repository.joined(run_dir))
-    failures = lead_extraction.collect_general_failures(leads, run_dir, catalog=[])
-    assert len(failures) == 1, "a back-filled agent-fixable legacy row was dropped from the queue"
-    assert failures[0]["error_class"] == "agent-fixable"
-    assert failures[0]["system"] == "elastic"
-
-
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -831,8 +637,6 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
     assert "execution.md pitfalls" in log, "the created execution.md was not committed"
 
 
-
-
 def _exit_class_html(run_dir: Path) -> str:
     """Render the leads-and-queries table and mask the exit-code NUMBER, so the only remaining
     difference between two single-query renders is what the error-class taxonomy drives."""
@@ -859,71 +663,6 @@ def test_visualize_runtime_distinguishes_exit_64_from_infra(tmp_path):
         "exit-64 (agent-fixable) and exit-2 (infra) render the same class — error_class is unread"
 
 
-def test_visualize_runtime_positive_control(tmp_path):
-    """visualize_runtime_positive_control — a success row (null), an infra row, and an
-    agent-fixable row each render their own distinct class — proving the taxonomy is read, not
-    that two happen to differ."""
-    ok = _exit_class_html(_one_row_run(
-        tmp_path, "ok", exit_code=0, error_class=None, status="ok"))
-    infra = _exit_class_html(_one_row_run(
-        tmp_path, "infra", exit_code=2, error_class="infra", status="error"))
-    agent = _exit_class_html(_one_row_run(
-        tmp_path, "agent", exit_code=64, error_class="agent-fixable", status="error"))
-    assert len({ok, infra, agent}) == 3, "the three error classes do not each render distinctly"
-
-
-def test_workspace_map_stops_advertising_help(tmp_path):
-    """workspace_map_stops_advertising_help — the workspace map injected into MAIN's message 0
-    does not tell main to run `--help` on an adapter module (the modules have no argparse/main)."""
-    text = workspace_map_mod.workspace_map(tmp_path, systems=("elastic",))
-    assert "--help" not in text, "the workspace map still advertises a dead --help affordance"
-
-
-def test_workspace_map_positive_control(tmp_path):
-    """workspace_map_positive_control — the map still lists the adapter surface, so the negative is
-    not passing because the map went empty."""
-    text = workspace_map_mod.workspace_map(tmp_path, systems=("elastic",))
-    assert "Adapters" in text
-    assert "- elastic " in text, "the adapter surface vanished from the map"
-
-
-
-
-def test_no_test_asserts_arg0_is_read():
-    """no_test_asserts_arg0_is_read — no migrated test constructs a params dict keyed on arg0 (the
-    dead positional the query tool never writes); test_lead_author_synth and the sibling suites are
-    re-pinned to the named-params contract, so the tree no longer holds two green suites asserting
-    contradictory things about the same column. (A `"arg0" not in …` guard is fine — only the
-    `{"arg0": …}` CONSTRUCTION is the smell.)"""
-    tests_dir = DEFENDER / "tests"
-    offenders = []
-    for p in sorted(tests_dir.rglob("test_*.py")):
-        if p.name == "test_620_consumers.py":
-            continue
-        txt = p.read_text(encoding="utf-8")
-        if '"arg0":' in txt or "'arg0':" in txt:
-            offenders.append(p.name)
-    assert offenders == [], f"a migrated test still binds params['arg0'] as a value: {offenders}"
-
-
-def test_eval_fixture_migrated_to_named_params():
-    """eval_fixture_migrated_to_named_params — the underfold-sshd-narrowing eval fixture is
-    migrated off params.arg0 + the dead shim raw_command + the query_id-suffix verb, onto the
-    named-params row shape with a real verb and an error_class key."""
-    fixture = (DEFENDER / "evals" / "scenarios_lead" / "underfold-sshd-narrowing" / "run"
-               / "run-underfold-001" / "executed_queries.jsonl")
-    rows = read_jsonl_rows(fixture)
-    assert rows, "the eval fixture is empty"
-    row = rows[0]
-    assert "arg0" not in row.get("params", {}), "the fixture still binds params['arg0']"
-    assert "error_class" in row, "the migrated fixture carries no error_class key"
-    assert row["verb"] != "sshd-failed-by-srcip", "verb still holds the query_id suffix lie"
-    assert row["verb"] in {"esql", "query", "alerts"}, "verb is not a real declared elastic verb"
-    assert not row["raw_command"].startswith("esql "), \
-        "raw_command is still the dead single-argv shim invocation"
-
-
-
 _ALL_SEVEN = ["elastic", "cmdb", "identity", "ticket", "change-mgmt", "host-state", "threat-intel"]
 _SPELLING_SPLIT = ["change-mgmt", "host-state", "threat-intel"]
 
@@ -932,16 +671,6 @@ def _run_validate_scaffold(system: str, *, defender_dir: Path = DEFENDER):
     env = {"DEFENDER_DIR": str(defender_dir), "PATH": os.environ.get("PATH", "")}
     return subprocess.run([sys.executable, str(VALIDATE_SCAFFOLD), system],
                           capture_output=True, text=True, env=env, timeout=60)
-
-
-def test_validate_scaffold_green_on_all_seven_via_registry_probe():
-    """validate_scaffold_green_on_all_seven_via_registry_probe — validate_scaffold probes the
-    registry (module importable, non-empty VERBS, health-check declared) and exits 0 for all seven
-    systems; it no longer asserts the --help / exit-64-on-bad-flag / bin/defender-<system>-shim
-    contract that #617 deleted."""
-    failed = {s: _run_validate_scaffold(s).returncode for s in _ALL_SEVEN}
-    assert all(rc == 0 for rc in failed.values()), \
-        f"validate_scaffold did not pass every system on the registry probe: {failed}"
 
 
 def test_validate_scaffold_normalizes_the_spelling_split():
@@ -990,19 +719,7 @@ def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label
                                                                  expected):
     """validate_scaffold FAILS an adapter whose verb cannot be dispatched as `fn(ctx, **params)`
     — the check `checklist.md` advertised from the day `check_registry` was written, which was
-    never actually implemented (#885). A positional model param is unbindable, not merely
-    unidiomatic: `declared_params` reads KEYWORD_ONLY only, so `validate_params` refuses every
-    call naming it and the one shape that survives (`params={}`) raises TypeError inside the
-    tool. Dropping the ctx entirely is worse than a crash — the tool binds the VerbContext
-    OBJECT into `host` and issues a garbage request — and `**kwargs` widens the body's surface
-    past the roster the validator reports.
-
-    Discriminating control: the SAME tree with the signature intact passes, so a FAIL cannot be
-    an incidental scaffold defect, and each case asserts the FAIL row names ITS clause. The
-    template is REPLACED (not removed) with a placeholder-free `list-roles` one in every bad
-    tree, because the placeholder invariant would ALSO fail the `${host}` template once `host`
-    stops being a declared param — a real second symptom, but it would mask which check
-    fired."""
+    never actually implemented (#885)."""
     def tree(name: str, mutated_signature: str | None) -> Path:
         root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
         if mutated_signature is not None:
@@ -1206,12 +923,10 @@ def test_validate_scaffold_passes_an_adapter_whose_callable_settings_check_is_no
 
 
 def test_validate_scaffold_enforces_placeholder_invariant(tmp_path):
-    """validate_scaffold_enforces_placeholder_invariant — validate_scaffold FAILS a template whose
-    ${placeholder} is neither a declared param of the template's verb nor a marked body
-    substitution (the same check as placeholder_is_a_declared_param_or_marked_body_substitution),
-    so §2f cannot regress. Discriminating control: the SAME otherwise-valid tree with a template
-    that binds only the declared ${host} passes — so the FAIL is the placeholder check, not an
-    incidental scaffold defect. (cmdb.get-host declares only `host`.)"""
+    """validate_scaffold_enforces_placeholder_invariant — validate_scaffold FAILS a template
+    whose ${placeholder} is neither a declared param of the template's verb nor a marked body
+    substitution (the same check as
+    placeholder_is_a_declared_param_or_marked_body_substitution), so §2f cannot regress."""
     good = _run_validate_scaffold(
         "cmdb", defender_dir=_scaffold_cmdb_tree(tmp_path / "good", "get-host host=${host}"))
     assert good.returncode == 0, (

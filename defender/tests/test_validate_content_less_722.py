@@ -1,24 +1,4 @@
-"""Hermetic spec for the judge-doc validators' "non-empty string" gates (#722, same class).
-
-The judge writes this YAML after reading the actor's story and the investigation, both
-downstream of attacker-influenced alert/gather text. `validate.py` is the gate that
-decides whether a case is processable — and a validated finding is not merely logged:
-`persist.py` queues `subject_anchor` / `subject_topic` verbatim into the pending-findings
-table, and the lesson curator's prompt renders them as the lesson's anchor. A field that
-renders as NOTHING must therefore not pass a check spelled "must be a non-empty string".
-
-`not v.strip()` was that check. strip() keys off `str.isspace()`, True for the
-visible-width separators (U+00A0, U+3000, U+2028) and False for the zero-width ones
-(U+200B, U+FEFF, U+00AD, U+2060) and NUL — so an anchor of a single zero-width space
-passed the gate and became a lesson anchor, while an anchor of one NBSP did not.
-
-The same split ran the other way on the two keyword gates: `outcome` and the report's
-`disposition` tolerated an NBSP around the keyword and turned the whole case
-unprocessable on a zero-width one. Both now match on what the value renders as.
-
-Driven through the public seam the pipeline itself calls — the `learning.loop`
-re-exports — with real docs and a real report.md on disk.
-"""
+"""Judge-doc validators' non-empty-string and keyword gates match on what a value RENDERS as: zero-width/NUL-only anchors are rejected, NBSP-padded keywords accepted (#722)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -125,13 +105,7 @@ def _report(tmp_path: Path, disposition: str) -> Path:
 def test_a_report_disposition_is_matched_on_what_it_renders_as(tmp_path, tag, written):
     """report.md's disposition is the headline the loop reads to pick a direction. The
     normalized keyword comes back, so no caller downstream ever sees the invisible
-    characters the model wrote around it.
-
-    #923 (§7 round 4) narrows this to the CLEAN spelling — the zero-width/BOM spellings that
-    used to belong here now belong in the rejected set below: on READ there is no author left
-    to ask, so a value that only becomes a member after something strips it is answered
-    exactly as a value that was never a member. `strip_zero_width` no longer runs in
-    `_vocab.normalized_disposition` at all."""
+    characters the model wrote around it."""
     assert loop.normalize_disposition(_report(tmp_path, written)) == "benign"
 
 
@@ -168,19 +142,7 @@ def test_strip_zero_width_keeps_the_whitespace_callers_split_on():
 
 def test_as_str_answers_on_the_type_and_not_on_emptiness():
     """`as_str` is the coercion #871 gave a shared home, and what it must do is turn a
-    NON-STRING into `""` — not merely turn `None` into one.
-
-    The distinction is the whole helper. `value if value is not None else ""` passes every
-    caller's happy path and every arm that drives a missing value, because each caller then
-    re-checks the type on its own account: `names_something_readable` has its own
-    `isinstance`, and `_trip` compares whatever it is against itself. What it does NOT survive
-    is a non-string reaching a spelling that has no such check — `query_tool` coarsens `verb`
-    through here before `_request_key` serializes it, so a non-string verb would key as
-    ITSELF and two calls that named no readable verb at all would stop being one group, which
-    is the #871 defect in the other coordinate of the same pair.
-
-    Pinned at the helper rather than through a caller for exactly that reason: the callers
-    each have a second net, so the contract is only observable here."""
+    NON-STRING into `""` — not merely turn `None` into one."""
     assert as_str("elastic") == "elastic"
     assert as_str("") == ""
     for not_a_string in (None, 12345, True, ["a"], {"n": 1}, 1.5, b"bytes"):

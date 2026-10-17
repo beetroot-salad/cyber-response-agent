@@ -11,10 +11,7 @@ from defender.learning.core.state import FINDINGS, REPO_LOCK, TRY_ONCE
 
 
 def test_lock_refuses_concurrent_run(tmp_repo, helpers):
-    """A second author tick exits cleanly while the first holds the queue lock.
-
-    The author drives this through the shared drain body's drain-role gate; the lock
-    primitive is the handle's ``lock(role, wait=TRY_ONCE)`` on the channel's drain role."""
+    """A second author tick exits cleanly while the first holds the queue lock."""
     role = tmp_repo.cfg.channel.drain_role
     state = tmp_repo.state
     with state.lock(role, wait=TRY_ONCE) as first:
@@ -26,11 +23,7 @@ def test_lock_refuses_concurrent_run(tmp_repo, helpers):
 
 
 def test_repo_lock_held_returns_zero(tmp_repo, helpers):
-    """run_batch exits cleanly when the shared repo lock is unavailable.
-
-    Mirrors the actor-author behavior: queue stays intact, no agent
-    invocation, rc=0 so the next tick retries.
-    """
+    """run_batch exits cleanly when the shared repo lock is unavailable."""
     import fcntl
 
     a = tmp_repo.author

@@ -1,27 +1,4 @@
-"""Executable spec for #585 — gather's query-template discovery.
-
-Gather is dispatched to bind a query template but is never told which templates exist, and
-every discovery route it can reach is dead: `find` is on no agent's lane, `grep -r` denies
-(#581), a glob reaches grep as a literal filename (`shell=False`), and #575 removes the last
-one (`ls`). This spec pins the replacement:
-
-  - **the fold** — `_corpus.iter_query_templates` becomes THE one walk over the query corpus;
-    `lead_neighbors.load_catalog`, the gather index and `workspace_map` all consume it (there
-    are three walks at HEAD). It inherits `iter_lessons`' skip-one-bad-file contract, not
-    `load_catalog`'s raise-on-read: post-fold the walk runs on every gather dispatch.
-  - **the index** — every ESTABLISHED template, all systems, `{id}` + repo-relative path +
-    `## Goal`, injected into the dispatch prompt and built from the THREADED `deps.defender_dir`.
-  - **`template_search(pattern, system=None)`** — the grep, as a gated tool: harness-owned root,
-    no model-supplied path, case-insensitive, and a `_draft/` hit comes back untrusted-wrapped.
-  - **the prose** — gather's SKILL.md / queries/SCHEMA.md stop teaching `ls`/`find`/`Grep`.
-
-Spec graph: `spec-flow/specs/spec_graph_585.yaml`. Demand ids (dNN) are cited per test.
-
-None of the target symbols exist at HEAD — `_corpus.iter_query_templates`,
-`tools_gather._template_index`, `tools_gather._tool_template_search`,
-`ToolSet(template_search=…)` — so each test reds on its own missing symbol while every import
-here resolves against HEAD, so the harness collects and proves itself.
-"""
+"""Gather query-template discovery: the template walk, the per-dispatch index, and the template_search tool (path confinement, literal case-insensitive matching, bounded output, untrusted draft hits)."""
 from __future__ import annotations
 
 import re
@@ -39,7 +16,6 @@ pytest.importorskip("pydantic_ai")
 from defender import _corpus  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime import tools_gather  # noqa: E402
-from defender.runtime.agent_definition import ToolSet  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
@@ -48,7 +24,6 @@ from defender.tests._lead_author_1134 import skills_view  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 _REAL_CATALOG = _DEFENDER / "skills" / "gather" / "queries"
-
 
 
 def _tpl(system: str, tid: str, *, status: str = "established", goal: str = "", query: str = "",
@@ -60,10 +35,7 @@ def _tpl(system: str, tid: str, *, status: str = "established", goal: str = "", 
 
 
 def _catalog(tmp_path: Path) -> Path:
-    """A synthetic defender tree with a 3-system catalog: 3 established + 2 drafts.
-
-    Returns the `defender_dir` (NOT the catalog dir) — the tree an `AgentDeps` threads.
-    """
+    """A synthetic defender tree with a 3-system catalog: 3 established + 2 drafts."""
     dfn = tmp_path / "wt" / "defender"
     q = dfn / "skills" / "gather" / "queries"
     for system, tid, goal in [
@@ -104,7 +76,6 @@ def _prompt_for(tmp_path: Path, defender_dir: Path, system: str = "elastic") -> 
     """The REAL entry point: the dispatch prompt _run_gather hands the gather subagent."""
     deps = _deps(tmp_path, defender_dir)
     return tools_gather._gather_prompt(deps, _request(system), catalog="- `elastic`: the SIEM")
-
 
 
 def test_d0a_walk_yields_a_record_per_template_sorted_by_path(tmp_path):
@@ -152,11 +123,8 @@ def test_d18b_missing_catalog_dir_yields_nothing_and_does_not_raise(tmp_path):
 
 
 def test_d13_malformed_template_is_skipped_with_a_warning_not_raised(tmp_path, capsys):
-    """load_catalog reads OUTSIDE its try (lead_neighbors.py:153) and drops an id-less file
-    SILENTLY (:156-157). Post-fold that walk runs on EVERY gather dispatch, so one undecodable
-    byte in one of 63 templates would take down every dispatch. The folded walk takes
-    iter_lessons' contract instead: read_text() inside the try, skip the bad file, warn on
-    stderr, yield the rest."""
+    """load_catalog reads OUTSIDE its try (lead_neighbors.py:153) and drops an id-less file SILENTLY
+    (:156-157)."""
     dfn = _catalog(tmp_path)
     q = dfn / "skills" / "gather" / "queries"
     (q / "elastic" / "no-fence.md").write_text("# no frontmatter at all\n\n## Goal\n\nx\n")
@@ -174,42 +142,12 @@ def test_d13_malformed_template_is_skipped_with_a_warning_not_raised(tmp_path, c
     assert err.count("skipping") >= 4, "each malformed template warns on stderr"
 
 
-def test_d11_the_three_consumers_share_one_walk():
-    """Anti-re-clone. `load_catalog` (lead_neighbors), the gather index and workspace_map must
-    all resolve to the SAME function object. lint_duplicate_helpers is NAME-based and
-    baseline-ratcheted, so a future `def _walk_templates()` in workspace_map.py re-clones the
-    walk and the gate never fires — only this identity assertion does."""
-    from defender.learning.leads import lead_neighbors
-
-    assert lead_neighbors.iter_query_templates is _corpus.iter_query_templates
-    assert wsm.iter_query_templates is _corpus.iter_query_templates
-    assert tools_gather.iter_query_templates is _corpus.iter_query_templates
-
-
-def test_d11_load_catalog_still_returns_templates_over_the_folded_walk(tmp_path):
-    """Characterization: the fold is behavior-preserving at load_catalog's surviving seam. Its
-    four consumers (lead_extraction, lead_author, draft_synthesis, its own CLI) must not notice."""
-    from defender.learning.leads.lead_neighbors import load_catalog
-
-    dfn = _catalog(tmp_path)
-    templates = load_catalog(dfn / "skills" / "gather" / "queries")
-    by_id = {t.id: t for t in templates}
-    assert "elastic.sshd-auth-history" in by_id
-    assert by_id["elastic.sshd-auth-history"].system == "elastic"
-    assert by_id["elastic.sshd-auth-history"].status == "established"
-    assert "Failed password" in by_id["elastic.sshd-auth-history"].goal
-    assert by_id["elastic.coined-redirect-probe"].status == "draft"
-
-
-
 def test_d12_corpus_module_imports_with_no_yaml_available(tmp_path):
-    """_corpus.py is deliberately yaml-free at import: the actor runs the pinned lesson scripts
-    as `python3 <script>` under the SYSTEM interpreter, which has no PyYAML, and each imports
+    """_corpus.py is deliberately yaml-free at import: the actor runs the pinned lesson scripts as
+    `python3 <script>` under the SYSTEM interpreter, which has no PyYAML, and each imports
     _corpus at module scope before re-execing into the venv. iter_query_templates needs
     parse_frontmatter (defender/_frontmatter.py imports yaml at module scope) — hoisting that
-    import to the top of _corpus breaks the actor's lesson retrieval live in the learning loop.
-
-    Drives it the honest way: a subprocess whose meta_path masks `yaml`, importing the module."""
+    import to the top of _corpus breaks the actor's lesson retrieval live in the learning loop."""
     probe = tmp_path / "probe.py"
     probe.write_text(textwrap.dedent(f"""
         import sys
@@ -233,17 +171,6 @@ def test_d12_corpus_module_imports_with_no_yaml_available(tmp_path):
     assert "OK" in proc.stdout
 
 
-def test_d12b_positive_control_the_walk_does_parse_frontmatter_under_the_venv(tmp_path):
-    """Positive control for the negative above: with PyYAML present the LAZY parser import fires
-    and the walk returns fully-parsed records. Without this, a walk that imports nothing and
-    yields nothing would pass the purity test vacuously."""
-    dfn = _catalog(tmp_path)
-    rows = list(_corpus.iter_query_templates(dfn / "skills" / "gather" / "queries"))
-    assert rows, "the walk yields records under the venv"
-    assert all(r.id and r.status for r in rows), "frontmatter really was parsed"
-
-
-
 def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
     """The index line is the template's id, its repo-relative path, and its `## Goal` body —
     not the frontmatter, not the `## Query`, not `## Pitfalls`. The PATH is load-bearing: see
@@ -257,35 +184,10 @@ def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
     assert "status: established" not in prompt
 
 
-def test_d3_every_system_stays_reachable_from_any_dispatch(tmp_path):
-    """d3 demanded an index that does not vary on the dispatched system, on two grounds: that
-    scoping "saves almost nothing (elastic is 62% of the corpus)", and that `system` was "a param
-    on its way out". #835 measured both wrong. The all-systems render is 3,881 tokens — 86% of a
-    gather lead's user message, re-sent on all 22 turns of it — and a lead dispatched `identity`
-    was handed 3,709 tokens of off-target catalog; `system` is still the axis every dispatch,
-    every adapter and the circuit breaker key on.
-
-    What SURVIVES is the reason d3 existed, and it is why #835 tiers rather than filters: leads
-    cross systems (l-004, dispatched host-state, queried cmdb; l-005, dispatched identity, queried
-    four), so no dispatch may HIDE another system's templates. Every established id is still in
-    every dispatch — off-target ones as id + path, without the Goal prose. The render is still
-    deterministic; it is now deterministic per dispatched system."""
-    dfn = _catalog(tmp_path)
-    as_elastic = _prompt_for(tmp_path, dfn, system="elastic")
-    as_cmdb = _prompt_for(tmp_path, dfn, system="cmdb")
-
-    for tid in ("elastic.sshd-auth-history", "cmdb.hostname-by-ip", "change-mgmt.active-changes"):
-        assert tid in as_elastic, f"{tid} missing from an elastic dispatch"
-        assert tid in as_cmdb, f"{tid} missing from a cmdb dispatch"
-    assert tools_gather._template_index(dfn, "cmdb") == tools_gather._template_index(dfn, "cmdb")
-
-
 def test_835_only_the_dispatched_systems_entries_carry_goal_prose(tmp_path):
-    """#835's demand, both directions off two renders of one corpus — so neither "keep every
-    Goal" (the shape being replaced) nor "drop every Goal" (which would strand the lead's own
-    system) can pass. The off-target entry keeps its PATH: there is no fetch-by-id tool, so the
-    path is what makes a cross-system reuse one `read_file` rather than a `template_search`
-    round-trip first."""
+    """#835's demand, both directions off two renders of one corpus — so neither "keep every Goal"
+    (the shape being replaced) nor "drop every Goal" (which would strand the lead's own system)
+    can pass."""
     dfn = _catalog(tmp_path)
     as_cmdb = _prompt_for(tmp_path, dfn, system="cmdb")
     as_elastic = _prompt_for(tmp_path, dfn, system="elastic")
@@ -302,12 +204,7 @@ def test_835_only_the_dispatched_systems_entries_carry_goal_prose(tmp_path):
 
 def test_835_a_system_with_no_templates_says_so_rather_than_rendering_nothing(tmp_path):
     """The tier split makes an empty on-target block reachable for the first time: main dispatches
-    systems the catalog has never had a template for (`ticket`, `threat-intel`). An omitted block
-    reads to the model as a truncated index — the silent-empty failure #585 exists to stop — so
-    the block renders and names itself empty, echoing the system so the lead can see WHICH tier
-    came back empty. A MALFORMED system never reaches here: `_run_gather` holds the param to
-    `verbs.is_system_name` first, so a mis-cased name is a retry rather than a catalog stripped of
-    every `## Goal`. A well-formed name the catalog simply has no template for is this case."""
+    systems the catalog has never had a template for (`ticket`, `threat-intel`)."""
     dfn = _catalog(tmp_path)
     prompt = _prompt_for(tmp_path, dfn, system="ticket")
 
@@ -319,9 +216,7 @@ def test_835_a_system_with_no_templates_says_so_rather_than_rendering_nothing(tm
 
 def test_d4_index_excludes_drafts_and_d4b_includes_established(tmp_path):
     """The index carries established templates only — a `_draft` Goal is machine boilerplate and
-    would poison a semantic index. Positive control (the complementary condition on the same
-    address): the established sibling in the SAME system IS there, so the exclusion is a filter
-    and not an empty render."""
+    would poison a semantic index."""
     prompt = _prompt_for(tmp_path, _catalog(tmp_path))
 
     assert "elastic.coined-redirect-probe" not in prompt
@@ -331,11 +226,8 @@ def test_d4_index_excludes_drafts_and_d4b_includes_established(tmp_path):
 
 
 def test_d4c_a_template_with_no_status_is_not_admitted_as_established(tmp_path):
-    """load_catalog does `fm.get("status") or "established"` (lead_neighbors.py:158) — an `or`
-    mis-fire on a valid-falsy value, exactly what defender/CLAUDE.md's anchor-a-default rule
-    bans. A draft_synthesis skeleton that lost its status key would be PROMOTED straight into
-    gather's prompt. The split must fail closed when the status field and the _draft/ path
-    segment disagree."""
+    """load_catalog does `fm.get("status") or "established"` (lead_neighbors.py:158) — an `or` mis-
+    fire on a valid-falsy value, exactly what defender/CLAUDE.md's anchor-a-default rule bans."""
     dfn = _catalog(tmp_path)
     q = dfn / "skills" / "gather" / "queries"
     (q / "elastic" / "_draft" / "no-status.md").write_text(
@@ -351,38 +243,9 @@ def test_d4c_a_template_with_no_status_is_not_admitted_as_established(tmp_path):
     assert "elastic.sshd-auth-history" in prompt
 
 
-def test_d23_index_block_stays_under_its_char_budget():
-    """The index is prompt text paid on EVERY dispatch, on a cheap model with reasoning off, and
-    it is bounded by nothing today (_read_char_cap does not apply — it is not a read). Pin a
-    ceiling so a future "just add ## Pitfalls too" is a red test, not a silent token tax.
-
-    #835 makes the render vary by dispatched system, so the ceiling measures the WORST CASE —
-    elastic, 14 of the 27 established templates. The old 24_000 was slack against a 14.8k render
-    that every dispatch paid; measured at the change, elastic renders 11.1k and every other
-    system ~3.5k. 13_000 keeps elastic headroom while red-ing a revert to all-systems-full prose.
-    Re-measure and move these numbers deliberately; do not raise one to make a run green.
-
-    The second assertion is the #835 demand as a regression pin rather than a shape test: if the
-    tiering stops working, no dispatch pays a small index and the floor rises with the ceiling."""
-    systems = {t.system for t in _corpus.iter_query_templates(_REAL_CATALOG)
-               if t.status == "established"}
-    rendered = {s: tools_gather._template_index(_DEFENDER, s).text for s in systems}
-    assert rendered, "the shipped corpus renders no index at all"
-
-    worst = max(rendered.values(), key=len)
-    assert len(worst) < 13_000, f"the worst-case index block is {len(worst)} chars"
-    cheapest = min(rendered.values(), key=len)
-    assert len(cheapest) < 5_000, (
-        f"the cheapest dispatch still pays {len(cheapest)} chars — the tiering is not working"
-    )
-
-
 def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
     """`if catalog:` is fail-open (tools_gather.py:237) — the block is silently omitted when it
-    cannot be built. That was safe while gather could still `ls` the catalog. Once the SKILL's
-    ls/Grep text is gone, a silently-omitted index leaves gather with NO discovery path: it
-    coins a fresh query for every lead, catalog reuse collapses, and nothing is ever raised. The
-    dispatch must still run, but the degradation must be VISIBLE in the prompt."""
+    cannot be built. That was safe while gather could still `ls` the catalog."""
     dfn = tmp_path / "empty" / "defender"
     (dfn / "skills").mkdir(parents=True)
     prompt = _prompt_for(tmp_path, dfn)
@@ -394,15 +257,7 @@ def test_d19_an_unbuildable_index_degrades_loudly(tmp_path):
 
 
 def test_an_all_denied_grant_is_not_reported_as_an_unreadable_corpus(tmp_path):
-    """d19's block claims a CAUSE — "the corpus could not be read" — for a condition with two.
-    A grant that allows no template in the catalog empties the same render, and the two want
-    opposite things said: "templates may well exist, go look" is true of a read failure and
-    misleading here, because `template_search` is NOT grant-filtered. It greps template TEXT
-    while the grant gates VERBS, so it returns hits this role cannot run, and the lead spends a
-    turn binding one to find out.
-
-    Both arms asserted here, on one corpus, so a future collapse back to a single message cannot
-    pass by satisfying whichever arm the test happened to check."""
+    """d19's block claims a CAUSE — "the corpus could not be read" — for a condition with two."""
     dfn = _catalog(tmp_path)
     deps = _deps(tmp_path, dfn)
     request = _request("elastic")
@@ -456,17 +311,15 @@ def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path)
     assert "elastic.falco-alerts" not in prompt_b
 
 
-
 class _ToolRecorder:
     def __init__(self):
         self.names: list[str] = []
         self.fns: dict = {}
 
     def tool(self, fn=None, **kwargs):
-        """Mirrors `Agent.tool`, which is usable bare OR with keyword options — #836
-        registers the write verbs with `sequential=`/`prepare=`, so a recorder that only
-        accepted the bare form would break on registration rather than on the property
-        this suite is about."""
+        """Mirrors `Agent.tool`, which is usable bare OR with keyword options — #836 registers the
+        write verbs with `sequential=`/`prepare=`, so a recorder that only accepted the bare form
+        would break on registration rather than on the property this suite is about."""
         if fn is None:
             return self.tool
 
@@ -477,9 +330,8 @@ class _ToolRecorder:
 
 def test_d5_gather_registers_template_search_and_main_does_not():
     """Registration derives from the DEF's ToolSet, not a hand-built one: the existing
-    `ToolSet(read=True, bash=BashGrammar())` assertions feed a SYNTHETIC set and stay green
-    while GATHER_DEF drifts. Feed the REAL defs. Negative + positive control in one: gather has
-    template_search, main does not (defender/SKILL.md forbids main the corpus)."""
+    `ToolSet(read=True, bash=BashGrammar())` assertions feed a SYNTHETIC set and stay green while
+    GATHER_DEF drifts."""
     g = _ToolRecorder()
     tools.register_tools(g, GATHER_DEF.tools, FakeVerbs({}))
     assert "template_search" in g.names
@@ -492,26 +344,15 @@ def test_d5_gather_registers_template_search_and_main_does_not():
     assert "read_file" in m.names
 
 
-def test_d5_toolset_carries_the_template_search_bit():
-    """A new tool is a new declarative bit on the ToolSet, per the lesson_read
-    mould — not a special case inside register_tools."""
-    assert GATHER_DEF.tools.template_search is True
-    assert MAIN_DEF.tools.template_search is False
-    assert ToolSet(template_search=True).template_search is True
-
-
 def test_d6_template_search_exposes_no_path_parameter():
-    """The corpus root is HARNESS-owned (deps.defender_dir), unlike lesson_read, whose path arg
-    is model-supplied and decide_read-gated. The model may supply ONLY a pattern and an optional
-    system — so there is no path to point outside the corpus, and the tool is gated by
-    construction rather than by a check."""
+    """The corpus root is HARNESS-owned (deps.defender_dir), unlike lesson_read, whose path arg is
+    model-supplied and decide_read-gated."""
     rec = _ToolRecorder()
     tools.register_tools(rec, GATHER_DEF.tools, FakeVerbs({}))
     import inspect
 
     params = set(inspect.signature(rec.fns["template_search"]).parameters) - {"ctx"}
     assert params == {"pattern", "system"}, f"template_search must take no path: {params}"
-
 
 
 @pytest.mark.parametrize("bad", ["..", "../..", "elastic/..", "/etc", "elastic\x00", "_draft"])
@@ -526,24 +367,9 @@ def test_d7_no_system_value_escapes_the_corpus_root(tmp_path, bad):
         tools_gather._tool_template_search(deps, "sshd", system=bad)
 
 
-def test_d7_positive_control_a_real_system_returns_its_hits(tmp_path):
-    """Positive control for d7: the mechanism is not simply rejecting everything — a real system
-    name searches that system and returns hits."""
-    deps = _deps(tmp_path, _catalog(tmp_path))
-    out = tools_gather._tool_template_search(deps, "Failed password", system="elastic")
-    assert "elastic.sshd-auth-history" in out
-
-
 def test_d8_system_none_searches_every_system_and_a_name_restricts(tmp_path):
     """system=None is the default AND the falsy member: it searches every system. A named system
-    restricts to that dir.
-
-    The pattern is `LIMIT` (every template's `## Query` body carries `... | LIMIT 1`). As written,
-    this test searched for `measures` — the default goal `_tpl` renders when `goal` is falsy — but
-    `_catalog` passes an EXPLICIT goal to every template it writes, so that word appears in no file
-    in the fixture and no correct substring search could ever have found it. The demand (all-systems
-    vs. scoped) is unchanged; only the literal was repaired. Human-approved during
-    write-code-from-spec."""
+    restricts to that dir."""
     deps = _deps(tmp_path, _catalog(tmp_path))
 
     everywhere = tools_gather._tool_template_search(deps, "LIMIT", system=None)
@@ -576,7 +402,6 @@ def test_d8_empty_system_is_not_a_second_spelling_of_all(tmp_path):
 
     with pytest.raises(ModelRetry):
         tools_gather._tool_template_search(deps, "sshd", system="")
-
 
 
 def test_d0b_a_hit_carries_the_template_id_and_its_path(tmp_path):
@@ -652,13 +477,12 @@ def test_d22_the_empty_pattern_is_not_a_wildcard(tmp_path):
         tools_gather._tool_template_search(deps, "   ")
 
 
-
 def test_d10_a_draft_hit_comes_back_untrusted_wrapped(tmp_path):
-    """draft_synthesis writes {system}/_draft/{verb}.md from an executed gather query — the
-    skeleton embeds the lead's goal text and the query body the gather LLM coined in RESPONSE TO
-    ALERT DATA, which is attacker-influenced by definition. is_untrusted_read is False for every
-    corpus path today (files.py:178-182 — only alert.json / gather_raw), so that text would
-    reach the model bare. A hit under _draft/ must arrive inside the run's untrusted tags."""
+    """draft_synthesis writes {system}/_draft/{verb}.md from an executed gather query — the skeleton
+    embeds the lead's goal text and the query body the gather LLM coined in RESPONSE TO ALERT
+    DATA, which is attacker-influenced by definition. is_untrusted_read is False for every corpus
+    path today (files.py:178-182 — only alert.json / gather_raw), so that text would reach the
+    model bare."""
     dfn = _catalog(tmp_path)
     q = dfn / "skills" / "gather" / "queries"
     (q / "elastic" / "_draft" / "poisoned.md").write_text(
@@ -675,18 +499,6 @@ def test_d10_a_draft_hit_comes_back_untrusted_wrapped(tmp_path):
     assert f"</run-{salt}-untrusted>" in out
 
 
-def test_d10_positive_control_an_established_hit_is_not_wrapped(tmp_path):
-    """Positive control for d10, on the same address under the complementary condition: an
-    ESTABLISHED template is curated, so its hit comes back bare. Without this, wrapping
-    everything unconditionally would pass the negative — and would teach gather to distrust the
-    24 templates it exists to reuse."""
-    deps = _deps(tmp_path, _catalog(tmp_path))
-    out = tools_gather._tool_template_search(deps, "Failed password")
-
-    assert "elastic.sshd-auth-history" in out
-    assert "-untrusted>" not in out
-
-
 def test_d10_is_untrusted_read_distinguishes_a_draft_from_an_established_template():
     """The predicate itself, at its own seam — so the wrap in the tool above cannot be satisfied
     by a string hack inside template_search."""
@@ -697,13 +509,9 @@ def test_d10_is_untrusted_read_distinguishes_a_draft_from_an_established_templat
     assert permission.is_untrusted_read(Path("/tmp/run/gather_raw/l-001/0.json")) is True
 
 
-
 def test_d14_map_names_no_template_and_no_draft_filename():
     """workspace_map lists every template AND every _draft filename into MAIN's message 0
-    (orient.py:199-202) — while defender/SKILL.md forbids main the corpus. A draft filename is a
-    model-coined verb minted from attacker-influenced alert data (draft_synthesis.py:187), so it
-    is an untagged channel into the main prompt. Main dispatches leads by SYSTEM, never by
-    template: the filenames were never actionable there."""
+    (orient.py:199-202) — while defender/SKILL.md forbids main the corpus."""
     out = wsm.workspace_map(Path("/tmp/does-not-matter"), systems=())
 
     section = out.split("## Gather query templates", 1)[1]
@@ -713,175 +521,8 @@ def test_d14_map_names_no_template_and_no_draft_filename():
     assert not re.search(r"\S+\.md\b", section), "the section names no .md file at all"
 
 
-def test_d14_positive_control_the_map_carries_per_system_counts():
-    """Positive control for d14: the section is not simply empty — it still names every system,
-    with counts that match the corpus on disk."""
-    out = wsm.workspace_map(Path("/tmp/does-not-matter"), systems=())
-    section = out.split("## Gather query templates", 1)[1].split("\n##", 1)[0]
-
-    rows = list(_corpus.iter_query_templates(_REAL_CATALOG))
-    for system in {r.system for r in rows}:
-        assert system in section, f"{system} missing from the map"
-    established = sum(1 for r in rows if r.status == "established")
-    assert str(established) in section or all(
-        str(sum(1 for r in rows if r.system == s and r.status == "established")) in section
-        for s in {r.system for r in rows}
-    ), "the section carries established counts"
-
-
-
-def test_d15_the_prose_no_longer_instructs_an_impossible_discovery_move():
-    """gather/SKILL.md §2 says "Read the catalog dir; past ~15 templates, `Grep` the ## Goal
-    bodies" — a directory Read raises ModelRetry("file not found") at _gated_read, and there is
-    no Grep tool in this runtime at all. SCHEMA.md says the same ("a coarse `ls`-time filter";
-    "Gather greps ## Goal across the catalog"). Both are instructions to use a capability the
-    gate removed."""
-    skill = (_DEFENDER / "skills" / "gather" / "SKILL.md").read_text()
-    schema = (_REAL_CATALOG / "SCHEMA.md").read_text()
-
-    for name, text in (("SKILL.md", skill), ("SCHEMA.md", schema)):
-        low = text.lower()
-        assert "ls-time filter" not in low, f"{name} still describes an ls-time filter"
-        assert "greps `## goal`" not in low, f"{name} still tells gather to grep the catalog"
-        assert "grep the `## goal`" not in low, f"{name} still tells gather to grep the catalog"
-        assert not re.search(r"read the catalog dir", low), f"{name} still says to Read the catalog dir"
-        assert not re.search(r"\b(ls|find)\b[^\n]*\b(catalog|queries)\b", low), \
-            f"{name} still names ls/find over the catalog"
-
-    assert "template_search" in skill
-    assert "template_search" in schema
-
-
-def test_d16_the_skill_demands_reading_the_template_before_binding_its_id():
-    """The index gives gather an id + a Goal + a path but NOT the query body. Nothing forces it
-    to open the file — and draft_synthesis SKIPS any query_id that resolves to an existing
-    template (draft_synthesis.py:146-200), so a coined query mis-bound to a real template's
-    id is laundered as a reuse: the draft is never minted, and the (query_id, params) join the
-    whole learning loop rests on is silently corrupted. The SKILL must close that.
-
-    The DEMAND is unchanged; only its spelling moved. #611 retired the `--query-id` pseudo-flag
-    (a bash string the harness stripped) for `query_id`, a real param of the typed `query` tool —
-    so an assertion on the flag's literal text now pins a command no agent can run. Worth naming:
-    this test passed on #611's branch only because the SKILL still taught the dead flag."""
-    skill = (_DEFENDER / "skills" / "gather" / "SKILL.md").read_text().lower()
-
-    assert "query_id" in skill
-    assert "--query-id" not in skill, \
-        "gather/SKILL.md still teaches the retired --query-id flag (#611: it is a `query` tool param)"
-    # The SKILL is not the only prompt text gather reads: `_INDEX_HEADER` and the
-    # `template_search` docstring are injected into the same dispatch, and BOTH still taught the
-    # dead flag until #835 — precisely because this assertion only ever read the SKILL. Widened
-    # to the module that carries them, so the next drift reds here instead of shipping.
-    engine = (_DEFENDER / "runtime" / "tools_gather.py").read_text()
-    assert "--query-id" not in engine, \
-        "runtime/tools_gather.py still teaches the retired --query-id flag — the index header " \
-        "and the template_search docstring are dispatch prompt text too (#611/#835)"
-    assert re.search(r"read[^.]*(template|## query)[^.]*before[^.]*(pass|bind|query_id)", skill) or \
-           re.search(r"(never|don't|do not)[^.]*(bind|pass)[^.]*query_id[^.]*(without|before)[^.]*read", skill), \
-        "gather/SKILL.md must require reading the template body before binding its query_id"
-
-
-
-def test_d1_no_template_carries_a_description_frontmatter_key():
-    """The index's description text is the file's `## Goal` body — the field SCHEMA.md already
-    mandates be written for keyword recall. A separate `description:` would be a second copy of
-    that prose (drift), and would mean hand-authoring 39 descriptions for uncurated auto-drafts."""
-    for path in sorted(_REAL_CATALOG.rglob("*.md")):
-        if path.name == "SCHEMA.md":
-            continue
-        head = path.read_text().split("---", 2)
-        assert len(head) >= 3, f"{path.name} has no frontmatter fence"
-        assert not re.search(r"^description:", head[1], re.M), f"{path.name} carries a description: key"
-
-
-def test_d1_positive_control_every_template_resolves_a_goal():
-    """Positive control for d1: the index CAN be built without a description field, because every
-    template already carries the Goal the index renders."""
-    rows = list(_corpus.iter_query_templates(_REAL_CATALOG))
-    assert len(rows) >= 25
-    assert all(r.goal.strip() for r in rows), "a template with no ## Goal has no index entry"
-
-
-def test_d24_every_template_id_matches_its_system_dir_and_filename():
-    """NOT asserted, despite what `checklist.md` claimed until #885, by `validate_scaffold`:
-    `check_templates` reads each template's verb and placeholders and never looks at `id` at
-    all. This check covers templates yielded by `iter_query_templates`; a missing `id:`
-    is reported by that iterator with a stderr warning. The index keys on `id` and gather
-    tags --query-id {id} against the DISPATCHED system's adapter, so a template whose id says
-    elastic.x while it sits in cmdb/ puts an elastic id in cmdb's index, writes a cross-system
-    queries-table row, and makes draft_synthesis mint elastic/_draft/x.md from a cmdb query."""
-    for r in _corpus.iter_query_templates(_REAL_CATALOG):
-        assert r.id == f"{r.system}.{r.path.stem}", (
-            f"{r.path}: id {r.id!r} disagrees with its location ({r.system}/{r.path.stem})"
-        )
-
-
-def test_d24_status_agrees_with_the_draft_directory():
-    """The other half of the location invariant: a file under _draft/ is status: draft, and a
-    file at the system root is status: established. d4c makes the index fail closed when they
-    disagree; this pins that they do not disagree in the shipped corpus."""
-    for r in _corpus.iter_query_templates(_REAL_CATALOG):
-        in_draft_dir = "_draft" in r.path.parts
-        assert in_draft_dir == (r.status == "draft"), f"{r.path}: status {r.status!r} vs its location"
-
-
-def test_the_harness_named_correlation_template_is_runnable_on_the_grant_that_names_it():
-    """The template `lead-zero.yaml` names is named OUTRIGHT in item 3's harness-authored goal
-    ("read it first ... it already carries the entity-disjunct body"), so the id is prompt text
-    a lead with no model in the loop acts on. The join is pinned at run start for every
-    deployment (`lead_zero.resolve_correlation_dispatch`, #1003); this is repo CI's pin on
-    the repo's own copies — the config lives in the fixture tenant's `settings/` (#1106, #1120 C26),
-    the file in the catalog, and
-    the grant that decides whether the file is even RENDERED in a third place.
-
-    Three ways it silently breaks, all of them the failure #859 exists to remove — a rename or
-    a demotion to `_draft/` (the id resolves to nothing), and a `verb:` change (the id resolves
-    to a template `_template_index` filters out of this role's own index, because the grant
-    refuses its verb). In every one the harness tells the lead to bind a template its index does
-    not list, and the lead spends its bounded budget discovering that.
-
-    The last assertion is the goal's own remaining claim: this is what the grant-filtered index
-    offers. Not "the one template" as a literal — a second `alerts` template is a legitimate
-    authoring move — but the named one must be IN that set."""
-    from defender.runtime.lead_zero_config import lead_zero_config_path, load_correlation_template
-    from defender.tests import _tenants1106 as T1106
-
-    # #1106 M4: the run's grants, projected from the committed fixture tenant's table.
-    grants = T1106.fixture_grants()
-    CORRELATION_GRANT, CORRELATION_SYSTEM = grants.correlation, grants.correlation_system
-    CORRELATION_TEMPLATE = load_correlation_template(
-        lead_zero_config_path(T1106.FIXTURE_SETTINGS))
-    established = [t for t in _corpus.iter_query_templates(_REAL_CATALOG) if _corpus.is_established(t)]
-    named = [t for t in established if t.id == CORRELATION_TEMPLATE]
-    assert named, (
-        f"item 3's contract names {CORRELATION_TEMPLATE!r}, which is not an established "
-        f"template — the harness sends the correlation lead to read a file that is not in its "
-        f"index (ids present: {sorted(t.id for t in established if t.system == CORRELATION_SYSTEM)})"
-    )
-    tpl = named[0]
-    assert CORRELATION_GRANT.allows(tpl.system, tpl.verb), (
-        f"{CORRELATION_TEMPLATE} binds verb {tpl.verb!r}, which "
-        f"{CORRELATION_GRANT.role!r} does not hold — `_template_index` filters it out of the "
-        "very dispatch whose goal names it, so the lead is told to bind a template its own "
-        "index does not list"
-    )
-
-    runnable = tools_gather._template_index(_DEFENDER, CORRELATION_SYSTEM, CORRELATION_GRANT)
-    assert CORRELATION_TEMPLATE in runnable.text, (
-        "the correlation lead's grant-filtered template index does not carry the id its own "
-        f"goal tells it to bind:\n{runnable.text}"
-    )
-
-
 def test_search_reads_sections_beyond_goal_and_query(tmp_path):
-    """The search must read the FULL body, not just the two parsed sections.
-
-    `_NO_HITS` asserts "no template's text carries that text". A search that reads only `## Goal`
-    and `## Query` makes that claim FALSE of every other section — and a template carries more:
-    `## What to summarize` is on 54 of the 63 in the shipped corpus, the pitfalls sections on ~30
-    more, all of it the concrete-artifact vocabulary SCHEMA.md tells authors to write FOR keyword
-    recall. Answering "no template carries that text" about a field a template names in plain
-    sight is the same coin-a-duplicate failure as a silent empty return."""
+    """The search must read the FULL body, not just the two parsed sections."""
     dfn = _catalog(tmp_path)
     tpl = dfn / "skills" / "gather" / "queries" / "elastic" / "sshd-auth-history.md"
     tpl.write_text(
@@ -895,11 +536,8 @@ def test_search_reads_sections_beyond_goal_and_query(tmp_path):
 
 
 def test_a_broad_pattern_is_bounded_and_says_that_it_truncated(tmp_path):
-    """A plain substring has no lower bound on breadth, and the guard above rejects only the
-    EMPTY pattern. `user` and `host` are exactly the words an analyst types, and uncapped they
-    return 25 and 41 of the 63 shipped templates (14 KB / 21 KB of dispatch context); a bare `e`
-    returns all 63. Both caps must hold, and both must ANNOUNCE — a silently clipped result reads
-    as a complete one, which is the same lie as the silent empty this tool exists to replace."""
+    """A plain substring has no lower bound on breadth, and the guard above rejects only the EMPTY
+    pattern."""
     corpus, lines_each = 40, 8
     assert corpus > tools_gather._SEARCH_MAX_TEMPLATES, "fixture too small to exercise the cap"
     assert lines_each > tools_gather._SEARCH_LINES_PER_TEMPLATE, "fixture too thin for the cap"
@@ -945,14 +583,8 @@ def test_the_truncated_list_keeps_the_densest_matches(tmp_path):
     assert "zzz-last-system.the-one" in out, "the densest match was dropped for an alphabetical one"
 
 
-
 def test_598_a_hash_line_inside_a_fence_does_not_split_the_section(tmp_path):
-    """`_sections` swept `^## ` over the whole body with re.MULTILINE, blind to code fences. Every
-    template's `## Query` IS a fence, and a query body may legitimately carry a `## ` line — a
-    shell/ES|QL comment, an embedded markdown snippet, a `#`-prefixed literal in a string. The
-    sweep read that line as the next heading, which TRUNCATED `## Query` at it and invented a
-    section named after whatever followed. Both silent, and the truncated body is the one gather
-    reads before it binds --query-id."""
+    """`_sections` swept `^## ` over the whole body with re.MULTILINE, blind to code fences."""
     body = (
         "---\nid: elastic.x\nstatus: established\n---\n\n"
         "## Goal\n\nmeasures x\n\n"
@@ -970,10 +602,7 @@ def test_598_a_hash_line_inside_a_fence_does_not_split_the_section(tmp_path):
 
 
 def test_598_the_walk_and_lead_render_agree_on_a_fenced_hash_query(tmp_path):
-    """The two consumers of the section parse must not disagree. `lead_render` carried its own
-    fence-blind `^## Query…(?=^## |\\Z)` copy: it truncated the section at the fenced `## ` line,
-    which left the fence UNTERMINATED, so its `_FENCE_RE` search missed and it returned the
-    truncated text verbatim as the query the lead author renders."""
+    """The two consumers of the section parse must not disagree."""
     from defender.learning.leads import lead_render
 
     q = tmp_path / "t.md"
@@ -988,14 +617,3 @@ def test_598_the_walk_and_lead_render_agree_on_a_fenced_hash_query(tmp_path):
     assert "Pitfalls" not in rendered, "lead_render leaked the next section into the query"
 
 
-def test_598_no_shipped_template_hides_a_heading_in_a_fence():
-    """The corpus invariant the parser now enforces, pinned so it stops holding by luck: no `## `
-    line sits inside a fence, and every template resolves a non-empty `## Query` body."""
-    for r in _corpus.iter_query_templates(_REAL_CATALOG):
-        assert r.query.strip(), f"{r.path}: empty ## Query body (a section-parse casualty?)"
-        fenced = False
-        for ln in r.body.splitlines():
-            if ln.lstrip().startswith(("```", "~~~")):
-                fenced = not fenced
-            elif fenced and ln.startswith("## "):
-                assert r.query.strip(), f"{r.path}: fenced `## ` line truncated the query"

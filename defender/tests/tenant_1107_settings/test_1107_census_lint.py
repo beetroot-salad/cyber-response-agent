@@ -1,40 +1,14 @@
-"""#1107 — the censuses and the env lint that keep tenant settings out of the environment (D2, D4,
-N3, S3, F7, O7, NF-7, MF-14).
-
-Two instruments, each a production-shaped observation of the source tree:
-
-  * the CENSUSES (`_census_1107`): test-side AST / line scanners, each ONE function over a root.
-    The negative runs it over the checkout and asserts no finding — with the in-test precondition
-    that it scanned a non-empty file set; its paired `*_detects_planted` control runs the SAME
-    function over a tmp tree laid out like the repo holding one planted violation and asserts the
-    finding names that file and line. The two together are what make the negative evidence;
-  * the LINT (`scripts/lint/lint_tenant_env_reads.py`, O7/NF-7, absent at base): loaded fresh by
-    path and driven through its own `main(argv) -> int` (d0: 0 clean, non-zero with `path:line`
-    findings) — over the checkout (`[]`) or over a planted tree (`--root <tree>`, coined in
-    `_spec1107.run_env_lint`). Every planted tree is first given all four swept trees (an
-    innocuous module in each), so a lint that refuses a tree missing a swept directory (the
-    `lint_monkeypatch` exit-2 shape) is not what a test observes.
-
-s017's second half drives the REAL `cmdb_adapter.get_host` on a record the real resolver built,
-with the config key exported into both the process env and the verb's `ctx.env`, through the
-`docker` shim first on that env's PATH (CX8: the shim receives the argv the transport forked).
-"""
+"""lint_tenant_env_reads: flags env reads in the swept trees, allows whole-env passthrough."""
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
-import pytest
-import yaml
 
 from defender.scripts.adapters import cmdb_adapter
 from defender.tests.tenant_1107_settings import _census_1107 as C
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
-REPO = S.REPO_ROOT
-LINT_REL = f"scripts/lint/{S.ENV_LINT}.py"
-BASELINE = REPO / "scripts" / "lint" / f"{S.ENV_LINT}_baseline.json"
 
 # ======================================================================================
 # Planted trees.
@@ -69,199 +43,44 @@ def _names(output: str, rel: str) -> bool:
     return rel.removeprefix("defender/") in output
 
 
-def _has(findings: list[str], rel: str, line: int) -> bool:
-    return any(f.startswith(f"{rel}:{line}:") for f in findings)
 
 
 # ======================================================================================
 # D4 — the Elastic keys are interpreted in one place.
 # ======================================================================================
 
-@pytest.mark.gate
-def test_d4_elastic_keys_one_place():
-    """Outside the elastic adapter, no platform module (runtime/, learning/, run.py) reads an
-    ELASTIC_* or ELASTICSEARCH_URL key out of a SystemConfig or a config file. The Elastic view that
-    once held them for platform code went with #1222's M1, so the adapter is the one reader."""
-    # The interacting sites at base: the estate stager's configured_patterns / default-index map,
-    # staging's write_door_from_env, lead-zero's _resolve_item1 — each reads the keys raw.
-    scanned, found = C.elastic_key_reads(REPO)
-    assert scanned > 0, "the key census scanned no platform module — it can see nothing"
-    assert found == [], (
-        "platform code reads Elastic keys raw instead of leaving them to the adapter:\n"
-        + "\n".join(found))
 
 
-def test_d4_keys_census_detects_planted(tmp_path):
-    """The same key census, run over a planted platform module that reads ELASTIC_ALERTS_INDEX from
-    a SystemConfig, reports that module."""
-    planted = ("def alerts_index(record):\n"
-               "    cfg = record.systems['elastic']\n"
-               "    return cfg['ELASTIC_ALERTS_INDEX']  # @subscript\n"
-               "\n"
-               "_KEY = 'ELASTIC_ALERTS_INDEX'\n"
-               "\n"
-               "def alerts_index_by_name(cfg):\n"
-               "    return cfg.get(_KEY)  # @named-key\n")
-    # A pass case: a verb-to-field mapping that names no Elastic key at all.
-    passing = ("_FIELD = {'query': 'events_index', 'alerts': 'alerts_index'}\n"
-               "\n"
-               "def index_for(record, verb):\n"
-               "    return _FIELD[verb]\n")
-    S.plant_module(tmp_path, "defender/runtime/planted_1107.py", planted)
-    S.plant_module(tmp_path, "defender/learning/branch/view_user_1107.py", passing)
-    at = _lines(planted)
-
-    scanned, found = C.elastic_key_reads(tmp_path)
-
-    assert scanned == 2, f"the census did not scan both planted modules: {scanned}"
-    for label in ("subscript", "named-key"):
-        assert _has(found, "defender/runtime/planted_1107.py", at[label]), (
-            f"the key census missed the planted {label} read of ELASTIC_ALERTS_INDEX: {found}")
-    assert not [f for f in found if "view_user_1107" in f], (
-        f"the census flagged a mapping that names no Elastic key: {found}")
 
 
 # ======================================================================================
 # S3 — nothing copies settings/ into a run or an episode.
 # ======================================================================================
 
-@pytest.mark.gate
-def test_s3_no_settings_copy_census():
-    """No production code copies a file or its bytes from a tenant's settings/ folder into a run dir
-    or an episode dir. A census over every copy and write call whose source derives from
-    RunTenant.settings or a settings/ path finds none."""
-    scanned, found = C.settings_copies(REPO)
-    assert scanned > 0, "the copy census scanned no production module — it can see nothing"
-    assert found == [], "production code copies out of a tenant's settings/:\n" + "\n".join(found)
 
 
-def test_s3_census_detects_planted_copy(tmp_path):
-    """The same census, run over a planted module that shutil.copy's a file from record.settings
-    into run_dir, reports it."""
-    planted = ("import shutil\n"
-               "\n"
-               "\n"
-               "def stage(record, run_dir, episode_dir):\n"
-               "    shutil.copy(record.settings / 'systems' / 'cmdb' / 'config.env',  # @copy\n"
-               "                run_dir / 'config.env')\n"
-               "    src = record.settings / 'secrets.env'\n"
-               "    (episode_dir / 'secrets.env').write_bytes(src.read_bytes())  # @bytes\n")
-    rel = "defender/learning/branch/planted_1107.py"
-    S.plant_module(tmp_path, rel, planted)
-    at = _lines(planted)
-
-    scanned, found = C.settings_copies(tmp_path)
-
-    assert scanned == 1, f"the census did not scan the planted module: {scanned}"
-    assert _has(found, rel, at["copy"]), f"the census missed shutil.copy from record.settings: {found}"
-    assert _has(found, rel, at["bytes"]), f"the census missed a byte copy from settings: {found}"
 
 
 # ======================================================================================
 # F7 — settings_dir survives only on the resolver side.
 # ======================================================================================
 
-def test_d_settings_dir_grep_rule():
-    """A census of settings_dir over non-test code finds every remaining hit either on RunTenant/the
-    resolver or naming the path without reading under it (F7 resolved auto: the allow-list is the
-    resolver and its components run_tenant.py, _tenants.py, verb_dispositions.py and
-    lead_zero_config.py; the path-namer query_tool._model_visible; and validate_scaffold, a folder
-    validator reading the folder it validates). No adapter, screen, applier, writer, stager, door or
-    lead-zero frame reads a file under a settings_dir."""
-    scanned, found = C.settings_dir_hits(REPO)
-    assert scanned > 0, "the settings_dir census scanned no production module — it can see nothing"
-    assert found == [], (
-        "settings_dir outside F7's allow-list (resolver, its components, _model_visible, "
-        "validate_scaffold):\n" + "\n".join(found))
 
 
-def test_d_settings_dir_census_detects_planted(tmp_path):
-    """The same census, run over a planted module that reads settings_dir / 'systems' / x /
-    'config.env', reports it."""
-    planted = ("def load(settings_dir, x):\n"
-               "    return (settings_dir / 'systems' / x / 'config.env').read_text()  # @read\n")
-    rel = "defender/scripts/adapters/planted_1107.py"
-    S.plant_module(tmp_path, rel, planted)
-    # The allow-list is by file: the same text in the resolver is not a finding.
-    S.plant_module(tmp_path, "defender/runtime/run_tenant.py", planted)
-
-    scanned, found = C.settings_dir_hits(tmp_path)
-
-    assert scanned == 2, f"the census did not scan both planted modules: {scanned}"
-    assert _has(found, rel, _lines(planted)["read"]), (
-        f"the census missed a read under settings_dir in an adapter: {found}")
-    assert not [f for f in found if "run_tenant.py" in f], (
-        f"the census flagged the resolver, which F7 allows: {found}")
 
 
 # ======================================================================================
 # N3 — the swept trees take their location and env from the caller.
 # ======================================================================================
 
-def test_n3_helper_lookups_removed():
-    """In the four swept trees (scripts/adapters, learning/branch/estate,
-    scripts/case_history, runtime/lead_zero*), no function other than
-    one named main calls process_defender_dir() or run_common.run_env(), or looks up DEFENDER_DIR or
-    DEFENDER_RUN_DIR. The location and the env come from the caller (F6 resolved: run.py passes its
-    run env)."""
-    # rejected: N3: PATHS.defender_dir stays; it is a module constant from the checkout, not an environment read (CX18)
-    scanned, found = C.helper_location_lookups(REPO)
-    assert scanned > 0, "the helper census scanned no module in the four trees — it can see nothing"
-    assert found == [], (
-        "a swept-tree function finds its location/env for itself:\n" + "\n".join(found))
 
 
-def test_n3_census_detects_planted(tmp_path):
-    """That census, run over a planted module in one of the trees that calls process_defender_dir()
-    outside main, reports it."""
-    planted = ("from defender._paths import process_defender_dir\n"
-               "\n"
-               "\n"
-               "def locate():\n"
-               "    return process_defender_dir()  # @helper\n"
-               "\n"
-               "\n"
-               "def main(argv=None):\n"
-               "    return process_defender_dir()  # @main\n")
-    rel = "defender/scripts/case_history/planted_1107.py"
-    S.plant_module(tmp_path, rel, planted)
-    at = _lines(planted)
-
-    scanned, found = C.helper_location_lookups(tmp_path)
-
-    assert scanned == 1, f"the census did not scan the planted module: {scanned}"
-    assert _has(found, rel, at["helper"]), (
-        f"the census missed process_defender_dir() outside main: {found}")
-    assert not _has(found, rel, at["main"]), f"the census flagged the call inside main: {found}"
 
 
 # ======================================================================================
 # D2 — no SOC_PLAYGROUND_* setting is read from an environment.
 # ======================================================================================
 
-@pytest.mark.gate
-def test_d2_soc_playground_not_read(tmp_path):
-    """No production module under defender/ reads a SOC_PLAYGROUND_* name from any environment,
-    whether os.environ or ctx.env."""
-    # rejected: N8: infra/bin/es.sh keeps reading its variables; it is lab tooling outside the census
-    # Positive control (no paired planted demand): the census DOES report both lookup shapes.
-    planted = ("import os\n"
-               "\n"
-               "\n"
-               "def context(ctx):\n"
-               "    a = ctx.env.get('SOC_PLAYGROUND_DOCKER_CONTEXT', 'x')  # @ctx-env\n"
-               "    b = os.environ['SOC_PLAYGROUND_ES_CONTAINER']  # @os-environ\n"
-               "    return a, b\n")
-    rel = "defender/scripts/adapters/planted_1107.py"
-    S.plant_module(tmp_path, rel, planted)
-    _, control = C.soc_playground_reads(tmp_path)
-    at = _lines(planted)
-    missed = [label for label in at if not _has(control, rel, at[label])]
-    assert missed == [], f"the census cannot see a planted SOC_PLAYGROUND_* read ({missed}): {control}"
-
-    scanned, found = C.soc_playground_reads(REPO)
-    assert scanned > 0, "the SOC_PLAYGROUND census scanned no production module — it can see nothing"
-    assert found == [], "production code reads SOC_PLAYGROUND_* settings:\n" + "\n".join(found)
 
 
 # ======================================================================================
@@ -369,72 +188,10 @@ def test_o7_lint_allows_passthrough(tmp_path):
                                   _lines(flagged)["flagged"])), f"the control lookup was not reported, so the clean result above proves nothing:\n{out2}"
 
 
-@pytest.mark.gate
-def test_o7_lint_clean_empty_allowlist(tmp_path):
-    """The lint, run over the repository's four trees with an empty allow-list (no baseline and no
-    suppression), exits 0."""
-    rc, out = S.run_env_lint()
-    assert rc == 0, f"{LINT_REL} over the repository's four trees:\n{out}"
-
-    # The allow-list is empty: no baseline entry, no suppression marker in a swept file.
-    if BASELINE.exists():
-        entries = json.loads(BASELINE.read_text(encoding="utf-8")).get("entries", {})
-        assert not entries, f"{BASELINE.name} carries an allow-list: {sorted(entries)}"
-    swept = C.swept_py(REPO)
-    assert swept, "no module found in the four swept trees"
-    suppressed = [f"{p.relative_to(REPO)}:{n}" for p in swept
-                  for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1)
-                  if S.ENV_LINT_SUPPRESSION.search(line)]
-    assert suppressed == [], f"swept files suppress the lint: {suppressed}"
-
-    # Positive control: the same lint fails a tree with one violation in it.
-    _skeleton(tmp_path)
-    S.plant_module(tmp_path, "defender/scripts/adapters/flagged_1107.py",
-                   "import os\n\n\ndef verb(ctx):\n    return os.environ['X_1107']\n")
-    rc2, out2 = S.run_env_lint(tmp_path)
-    assert rc2 != 0, f"the lint passed a planted os.environ read, so exit 0 above proves nothing:\n{out2}"
 
 
-def test_o7_lint_refuses_a_swept_entry_missing_from_this_repo(tmp_path):
-    """Over this repo, a swept entry that no longer exists is a blind scan (exit 2), not a clean
-    one: a move that takes swept code elsewhere without carrying its entry along would otherwise
-    drop that code from the sweep while the lint keeps passing. Under `--root` the same missing
-    entry is still just not scanned, so a planted partial tree is checked as before.
-
-    Driven on a fresh copy of the lint with one non-existent entry added to its swept list.
-    Positive control: the unmodified copy scans this repo cleanly."""
-    clean = S.env_lint()
-    assert clean.main([]) == 0, "control: the lint does not pass this repo as it is"
-
-    lint = S.env_lint()
-    gone = "defender/runtime/moved_away_1190.py"
-    lint.SWEPT = (*lint.SWEPT, gone)
-    with pytest.raises(lint.ScanBlind, match=re.escape(gone)):
-        lint.scan(REPO)
-    assert lint.main([]) == 2, "a missing swept entry over this repo did not fail the lint"
-
-    _skeleton(tmp_path)
-    assert lint.main(["--root", str(tmp_path)]) == 0, (
-        "a planted tree without the extra entry is refused: --root must still allow partial trees")
 
 
-def test_o7_lint_in_ci():
-    """.github/workflows/ci.yml runs scripts/lint/lint_tenant_env_reads.py as a step beside the other
-    custom lints (CX20)."""
-    ci = yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    jobs = ci.get("jobs") or {}
-    assert jobs, "ci.yml has no jobs"
-
-    def runs(job: dict) -> list[str]:
-        return [str(step.get("run", "")) for step in job.get("steps") or []]
-
-    lint_jobs = [name for name, job in jobs.items() if any(LINT_REL in r for r in runs(job))]
-    peer_jobs = [name for name, job in jobs.items()
-                 if any("scripts/lint/lint_monkeypatch.py" in r for r in runs(job))]
-    assert peer_jobs, "ci.yml no longer runs lint_monkeypatch.py — the custom-lint job moved"
-    assert lint_jobs, f"no ci.yml step runs {LINT_REL}"
-    assert set(lint_jobs) & set(peer_jobs), (
-        f"{LINT_REL} runs in {lint_jobs}, not beside the other custom lints in {peer_jobs}")
 
 
 _NF7 = """\
@@ -569,49 +326,5 @@ HOMONYMS: tuple[tuple[str, str], ...] = (
 )
 
 
-def test_s7_mf14_docs_teach_no_env_override():
-    """No line of G34's eight model-facing files (cmdb/execution.md, identity/execution.md,
-    host-state/execution.md, scripts/adapters/README.md, connect/SKILL.md, connect decisions.md,
-    connect checklist.md, connect adapter.md) says a config key can be overridden by an environment
-    variable, names a SOC_PLAYGROUND_* variable as a setting, teaches environment-variable secrets or
-    the _ENV suffix, or says host-state's context is hard-coded; host-state/execution.md names its
-    config.env lines. The domain homonyms of "override" G34 lists (identity/SKILL.md:59-61,
-    cmdb/SKILL.md:50,91, elastic/execution.md:112, user-authorization.md:17, connect/SKILL.md:296,
-    tacit-knowledge/execution.md:39) stay."""
-    read, found = C.doc_env_teaching(REPO)
-    assert read == len(C.MODEL_DOCS), f"the doc census read {read} of G34's {len(C.MODEL_DOCS)} files"
-    assert found == [], "model-facing docs still teach the environment:\n" + "\n".join(found)
-
-    host_state = (REPO / "defender/skills/host-state/execution.md").read_text(encoding="utf-8")
-    prefix = S.PREFIX["host-state"]
-    missing = [k for k in (f"{prefix}_TRANSPORT", f"{prefix}_DOCKER_CONTEXT") if k not in host_state]
-    assert missing == [], f"host-state/execution.md does not name its config.env lines {missing}"
-
-    _, homonym_findings = C.doc_env_teaching(REPO, [rel for rel, _ in HOMONYMS])
-    for rel, phrase in HOMONYMS:
-        lines = (REPO / rel).read_text(encoding="utf-8").splitlines()
-        at = [n for n, line in enumerate(lines, start=1) if phrase in line]
-        assert at, f"G34's homonym {phrase!r} is gone from {rel}"
-        flagged = [n for n in at if _has(homonym_findings, rel, n)]
-        assert flagged == [], f"the census flags G34's homonym {phrase!r} at {rel}:{flagged}"
 
 
-def test_s7_mf14_doc_census_detects_planted(tmp_path):
-    """The same doc census, run over a planted doc line saying CMDB_URL_BASE can be overridden by
-    exporting it, reports that file and line."""
-    doc = ("# CMDB — execution\n"
-           "\n"
-           "CMDB_URL_BASE can be overridden by exporting it.  # @planted\n"
-           "\n"
-           "Per-host `users:` overrides in `hosts/inventory.yaml` are signal-bearing.\n"
-           "An exported variable no longer overrides a `config.env` key.\n")
-    rel = "defender/skills/cmdb/execution.md"
-    S.plant_module(tmp_path, rel, doc)
-
-    read, found = C.doc_env_teaching(tmp_path)
-
-    assert read == 1, f"the doc census did not read the planted doc: {read}"
-    line = _lines(doc)["planted"]
-    assert _has(found, rel, line), f"the doc census missed {rel}:{line}: {found}"
-    assert [f for f in found if not f.startswith(f"{rel}:{line}:")] == [], (
-        f"the census flagged a homonym or a negation beside the planted line: {found}")

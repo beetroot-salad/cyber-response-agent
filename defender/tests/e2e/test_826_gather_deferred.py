@@ -117,16 +117,7 @@ def _run(root: Path, *, verbs, turns: list[Turn], run_id: str, tmp_path: Path,
 
 def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     """THE DEFECT (item 1): `_run_gather`'s terminal arms left the gather session ending on an
-    unanswered tool call with `truncated_by` UNSET. `set_truncated_by` had exactly one
-    production call site — `driver._flush_run_end`, on the MAIN session — so no reader of the
-    session store could tell a lead that was CUT OFF from one that finished, and
-    `GatherDeadEnd` made a fourth terminator with the same gap.
-
-    Driven at the seam so all four arms are reachable without manufacturing a 40-request
-    overrun: three raise out of the gather agent; the dead end (since #987 a tool result, not
-    an exception) closes the lead's door and returns. Each must name a DISTINCT reason — a
-    single "truncated" flag would answer "was this cut off" and lose "by what", which is the
-    question a reader comparing leads is actually asking."""
+    unanswered tool call with `truncated_by` UNSET."""
     stamped: list[tuple[str, str]] = []
 
     def _deps(run_dir: Path):  # noqa: ANN202
@@ -220,10 +211,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
 def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(tmp_path):
     """The whole chain, on a real store: the composition root opens a session per gather agent
     and owns the stamp, so a reader joining `session` rows can separate the lead that was cut
-    off from the lead that finished — the discrimination item 1 says does not exist.
-
-    Two leads, one run: the first loops itself into the repeat guard's dead end, the second
-    measures its lead and stops. One `truncated_by`, one NULL."""
+    off from the lead that finished — the discrimination item 1 says does not exist."""
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='d826-store')
     rec = VerbRecorder()
     main = ReplayFn([
@@ -268,13 +256,7 @@ class _UnstampableStore:
 
 def test_a_broken_store_cannot_turn_a_lost_terminator_into_a_lost_lead(tmp_path):
     """The stamp is best-effort, for `_flush_run_end`'s reason: the store may be exactly what
-    ended this lead. A stamp that RAISED would replace a missing session row with a missing
-    gather summary — trading the smaller loss for the larger one — and on the two run-level
-    arms it would replace the kill itself, since the stamp runs in a `finally`.
-
-    Driven against a real run whose store refuses only `set_truncated_by`: the write is
-    attempted (a lost terminator must be a failed write, not a skipped one), and the lead's
-    summary survives it."""
+    ended this lead."""
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='d826-nostamp')
     rec = VerbRecorder()
     main = ReplayFn([
@@ -306,14 +288,7 @@ def test_a_broken_store_cannot_turn_a_lost_terminator_into_a_lost_lead(tmp_path)
 
 
 def test_both_writers_of_the_column_draw_on_one_vocabulary(tmp_path):
-    """One column, one vocabulary — structurally, not by agreement. `truncated_by` now has two
-    writers (the run-end flush on the MAIN session, the terminator stamp on a lead's), and both
-    take their values from `session_store`, which owns the column. A reader joining `session`
-    rows across both kinds of session asks "was this cut off, and by what" once.
-
-    Driven rather than grepped: a real run whose MAIN session is cut off by the store and whose
-    GATHER session is cut off by the repeat guard, with both stamped values checked against the
-    one closed set."""
+    """One column, one vocabulary — structurally, not by agreement."""
     assert len(set(session_store.TRUNCATED_BY_VALUES)) == len(session_store.TRUNCATED_BY_VALUES)
 
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='d826-vocab')
@@ -377,13 +352,7 @@ def _bad_args(params: dict) -> Turn:
 
 def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_path):
     """THE DEFECT (item 4): a repeat loop the argument schema turned back reached no guard at
-    all. It was bounded only by `DEFAULT_TOOL_RETRIES = 10`, whose exhaustion raised
-    `UnexpectedModelBehavior`, was caught at `_run_gather`, and returned the SAME "Treat this
-    lead as incomplete" idiom — with none of the repeat naming and no trip row. A second,
-    silent terminator.
-
-    It is neither silent nor unbounded now: the lead stops at the threshold, main is told what
-    repeated, and the table carries a row that says so."""
+    all."""
     rec = VerbRecorder()
     res = _run(
         tmp_path / "run", tmp_path=tmp_path, run_id="d826-schema",

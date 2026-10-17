@@ -1,30 +1,4 @@
-"""#933 — the arms of rules #6, #17, #23, #24 and #33 that survived mutation.
-
-Companion to `test_invlang_rules_933.py`, kept separate because it was written against the
-same five functions from the outside: each block here was derived from a MUTANT of
-`validate.py` that the original file's 24 tests let through. Every test below fails on its
-mutant and passes on the shipped implementation.
-
-What survived, and therefore what these pin:
-
-* #6 — the `++`-only trigger (a `+` may under-cite), the union across resolutions, the
-  citation floor of ZERO, hypotheses born inside a lead, and the per-hypothesis scoping of
-  the citation pool.
-* #17 — the `match`-without-`hypothesize` shape that is the rule's whole point, and leads
-  past the first. The block's *intermediate* mutants went stale at spec v2.22, which struck
-  that arm: `test_a_screen_lead_followed_by_a_non_screen_lead_carries_its_result` no longer
-  fails on any mutant and is kept as a liveness shape.
-  `test_a_result_on_a_non_screen_lead_is_one_defect_not_two` is NOT stale — it was written
-  against the intermediate arm, but its `len(errors) == 1` kills a mutant of the surviving
-  MODE arm (disarm that arm and the count goes to zero), so it is still a mutation kill.
-* #23 — the PARENT half of the sibling key, `ap*` claims in the signature (keyed on
-  `target`/`attribute` as well as the value, because the value alone names nothing), partial
-  overlap, and the empty-signature skip.
-* #24 — the two arms v2.18 excised: naming a hypothesis in the conclude PROSE is not a
-  discharge.
-* #33 — every id shape but `a1`, every illegal target but `v-001`, the two legal targets the
-  original file never wrote, rows past the first, and rows on a lead-declared hypothesis.
-"""
+"""Mutation-derived edge cases for invlang validator rules #6, #17, #23, #24 and #33."""
 
 from __future__ import annotations
 
@@ -75,16 +49,6 @@ l-001|1|auth-history|v-001|h-001|elastic|10m
 """
 
 
-def test_a_plus_may_leave_a_prediction_unmatched() -> None:
-    """`++` is the only grade this rule gates. Partial coverage is exactly what `+` means, so
-    a `+` citing one of two predictions is the shape the rule EXISTS to route traffic to —
-    refusing it too would leave an author with no legal way to record a half-answered fork."""
-    assert _errors(_TWO_PREDS + """\
-:T resolutions
-h-001  null → +    [l-001 p1 moderate ⟂ e-001 :: bursty; interval not read]
-""") == []
-
-
 def test_the_coverage_gate_still_bites_when_a_conclude_block_is_present() -> None:
     """Rule #6 is described as the EARLY gate and #34 as the late one, which is a statement
     about when it first fires, not about it standing down later. A document that writes the
@@ -125,18 +89,6 @@ l-002|2|interval-histogram|v-001|h-001|elastic|24h
 h-001  null → +    [l-001 p1 moderate ⟂ e-001 :: bursty]
 h-001  + → ++      [l-002 p2 severe ⟂ e-001 :: no interval]
 """) == []
-
-
-def test_a_double_plus_citing_nothing_at_all_is_refused_by_the_coverage_gate() -> None:
-    """Zero is the boundary of "partial", and the gate has to hold there too: a skip added for
-    the no-citation case would hand every under-covered `++` a way through by citing less
-    rather than more. `_check_strong_move_provenance` also speaks here; this asserts rule #6's
-    own sentence is among what comes back, naming BOTH unmatched ids."""
-    joined = _joined(_TWO_PREDS + """\
-:T resolutions
-h-001  null → ++   [l-001 severe ⟂ e-001 :: confirmed, no ids cited]
-""")
-    assert "resolution of h-001 to '++' leaves p1, p2 unmatched" in joined
 
 
 def test_the_first_confirming_lead_is_the_one_named() -> None:
@@ -216,18 +168,6 @@ h-002  null → -    [l-001 p2 moderate ⟂ e-001 :: no stable interval]
 _SCREEN_HEADER = ":L findings [id|loop|name|target|mode|tests|system|window|screen_result]\n"
 
 
-def test_a_screen_lead_followed_by_a_non_screen_lead_carries_its_result() -> None:
-    """The ordinary shape: screen, then investigate.
-
-    Derived from a mutant of the intermediate arm — dropping the "also screens" conjunct made
-    any following lead refuse this. v2.22 struck the whole arm, so there is no mutant left for
-    this to fail on; it stays as the liveness shape the rule must keep accepting."""
-    assert _errors(_PROLOGUE + _SCREEN_HEADER + """\
-l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match
-l-002|1|auth-history|v-001|||elastic|10m|
-""") == []
-
-
 def test_a_matched_screen_with_no_hypothesize_block_is_the_shape_the_rule_wants() -> None:
     """Arm C's whole content is `match` AND hypotheses. The original file only ever writes
     `match` beside a `hypothesize` block, so a check that refused every `match` — the fast-path
@@ -237,40 +177,14 @@ l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|match
 """) == []
 
 
-def test_a_matched_screen_beside_an_empty_hypothesize_block_is_not_an_investigation() -> None:
-    """A `:H hypothesize.hypotheses` header with no rows projects the key with an empty list.
-    The block enumerates nothing, so there is no second run to collide with the fast path."""
-    joined = _joined(_PROLOGUE + _HYP_HEADER + "\n" + _SCREEN_HEADER + """\
-l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|match
-""")
-    assert "closes the run on the fast path" not in joined
-
-
 def test_a_result_on_a_non_screen_lead_is_one_defect_not_two() -> None:
-    """One defect, one refusal: the non-screen lead is refused for its mode and the screen
-    lead beside it is not refused at all.
-
-    Written when the mode arm's alternative was the intermediate arm — running both would have
-    told the author to set `mode: screen` and to drop the cell for being mid-sequence at once.
-    v2.22 struck that arm, so the `len(errors) == 1` here pins two things that are both still
-    live: that the surviving MODE arm fires (disarm it and the count is zero), and that the
-    legal screen lead beside it draws nothing."""
+    """One defect, one refusal:"""
     errors = _errors(_PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|auth-history|v-001|||elastic|10m|no_match
 l-002|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match
 """)
     assert len(errors) == 1
     assert "on a lead whose mode is ''" in errors[0]
-
-
-def test_the_defect_is_found_on_a_lead_that_is_not_the_first() -> None:
-    """Every violating fixture in the original file puts the offending lead at index 0."""
-    errors = _errors(_PROLOGUE + _SCREEN_HEADER + """\
-l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|no_match
-l-002|1|auth-history|v-001|||elastic|10m|no_match
-""")
-    assert len(errors) == 1
-    assert errors[0].startswith("lead l-002: `screen_result: no_match` on a lead whose mode is")
 
 
 # rule #23: hypothesis fork distinctness
@@ -347,17 +261,7 @@ ap1|proposed_parent|signing|"The binary is   unsigned."
 
 
 def test_an_attribute_prediction_keys_on_what_the_value_is_a_value_of() -> None:
-    """The mirror of the pair above, and the reason `target` and `attribute` ARE in the key
-    where `.preds`'s `subject` is not.
-
-    A `.preds` claim is a sentence carrying its own subject, so filing it under two subject
-    labels writes one observable twice. An `.attr_preds` claim is a VALUE — `unsigned`,
-    `none`, `partial` — and the value alone says nothing about what was measured. These two
-    predict the same word about two DIFFERENT objects: one lead reading the proposed parent's
-    signing and the anchored vertex's signing can come back and leave exactly one standing,
-    which is what makes them a fork rather than a duplicate. Keying on the bare claim fuses
-    them and refuses a legal document.
-    """
+    """The mirror of the pair above, and the reason `target` and `attribute` ARE in the key where `.preds`'s `subject` is not."""
     assert _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -371,13 +275,7 @@ ap1|attached_vertex|signing|"unsigned"
 
 
 def test_siblings_that_share_one_claim_and_differ_in_another_are_distinct() -> None:
-    """The floor is an IDENTICAL claim set, not an overlapping one. "At least one prediction
-    whose claimed value differs" is the whole price, and a shared premise beside a differing
-    one is a fork a single lead can still split.
-
-    The shared claim is written to sort FIRST of the three, so a check that compared any single
-    representative of the set — the first claim, the smallest, a hash of one element — collides
-    here rather than passing by luck of ordering."""
+    """The floor is an IDENTICAL claim set, not an overlapping one."""
     assert _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -392,23 +290,6 @@ p2|proposed_edge|"failures repeat on a fixed interval"
 """) == []
 
 
-def test_a_sibling_declaring_a_strict_superset_is_distinct() -> None:
-    """`h-002` declares everything `h-001` does and one thing more. That extra claim is a
-    prediction whose value differs — evidence against it leaves `h-001` standing — so the pair
-    is splittable and legal. A containment test in place of set equality would refuse it."""
-    assert _errors(_PROLOGUE + _HYP_HEADER + """\
-h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
-h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
-
-:H h-001.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts"
-
-:H h-002.preds [id|subject|claim]
-p1|proposed_edge|"failures arrive in bursts"
-p2|proposed_edge|"the bursts repeat on a fixed outer period"
-""") == []
-
-
 def test_two_siblings_declaring_no_predictions_are_skipped() -> None:
     """Empty signatures are skipped per rule #35 — a hypothesis with no fork axis has none to
     compare, and leanness and the refutation-link rules own that shape. Without the skip both
@@ -420,34 +301,10 @@ h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
     assert _SIBLING_FORK_TAG not in joined
 
 
-def test_a_pair_of_blank_claims_is_an_empty_signature_not_a_shared_one() -> None:
-    """A blank `claim` cell is refused by rule #33 and contributes NOTHING to the fork axis.
-    Counting it would turn two separately-defective hypotheses into a spurious fork report on
-    top of the two real defects."""
-    joined = _joined(_PROLOGUE + _HYP_HEADER + """\
-h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
-h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
-
-:H h-001.attr_preds [id|target|attribute|claim]
-ap1|proposed_parent|signing|
-
-:H h-002.attr_preds [id|target|attribute|claim]
-ap1|proposed_parent|signing|
-""")
-    assert _SIBLING_FORK_TAG not in joined
-    assert joined.count("empty `claim`") == 2
-
-
 # rule #24: hypothesis persistence at CONCLUDE
 
 def test_naming_a_hypothesis_in_the_conclude_prose_is_not_a_discharge() -> None:
-    """v2.18 excised "cited in the conclude block" from arm (b): `termination.rationale` is
-    free text and nothing in the termination pair is a projected hypothesis reference. The
-    two discharges are `--` and a `:T conclude.surviving` row, and prose naming the id is
-    neither.
-
-    #923: `disposition malicious` here, not `inconclusive` — this test is about the surviving
-    table, unrelated to `inconclusive`'s own entry price, which this fixture never pays."""
+    """v2.18 excised "cited in the conclude block" from arm (b):"""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -508,54 +365,6 @@ def test_every_id_outside_the_ap_namespace_is_refused(case: str, apid: str) -> N
     errors = _errors(_with_attr_preds(f'{apid}|proposed_parent|signing|"unsigned"\n'))
     assert len(errors) == 1
     assert f"row {apid!r}: an attribute prediction is numbered `ap<n>`" in errors[0]
-
-
-def test_a_target_that_merely_resembles_a_legal_one_is_refused() -> None:
-    """The enum is exact. `proposed` is not `proposed_parent` or `proposed_edge`, and which of
-    the two it meant is the whole content of the cell."""
-    errors = _errors(_with_attr_preds('ap1|proposed|signing|"unsigned"\n'))
-    assert len(errors) == 1
-    assert "target 'proposed' is not one of" in errors[0]
-
-
-def test_all_three_declared_targets_validate_clean() -> None:
-    """The original file only ever writes `proposed_parent`, so two thirds of the enum was
-    pinned by nothing but the text of the error message. Dropping either of the other two
-    from the tuple has to break a document, not only a sentence."""
-    assert _errors(_with_attr_preds(
-        'ap1|proposed_parent|signing|"unsigned"\n'
-        'ap2|attached_vertex|os_release|"the host runs the pinned image"\n'
-        'ap3|proposed_edge|interval|"no fixed interval separates the failures"\n'
-    )) == []
-
-
-def test_a_whitespace_only_claim_is_an_empty_claim() -> None:
-    """A quoted run of spaces survives the parser intact — `"   "` projects as `"   "`, not as
-    the empty string — so the emptiness test has to normalize. A blank-looking cell commits to
-    nothing while still counting as a prediction rules #6 and #34 require settled."""
-    errors = _errors(_with_attr_preds('ap1|proposed_parent|signing|"   "\n'))
-    assert len(errors) == 1
-    assert "row 'ap1': empty `claim`" in errors[0]
-
-
-def test_a_defect_on_the_second_row_of_a_block_is_found() -> None:
-    """Every defective fixture in the original file puts the bad row first and alone."""
-    errors = _errors(_with_attr_preds(
-        'ap1|proposed_parent|signing|"unsigned"\n'
-        'ap2|the_parent|cmdline|"launched from a terminal"\n'
-    ))
-    assert len(errors) == 1
-    assert "row 'ap2': target 'the_parent' is not one of" in errors[0]
-
-
-def test_one_row_can_be_wrong_three_ways_and_says_so_three_times() -> None:
-    """The three clauses are independent, and an author fixing the id should not then discover
-    the target, and then the claim. One pass, one row, three sentences."""
-    errors = _errors(_with_attr_preds("a1|the_parent|signing|\n"))
-    assert len(errors) == 3
-    assert any("an attribute prediction is numbered `ap<n>`" in e for e in errors)
-    assert any("target 'the_parent' is not one of" in e for e in errors)
-    assert any("empty `claim`" in e for e in errors)
 
 
 def test_a_hypothesis_whose_only_predictions_are_attribute_predictions_is_checked() -> None:

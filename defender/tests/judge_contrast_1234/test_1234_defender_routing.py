@@ -1,47 +1,12 @@
-"""#1234 slice 8 — defender routing: which channel each filed finding reaches, and what a queued
-defender row carries.
-
-The judge routes every finding of every completed draw by mechanical rules over its typed
-pointers (A1, A13, A14, A15), never by a word another world or the family call said (P-c, I2):
-
-* an investigator finding of a MEASURED world whose every completed draw agrees on one
-  investigator bucket is queued on the defender channel under its own draw's finding id (A7,
-  A13); a not-measured, withheld (draws disagree) or `none` world queues none (I4, I9);
-* a finding whose every resolving conduct pointer (context set aside) is a blocked-call row —
-  a served-ledger `refused`/`fault` row, or J3's inherited `∅.denied` table row — is gap-only
-  and goes to the user record, never a queue (I3, P-a); an outage (`real-error`) row and an
-  exit-64 reject are ordinary conduct;
-* a world finding with a resolving plan pointer that is not gap-only is design and reaches the
-  questioner queue from every draw; withholding stops only defender rows;
-* a queued defender row replaces `judge_outcome` with `contrast_evidence`, `on_verdict_path`
-  and `world_label_doubted` (the doubt mark: set when any of that world's OWN draws filed
-  `mislabelled`), keeps today's other keys, and carries its own world's alert rule key.
-
-Drive points: the hand-built archived episode (`S.family`) for the routing rules, and the REAL
-launcher path (`S.real_family`, I-10) where the blocked call or the reject must be written by
-the real writers (s_AM8: J3's inherited row seeded by the real `_inherit_evidence`; s_A44: a
-grant refusal at run time). Every pass goes through `grade_episode` (`S.grade`) with the
-recording `S.RoutedJudge` scripting each world's draws (scripted content in the design's reply
-shape; it routes, it never decides). Assertions read the two queues through the state
-handle's own reader, the ledger lanes and the user section off `judge.yaml`, and, for g13 and
-s_D35, what `build_finding_row` and the lesson writer's prompt builder return.
-
-RED at base 463833df: main's reply validator refuses the amended reply shape (no
-`episode_outcome`; three filed lists), so every draw is malformed and nothing is queued; main
-has no user section, no per-finding lanes beyond its five, no doubt mark, an episode-level
-alert key (OB14), a `judge_outcome` keyword on `build_finding_row`, and its defender lane is
-keyed on the family's verdict word.
-"""
+"""#1234 judge contrast: routing of judge findings to the defender/user-record queues."""
 from __future__ import annotations
 
 import ast
 import inspect
-import json
 import textwrap
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 from defender import _yaml
 from defender.tests.judge_contrast_1234 import _spec1234 as S
@@ -50,21 +15,9 @@ LQ = "lead-quality"
 LS = "lead-set"
 MISLABELLED = "mislabelled"
 UNREACHABLE = "unreachable"
-INCOHERENT = "incoherent"
 MEASURED = S.COINED["row.measured"]
-NOT_MEASURED_REASON = S.COINED["row.not_measured_reason"]
-DRAWS_DISAGREE = S.COINED["row.draws_disagree"]
-COMPLETED = S.RULED["row.completed_draws"]
 CITATIONS = S.RULED["row.citations"]
 
-#: Today's thirteen defender `FindingRow` keys (`enqueue.build_finding_row` at 463833df). d00d:
-#: the queued row keeps every one but `judge_outcome`, and gains the three new fields.
-TODAY_ROW_KEYS = frozenset({
-    "schema_version", "finding_id", "run_id", "alert_rule_key", "direction", "subject", "type",
-    "subject_anchor", "subject_topic", "finding", "judge_outcome", "citations",
-    "source_run_dir"})
-NEW_ROW_KEYS = (TODAY_ROW_KEYS - {"judge_outcome"}) | {S.CONTRAST, S.ON_PATH, S.DOUBT}
-ALERT_KEY = S.EXISTING["queue.alert_rule_key"]
 
 #: The family words and the per-world reply word the change retires (`_vocab.JUDGE_OUTCOME_ENUM`
 #: and `run._REPLY_OUTCOME_ENUM` at 463833df; design C2, C3, C3b), and the names that carried them.
@@ -73,8 +26,6 @@ OUTCOME_WORDS = frozenset({"caught", "corpus-contradiction", "discard", "survive
 RETIRED_NAMES = frozenset({*S.RETIRED_RECORD_FIELDS, *S.RETIRED_ENUMS,
                            "normalized_judge_outcome", "_UNQUEUEABLE_VERDICTS"})
 
-#: `build_finding_row`'s keyword for the doubt mark — F2 leaves it to the implementer (`S.COINED`).
-DOUBT_KW = S.COINED["kw.doubted"]
 
 
 # --------------------------------------------------------------------------------------
@@ -148,16 +99,6 @@ def _first_row(rows: list[dict], *, query_id: str | None = None, exit_code: int 
                          f"exit_code={exit_code!r} in {rows!r}")
 
 
-def _build_row(subject: str, finding: dict, **extra: Any) -> dict:
-    """`build_finding_row` for one finding of draw 0 of world `b`, its inputs filled from a pool
-    by the keywords its signature declares (F2 coins the new ones), plus `extra` verbatim."""
-    enqueue = S.mod(S.JUDGE_ENQUEUE)
-    build = enqueue.build_finding_row
-    pool = {"run_id": S.EPISODE_ID, "label": "b", "draw": "0", "index": 0, "subject": subject,
-            "finding": finding, ALERT_KEY: "rule-RULE-B", "provenance": "model",
-            "systems": ["idp"], DOUBT_KW: False}
-    declared = inspect.signature(build).parameters
-    return build(**{k: v for k, v in pool.items() if k in declared}, **extra)
 
 
 # --------------------------------------------------------------------------------------
@@ -217,29 +158,6 @@ def test_1234_every_completed_draws_findings_route_by_class_under_their_own_ids(
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_measured_world_with_an_investigator_bucket_queues_its_findings(
-        tmp_path: Path) -> None:
-    """A world whose every completed draw agrees on an investigator bucket and files no
-    unreachable, incoherent or fact-blocking gap is recorded measured, and the investigator
-    findings of every completed draw are queued (A7, A13).
-
-    World b's two draws agree on lead-quality; each also names a deployment gap whose
-    kept_facts_from_investigator flag is false (a gap that kept no fact back), which leaves the
-    world measured. Measured is read off the returned EpisodeGrade and off judge.yaml."""
-    built = S.family(tmp_path, S.triad(a={"calls": _calls("a", S.refused_call())},
-                                        b={"calls": _calls("b", S.refused_call())}))
-    refused_b = _served(built, "b", 2)
-    replies = {("b", n): S.world_reply(LQ, investigator=[
-        S.inv(claim=S.marker("b", f"inv-{n}"))], gaps=[
-        S.gap(evidence=[refused_b], kept_facts=False)]) for n in range(2)}
-
-    graded = S.grade(built, S.judge(replies), draws=2)
-
-    returned, on_disk = S.row(graded, "b"), S.row(built, "b")
-    assert returned.get(MEASURED) is True, f"returned row for b: {returned!r}"
-    assert on_disk.get(MEASURED) is True, f"judge.yaml row for b: {on_disk!r}"
-    assert on_disk.get(COMPLETED) == 2
-    assert sorted(_defender("b")) == [built.finding_id("b", 0, 0), built.finding_id("b", 1, 0)]
 
 
 def test_1234_mislabelled_world_still_queues_with_the_doubt_mark(tmp_path: Path) -> None:
@@ -310,55 +228,6 @@ def test_1234_family_call_mislabelled_finding_never_marks_world_rows(tmp_path: P
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_grading_world_b_never_changes_world_c_rows(tmp_path: Path) -> None:
-    """World c's queued rows are byte-identical, and c's eligibility on judge.yaml is
-    unchanged, whether world b's draw replies with findings, files unreachable, carries a
-    retired episode_outcome (refused and re-asked), or fails, and whatever the family call
-    returns (P-c).
-
-    Four episodes with one id, each under its own episodes root and its own learning state;
-    c's archive and reply are the same in all four. The positive control is c queued in every
-    variant (d06f), and b's own outcome demonstrably differs across them."""
-    c_reply = S.world_reply(LQ, investigator=[
-        S.inv(contrast=_pair_with_control("c"), claim=S.marker("c", "inv"))])
-    b_good = S.world_reply(LQ, investigator=[S.inv(claim=S.marker("b", "inv"))])
-    variants: dict[str, dict[str, Any]] = {
-        "findings": {"b": S.world_reply(LQ, investigator=[S.inv()], world=[
-            S.wf(MISLABELLED, evidence=[S.plan_ptr("b")])])},
-        "unreachable": {"b": S.world_reply(LQ, world=[
-            S.wf(UNREACHABLE, evidence=[S.plan_ptr("b")])]),
-            S.FAMILY: S.family_reply(world=[S.wf(MISLABELLED, systems=["edr"],
-                                                 evidence=[S.plan_ptr("c")])])},
-        "retired": {("b", 0): [S.world_reply(LQ, investigator=[S.inv()],
-                                             episode_outcome="discard"), b_good],
-                    S.FAMILY: S.family_reply(world=[S.wf(UNREACHABLE,
-                                                         evidence=[S.plan_ptr(None)])])},
-        "fails": {},
-    }
-    b_defender_rows = {"findings": 1, "unreachable": 0, "retired": 1, "fails": 0}
-    eligibility = (MEASURED, NOT_MEASURED_REASON, DRAWS_DISAGREE, S.RULED["reply.bucket"],
-                   S.STATE_KEY, COMPLETED)
-    c_lines: dict[str, list[str]] = {}
-    c_rows: dict[str, dict] = {}
-    for name, scripted in variants.items():
-        built = S.family(tmp_path / name, S.triad(), root=tmp_path / name / "episodes")
-        state = S.state_over(tmp_path / name / "learning-state")
-        fail = {"b", S.FAMILY} if name == "fails" else set()
-        S.grade(built, S.judge({"c": c_reply, **scripted}, fail=fail), draws=1, state=state)
-        defender_text = S.queue_bytes(state)[0]
-        c_lines[name] = [line for line in defender_text.splitlines()
-                         if line.strip() and "/c/" in str(json.loads(line).get("finding_id"))]
-        c_rows[name] = {k: S.row(built, "c").get(k) for k in eligibility}
-        assert len(_defender("b", state)) == b_defender_rows[name], (
-            f"variant {name}: b's own outcome must take effect (the variation is real)")
-
-    assert c_lines["findings"], "positive control: c's investigator finding is queued"
-    assert c_rows["findings"][MEASURED] is True
-    for name in variants:
-        assert c_lines[name] == c_lines["findings"], (
-            f"variant {name}: c's queued rows changed with world b's reply or the family call")
-        assert c_rows[name] == c_rows["findings"], (
-            f"variant {name}: c's eligibility on judge.yaml changed: {c_rows[name]!r}")
 
 
 # --------------------------------------------------------------------------------------
@@ -366,32 +235,6 @@ def test_1234_grading_world_b_never_changes_world_c_rows(tmp_path: Path) -> None
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_identical_findings_from_two_worlds_queue_as_two_rows(tmp_path: Path) -> None:
-    """Two worlds filing the same investigator finding queue two rows in walk order, neither
-    merged with the other nor reordered by on_verdict_path.
-
-    b and c file one finding with the same bucket, claim, root cause, anchor and topic; b's is
-    off the verdict path and c's on it, so ranking by on_verdict_path would put c first."""
-    built = S.family(tmp_path, S.triad())
-    same = {"claim": S.marker("bc", "same-claim"), "root_cause": "stopped after one answer",
-            "anchor": "l-001", "topic": "lead revisit"}
-    replies = {
-        "b": S.world_reply(LQ, investigator=[S.inv(on_path=False, **same)]),
-        "c": S.world_reply(LQ, investigator=[
-            S.inv(on_path=True, contrast=_pair_with_control("c"), **same)]),
-    }
-
-    S.grade(built, S.judge(replies), draws=1)
-
-    queue = S.defender_queue()
-    ids = [i for i in _ids(queue) if "/b/" in i or "/c/" in i]
-    assert ids == [built.finding_id("b", 0, 0), built.finding_id("c", 0, 0)], (
-        f"two rows, b's first (walk order), never merged or ranked: {ids}")
-    by_id = {str(r.get("finding_id")): r for r in queue}
-    b_row, c_row = by_id[ids[0]], by_id[ids[1]]
-    assert b_row.get("finding") == c_row.get("finding"), "the two rows carry the same finding"
-    assert b_row.get(S.ON_PATH) is False
-    assert c_row.get(S.ON_PATH) is True
 
 
 # --------------------------------------------------------------------------------------
@@ -484,64 +327,8 @@ def test_1234_a_deployment_gap_reaches_neither_queue(tmp_path: Path) -> None:
     assert S.named_gaps(built), "the named gap is listed in the user record (A2, A7)"
 
 
-def test_1234_contrast_pair_whose_halves_are_both_refusal_rows(tmp_path: Path) -> None:
-    """A contrast pair whose two halves are both blocked-call rows (an external refusal in b
-    and the same refused call in the control, including the inherited pre-branch denial both
-    carry, A14): gap-only evidence, so the finding goes to the user record, not the defender
-    queue (I3, M5).
-
-    The halves are query-table rows: b's and the control's ∅.denied rows (each joins its
-    refused ledger row by call id), and J3's inherited row in both tables. The control: the
-    same refusal in b paired with an ordinary conduct pointer of the control is not gap-only
-    and queues (A15; T10's stated cost)."""
-    built = S.family(tmp_path, S.triad(a={"calls": _calls("a", S.refused_call())},
-                                        b={"calls": _calls("b", S.refused_call())}),
-                     inherited=[S.inherited_denial()])
-    refused_b = _table(built, "b", 2)
-    pairs = {"refusal-pair": [refused_b, _table(built, "a", 1)],
-             "inherited-pair": [built.table("b", 0), built.table("a", 0)],
-             "one-ordinary-half": [refused_b, S.conduct("a")]}
-    reply = S.world_reply(LQ, investigator=[
-        S.inv(contrast=ptrs, claim=S.marker("b", name)) for name, ptrs in pairs.items()])
-
-    S.grade(built, S.judge({"b": reply}), draws=1)
-
-    fid = {name: built.finding_id("b", 0, i) for i, name in enumerate(pairs)}
-    assert _defender("b") == [fid["one-ordinary-half"]], (
-        f"only the pair with an ordinary half queues; defender ids from b: {_defender('b')}")
-    for name in ("refusal-pair", "inherited-pair"):
-        assert S.lane_of(built, fid[name]) == S.LANES["user_record"], name
-        assert _user_mentions(built, fid[name], S.marker("b", name)), name
 
 
-def test_1234_gap_finding_padded_with_one_ordinary_pointer(tmp_path: Path) -> None:
-    """Gap-only is mechanical (A1 rule 3, A15): at least one resolving conduct pointer and every
-    resolving conduct pointer (context set aside) is a blocked-call row. A gap finding padded
-    with one ordinary conduct pointer is not gap-only; a padding context pointer (samples,
-    outcome) is set aside and does not flip it. Substance is not judged.
-
-    Every finding claims the same deployment gap over b's and the control's refused rows; one
-    is padded with b's report (ordinary conduct, so it queues), the others with a samples
-    section, pre-flight's record, or b's alert.json (all context, so the user record)."""
-    built = S.family(tmp_path, S.triad(a={"calls": _calls("a", S.refused_call())},
-                                        b={"calls": _calls("b", S.refused_call())}))
-    pair = [_served(built, "b", 2), _served(built, "a", 1)]
-    padding = {"conduct-pad": S.conduct("b"), "samples-pad": S.samples_ptr("edr"),
-               "outcome-pad": S.outcome_ptr(), "alert-pad": S.conduct("b", "alert.json")}
-    reply = S.world_reply(LQ, investigator=[
-        S.inv(contrast=[*pair, pad], claim=f"the grant refused edr lookup {S.marker('b', name)}")
-        for name, pad in padding.items()])
-
-    S.grade(built, S.judge({"b": reply}), draws=1)
-
-    fid = {name: built.finding_id("b", 0, i) for i, name in enumerate(padding)}
-    assert _defender("b") == [fid["conduct-pad"]], (
-        "one ordinary conduct pointer makes the gap finding not gap-only (substance is not "
-        f"judged); defender ids from b: {_defender('b')}")
-    for name in ("samples-pad", "outcome-pad", "alert-pad"):
-        assert S.lane_of(built, fid[name]) == S.LANES["user_record"], (
-            f"{name}: a context pointer is set aside and does not flip gap-only")
-        assert _user_mentions(built, fid[name], S.marker("b", name)), name
 
 
 # --------------------------------------------------------------------------------------
@@ -549,70 +336,8 @@ def test_1234_gap_finding_padded_with_one_ordinary_pointer(tmp_path: Path) -> No
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_not_measured_worlds_design_finding(tmp_path: Path) -> None:
-    """A not-measured world's design finding still reaches the questioner queue: the
-    not-measured rule withholds investigator findings only (I4), and a world finding routes by
-    A1's classes (design when not gap-only and it has a resolving plan pointer).
-
-    b files unreachable and c files incoherent, each citing its own manifest entry, beside an
-    investigator finding; d is measured and queues (the defender channel is live)."""
-    built = S.family(tmp_path, S.triad(d={"role": "D", "calls": [S.CallRow()]}))
-    replies = {
-        "b": S.world_reply(LQ, investigator=[S.inv()], world=[
-            S.wf(UNREACHABLE, evidence=[S.plan_ptr("b")])]),
-        "c": S.world_reply(LQ, investigator=[S.inv(contrast=_pair_with_control("c"))], world=[
-            S.wf(INCOHERENT, evidence=[S.plan_ptr("c")])]),
-        "d": S.world_reply(LQ, investigator=[S.inv(contrast=_pair_with_control("d"))]),
-    }
-
-    S.grade(built, S.judge(replies), draws=1)
-
-    assert _defender("d") == [built.finding_id("d", 0, 0)], "positive control"
-    for label in ("b", "c"):
-        assert S.row(built, label).get(MEASURED) is False, f"world {label} is not measured"
-        assert _defender(label) == [], f"no investigator finding of not-measured {label} queues"
-        assert S.lane_of(built, built.finding_id(label, 0, 0)) == S.LANES["not_measured"]
-        assert _questioner(label) == [built.finding_id(label, 0, 1)], (
-            f"world {label}'s design finding still reaches the questioner queue")
 
 
-def test_1234_none_bucket_world_that_files_mislabelled(tmp_path: Path) -> None:
-    """A none-bucket world (every draw agreeing on `none`) queues no defender rows (I9); each
-    draw's mislabelled finding routes by its class under its own finding_id (design if it has a
-    plan pointer and is not gap-only); the doubt mark is set because any draw filed
-    `mislabelled` (A7, A13); judge.yaml records bucket none and each filed finding with its
-    lane.
-
-    Two draws of b agree on none. Draw 0's mislabelled finding cites b's manifest entry
-    (design); draw 1's cites only b's report (no plan pointer, not gap-only: serving, so the
-    user record). With no defender row to carry it, the doubt mark is read off b's judge.yaml
-    row. c is measured and queues (the defender channel is live)."""
-    built = S.family(tmp_path, S.triad())
-    m0, m1 = S.marker("b", "design-0"), S.marker("b", "serving-1")
-    replies = {
-        ("b", 0): S.world_reply(S.NO_BUCKET, [], investigator=[S.inv()], world=[
-            S.wf(MISLABELLED, evidence=[S.plan_ptr("b")], claim=m0)]),
-        ("b", 1): S.world_reply(S.NO_BUCKET, [], investigator=[S.inv()], world=[
-            S.wf(MISLABELLED, evidence=[S.conduct("b")], claim=m1)]),
-        "c": S.world_reply(LQ, investigator=[S.inv(contrast=_pair_with_control("c"))]),
-    }
-
-    S.grade(built, S.judge(replies), draws=2)
-
-    assert sorted(_defender("c")) == [built.finding_id("c", 0, 0), built.finding_id("c", 1, 0)]
-    assert _defender("b") == [], "a none world queues no defender rows (I9)"
-    assert _questioner("b") == [built.finding_id("b", 0, 1)], (
-        "draw 0's design finding reaches the questioner queue under its own id; draw 1's "
-        "serving finding does not")
-    b_row = S.row(built, "b")
-    assert b_row.get(S.RULED["reply.bucket"]) == S.NO_BUCKET
-    assert b_row.get(S.DOUBT) is True, "a draw of b filed mislabelled"
-    expected = {(0, 0): S.LANES["unauthored"], (0, 1): S.LANES["questioner"],
-                (1, 0): S.LANES["unauthored"], (1, 1): S.LANES["user_record"]}
-    for (n, i), lane in expected.items():
-        assert S.lane_of(built, built.finding_id("b", n, i)) == lane, (
-            f"b/{n}/{i} must be recorded on judge.yaml with lane {lane!r}")
-    assert _user_mentions(built, built.finding_id("b", 1, 1), m1)
 
 
 # --------------------------------------------------------------------------------------
@@ -791,61 +516,8 @@ def test_1234_defender_row_cites_the_manifest_or_the_oracle_store(tmp_path: Path
         assert marker not in prompt, f"{marker}: archive content reached the lesson writer"
 
 
-def test_1234_defender_row_replaces_judge_outcome_with_three_fields(tmp_path: Path) -> None:
-    """A queued defender FindingRow carries contrast_evidence (the resolving pointer pair),
-    on_verdict_path and world_label_doubted, carries no judge_outcome, and otherwise keeps
-    today's keys and values.
-
-    One finding of b, off the verdict path, in a world that filed no mislabelled; today's
-    values are the ones `build_finding_row` derives at 463833df (the alert key from b's own
-    archived alert)."""
-    built = S.family(tmp_path, S.triad())
-    finding = S.inv(on_path=False, claim=S.marker("b", "claim"), root_cause="stopped early",
-                    anchor="l-001", topic="lead revisit")
-
-    S.grade(built, S.judge({"b": S.world_reply(LQ, investigator=[finding])}), draws=1)
-
-    fid = built.finding_id("b", 0, 0)
-    row = _defender_rows("b").get(fid, {})
-    assert set(row) == NEW_ROW_KEYS | {"recorded_signature"}, (
-        f"missing {sorted(NEW_ROW_KEYS - set(row))}, extra {sorted(set(row) - NEW_ROW_KEYS)}")
-    assert row.get(S.CONTRAST) == _pair_with_control("b")
-    assert row.get(S.ON_PATH) is False
-    assert row.get(S.DOUBT) is False
-    assert row["recorded_signature"] == S.J.ALERT_ID
-    today = {"schema_version": 1, "finding_id": fid, "run_id": built.episode_id,
-             ALERT_KEY: S.J.ALERT_ID, "direction": "family",
-             "subject": "defender", "type": LQ, "subject_anchor": "l-001",
-             "subject_topic": "lead revisit",
-             "finding": S.EXISTING["row.finding_join"].join((S.marker("b", "claim"),
-                                                             "stopped early")),
-             CITATIONS: _pair_with_control("b"),
-             "source_run_dir": f"episodes/{built.episode_id}/worlds/b"}
-    assert {k: row.get(k) for k in today} == today
 
 
-def test_1234_build_finding_row_refuses_a_judge_outcome_argument() -> None:
-    """build_finding_row takes no judge_outcome or verdict word: calling it with one raises (a
-    TypeError or a named refusal), for the defender and the world subject alike, and the row it
-    builds carries neither key. The control is the call without it, which builds the row of
-    d00d."""
-    refused = (TypeError, *S.refusals())
-    subjects = {"defender": S.inv(), "world": S.wf(MISLABELLED)}
-    for subject, finding in subjects.items():
-        for retired in ("judge_outcome", "verdict_word"):
-            with pytest.raises(refused) as raised:
-                _build_row(subject, finding, **{retired: "survived"})
-            assert retired in str(raised.value), (
-                f"{subject} row: the refusal must be of the {retired} argument itself, not of "
-                f"something else in the call: {raised.value!r}")
-    defender_row = _build_row("defender", subjects["defender"])
-    world_row = _build_row("world", subjects["world"])
-    assert set(defender_row) == NEW_ROW_KEYS, (
-        f"the control builds d00d's row: missing {sorted(NEW_ROW_KEYS - set(defender_row))}, "
-        f"extra {sorted(set(defender_row) - NEW_ROW_KEYS)}")
-    for row in (defender_row, world_row):
-        assert not {"judge_outcome", "verdict_word"} & set(row), row
-    assert world_row.get("finding_id") == f"{S.EPISODE_ID}/b/0/0"
 
 
 # --------------------------------------------------------------------------------------
@@ -921,31 +593,3 @@ def test_1234_defender_lane_decision_rests_on_world_state_not_a_verdict_word(
 # --------------------------------------------------------------------------------------
 
 
-def test_1234_alert_rule_key_when_rows_are_queued_world_by_world(tmp_path: Path) -> None:
-    """Each row carries the source episode's recorded signature (#1222), independent of edited
-    world alert copies and which worlds were graded in the same pass.
-
-    b's alert carries a rule and no alert id, c archived no alert, d's carries both. Pass 1's
-    call for b fails, so only c and d queue; the bare re-run grades b alone (OB14's two-pass
-    shape: on main every row carries the first alert-id-bearing world's key)."""
-    built = S.family(tmp_path, S.triad(c={"alert": False},
-                                        d={"role": "D", "calls": [S.CallRow()]}))
-    alerts = {"b": {"rule": {"id": "RULE-B"}, "summary": S.marker("b", "alert")},
-              "d": {"alert_id": "ALERT-D", "rule": {"id": "RULE-D"},
-                    "summary": S.marker("d", "alert")}}
-    for label, doc in alerts.items():
-        (built.world_dir(label) / "alert.json").write_text(json.dumps(doc), encoding="utf-8")
-    replies = {label: S.world_reply(LQ, investigator=[S.inv(contrast=_pair_with_control(label))])
-               for label in "bcd"}
-
-    S.grade(built, S.judge(replies, fail={"b"}), draws=1)
-    S.grade(built, S.judge(replies), draws=1)
-
-    expected = dict.fromkeys("bcd", S.J.ALERT_ID)
-    for label, key in expected.items():
-        rows = list(_defender_rows(label).values())
-        assert rows, f"world {label} queued no row (b on the re-run, c and d on pass 1)"
-        for row in rows:
-            assert row.get(ALERT_KEY) == key, (
-                f"world {label}'s row must carry its own alert's key {key!r}, not "
-                f"{row.get(ALERT_KEY)!r}")

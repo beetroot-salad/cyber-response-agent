@@ -1,14 +1,4 @@
-"""Tests for defender/hooks/budget_enforcer.py.
-
-Warning-only budget LIBRARY: counts tool calls / subagent spawns on the run's
-own ``RunState`` (#1235 round 2: no ``budget.json``, no table keyed by the folder),
-and returns warning strings at 75% / 100%.
-Emitting them is the caller's job (`runtime/driver.py`'s `after_tool_execute`).
-
-The `claude -p` PostToolUse entrypoint these tests used to drive — stdin
-JSON in, exit code out — was deleted with that retired runtime, so they
-drive the two functions the driver actually calls.
-"""
+"""Tests for defender/hooks/budget_enforcer.py."""
 
 from __future__ import annotations
 
@@ -41,8 +31,7 @@ def test_counts_tool_calls_and_spawns(tmp_path):
 
 
 def test_only_gather_counts_as_a_spawn(tmp_path):
-    """"Task"/"Agent" were the retired claude -p dispatch names. No tool by
-    either name is registered now, so neither is a spawn — `gather` is."""
+    """"Task"/"Agent" were the retired claude -p dispatch names. No tool by either name is registered now, so..."""
     state = _state(tmp_path)
     for name in ("Task", "Agent", "bash", "read_file"):
         _bump(state, name)
@@ -76,8 +65,7 @@ def test_no_warning_below_threshold(tmp_path):
 
 
 def test_check_budgets_survives_a_budget_missing_started_at(tmp_path):
-    """The wall-clock arm swallows a malformed/absent timestamp rather than
-    raising into the caller — the tool-call arms still report."""
+    """The wall-clock arm swallows a malformed/absent timestamp rather than raising into the caller — the..."""
     warnings = check_budgets({"tool_calls": 9}, {**DEFAULT_LIMITS, "max_tool_calls": 9})
     assert any("tool_calls at 9/9" in w for w in warnings)
 
