@@ -757,9 +757,17 @@ def test_sibling_system_calls_share_one_docker_context_partial_failure(tmp_path,
 
 
 def test_a_stored_fault_is_raised_more_than_once_across_the_run(tmp_path):
-    """A system kept as a ConfigFault at resolve faults the same way on every call across the
-    run: each call that reaches it observes the same breaker-counted outcome (exit 2), and the
-    contract is the outcome, not the fault object's identity."""
+    """A system kept as a ConfigFault at resolve faults the same way on every call that reaches
+    its adapter directly (pre-flight replay calls adapters with no run gates, a #1256
+    non-obligation): each call observes the same outcome (exit 2), and the contract is the
+    outcome, not the fault object's identity.
+
+    #1256 removed this test's other half — "each call is breaker-counted" (the breaker counting
+    1, 2, 3). In a run, such a system is judged by its adapter's settings check at start, is
+    down from the start, and none of its calls runs or is charged (DP1/DP2; observed through a
+    driven run in `test_o5_missing_system_config_run_completes` and
+    `startup_usability_1256/test_1256_run_flow.py`). The breaker never sees it, so it is not
+    fed here."""
     root, folder = _tenant(tmp_path, "sfr")
     S.config_path(folder, "cmdb").unlink()  # design: a folder with a missing file is kept as its ConfigFault
     record = S.resolve(root)
@@ -769,36 +777,90 @@ def test_a_stored_fault_is_raised_more_than_once_across_the_run(tmp_path):
     ctx = _ctx(record, tmp_path, shim)
 
     seen = []
-    run_state = _run_state(ctx.run_dir)
     for fn, kw in ((cmdb_adapter.get_host, {"host": "web-1"}), (cmdb_adapter.health_check, {}),
                    (cmdb_adapter.get_host, {"host": "web-2"})):
         fault = _raised(fn, ctx, **kw)
         assert isinstance(fault, AdapterFault), f"a stored fault must raise on every call: {fault!r}"
-        state = circuit_breaker.record_outcome(run_state, "cmdb", fault.exit_code)
-        seen.append((type(fault).__name__, fault.exit_code, str(fault),
-                     state.get("systems", {}).get("cmdb", {}).get("failures")))
-    assert [s[:3] for s in seen] == [seen[0][:3]] * 3, f"each call must observe the same exit-2 outcome: {seen}"
+        seen.append((type(fault).__name__, fault.exit_code, str(fault)))
+    assert seen == [seen[0]] * 3, f"each call must observe the same exit-2 outcome: {seen}"
     assert seen[0][1] == 2, f"each call must observe the same exit-2 outcome: {seen}"
-    assert [s[3] for s in seen] == [1, 2, 3], f"the breaker must count every call: {seen}"
     assert _argvs(shim) == [], f"a stored fault spawned a child: {_argvs(shim)}"
 
 
+#: The five stub systems with an adapter, plus host-state — granted gather's health-check each,
+#: and host-state a query verb too. host-state stays configured in every arm, so the run always
+#: has a usable system that gather can query (a run whose granted-and-up systems grant gather no
+#: query verb is refused at start, #1256 O-8 over `require_gather_query`).
+_MF8_TABLE = """\
+dispositions:
+  cmdb:
+    health-check: {roles: [gather]}
+  identity:
+    health-check: {roles: [gather]}
+  ticket:
+    health-check: {roles: [gather]}
+  change-mgmt:
+    health-check: {roles: [gather]}
+  threat-intel:
+    health-check: {roles: [gather]}
+  host-state:
+    health-check: {roles: [gather]}
+    proc-tree: {roles: [gather]}
+"""
+
+
 def test_s7_mf8_config_fault_breaker_accounting_unchanged(tmp_path):
-    """A ConfigFault counts toward the per-system and the run-wide breaker exactly as a
-    TransportFault does (both exit 2): N distinct systems each down for config reach the
-    run-wide failure limit at the same count as N connectivity faults (RUN_FAIL_KILL_LIMIT), as
-    today. No config-fault exemption is added."""
+    """#1256 supersedes this test's #1107 expectation ("a ConfigFault counts toward the
+    per-system and the run-wide breaker exactly as a TransportFault does; no config-fault
+    exemption is added"). Now: whether a system is configured is decided at run start, and a
+    system down for config is never charged (O-2, DP2). N = RUN_FAIL_KILL_LIMIT distinct systems
+    each down for config, each called once from a run's gather lead, charge nothing and the run
+    completes; N distinct systems down for connectivity still reach the run-wide limit exactly
+    as before (the breaker's accounting of outages is unchanged, a #1256 non-obligation).
+
+    The config arm drives a REAL run (a lead on configured host-state calls each system's real
+    `health_check`, behind a recorder) — the arm that changed. The connectivity arm keeps its
+    direct feed of real `TransportFault`s to the real breaker: what it pins did not change."""
+    pytest.importorskip("pydantic_ai")
+    from defender.tests.e2e._replay_harness import FakeVerbs
+
     limit = circuit_breaker.RUN_FAIL_KILL_LIMIT
     systems = list(_STUB_ADAPTERS)[:limit]
     assert len(systems) == limit, f"precondition: {limit} distinct systems to fail: {systems}"
 
     # Down for config: each system's config.env removed before resolve.
-    root_c, folder_c = _tenant(tmp_path, "mfc", name="config")
+    root_c, folder_c = _tenant(tmp_path, "mfc", name="config", table=_MF8_TABLE)
     for system in systems:
         S.config_path(folder_c, system).unlink()
     shim_c = S.DockerShim(tmp_path / "config" / "shim", [_OK])
     ctx_c = _ctx(S.resolve(root_c), tmp_path / "config", shim_c)
     config_faults = [_raised(_STUB_ADAPTERS[s].health_check, ctx_c) for s in systems]
+    assert all(isinstance(f, ConfigFault) for f in config_faults), \
+        f"precondition: every config-down system's adapter raises ConfigFault: {config_faults}"
+
+    ran: list[str] = []
+
+    def recorded(system: str):
+        def health_check(ctx):
+            ran.append(system)
+            return _STUB_ADAPTERS[system].health_check(ctx)
+        return health_check
+
+    verbs = FakeVerbs({**{s: {"health-check": recorded(s)} for s in systems},
+                       "host-state": {"health-check": lambda ctx: {"status": "ok"}}})
+    _, main, gather, run_state = _replay(
+        tmp_path / "config", root_c, verbs,
+        [(s, "health-check", {}) for s in systems] + [("host-state", "health-check", {})],
+        lead_system="host-state")
+    charged = {s: run_state.breaker_failures(s) for s in systems}
+    assert charged == dict.fromkeys(systems, 0), \
+        f"a system down for config was charged (#1256 O-2): {_breaker_doc(run_state)}"
+    assert run_state.breaker_snapshot()["total_failures"] == 0, \
+        f"the run was charged for systems down for config (#1256 O-2): {_breaker_doc(run_state)}"
+    assert ran == [], f"a system down for config had its adapter run (#1256 O-1): {ran}"
+    assert main.calls >= 2, f"the run must complete (main {main.calls} turns, gather {gather.calls})"
+    assert gather.calls >= limit + 2, \
+        f"the lead must be answered after every call (main {main.calls} turns, gather {gather.calls})"
 
     # Down for connectivity: configured, but docker answers G23's unknown-context rc=1.
     root_t, _ = _tenant(tmp_path, "mft", name="transport")
@@ -808,21 +870,14 @@ def test_s7_mf8_config_fault_breaker_accounting_unchanged(tmp_path):
     for system in systems:
         shim_t.respond(S.context_not_found(S.context_name("mft", system)))  # G23
         transport_faults.append(_raised(_STUB_ADAPTERS[system].health_check, ctx_t))
-
-    assert all(isinstance(f, ConfigFault) for f in config_faults), \
-        f"precondition: every config-down system raised ConfigFault: {config_faults}"
     assert all(isinstance(f, TransportFault) for f in transport_faults), \
         f"precondition: every connectivity-down system raised TransportFault: {transport_faults}"
-    runs = {}
-    for label, faults, run_dir in (("config", config_faults, ctx_c.run_dir),
-                                   ("transport", transport_faults, ctx_t.run_dir)):
-        runs[label] = _breaker_run(run_dir, [(s, f.exit_code) for s, f in zip(systems, faults, strict=True)])
-    for label, (totals, aborted) in runs.items():
-        assert aborted is not None, f"{label}: {limit} distinct systems down must raise RunAborted at {limit}: {runs[label]}"
-        assert aborted.total_failures == limit, f"{label}: {limit} distinct systems down must raise RunAborted at {limit}: {runs[label]}"
-        assert totals == list(range(1, limit)), f"{label}: each fault counted once: {totals}"
-    assert runs["config"][1].systems == runs["transport"][1].systems == sorted(systems), \
-        f"both runs must abort over the same systems: {runs}"
+    totals, aborted = _breaker_run(
+        ctx_t.run_dir, [(s, f.exit_code) for s, f in zip(systems, transport_faults, strict=True)])
+    assert aborted is not None, f"{limit} distinct systems down must raise RunAborted at {limit}: {totals}"
+    assert aborted.total_failures == limit, f"{limit} distinct systems down must raise RunAborted at {limit}: {aborted}"
+    assert totals == list(range(1, limit)), f"each fault counted once: {totals}"
+    assert aborted.systems == sorted(systems), f"the run must abort over those systems: {aborted.systems}"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -998,34 +1053,61 @@ def test_s7_mf7c_the_adapter_judges_its_own_required_keys(tmp_path):
     assert _argvs(shim2) == [], f"the faulted adapter spawned a child: {_argvs(shim2)}"
 
 
+#: `_REPLAY_TABLE` plus threat-intel's `lookup`: with cmdb down at start, the systems left up must
+#: still grant gather a query verb, or #1256 O-8 refuses the run at start (`require_gather_query`
+#: over the granted-and-up systems) — this test is about a run that goes on.
+_O5_TABLE = _REPLAY_TABLE + "    lookup: {roles: [gather]}\n"
+
+
 def test_o5_missing_system_config_run_completes(tmp_path, monkeypatch):
-    """A tenant with cmdb's config.env removed resolves, and its run completes. A cmdb call
-    raises ConfigFault (exit 2, counted toward the cmdb breaker), and the other systems still
-    answer."""
+    """A tenant with cmdb's config.env removed resolves, and its run completes, the other
+    systems still answering (#1107 O5 — unchanged).
+
+    #1256 replaces what a cmdb call does: cmdb fails its own settings check at run start, so it
+    is down for the whole run — a call to it is refused naming "not configured" and the reason,
+    its adapter never runs, the refusal writes no query row, and nothing is charged (O-1, O-2,
+    O-4). Before #1256 the call raised ConfigFault, wrote an exit-2 infra row and was charged to
+    cmdb's breaker. The lead is dispatched to threat-intel (not cmdb, as before): a dispatch to
+    cmdb is itself refused now, and would leave no call to observe."""
     pytest.importorskip("pydantic_ai")
     from defender.tests.e2e._replay_harness import FakeVerbs
 
     m = "o5m"
-    root, folder = _tenant(tmp_path, m, table=_REPLAY_TABLE)
+    root, folder = _tenant(tmp_path, m, table=_O5_TABLE)
     S.config_path(folder, "cmdb").unlink()
     S.resolve(root)  # resolves: a system with no config is down, not a refused run
     shim = S.DockerShim(tmp_path / "shim", [_OK])
     monkeypatch.setenv("PATH", shim.path_value())
-    verbs = FakeVerbs({"cmdb": {"get-host": cmdb_adapter.get_host},
+    ran: list[str] = []
+
+    def get_host(ctx, *, host: str):
+        ran.append(host)
+        return cmdb_adapter.get_host(ctx, host=host)
+
+    verbs = FakeVerbs({"cmdb": {"get-host": get_host},
                        "threat-intel": {"health-check": threat_intel_adapter.health_check}})
     run_dir, main, gather, run_state = _replay(tmp_path, root, verbs, [
         ("cmdb", "get-host", {"host": "web-1"}), ("threat-intel", "health-check", {})],
-        lead_system="cmdb")
+        lead_system="threat-intel")
 
     assert main.calls >= 2, f"the run must complete (main {main.calls} turns, gather {gather.calls})"
     assert gather.calls >= 3, f"the run must complete (main {main.calls} turns, gather {gather.calls})"
     rows = {r["system"]: r for r in _own_rows(run_dir)}
-    assert {"cmdb", "threat-intel"} <= set(rows), f"precondition: both calls were made: {rows}"
-    assert (rows["cmdb"]["exit_code"], rows["cmdb"]["error_class"]) == (2, "infra"), \
-        f"cmdb with no config must be an infra fault (exit 2): {rows['cmdb']}"
-    assert rows["threat-intel"]["exit_code"] == 0, f"threat-intel must still answer: {rows}"
-    assert _breaker_doc(run_state).get("systems", {}).get("cmdb", {}).get("failures") == 1, \
-        f"cmdb's fault must count toward its breaker: {_breaker_doc(run_state)}"
+    assert rows.get("threat-intel", {}).get("exit_code") == 0, f"threat-intel must still answer: {rows}"
+    assert ran == [], f"cmdb is not configured, but its adapter ran (#1256 O-1): {ran}"
+    assert "cmdb" not in rows, f"the refused cmdb call wrote a query row (#1256 O-4): {rows['cmdb']}"
+    assert run_state.breaker_failures("cmdb") == 0, \
+        f"cmdb's refusal was charged (#1256 O-2): {_breaker_doc(run_state)}"
+    assert run_state.breaker_snapshot()["total_failures"] == 0, \
+        f"the run was charged for cmdb's refusal (#1256 O-2): {_breaker_doc(run_state)}"
+    assert gather.seen[1].startswith(gather.seen[0]), \
+        "precondition: a gather request's text extends the one before it (harness shape)"
+    answered = gather.seen[1][len(gather.seen[0]):]
+    assert "not configured" in answered.lower(), \
+        f"the cmdb call's refusal must say cmdb is not configured (#1256 O-4): {answered!r}"
+    assert "not found" in answered.lower(), \
+        f"the refusal must carry the check's reason (the config file not found): {answered!r}"
+    assert "tripped" not in answered.lower(), f"a not-configured refusal reads as a trip: {answered!r}"
     calls = [S.context_of(a) for a in _argvs(shim)]
     assert calls == [S.context_name(m, "threat-intel")], \
         f"only threat-intel reaches docker, on its own context: {calls}"

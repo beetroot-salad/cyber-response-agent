@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, NoReturn
 
 from pydantic import ValidationError
@@ -25,7 +26,7 @@ from defender.hooks.budget_enforcer import BudgetKill
 from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
-from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
+from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault
 from defender.runtime.payload_view import render as _render_payload
 from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.runtime.tools import DeadEnd
@@ -63,6 +64,7 @@ from defender._query_rules import (
 )
 
 from . import circuit_breaker
+from . import system_status
 from .run_state import run_state_of
 from .run_end import CallRecordWriteFailed
 from .verbs import (
@@ -186,13 +188,12 @@ class QueryCapture(AbstractCapability[Any]):
 
         return observe.denial_logger(run_dir)
 
-    def _decide_guarded(
+    def _resolve_guarded(
         self, system: str, verb: str, params: dict,
     ) -> tuple[Any, str | None]:
-        """The grant decision, guarded so a broken adapter import degrades instead of unwinding
-        the stage. Uses `decide_call` so a registry that records served calls records this one."""
+        """Resolve an admitted, runnable call, preserving registry fault accounting."""
         try:
-            return self._registry.decide_call(system, verb, params), None
+            return self._registry.resolve_call(system, verb, params), None
         except CONTROL_FLOW_EXCEPTIONS:
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
@@ -406,8 +407,8 @@ class QueryCapture(AbstractCapability[Any]):
         """The grant check, ahead of everything else: a denied call always produces its denial
         record (and a `∅.denied` sentinel row), never an evidence row. Returns
         `(decision, early_result)`; `early_result` is set when the caller must return early."""
-        decision, load_error = self._decide_guarded(system, verb, params)
-        if load_error is None and decision.outcome == DENIED:
+        decision = self._registry.authorize_call(system, verb, params)
+        if decision.outcome == DENIED:
             refusal = decision.refusal or f"denied: {system}.{verb}"
             # Audit record first, above the door: a stopped lead does not get a quieter audit
             # trail, and a failed row write below has already left it behind.
@@ -431,14 +432,53 @@ class QueryCapture(AbstractCapability[Any]):
         if _door_closed(deps):
             raise ToolFailed(QUERY_NOT_RUN)
 
+        if decision.outcome != GRANTED:
+            await self._reject_unresolved(deps, decision, system, verb, params)
+
+        return decision, None
+
+    async def _reject_unresolved(self, deps, decision, system: str, verb: str, params: dict):
+        """Record and reject an undeclared call at either decision stage."""
+        # Unresolvable verb: same guard and coarsening as the schema placement. A declared
+        # system with an unknown verb still records its name.
+        refusal = decision.refusal or f"unresolvable: {system}.{verb}"
+        recorded_system, system_key = self._coarsen(system)
+        trip = self._rejection_guard(
+            deps, recorded_system, verb, params, system_key=system_key,
+        )
+        # The model gets the full refusal; a coarsened row gets a host literal instead, since
+        # the refusal names the model's system. A declared system keeps the refusal, which
+        # the pitfalls channel needs.
+        rejection = (
+            UNDECLARED_SYSTEM_DETAIL
+            if self._was_coarsened(recorded_system)
+            else (decision.refusal or "unresolvable")
+        )
+        # The trip phrase wraps the coarsened detail, as at the schema placement.
+        detail = rejection if trip is None else rejection_detail(trip, rejection)
+        await self._record(
+            deps, system=recorded_system, verb=verb, system_key=system_key,
+            query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
+            exit_code=USAGE_EXIT_CODE,
+            detail=detail,
+        )
+        if trip is not None:
+            raise rejection_dead_end(
+                trip,
+                target=self._undeclared_target(recorded=recorded_system, raw=system),
+                verb=verb,
+            )
+        raise ModelRetry(refusal)
+
+    async def _resolve_check(self, deps, system: str, verb: str, params: dict):
+        """Gate down systems before resolution, then file load faults or declaration failures."""
+        # A down system answers before callable resolution, parameter screens or adapter I/O.
+        refused = _down_refusal(deps, system)
+        if refused is not None:
+            return None, refused
+
+        decision, load_error = self._resolve_guarded(system, verb, params)
         if load_error is not None:
-            # Breaker check here too: these `infra` rows are outside `rejection_trip`, so the
-            # breaker must bound a failing import (retried every call, since only successes are
-            # cached). Before `_record`, so a down answer writes no row. Not hoisted above the
-            # DENIED branch, which always owes its denial record.
-            tripped = _tripped_message(deps, system)
-            if tripped is not None:
-                return None, tripped
             row, text = await self._record(
                 deps, system=system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
@@ -450,36 +490,7 @@ class QueryCapture(AbstractCapability[Any]):
             return None, self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
 
         if decision.outcome != GRANTED:
-            # Unresolvable verb: same guard and coarsening as the schema placement. A declared
-            # system with an unknown verb still records its name.
-            refusal = decision.refusal or f"unresolvable: {system}.{verb}"
-            recorded_system, system_key = self._coarsen(system)
-            trip = self._rejection_guard(
-                deps, recorded_system, verb, params, system_key=system_key,
-            )
-            # The model gets the full refusal; a coarsened row gets a host literal instead, since
-            # the refusal names the model's system. A declared system keeps the refusal, which
-            # the pitfalls channel needs.
-            rejection = (
-                UNDECLARED_SYSTEM_DETAIL
-                if self._was_coarsened(recorded_system)
-                else (decision.refusal or "unresolvable")
-            )
-            # The trip phrase wraps the coarsened detail, as at the schema placement.
-            detail = rejection if trip is None else rejection_detail(trip, rejection)
-            await self._record(
-                deps, system=recorded_system, verb=verb, system_key=system_key,
-                query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
-                exit_code=USAGE_EXIT_CODE,
-                detail=detail,
-            )
-            if trip is not None:
-                raise rejection_dead_end(
-                    trip,
-                    target=self._undeclared_target(recorded=recorded_system, raw=system),
-                    verb=verb,
-                )
-            raise ModelRetry(refusal)
+            await self._reject_unresolved(deps, decision, system, verb, params)
 
         return decision, None
 
@@ -546,10 +557,9 @@ class QueryCapture(AbstractCapability[Any]):
         if early_result is not None:
             return early_result
 
-        # Breaker before the screens: a system known down answers "down", not a param complaint.
-        tripped = _tripped_message(deps, system)
-        if tripped is not None:
-            return tripped
+        decision, early_result = await self._resolve_check(deps, system, verb, params)
+        if early_result is not None:
+            return early_result
 
         # Repeat guard above `_screen`, so a repeated bad call trips instead of earning yet
         # another identical `ModelRetry`.
@@ -577,6 +587,7 @@ class QueryCapture(AbstractCapability[Any]):
         query_id = resolve_query_id(system, verb, as_str(model_query_id) or None)
 
         payload: Any = None
+        escaped = False
         try:
             payload = await handler(args)
             exit_code, detail = 0, ""
@@ -584,11 +595,32 @@ class QueryCapture(AbstractCapability[Any]):
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
             raise
+        except ConfigFault as e:
+            # A settings fault the system's start check did not catch (#1256 O-5b, DP3): the
+            # system is not configured for this run, from this call on.
+            exit_code, detail, escaped = e.exit_code, e.detail, True
         except AdapterFault as e:
             exit_code, detail = e.exit_code, e.detail
         except BaseException as e:  # noqa: BLE001 — the point: an unmapped fault still writes a row
             exit_code, detail = _fault_exit(e), str(e) or type(e).__name__
 
+        if escaped:
+            # Marked down before the row, so a sibling lead's call racing this one is refused;
+            # the row records the call that ran, uncharged (the breaker counts only what can
+            # change during a run, DP2), and the answer is the not-configured refusal every
+            # later call gets, naming the fault's reason.
+            defender_dir = getattr(deps, "defender_dir", None)
+            system_status.mark_escaped(
+                run_state_of(deps), system, detail, tenant=getattr(deps, "tenant", None),
+                defender_dir=Path(defender_dir) if defender_dir is not None else None)
+            await self._record(
+                deps, system=system, verb=verb, query_id=query_id, params=params,
+                payload=payload, exit_code=exit_code, detail=detail, system_key="",
+                charged=False,
+            )
+            refused = _down_refusal(deps, system)
+            assert refused is not None, "a system just marked down is down"
+            return refused
         row, text = await self._record(
             deps, system=system, verb=verb, query_id=query_id, params=params,
             payload=payload, exit_code=exit_code, detail=detail, system_key="",
@@ -597,14 +629,16 @@ class QueryCapture(AbstractCapability[Any]):
 
     async def _record(  # noqa: PLR0913 — one per row column the CALLER decides, plus `deps`
         self, deps, *, system: str, verb: str, query_id: str, params: dict,
-        payload: Any, exit_code: int, detail: str, system_key: str,
+        payload: Any, exit_code: int, detail: str, system_key: str, charged: bool = True,
     ) -> tuple[dict, str]:
         """Append the row and charge the circuit breaker to its `system`.
 
         The charge is the call's outcome, not the view's: it lands whether or not the row's
         view line could be written. A refused write (`append_query_row` has already recorded
         the row in the run's state) is charged first and then propagates; the run is not told
-        the call was viewed.
+        the call was viewed. `charged=False` writes the row only: a call whose `ConfigFault`
+        escaped the start check marks its system not configured, which the breaker never
+        counts (#1256 O-5b).
 
         A coarsened row charges `""`, which `record_outcome` skips; the rejection guards bound
         those instead. `system_key` has no default so every writer must state it explicitly.
@@ -641,9 +675,10 @@ class QueryCapture(AbstractCapability[Any]):
                 call_id=CALL_ID.get(),
             )
         finally:
-            circuit_breaker.record_outcome(
-                state, system, exit_code,
-                counts_toward_run=not getattr(deps, "harness_lead", False))
+            if charged:
+                circuit_breaker.record_outcome(
+                    state, system, exit_code,
+                    counts_toward_run=not getattr(deps, "harness_lead", False))
         return row, text
 
     def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:
@@ -860,12 +895,22 @@ def _list_verbs_line(
         )
 
 
-def _tool_list_verbs(registry: Any, system: str) -> str:
+#: A granted system that is down for the run (#1256 O-3): its cause, and what to do instead.
+_LIST_VERBS_DOWN = (
+    "`{system}` — DOWN for this run ({cause}). No verb of it runs in this run, so there is no "
+    "surface to show you and nothing to call. Do not query or dispatch it: measure this lead "
+    "against a system that is up, and name the missing evidence in your summary — it is a "
+    "visibility gap, not a result."
+)
+
+
+def _tool_list_verbs(registry: Any, system: str, down: system_status.Down | None = None) -> str:
     """`system`'s granted verbs and their declared params, derived at call time.
 
     Uses the same readers `validate_params` enforces with, and filters through
     `registry.decide`, so what is published is what `query` admits. The system-level grant
-    check runs first because `decide` would import the adapter.
+    check runs first because `decide` would import the adapter; a granted system that is down
+    for the run (`down`, its cause) answers that instead of a surface no call could use.
 
     Nothing is persisted (no row, breaker, or repeat guard): it reads our own adapter
     signatures, so the output is first-party and carries no untrusted frame.
@@ -876,6 +921,8 @@ def _tool_list_verbs(registry: Any, system: str) -> str:
     if system not in reachable:
         roster = f" The systems your grant reaches: {', '.join(reachable)}." if reachable else ""
         return _LIST_VERBS_UNREACHABLE.format(system=shown, roster=roster)
+    if down is not None:
+        return _LIST_VERBS_DOWN.format(system=shown, cause=system_status.cause_text(down))
 
     declared, degradation = _list_verbs_declared(registry, system, shown)
     if degradation is not None:
@@ -919,9 +966,13 @@ def register_list_verbs_tool(agent, registry) -> None:
         is the system you were dispatched to (the Dispatch block names it); call it again for
         another system if this lead crosses one. It runs nothing against the system of record
         and is not recorded as a query."""
+        # The run's one question (#1256): is this system down? Deps no run started (an agent
+        # built on its own) hold no state, and nothing is down for them.
+        state = getattr(ctx.deps, "run_state", None)
+        down = system_status.down_cause(state, system) if state is not None else None
         # Off the event loop: the first call imports the adapter module, which would otherwise
         # stall sibling leads.
-        return await asyncio.to_thread(_tool_list_verbs, registry, system)
+        return await asyncio.to_thread(_tool_list_verbs, registry, system, down)
 
 
 def register_query_tool(agent, registry) -> None:
@@ -975,7 +1026,7 @@ def _as_dict(v: Any) -> dict:
 
 
 from .tools import _bash_env, _format_bash_result  # noqa: E402
-from .tools_gather import _payload_note, _tripped_message  # noqa: E402
+from .tools_gather import _down_refusal, _payload_note  # noqa: E402
 
 
 __all__ = [

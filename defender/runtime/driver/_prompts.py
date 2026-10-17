@@ -5,7 +5,7 @@ Only assembles text (no agent, no budget), so the resume's substitution is testa
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,7 @@ def _main_instructions(defender_dir: Path) -> str:
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
     run_dir: Path, alert_path: Path, defender_dir: Path,
     *, systems: Sequence[str], correlation_section: str | None,
+    down: Mapping[str, str],
     orient_shim: orient.ShimRunner | None = None,
     tenant_agent: Path | None = None,
 ) -> str:
@@ -54,10 +55,11 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
     The correlation lead has already run to its end (or its absence has been decided) when this
     is built, so `correlation_section` is final: the lead's framed summary or one fixed
     sentence, under a host heading naming the reserved id (`None` for a run that dispatches no
-    lead at all)."""
+    lead at all). `down` is each granted system down at run start, with its cause (#1256 O-3)."""
     orientation = orient.orientation(
         run_dir, defender_dir, alert_path, systems=systems,
         lead_zero_section=correlation_section, shim=orient_shim, tenant_agent=tenant_agent,
+        down=down,
     )
     return f"Begin the investigation.\n\n{_coordinates(run_dir, alert_path)}\n{orientation}"
 
@@ -74,6 +76,7 @@ def _coordinates(run_dir: Path, alert_path: Path) -> str:
 def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
     resume: Any, run_dir: Path, alert_path: Path, defender_dir: Path,
     *, systems: Sequence[str], correlation_section: str | None,
+    down: Mapping[str, str],
     orient_shim: orient.ShimRunner | None = None,
     tenant_agent: Path | None = None,
 ) -> str:
@@ -90,7 +93,7 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
     if resume is None:
         return _user_prompt(
             run_dir, alert_path, defender_dir, systems=systems,
-            correlation_section=correlation_section, orient_shim=orient_shim,
+            correlation_section=correlation_section, down=down, orient_shim=orient_shim,
             tenant_agent=tenant_agent,
         )
     return (

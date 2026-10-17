@@ -117,6 +117,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -167,6 +168,7 @@ from defender.scripts.gather_tools.record_query import (
 )
 from defender._query_rules import ABOVE_GUARD_QUERY_ID, REPEAT_TRIP_QUERY_ID
 from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.tests._after_start_1256 import AfterStart, Relink  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -260,7 +262,7 @@ def _dispatch(lead: str, system: str) -> tuple[str, dict]:
 
 def _run(
     root: Path, *, verbs, turns: list[Turn], run_id: str, system: str = "elastic",
-    lead: str = LEAD, planted: list[dict] | None = None,
+    lead: str = LEAD, planted: list[dict] | None = None, tenant: Any = None,
 ) -> _Res:
     """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
     `turns` against the INJECTED verb registry. Everything between the two fakes — dispatch,
@@ -277,7 +279,7 @@ def _run(
     main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
                      Turn(text="Investigation complete.")])
     gather = ReplayFn(turns)
-    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
+    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, tenant=tenant)
     return _Res(run_dir, main, gather, summary)
 
 
@@ -659,6 +661,9 @@ class GrantScopedVerbs(VerbRegistry):
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))
 
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        return frozenset(self._table.get(system, {}))
+
     def verbs(self, system: str):
         return self._table[system]
 
@@ -688,14 +693,43 @@ _BROKEN_ADAPTER = (
 )
 
 
-def unloadable_adapter(root: Path) -> ModuleVerbRegistry:
-    """The REAL production registry over a REAL adapter module that raises at import — a
-    level-1 fault, not a stand-in for one. `decide` resolves the grant cold (an AST read of
-    the `VERBS = {...}` literal), then imports to bind the verb, and the import raises."""
+#: The same system's adapter as the run's start check finds it: importable, declaring its
+#: settings check (#1256 O-5) and the one verb. Its verb is never called: the file is broken
+#: (`_BROKEN_ADAPTER`) before the lead's first call.
+_LOADABLE_ADAPTER = (
+    "def check_settings(*_a, **_k):\n"
+    "    return None\n"
+    "\n"
+    "def probe(ctx, *, native_query: str) -> list:\n"
+    "    return [{'probed': native_query}]\n"
+    "\n"
+    'VERBS = {"probe": probe}\n'
+)
+
+
+def unloadable_adapter(root: Path) -> tuple[ModuleVerbRegistry, Relink]:
+    """The REAL production registry over a REAL adapter module, and the `Relink` that makes it
+    one that raises at import — a level-1 fault, not a stand-in for one.
+
+    Since #1256 the run imports every granted adapter at its start, so an adapter that cannot
+    be imported THEN is down for the whole run (O-5a) and no call of it ever loads it. A load
+    error at CALL time is what remains possible: the adapter changing after the start check.
+    So the file is importable when the run starts and `Relink.break_` (fired by `_after_start`
+    when the gather model asks for its first call) replaces it by a link to `_BROKEN_ADAPTER`:
+    `decide` resolves the grant cold (an AST read of the `VERBS = {...}` literal), then loads
+    the module to bind the verb, and that load raises — on every call, since a failed load is
+    never kept."""
     adapters = root / "adapters"
     adapters.mkdir(parents=True)
-    (adapters / "elastic_adapter.py").write_text(_BROKEN_ADAPTER, encoding="utf-8")
-    return ModuleVerbRegistry(read_roster(adapters), VerbGrant(role="gather", entries=(("elastic", "probe", "r"),)))
+    (adapters / "elastic_adapter.py").write_text(_LOADABLE_ADAPTER, encoding="utf-8")
+    registry = ModuleVerbRegistry(read_roster(adapters),
+                                  VerbGrant(role="gather", entries=(("elastic", "probe", "r"),)))
+    return registry, Relink(adapters / "elastic_adapter.py", _BROKEN_ADAPTER)
+
+
+def _after_start(relink: Relink, turns: list[Turn]) -> list:
+    """`turns`, its first one breaking the adapter when the gather model asks for it."""
+    return [AfterStart(turns[0], relink.break_), *turns[1:]]
 
 
 def _bad_args(params: dict) -> Turn:
@@ -1399,15 +1433,26 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
     `spec_graph_807.yaml:450-461` and `rejection_trip`'s own justification for excluding these
     rows. It is now `== 2`, and the down-message is asserted positively rather than inferred
     from `is_tripped`. `load_error_repeat_is_answered_by_the_breaker_not_the_run_kill` drives
-    the same shape past the fifth call, where the old behaviour cost the run."""
+    the same shape past the fifth call, where the old behaviour cost the run.
+
+    #1256: the adapter is importable when the run starts and broken before the lead's first
+    call (`unloadable_adapter`): an adapter that cannot be imported AT start is down for the
+    whole run (O-5a) and none of its calls reaches `_grant_check`, so the load-error rows this
+    demand is about are now those of an adapter that changed during the run."""
+    registry, relink = unloadable_adapter(tmp_path / "tree")
+    from defender.tests.tenant_1107_settings import _spec1107 as S
+
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="dispositions:\n  elastic:\n    probe: {roles: [gather]}\n")
     r = _run(
-        tmp_path / "run", verbs=unloadable_adapter(tmp_path / "tree"), run_id="d807-loaderr",
-        turns=[
+        tmp_path / "run", verbs=registry, run_id="d807-loaderr", tenant=S.tenant_folder_of(root),
+        turns=_after_start(relink, [
             q("elastic", "probe", {"native_query": "FROM logs"}),
             q("elastic", "probe", {"native_query": "FROM logs"}),
             q("elastic", "probe", {"native_query": "FROM logs"}),
             DONE,
-        ])
+        ]))
+    assert relink.broken == 1, "premise: the adapter was never broken after the run's start"
     rows = r.own_rows
     assert len(rows) == 2, \
         "the third load-error call was recorded — the breaker that owns this repeat never answered it"
@@ -1437,10 +1482,19 @@ def test_load_error_repeat_is_answered_by_the_breaker_not_the_run_kill(tmp_path)
     The three assertions that separate the fix from the defect: `total_failures` stays at
     `PER_SYSTEM_FAIL_LIMIT` rather than reaching the kill limit (a tripped breaker means the
     call did not happen, so it counts no failure), the lead still produces its summary, and
-    MAIN still reaches its own final turn."""
+    MAIN still reaches its own final turn.
+
+    #1256: as above, the adapter breaks after the run's start (`unloadable_adapter`)."""
+    registry, relink = unloadable_adapter(tmp_path / "tree")
+    from defender.tests.tenant_1107_settings import _spec1107 as S
+
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="dispositions:\n  elastic:\n    probe: {roles: [gather]}\n")
     r = _run(
-        tmp_path / "run", verbs=unloadable_adapter(tmp_path / "tree"), run_id="d878-loaderr",
-        turns=[q("elastic", "probe", {"native_query": "FROM logs"})] * 5 + [DONE])
+        tmp_path / "run", verbs=registry, run_id="d878-loaderr", tenant=S.tenant_folder_of(root),
+        turns=_after_start(relink, [q("elastic", "probe", {"native_query": "FROM logs"})] * 5
+                           + [DONE]))
+    assert relink.broken == 1, "premise: the adapter was never broken after the run's start"
     rows = r.own_rows
     assert len(rows) == 2, "a call answered by the down-message still recorded an evidence row"
     assert {row["exit_code"] for row in rows} == {2}

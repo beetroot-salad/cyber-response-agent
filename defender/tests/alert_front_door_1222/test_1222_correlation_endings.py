@@ -522,7 +522,7 @@ def test_o5_timed_out_correlation_is_named_to_main(tmp_path: Path) -> None:
 # O6 — every named ending reaches a normal close
 # =================================================================================================
 
-def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any]:  # noqa: PLR0911 — one arm per A2 ending
+def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any]:  # noqa: C901, PLR0911 — one arm per named ending
     if ending == "withheld":
         return {"scene": withheld}
     if ending == "dispatch_raised":
@@ -546,12 +546,21 @@ def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any
         # request awaits the lead.
         return {"limits": S.with_deadline(), "leads": {S.L3: [S.text("late")]},
                 "lead_faults": {S.L3: S.LeadFault(delay=S.SHORT_DEADLINE_S + 2.0)}}
+    if ending == "down_at_start":
+        # #1256 O-6: elastic has no config.env, so it is down from run start; cmdb stays usable.
+        return {"scene": _Scene(tmp_path, tenant_id="acme-down", omit_systems=("elastic",)),
+                "leads": {S.L3: [_q(1), _q(2), S.text("narration")]}}
     raise AssertionError(f"not an A2 ending: {ending!r}")
 
 
-@pytest.mark.parametrize("ending", S.ENDINGS)
+#: A2's named endings, plus #1256's: l-00c on a system down at run start (O-6) is a named non-run
+#: that never refuses the run.
+O6_ENDINGS = (*S.ENDINGS, "down_at_start")
+
+
+@pytest.mark.parametrize("ending", O6_ENDINGS)
 def test_o6_every_named_non_run_reaches_report_md(tmp_path: Path, ending: str) -> None:
-    """Every named ending A2 lists — withheld, dispatch raised, claim collided, claim failed, request limit, tripped breaker, empty output, every call failed, timed out — continues to a normal close and writes report.md."""
+    """Every named ending A2 lists — withheld, dispatch raised, claim collided, claim failed, request limit, tripped breaker, empty output, every call failed, timed out — and #1256's down at start (O-6: never a run refusal) continues to a normal close and writes report.md."""
     granting = _Scene(tmp_path)
     withheld = _Scene(tmp_path, tenant_id="acme-withheld", table=S.TABLE_WITHHELD)
     spec = _o6_scenario(ending, tmp_path, withheld)
@@ -604,34 +613,58 @@ def test_p005_l00c_session_cannot_be_opened(tmp_path: Path) -> None:
 
 
 def test_p006_correlation_system_granted_but_unconfigured(tmp_path: Path) -> None:
-    """When every call fails before reaching a backend: if the breaker refused any of the lead's calls the sentence is 'tripped breaker', otherwise (at least one call ran and all failed) 'every call failed'. No queries-row count is pinned (breaker-refused calls leave no rows). The run reaches report.md."""
+    """#1256 O-6 (supersedes #1222's expectation here, which named this case 'tripped breaker' or 'every call failed'): a correlation system the tenant's settings do not configure is down from run start, so l-00c ends before it claims its lead or spends a gather count — as the withheld ending does — with its own ending naming the cause ('not configured'), distinct from 'tripped breaker' and 'every call failed'. No call runs and the breaker is charged nothing; it is never a run refusal, and the run reaches report.md (cmdb, granted and configured, keeps gather usable: O-8).
+
+    What #1222 asserted and #1256 drops: that MAIN is never handed the config fault's text — the design now hands MAIN the down system's cause and reason (O-3, O-4)."""
     scene = _Scene(tmp_path)
     unconfigured = _Scene(tmp_path, tenant_id="acme-unconfigured", omit_systems=("elastic",))
     control = scene.control()
-    closing = S.closing_main_turns("inconclusive")
-    # RJ-07: every call exits 2 (ConfigFault) before any backend; the breaker trips at two.
-    two = unconfigured.run("two-calls", backend=_fail_alerts(_config_fault), main=closing,
-                           leads={S.L3: [_q(1), _q(2), S.text("narration")]})
-    three = unconfigured.run("three-calls", backend=_fail_alerts(_config_fault),
-                             main=S.closing_main_turns("inconclusive"),
-                             leads={S.L3: [_q(1), _q(2), _q(3), S.text("narration")]})
+    # RJ-07: before #1256 every call exited 2 (ConfigFault) before any backend and the breaker
+    # tripped at two. The lead's script still asks for three such calls, so a run that dispatches
+    # it anyway is seen calling, charging and ending 'tripped breaker'.
+    down = unconfigured.run("down-at-start", backend=_fail_alerts(_config_fault),
+                            main=S.closing_main_turns("inconclusive"),
+                            leads={S.L3: [_q(1), _q(2), _q(3), S.text("narration")]})
     # The reference endings, met by faults the breaker never counts (exit 1) or never sees.
     ecf = scene.run("ecf-reference", backend=_fail_alerts(S.upstream_fault),
                     leads={S.L3: [_q(1), S.text("narration")]})
     tripped = scene.run("tb-reference", before=_pre_trip(),
                         leads={S.L3: [_q(1), S.text("narration")]})
 
-    assert _named(two, control, "unconfigured, no call refused") == _named(
-        ecf, control, "every call failed (reference)"), (
-        "every call failed before a backend and none was refused, but the sentence is not "
-        "'every call failed'")
-    assert _named(three, control, "unconfigured, a call refused") == _named(
-        tripped, control, "tripped breaker (reference)"), (
-        "the breaker refused one of the lead's calls, but the sentence is not 'tripped breaker'")
-    for label, d in (("two calls", two), ("three calls", three)):
-        _assert_closed(d, f"unconfigured correlation system, {label}")
-        _assert_never_handed(d, "config file not found")
-    _alone(control, ("unconfigured, two calls", two), ("unconfigured, three calls", three))
+    sentence = _named(down, control, "unconfigured correlation system")
+    assert sentence != _named(ecf, control, "every call failed (reference)"), (
+        "l-00c on an unconfigured system is named 'every call failed'")
+    assert sentence != _named(tripped, control, "tripped breaker (reference)"), (
+        "l-00c on an unconfigured system is named 'tripped breaker'")
+    # Read from the ONE correlation section: the whole-prose difference also carries the
+    # workspace map's line for the down system (O-3), which is not the lead's ending.
+    _head, body = S.correlation_section(down.opening_message)
+    assert "elastic" in body.lower(), f"the correlation section names no system: {body!r}"
+    assert "not configured" in body.lower(), (
+        f"the correlation section does not name the cause 'not configured': {body!r}")
+    for word in ("tripped", "circuit breaker", "infra failure"):
+        assert word not in body.lower(), (
+            f"the correlation section names the breaker's cause ({word}): {body!r}")
+    # Before its claim and its count, as withheld: the summary control shows both channels move.
+    assert control.has_sidecar(S.L3), "premise: the summary control's l-00c claimed no row"
+    assert control.budget.get("subagent_spawns") == 1, (
+        f"premise: the summary control's l-00c spent no gather count: {control.budget!r}")
+    assert not down.router.dispatched(S.L3), "l-00c was dispatched on a system down at start"
+    assert not down.has_sidecar(S.L3), "l-00c claimed its leads row on a system down at start"
+    assert down.budget.get("subagent_spawns") == 0, (
+        f"l-00c spent a gather count on a system down at start: {down.budget!r}")
+    assert down.backend.rec.calls == [], f"an adapter ran: {down.backend.rec.verbs}"
+    assert down.run_state is not None
+    assert down.run_state.breaker_failures("elastic") == 0, (
+        f"the breaker was charged for a system down at start: {down.breaker!r}")
+    assert down.breaker.get("total_failures", 0) == 0, (
+        f"the run-wide failure count was charged: {down.breaker!r}")
+    _assert_continued(down, "unconfigured correlation system", requests=3)
+    _assert_closed(down, "unconfigured correlation system")
+    # Exactly one correlation section (A4), counted by its host heading alone — not `_alone`'s
+    # frame census, which would also forbid O-3 framing the down system's reason (undecided).
+    sections = S.correlation_sections(down.opening_message)
+    assert len(sections) == 1, f"not exactly one correlation section: {[h for h, _ in sections]}"
 
 
 def test_p008_l00c_own_failures_trip_its_system(tmp_path: Path) -> None:

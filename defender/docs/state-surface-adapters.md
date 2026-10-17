@@ -82,7 +82,11 @@ that need to match `elastic_adapter.py`:
   `gather_raw/{lead_id}/{seq}.json`.
 - Exit codes: `0` success, `1` query error (404, schema mismatch,
   bad arg), `2` connectivity/auth failure or a missing/broken config
-  (`TransportFault` / `ConfigFault`; both charge the circuit breaker).
+  (`TransportFault` / `ConfigFault`). A `TransportFault` charges the
+  circuit breaker; a `ConfigFault` never does: the adapter's
+  `check_settings` raises it at run start and the system is down for the
+  run as not configured (#1256), and one that still escapes at call time
+  marks the system down the same way, uncharged.
 - **Don't** Read the CLI source to discover params — the SKILL.md +
   the `VERBS` registry's annotations are the authoritative surface (per the
   memory-recorded discipline in the elastic SKILL).

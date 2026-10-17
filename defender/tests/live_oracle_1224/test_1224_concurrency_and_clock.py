@@ -1114,7 +1114,7 @@ def test_1224_concurrent_leads_leave_one_intact_world_ledger_row_per_call(tmp_pa
     fns: list[Callable[[], Any]] = []
     fns += [lambda p=p: S.call(reg, "idp", "query", ctx, **p) for p in served]
     fns += [lambda p=p: S.call(reg, "idp", "query", ctx, **p) for p in broken]
-    fns += [lambda n=n: reg.decide_call("edr", S.WRITE_VERB, {"host": f"db-{n}"})
+    fns += [lambda n=n: reg.authorize_call("edr", S.WRITE_VERB, {"host": f"db-{n}"})
             for n in range(3)]
     calls = _together(*fns)
     assert all(c.error is None for c in calls[:3]), [c.error for c in calls[:3]]

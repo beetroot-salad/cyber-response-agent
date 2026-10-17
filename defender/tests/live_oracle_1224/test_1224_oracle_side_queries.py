@@ -1719,7 +1719,7 @@ def test_tenant_grant_changed_between_launch_and_sibling_resume(tmp_path):
     _e, _p, reg = _scene(tmp_path, oracle, est=est, ep=ep)
 
     _ask(reg, est, tmp_path / "run")
-    dropped = reg.decide_call("siem-x", "lookup", VERIFY)
+    dropped = reg.authorize_call("siem-x", "lookup", VERIFY)
     gained = reg.decide(UNGRANTED, "query")
 
     assert est.calls("siem-x") == [], "a system the live grant dropped was read"

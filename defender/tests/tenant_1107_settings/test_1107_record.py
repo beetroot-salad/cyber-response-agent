@@ -625,7 +625,7 @@ def test_resolve_does_not_judge_an_access_method(tmp_path, caplog):
     configs = S.config_texts("mf8")
     # A folder that predates D2: cmdb's config is #1106's (neither access-method key); ticket
     # lacks only its TRANSPORT, identity only its DOCKER_CONTEXT; the rest are complete.
-    configs["cmdb"] = T1106.config_texts("mf8")["cmdb"]
+    configs["cmdb"] = without(without(configs["cmdb"], "CMDB_TRANSPORT"), "CMDB_DOCKER_CONTEXT")
     configs["ticket"] = without(configs["ticket"], "TICKET_TRANSPORT")
     configs["identity"] = without(configs["identity"], "IDENTITY_DOCKER_CONTEXT")
     root = tmp_path / "tenants"

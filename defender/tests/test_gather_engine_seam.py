@@ -360,10 +360,15 @@ def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path)
     the model is waiting on — and `functools.cache` on the builder does not memoise a raise,
     so every later dispatch would re-raise it.
 
-    Pinned from the prompt the gather agent receives: a sentinel catalog lands in it verbatim,
-    and `None` yields NO "Systems of record" block at all — over `_DEFENDER`, the real tree,
-    whose real catalog is non-empty, so a frame that built its own would render one here and
-    fail the second arm."""
+    #1256 r4: what run start hands down is the system index it built (`SystemIndex`), and the
+    dispatch RENDERS it at use against the run's current down map (`.render(down)`) — so the
+    stand-in handed here is an index whose rendering is the sentinel, and it records that the
+    dispatch rendered it.
+
+    Pinned from the prompt the gather agent receives: the handed index's rendering lands in it
+    verbatim, and `None` yields NO "Systems of record" block at all — over `_DEFENDER`, the real
+    tree, whose real catalog is non-empty, so a frame that built its own would render one here
+    and fail the second arm."""
     from defender.runtime import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
@@ -374,15 +379,34 @@ def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path)
             prompts.append(prompt)
             raise UsageLimitExceeded("far enough — the prompt was captured")
 
+    class _HandedIndex:
+        """A stand-in for the index run start builds and hands down: it lists the systems its
+        lines name (`systems`, read by the dispatch to mark those that are down), renders to
+        `text`, whatever down map it is rendered against, and records each rendering."""
+
+        systems = ("elastic",)
+
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.renders: list[tuple[tuple, dict]] = []
+
+        def render(self, *args: object, **kw: object) -> str:
+            self.renders.append((args, kw))
+            return self.text
+
     sentinel = "- `elastic`: THE-CATALOG-THIS-RUN-WAS-HANDED"
-    for lead, catalog in (("l-901", sentinel), ("l-902", None)):
+    index = _HandedIndex(sentinel)
+    for lead, catalog in (("l-901", index), ("l-902", None)):
         asyncio.run(tools_gather._run_gather(
             deps, lambda agent_id, system, request_limit: _Capture(), 40,
             tools_gather.GatherRequest(lead, "elastic", "confirm the lead", ("what",)),
             T1106.fixture_grants().gather, catalog=catalog,
         ))
     handed, none = prompts
-    assert sentinel in handed, "the catalog this dispatch was handed is not in its prompt"
+    assert index.renders, (
+        "the dispatch never rendered the index it was handed (#1256 r4: it is rendered at use, "
+        "against the run's current down map)")
+    assert sentinel in handed, "the index this dispatch was handed is not in its prompt"
     assert "## Systems of record" in handed
     assert "## Systems of record" not in none, \
         "handed no catalog, the dispatch rendered one anyway — it built its own from the tree"

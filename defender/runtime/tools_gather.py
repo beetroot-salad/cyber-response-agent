@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from defender.runtime.tools._deps import run_of
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
@@ -15,7 +15,11 @@ from defender._model import model
 from defender.hooks.budget_enforcer import BudgetKill
 from defender.run_repository import Run
 
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.hooks.inject_system_skill_description import SystemIndex
+
 from . import circuit_breaker
+from . import system_status
 from .exception_groups import carried_unless_overridden
 from .run_state import run_state_of
 from . import permission
@@ -60,16 +64,30 @@ class GatherRequest:
 GatherFactory = Callable[[str, str, int], Any]
 
 
-def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
+def _down_refusal(deps: GatherDeps, system: str | None) -> str | None:
+    """The query tool's in-call gate: the refusal of a call to a system that is down for this
+    run, rendered from its cause (`system_status`, DP4), or `None` when it is up."""
+    if not system:
+        return None
     state = run_state_of(deps)
-    if system and circuit_breaker.is_tripped(state, system):
-        # Remembered on the lead's stop, so the harness's correlation lead can name "a call was
-        # refused by the breaker" apart from "every call failed" (#1222 A2).
-        stop = getattr(deps, "stop", None)
-        if stop is not None:
-            stop.mark_breaker_refused(system)
-        return circuit_breaker.down_message(state, system)
-    return None
+    cause = system_status.down_cause(state, system)
+    if cause is None:
+        return None
+    if isinstance(cause, system_status.Tripped):
+        return _tripped_message(deps, system)
+    # Down for another cause: not the breaker's, so nothing is remembered on the lead's stop
+    # (lead zero asks the system's cause itself).
+    return system_status.message_for(state, system, cause)
+
+
+def _tripped_message(deps: GatherDeps, system: str) -> str:
+    """The breaker's refusal of a call to `system`, tripped during this run. Remembered on the
+    lead's stop, so the harness's correlation lead can name "a call was refused by the breaker"
+    apart from "every call failed" (#1222 A2)."""
+    stop = getattr(deps, "stop", None)
+    if stop is not None:
+        stop.mark_breaker_refused(system)
+    return circuit_breaker.down_message(run_state_of(deps), system)
 
 
 def _payload_note(deps: GatherDeps, record: dict) -> str:
@@ -445,7 +463,7 @@ def _compose(
 async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except arm per way a gather run can end
     deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
-    *, catalog: str | None, pre_claimed: bool = False,
+    *, catalog: SystemIndex | None, pre_claimed: bool = False,
     on_end: Callable[[Any], None] | None = None,
 ) -> str:
     """Run one gather lead and return main's wrapped result.
@@ -459,7 +477,8 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
     supplies it because the session is opened inside the factory. `None` skips stamping.
 
     `catalog` is the descriptor index, built once at run start so an unreadable adapters tree
-    fails there rather than mid-tool. `None` means no index to show.
+    fails there rather than mid-tool, and rendered here with the systems down NOW marked
+    (#1256). `None` means no index to show.
 
     The `except` arms are one per way a gather run can end: three faults degrade the lead into
     a notice, two run-level ends pass through. A harness stop is not an exception: a guard's
@@ -490,6 +509,14 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
             "the leads-table row's own text and the whole of what gather is dispatched to "
             "measure. Re-dispatch this same lead_id with the goal spelled out."
         )
+    # The dispatch gate: a system down for this run — not configured or its adapter broken at
+    # start, an escaped config fault, or tripped since — is refused here, before its lead is
+    # claimed (#1256 O-1, O-4, O-6): a refused dispatch writes no lead record, consumes no id
+    # and starts no gather.
+    refused = system_status.refusal_if_down(run_state_of(deps), system)
+    if refused is not None:
+        return refused
+
     # Harness-reserved leads are claimed at run start; re-claiming would raise a `ModelRetry`
     # with no model in the loop to retry it.
     if not pre_claimed:
@@ -504,10 +531,6 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
             raise LeadRecordFault(
                 f"lead {lead_id!r} could not be claimed: the run's leads table could not be "
                 "written")
-
-    state = run_state_of(deps)
-    if circuit_breaker.is_tripped(state, system):
-        return circuit_breaker.down_message(state, system)
 
     from defender.runtime.agent_definition import RunScope, bind
     from defender.runtime.driver import gather_def_for
@@ -537,7 +560,11 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
         tenant=deps.tenant,
         harness_lead=getattr(deps, "harness_lead", False),
     )
-    prompt = _gather_prompt(deps, request, catalog, verb_grant)
+    # The index as it stands now: a system downed since the start (an escaped config fault, a
+    # trip) is marked in it (#1256).
+    index = None if catalog is None else catalog.render(
+        system_status.down_notes(run_state_of(deps), catalog.systems))
+    prompt = _gather_prompt(deps, request, index, verb_grant)
 
     def stamp(terminator: str | None) -> None:
         if terminator is not None and stamp_terminator is not None:
@@ -613,7 +640,7 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
 
 def register_gather_tool(
     main_agent, gather_factory: GatherFactory, request_limit: int, verb_grant: VerbGrant,
-    stamp_terminator: Callable[[str, str], None] | None = None, *, catalog: str | None,
+    stamp_terminator: Callable[[str, str], None] | None = None, *, catalog: SystemIndex | None,
 ) -> None:
 
     @main_agent.tool

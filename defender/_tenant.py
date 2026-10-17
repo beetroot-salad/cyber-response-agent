@@ -419,6 +419,17 @@ class Tenant:
     def agent(self) -> Path:
         return self._layout.agent
 
+    def root_names(self) -> dict[str, str]:
+        """How text shown to a model or an operator names this tenant's host roots instead of
+        locating them: each spelling (`_paths.root_spellings`) of its own folder
+        (`<tenant folder>`) and of the data root it was accepted under (`<data root>`). For text
+        whose host paths no layout rule chose — an adapter's crash, a repr of the run's record
+        (#1256's reasons) — handed to `_paths.name_roots`, which names whole paths only and the
+        longest spelling first, so the tenant's folder is never cut into `<data root>/<id>`.
+        Read here because this module owns the root (#1210)."""
+        return {**_paths.root_spellings(self.data_root, "<data root>"),
+                **_paths.root_spellings(self.dir, "<tenant folder>")}
+
     def runs_repository(self) -> RunsRepository:
         """This tenant's runs repository (#1105 PR 2, decision C): bound to this tenant, and
         below it everything is ids. Only an accepted `Tenant` exists, so this is the one way a
