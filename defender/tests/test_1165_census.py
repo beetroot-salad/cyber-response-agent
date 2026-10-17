@@ -132,7 +132,7 @@ RESIDUE = {
     ("runtime.box._docker", "_own_container_ids", "read_text_soft"): (2, "nonrecord", ('hostname_path', 'mountinfo_path')),
     ("runtime.box._image", "_read", ".read_bytes"): (1, "nonrecord", ('tree / name',)),
     # #1108 P3 (D7): a read-only mount is verified by reading an existing host file back
-    # (`.tenant-id`, a code mount's `MOUNT_CHECK`, or a data mount's first regular file) — never a run record.
+    # (a code mount's `MOUNT_CHECK` or a data mount's first regular file) — never a run record.
     ("runtime.box._lifecycle", "_check_mount_sentinel", "read_text_utf8"): (1, "probe", ('source / relative',)),
     ("runtime.box._lifecycle", "_plant", "write_guarded"): (1, "probe", ('sentinel',)),
     ("runtime.box._lifecycle", "_probe_sentinel", ".unlink"): (2, "probe", ('sentinel',)),

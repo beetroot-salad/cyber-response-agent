@@ -42,7 +42,7 @@ Where this section and an earlier one disagree, this section wins. The seams sec
   - another repository, a prefix repository, or one reached through dot-segments;
   - a bad port, or a bad IPv6 host;
   - our own address, naming a page that skips one (added after adversary M07).
-  
+
   Every listing must still find every row past page 1. Every request must go to our repository at our address with the token, and each must name `page` and `limit`. `test_pagination_follows_an_equivalent_spelling_of_the_origin` becomes `test_every_page_is_asked_of_the_parsed_address`.
 - **Choice 5 gains R1, R2 and R9** (the cases are in the rules table below).
 - **The pipe becomes a sealed memfd.** See the seams, and R7.
@@ -64,12 +64,12 @@ Where this section and an earlier one disagree, this section wins. The seams sec
   - our commit at the head of a fork, a sibling fork, a namesake (our full name, another id), or a row with no head repository;
   - our branch name in our repository at another commit, merged or closed;
   - another batch's open PR.
-  
+
   The positive side is `test_the_batchs_pr_is_known_by_its_head_commit_and_repository_id`, with four rows:
   - our repository renamed (another full name, the same id) under another branch name, open;
   - merged with the branch deleted;
   - merged, or closed, at the batch's earlier commit.
-  
+
   Each answers its status, pushes nothing and opens nothing.
 
 ### The rules and their cases

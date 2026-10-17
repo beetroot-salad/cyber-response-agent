@@ -450,8 +450,8 @@ class Tenant:
     @property
     def knowledge_lock(self) -> Path:
         """The per-tenant lock over the knowledge clone and its exports: held for a
-        fast-forward, an export publish and a worktree's creation or removal, never across
-        network I/O or a box window."""
+        fast-forward, export publication, filter configuration and draft build or sweep,
+        never across network I/O, a box window or commit creation."""
         return self._layout.knowledge_lock
 
     @property
