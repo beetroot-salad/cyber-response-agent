@@ -61,10 +61,10 @@ class OpenAICompatProvider:
                 "reinstall defender with "
                 "`uv pip install --python .venv/bin/python -e '.[runtime]'`."
             ) from e
-        return OpenAIChatModel(
-            self._model_id(name),
-            provider=OpenAIProvider(base_url=self.base_url, api_key=api_key),
-        )
+        provider = OpenAIProvider(base_url=self.base_url, api_key=api_key)
+        # The retrier (`retry.py`) owns every retry; see `AnthropicProvider.build_model`.
+        provider.client.max_retries = 0
+        return OpenAIChatModel(self._model_id(name), provider=provider)
 
     def effort_for_role(self, name: str, role: AgentRole) -> str | None:
         """The role's effort for this model — a provider preference clamped to a model

@@ -8,6 +8,9 @@ decides on while it runs:
 
   * the budget — the tool-call and spawn counters and the clock's two origins;
   * the circuit breaker — each system's failures and when it tripped;
+  * each system down for a cause the breaker does not count — not configured, or its adapter
+    broken — judged once at run start (#1256) and never cleared, and the scope every such
+    cause's reason is shown in — the live status every surface asks when it renders;
   * the queries table's rows, by lead, in append order — the record of every call the run
     made (the table file is the model's view of it), or the rows seeding handed over for a
     branch sibling, never rows read back from the file;
@@ -18,8 +21,9 @@ so a decision answered from there is one the model can move; and a run folder is
 by one run (`run_common._setup_state`), so nothing needs to outlive the process.
 
 The behaviour stays with each concern's own module, which takes the state first:
-`budget_enforcer` (counting, the oracle clock), `circuit_breaker` (charging, the trip) and
-`record_query` (the row append, the seq, the repeat note). Each does its read-modify-write under
+`budget_enforcer` (counting, the oracle clock), `circuit_breaker` (charging, the trip),
+`system_status` (a system down at start, or on an escaped config fault) and `record_query` (the
+row append, the seq, the repeat note). Each does its read-modify-write under
 the state's one `lock`. Outside readers take the budget and breaker snapshots, which are copies,
 and the row accessors (`lead_rows`, `row_count`, `last_row`), which hand out the stored rows:
 a row is never changed once recorded. Nothing process-wide refers to a state, so it lives
@@ -33,7 +37,10 @@ import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.system_status import ReasonScope, StartCause
 
 
 class RunState:
@@ -64,6 +71,15 @@ class RunState:
         #: `circuit_breaker`: `{"systems": {name: {"failures": n, "tripped_at"?: iso}},
         #: "total_failures": n}`.
         self.breaker: dict = {"systems": {}, "total_failures": 0}
+        #: `system_status`: each system down for this run for a cause the breaker does not
+        #: count, with that cause (`NotConfigured` / `AdapterBroken`). Set once per system —
+        #: at run start, or when a call's `ConfigFault` escapes the start check — and never
+        #: cleared: a system does not come back up within a run.
+        self.system_down: dict[str, StartCause] = {}
+        #: `system_status`: the scope this run's down-cause reasons are shown in, held with its
+        #: start verdict (`hold_at_start`) so a cause made later hides what the start's did;
+        #: `None` until then.
+        self.reason_scope: ReasonScope | None = None
         #: `record_query`: each lead's rows, in append order (an inherited prefix first).
         self.rows: dict[str, list[dict]] = {}
         #: `record_query`: call identity and the next number, owned by this run alone.
@@ -91,6 +107,13 @@ class RunState:
         with self.lock:
             rec = self.breaker["systems"].get(system)
             return rec["failures"] if rec else 0
+
+    def system_down_cause(self, system: str) -> StartCause | None:
+        """Why `system` is down for this run for a cause the breaker does not count, or `None`.
+        A tripped system is the breaker's (`breaker_failures`); `system_status.down_cause` asks
+        both."""
+        with self.lock:
+            return self.system_down.get(system)
 
     def lead_rows(self, lead: str) -> tuple[dict, ...]:
         """`lead`'s rows as they stand, in append order; `()` for a lead with none.

@@ -85,6 +85,27 @@ def _jsonl_text(run_dir: Path) -> str:
 
 
 
+class _QueryAnswers(ReplayFn):
+    """`ReplayFn` that also keeps, per model request, the `query` tool's answers that arrived
+    with it — the tool-return and retry-prompt parts of the request's last message, i.e. the
+    host's answer to the previous turn's call, read off that request rather than diffed from the
+    whole transcript (an answer worded like an earlier one still counts)."""
+
+    __name__ = "_QueryAnswers"
+
+    def __init__(self, turns: list[Turn]) -> None:
+        super().__init__(turns)
+        self.answers: list[str] = []
+
+    def __call__(self, messages: Any, info: Any) -> Any:
+        parts = getattr(messages[-1], "parts", ()) if messages else ()
+        self.answers.append("\n".join(
+            str(p.content) for p in parts
+            if getattr(p, "part_kind", None) in ("tool-return", "retry-prompt")
+            and getattr(p, "tool_name", None) == "query"))
+        return super().__call__(messages, info)
+
+
 # Lead-zero's item 1 — the ancestor fetch that read `record.elastic`'s alerts index and reported
 # "unavailable" for an unconfigured or bad Elastic part — was deleted by #1222 (D1), and with it
 # its three tests here (`c_lead_zero_reads_record`, `o9_lead_zero_unavailable_explicit`,
@@ -271,7 +292,15 @@ def test_d_grants_through_tenant_config(tmp_path):
 def test_d_record_settings_redacted(tmp_path, monkeypatch):
     """record.settings is the tenant's settings folder path. A ConfigFault whose text names that
     path, either as given or resolved, reaches the model with the path replaced by
-    SETTINGS_POINTER ("the tenant's settings/") (CX5)."""
+    SETTINGS_POINTER ("the tenant's settings/") (CX5).
+
+    #1256: cmdb is configured, so it passes its start check, and this call-time ConfigFault is
+    an escape (O-5b): cmdb goes down as not configured and the refusal the gather model gets
+    carries the escaped fault's reason — which reaches the model, so CX5 holds for it as for
+    any ConfigFault text. The lead calls cmdb twice: what the escaped call itself answers is not
+    pinned beyond CX5 (the design is silent on its content; like any ConfigFault text it shows
+    no host path), and the second call's own answer is the refusal of a down system: it says not
+    configured and names the reason by the settings pointer (O-4, O-5b)."""
     # CX8: the shim first on the PATH the run env inherits (no call here should reach docker).
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
@@ -295,9 +324,11 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
         raise fault
 
     run_dir = LZ.materialize_alert(tmp_path / "replay", LZ.alert_doc(ancestors=[]))
-    gather = ReplayFn([
+    gather = _QueryAnswers([
         Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
                                     "params": {"host": "web-1"}})]),
+        Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
+                                    "params": {"host": "web-2"}})]),
         Turn(text="Summary: the host."),
     ])
     drive(run_dir, run_id="red1107", tenant=tenant, gather=gather,
@@ -313,6 +344,16 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
     assert any(s in str(raised[0]) for s in spellings), (
         f"the fault names no settings path: {raised[0]!s}")
     after = "\n".join(gather.seen[1:])
+    assert len(gather.answers) > 2, (
+        f"the lead was never asked again after its second cmdb call ({len(gather.answers)} "
+        "requests) — the run ended before answering it")
+    second = gather.answers[2]
+    assert "not configured" in second.lower(), (
+        f"the second cmdb call's own answer is not the refusal of a system down as not "
+        f"configured (O-4, O-5b): {second!r}")
+    assert S.settings_pointer() in second, (
+        f"the second cmdb call's refusal does not name the reason by the settings pointer "
+        f"(O-4, O-5b, CX5): {second!r}")
     assert S.settings_pointer() in after, f"the fault reached the model unnamed:\n{after}"
     for surface, text in (("gather model", after), ("run-dir tables", _jsonl_text(run_dir))):
         for spelling in spellings:

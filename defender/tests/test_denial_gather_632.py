@@ -26,6 +26,7 @@ from defender.tests._verb_authorization_632 import (  # noqa: E402
 )
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.tests._after_start_1256 import AfterStart, Relink  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -406,16 +407,23 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
     adapters = tmp_path / "adapters"
     adapters.mkdir()
     (adapters / "elastic_adapter.py").write_text(
+        "def check_settings(*_a, **_k):\n    return None\n"
         "def query(ctx, *, native_query: str) -> dict:\n    return {}\n"
         "VERBS = {'query': query, 'esql': query}\n", encoding="utf-8")
     (adapters / "cmdb_adapter.py").write_text(
-        "raise ImportError('boom')\n"
-        "VERBS = {'get-host': None, 'list-hosts': None}\n", encoding="utf-8")
+        "def check_settings(*_a, **_k):\n    return None\n"
+        "def get_host(ctx, *, host: str) -> dict:\n    return {}\n"
+        "def list_hosts(ctx) -> dict:\n    return {}\n"
+        "VERBS = {'get-host': get_host, 'list-hosts': list_hosts}\n", encoding="utf-8")
+    relink = Relink(adapters / "cmdb_adapter.py",
+                    "raise ImportError('boom')\n"
+                    "VERBS = {'get-host': None, 'list-hosts': None}\n")
 
     from defender.runtime.verbs import ModuleVerbRegistry
 
     grant = grant_of("gather", (("elastic", "query"), ("cmdb", "get-host")))
     reg = ModuleVerbRegistry(read_roster(adapters), grant)
+    relink.break_()
     assert reg.decide("mystery", "get-host").outcome == UNDECLARED, \
         "a system the grant reaches nowhere resolved to something other than unresolvable"
     assert reg.decide("elastic", "esql").outcome == DENIED
@@ -426,8 +434,21 @@ def test_a_denial_is_decided_from_the_grant_without_importing_the_adapter(tmp_pa
         "and downgraded the denial to unresolvable"
     )
 
-    r = run_gather(tmp_path / "run", verbs=reg, system="cmdb",
-                   turns=[q("cmdb", "list-hosts"), DONE], run_id="d38-unloadable")
+    # The run starts over the importable file; the lead's call meets it broken.
+    relink.restore()
+    from defender.tests.tenant_1107_settings import _spec1107 as S
+
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="""dispositions:
+  elastic:
+    query: {roles: [gather]}
+  cmdb:
+    get-host: {roles: [gather]}
+""")
+    r = run_gather(tmp_path / "run", verbs=reg, system="cmdb", tenant=S.tenant_folder_of(root),
+                   turns=[AfterStart(q("cmdb", "list-hosts"), relink.break_), DONE],
+                   run_id="d38-unloadable")
+    assert relink.broken == 2, "premise: the adapter was not broken after the run's start"
     assert [row["query_id"] for row in r.own_rows] == [DENIED_QUERY_ID], \
         "the denial on an unloadable system was recorded as an unresolvable query instead"
     assert len(r.own_denials) == 1, \

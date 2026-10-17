@@ -458,7 +458,7 @@ REPEAT_ESCAPE = (
 #   - The correlation lead runs under `CORRELATION_REQUEST_LIMIT = 8`, where 6 is 75% of the
 #     allowance (vs 15% of `GATHER_REQUEST_LIMIT = 40`). Resizing or exempting it is for the
 #     owner of ORIENT's correlation section.
-#   - Both `_tripped_message` returns answer with a plain tool result and write no row, and
+#   - Both `_down_refusal` returns answer with a plain tool result and write no row, and
 #     `_grant_check`'s `∅.denied` rows are excluded from both predicates, so a lead looping on
 #     a policy-denied verb is bounded only by `GATHER_REQUEST_LIMIT`.
 

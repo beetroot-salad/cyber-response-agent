@@ -280,7 +280,7 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
     try:
         sib.rc = S.mod(S.RUN).main(argv, lifecycle=lifecycle, visualize=_no_visualize,
                                    preflight=_no_preflight, oracle=oracle.model,
-                                   verifier=verifier.model)
+                                   verifier=verifier.model, roster=est.roster())
     except SystemExit as stop:
         sib.rc = 0 if stop.code is None else stop.code
     except Exception as exc:  # noqa: BLE001 — only the coined class is kept, the rest re-raise

@@ -22,7 +22,7 @@ import sqlite3
 import sys
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -50,10 +50,12 @@ from .. import providers
 from .. import run_end
 from .. import selection
 from .. import session_store
+from .. import system_status
 from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, RunScope, ToolSet, bind
 from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
+from ..exception_groups import carried, carried_unless_overridden
 from .. import review_roles
 from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
@@ -70,7 +72,7 @@ from ..verb_grant import VerbGrant
 from ..verb_dispositions import RunGrants
 from ..verbs import ModuleVerbRegistry, RosterRead, read_roster
 from defender.skills.invlang.validate import hold_capabilities
-from defender.hooks.inject_system_skill_description import descriptor_catalog
+from defender.hooks.inject_system_skill_description import SystemIndex, descriptor_index
 
 from defender import _clock
 from defender._env import env_bool
@@ -279,16 +281,25 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
-    except (run_end.CallRecordWriteFailed, BaseExceptionGroup) as e:
-        # A call record the run could not write ends it (A12, #1234), stamped with the record
-        # that failed. Concurrent leads may deliver it inside an exception group; a group that
-        # carries none propagates as itself.
-        failed = _call_record_failure(e)
-        if failed is None:
+    except (run_end.CallRecordWriteFailed, providers.ProviderDown, BaseExceptionGroup) as e:
+        # Two failures end the run by name. Concurrent leads may deliver either inside an
+        # exception group; a group that carries neither propagates as itself.
+        failed = carried(e, run_end.CallRecordWriteFailed)
+        down = _provider_down_in(e)
+        if failed is not None:
+            # A call record the run could not write (A12, #1234), stamped with the record that
+            # failed.
+            _logger.error(f"{failed}")
+            truncated_by = failed.record
+            exit_reason = "CallRecordWriteFailed"
+        elif down is not None:
+            # A model request kept failing temporarily past the retrier (#1243): an
+            # infrastructure end, so like the budget kill it writes no report.
+            _logger.error(f"{down}; ending the run")
+            truncated_by = session_store.TRUNCATED_BY_PROVIDER_DOWN
+            exit_reason = "ProviderDown"
+        else:
             raise
-        _logger.error(f"{failed}")
-        truncated_by = failed.record
-        exit_reason = "CallRecordWriteFailed"
     finally:
         _flush_run_end(run, store, session_id, truncated_by)
     # The run-end record is taken before the forced close sets `closed`, and written always
@@ -316,16 +327,10 @@ def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
     bind_call_ids(state, run if isinstance(run, str) and run else run_id)
 
 
-def _call_record_failure(exc: BaseException) -> run_end.CallRecordWriteFailed | None:
-    """The `CallRecordWriteFailed` `exc` is or carries (an exception group may wrap it)."""
-    if isinstance(exc, run_end.CallRecordWriteFailed):
-        return exc
-    if isinstance(exc, BaseExceptionGroup):
-        for inner in exc.exceptions:
-            found = _call_record_failure(inner)
-            if found is not None:
-                return found
-    return None
+def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:
+    """The `ProviderDown` that should end the run on `exc` (bare, or carried by a group that
+    holds no interrupt, kill or abort), else `None`."""
+    return carried_unless_overridden(exc, providers.ProviderDown, (BudgetKill, RunAborted))
 
 
 def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
@@ -382,17 +387,38 @@ async def _close_a_run_cut_short(
 
 def _dispatch_catalogs(
     defender_dir: Path, roster: RosterRead, grants: RunGrants,
-) -> tuple[str | None, str | None]:
+    down: Mapping[str, system_status.StartCause],
+) -> tuple[SystemIndex, SystemIndex]:
     """The descriptor index each dispatch prompt opens with: MAIN's (narrowed to the gather
     grant) and lead-0's (narrowed to the correlation grant).
 
-    Built once at run start so a roster fault fails here, not mid-tool. Uses the run's grants,
-    not the injected `verbs=` registry, so a narrower registry does not narrow the catalog."""
+    Built once at run start so a roster fault fails here, not mid-tool; a system `down` at start
+    is listed without being loaded. Each is rendered when a dispatch prompt is built, its down
+    marks from the run's status then (#1256 O-3). Uses the run's grants, not the injected
+    `verbs=` registry, so a narrower registry does not narrow the catalog."""
     skills = KnowledgePaths.of_defender_dir(defender_dir).skills_dir
     return (
-        descriptor_catalog(skills, roster, grants.gather),
-        descriptor_catalog(skills, roster, grants.correlation),
+        descriptor_index(skills, roster, grants.gather, unloaded=down),
+        descriptor_index(skills, roster, grants.correlation, unloaded=down),
     )
+
+
+def _systems_at_run_start(
+    state: RunState, systems: system_status.RunSystems | None, roster: RosterRead,
+    tenant: RunTenant, defender_dir: Path,
+) -> system_status.RunSystems:
+    """The run's one judgement of its systems (#1256): the one `run.py` made before the run
+    existed when handed it (`systems`), else — a direct caller, a run started without one —
+    judged here over `roster` by each adapter's own settings check over the run's frozen record.
+    Held on the run's state, each down system logged, before the budget, the logger or any
+    model; and a start at which no granted system that is up gives gather a query verb is
+    refused (O-8, the predicate over the verdict — never a second judgement), naming each down
+    system."""
+    judged = systems if systems is not None else system_status.judge_run(
+        roster, tenant, defender_dir=defender_dir)
+    system_status.hold_at_start(state, judged)
+    system_status.require_usable(tenant.grants, judged.down)
+    return judged
 
 
 def _correlation_dispatch_at_run_start(
@@ -468,7 +494,7 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
     correlation: CorrelationDispatch, *, run: Run, run_dir: Path, defender_dir: Path, run_id: str,
     verbs: Any, limits: dict, make_model: MakeModel, logger: Any, box: Any, store: Any,
     session_id: str, case_id: str, model_name: str | None, run_state: RunState,
-    catalog: str | None, tenant: RunTenant, deadline: float, run_started: float,
+    catalog: SystemIndex | None, tenant: RunTenant, deadline: float, run_started: float,
 ) -> tuple[str | None, dict | None]:
     """Run the correlation lead to its end and return `(the correlation section of MAIN's
     opening message, None)`, or `(None, the run summary)` when a run-level stop arrived first.
@@ -498,7 +524,12 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
     except (sqlite3.Error, session_store.StoreError) as e:
         _logger.error(f"store fault during the correlation lead ({e!r}); ending the run")
         return None, stop(session_store.TRUNCATED_BY_STORE, "StoreAppendError")
-    except BaseException:
+    except BaseException as e:
+        # A provider that stayed down (#1243) may arrive inside an exception group.
+        down = _provider_down_in(e)
+        if down is not None:
+            _logger.error(f"{down}; stopping before the agent starts")
+            return None, stop(session_store.TRUNCATED_BY_PROVIDER_DOWN, "ProviderDown")
         logger.close()
         with contextlib.suppress(Exception):
             store.close()
@@ -527,6 +558,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     make_model: MakeModel | None = None,
     verbs: Any = None,
     roster: RosterRead | None = None,
+    #: The run's one judgement of its systems, made by `run.py` before the run existed (#1256):
+    #: its roster is the run's, and the driver holds its verdict rather than judging again.
+    #: `None`: the driver judges the roster itself.
+    systems: system_status.RunSystems | None = None,
     limits: dict | None = None,
     box: Any = None,
     store_factory: StoreFactory | None = None,
@@ -557,12 +592,15 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # threaded inward.
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
-    roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs, tenant)
+    roster, verbs = _adapters_at_run_start(
+        defender_dir, systems.roster if systems is not None else roster, verbs, tenant)
+    judged = _systems_at_run_start(state, systems, roster, tenant, defender_dir)
     _bind_call_ids(state, verbs, run_id)
     correlation = _correlation_dispatch_at_run_start(
         tenant=tenant, resume=resume, lead_zero_verbs=lead_zero_verbs,
     )
-    catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster, tenant.grants)
+    catalog, correlation_catalog = _dispatch_catalogs(
+        defender_dir, roster, tenant.grants, judged.down)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     # A usable deadline or no run: checked before the run folder is touched, never replaced by a
     # fallback. A lead the table withholds is never run, so it owes no deadline.
@@ -655,6 +693,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt = _opening_prompt(
         resume, run_dir, alert_path, defender_dir,
         systems=tuple(roster.accepted), correlation_section=correlation_section,
+        # The systems down NOW — after the correlation lead, which can take one down (O-5b).
+        down=system_status.down_notes(state, roster.accepted),
         orient_shim=orient_shim, tenant_agent=tenant.agent,
     )
 

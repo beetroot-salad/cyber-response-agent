@@ -15,6 +15,7 @@ from defender.runtime.circuit_breaker import (  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.tests._declared869 import write  # noqa: E402
+from defender.tests._after_start_1256 import AfterStart  # noqa: E402
 from defender.tests._verb_authorization_632 import grant_of  # noqa: E402
 from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
     PARAMS,
@@ -24,6 +25,7 @@ from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
 )
 from defender.tests.e2e.test_pitfalls_input_823 import _Res, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
+from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -37,6 +39,11 @@ from pathlib import Path
 from defender.runtime.verbs import VerbContext, verb
 
 REACHED = "adapter-reached.txt"
+
+
+def check_settings(*_a, **_k):
+    """This system needs no settings (#1256 O-5: every adapter declares its check)."""
+    return None
 
 
 @verb()
@@ -85,11 +92,15 @@ def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_remo
         _bad_args("elastic", verb="ghostverb"), q("elastic", "otherverb", PARAMS),
         _bad_args("ghostone", verb="ghostverb"), q("ghosttwo", "otherverb", PARAMS),
     ]
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="dispositions:\n  elastic:\n    query: {roles: [gather]}\n")
+    tenant = S.tenant_folder_of(root)
     adapters, registry = _real_registry(tmp_path / "removed")
-    shutil.rmtree(adapters)
-    assert not adapters.exists()
-    r = _run(tmp_path / "removed", run_id="d1031-removed", verbs=registry,
-             turns=[*rejections, DONE])
+    removal = AfterStart(rejections[0], lambda: shutil.rmtree(adapters))
+    r = _run(tmp_path / "removed", run_id="d1031-removed", verbs=registry, tenant=tenant,
+             turns=[removal, *rejections[1:], DONE])
+    assert removal.fired, "premise: the adapters directory was not removed during the run"
+    assert not adapters.exists(), "premise: the adapters directory is still there"
 
     rows = _above_guard(r)
     assert len(rows) == 4, f"the four rejections did not all leave counted rows: {r.own_rows!r}"
@@ -112,7 +123,7 @@ def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_remo
     _assert_no_forbidden_pair(r)
 
     _adapters, intact = _real_registry(tmp_path / "intact")
-    healthy = _run(tmp_path / "intact", run_id="d1031-intact", verbs=intact,
+    healthy = _run(tmp_path / "intact", run_id="d1031-intact", verbs=intact, tenant=tenant,
                    turns=[*rejections, q("elastic", "query", PARAMS), DONE])
     assert _reached(healthy), "the corrected call never reached the adapter — the fixture is a stub"
     assert healthy.own_rows[-1]["exit_code"] == 0

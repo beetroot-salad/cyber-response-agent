@@ -464,7 +464,7 @@ def test_o5_timed_out_correlation_is_named_to_main(tmp_path: Path) -> None:
 
 # O6 — every named ending reaches a normal close
 
-def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any]:  # noqa: PLR0911 — one arm per A2 ending
+def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any]:  # noqa: C901, PLR0911 — one arm per named ending
     if ending == "withheld":
         return {"scene": withheld}
     if ending == "dispatch_raised":
@@ -488,12 +488,21 @@ def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any
         # request awaits the lead.
         return {"limits": S.with_deadline(), "leads": {S.L3: [S.text("late")]},
                 "lead_faults": {S.L3: S.LeadFault(delay=S.SHORT_DEADLINE_S + 2.0)}}
+    if ending == "down_at_start":
+        # #1256 O-6: elastic has no config.env, so it is down from run start; cmdb stays usable.
+        return {"scene": _Scene(tmp_path, tenant_id="acme-down", omit_systems=("elastic",)),
+                "leads": {S.L3: [_q(1), _q(2), S.text("narration")]}}
     raise AssertionError(f"not an A2 ending: {ending!r}")
 
 
-@pytest.mark.parametrize("ending", S.ENDINGS)
+#: A2's named endings, plus #1256's: l-00c on a system down at run start (O-6) is a named non-run
+#: that never refuses the run.
+O6_ENDINGS = (*S.ENDINGS, "down_at_start")
+
+
+@pytest.mark.parametrize("ending", O6_ENDINGS)
 def test_o6_every_named_non_run_reaches_report_md(tmp_path: Path, ending: str) -> None:
-    """Every named ending A2 lists — withheld, dispatch raised, claim collided, claim failed, request limit, tripped breaker, empty output, every call failed, timed out — continues to a normal close and writes report.md."""
+    """Every named ending A2 lists — withheld, dispatch raised, claim collided, claim failed, request limit, tripped breaker, empty output, every call failed, timed out — and #1256's down at start (O-6: never a run refusal) continues to a normal close and writes report.md."""
     granting = _Scene(tmp_path)
     withheld = _Scene(tmp_path, tenant_id="acme-withheld", table=S.TABLE_WITHHELD)
     spec = _o6_scenario(ending, tmp_path, withheld)

@@ -151,7 +151,7 @@ def _dispatch(lead: str = LEAD, system: str = "elastic") -> tuple[str, dict]:
 
 def _run(
     root: Path, *, turns: list[Turn], run_id: str, box: _Box | None = None,
-    main_turns: list[Turn] | None = None, verbs=None, run_dir: Path | None = None,
+    main_turns: list[Turn] | None = None, verbs=None, run_dir: Path | None = None, tenant=None,
 ) -> _Res:
     """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
     `turns`. Everything between the two fakes — dispatch, the bash tool, the permission gate,
@@ -164,7 +164,7 @@ def _run(
     ])
     gather = ReplayFn(turns)
     summary = drive(run_dir, run_id=run_id, main=main, gather=gather,
-                    verbs=verbs if verbs is not None else elastic_ok(rec), box=the_box)
+                    verbs=verbs if verbs is not None else elastic_ok(rec), box=the_box, tenant=tenant)
     return _Res(run_dir, main, gather, the_box, summary)
 
 

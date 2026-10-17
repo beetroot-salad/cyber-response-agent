@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
@@ -13,6 +13,7 @@ from defender._corpus import iter_query_templates  # noqa: E402
 from defender._knowledge import CHECKOUT_KNOWLEDGE  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
 from defender.run_repository import RUN_LAYOUT  # noqa: E402
+from defender.runtime.system_status import NONE_DOWN  # noqa: E402
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent
@@ -52,10 +53,25 @@ def _list_dir(d: Path) -> list[str]:
     ]
 
 
-def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
+#: What the map tells MAIN beside the systems it marks DOWN (#1256 O-3): one paragraph, in the
+#: same section as the marks.
+DOWN_GUIDANCE = (
+    "A system marked DOWN cannot be used in this run — its settings or its adapter were judged "
+    "unusable when the run started, or a call has shown it unusable since — and every dispatch "
+    "or call to it is refused. Do NOT dispatch a lead "
+    "to it — what it would have shown is a visibility gap: name the missing evidence in your "
+    "analysis and in a `:T conclude` `ceiling_test` row (the entry price `inconclusive` owes), "
+    "then escalate (inconclusive) if it blocks disposition."
+)
+
+
+def workspace_map(run_dir: Path, *, systems: Sequence[str],
+                  down: Mapping[str, str] = NONE_DOWN) -> str:
     """The model's directory view of the run. `systems` (the Adapters section) is the run's
     roster (`read_roster(...).accepted`), never a directory listing, so the map cannot name a
-    system that `query` would reject as unknown."""
+    system that `query` would reject as unknown. `down` is each system down for the run as the
+    map is built, with its cause as `system_status.cause_text` names it (#1256 O-3): marked in
+    the Adapters section, beside what MAIN is to do about it."""
     lines: list[str] = []
     lines.append("# Workspace map")
     lines.append("")
@@ -92,9 +108,15 @@ def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
     lines.append(f"## Adapters — `{_rel(adapters_under(DEFENDER_DIR))}/`")
     if systems:
         for name in sorted(systems):
-            lines.append(f"- {name}  (a system dispatched via the query tool; do not Read the adapter source)")
+            if name in down:
+                lines.append(f"- {name}  — DOWN for this run, {down[name]}")
+            else:
+                lines.append(f"- {name}  (a system dispatched via the query tool; do not Read the adapter source)")
     else:
         lines.append("- (none declared)")
+    if down:
+        lines.append("")
+        lines.append(DOWN_GUIDANCE)
     lines.append("")
 
     queries_dir = CHECKOUT_KNOWLEDGE.catalog_dir

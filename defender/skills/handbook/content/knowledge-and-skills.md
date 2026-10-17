@@ -35,7 +35,7 @@ rationale (the visibility-surface / execution split) is in
 
 The gather subagent never has the per-system SKILL body inlined into its
 prompt. Instead the driver reads every system's frontmatter `description:`
-once at run start (`inject_system_skill_description.descriptor_catalog`) and
+once at run start (`inject_system_skill_description.descriptor_index`) and
 the `gather` tool hands the target system's line to the subagent; gather
 confirms relevance from that line, then Reads the full body itself. The
 single source of truth stays the file on disk

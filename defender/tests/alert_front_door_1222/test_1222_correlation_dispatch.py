@@ -18,6 +18,7 @@ from defender.tests import _tenants1106 as T6
 from defender.tests._branch_947 import spec_at
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 from defender.tests.e2e import _replay_harness as H
+from defender.tests.tenant_1107_settings import _spec1107 as S7
 
 # Local helpers (work-arounds requested as shared machinery in 82-writer-correlation_dispatch.md)
 
@@ -147,18 +148,35 @@ def _run_with_turns(d: S.Drive) -> None:
 
 def _tenant_elastic_configs(tenant_id: str, *, events: str, alerts: str,
                             url: str | None = None) -> dict[str, str]:
-    """The tenant's config files, its elastic one carrying the index patterns given and the
-    access keys the real adapter checks (`ELASTIC_TRANSPORT`, `ELASTIC_DOCKER_CONTEXT`), and NO
-    `ELASTIC_ES_CONTAINER` — so the real adapter reaches its confinement gate and, past it,
-    ends in its own `ConfigFault` before any docker child could run. `url=""` blanks
-    `ELASTICSEARCH_URL` (a faulted SIEM config)."""
+    """The tenant's COMPLETE config files (`T6.config_texts`: access method, docker context and
+    both containers included), its elastic one carrying the index patterns given. `url=""`
+    blanks `ELASTICSEARCH_URL` (a faulted SIEM config: elastic's own settings check fails, so
+    since #1256 elastic is down from run start).
+
+    Until #1256 this omitted `ELASTIC_ES_CONTAINER` so that a call the confinement gate admitted
+    ended in the adapter's own call-time `ConfigFault`. Under #1256 that omission makes elastic
+    down at start and no call reaches the gate, so the real adapter is now stopped short of real
+    docker by `_docker_shim` instead."""
     texts = T6.config_texts(tenant_id, events_index=events, alerts_index=alerts)
-    elastic = texts["elastic"]
     if url is not None:
-        elastic = re.sub(r'(?m)^ELASTICSEARCH_URL=.*$', f'ELASTICSEARCH_URL="{url}"', elastic)
-    texts["elastic"] = (elastic + 'ELASTIC_TRANSPORT="docker-exec"\n'
-                        'ELASTIC_DOCKER_CONTEXT="s04-no-such-context"\n')
+        texts["elastic"] = re.sub(r'(?m)^ELASTICSEARCH_URL=.*$', f'ELASTICSEARCH_URL="{url}"',
+                                  texts["elastic"])
     return texts
+
+
+#: An Elasticsearch `_search` answer with no hits, as the docker-exec'd curl prints it (the body,
+#: then curl's `-w` status line — `S7.answer`'s shape).
+ES_NO_HITS = S7.answer(json.dumps({"hits": {"total": {"value": 0}, "hits": []}}))
+
+
+def _docker_shim(where: Path, monkeypatch: Any) -> S7.DockerShim:
+    """A recording `docker` first on the PATH the run's verbs fork with, answering every call
+    with `ES_NO_HITS`. It replaces the docker CLI only — the real adapter's config reading,
+    confinement and request building all run — so a call the gate admits ends here, observably
+    (`.calls()`), and one it refuses never reaches it."""
+    shim = S7.DockerShim(where, [ES_NO_HITS])
+    monkeypatch.setenv("PATH", shim.path_value())
+    return shim
 
 
 def _registry_with_real_elastic(backend: S.Backend, *verbs: str) -> Any:
@@ -443,29 +461,55 @@ dispositions:
 """
 
 
-def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path):
-    """Nothing at run start names a faulted SIEM config. The first lead on that system fails with the
-    adapter's configured error.
+def _names_down_as_not_configured(text: str, system: str) -> list[str]:
+    """Each line of `text` saying "not configured" (any case) whose own line or the one before
+    it names `system` — how #1256 tells an agent a granted system is down from run start, read
+    loosely on layout (the note may put the system on its own bullet line above the reason)."""
+    lines = text.lower().splitlines()
+    return [ln for i, ln in enumerate(lines) if "not configured" in ln
+            and any(system in near for near in lines[max(i - 1, 0):i + 1])]
+
+
+def _main_tool_returns(d: S.Drive) -> str:
+    """Every tool result MAIN received after its first request (a dispatch's answer lands here)."""
+    return "\n".join(t for seen in d.main.seen[1:] for t in seen.tool_returns)
+
+
+def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
+    """A tenant whose SIEM config is faulted at run start starts with that system DOWN, and MAIN is
+    told so; MAIN's lead on it is refused naming the reason, without running the adapter, writing
+    a row or charging the breaker; correlation on another system still runs.
+
+    #1256 (O-1, O-2, O-3, O-4) supersedes #1222's p134, which pinned the opposite — "nothing at run
+    start names a faulted SIEM config", identical opening messages, and the first lead failing
+    with the adapter's call-time `ConfigFault`.
 
     Two tenants differ only in their elastic config (one blanks ELASTICSEARCH_URL); correlation
-    runs on cmdb in both. The host says the same thing to MAIN in both opening messages; MAIN's
-    elastic lead on the faulted tenant meets the real adapter's `ConfigFault`."""
+    runs on cmdb in both. The elastic verb is the REAL adapter's `query`, and the startup check
+    that judges elastic is the real adapter's own over the planted settings (K2: it is read from
+    the roster, not the injected registry). The healthy tenant is the control for every channel:
+    its opening names no down elastic, its same lead runs to a row through the real verb (the
+    docker shim answers it), and nothing on it says "not configured". Before #1256 the faulted
+    run's lead ran, wrote an exit-2 row naming ELASTICSEARCH_URL and charged elastic's breaker —
+    the channels below demonstrably see all three."""
     patterns = ("logs-*", ".internal.alerts-security.alerts-default-*")
     leads = {S.L3: [S.query("cmdb", "list-hosts", {}), S.text("CORR-P134: 2 hosts.")],
              "l-001": [S.query("elastic", "query", {"native_query": "host.name:office-ws-1"}),
-                       S.text("L1-P134: the SIEM did not answer.")]}
+                       S.text("L1-P134: the SIEM answered.")]}
     main = [S.gather("l-001", "elastic", "measure the host"), S.text(S.DONE)]
     # An alert that names no signal index: the tenant's own SIEM config is the only place an
     # index could come from (base's item 1 read it here, and named its fault).
     alert = S.fixture_alert()
     alert.pop("signal_index")
     runs: dict[str, S.Drive] = {}
+    shims: dict[str, S7.DockerShim] = {}
     for tenant_id, url in (("tfault1222", ""), ("tgood1222", None)):
         planted = S.plant_tenant(
             tenant_id, alert_mapping=S.DEFAULT_MAPPING,
             table=TABLE_ELASTIC_GATHER_CMDB_CORRELATION, lead_zero=S.LEAD_ZERO_NON_ELASTIC,
             configs=_tenant_elastic_configs(tenant_id, events=patterns[0], alerts=patterns[1],
                                             url=url))
+        shims[tenant_id] = _docker_shim(tmp_path / tenant_id / "docker", monkeypatch)
         backend = S.Backend()
         runs[tenant_id] = S.run_alert(tmp_path / tenant_id, alert=alert,
                                       tenant=planted, backend=backend,
@@ -473,17 +517,52 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path):
                                       run_id="s04-p134", main=main, leads=leads)
         _run_with_turns(runs[tenant_id])
     faulted, healthy = runs["tfault1222"], runs["tgood1222"]
-    assert _opening(faulted, "tfault1222") == _opening(healthy, "tgood1222"), (
-        "MAIN's opening message differs between a tenant whose SIEM config is faulted and one "
-        "whose is not — something at run start named the faulted config")
-    (row,) = faulted.rows_for("l-001")
-    assert row.get("exit_code") != 0, row
-    assert "ELASTICSEARCH_URL" in str(row.get("payload_digest")), (
-        f"the elastic lead's failure does not name the faulted key: {row}")
-    assert "ELASTICSEARCH_URL" in _lead_tool_returns(faulted, "l-001")
-    # Control: the healthy tenant's same lead passes the config check (it ends past it).
-    (ok,) = healthy.rows_for("l-001")
-    assert "ELASTICSEARCH_URL" not in str(ok.get("payload_digest")), ok
+
+    # O-3: MAIN's opening names elastic as not configured, with the check's reason (the key).
+    opening = _opening(faulted, "tfault1222")
+    assert _names_down_as_not_configured(opening, "elastic"), (
+        "MAIN's opening message does not name elastic as not configured on a tenant whose "
+        "elastic settings fail its check at run start (#1256 O-3)")
+    assert "ELASTICSEARCH_URL" in opening, (
+        "MAIN's opening message names elastic down without the check's reason (the blank key)")
+
+    # O-4 / O-1: the dispatch (or call) is refused naming the reason, and the adapter never ran.
+    # The dispatch gate answers MAIN (the lead never gets a conversation); an in-call refusal
+    # would answer the lead — either channel may carry it.
+    lead_saw = (_lead_tool_returns(faulted, "l-001") if faulted.router.dispatched("l-001")
+                else "")
+    refused = _main_tool_returns(faulted) + "\n" + lead_saw
+    assert "not configured" in refused.lower(), (
+        f"MAIN's elastic lead was not refused as not configured: {refused[:2000]}")
+    assert "ELASTICSEARCH_URL" in refused, (
+        f"the refusal does not name the check's reason (the blank key): {refused[:2000]}")
+    assert "tripped" not in refused.lower(), (
+        f"a not-configured system was refused as a tripped breaker: {refused[:2000]}")
+    assert faulted.rows_for("l-001") == [], (
+        f"the refused elastic lead wrote query rows — its call ran: {faulted.rows_for('l-001')}")
+    assert not [r for r in faulted.rows if r.get("system") == "elastic"], faulted.rows
+    # O-2: nothing is charged, per system or run-wide (read as failure counts, not as the
+    # breaker's layout — where a not-configured status is kept is the implementer's).
+    assert faulted.run_state.breaker_failures("elastic") == 0, faulted.breaker
+    assert faulted.breaker.get("total_failures", 0) == 0, faulted.breaker
+
+    # Correlation on cmdb (up) still runs and reaches MAIN.
+    assert faulted.router.dispatched(S.L3), "l-00c on cmdb was not dispatched"
+    assert {r.get("system") for r in faulted.rows_for(S.L3)} == {"cmdb"}, faulted.rows_for(S.L3)
+    _assert_summary_in_opening(faulted, "CORR-P134")
+
+    # Control: the healthy tenant's opening names no down elastic; its same lead runs through the
+    # real verb to a row (one docker call); nothing it is told says "not configured".
+    healthy_opening = _opening(healthy, "tgood1222")
+    assert not _names_down_as_not_configured(healthy_opening, "elastic"), (
+        f"a fully configured elastic is named not configured: "
+        f"{_names_down_as_not_configured(healthy_opening, 'elastic')}")
+    assert "ELASTICSEARCH_URL" not in healthy_opening
+    assert [r.get("exit_code") for r in healthy.rows_for("l-001")] == [0], (
+        healthy.rows_for("l-001"))
+    assert len(shims["tgood1222"].calls()) == 1, shims["tgood1222"].calls()
+    assert "not configured" not in _main_tool_returns(healthy).lower()
+    assert "L1-P134: the SIEM answered." in _main_tool_returns(healthy)
 
 
 # r1 / r2 — the opening message's slots, the sessions

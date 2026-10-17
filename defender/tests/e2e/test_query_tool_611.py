@@ -22,7 +22,7 @@ from pydantic_ai.exceptions import (  # noqa: E402
 )
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.hooks.inject_system_skill_description import descriptor_catalog  # noqa: E402
+from defender.tests import _system_index_1256 as SI  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.runtime import permission, tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
@@ -362,8 +362,9 @@ def test_descriptor_catalog_advertises_only_declared_systems(tmp_path):
         described=("hollow", "solid"),
     )
     grant = VerbGrant(role="gather", entries=(("solid", "look", "r"),))
-    catalog = descriptor_catalog(tree / "skills", read_roster(tree / "scripts" / "adapters"), grant)
-    assert catalog is not None
+    catalog = SI.index_text(SI.index_module(), tree / "skills",
+                            read_roster(tree / "scripts" / "adapters"), grant)
+    assert SI.listing(catalog)
     assert "`solid`" in catalog
     assert "hollow" not in catalog, "a system with no declared verbs was advertised to gather"
 
@@ -376,8 +377,11 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
     b = _make_tree(tmp_path / "b", {"probe": _TREE_PROBE}, described=("probe",))
 
     grant = VerbGrant(role="gather", entries=(("probe", "whoami", "r"),))
-    assert descriptor_catalog(a / "skills", read_roster(a / "scripts" / "adapters"), grant) is not None
-    assert descriptor_catalog(b / "skills", read_roster(b / "scripts" / "adapters"), grant) is not None
+    module = SI.index_module()
+    assert SI.listing(SI.index_text(module, a / "skills", read_roster(a / "scripts" / "adapters"),
+                                    grant))
+    assert SI.listing(SI.index_text(module, b / "skills", read_roster(b / "scripts" / "adapters"),
+                                    grant))
 
     ctx_a = _tenants1106.verb_context(a, tmp_path / "run", {})
     ctx_b = _tenants1106.verb_context(b, tmp_path / "run", {})
@@ -636,19 +640,45 @@ def test_failure_digest_carries_the_vendor_diagnosis(tmp_path):
     assert detail[:80] in row["payload_digest"]
 
 
-def test_missing_config_is_infra_not_agent_fixable(tmp_path):
-    """missing_config_is_infra_not_agent_fixable — a missing/malformed config.env classifies as
-    infra (exit 2) and ADVANCES the breaker. Today the shared transport's bare
-    sys.exit('error: config file not found') exits 1, so a definitionally-down system is filed as"""
+def test_missing_config_is_infra_not_agent_fixable(tmp_path, caplog):
+    """missing_config_is_infra_not_agent_fixable — a missing config is never an agent-fixable
+    query error (#611: the transport's bare exit 1 used to file a definitionally-down system as
+    the agent's mistake).
+
+    #1256 replaces the rest. The fixture tenant configures elastic, so elastic passes its start
+    check and this `ConfigFault` reaches the run at CALL time — an adapter whose settings check
+    missed a key (O-5b, DP3), not the startup refusal the design text names for this test: the
+    call runs. It no longer ADVANCES the breaker: elastic is marked down as not configured on
+    the spot, nothing is charged (per-system or run-wide), the lead's same call retried is
+    refused naming "not configured" and the fault's reason without running the verb, and the
+    escape is logged as an adapter defect at ERROR or above naming elastic. The escaped call's
+    own row is not pinned (the design is silent), beyond never being agent-fixable."""
+    import logging
+
+    caplog.set_level(logging.INFO)
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, ConfigFault("config file not found")), turns=[
-        q("elastic", "probe", {}), DONE,
+        q("elastic", "probe", {}), q("elastic", "probe", {}), DONE,
     ])
-    row = r.row()
-    assert row["exit_code"] == 2
-    assert row["error_class"] == "infra"
-    assert row["exit_code"] != 1, "a missing config is still misfiled as an agent-fixable error"
-    assert r.breaker["systems"]["elastic"]["failures"] == 1
+    assert [row for row in r.own_rows if row.get("error_class") == "agent-fixable"] == [], \
+        f"a missing config is misfiled as an agent-fixable error: {r.own_rows}"
+    assert rec.verbs == ["probe"], \
+        f"after a call-time ConfigFault elastic must be down: the retry ran the verb: {rec.verbs}"
+    assert r.state.breaker_failures("elastic") == 0, \
+        f"a call-time ConfigFault was charged to elastic (#1256 O-5b): {r.breaker}"
+    assert r.state.breaker_snapshot()["total_failures"] == 0, \
+        f"a call-time ConfigFault was charged to the run (#1256 O-5b): {r.breaker}"
+    assert len(r.gather.seen) >= 3, f"precondition: the retry was answered ({len(r.gather.seen)} requests)"
+    assert r.gather.seen[2].startswith(r.gather.seen[1]), \
+        "precondition: a gather request's text extends the one before it (harness shape)"
+    retried = r.gather.seen[2][len(r.gather.seen[1]):]
+    assert "not configured" in retried.lower(), \
+        f"the retry's refusal must say elastic is not configured: {retried!r}"
+    assert "config file not found" in retried, f"the refusal must carry the fault's reason: {retried!r}"
+    assert "tripped" not in retried.lower(), f"a not-configured refusal reads as a trip: {retried!r}"
+    defects = [rec_ for rec_ in caplog.records
+               if rec_.levelno >= logging.ERROR and "elastic" in rec_.getMessage()]
+    assert defects, "the escaped ConfigFault was not logged as an adapter defect naming elastic"
 
 
 @pytest.mark.parametrize("empty", [{}, []])

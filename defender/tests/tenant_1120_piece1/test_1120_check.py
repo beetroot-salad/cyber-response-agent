@@ -530,7 +530,7 @@ def test_1120_setup_refuses_an_all_withheld_table_that_check_accepts(tmp_path: P
 
 # ======================================================================================
 # V14 (human, §7-verify round 3; SUPERSEDES V1's and V10's rule lists): setup calls run start's
-# own readiness function (`H.RUN_READINESS`), so any run-start refusal is setup's refusal, named
+# own readiness function (`H.RUN_READINESS`), so any STRUCTURAL run-start refusal is setup's refusal, named
 # (beside the folder rules — the settings files' parse, mapping.yaml included — V18 keeps).
 # V1's lead-zero cells and V10's all-withheld cell above stay; this adds 92r2 #1's executed case
 # and the words-for-words parity with run start. That setup REACHES the function (not a copy of
