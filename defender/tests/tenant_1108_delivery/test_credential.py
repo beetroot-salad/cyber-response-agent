@@ -261,6 +261,80 @@ def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, tmp_pat
     assert [copy for copy in copies if copy != str(credentials)] == [], copies
 
 
+def _shm():
+    return "/dev/shm" if os.path.isdir("/dev/shm") else None
+
+
+def _new_entries(folder, existing):
+    return [os.path.join(folder, name) for name in sorted(set(os.listdir(folder)) - existing)]
+
+
+def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_repo, tmp_path):
+    """O-E / C4 (orchestrator ruling: never on disk DURING a network call): the token is in
+    no file while git authenticates, not only after the call. With a token fresh to this
+    test, every network route's first authenticated request of each service (a publish's
+    and `start_batch`'s fetch, finish's lookup and push, a revert's fetch and push) holds
+    while the filesystem is searched: no file below the tenant's folder (but the credential
+    file), the isolated home, or anything new in the temp folder or `/dev/shm` holds it. A
+    file written for the call and removed after it is caught here."""
+    tenant, _remote, credentials, server = http_repo
+    token = f"p3-fresh-{uuid.uuid4().hex}"
+    port = server.server.server_address[1]
+    credentials.write_text(f"http://bot:{token}@127.0.0.1:{port}\n", encoding="utf-8")
+    server.token = token
+    tmp, shm = tempfile.gettempdir(), _shm()
+    existing = {folder: set(os.listdir(folder)) for folder in (tmp, shm) if folder}
+    started = time.time() - 1
+    scans, phase = {}, ["publish"]
+
+    def scan(service):
+        roots = [entry for folder, names in existing.items() for entry in _new_entries(folder, names)]
+        found = _holding([*roots, tenant.dir, git_config_home(tmp_path).home], token.encode(), started)
+        scans[phase[0], service] = [path for path in found if path != str(credentials)]
+    server.on_service = scan
+    http = ForgeHTTP()
+    d = delivery(http_repo, http)
+    d.publish()
+    phase[0] = "start_batch"
+    server.rearm()
+    batch = d.start_batch("during", lanes=LANES)
+    (batch.draft_root / "agent/lessons/during.md").write_text("a lesson\n", encoding="utf-8")
+    batch.commit(batch.change_set(), "claim")
+    phase[0] = "finish"
+    server.rearm()
+    opened(d.finish(batch))
+    merge_on_remote(http_repo, tmp_path, batch.branch)
+    phase[0] = "revert"
+    server.rearm()
+    opened(d.revert("agent/lessons/during.md", "during"), None)
+    required = {("publish", "git-upload-pack"), ("start_batch", "git-upload-pack"),
+                ("finish", "git-receive-pack"), ("revert", "git-receive-pack")}
+    assert required <= set(scans), sorted(required - set(scans))
+    assert {moment: found for moment, found in scans.items() if found} == {}, \
+        "the token sat in a file while git waited on the forge"
+
+
+def test_a_downgrade_to_plain_http_at_the_same_host_and_port_gets_no_token(http_repo, spies):
+    """Flow 5 (orchestrator ruling): the helper answers only for the parsed address's
+    protocol, host and port. The origin is `https` at the forge's host and port, and the
+    clone's config rewrites it to plain `http` at the same host and port (`insteadOf`): git
+    then asks for an `http` credential, the helper has no answer, and the token never crosses
+    plain http. The publish succeeds (an implementation that does not follow the rewrite) or
+    refuses, never hangs, and no prompt program runs."""
+    tenant, _remote, credentials, server = http_repo
+    log = _armed(http_repo, spies)
+    port = server.server.server_address[1]
+    git(tenant.knowledge, "remote", "set-url", "origin", f"https://127.0.0.1:{port}/tenants/blue.git")
+    git(tenant.knowledge, "config", f"url.http://127.0.0.1:{port}/.insteadOf", f"https://127.0.0.1:{port}/")
+    credentials.write_text(f"https://bot:{TOKEN}@127.0.0.1:{port}\n", encoding="utf-8")
+    d = delivery(http_repo, ForgeHTTP())
+    _, error, hung = bounded(d.publish, seconds=60)
+    assert not hung, "git waited on a prompt"
+    assert error is None or isinstance(error, target().DeliveryRefused), error
+    assert [auth for auth in server.authorizations if auth] == [], "the token went over plain http"
+    _silent(log)
+
+
 #: Where each spawn audit event carries its argv and its environment (`None`: this
 #: process's own, inherited).
 _SPAWN_FIELDS = {"subprocess.Popen": (1, 3), "os.posix_spawn": (1, 2), "os.exec": (1, 2),
@@ -443,19 +517,19 @@ def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
     assert verdict.get("published") or "refused" in verdict, verdict
 
 
-def test_a_git_run_that_asks_for_the_credential_twice_succeeds(http_repo, spies):
+def test_a_git_run_that_asks_for_the_credential_again_and_again_succeeds(http_repo, spies):
     """R7 / O-E: every `get` git asks of the one helper is answered, not only the first (a
-    one-shot pipe reads empty the second time; a sealed in-memory file read through
-    `/dev/fd/N` starts at offset 0 on every open). The clone's own config gives `origin` two
-    push URLs, both the forge's repository, so one push asks for the credential twice
-    (probed): finish pushes and opens its PR, every push authenticated, the credential file
-    untouched, no spy run. (An implementation that pushes to an explicit URL rather than to
+    one-shot pipe reads empty the second time, a pipe preloaded with N copies the (N+1)th;
+    a sealed in-memory file read through `/dev/fd/N` starts at offset 0 on every open). The
+    clone's own config gives `origin` three push URLs, all the forge's repository, so one
+    push asks for the credential three times (probed: once per URL): finish pushes and opens
+    its PR, every push authenticated, the credential file untouched, no spy run. (An implementation that pushes to an explicit URL rather than to
     `origin` never asks twice; the case is then vacuous, and the bug unreachable.)"""
     tenant, remote, credentials, server = http_repo
     log = _armed(http_repo, spies)
     before = _state(credentials)
     url = f"{server.url}/tenants/blue.git"
-    for _ in range(2):
+    for _ in range(3):
         git(tenant.knowledge, "config", "--add", "remote.origin.pushurl", url)
     http = ForgeHTTP()
     d = delivery(http_repo, http)
@@ -464,7 +538,7 @@ def test_a_git_run_that_asks_for_the_credential_twice_succeeds(http_repo, spies)
     sha = batch.commit(batch.change_set(), "claim")
     result, error, hung = bounded(lambda: d.finish(batch), seconds=90)
     assert not hung, "git waited on a prompt"
-    assert error is None, f"a second credential get went unanswered: {error!r}"
+    assert error is None, f"a later credential get went unanswered: {error!r}"
     opened(result)
     assert git(remote, "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert not server.offered_and_refused("git-receive-pack")

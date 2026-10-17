@@ -194,7 +194,8 @@ def test_an_origin_that_is_not_one_forge_repository_is_refused(origin):
 
 #: What Forgejo may put in `Link` (built from its `ROOT_URL`, not our address: review finding
 #: #6), and worse: another host, scheme or port, another repository (one whose name begins
-#: with ours, one reached through dot-segments), a URL that does not parse.
+#: with ours, one reached through dot-segments), a URL that does not parse, and our own
+#: address naming a page that skips one (followed, it hides page 2's rows).
 _LINKS = {
     "internal-root-url": None,
     "other-host": "http://other.invalid:3000/api/v1/repos/tenants/blue/pulls?page=2",
@@ -205,6 +206,7 @@ _LINKS = {
     "dot-segments": "http://forge.invalid:3000/api/v1/repos/tenants/blue/../../mallory/blue/pulls?page=2",
     "bad-port": "http://forge.invalid:bad/api/v1/repos/tenants/blue/pulls?state=open&page=2",
     "bad-ipv6": "http://[invalid]/api/v1/repos/tenants/blue/pulls?page=2",
+    "own-address-skipping": "http://forge.invalid:3000/api/v1/repos/tenants/blue/pulls?state=open&page=3&limit=2",
 }
 
 
@@ -247,6 +249,32 @@ def test_a_listing_goes_on_past_a_page_the_server_clamped(method):
         assert forge(http).list_prs_for_head("lessons/a") == [normalized(3, "lessons/a")]
     assert _pages_asked(http)[:3] == [1, 2, 3]
     _all_ours(http)
+
+
+@pytest.mark.parametrize("total", [True, False], ids=["with-total-count", "without-total-count"])
+@pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
+def test_a_long_listing_is_read_to_its_end(method, total):
+    """C4 (R2, R6): a listing stops only at an empty page or once the raw rows seen reach
+    `X-Total-Count`, never after some number of pages. 260 rows, the server clamping pages
+    to 5 (52 pages): the one row the query matches is the last."""
+    http = ForgeHTTP()
+    http.page_size = 5
+    http.total_count = total
+    _stored(http, [*(f"unrelated/{n}" for n in range(259)), "lessons/a"])
+    query = "lessons/a" if method == "list_prs_for_head" else "lessons/"
+    assert getattr(forge(http), method)(query) == [normalized(260, "lessons/a")]
+    assert _pages_asked(http)[:52] == list(range(1, 53))
+
+
+@pytest.mark.parametrize("value", ["many", "1.5", "0x10"])
+def test_a_total_count_that_is_not_a_number_is_a_forge_error(value):
+    """Refusal contract (deck #677; orchestrator ruling): an `X-Total-Count` that is not a
+    whole number is a `ForgeError`, never a `ValueError` escaping the forge."""
+    http = ForgeHTTP()
+    http.total_count = value
+    http.pages = {1: [row(1, "lessons/a")]}
+    with pytest.raises(_forge_module().ForgeError):
+        forge(http).list_prs_for_head("lessons/a")
 
 
 @pytest.mark.parametrize("total", [True, False], ids=["with-total-count", "without-total-count"])

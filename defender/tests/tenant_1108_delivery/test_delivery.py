@@ -13,6 +13,7 @@ commit is one of the batch's and whose head repository is the base repository, a
 deliver answer `open` (with its URL), `merged`, `closed` or `nothing to deliver`."""
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import shutil
@@ -1529,6 +1530,82 @@ def test_a_revert_whose_pr_is_open_answers_that_pr(repo, tmp_path):
     assert remote_refs(repo[1]) == refs
 
 
+def test_each_lesson_of_one_batch_has_its_own_revert(repo, tmp_path):
+    """R1 / C1: the record holds one row per lesson per batch, and a revert is recorded
+    against its row. One batch created two lessons (merged); the first lesson's revert is
+    open. Reverting the second lesson makes that lesson's own revert (`opened`, a new PR
+    deleting it), never answers with the first lesson's PR."""
+    writer = delivery(repo, ForgeHTTP())
+    batch = writer.start_batch("two", lanes=LANES)
+    lane = batch.draft_root / "agent/lessons"
+    (lane / "first.md").write_bytes(b"first\n")
+    (lane / "second.md").write_bytes(b"second\n")
+    batch.commit(batch.change_set(), "two lessons")
+    opened(writer.finish(batch))
+    merge_on_remote(repo, tmp_path, batch.branch)
+    first = opened(delivery(repo, ForgeHTTP()).revert("agent/lessons/first.md", "first"), None)
+    http = ForgeHTTP()
+    main = git(repo[1], "rev-parse", "main")
+    tip = _revert_commit(repo[1], http, main, delivery(repo, http).revert("agent/lessons/second.md", "second"))
+    assert forge_pulls(repo[1])[-1]["html_url"] != first
+    assert _name_status(repo[1], tip) == {"agent/lessons/second.md": "D"}
+
+
+def test_a_closed_fork_pr_at_the_revert_commit_is_not_the_reverts(repo, tmp_path):
+    """R1 / C1: every PR the revert's lookup considers is filtered by the base repository's
+    id. A revert whose PR request failed never had a PR of ours; a fork's PR whose head is
+    that revert commit (anyone can push it to a fork), closed, is not ours: the next revert
+    makes the revert again (`opened`), never refuses as if its PR had been closed."""
+    _agent_wrote(repo, tmp_path, _FIRST, _SECOND)
+    http = ForgeHTTP()
+    d = delivery(repo, http)
+    before = set(_branches(repo[1]))
+    http.fail_create = True
+    with pytest.raises(target().DeliveryRefused):
+        d.revert(_LEARNED, "learned")
+    remaining = sorted(set(_branches(repo[1])) - before)
+    assert remaining, "the revert's push left no branch on the remote"
+    sha = git(repo[1], "rev-parse", remaining[0])
+    push_object(repo, sha, "refs/pull/5/head")
+    http.add_pr(pr_row(5, "mallory-branch", repo=FORK, sha=sha, state="closed"))
+    retry = ForgeHTTP()
+    main = git(repo[1], "rev-parse", "main")
+    tip = _revert_commit(repo[1], retry, main, delivery(repo, retry).revert(_LEARNED, "learned"))
+    assert git_bytes(repo[1], "cat-file", "blob", f"{tip}:{_LEARNED}") == _FIRST
+
+
+class _AnswerLost(ForgeHTTP):
+    """A forge that creates the PR asked for and then loses its answer (a read timeout after
+    the create)."""
+
+    def reply(self, request):
+        response = super().reply(request)
+        if request.method == "POST" and request.url.path.endswith("/pulls"):
+            raise httpx.ReadTimeout("the forge's answer was lost", request=request)
+        return response
+
+
+def test_a_revert_whose_pr_was_created_but_unanswered_is_found_not_made_again(repo, tmp_path):
+    """R1 / C1 (orchestrator ruling): the revert commit is recorded against its row as soon
+    as it exists, before any push, and its PR is found by that commit. The forge creates the
+    revert's PR and the answer is lost: the revert refuses. The next revert, from a new
+    delivery object and from a freshly started process, finds that PR and answers `open`
+    with its URL: no second revert commit, push or PR."""
+    _agent_wrote(repo, tmp_path, _FIRST, _SECOND)
+    with pytest.raises(target().DeliveryRefused):
+        delivery(repo, _AnswerLost()).revert(_LEARNED, "learned")
+    [row] = [r for r in forge_pulls(repo[1]) if r["state"] == "open"]
+    refs = remote_refs(repo[1])
+    retry = ForgeHTTP()
+    still_open(delivery(repo, retry).revert(_LEARNED, "learned"), row["html_url"])
+    assert not retry.creates
+    later = in_a_later_process(repo, "revert", _LEARNED, "learned")
+    assert later.get("status") == "open", later
+    assert later["url"] == row["html_url"]
+    assert later["creates"] == []
+    assert remote_refs(repo[1]) == refs
+
+
 @pytest.mark.parametrize("failure", ["pr-request", "push"])
 def test_a_revert_that_never_got_a_pr_is_made_again(repo, tmp_path, failure):
     """R1: a revert whose PR request failed (503), or whose push the remote refused (its
@@ -1792,11 +1869,14 @@ def test_a_retried_revert_never_sends_a_commit_laid_on_its_branch(repo, tmp_path
 
 
 @pytest.mark.parametrize("path", ["agent/.tenant-id", "settings/lead-zero.yaml",
-                                  "agent/lessons/absent.md", "agent/lessons/../.tenant-id"])
+                                  "agent/lessons/absent.md", "agent/lessons/../.tenant-id",
+                                  "agent/lessons/\ud800.md"],
+                         ids=["tenant-id", "settings", "absent", "traversal", "lone-surrogate"])
 def test_revert_refuses_a_path_that_is_not_a_lesson_on_main(repo, path):
     """O-C: a revert's change set obeys the same rules: `agent/.tenant-id`, a settings file, a
-    traversal, or a lesson absent from `main` that no commit-maker change deleted, is refused,
-    with nothing pushed or requested."""
+    traversal, a lesson absent from `main` that no commit-maker change deleted, or a path no
+    file system or git can be handed (a lone surrogate; refusal contract, deck #677), is
+    refused with `DeliveryRefused`, with nothing pushed or requested."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     with pytest.raises(target().DeliveryRefused):
@@ -1808,6 +1888,28 @@ def test_revert_refuses_a_path_that_is_not_a_lesson_on_main(repo, path):
 # ---------------------------------------------------------------------------------------
 # Kept: open() refusals (O9), protection (A10), the credential single read (O8), ambient git
 # ---------------------------------------------------------------------------------------
+
+#: Repository reads that name no usable id: none, not an object, a string, null, a float,
+#: a boolean (an `int` subclass in Python, not a JSON integer).
+_UNUSABLE_REPOSITORY = {"no-id": {"full_name": "tenants/blue"}, "list": [], "str-id": {"id": "11"},
+                        "null-id": {"id": None}, "float-id": {"id": 11.0}, "bool-id": {"id": True}}
+
+
+def _forge():
+    return importlib.import_module("defender.learning.author.forge")
+
+
+@pytest.mark.parametrize("reply", sorted(_UNUSABLE_REPOSITORY))
+def test_a_repository_read_without_an_integer_id_is_refused(repo, reply):
+    """C1 / refusal contract (deck #677; orchestrator ruling): the repository id `open()`
+    reads is what every PR row's head is compared with. A read whose id is missing or not an
+    integer refuses `open()` (`DeliveryRefused` or `ForgeError`), never coerced (`"11"`
+    taken as 11) and never a `KeyError` or `TypeError` escaping."""
+    http = ForgeHTTP()
+    http.repository = _UNUSABLE_REPOSITORY[reply]
+    with pytest.raises((target().DeliveryRefused, _forge().ForgeError)):
+        delivery(repo, http)
+
 
 @pytest.mark.parametrize(("fault", "reason"), [("unversioned", "version|git"), ("local-origin", "network|origin"), ("credentials", "credential"), ("main", "main")])
 def test_delivery_refuses_unusable_tenant_with_named_reason(repo, fault, reason):
