@@ -656,11 +656,6 @@ class VerbRegistry:
         decision = self.authorize(system, verb)
         return self.resolve(system, verb) if decision.outcome == GRANTED else decision
 
-    def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
-        """Combined actual-call path for callers that need no intervening status gate."""
-        decision = self.authorize_call(system, verb, params)
-        return self.resolve_call(system, verb, params) if decision.outcome == GRANTED else decision
-
 
 class ModuleVerbRegistry(VerbRegistry):
 

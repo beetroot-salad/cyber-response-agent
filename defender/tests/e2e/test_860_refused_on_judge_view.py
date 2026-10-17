@@ -920,7 +920,7 @@ def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_
     """A call the grant withholds is on the world's served ledger, which is what the judge's
     VIEW 1 renders with its decision word (#1224 retired the mechanical pass that once read it
     for `lead-set`); a withheld call used to be absent from that ledger by construction. Now the sibling's own registry files it there (`WorldRegistry.
-    decide_call`, `source: refused`, the params as asked, the world's id) at the grant
+    authorize_call`, `source: refused`, the params as asked, the world's id) at the grant
     decision — the same row the seam's isolation refusal leaves, one frame earlier — so the
     judge reads no second surface and no second flag is stored. A REAL gather run, a REAL `WorldRegistry` over a fake estate, the REAL query tool
     between them: the denied call also leaves its `∅.denied` row on the queries table (the per-lead

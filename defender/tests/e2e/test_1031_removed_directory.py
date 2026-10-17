@@ -61,6 +61,7 @@ from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
 )
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
+from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -141,9 +142,12 @@ def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_remo
         _bad_args("elastic", verb="ghostverb"), q("elastic", "otherverb", PARAMS),
         _bad_args("ghostone", verb="ghostverb"), q("ghosttwo", "otherverb", PARAMS),
     ]
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="dispositions:\n  elastic:\n    query: {roles: [gather]}\n")
+    tenant = S.tenant_folder_of(root)
     adapters, registry = _real_registry(tmp_path / "removed")
     removal = AfterStart(rejections[0], lambda: shutil.rmtree(adapters))
-    r = _run(tmp_path / "removed", run_id="d1031-removed", verbs=registry,
+    r = _run(tmp_path / "removed", run_id="d1031-removed", verbs=registry, tenant=tenant,
              turns=[removal, *rejections[1:], DONE])
     assert removal.fired, "premise: the adapters directory was not removed during the run"
     assert not adapters.exists(), "premise: the adapters directory is still there"
@@ -169,7 +173,7 @@ def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_remo
     _assert_no_forbidden_pair(r)
 
     _adapters, intact = _real_registry(tmp_path / "intact")
-    healthy = _run(tmp_path / "intact", run_id="d1031-intact", verbs=intact,
+    healthy = _run(tmp_path / "intact", run_id="d1031-intact", verbs=intact, tenant=tenant,
                    turns=[*rejections, q("elastic", "query", PARAMS), DONE])
     assert _reached(healthy), "the corrected call never reached the adapter — the fixture is a stub"
     assert healthy.own_rows[-1]["exit_code"] == 0
@@ -200,10 +204,13 @@ def test_a_loop_of_rejections_against_a_declared_system_is_ended_by_the_budget(t
     counted them — and is kept as the positive control that the guards see the rows O3
     changes the shape of; what fails today is the name on the counted rows (`""` beside
     `sha256("elastic")`), O3's failure inside O4's population."""
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="dispositions:\n  elastic:\n    query: {roles: [gather]}\n")
     adapters, registry = _real_registry(tmp_path)
     loop = [_bad_args("elastic", verb=f"ghostverb{i}") for i in range(REJECTION_BUDGET + 3)]
     removal = AfterStart(loop[0], lambda: shutil.rmtree(adapters))
-    r = _run(tmp_path, run_id="d1031-budget", verbs=registry, turns=[
+    r = _run(tmp_path, run_id="d1031-budget", verbs=registry,
+             tenant=S.tenant_folder_of(root), turns=[
         removal, *loop[1:], q("elastic", "query", PARAMS), DONE,
     ])
     assert removal.fired, "premise: the adapters directory was not removed during the run"

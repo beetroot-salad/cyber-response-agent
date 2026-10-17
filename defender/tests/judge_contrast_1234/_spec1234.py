@@ -36,7 +36,7 @@ TWO EPISODE BUILDERS — pick by the demand, as `80-survey.md` assigns:
    over the #1224 fixture tenant with real pre-flight; every sibling is the REAL
    `run.main --tenant T --episode <id> --world L`, run in-process by `InProcessSiblings` (the
    launcher's `spawn=` seam); then the real `verify_family` -> `archive_episode` -> family
-   stamp. The call records are written by the real writers (registry `decide_call`/`_deliver`/
+   stamp. The call records are written by the real writers (registry `authorize_call`/`_deliver`/
    `_record_beside`, query tool `append_query_row`/`_record_denied`, `_inherit_evidence`), so a
    test reads the call id OFF the rows (`call_ids`) and never plants it. Every A12/A14
    situation, d03b-d03d, d08a and the n_t8_* runtime demands use this path. The launcher's own
@@ -572,7 +572,7 @@ def refused_call(system: str = "edr", verb: str = "lookup", params: dict | None 
 
 def fault_call(system: str = "edr", verb: str = "query", params: dict | None = None,
                **kw: Any) -> CallRow:
-    """An adapter that could not load: a `fault` ledger row (`decide_call`, F-02=A) and an
+    """An adapter that could not load: a `fault` ledger row (`resolve_call`, F-02=A) and an
     infra-exit table row."""
     return CallRow(system=system, verb=verb, params=params or query_params("host:db-1"),
                    source="fault", exit_code=2, **kw)

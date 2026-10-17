@@ -4,7 +4,7 @@ contrast row built from them (design M2, A2, A14), and fail-closed writes of eit
 Every scenario here runs the REAL path (I-10, 45-dispositions-drift): the launcher over the
 #1224 fixture tenant with real pre-flight, each sibling the real `run.main --tenant T
 --episode <id> --world L` driven in-process (`S.real_family`), so both call records are written
-by the real writers — the registry's `decide_call` / `_deliver` / `_record_beside`, the query
+by the real writers — the registry's `authorize_call` / `_deliver` / `_record_beside`, the query
 tool's `append_query_row` / `_record_denied`, the shim's `_record_shim_failure`, and the seed's
 `_inherit_evidence`. A test reads the call id OFF the rows; it never plants one.
 
@@ -937,13 +937,13 @@ def _ledger_fails(est: Any, writer: str) -> Any:
     if writer == "_record_beside":  # the real-error row of a live outage
         est.break_write("idp", "query", BOB, BREAK_LEDGER, fault="UpstreamFault")
         return q("idp", "query", BOB)
-    # decide_call: the refused row of the withheld verb (it never reaches an adapter)
+    # authorize_call: the refused row of the withheld verb (it never reaches an adapter)
     return _Between(q("edr", "lookup", S.DENIED_LOOKUP), before=plant_dir_at(LEDGER_GLOB))
 
 
-@pytest.mark.parametrize("writer", ["_deliver", "_record_beside", "decide_call"])
+@pytest.mark.parametrize("writer", ["_deliver", "_record_beside", "authorize_call"])
 def test_1234_failed_served_ledger_write_ends_the_run(tmp_path: Path, writer: str) -> None:
-    """A served-ledger write that fails (decide_call's refused/fault row, _deliver's delivered
+    """A served-ledger write that fails (authorize_call's refused row or resolve_call's fault row, _deliver's delivered
     row, _record_beside's error or refusal row) ends the run: the failure is not swallowed, no
     further call is served, and the world is archived cut short naming the failed write (A12;
     today _record_beside swallows it, AP-01/JP-02).
@@ -1010,11 +1010,11 @@ def test_1234_failed_query_table_view_does_not_stamp_a_recording_cut(tmp_path: P
 def test_1234_one_call_carries_one_host_written_id_on_both_records(tmp_path: Path) -> None:
     """Before a call reaches the registry the query tool allocates a host-written call id naming
     the run and the call; the registry writes it on every served-ledger row of that call
-    (refused/fault from decide_call, delivered/real-error from _deliver/_record_beside) and the
+    (refused from authorize_call / fault from resolve_call, delivered/real-error from _deliver/_record_beside) and the
     query tool writes the same id on the call's table row; no two calls of one run share an id,
     and a repeated identical call gets its own id (A12; JP-01: no id is in scope today).
 
-    QueryCapture drives decide_call and the serve path; the served_ledger and executed_queries
+    QueryCapture drives authorize_call and the serve path; the served_ledger and executed_queries
     (append_query_row's rows) carry the identity. World b makes a passthrough call, CAROL twice,
     the altered QP, the withheld edr lookup (refused before anything is served) and an outage."""
     est = estate(tmp_path)
@@ -1100,7 +1100,7 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "writes_by": "record", "via": (), "failed_write": "ends the run",
         "call_id": "this run's", "driven_by": "test_1234_failed_served_ledger_write_ends_the_run"},
     "learning/branch/estate/registry.py::_record_beside": {
-        "writes_by": "record", "via": ("WorldRegistry.decide_call", "WorldRegistry._base"),
+        "writes_by": "record", "via": ("WorldRegistry.authorize_call", "WorldRegistry._base"),
         "failed_write": "ends the run", "call_id": "this run's",
         "driven_by": "test_1234_failed_served_ledger_write_ends_the_run"},
     "runtime/query_tool.py::QueryCapture._record": {
@@ -1230,7 +1230,7 @@ def _swallowing_handlers(tree: ast.AST, scope: str, callee: str) -> list[int]:
 
 def test_1234_every_call_record_write_site_is_in_the_census(tmp_path: Path) -> None:
     """A census lists every production write site of the served ledger and of
-    executed_queries.jsonl (at least decide_call, _deliver, _record_beside, _record_denied,
+    executed_queries.jsonl (at least authorize_call, _deliver, _record_beside, _record_denied,
     append_query_row, the shim's ∅.bash-shim append and _inherit_evidence's seed) with how each
     handles a failed write and whether it writes the call id; a planted extra write site is
     reported.
@@ -1239,7 +1239,7 @@ def test_1234_every_call_record_write_site_is_in_the_census(tmp_path: Path) -> N
     the calls that write either record. The scan finds exactly the census's sites; a module
     planted beside the tree with one more writer of each record is reported; every row names
     the test above that drives it; and no function on a row's path (the site, and the functions
-    reaching it — decide_call reaches the ledger through _record_beside, _record_denied the
+    reaching it — authorize_call reaches the ledger through _record_beside, _record_denied the
     table through _record) guards the write with a broad handler that swallows it (A12: a
     failed write ends the run)."""
     shipped = _shipped()
@@ -1283,7 +1283,7 @@ def test_1234_every_call_record_write_site_is_in_the_census(tmp_path: Path) -> N
 
 def test_1234_two_leads_calls_at_once_leave_intact_distinct_ledger_and_table_rows(
         tmp_path: Path) -> None:
-    """The served-ledger writers (decide_call, _deliver, _record_beside) run on separate worker
+    """The served-ledger writers (authorize_call, _deliver, _record_beside) run on separate worker
     threads (GT-1): two gather leads dispatched in one main turn issue calls whose ledger writes
     overlap in those threads, including two identical calls, one refused call and one errored
     call. After both leads finish, every ledger row is whole and parses, the row count equals the

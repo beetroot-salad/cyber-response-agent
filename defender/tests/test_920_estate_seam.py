@@ -555,7 +555,7 @@ def test_a_denied_call_is_a_refused_row_and_a_listing_of_the_same_verb_is_not(tm
     """    #860 — a verb the grant WITHHOLDS is turned away at the grant decision, one frame
     before the seam; of every call the defender makes it was the one that left no row here, so
     every reader of this ledger (the judge's "no row on H" above all) saw a sibling that never
-    asked. `decide_call` — the dispatch path's decision — files it as `refused`, against the
+    asked. `authorize_call` — the dispatch path's decision — files it as `refused`, against the
     params as ASKED, under the world's own id; and the adapter body is never reached.
 
     The NEGATIVE arms are what make the split earn its name. `decide` — the same question,
@@ -575,11 +575,11 @@ def test_a_denied_call_is_a_refused_row_and_a_listing_of_the_same_verb_is_not(tm
     assert listing.outcome == DENIED
     assert served_rows(ledger_path) == [], "a LISTING of a withheld verb left a row"
 
-    granted = reg.decide_call("elastic", "esql", {"query": "FROM logs\n| LIMIT 1"})
+    granted = reg.authorize_call("elastic", "esql", {"query": "FROM logs\n| LIMIT 1"})
     assert granted.outcome == GRANTED
     assert served_rows(ledger_path) == [], "a granted DECISION left a row (its row is the served one)"
 
-    decision = reg.decide_call("elastic", "get-host", asked)
+    decision = reg.authorize_call("elastic", "get-host", asked)
     assert decision.outcome == DENIED
     rows = served_rows(ledger_path)
     assert [r["source"] for r in rows] == [REFUSED], (
@@ -592,8 +592,8 @@ def test_a_denied_call_is_a_refused_row_and_a_listing_of_the_same_verb_is_not(tm
 
 
 def test_an_adapter_that_cannot_load_at_the_decision_is_a_fault_row_and_still_raises(tmp_path):
-    """    The other refusal the grant decision makes before the seam: an adapter whose module
-    cannot be imported raises out of `decide`. Filed `fault`: it is the environment's outage,
+    """    After cold authorization, an adapter whose module cannot be imported raises out of
+    `resolve_call`. Filed `fault`: it is the environment's outage,
     not a refusal of the call, and a `refused` row would charge it to the world. Re-raised
     untouched: what the query tool makes of
     that exception (§7 R2, the load-error row it writes) is the query tool's own.
@@ -606,8 +606,13 @@ def test_an_adapter_that_cannot_load_at_the_decision_is_a_fault_row_and_still_ra
     ledger_path = tmp_path / SERVED_FILE
     reg = world_registry(adapters, FAKE_GRANT, ledger_path, world=World("w1"))
 
+    params = {"query": "FROM logs"}
+    authorization = reg.authorize_call("elastic", "esql", params)
+    assert authorization.outcome == GRANTED
+    assert authorization.fn is None
+    assert served_rows(ledger_path) == []
     with pytest.raises(ImportError, match="not installed"):
-        reg.decide_call("elastic", "esql", {"query": "FROM logs"})
+        reg.resolve_call("elastic", "esql", params)
 
     rows = served_rows(ledger_path)
     assert [r["source"] for r in rows] == [FAULT], f"an adapter that could not load left {rows}"

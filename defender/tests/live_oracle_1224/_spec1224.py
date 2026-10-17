@@ -87,7 +87,7 @@ write-code-from-spec names anything differently it renames it HERE, never in a t
       or `{<system>: {unavailable: <reason>}}`; a citation names `samples.yaml#<system>`.
     * `served/<episode token>.<label>.jsonl` — the world ledger (unchanged path). Decisions
       (`source`): `passthrough`, `oracle`, `real-error`, `refused`, and `fault` only for
-      `decide_call`'s adapter-cannot-load row (F-02=A). An `oracle` row also carries
+      `resolve_call`'s adapter-cannot-load row (F-02=A). An `oracle` row also carries
       `base_digest`, `claim`, `verifier_verdict`, `attempts`.
   Manifest v2 (`family_v2`): a world carries `facts: [{fact_id, statement, entities}]` (an
     explicit `facts: []` for the control world, M07=A); the top level carries `served_systems`;

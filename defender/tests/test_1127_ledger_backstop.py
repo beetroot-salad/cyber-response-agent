@@ -14,7 +14,7 @@ The design (issue #1127, as amended after the two reviews of PR #1139):
   `RecursionError` — naming the field that was too deep;
 * `ServedCall` cleans `params` and `asked_params` once, AS IT IS BUILT: a call no row could
   carry is never built, so `row()`, both keys and `Ledger.record` cannot fail on depth;
-* both doors into `WorldRegistry` — `decide_call` and `_served` — refuse such a call UP FRONT,
+* the authorization and execution doors into `WorldRegistry` refuse such a call UP FRONT,
   as the ledger's own `LedgerError`, before the grant is decided, the estate adapter runs or
   the call is keyed, and file no row at all. `_served` re-raises it untouched; anything else
   would be caught by its `except Exception` and filed as a FAULT row;
@@ -223,15 +223,14 @@ def test_a_served_call_at_the_limit_records_its_row_and_keeps_its_base_read(tmp_
     assert all(row["params"] == {"host": host} for row in rows + kept)
 
 
-# ── the other door: WorldRegistry.decide_call ──────────────────────────────────────────────
+# ── the other door: WorldRegistry.authorize_call ──────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("depth", [LIMIT + 1, FAR])
 def test_a_deep_call_to_a_denied_verb_is_refused_before_the_decision_and_files_nothing(
         tmp_path, caplog, depth):
-    """#1127 review: `decide_call` files a REFUSED row for a denied verb (and a FAULT row for an
-    adapter that cannot load) through `_record_beside`, which logs and drops a write that
-    fails. A too-deep call there used to reach the ledger, be refused, and be dropped with a
+    """#1127 review: `authorize_call` files a REFUSED row for a denied verb through
+    `_record_beside`, which logs and drops a write that fails. A too-deep call there used to reach the ledger, be refused, and be dropped with a
     warning — the call then read as never asked. It is now refused at the door, as the
     ledger's own `LedgerError`, before the grant is decided: no row is attempted, so none is
     dropped. The control: the same denied call, shallow, files its REFUSED row."""
@@ -239,7 +238,7 @@ def test_a_deep_call_to_a_denied_verb_is_refused_before_the_decision_and_files_n
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
 
     with caplog.at_level(logging.WARNING, logger=REGISTRY_LOGGER):
-        err = raised(lambda: reg.decide_call("elastic", "get-host", {"host": chain(depth - 1)}))
+        err = raised(lambda: reg.authorize_call("elastic", "get-host", {"host": chain(depth - 1)}))
 
     assert isinstance(err, LedgerError), \
         f"refused with {type(err).__name__}, not LedgerError: {str(err)[:200]}"
@@ -248,7 +247,7 @@ def test_a_deep_call_to_a_denied_verb_is_refused_before_the_decision_and_files_n
     assert [r.getMessage()[:200] for r in caplog.records if r.name == REGISTRY_LOGGER] == [], \
         "a row was attempted for the too-deep call and dropped"
 
-    reg.decide_call("elastic", "get-host", {"host": "canary-1"})
+    reg.authorize_call("elastic", "get-host", {"host": "canary-1"})
     assert [parse_jsonl_row(line)["source"] for line in raw_lines(ledger_path)] == ["refused"]
 
 

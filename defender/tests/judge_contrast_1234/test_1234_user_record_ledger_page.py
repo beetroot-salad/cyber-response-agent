@@ -429,7 +429,7 @@ def test_1234_not_archived_world_with_refusals_in_its_served_ledger(
 
     real: c ends with no scrub verdict, so it is not archived; its ledger holds its refused
     `edr lookup`. hand-built: c's ledger holds one refused call and the same faulted call twice
-    (a `fault` row is `decide_call`'s, an adapter that cannot load), and c's archived tree is
+    (a `fault` row is `resolve_call`'s, an adapter that cannot load), and c's archived tree is
     gone beside a `not archived` world record whose detail is marked.
     """
     if builder == "real":
