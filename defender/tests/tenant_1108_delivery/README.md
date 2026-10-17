@@ -168,6 +168,16 @@ trickling connection and bound exception propagation as well as checking for lef
 processes. Waiting for curl to stop is no longer accepted as prompt cleanup. This repair was
 reviewed during the continuation, not by an independent cold reviewer.
 
+Validation on `impl/1108-p3`, after merging current `main`: the contract plus P2, learning,
+box and replay neighbours passed **852 tests, 11 skipped**; remaining changed-file neighbours
+passed **85, 26 skipped**; CI's gate selection passed **5**. After this repair, all **29
+network tests** pass. Three guard mutations were rejected: forgetting a revert's target
+made a duplicate PR; accepting another repository's PR returned the fork's PR; omitting the
+process-group kill took 60.1 seconds to propagate the exception (limit 15 seconds). The
+unmodified cases pass. Both ruff forms, all 34 custom lint commands in current CI, mypy
+(291 source files), golden-case validation, tacit-registry validation and the blocking jscpd
+check pass. Earlier records below describe their own historical trees and runs.
+
 ### Validation (amendment 3)
 
 Against the base, a scratch implementation, and the contract adversary's base and its mutants, after the contract adversary repair. The collection, base and scratch runs ran on the files as committed, then the adversary's base and each of its mutants, then this author's mutants, in one hold of the lock; four mutants for the rulings ran in a second.
