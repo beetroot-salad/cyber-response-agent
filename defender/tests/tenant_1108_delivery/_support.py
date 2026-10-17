@@ -682,7 +682,7 @@ class Trickle:
 
 
 class GitHTTP:
-    """`git http-backend` behind HTTP Basic auth on 127.0.0.1. Local transport never consults
+    """`git http-backend` behind HTTP Bearer auth on 127.0.0.1. Local transport never consults
     a credential helper; this remote does, exactly as Forgejo does: an unauthenticated request
     gets 401, and git asks its helpers.
 
