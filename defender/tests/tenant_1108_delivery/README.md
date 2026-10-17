@@ -178,6 +178,17 @@ unmodified cases pass. Both ruff forms, all 34 custom lint commands in current C
 (291 source files), golden-case validation, tacit-registry validation and the blocking jscpd
 check pass. Earlier records below describe their own historical trees and runs.
 
+### Standalone Python repair (2026-10-17)
+
+The first resumed CI run exposed missing `fcntl` seal constants in its standalone Python:
+237 delivery failures shared that cause. A local standalone build also omits `os.memfd_create`
+and its flags despite kernel/libc support. `test_delivery_needs_no_optional_python_linux_exports`
+removes those optional names in a fresh process and requires a real authenticated delivery.
+The contract now collects 577 cases (the historical counts below belong to their own runs).
+The implementation calls libc and the stable Linux ABI directly; creation and all four seals
+remain mandatory. A descriptor probe verifies repeated reads and rejects write, shrink,
+grow and reseal with EPERM. No disk or unsealed fallback was added.
+
 ### Validation (amendment 3)
 
 Against the base, a scratch implementation, and the contract adversary's base and its mutants, after the contract adversary repair. The collection, base and scratch runs ran on the files as committed, then the adversary's base and each of its mutants, then this author's mutants, in one hold of the lock; four mutants for the rulings ran in a second.
