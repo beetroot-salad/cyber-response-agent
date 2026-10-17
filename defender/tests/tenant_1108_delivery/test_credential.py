@@ -1,19 +1,8 @@
-"""O-E (amendment 2, flow 5): the tenant credential is read-only and non-interactive, and
-`open()` is its single reader.
+"""Bearer transport uses sealed memory, never ambient helpers, prompts or disk files.
 
-Git runs against a real smart-HTTP remote demanding the bot's credential, so its credential
-path actually runs (local transport never consults a helper). K1 showed git's `store` helper
-empties the credential file after an authentication failure; the failed fetch and failed push
-here are that case. Every case runs with git's per-user and system configuration isolated
-under the test's own folder (`http_repo`), so a wrong implementation reaches only spies, never
-a developer's real helper. Spies sit wherever git looks for other helpers and for a prompt:
-the clone's own config, the isolated global config (`GIT_CONFIG_GLOBAL`, `$HOME/.gitconfig`,
-`$XDG_CONFIG_HOME/git/config`) and system config (`GIT_CONFIG_SYSTEM`),
-`GIT_ASKPASS`/`SSH_ASKPASS` and `core.askPass`. A positive control proves every spy is live
-before delivery runs. A terminal prompt is observed on a real pseudo-terminal.
-
-Amendment 3 (C4): the token reaches the helper through a sealed in-memory file, so every
-`get` of one git run is answered (R7), and network git runs no hook of the clone's."""
+Real smart-HTTP git checks fetch/push, failures, URL rewrites, clone hooks and secret leakage.
+Legacy credential files are ignored sentinels: the only token source is explicit Vault HTTP.
+"""
 from __future__ import annotations
 
 import base64
@@ -30,6 +19,8 @@ import time
 import uuid
 
 import pytest
+
+from ._identity import VaultHTTP, token as identity_token
 
 from ._support import (
     BARE_NO_UPKEEP,
@@ -112,11 +103,8 @@ def _prove_spies_live(clone, server, log):
 @pytest.mark.parametrize("outcome", ["success", "fetch-refused", "push-refused"])
 def test_git_never_stores_erases_prompts_for_or_shares_the_tenant_credential(
         http_repo, spies, outcome):
-    """Flow 5: helpers reset, then one read-only helper answering only `get` from the tenant
-    file; no prompt. Whether the fetch or push succeeds or the server refuses the bot's
-    token, the credential file is byte-identical and untouched (same inode, mtime, mode),
-    `forge/` gains nothing, and no spy is ever invoked. The server's record shows the bot's
-    token was offered each time, so a refusal really is git's erase path (K1)."""
+    """Bearer authentication succeeds or refuses without consulting ambient helpers,
+    prompting, or changing an ignored legacy credential file."""
     tenant, remote, credentials, server = http_repo
     log, local = spies
     git(tenant.knowledge, "config", "credential.helper", str(local))
@@ -155,14 +143,9 @@ def test_git_never_stores_erases_prompts_for_or_shares_the_tenant_credential(
 
 
 @pytest.mark.parametrize("change", ["emptied", "rewritten-for-another-host", "another-token"])
-def test_git_authenticates_with_what_open_read_whatever_the_file_says_later(http_repo, spies, change):
-    """Flow 5, `open()` the single reader: after `open()` the credential file is emptied,
-    rewritten for another host, or rewritten with another token for the same host. Git still
-    authenticates with exactly what `open()` read (the server accepts only that token), the
-    publish succeeds, no spy runs, `forge/` gains nothing, and the token rode in no process's
-    argv or environment (so it reached git another way). The in-process audit in
-    `test_credentials_loaded_once_and_token_not_in_representation` cannot see a helper
-    subprocess re-reading the file; this can."""
+def test_git_ignores_changes_to_a_legacy_credential_file(http_repo, spies, change):
+    """Changes to a legacy credential file cannot affect the explicit Vault identity.
+    Real smart-HTTP authentication succeeds without helpers or argv/environment secrets."""
     tenant, remote, credentials, server = http_repo
     log = _armed(http_repo, spies)
     d = delivery(http_repo, ForgeHTTP())
@@ -184,9 +167,8 @@ def test_git_authenticates_with_what_open_read_whatever_the_file_says_later(http
 
 def test_deliver_and_revert_never_store_erase_prompt_for_or_share_the_credential(
         http_repo, spies, tmp_path):
-    """Flow 5 on the two push routes besides finish: a retained branch's delivery and a
-    revert run with helpers reset and the one read-only helper, so no spy runs and the
-    credential file is untouched."""
+    """Retained delivery and revert authenticate without helpers or prompts, leaving
+    the ignored legacy credential sentinel untouched."""
     tenant, remote, credentials, server = http_repo
     log = _armed(http_repo, spies)
     before = _state(credentials)
@@ -231,21 +213,16 @@ def _holding(roots, secret: bytes, since: float):
 
 
 def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, tmp_path):
-    """O-E: nothing persists a second copy of the token, through git's `store` helper on a
-    temporary file or otherwise. With a token fresh to this test, after a drain (publish,
-    claim, a refused and a retained finish) and a revert, no file changed meanwhile in the
-    temp folder, the tenant's folder (but the credential file itself) or the isolated home
-    holds it."""
+    """A fresh JWT never appears in a disk file after publish, commit, refused finish,
+    retained delivery and revert."""
     tenant, _remote, credentials, server = http_repo
-    token = f"p3-fresh-{uuid.uuid4().hex}"
-    port = server.server.server_address[1]
-    credentials.write_text(f"http://bot:{token}@127.0.0.1:{port}\n", encoding="utf-8")
+    token = identity_token(signature=uuid.uuid4().hex)
     server.token = token
     tmp = tempfile.gettempdir()
     started = time.time() - 1
     existing = set(os.listdir(tmp))
     http = ForgeHTTP()
-    d = delivery(http_repo, http)
+    d = delivery(http_repo, http, identity=VaultHTTP(value=token).identity())
     batch = d.start_batch("no-copy", lanes=LANES)
     (batch.draft_root / "agent/lessons/no-copy.md").write_text("a lesson\n", encoding="utf-8")
     batch.commit(batch.change_set(), "claim")
@@ -259,7 +236,7 @@ def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, tmp_pat
     assert server.authorized("git-receive-pack")
     new_in_tmp = [os.path.join(tmp, name) for name in sorted(set(os.listdir(tmp)) - existing)]
     copies = _holding([*new_in_tmp, tenant.dir, git_config_home(tmp_path).home], token.encode(), started)
-    assert [copy for copy in copies if copy != str(credentials)] == [], copies
+    assert copies == [], copies
 
 
 def _shm():
@@ -271,17 +248,10 @@ def _new_entries(folder, existing):
 
 
 def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_repo, tmp_path):
-    """O-E / C4 (orchestrator ruling: never on disk DURING a network call): the token is in
-    no file while git authenticates, not only after the call. With a token fresh to this
-    test, every network route's first authenticated request of each service (a publish's
-    and `start_batch`'s fetch, finish's lookup and push, a revert's fetch and push) holds
-    while the filesystem is searched: no file below the tenant's folder (but the credential
-    file), the isolated home, or anything new in the temp folder or `/dev/shm` holds it. A
-    file written for the call and removed after it is caught here."""
+    """A fresh JWT never appears on disk during authenticated fetch or push, including
+    publish, batch start, finish and revert."""
     tenant, _remote, credentials, server = http_repo
-    token = f"p3-fresh-{uuid.uuid4().hex}"
-    port = server.server.server_address[1]
-    credentials.write_text(f"http://bot:{token}@127.0.0.1:{port}\n", encoding="utf-8")
+    token = identity_token(signature=uuid.uuid4().hex)
     server.token = token
     tmp, shm = tempfile.gettempdir(), _shm()
     existing = {folder: set(os.listdir(folder)) for folder in (tmp, shm) if folder}
@@ -291,10 +261,10 @@ def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_
     def scan(service):
         roots = [entry for folder, names in existing.items() for entry in _new_entries(folder, names)]
         found = _holding([*roots, tenant.dir, git_config_home(tmp_path).home], token.encode(), started)
-        scans[phase[0], service] = [path for path in found if path != str(credentials)]
+        scans[phase[0], service] = found
     server.on_service = scan
     http = ForgeHTTP()
-    d = delivery(http_repo, http)
+    d = delivery(http_repo, http, identity=VaultHTTP(value=token).identity())
     d.publish()
     phase[0] = "start_batch"
     server.rearm()
@@ -316,12 +286,8 @@ def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_
 
 
 def test_a_downgrade_to_plain_http_at_the_same_host_and_port_gets_no_token(http_repo, spies):
-    """Flow 5 (orchestrator ruling): the helper answers only for the parsed address's
-    protocol, host and port. The origin is `https` at the forge's host and port, and the
-    clone's config rewrites it to plain `http` at the same host and port (`insteadOf`): git
-    then asks for an `http` credential, the helper has no answer, and the token never crosses
-    plain http. The publish succeeds (an implementation that does not follow the rewrite) or
-    refuses, never hangs, and no prompt program runs."""
+    """An origin rewritten from HTTPS to HTTP at the same host receives no Bearer
+    token and cannot trigger a helper or prompt."""
     tenant, _remote, credentials, server = http_repo
     log = _armed(http_repo, spies)
     port = server.server.server_address[1]
@@ -455,13 +421,13 @@ from pathlib import Path
 os.setsid()
 os.open(sys.argv[1], os.O_RDWR)  # the controlling terminal of this new session
 from defender.tests import _tenants1106 as tenants
-from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, configured_origin, target
+from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, configured_origin, target, fixture_identity
 mod = target()
 out = {}
 try:
     tenant = tenants.accept(Path(sys.argv[2]), sys.argv[3])
     http = ForgeHTTP(origin=configured_origin(tenant.knowledge))
-    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client)
+    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)))
     later.publish()
     out["published"] = True
 except mod.DeliveryRefused as refused:
@@ -519,13 +485,8 @@ def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
 
 
 def test_a_git_run_that_asks_for_the_credential_again_and_again_succeeds(http_repo, spies):
-    """R7 / O-E: every `get` git asks of the one helper is answered, not only the first (a
-    one-shot pipe reads empty the second time, a pipe preloaded with N copies the (N+1)th;
-    a sealed in-memory file read through `/dev/fd/N` starts at offset 0 on every open). The
-    clone's own config gives `origin` three push URLs, all the forge's repository, so one
-    push asks for the credential three times (probed: once per URL): finish pushes and opens
-    its PR, every push authenticated, the credential file untouched, no spy run. (An implementation that pushes to an explicit URL rather than to
-    `origin` never asks twice; the case is then vacuous, and the bug unreachable.)"""
+    """Every push URL in one git invocation receives the scoped Bearer header.
+    The descriptor can be read repeatedly without helpers, prompts or disk writes."""
     tenant, remote, credentials, server = http_repo
     log = _armed(http_repo, spies)
     before = _state(credentials)
@@ -624,3 +585,29 @@ for module, names in (
     assert result.get("status") == "opened", result
     assert len(result["creates"]) == 1
     assert git(remote, "rev-parse", f"refs/heads/{batch.branch}") == commit
+
+
+def test_git_does_not_send_bearer_to_another_repository_on_the_same_server(http_repo, spies):
+    tenant, _, _, server = http_repo
+    log = _armed(http_repo, spies)
+    origin = f"{server.url}/tenants/blue.git"
+    git(tenant.knowledge, "config", f"url.{server.url}/tenants/other.git.insteadOf", origin)
+    d = delivery(http_repo, ForgeHTTP())
+    with pytest.raises(target().DeliveryRefused):
+        d.publish()
+    assert server.authorizations
+    assert not any(server.authorizations)
+    _silent(log)
+
+
+def test_git_refreshes_a_vault_identity_before_a_fetch_outlives_it(http_repo):
+    vault = VaultHTTP()
+    d = delivery(http_repo, ForgeHTTP(), identity=vault.identity())
+    d.publish()
+    assert len(vault.calls) == 1
+    vault.now += 451
+    http_repo[3].token = identity_token(issued=vault.now)
+    http_repo[3].seen.clear()
+    d.publish()
+    assert len(vault.calls) == 2
+    assert http_repo[3].authorized("git-upload-pack")

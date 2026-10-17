@@ -46,6 +46,7 @@ from ._support import (
     quiet,
     running_in,
     target,
+    fixture_identity,
 )
 
 def _current(tenant):
@@ -306,7 +307,7 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
             "a draft or its temporary was made under a busy lock"
         assert git(tenant.knowledge, "for-each-ref", "--format=%(refname)", "refs/heads") == "refs/heads/main"
         red_forge = ForgeHTTP(origin=configured_origin(red_tenant.knowledge))
-        red = mod.TenantDelivery.open(red_tenant, defender_dir=DEFENDER, client=red_forge.client)
+        red = mod.TenantDelivery.open(red_tenant, defender_dir=DEFENDER, client=red_forge.client, identity=fixture_identity(str(red_tenant.id)))
         assert red.publish().commit == git(red_remote, "rev-parse", "main")
     assert sorted(p.name for p in (tenant.dir / "forge").iterdir()) == ["git-credentials"], \
         "the lock (or anything else) landed in forge/, which stays the credential's alone"
@@ -482,12 +483,12 @@ _INTERRUPTED_PUBLISH = """
 import json, os, resource, signal, sys
 from pathlib import Path
 from defender.tests import _tenants1106 as tenants
-from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, target
+from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, target, fixture_identity
 root, tenant_id, marker, size, limit = (Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4]),
                                         int(sys.argv[5]))
 mod = target()
 tenant = tenants.accept(root, tenant_id)
-d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client)
+d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client, identity=fixture_identity(str(tenant.id)))
 clone = os.path.abspath(tenant.knowledge)
 in_clone = os.path.join(clone, "agent", "lessons", marker)
 signal.signal(signal.SIGXFSZ, signal.SIG_DFL)  # a write past the limit kills, as a power cut would
@@ -576,12 +577,12 @@ _PAUSED_PUBLISH = """
 import json, os, sys, time
 from pathlib import Path
 from defender.tests import _tenants1106 as tenants
-from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, lock_probe, target
+from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, lock_probe, target, fixture_identity
 root, tenant_id, marker, ready, go, trace = (Path(sys.argv[1]), sys.argv[2], sys.argv[3],
                                              Path(sys.argv[4]), Path(sys.argv[5]), Path(sys.argv[6]))
 mod = target()
 tenant = tenants.accept(root, tenant_id)
-d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client)
+d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP().client, identity=fixture_identity(str(tenant.id)))
 clone = os.path.abspath(tenant.knowledge)
 current = os.path.join(os.path.realpath(tenant.dir / "exports"), "current")
 in_clone = os.path.join(clone, "agent", "lessons", marker)

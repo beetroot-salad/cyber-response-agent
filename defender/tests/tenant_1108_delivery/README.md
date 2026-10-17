@@ -1,3 +1,17 @@
+> Current implementation update (PR #1253): the credential-file contract below is
+> historical. The current public API is `defender.learning.author.version_control`.
+> `TenantDelivery.open(..., identity=ForgejoIdentity(...))` requires an explicit host-side
+> Vault identity. No production code reads `forge/git-credentials`. Forgejo 17 Authorized
+> Integrations accept short-lived JWTs for both API and git; see the deployment notes in
+> `defender/docs/development-operations.md`. Existing credential files in test fixtures are
+> ignored sentinel files, retained to detect accidental reads or writes.
+>
+> `test_identity.py` checks tenant/audience/issuer binding, token lifetime, renewal, malformed
+> responses and refusals. `test_credential.py` still probes git helpers, prompts, hooks,
+> argv/environment leakage and files during transport. Fast Forgejo tests use `MockTransport`;
+> smart-HTTP tests run real git against `git http-backend`. `test_live_forgejo.py` separately
+> verifies signed JWT acceptance and rejection against a real configured Forgejo 17 service.
+
 # Issue 1108 P3 executable contract
 
 Status: **amendment 3 rewrite (2026-10-16), repaired after its review (REVISE) and after the contract adversary run on `86acc4e9`, the same day; repair diff reviewed during the Codex continuation on 2026-10-17 (not an independent cold review).** The current contract is the "Amendment 3 rewrite" section (with its "Review repair" and "Contract adversary repair" subsections, the later winning inside it), then the "Amendment 2 rewrite" section (with its "Review repair" and "Contract adversary repair" subsections) where amendment 3 leaves it standing, the "Local test API seams" section and the obligations table below; where they disagree the amendment 3 section wins. The earlier repair records are history. Production implementation is absent from this branch.

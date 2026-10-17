@@ -37,6 +37,7 @@ from ._support import (
     set_pull_state,
     still_open,
     target,
+    fixture_identity,
 )
 
 
@@ -141,7 +142,7 @@ def test_retained_branch_delivery_pushes_only_commit_maker_commits(repo, planted
     if planted is not None:
         plant_raw_commit(repo[0].knowledge, f"refs/heads/{batch.branch}", "agent/lessons/raw.md",
                          b"raw git, not the commit-maker\n", amend=planted == "amended")
-    later = target().TenantDelivery.open(repo[0], defender_dir=DEFENDER, client=http.client)
+    later = target().TenantDelivery.open(repo[0], defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(repo[0].id)))
     if planted is None:
         opened(later.deliver("retained"))
         assert len(http.creates) == posts + 1

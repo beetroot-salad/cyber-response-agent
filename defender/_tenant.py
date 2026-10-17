@@ -287,10 +287,6 @@ class _TenantLayout:
         return self.dir / "knowledge"
 
     @property
-    def forge_credentials(self) -> Path:
-        return self.dir / "forge" / "git-credentials"
-
-    @property
     def exports(self) -> Path:
         return self.dir / "exports"
 
@@ -430,11 +426,6 @@ class Tenant:
     @property
     def knowledge(self) -> Path:
         return self._layout.knowledge
-
-    @property
-    def forge_credentials(self) -> Path:
-        """Host-only forge credential location; delivery is its sole reader."""
-        return self._layout.forge_credentials
 
     @property
     def exports(self) -> Path:

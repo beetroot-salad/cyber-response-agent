@@ -10,6 +10,8 @@ import json
 import httpx
 import pytest
 
+from ._identity import identity as fixture_identity
+
 from ._support import (
     FORK,
     NAMESAKE,
@@ -24,11 +26,11 @@ from ._support import (
 
 
 def _forge_module():
-    return importlib.import_module("defender.learning.author.forge")
+    return importlib.import_module("defender.learning.author.version_control.forgejo")
 
 
 def forge(http, origin=ORIGIN):
-    return _forge_module().ForgejoForge(origin=origin, token=TOKEN, client=http.client)
+    return _forge_module().ForgejoForge(origin=origin, identity=fixture_identity(), client=http.client)
 
 
 def row(number, head):
@@ -117,7 +119,7 @@ def test_protection_read_failure_or_unknown_push_permission_refuses(response):
         return response
     client = httpx.Client(transport=httpx.MockTransport(reply))
     with pytest.raises(_forge_module().ForgeError, match="protect|push|403|JSON|main"):
-        _forge_module().ForgejoForge(origin=ORIGIN, token=TOKEN, client=client).verify_main_protection()
+        _forge_module().ForgejoForge(origin=ORIGIN, identity=fixture_identity(), client=client).verify_main_protection()
     assert any(call.url.path.endswith("/branches/main") for call in calls)
 
 
@@ -393,3 +395,12 @@ def test_a_pr_row_without_its_head_repository_is_skipped(method):
                   2: [pr_row(3, "lessons/a", repo=None)]}
     assert getattr(forge(http), method)("lessons/a" if method == "list_prs_for_head" else "lessons/") == \
         [normalized(2, "lessons/a")]
+
+
+@pytest.mark.parametrize("origin", ['http://forge.invalid/tenants/blue.git\n',
+    'http://forge.invalid"/tenants/blue.git', 'http://forge.invalid/tenants/blue.git\\'])
+def test_origin_cannot_inject_transport_configuration(origin):
+    http = ForgeHTTP()
+    with pytest.raises(_forge_module().ForgeError):
+        forge(http, origin)
+    assert http.requests == []

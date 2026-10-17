@@ -198,13 +198,13 @@ import json, os, resource, signal, sys
 from pathlib import Path
 from defender.tests import _tenants1106 as tenants
 from defender.tests.tenant_1108_delivery._support import (
-    DEFENDER, LANES, ForgeHTTP, configured_origin, target)
+    DEFENDER, LANES, ForgeHTTP, configured_origin, target, fixture_identity)
 root, tenant_id, remote, batch_id, cap, mode = (Path(sys.argv[1]), sys.argv[2], sys.argv[3],
                                                 sys.argv[4], int(sys.argv[5]), sys.argv[6])
 mod = target()
 tenant = tenants.accept(root, tenant_id)
 http = ForgeHTTP(remote=remote, origin=configured_origin(tenant.knowledge))
-d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client)
+d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)))
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 if mode == "crash":
     d.start_batch(batch_id, lanes=LANES)
@@ -443,6 +443,6 @@ _UNUSABLE_REPOSITORY = {"no-id": {"full_name": "tenants/blue"}, "list": [], "str
 
 
 def _forge():
-    return importlib.import_module("defender.learning.author.forge")
+    return importlib.import_module("defender.learning.author.version_control.forgejo")
 
 

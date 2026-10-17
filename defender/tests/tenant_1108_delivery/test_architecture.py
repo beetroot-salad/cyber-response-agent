@@ -1,11 +1,11 @@
-"""O8/A5/P3: one credential location owner, tenant delivery remains dormant."""
+"""Explicit host identities, package ownership and dormant tenant delivery."""
 from __future__ import annotations
 
 import ast
 
 from ._support import DEFENDER, target
 
-_OWNER = "learning/author/tenant_delivery.py"
+_OWNER = "learning/author/version_control/"
 
 
 def production_trees():
@@ -27,34 +27,16 @@ def non_docstring_nodes(tree):
     return [node for node in ast.walk(tree) if id(node) not in docstrings]
 
 
-def test_git_credential_location_has_one_production_owner():
-    target()  # A zero-implementation tree is not a successful ownership census.
-    found = []
-    for path, tree in production_trees():
-        parents = {id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
-        for node in non_docstring_nodes(tree):
-            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
-                continue
-            if "git-credentials" not in node.value:
-                continue
-            if path == "_tenant.py":
-                # The layout may name the file; it cannot become a second credential reader.
-                parent = parents[id(node)]
-                assert (isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Div)) or (
-                    isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute)
-                    and parent.func.attr == "joinpath"  # lint-ast-resolve: ok — path-construction spelling census; no callable-binding claim
-                ), f"{path}:{node.lineno}: layout credential literal must only construct a path"
-            else:
-                assert path == _OWNER, f"{path}:{node.lineno}: extra forge credential location owner"
-            found.append(path)
-    assert found, "the single credential location must be explicit in its owning module"
+def test_delivery_has_no_disk_credential_location():
+    target()
+    assert list(_spellings("git-credentials")) == []
 
 
 def test_tenant_delivery_has_no_production_callers_until_p4():
     target()
     uses = []
     for path, tree in production_trees():
-        if path == _OWNER:
+        if path.startswith(_OWNER):
             continue
         for node in non_docstring_nodes(tree):
             names = []

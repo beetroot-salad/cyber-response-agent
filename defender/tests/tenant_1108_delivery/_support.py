@@ -5,7 +5,6 @@ Nothing here implements target policy: fixtures plant trees and record what cros
 boundary; every judgement is the code under test's."""
 from __future__ import annotations
 
-import base64
 import contextlib
 import importlib
 import json
@@ -26,7 +25,7 @@ import pytest
 from defender.tests import _tenants1106 as tenants
 
 ORIGIN = "http://forge.invalid:3000/tenants/blue.git"
-TOKEN = "p3-blue-secret-credential"
+from ._identity import TOKEN, identity as fixture_identity
 DEFENDER = Path(__file__).resolve().parents[2]
 #: The import root a probe subprocess needs, so it imports THIS tree's `defender`.
 IMPORT_ROOT = DEFENDER.parent
@@ -39,7 +38,7 @@ _IDENTITY = {"GIT_AUTHOR_NAME": "P3", "GIT_AUTHOR_EMAIL": "p3@test.invalid",
 
 def target():
     # Lazy import: the contract must collect before its implementation exists.
-    return importlib.import_module("defender.learning.author.tenant_delivery")
+    return importlib.import_module("defender.learning.author.version_control")
 
 
 #: Git's automatic upkeep, off for every git the fixtures run. Git >= 2.47 starts
@@ -374,7 +373,7 @@ def build_tenant(tmp_path, tenant_id="blue", *, root=None):
     git(clone, "fetch", "origin")
     credentials = tenant.dir / "forge" / "git-credentials"
     credentials.parent.mkdir()
-    credentials.write_text(f"http://bot:{TOKEN}@forge.invalid:3000\n", encoding="utf-8")
+    credentials.write_text("http://bot:ignored-legacy-secret@forge.invalid:3000\n", encoding="utf-8")
     credentials.chmod(0o600)
     return tenant, remote, credentials
 
@@ -392,6 +391,7 @@ def delivery(repo, http, **options):
     origin = configured_origin(repo[0].knowledge)
     if http.address is None and origin is not None:
         http.serve(origin)
+    options.setdefault("identity", fixture_identity(str(repo[0].id)))
     return target().TenantDelivery.open(repo[0], defender_dir=DEFENDER, client=http.client, **options)
 
 
@@ -743,7 +743,7 @@ class GitHTTP:
         parts = urlsplit(handler.path)
         service = parse_qs(parts.query).get("service", [""])[0] or parts.path.rsplit("/", 1)[-1]
         body = self._body(handler)
-        expected = "Basic " + base64.b64encode(f"{self.user}:{self.token}".encode()).decode()
+        expected = "Bearer " + self.token
         sent = handler.headers.get("Authorization") == expected
         authorized = sent and service not in self.refuse
         with self._lock:
@@ -754,7 +754,7 @@ class GitHTTP:
                 self._fired.add(service)
         if not authorized:
             handler.send_response(401)
-            handler.send_header("WWW-Authenticate", 'Basic realm="p3"')
+            handler.send_header("WWW-Authenticate", 'Bearer realm="p3"')
             handler.send_header("Content-Length", "0")
             handler.end_headers()
             return
@@ -871,7 +871,7 @@ def http_repo(tmp_path, monkeypatch):
         git(clone, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
         credentials = tenant.dir / "forge" / "git-credentials"
         credentials.parent.mkdir()
-        credentials.write_text(f"http://bot:{TOKEN}@127.0.0.1:{server.server.server_address[1]}\n",
+        credentials.write_text(f"http://bot:ignored-legacy-secret@127.0.0.1:{server.server.server_address[1]}\n",
                                encoding="utf-8")
         credentials.chmod(0o600)
         yield tenant, remote, credentials, server
@@ -887,14 +887,14 @@ _LATER_SCRIPT = """
 import json, sys
 from pathlib import Path
 from defender.tests import _tenants1106 as tenants
-from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, configured_origin, target
+from defender.tests.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, configured_origin, target, fixture_identity
 root, tenant_id, remote, verb, args = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
 mod = target()
 tenant = tenants.accept(root, tenant_id)
 http = ForgeHTTP(remote=remote, origin=configured_origin(tenant.knowledge))
 out = {}
 try:
-    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client)
+    later = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)))
     result = getattr(later, verb)(*args)
     status = result.status
     out["status"] = status if isinstance(status, str) else repr(status)
