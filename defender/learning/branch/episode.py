@@ -44,6 +44,7 @@ from defender.learning.branch.ledger import (
 from defender.runtime.branch._family import (
     BASE_ROLE,
     episode_token_for,
+    family_identities,
     is_reserved_world_label,
     load_family,
     world_token_for,
@@ -233,7 +234,7 @@ def _answers(rows: list[dict]) -> dict[str, str]:
 
 
 def _classify(base: dict[str, str], world: dict[str, str], keys: list[str], axis: str | None,
-              invoke: Invoke | None) -> dict[str, str]:
+              invoke: Invoke | None, known_ids: frozenset[str]) -> dict[str, str]:
     """One world's shared keys, each classified against the base's answer.
 
     Equal canonical text is `same` with no model call. Only a real difference reaches the
@@ -257,7 +258,7 @@ def _classify(base: dict[str, str], world: dict[str, str], keys: list[str], axis
         # `.value`: callers write this table to YAML and compare bare words, and
         # `str(Verdict.SAME)` renders `'Verdict.SAME'`. Membership is checked against the
         # comparator's own `DELTA_SEAT`.
-        verdict = compare(base[key], world[key], axis, invoke=invoke)
+        verdict = compare(base[key], world[key], axis, known_ids=known_ids, invoke=invoke)
         out[key] = verdict.value if verdict in DELTA_SEAT else _wrong_seat(key, verdict)
     return out
 
@@ -336,11 +337,13 @@ def _delta_o(bound: Bound, invoke: Invoke | None) -> dict[str, dict[str, str]]:
         drift = {key for key, answer in served.get(control, {}).items()
                  if key in base and base[key] != answer}
 
+    # The family's identities, removed from every prompt the comparator sends.
+    known_ids = family_identities(family)
     out: dict[str, dict[str, str]] = {}
     for label in labels:
         world = served[label]
         shared = sorted(set(base) & set(world) - drift)
-        out[label] = _classify(base, world, shared, family.world(label).axis, invoke)
+        out[label] = _classify(base, world, shared, family.world(label).axis, invoke, known_ids)
     return out
 
 

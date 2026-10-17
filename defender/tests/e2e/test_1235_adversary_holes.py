@@ -94,7 +94,7 @@ def test_1235_the_query_tool_never_makes_a_state_of_its_own(tmp_path):
     assert deps.run_state is None
 
     def record(d):
-        return asyncio.run(QueryCapture(registry=None)._record(
+        return asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
             d, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},
             payload=[{"a": 1}], exit_code=0, detail="", system_key=""))
 

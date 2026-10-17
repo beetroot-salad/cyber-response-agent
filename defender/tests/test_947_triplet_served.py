@@ -183,3 +183,45 @@ def test_947_the_queries_table_digest_carries_no_world_token(tmp_path):
         assert ACTIONABLE in digest, digest
         for leak in (TOKEN_A, T.EPISODE_TOKEN):
             assert leak not in digest, f"{leak!r} was persisted into the queries table"
+
+
+# ---------------------------------------------------------------------------------------
+# the same channel when the ids carry no UTC stamp: the filter is handed what the host knows
+# ---------------------------------------------------------------------------------------
+
+#: An episode forked from an operator-pinned source run id: nothing here is stamp-shaped, so
+#: only the identities the serving registry declares can be removed.
+PINNED_EPISODE = "live-lever-up-20260930-sudo-n5"
+PINNED_FAULT = ("Elasticsearch query failed (HTTP 404): ledger "
+                "live.lever.up.20260930.sudo.n5.a.jsonl missing; run "
+                "live-lever-up-20260930-sudo-n5-c refused")
+
+
+def _branched_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
+    """`_faulting_backend`, as a registry serving one world of a pinned-source family: it
+    declares the family's identities through the seam a `WorldRegistry` answers."""
+    family = T.sym("runtime.branch._family", "parse_family")(
+        T.family_doc(episode_id=PINNED_EPISODE, source_run_id="live-lever-up-20260930-sudo"))
+    known = T.sym("runtime.branch._family", "family_identities")(family)
+    plain = _faulting_backend(rec, detail)
+
+    class _World(FakeVerbs):
+        def branch_identities(self) -> frozenset[str]:
+            return known
+
+    return _World(plain._table)
+
+
+def test_947_a_driven_pinned_source_fault_reaches_neither_surface_with_a_known_id(tmp_path):
+    """Driven end to end: the registry declares the family, and neither the model's turn nor the
+    queries table's digest names any of it, while the actionable half survives on both."""
+    rec = VerbRecorder()
+    gather, run_dir = _drive_one_query(tmp_path, _branched_backend(rec, PINNED_FAULT))
+    assert rec.calls, "the query never reached the verb, so no fault was raised"
+    seen = "\n".join(gather.seen)
+    digests = "\n".join(str(r.get("payload_digest", "")) for r in _own_failure_rows(run_dir))
+    assert ACTIONABLE in seen
+    assert ACTIONABLE in digests
+    for leak in ("live.lever.up.20260930.sudo.n5", PINNED_EPISODE):
+        assert leak not in seen, f"{leak!r} reached the model on the fault channel"
+        assert leak not in digests, f"{leak!r} was persisted into the queries table"

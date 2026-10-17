@@ -201,7 +201,7 @@ def test_947_agent_trace_ids_are_pairwise_distinct_across_all_four_role_key_writ
     judge = T.FakeAgent("mutation")
     _questioner().author_family(source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
                                 invoke=author, leads=[], alert={}, frontier="")
-    T.mod("learning.branch.comparator").compare("{}", '{"a": 1}', "an axis", invoke=judge)
+    T.mod("learning.branch.comparator").compare("{}", '{"a": 1}', "an axis", known_ids=frozenset(), invoke=judge)
     ids = author.agent_ids + judge.agent_ids
     assert len(ids) == 4
     assert len(set(ids)) == 4, f"trace ids collide: {ids}"

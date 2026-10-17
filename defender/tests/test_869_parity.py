@@ -76,7 +76,7 @@ def test_runtime_system_of_record_is_unchanged(tmp_path):
     write(adapters / "elastic_adapter.py", "VERBS = {}\n")
     write(adapters / "cmdb_adapter.py", "VERBS = {}\n")
     registry = ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
-    capture = QueryCapture(registry)
+    capture = QueryCapture(registry, known_ids=frozenset())
 
     assert registry.systems() == ("cmdb", "elastic")
     assert capture._system_of_record("elastic") == "elastic"

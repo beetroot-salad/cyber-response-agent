@@ -780,7 +780,8 @@ def test_1008_the_comparator_still_judges_under_the_questioners_role(tmp_path):
     comparator = T.mod("learning.branch.comparator")
     agent = T.FakeAgent("mutation")
 
-    verdict = comparator.compare("{}", '{"a": 1}', "an axis", invoke=agent)
+    verdict = comparator.compare("{}", '{"a": 1}', "an axis", known_ids=frozenset(),
+                                  invoke=agent)
 
     assert agent.calls == 1, (
         "the comparator settled without a model call, so there is no recorded role to assert on")

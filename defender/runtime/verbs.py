@@ -550,6 +550,15 @@ class VerbRegistry:
     def verbs(self, system: str) -> Mapping[str, Verb]:
         raise NotImplementedError
 
+    def branch_identities(self) -> frozenset[str]:
+        """Every branch identity of the world this registry serves (episode id and token,
+        world tokens, arm run ids), which the query tool removes from model-visible fault text
+        (`learning/branch/redaction.py`). A registry over real systems serves a natural run,
+        which has none; the one registry that serves a world (`estate.registry.WorldRegistry`,
+        whose constructor requires the world) answers with its family's, and a wrapper answers
+        with what it wraps."""
+        return frozenset()
+
     def _cold_verb_names(self, system: str) -> frozenset[str] | None:
         """Verb names `system` declares, without importing; `None` if there is no cold source,
         in which case `decide` falls back to `self.verbs(system)`. Real-adapter subclasses

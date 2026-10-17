@@ -108,7 +108,7 @@ def _gather_deps(run_dir: Path, state: RunState):
 def _record_failure(deps, *, params: dict) -> tuple[dict, str]:
     """One backend call that failed on the transport (exit 2: an infra failure the breaker
     charges), recorded through the query tool's own recorder."""
-    return asyncio.run(QueryCapture(registry=None)._record(
+    return asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params=params,
         payload=None, exit_code=2, detail="connection refused", system_key=""))
 
@@ -172,7 +172,7 @@ def test_a_succeeding_call_whose_view_write_is_refused_charges_nothing(tmp_path)
     RunPaths(run_dir).executed_queries.mkdir()
 
     with pytest.raises(OSError):  # noqa: PT011 — the directory refuses in its own words
-        asyncio.run(QueryCapture(registry=None)._record(
+        asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
             deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={"q": "a"},
             payload=[{"a": 1}], exit_code=0, detail="", system_key=""))
     assert [(r["seq"], r["exit_code"]) for r in state.lead_rows(LEAD)] == [(0, 0)], \
@@ -344,7 +344,7 @@ def test_what_round_three_deletes_is_gone():
     for module in (lead_zero, _capture):
         left = [n for n in ("_rows_for", "_budget_account") if hasattr(module, n)]
         assert left == [], f"{module.__name__} still has {left}"
-    assert not hasattr(QueryCapture(registry=None), "_seq_lock"), \
+    assert not hasattr(QueryCapture(registry=None, known_ids=frozenset()), "_seq_lock"), \
         "the query tool still holds a lock of its own beside the run state's"
     if importlib.util.find_spec("defender.hooks._run_dir") is not None:
         run_dir_mod = importlib.import_module("defender.hooks._run_dir")

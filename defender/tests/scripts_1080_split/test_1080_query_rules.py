@@ -723,7 +723,7 @@ def _query_id_verdicts() -> dict[str, dict[str, Any]]:
     is_reserved = _flat("is_reserved_query_id")
     assert query_tool.resolve_query_id is resolve, (
         "the query tool must apply the one moved rule, not a copy")
-    screen = query_tool.QueryCapture(None)
+    screen = query_tool.QueryCapture(None, known_ids=frozenset())
     out = {}
     for case, (system, verb, qid) in QUERY_ID_CASES.items():
         out[case] = {

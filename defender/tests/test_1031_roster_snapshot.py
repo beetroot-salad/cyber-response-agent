@@ -130,7 +130,7 @@ def test_the_query_tool_consults_the_snapshot_not_the_disk(tmp_path):
     Observed failing by (today): `("", sha256("elastic"))` for the declared name after the
     removal — a fingerprint of a real name, keyed like a ghost's, which is O3's failure."""
     adapters = _adapters(tmp_path, "elastic")
-    capture = QueryCapture(ModuleVerbRegistry(read_roster(adapters), DENY_ALL))
+    capture = QueryCapture(ModuleVerbRegistry(read_roster(adapters), DENY_ALL), known_ids=frozenset())
     ghost_pair = ("", system_fingerprint("ghostone", ""))
     assert ghost_pair[1], "the ghost mints no fingerprint, so the control below is vacuous"
 
@@ -501,7 +501,7 @@ def test_neither_reader_swallows_a_registry_that_raises():
 
     Observed failing by (today): `RegistryUnavailable` out of the first, `False` from the
     second."""
-    capture = QueryCapture(_RaisingRoster())
+    capture = QueryCapture(_RaisingRoster(), known_ids=frozenset())
     with pytest.raises(PermissionError):
         capture._system_of_record("elastic")
     with pytest.raises(PermissionError):

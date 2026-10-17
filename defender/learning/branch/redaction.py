@@ -15,14 +15,22 @@ channel is the system's own error relayed verbatim, which we do not author.
 It must stay actionable: an empty or truncated refusal makes the model repeat the call. So only
 tokens are removed; the sentence, configured patterns like `logs-*`, and every other name pass
 through unchanged.
+
+Two rules find a token. The primary one is the KNOWN set: the identities the caller's process
+actually holds (`runtime/branch/_family.family_identities` — the episode id and token, every
+world token, every arm's run id), passed on every call. It does not depend on what an id looks
+like, so an episode forked from an operator-pinned source run id, or a UUID (#1187), is found.
+The second is the stamp SHAPE `episode_token_for` derives from a minted id, kept as defense in
+depth for a token no caller declared. A natural run knows no identity and passes an empty set.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 
-#: An episode or world token, matched by shape, since the filter is never told which world is
-#: serving (faults also come from the launcher and the oracle). The shape is what
+#: An episode or world token, matched by shape: the defense-in-depth rule for a token no caller
+#: declared in the known set (faults also come from the launcher and the oracle). The shape is what
 #: `episode_token_for` derives: a casefolded UTC stamp, then dotted or hyphenated segments. A
 #: world token is the episode token plus a segment, and the greedy tail removes both.
 #:
@@ -39,13 +47,24 @@ _TOKEN = re.compile(r"(?<![A-Za-z0-9])\d{8}[tT]\d{6}[zZ](?:[.\-][A-Za-z0-9_]+)*"
 _TOKEN_MARK = "[a run id]"
 
 
-def redact_model_visible(detail: str) -> str:
+def redact_model_visible(detail: str, known_ids: Collection[str]) -> str:
     """`detail` with every episode and world token removed, and nothing else touched.
 
-    Called from `runtime/query_tool.py` at `_model_view` (the model's copy) and
-    `QueryCapture._record` (the failure digest); that wiring is pinned by a driven run.
+    `known_ids` is every branch identity the caller's process knows (`family_identities`), or
+    an empty set for a natural run. Required, so no caller can forget it silently. Matched as
+    literal text, case-insensitively, longest first, so a world token is removed whole rather
+    than leaving its label behind its episode token's marker. The stamp-shaped rule runs after.
 
-    A non-string is passed through `str`: this runs inside fault handlers, which must not raise.
+    Called from `runtime/query_tool.py` at `_model_view` (the model's copy) and
+    `QueryCapture._record` (the failure digest), and from the comparator's prompt; that wiring
+    is pinned by a driven run.
+
+    A non-string is passed through `str`, and an empty member is dropped (it would match
+    between every character): this runs inside fault handlers, which must not raise.
     """
     text = detail if isinstance(detail, str) else str(detail)
+    names = sorted({str(n) for n in known_ids if n}, key=len, reverse=True)
+    if names:
+        known = re.compile("|".join(map(re.escape, names)), re.IGNORECASE)
+        text = known.sub(_TOKEN_MARK, text)
     return _TOKEN.sub(_TOKEN_MARK, text)

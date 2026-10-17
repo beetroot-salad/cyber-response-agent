@@ -712,7 +712,12 @@ class ResumeWorld:
     @property
     def run_id(self) -> str:
         """This sibling's run id: the episode id joined to its world label."""
-        return f"{self.family.episode_id}-{self.label}"
+        return arm_run_id_for(self.family.episode_id, self.label)
+
+
+def arm_run_id_for(episode_id: str, world_label: str) -> str:
+    """The one spelling of a world's arm run id: `<episode_id>-<label>`."""
+    return f"{episode_id}-{world_label}"
 
 
 def resume_world_from(family: Family, world_label: str, episode_dir: Path) -> ResumeWorld:
@@ -726,6 +731,26 @@ def resume_world_from(family: Family, world_label: str, episode_dir: Path) -> Re
         label=world_label, episode_dir=Path(episode_dir), facts=world.facts,
         as_of=family.as_of, family=family,
     )
+
+
+def family_identities(family: Family) -> frozenset[str]:
+    """Every spelling of this family's identity a sibling's text could carry: the episode id
+    and its token, and for each declared world its token and its arm's run id — composed by
+    the same helpers `ResumeWorld` names itself by, so the two cannot drift.
+
+    The redaction filter's known set (`learning/branch/redaction.py`). Whole-family, not one
+    world's: a sibling's token in a relayed fault discloses the scheme as surely as one's own.
+    A world label alone is not a member — a one-letter label would shred ordinary prose — and
+    neither is the source run id, which the resumed transcript already carried before the fork.
+    The ledger filename and call ids (`<world token>.jsonl`, `<world token>/<n>`) contain a
+    member, so the filter's substring match covers them.
+    """
+    token_head = episode_token_for(family.episode_id)
+    out = {family.episode_id, token_head}
+    for world in family.worlds:
+        out.add(world_token_for(token_head, world.world_id))
+        out.add(arm_run_id_for(family.episode_id, world.world_id))
+    return frozenset(out)
 
 
 def refuse_bad_episode_id(episode_id: str) -> None:
@@ -749,8 +774,10 @@ __all__ = [
     "RESERVED_WORLD_LABELS",
     "ResumeWorld",
     "World",
+    "arm_run_id_for",
     "check_identities",
     "episode_token_for",
+    "family_identities",
     "is_reserved_world_label",
     "refuse_reserved_world_label",
     "load_family",
