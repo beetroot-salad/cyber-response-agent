@@ -687,3 +687,13 @@ PYTHONPATH="$PWD" flock /tmp/defender-pytest.lock /workspace/defender/.venv/bin/
 The lock and credential cases start short-lived Python probe processes and a loopback `git http-backend` server; nothing leaves the host.
 
 The interpreter path above is this dev host's existing venv; other machines use their project interpreter. Product CI needs no tenant repository, credential, or dev Forgejo for this suite.
+
+## Test organization (2026-10-17)
+
+The behavior-preserving test refactor separates batch lifecycle (`test_batches.py`), validated
+changes and commit creation (`test_changes.py`), PR delivery/status (`test_delivery.py`),
+revert (`test_revert.py`) and opening/authentication (`test_open.py`). Shared setup and
+independent git observations live in `_scenarios.py`; tests do not import each other. Test
+docstrings state their invariant; the detailed rulings and historical evidence remain here.
+No assertions or parametrized cases were removed. The API fake remains `ForgeHTTP`, while
+the git process and temporary repositories are real.

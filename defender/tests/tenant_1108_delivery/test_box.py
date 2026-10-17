@@ -236,12 +236,7 @@ _START_FAULTS = ["daemon-unavailable", "image-missing", "code-check-missing", "c
 
 @pytest.mark.parametrize("fault", _START_FAULTS)
 def test_a_drain_start_fault_raises_and_leaves_nothing_under_the_drafts(repo, tmp_path, monkeypatch, fault):
-    """C3 / R5 / O-D: the tenant drain's start requires a sandbox. With the operator's opt-out
-    set (`DEFENDER_ALLOW_UNSANDBOXED=1`), every start fault, before the create or after it
-    (no daemon, no box image, a code mount without its check file, the create refused, the
-    code check read back wrong, another draft's token read back, a lane's sentinel not read
-    back), raises `BoxFault`: no executor, sandboxed or not, no box left, and nothing under
-    `<T>/drafts/` changed: no did-not-run marker beside a lane, no token, no sentinel."""
+    """C3 / R5 / O-D: the tenant drain's start requires a sandbox."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     d, batch = _batch(repo, "no-box")
     drafts = batch.draft_root.parent
@@ -260,10 +255,7 @@ def test_a_drain_start_fault_raises_and_leaves_nothing_under_the_drafts(repo, tm
 
 
 def test_a_drain_box_started_and_stopped_leaves_the_drafts_as_they_were(repo, tmp_path):
-    """C3 / R5: box start and teardown leave nothing under `<T>/drafts/`. The token and the
-    lane sentinels are planted and removed, and a draft's box is stopped with `stop_box`,
-    which writes no verdict: after a sandboxed start and its stop, the drafts folder is
-    exactly as before the start."""
+    """C3 / R5: box start and teardown leave nothing under `<T>/drafts/`."""
     from defender.tests._box1195 import FakeDaemon
     d, batch = _batch(repo, "started")
     drafts = batch.draft_root.parent
@@ -277,11 +269,7 @@ def test_a_drain_box_started_and_stopped_leaves_the_drafts_as_they_were(repo, tm
 
 
 def test_a_request_that_requires_a_sandbox_never_falls_back_and_writes_no_marker(tmp_path, monkeypatch):
-    """C3 / R5: a `BoxRequest` with `require_sandbox=True` started through `box.start_box`
-    raises on a start fault, whatever the operator's opt-out says: never an unsandboxed
-    executor, and no did-not-run marker beside its writable mount (nothing in the tree
-    changes). Control: the same request without it falls back to an unsandboxed executor
-    under the opt-out, so the opt-out is live."""
+    """A request that requires a sandbox never falls back and writes no marker."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     tree = tmp_path / "tree"
     lane = tree / "lane"
@@ -302,10 +290,7 @@ def test_a_request_that_requires_a_sandbox_never_falls_back_and_writes_no_marker
 
 
 def test_the_oracle_start_requires_a_sandbox_and_leaves_no_stray_marker(tmp_path, monkeypatch):
-    """C3: the #1224 oracle starts through `box.start_box` with `require_sandbox=True`. Under
-    the operator's opt-out a start fault (a lane's sentinel not read back) is still
-    `BoxStartRefused`, no box is left, and no did-not-run marker is left beside its scratch
-    folder (the stray `defender-oracle-*.scrub-verdict.json` in the temporary folder)."""
+    """C3: the #1224 oracle starts through `box.start_box` with `require_sandbox=True`."""
     from defender.runtime.box import _oracle
     from defender.tests._box1195 import FakeDaemon
 
@@ -340,12 +325,7 @@ _PROBE_CASES = [
 
 @pytest.mark.parametrize(("kind", "fault"), _PROBE_CASES)
 def test_readonly_probe_reads_existing_file_and_never_plants(tmp_path, start, kind, fault):
-    """D7 amendments 1-4: the declared kind alone picks the existing file read back (no folder
-    is named for its kind); a wrong mapping or a read error refuses before a box is handed out,
-    and the source is never written. `code` and `data` read-backs equal the host's own read:
-    fresh bytes per test (A09), and a reply differing by one newline or space refuses (A10);
-    only a CRLF/LF difference compares equal. `data` reads its first regular file, here its
-    only one."""
+    """Readonly probe reads existing file and never plants."""
     folder, marker, expected = {
         "code": ("product-tree", _check_file(), _check_bytes()),
         "data": ("evidence-store", "result.json", f'{{"made-up": "{secrets.token_hex(8)}"}}\n'),
@@ -470,11 +450,7 @@ def test_a_word_that_is_not_a_kind_is_refused_not_mapped(tmp_path, start, kind):
 ])
 def test_startup_applies_the_declared_kind_never_the_folder_name(
         tmp_path, start, case, folder, kind, starts):
-    """D7 amendments 1-2: the rule comes from the declared kind. Empty `data` folders named
-    `defender` (at the legacy code dir) or `agent` start with nothing read (#665 Decision 9);
-    a `staged` copy whose root is named `defender` gets its token check and no code check; a
-    `code` folder by any other name still needs the check file, and a `staged` root holding no
-    `agent/` refuses."""
+    """D7 amendments 1-2: the rule comes from the declared kind."""
     wt = tmp_path / "wt"
     source = wt / folder
     extra = {}
@@ -565,11 +541,7 @@ _CODE_DIR_LAYOUTS = {
 
 @pytest.mark.parametrize("layout", sorted(_CODE_DIR_LAYOUTS))
 def test_code_dir_is_the_request_code_root_and_lies_inside_the_code_mount(tmp_path, start, layout):
-    """D7 amendment 2: `code_dir` is the explicit `defender_dir`, else `<workdir>/defender`,
-    and must lie inside the mount declared `code`: not in another mount of the request, such
-    as its writable lane (A15), and not in a folder whose path merely begins with the code
-    mount's (`checkout-lane` is not inside `checkout`, A11). The check file is read there, not
-    at the mount's root; an absent code dir or check file refuses, never skips (A16)."""
+    """Code dir is the request code root and lies inside the code mount."""
     planted, empty, code_root, workdir, read = _CODE_DIR_LAYOUTS[layout]
     mount, lane = tmp_path / "checkout", tmp_path / "lane"
     mount.mkdir()
@@ -667,10 +639,7 @@ def test_writable_mount_keeps_its_planted_sentinel_read_back(tmp_path, start, fa
 
 def test_oracle_production_start_reads_the_runner_check_and_refuses_a_wrong_mapping(
         tmp_path, monkeypatch):
-    """D7 amendment 5 on the oracle's own start (A24): `start_oracle_box`, with the fake
-    daemon as the `docker` on PATH, starts sandboxed after reading the runner's check file
-    through the box; a daemon answering other bytes for every read refuses with no box left
-    and both folders discarded."""
+    """Oracle production start reads the runner check and refuses a wrong mapping."""
     from defender.runtime.box import _oracle
     from defender.tests._box1195 import FakeDaemon
 
@@ -704,10 +673,7 @@ def test_oracle_production_start_reads_the_runner_check_and_refuses_a_wrong_mapp
 
 def test_oracle_runner_is_a_code_mount_holding_only_runner_files_and_starts_sandboxed(
         tmp_path, start):
-    """D7 amendment 5: the oracle's runner is a `code` mount whose files are exactly
-    `RUNNER_FILES` (three transport modules and the check file, no SKILL.md), built by the
-    real runner maker and started through each request-lane entry with reads routed by the
-    captured mount table."""
+    """Oracle runner is a code mount holding only runner files and starts sandboxed."""
     from defender.runtime.box import _oracle
     from defender.tests._spec1092 import STOCK_ROOTFS
     from defender.tests.tenant_1108_p2._support import MountedReadDocker, tree_bytes
@@ -761,10 +727,7 @@ _TOKEN_FAULTS = {"another-copy": (0, "a token another copy holds\n"), "unreadabl
 @pytest.mark.parametrize("fault", [None, *sorted(_TOKEN_FAULTS)])
 def test_a_staged_copy_starts_only_on_the_token_the_host_planted_for_this_start(
         tmp_path, start, fault):
-    """Amendment 2, O-A: the host plants a fresh random token at the copy's root, outside
-    `agent/`, and the box must read those bytes back before any workload; a box bound to
-    another copy, or to an empty or stale folder, refuses with no container left. `agent/` is
-    never written, and `.tenant-id` is never a probe (identity was checked at publish)."""
+    """A staged copy starts only on the token the host planted for this start."""
     root = _copy(tmp_path / "copy")
     boundary = _Boundary(tmp_path, [root / "agent"], root=root,
                          root_reply=None if fault is None else _TOKEN_FAULTS[fault])
@@ -881,11 +844,8 @@ def test_a_staged_mount_is_never_writable(tmp_path, start):
 @pytest.mark.parametrize("wrong", [None, "token", "settings-at-root"])
 def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_a_box(
         repo, tmp_path, wrong):
-    """The tenant drain's own start: the product check file and the draft root's token are
-    read back through the box before an executor is handed out. A box answering another
-    draft's token, or a draft root that also holds `settings/` (a run copy's half, never a
-    draft's), refuses and reaps. The clone and the draft's `agent/` are never touched, and a
-    refusal leaves the drafts folder as it was."""
+    """The tenant drain's own start: the product check file and the draft root's token are read
+    back through the box before an executor is handed out."""
     from defender.tests._box1195 import FakeDaemon
     d, batch = _batch(repo, "lifecycle")
     root = batch.draft_root
