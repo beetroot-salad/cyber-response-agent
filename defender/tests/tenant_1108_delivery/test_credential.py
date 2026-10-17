@@ -43,6 +43,7 @@ from ._support import (
     fresh_process_env,
     git,
     git_config_home,
+    in_a_later_process,
     merge_on_remote,
     opened,
     target,
@@ -597,3 +598,29 @@ def test_network_git_runs_no_hook_of_the_clones(repo, tmp_path):
     assert git(remote, "rev-parse", f"refs/heads/{batch.branch}")
     seen = log.read_text(encoding="utf-8") if log.exists() else ""
     assert seen == "", f"a clone hook ran under network git: {seen}"
+
+
+def test_delivery_needs_no_optional_python_linux_exports(http_repo):
+    """Standalone Python's build headers can omit memfd/seal exports even on a Linux host
+    that supports them. A later drain must still authenticate and deliver; no credential
+    channel is replaced with a disk file. Remove those optional names in the child only.
+    """
+    remote = http_repo[1]
+    writer = delivery(http_repo, ForgeHTTP())
+    batch = writer.start_batch("portable", lanes=LANES)
+    (batch.draft_root / "agent/lessons/portable.md").write_bytes(b"portable lesson\n")
+    commit = batch.commit(batch.change_set(), "claim")
+    prelude = """
+import fcntl, os
+for module, names in (
+    (os, ("memfd_create", "MFD_CLOEXEC", "MFD_ALLOW_SEALING")),
+    (fcntl, ("F_ADD_SEALS", "F_GET_SEALS", "F_SEAL_SEAL", "F_SEAL_SHRINK", "F_SEAL_GROW", "F_SEAL_WRITE")),
+):
+    for name in names:
+        if hasattr(module, name):
+            delattr(module, name)
+"""
+    result = in_a_later_process(http_repo, "deliver", batch.id, python_prelude=prelude)
+    assert result.get("status") == "opened", result
+    assert len(result["creates"]) == 1
+    assert git(remote, "rev-parse", f"refs/heads/{batch.branch}") == commit

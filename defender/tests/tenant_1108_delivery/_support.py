@@ -922,7 +922,7 @@ def fresh_process_env(tenant, scratch: Path):
     return env
 
 
-def in_a_later_process(repo, verb, *args):
+def in_a_later_process(repo, verb, *args, python_prelude=""):
     """`verb(*args)` (`deliver` or `revert`) on a `TenantDelivery` opened for `repo`'s tenant in
     ANOTHER, freshly started process with its own forge double (backed by the same remote,
     as the real forge is) and a fresh environment, as a later drain would: nothing of this
@@ -931,7 +931,7 @@ def in_a_later_process(repo, verb, *args):
     requests it sent."""
     tenant, remote = repo[0], repo[1]
     scratch = Path(tenant.data_root).parent / f"later-{len(list(Path(tenant.data_root).parent.glob('later-*')))}"
-    proc = subprocess.run([sys.executable, "-c", _LATER_SCRIPT, str(tenant.data_root), str(tenant.id),
+    proc = subprocess.run([sys.executable, "-c", python_prelude + "\n" + _LATER_SCRIPT, str(tenant.data_root), str(tenant.id),
                            str(remote), verb, *map(str, args)], capture_output=True, text=True,
                           env=fresh_process_env(tenant, scratch), timeout=300, check=False)
     assert proc.returncode == 0, f"the later process crashed: {proc.stderr}"
