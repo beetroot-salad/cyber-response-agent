@@ -66,6 +66,7 @@ def network_git(
     config = f'[http "{origin}"]\nextraHeader = Authorization: Bearer {token}\n'
     fd = _sealed(config.encode("utf-8"))
     try:
+        # A URL-specific clone setting beats an unscoped -c, so refuse redirects at both levels.
         return _git.git_network(
             [
                 "-c",
@@ -76,6 +77,8 @@ def network_git(
                 "core.hooksPath=/dev/null",
                 "-c",
                 "http.followRedirects=false",
+            "-c",
+            f"http.{origin}.followRedirects=false",
                 "-c",
                 "http.extraHeader=",
                 "-c",

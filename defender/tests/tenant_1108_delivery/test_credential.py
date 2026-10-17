@@ -611,3 +611,27 @@ def test_git_refreshes_a_vault_identity_before_a_fetch_outlives_it(http_repo):
     d.publish()
     assert len(vault.calls) == 2
     assert http_repo[3].authorized("git-upload-pack")
+
+
+def test_url_specific_clone_configuration_cannot_enable_redirects(http_repo):
+    from ._support import Trickle
+
+    tenant, _, _, server = http_repo
+    origin = f"{server.url}/tenants/blue.git"
+    git(tenant.knowledge, "config", f"http.{origin}.followRedirects", "true")
+
+    class Redirect(Trickle):
+        def __init__(self):
+            pass
+
+        def send(self, handler):
+            handler.send_response(302)
+            handler.send_header("Location", f"{server.url}/tenants/other.git/info/refs?service=git-upload-pack")
+            handler.send_header("Content-Length", "0")
+            handler.end_headers()
+
+    server.on_service = lambda service: Redirect()
+    d = delivery(http_repo, ForgeHTTP())
+    with pytest.raises(target().DeliveryRefused):
+        d.publish()
+    assert len(server.authorizations) == 1, "git followed the redirect to another repository"
