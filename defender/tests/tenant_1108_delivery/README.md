@@ -187,7 +187,10 @@ removes those optional names in a fresh process and requires a real authenticate
 The contract now collects 577 cases (the historical counts below belong to their own runs).
 The implementation calls libc and the stable Linux ABI directly; creation and all four seals
 remain mandatory. A descriptor probe verifies repeated reads and rejects write, shrink,
-grow and reseal with EPERM. No disk or unsealed fallback was added.
+grow and reseal with EPERM. No disk or unsealed fallback was added. The full repaired
+contract on a uv standalone Python 3.11.15 venv (which omits both `os.memfd_create` and
+`fcntl.F_ADD_SEALS`) passes **576 tests, 1 skipped**. Both ruff forms, mypy and the relevant
+custom lint gates also pass after this repair.
 
 ### Validation (amendment 3)
 
