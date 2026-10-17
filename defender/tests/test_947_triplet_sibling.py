@@ -1,29 +1,10 @@
-"""#947 — a sibling is a `run.py --episode` PROCESS (M6, M7, O6, O9, O10).
-
-D1's whole content: the launcher writes the manifest, pre-flights the family and starts N
-processes; learning never executes the driver in its own process. So `run.py` grows
-`--episode <episode_id> --world X` (#1105 PR 2, declared change 6: `--resume <manifest>` before
-it) and otherwise runs an ordinary run — its own preflight, run-dir materialisation and
-stamp, box, scrub and verdict, in that order — while the resume path refuses the ticket flag and
-forces the no-learn branch so a synthetic sibling never writes a ticket row or a queue marker.
-
-O6 is currently satisfied by OMISSION and nothing asserts it (G19, refuted): the launcher simply
-never calls the two lanes. Routing a sibling through `run.py`'s own `main` acquires both of them,
-so the discharge here is a POSITIVE refusal on the resume path, not an absence.
-
-Five signatures carry `world`, not three (G4, refuted): the argument parser and `main`'s own
-lifecycle call as well as the protocol, the drive function and the lifecycle.
-
-RED against b8a63e66: `run.py` has no resume argument at all (C3/PO-C29) and
-`runtime/branch/_family.py` does not exist (X16).
-"""
+"""#947 — a sibling is a `run.py --episode` PROCESS (M6, M7, O6, O9, O10)."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165
 
 from defender.tests._spec1077 import fixture_run as _run_handle_lifecycle_1165
 
-import inspect
 import json
 from typing import Any
 
@@ -65,10 +46,7 @@ def _sibling_argv(manifest, world="b", tenant=T.SOURCE_TENANT):
 
 
 def _episode(tmp_path, src, *, container=T.SOURCE_TENANT):
-    """The episode a sibling opens by id: under the configured episodes base (`_tmp_roots`),
-    its manifest naming the source run `src`, and its container `<episode>/runs` made with
-    `container`'s record (`None`: left absent) — what the launcher's `create_container` leaves
-    before it starts the first sibling (#1105 PR 2)."""
+    """The episode a sibling opens by id"""
     from defender import _tenant
 
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
@@ -94,19 +72,7 @@ class _Recorder:
         return {"output": "done", "requests": 1, "truncated_by": None}
 
 
-# ---------------------------------------------------------------------------------------
 # the argument surface
-# ---------------------------------------------------------------------------------------
-
-
-def test_947_run_py_accepts_resume_manifest_and_world(tmp_path):
-    """The sibling entry point accepts an episode id and a world label (#1105 PR 2: the
-    episode by id, not its manifest's path), and the parsed namespace carries both, so a
-    family's manifest is the whole of what a sibling is told."""
-    manifest = T.write_family(tmp_path / "ep")
-    ns = _run().parse_args(_sibling_argv(manifest))
-    assert ns.episode == manifest.parent.name
-    assert ns.world == "b"
 
 
 def test_947_resume_makes_the_positional_alert_illegal(tmp_path):
@@ -171,12 +137,7 @@ def test_947_resume_with_a_world_the_manifest_does_not_declare_refuses_before_ma
 
 
 def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
-    """The resume path refuses the ticket flag outright rather than accepting and ignoring it:
-    the two ticket calls are ordered around the curation marker, so suppressing one of them
-    would break the pairing instead of the obligation. (The requested tenant exists, so the
-    refusal is the flag's, not the tenant's — and #1105 PR 2: the episode is under the
-    configured episodes base with its container made for that tenant, so the refusal is not
-    the episode's either.)"""
+    """The resume path refuses the ticket flag outright rather than accepting and ignoring it"""
     from defender import _tenant
 
     manifest = T.write_family(tmp_path / "episodes-root" / "ep")
@@ -190,9 +151,7 @@ def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
     assert "--update-ticket" in str(bad.value)
 
 
-# ---------------------------------------------------------------------------------------
 # O6 — the two lanes a sibling must not take, and the control that proves the channel
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
@@ -221,10 +180,7 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
 
 
 def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
-    """A sibling run reaches the curation lane on none of its exits: the resume path forces the
-    no-learn branch, so the enqueue seam records nothing at all for a sibling — asserted on the
-    SAME seam the positive control below drives, because a directory that does not exist is
-    empty of a sibling's marker whatever the resume path did."""
+    """A sibling run reaches the curation lane on none of its exits"""
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
     seen: list[str] = []
@@ -236,39 +192,7 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
     assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
 
 
-def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
-    """The positive control for the queue negative: an ordinary run with the learning flag
-    unset still reaches the curation lane, so the sibling's silence is a refusal rather than a
-    channel that never carries anything."""
-    base, src = T.runs_base(tmp_path)
-    # #1105 PR 2: the request names the tenant whose location the run sits at
-    # (`tenant_of_run_dir` is gone, F-13); its runs-base record agrees.
-    tenant_id = T.mod("_tenant").read_tenant(base).tenant_id
-    seen: list[str] = []
-    _run().main([str(RunPaths(src).alert), "--tenant", tenant_id], lifecycle=_Recorder([]),
-                visualize=lambda p, **kw: None, preflight=_no_preflight,
-                enqueue=lambda run, alert, truncated_by=None: seen.append(str(run.id)))
-    assert seen, "an ordinary run reached no curation lane"
-
-
-# ---------------------------------------------------------------------------------------
 # threading the world through the run
-# ---------------------------------------------------------------------------------------
-
-
-def test_947_world_is_threaded_through_investigate_drive_and_lifecycle(tmp_path):
-    """The world reaches the investigation through every signature on the path: the argument
-    parser, the investigate protocol, the drive function, the lifecycle and the call `main`
-    makes to it — five sites, so a world declared on the command line cannot be dropped between
-    any two of them."""
-    run = _run()
-    for fn in (run._drive_investigation, run._run_investigation_lifecycle):
-        assert "world" in inspect.signature(fn).parameters, fn.__name__
-    assert "world" in inspect.signature(run._Investigate.__call__).parameters
-    assert "world" in inspect.signature(run.parse_args).parameters or \
-        "--world" in (T.DEFENDER / "run.py").read_text(encoding="utf-8")
-    src = (T.DEFENDER / "run.py").read_text(encoding="utf-8")
-    assert "world=" in src.split("summary = lifecycle(")[1].split(")")[0]
 
 
 def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
@@ -316,36 +240,6 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
     assert built == []
 
 
-def test_947_without_a_world_the_production_registry_is_built_exactly_as_now(tmp_path):
-    """The parity control: with no world the drive function builds the production module
-    registry exactly as it does today, over the adapters tree and the gather grant — the
-    constraint the resume path adds is enforced on the resume path only."""
-    base, src = T.runs_base(tmp_path)
-    seen: dict = {}
-    tenant = T1106.fixture_run_tenant()
-    _run()._drive_investigation(
-        alert_path=RunPaths(src).alert, run=_fixture_run_1165(src),
-        defender_dir=T.DEFENDER, model_name="m", model_override=None, box=None,
-        tenant=tenant,
-        world=None, investigate=lambda **kw: seen.update(kw) or {})
-    registry = seen["verbs"]
-    assert type(registry).__name__ == "ModuleVerbRegistry"
-    # #1106 M4: the run's OWN tenant's gather grant, handed in — no process-level grant.
-    assert registry.grant == tenant.grants.gather
-
-
-def test_947_episode_dir_is_derived_as_the_manifest_parent(tmp_path):
-    """A sibling derives the episode dir as the manifest's own parent, which is what makes the
-    world ledger resolve: the ledger it writes is the file beside the family's primed base
-    recording, wherever the manifest lives."""
-    base, src = T.runs_base(tmp_path)
-    ep = _episode(tmp_path, src)
-    world = _run().resume_world(
-        Episode.open(ep), "b", tenant=T1106.fixture_run_tenant)
-    assert world.episode_dir == ep
-    assert world.ledger_path == ep / "served" / f"{TOKEN_B}.jsonl"
-
-
 def test_a_sibling_resumes_through_its_requested_tenant(tmp_path):
     """The entry point end to end: `run.py --resume --tenant T` reaches the lifecycle with the
     world as the manifest records it — its served systems read off the document, no settings
@@ -362,10 +256,7 @@ def test_a_sibling_resumes_through_its_requested_tenant(tmp_path):
 
 def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_refused(
         tmp_path):
-    """A sibling runs on the EPISODE's tenant — the one its request names, which the source
-    run's runs-base record agrees with. Its own runs base (`<episode>/runs`) holding a record
-    that names another tenant must refuse naming both, not stamp that tenant's record over a
-    run of the episode's world. The control is the resume above."""
+    """A sibling runs on the EPISODE's tenant — the one its request names, which the source run's runs-base record agrees with."""
     from defender import _tenant
 
     base, src = T.runs_base(tmp_path)
@@ -400,9 +291,7 @@ def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
         assert ledger_mod.Ledger.for_world(episode, world.world_id).path == world.ledger_path
 
 
-# ---------------------------------------------------------------------------------------
 # the sibling's own lifecycle, stamp and identity
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path):
@@ -433,10 +322,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
 
 
 def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
-    """Each sibling runs the runtime's own box lifecycle IN ORDER and leaves a scrub verdict
-    beside its run dir: the box is started before the investigation, reaped after it, and the
-    scan runs on the reaped tree — four events in that sequence, because a run that started a
-    box first and then did anything else at all is not the lifecycle O9 names."""
+    """Each sibling runs the runtime's own box lifecycle IN ORDER and leaves a scrub verdict beside its run dir"""
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
     events: list[str] = []

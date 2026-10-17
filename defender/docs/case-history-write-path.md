@@ -44,7 +44,7 @@ what manufactures the read PR's fixtures.
   appears unreachable or unconfigured, escalate"), ticket stays open. `request-limit` /
   `retry-exhausted` → the record, proposing the host's forced `unresolved`; with no
   usable report (the forced close itself failed) → the escalation note.
-  `budget` / `store` → no call at all. Anything else → the record off the report.
+  `budget` / `store` / `provider-down` → no call at all. Anything else → the record off the report.
   A run whose model had already closed when the cut landed (`closed_before_cut`)
   records its own verdict instead. Before #767 the forced-close arms CLOSED the
   ticket; that is the one thing this design cannot allow, since a host-set `closed`

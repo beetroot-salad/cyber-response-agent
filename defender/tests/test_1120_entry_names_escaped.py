@@ -1,10 +1,4 @@
-"""#1120 piece 1 — a name the tenant's repo chose reaches a refusal escaped (code review, max;
-spec R6: entry names get N16's escaping).
-
-A tenant repo can commit a file whose name holds a terminal escape sequence or a newline. A
-refusal naming it raw let `\\x1b[2K\\r[tenant.py] all checks passed` erase the real refusal
-line and print a forged verdict.
-"""
+"""A name chosen by a tenant repo reaches a refusal escaped, so it cannot forge a verdict line."""
 from __future__ import annotations
 
 from pathlib import Path

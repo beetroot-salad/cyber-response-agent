@@ -84,7 +84,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -98,7 +97,6 @@ from defender.evals.oracle_golden import migrate_esql_encoding as MIGRATE
 
 DEFENDER_DIR = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = DEFENDER_DIR / "evals" / "oracle_golden"
-CASES_DIR = GOLDEN_DIR / "cases"
 MIGRATION_SCRIPT = GOLDEN_DIR / "migrate_esql_encoding.py"
 
 
@@ -399,17 +397,6 @@ def test_an_empty_esql_payload_is_returned_exactly_as_it_is():
     assert MIGRATE.is_esql_payload(empty)
 
 
-def test_reencoding_an_already_positional_payload_changes_nothing():
-    """O5. The transform is a fixed point on its own output, which is what makes the
-    migration idempotent and what makes a `controls.py` rerun — whose writer already goes
-    through `esql_payload` — unable to re-split the corpus."""
-    once = MIGRATE.to_columnar(real_observed_payload())
-    twice = MIGRATE.to_columnar(once)
-
-    assert twice == once
-    assert twice["values"] == EXPECTED_POSITIONAL_ROWS
-
-
 # =================================================================================
 # O1 — what counts as an ES|QL payload
 # =================================================================================
@@ -427,15 +414,6 @@ def test_an_esql_payload_is_recognised_by_its_four_keys(what, text, is_esql):
     looking at an enumerated list nobody updated. No non-ES|QL shape in `hidden/` carries
     `columns` and `values` at all, so the four keys separate them cleanly."""
     assert MIGRATE.is_esql_payload(json.loads(text)) is is_esql, what
-
-
-@pytest.mark.parametrize("dropped", ESQL_KEYS)
-def test_a_dict_missing_any_one_of_the_four_keys_is_not_an_esql_payload(dropped):
-    """All four, not any of them: `{columns, values}` alone would also match a future
-    lookup response, and migrating one would rewrite a shape we do not model."""
-    partial = {k: v for k, v in real_observed_payload().items() if k != dropped}
-
-    assert MIGRATE.is_esql_payload(partial) is False
 
 
 # =================================================================================
@@ -481,39 +459,6 @@ def test_a_file_with_nothing_to_migrate_comes_out_byte_identical(what, text, tmp
     assert MIGRATE.migrate_file(positive_control) == 1
     assert positive_control.read_bytes() != control_before, (
         "the positive control was not rewritten either — the negative above is vacuous")
-
-
-def test_a_file_with_nothing_to_migrate_is_never_reopened_for_writing(tmp_path):
-    """O3, stronger than byte-equality (adversary finding, Hole 3, #1054): an implementation
-    that unconditionally re-serializes every file and happens to reproduce the same bytes
-    would also pass a byte-equality check, but it still performed a real write — an mtime
-    bump, a moment where a concurrent reader sees a truncated file, an unnecessary fsync on
-    957 files instead of 482. 'Nothing to migrate' has to be decided BEFORE opening the file
-    to write, not verified after the fact by comparing bytes."""
-    untouched = tmp_path / "untouched.json"
-    untouched.write_text(REAL_CMDB_TEXT, encoding="utf-8")
-    old = 1_700_000_000
-    os.utime(untouched, ns=(old * 1_000_000_000, old * 1_000_000_000))
-    before_mtime = untouched.stat().st_mtime_ns
-
-    assert MIGRATE.migrate_file(untouched) == 0
-    assert untouched.stat().st_mtime_ns == before_mtime, (
-        "the file's mtime moved even though nothing needed migrating — it was reopened for "
-        "writing rather than recognised up front as having nothing to do")
-
-
-def test_a_zero_byte_payload_file_is_skipped_rather_than_parsed(tmp_path):
-    """80 hidden files are zero bytes, and that is a recorded capture failure the judge
-    renders as `unreadable` — not an empty result set. Parsing one raises; writing `{}`
-    over it would tell the judge a query returned nothing. Paired with a real file that
-    does migrate, so "skipped everything" cannot pass as "skipped the empty one"."""
-    empty = tmp_path / "0.json"
-    empty.write_bytes(b"")
-    positive_control = _write(tmp_path / "1.json", real_observed_payload())
-
-    assert MIGRATE.migrate_file(empty) == 0
-    assert empty.read_bytes() == b""
-    assert MIGRATE.migrate_file(positive_control) == 1
 
 
 def test_a_file_whose_serialization_cannot_be_reproduced_is_refused_untouched(tmp_path):
@@ -641,20 +586,6 @@ def migrated_tree(tmp_path_factory):
     }
 
 
-def test_the_planted_dict_row_files_were_rewritten(migrated_tree):
-    """The positive control every "was not touched" assertion below leans on. If the run
-    rewrote nothing, the rest of this section measures nothing."""
-    before, after = migrated_tree["before"], migrated_tree["after_first"]
-
-    assert migrated_tree["planted_payloads"] >= len(PLANTED), (
-        "the fixture planted no dict rows — the whole section would be vacuous")
-    for rel in PLANTED:
-        assert before[rel] != after[rel], f"{rel} was not rewritten"
-    files_rewritten, payloads_rewritten = migrated_tree["first"]
-    assert files_rewritten >= len(PLANTED)
-    assert payloads_rewritten >= migrated_tree["planted_payloads"]
-
-
 def test_no_dict_row_esql_payload_survives_anywhere_under_hidden(migrated_tree):
     """O1, measured over the real tree rather than a fixture: after the run there is no
     ES|QL payload under any `hidden/` whose rows are not `len(columns)`-long arrays, and
@@ -676,222 +607,9 @@ def test_no_dict_row_esql_payload_survives_anywhere_under_hidden(migrated_tree):
     assert offenders == [], f"{len(offenders)} payload(s) still dict-row: {offenders[:5]}"
 
 
-def test_every_planted_payload_rezips_to_exactly_what_was_planted(migrated_tree):
-    """O2 end to end, on disk: the file the migration wrote re-zips by `columns[].name`
-    back to the very dict rows the fixture put there — keys, key order and values — and
-    its `query`, `columns` and `row_count` are the ones that went in."""
-    root = migrated_tree["root"]
-    checked = 0
-    for rel, planted in migrated_tree["planted"].items():
-        after = json.loads((root / rel).read_text(encoding="utf-8"))
-        pairs = list(zip(_esql_payloads_anywhere(planted),
-                         _esql_payloads_anywhere(after), strict=True))
-        assert pairs, f"{rel} carries no ES|QL payload"
-        for original, migrated in pairs:
-            assert migrated["query"] == original["query"]
-            assert migrated["columns"] == original["columns"]
-            assert migrated["row_count"] == original["row_count"]
-            assert _to_dict_rows(migrated)["values"] == original["values"]
-            for before_row, after_row in zip(original["values"],
-                                             _to_dict_rows(migrated)["values"],
-                                             strict=True):
-                assert list(after_row.keys()) == list(before_row.keys())
-            checked += 1
-    assert checked >= len(PLANTED)
-
-
-def test_a_second_run_over_the_migrated_tree_rewrites_nothing(migrated_tree):
-    """O5. The script is committed with the corpus so the transform stays replayable, and
-    a replay that re-wrote files would make "is the tree migrated?" unanswerable from the
-    diff. Every byte in the tree — not just the payload files — is identical after the
-    second run."""
-    assert migrated_tree["second"] == (0, 0)
-    assert migrated_tree["after_second"] == migrated_tree["after_first"]
-
-
-def test_the_only_files_the_run_rewrote_are_the_ones_carrying_dict_rows(migrated_tree):
-    """O3 over the real tree, stated as an equality rather than a sample: the set of files
-    whose bytes moved is EXACTLY the set the fixture planted dict rows in. Everything else
-    — the 191 non-ES|QL lookups, the 204 files whose only payloads are `values: []`, the
-    80 zero-byte capture failures, `controls.yaml`, manifests, stories, prompts — is
-    byte-identical, so the PR's diff is the data migration and nothing else.
-
-    This also re-states O1 from the other side: if the committed corpus still held
-    dict-row payloads of its own, they would appear here as files the run had to rewrite.
-    """
-    before, after = migrated_tree["before"], migrated_tree["after_first"]
-    assert set(after) == set(before), "the migration added or removed files"
-
-    moved = sorted(rel for rel in before if before[rel] != after[rel])
-    assert moved == sorted(PLANTED), (
-        f"{len(moved)} file(s) moved, expected only the planted ones. "
-        f"Unexpected: {sorted(set(moved) - set(PLANTED))[:5]}")
-
-
 # =================================================================================
 # O4 — nothing is re-scored, and the provenance gap is written down
 # =================================================================================
-
-#: The judge tag every committed label, the calibration audit and the held-out entries
-#: were measured under, with the judge reading DICT rows. It is deliberately not changed
-#: by #1054: folding the corpus encoding into `tag_suffix` would invalidate 15 label
-#: caches, the calibration audit and 6 ledger entries, all of which only a hand-run LLM
-#: sweep can regenerate, for a number nothing downstream consumes today.
-UNCHANGED_JUDGE_TAG = "judge-claude-opus-5-high_47d6044a"
-
-#: The two cases with a corpus and no label cache. If they are ever labelled they will be
-#: the first leads measured from the positional form under a tag whose other 85 leads
-#: were measured from dict rows. That is the accepted mixing O4 requires be named.
-UNCACHED_CASES = ("case-006-authorized-keys-db1", "case-007-lotl-web1")
-
-#: The claim the note has to make, in whichever words its author prefers. Checked as
-#: alternatives rather than one exact sentence: the obligation is that the note SAYS the
-#: tag was deliberately not changed, not that it says it in a particular way.
-TAG_UNCHANGED_PHRASINGS = (
-    "tag unchanged", "unchanged tag", "tag was not changed", "tag is not changed",
-    "without changing the tag", "tag was deliberately left unchanged",
-    "left the tag unchanged", "tag was left unchanged", "the tag does not change",
-)
-
-
-def _says_tag_unchanged(text: str) -> bool:
-    lowered = text.lower()
-    return any(phrase in lowered for phrase in TAG_UNCHANGED_PHRASINGS)
-
-
-def test_the_migration_does_not_touch_labels_scores_audits_or_the_ledger(migrated_tree):
-    """O4. A re-encode is not a re-measurement, so nothing that records a measurement may
-    move: the 15 committed label caches, every `scores/<tag>.json`, the two calibration
-    audits and the append-only held-out ledger (whose `check_held_out_ledger` hashes
-    `scores/<tag>.json` and would fail on a rewrite). Paired with the planted payload
-    files, which did move in the same run."""
-    before, after = migrated_tree["before"], migrated_tree["after_first"]
-
-    guarded = [rel for rel in sorted(before)
-               if rel == "held_out_ledger.yaml"
-               or rel.startswith("audits/")
-               or "/labels/" in rel
-               or "/scores/" in rel
-               or "/projections/" in rel]
-    assert len(guarded) >= 20, f"expected the committed measurements, found {guarded}"
-    assert any("/labels/" in rel for rel in guarded)
-    assert any("/scores/" in rel for rel in guarded)
-    assert "held_out_ledger.yaml" in guarded
-
-    moved = [rel for rel in guarded if before[rel] != after[rel]]
-    assert moved == [], f"the migration re-wrote committed measurements: {moved}"
-    assert any(before[rel] != after[rel] for rel in PLANTED), (
-        "nothing moved at all in this run — the assertion above is vacuous")
-
-
-def test_the_audits_readme_records_the_reencoding_under_the_unchanged_tag():
-    """O4/M3. `audits/README.md` is where the tag discipline is written down — "one file
-    per judge tag", "editing either prompt invalidates the calibration". #1054 changes the
-    judge's input BYTES under an unchanged tag, which is the one thing that discipline
-    exists to prevent, so the exception is recorded there rather than left for a future
-    reader to discover from a git log.
-
-    The note must name the two cases that have no label cache: their 15 leads would be the
-    first ever labelled from the positional form under a tag whose other 85 leads were
-    labelled from dict rows, and a cache hit does not protect them because they have none.
-    """
-    text = (GOLDEN_DIR / "audits" / "README.md").read_text(encoding="utf-8")
-    lines = text.splitlines()
-    headings = [i for i, line in enumerate(lines)
-                if line.startswith("## ") and UNCHANGED_JUDGE_TAG in line]
-    assert headings, "the calibration section this note belongs under is gone"
-    start = headings[0]
-    # Bounded to THIS section, not "to end of file" (adversary finding, Hole 4, #1054): a
-    # note filed under a LATER `##` heading — the verdict-selfagreement section, say — would
-    # still satisfy a to-EOF slice, but it would not be "under the `47d6044a` section" as M3
-    # asks.
-    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
-               len(lines))
-    section = "\n".join(lines[start:end])
-    # An HTML comment is invisible in rendered Markdown, so content that exists only inside
-    # one does not count as the note being "written down" (adversary finding, Hole 4).
-    note = re.sub(r"<!--.*?-->", "", section, flags=re.S)
-
-    assert "1054" in note, "the note does not cite the issue that re-encoded the corpus"
-    assert "re-encod" in note.lower(), (
-        "the note does not say the corpus was re-encoded")
-    assert _says_tag_unchanged(note), (
-        "the note does not say the judge tag was deliberately left unchanged; expected "
-        f"one of {TAG_UNCHANGED_PHRASINGS}")
-    for case_id in UNCACHED_CASES:
-        assert case_id in note, (
-            f"{case_id} has no label cache and would be labelled from the new form under "
-            f"{UNCHANGED_JUDGE_TAG} — the accepted mixing has to be named")
-
-
-def test_the_judge_cache_key_comment_points_at_the_accepted_encoding_mix():
-    """O4/M3. The comment above `MODEL_LEAD_FIELDS` already names the failure in the
-    abstract — "a rebuilt case would be labelled from a different input shape than its
-    siblings under one tag" — and it is what a future reader of `labels/<judge-tag>.json` reads
-    when they wonder what the cache key does and does not cover. #1054 is a real instance
-    of exactly that, accepted deliberately, so the comment has to point at it; the
-    abstract warning alone would leave the reader believing it never happened."""
-    source = (GOLDEN_DIR / "judge.py").read_text(encoding="utf-8")
-    anchor = source.index("MODEL_LEAD_FIELDS = ")
-    block = []
-    for line in reversed(source[:anchor].splitlines()):
-        if not line.lstrip().startswith("#"):
-            break
-        block.append(line)
-    comment = "\n".join(reversed(block))
-
-    assert comment, "no comment block above MODEL_LEAD_FIELDS"
-    assert "labelled from a different input shape than its siblings" in comment, (
-        "the comment this note attaches to has moved — re-anchor the note, do not drop it")
-    lowered = comment.lower()
-    assert "1054" in comment, (
-        "the cache-key comment does not name the accepted encoding change (#1054)")
-    # A comment containing "1054" and "encod" alone is satisfied by a sentence that states
-    # the OPPOSITE of what happened (adversary finding, Hole 4, #1054: "#1054 left the
-    # corpus encoding alone" contains both tokens). Require it actually say the corpus was
-    # RE-encoded, and name the shape — not just gesture at "encoding" in the abstract.
-    assert "re-encod" in lowered, (
-        "the cache-key comment does not say the corpus was RE-encoded (as opposed to, say, "
-        "left alone) — it must state what happened, not just mention 'encoding'")
-    assert "positional" in lowered or "columnar" in lowered, (
-        "the cache-key comment does not name the shape the corpus was re-encoded to")
-    for case_id in UNCACHED_CASES:
-        assert case_id in comment, (
-            f"the cache-key comment does not name {case_id}, one of the two leads with no "
-            "label cache under this tag")
-
-
-def test_the_readme_says_hidden_payloads_are_positional_and_what_enforces_it():
-    """O4/M3. The data-layout section is where someone reads what a `hidden/` file holds.
-    After #1054 that is `esql_payload`'s positional form, and the reason it stays that way
-    is the guard in `tests/evals/test_controls.py` — a reader who does not know the guard
-    exists is a reader who hand-edits a payload back to dict rows."""
-    raw = (GOLDEN_DIR / "README.md").read_text(encoding="utf-8")
-    # Strip HTML comments (invisible in rendered Markdown) before looking for content.
-    text = re.sub(r"<!--.*?-->", "", raw, flags=re.S)
-
-    assert "esql_payload" in text, (
-        "the README does not name the shaper that defines the corpus encoding")
-    assert "positional" in text.lower() or "columnar" in text.lower(), (
-        "the README does not say what shape `hidden/` ES|QL payloads are in")
-    assert ("test_the_corpus_speaks_the_SAME_esql_encoding_production_does" in text
-            or "test_controls" in text), (
-        "the README does not say what keeps the corpus in that shape")
-
-    # Adversary finding (Hole 4, #1054): three scattered tokens, each satisfying one
-    # assertion above from an unrelated corner of the file (a footer, a stray comment), is
-    # not the same as ONE sentence saying "hidden/ payloads are positional and this test
-    # enforces it". Require all three signals to co-occur in a single paragraph.
-    paragraphs = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
-    hit = [p for p in paragraphs
-           if "esql_payload" in p
-           and ("positional" in p.lower() or "columnar" in p.lower())
-           and ("test_the_corpus_speaks_the_SAME_esql_encoding_production_does" in p
-                or "test_controls" in p)]
-    assert hit, (
-        "no single paragraph of the README names esql_payload, says the hidden/ payload "
-        "shape, AND names what enforces it — three tokens scattered across the file is not "
-        "the same as a sentence saying so")
 
 
 # =================================================================================

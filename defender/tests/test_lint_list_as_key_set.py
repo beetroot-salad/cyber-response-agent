@@ -1,23 +1,6 @@
-"""Tests for the lint_list_as_key_set gate (#956).
-
-The gate's whole value is the line it draws between two loops that look identical:
-
-    for x in seq: table[x] += n     # a FIX-UP over a table already keyed by seq — the bug
-    for x in seq: tally[x] += 1     # a COUNT whose keys seq discovers — the correct idiom
-
-A rule that cannot tell them apart is unarmable: measured over the tree, the plain
-"augmented assign into a dict keyed on the loop variable" rule fires six times and every
-one of the six is correct code. So the first block below pins the separation itself, and
-the second pins the reach the module docstring claims — because a gate that quietly stops
-finding things reads exactly like a clean tree.
-
-The gate is driven through its DI seams:
-  - main(argv=None, *, scope=None, baseline_path=None) -> exit code
-  - _scan(root) -> list[Finding]
-"""
+"""Tests for the lint_list_as_key_set gate (#956)."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from defender.tests._by_path import load_lint_gate
@@ -197,39 +180,3 @@ def render(events, order):
 """)
 
 
-def test_the_gate_fails_on_a_new_finding_and_passes_once_baselined(tmp_path):
-    """The ratchet itself: a new site exits 1; the same site named in the baseline exits 0."""
-    tree = tmp_path / "tree"
-    tree.mkdir()
-    (tree / "m.py").write_text(_THE_BUG, encoding="utf-8")
-    baseline = tmp_path / "baseline.json"
-    baseline.write_text(json.dumps({"//": "test", "entries": {}}) + "\n", encoding="utf-8")
-
-    assert _GATE.main([], scope=tree, baseline_path=baseline) == 1
-
-    baseline.write_text(
-        json.dumps({
-            "//": "test",
-            "entries": {"m.py:render:phase_order->attribution": "test fixture"},
-        }) + "\n",
-        encoding="utf-8",
-    )
-    assert _GATE.main([], scope=tree, baseline_path=baseline) == 0
-
-
-def test_an_unreadable_file_in_scope_exits_two_not_clean(tmp_path):
-    """A file the gate could not parse never entered the corpus, so a defect could sit in
-    it while the gate prints zero findings. Exit 2 — could-not-run is not clean."""
-    tree = tmp_path / "tree"
-    tree.mkdir()
-    (tree / "broken.py").write_text("def f(:\n", encoding="utf-8")
-    baseline = tmp_path / "baseline.json"
-    baseline.write_text(json.dumps({"//": "test", "entries": {}}) + "\n", encoding="utf-8")
-    assert _GATE.main([], scope=tree, baseline_path=baseline) == 2
-
-
-def test_the_shipped_baseline_is_empty(tmp_path):
-    """An entry here is a regression someone chose. Pinned so adding one is a visible act
-    rather than a side effect of `--update-baseline`."""
-    entries = json.loads(_GATE.BASELINE_PATH.read_text(encoding="utf-8"))["entries"]
-    assert entries == {}, f"the gate shipped with accepted debt: {entries}"

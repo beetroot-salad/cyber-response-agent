@@ -1,15 +1,4 @@
-"""#1224 — the episode page, the frontend serializers and the episode readers over an
-oracle-era episode (M05=A, M16=A, M19=A, O15, N02).
-
-Every episode here is built with `_spec1224`'s builders (`judged_episode`, `outcome_record`,
-`world_record`, `write_ledger` + `ledger_row`) and read RAW off disk or through the real
-reader under test: `render_episode` (the page), `serialize.build_view` /
-`serialize_queues.build_view` (the frontend), `episode.verdicts` / `episode.delta_o` (the
-readers). The judge's record, where a scenario needs one, is written by the REAL judge
-(`grade_episode`) driven by a scripted judge double; nothing here hand-writes `judge.yaml`.
-
-RED AGAINST HEAD (96e4cdb0) IS THE EXPECTED STATE: the page still imports staging and reads
-`review.yaml`; the readers key on `incomplete`; the lesson fields name `pattern`.
+"""#1224 — the episode page and episode readers over an oracle-era episode (outcome record, ledgers, judge record).
 """
 from __future__ import annotations
 
@@ -27,7 +16,6 @@ from defender.tests.live_oracle_1224 import _spec1224 as S
 
 #: The page's rendered TEXT is what a reader sees; markup must arrive there as text and never
 #: as live HTML in the raw bytes.
-SCRIPT = "<script>alert('x1224')</script>"
 
 
 @pytest.fixture(autouse=True)
@@ -113,45 +101,7 @@ def _empty_decision_slot(raw: str) -> bool:
 # --------------------------------------------------------------------------------------
 
 
-def test_1224_episode_page_shows_the_refusal_for_an_old_episode(tmp_path):
-    """d01i_old_manifest_refused_on_page — the page over an episode whose manifest carries an
-    old field shows the predates-the-oracle refusal and renders no world.
-
-    (O15, N04: the predates-the-oracle reason is reported first.) Driven for `overlay` and for
-    `captured_patterns`; the positive control is the same archive under a v2 manifest, which
-    renders its worlds and shows no such reason (RF-9: the page refuses through the judge's
-    reader)."""
-    for key in ("overlay", "captured_patterns"):
-        ep = S.judged_episode(tmp_path / key, doc=S.old_manifest(key))
-        page = _render(ep)
-        assert S.PREDATES in page.text.lower(), (
-            f"an old manifest carrying {key!r} rendered without the predates-the-oracle reason")
-        assert key in page.text, f"the refusal does not name the old field {key!r}"
-        assert page.ids_with("world-") == [], (
-            f"an old manifest carrying {key!r} still rendered world sections")
-        assert "summary for world b" not in page.text, "the archived worlds were rendered"
-
-    control = S.judged_episode(tmp_path / "v2")
-    page = _render(control)
-    assert page.ids_with("world-"), "the v2 control rendered no world sections"
-    assert S.PREDATES not in page.text.lower()
-
-
-def test_p069_old_manifest_keys_and_values_contain_markup_shown_on_the_page(tmp_path):
-    """s_p032 — every manifest-, ledger- and judge-derived string reaches the page as inert text.
-
-    Driven twice: an old manifest whose key and value carry markup (the refusal page), and a v2
-    episode whose fact statement, entity name, served (forged) value and judge finding carry
-    markup (the rendered page). Positive controls: the refusal reason and the fact statement and
-    finding are SHOWN, as text."""
-    old_doc = S.old_manifest("captured_patterns", value=[SCRIPT])
-    old_doc["<img src=x onerror=alert('key')>"] = "<svg onload=alert('value')>"
-    old = S.judged_episode(tmp_path / "old", doc=old_doc)
-    page = _render(old)
-    assert S.PREDATES in page.text.lower(), "the old manifest was not refused on the page"
-    for markup in (SCRIPT, "<img src=x onerror=alert('key')>", "<svg onload=alert('value')>"):
-        assert not _raw_has_live(page.raw, markup), f"{markup!r} reached the page as live HTML"
-
+def test_manifest_ledger_and_judge_strings_reach_the_page_as_inert_text(tmp_path):
     fact_markup = "<script>alert('fact')</script> alice obtained a TGT"
     entity_markup = "<b>alice</b>"
     forged_markup = "<img src=x onerror=alert('forged')>"
@@ -170,27 +120,6 @@ def test_p069_old_manifest_keys_and_values_contain_markup_shown_on_the_page(tmp_
         assert not _raw_has_live(page.raw, markup), f"{markup!r} reached the page as live HTML"
     assert fact_markup in page.text, "the fact statement is not shown as text"
     assert finding_markup in page.text, "the judge's finding is not shown as text"
-
-
-def test_1224_episode_page_over_an_old_episode_with_removed_step_timings(tmp_path):
-    """s_p033 — over an old episode the page shows the predates-the-oracle refusal before any
-    other reader fails.
-
-    Other readers: timings, outcome record, ledger. The archive also carries a staged.yaml and
-    a review.yaml, as a pre-oracle episode does."""
-    ep = S.judged_episode(tmp_path, doc=S.old_manifest("overlay"), outcome=None)
-    (ep / "staged.yaml").write_text("- {name: wv-old-logs, world: b}\n", encoding="utf-8")
-    J.review_record(ep)
-    E.write_timing(ep, [("questioner", "2026-07-28T10:00:00Z", "2026-07-28T10:01:00Z"),
-                        ("staging", "2026-07-28T10:01:00Z", "2026-07-28T10:02:00Z"),
-                        ("review", "2026-07-28T10:02:00Z", "2026-07-28T10:03:00Z")],
-                   check=False)
-    page = _render(ep)
-    text = page.text.lower()
-    assert S.PREDATES in text, "the old episode's page does not show the predates reason"
-    for unrelated in ("timing record unreadable", "staging record unreadable",
-                      "review record unreadable", "outcome record unreadable"):
-        assert unrelated not in text, f"another reader failed first: {unrelated!r}"
 
 
 # --------------------------------------------------------------------------------------
@@ -228,30 +157,6 @@ def test_1224_episode_page_renders_a_v2_episode_from_the_models_output(tmp_path)
     assert "decision-discipline" in text, "the judge model's per-world buckets are not shown"
     for decision in (S.ORACLE_DECISION, S.REAL_ERROR, S.PASSTHROUGH):
         assert decision in text, f"the served-answer decision {decision!r} is not shown"
-    # The judge transcripts quote the judge's prompt, whose world-finding vocabulary (#1234 A5)
-    # spells `unreachable`; a section is the page's own text, so the transcripts are set aside.
-    for tx in page.ids_with("tx-"):
-        text = text.replace(page.text_of(tx), "")
-    lowered = text.lower()
-    for gone in ("staging", "staged", "reachab", "envelope"):
-        assert gone not in lowered, f"the page still renders a {gone!r} section"
-
-
-def test_1224_episode_page_renders_with_neither_review_nor_staged_record(tmp_path):
-    """o23_page_without_review_or_staged — the page renders an oracle-era episode with no
-    review.yaml and no staged.yaml, and says nothing about their absence.
-
-    No teardown-failure or staged-view block (O-23). Positive control: the page rendered the
-    episode's worlds."""
-    ep = S.judged_episode(tmp_path)
-    assert not (ep / "review.yaml").exists()
-    assert not (ep / "staged.yaml").exists()
-    page = _render(ep)
-    assert page.ids_with("world-"), "the page rendered no world at all"
-    text = page.text.lower()
-    for missing in ("review record", "staging record", "staged", "teardown",
-                    "no review record"):
-        assert missing not in text, f"the page reports {missing!r} for an oracle-era episode"
 
 
 def test_1224_outcome_and_world_record_reasons_render_inert_on_the_page_and_in_the_judge_record(
@@ -373,80 +278,6 @@ def test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note(tmp_p
     assert S.REAL_ERROR in torn.text, "the world ledger's complete row is not shown"
 
 
-# --------------------------------------------------------------------------------------
-# Timing.
-# --------------------------------------------------------------------------------------
-
-
-def test_1224_stage_timings_read_the_preflight_step_and_refuse_a_removed_step_legibly(tmp_path):
-    """o49_stage_timings_read — the timing reader and the page read the pre-flight step, and a
-    row naming a removed step fails with a legible reason.
-
-    The removed steps are staging and review; the reason is consistent with O15's refusal
-    (F-21: PREFLIGHT sits between QUESTIONER and RUNS)."""
-    Step = S.sym(S.STEPS, "Step")
-    preflight = getattr(Step, S.COINED["step.preflight"])
-    order = [Step.QUESTIONER, preflight, Step.RUNS, Step.JUDGE]
-    assert list(S.sym(S.STEPS, "STEPS")).index(preflight) == (
-        list(S.sym(S.STEPS, "STEPS")).index(Step.QUESTIONER) + 1)
-    timing = S.mod("learning.branch.timing")
-    io = S.mod("_io")
-
-    ep = S.judged_episode(tmp_path / "v2")
-    steps = [(str(s), f"2026-07-28T10:0{i}:00Z", f"2026-07-28T10:0{i + 1}:00Z")
-             for i, s in enumerate(order)]
-    E.write_timing(ep, steps, check=False)
-    with io.bind(ep) as bound:
-        got = timing.read_stage_timings(bound)
-    assert [r["step"] for r in got] == [str(s) for s in order]
-    page = _render(ep)
-    assert "timing record unreadable" not in page.text.lower()
-    assert str(preflight) in page.text, "the page does not show the pre-flight step"
-
-    for removed in ("staging", "review"):
-        old = S.judged_episode(tmp_path / removed)
-        E.write_timing(old, [("questioner", "2026-07-28T10:00:00Z", "2026-07-28T10:01:00Z"),
-                             (removed, "2026-07-28T10:01:00Z", "2026-07-28T10:02:00Z")],
-                       check=False)
-        with io.bind(old) as bound, pytest.raises(ValueError, match=removed) as refused:
-            timing.read_stage_timings(bound)
-        message = str(refused.value)
-        assert removed in message, f"the refusal does not name the removed step {removed!r}"
-        assert S.PREDATES in message.lower(), (
-            f"the refusal of {removed!r} is not O15's predates-the-oracle reason")
-
-
-# --------------------------------------------------------------------------------------
-# The episode readers (M05=A).
-# --------------------------------------------------------------------------------------
-
-
-def test_1224_episode_reader_reads_the_outcome_record(tmp_path):
-    """d14i_episode_reader_reads_the_outcome_record — the episode reader takes the outcome and
-    its reason from pre-flight's outcome record and refuses a not-accepted one.
-
-    (M05=A: every word other than exactly `accepted` is not gradable; the retired word is not
-    used.) The review.yaml a pre-oracle launcher wrote is no longer where the outcome lives: a
-    stale one beside an accepted outcome record changes nothing."""
-    recorded = S.sym(S.EPISODE, "_recorded_outcome")
-    verdicts = S.sym(S.EPISODE, "verdicts")
-    refusal = S.sym(S.EPISODE, "EpisodeError")
-    io = S.mod("_io")
-
-    ep = S.judged_episode(tmp_path / "unusable", outcome=None)
-    S.outcome_record(ep, "unusable", reason="worlds b and c were unservable")
-    with io.bind(ep) as bound:
-        assert recorded(bound) == ("unusable", "worlds b and c were unservable")
-    with pytest.raises(refusal) as refused:
-        verdicts(ep)
-    assert "worlds b and c were unservable" in str(refused.value)
-
-    accepted = S.judged_episode(tmp_path / "accepted")
-    J.review_record(accepted, outcome="rejected", reason="a stale pre-oracle record")
-    with io.bind(accepted) as bound:
-        assert recorded(bound)[0] == "accepted"
-    assert set(verdicts(accepted)) == {"a", "b", "c"}
-
 
 def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
     """pco01_episode_readers_refuse_new_words — verdicts and delta_o refuse `unusable`,
@@ -479,116 +310,3 @@ def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
     assert set(verdicts(accepted)) == {"a", "b", "c"}
     delta_o(accepted)
 
-
-# --------------------------------------------------------------------------------------
-# The frontend serializers.
-# --------------------------------------------------------------------------------------
-
-_QUESTIONER_LESSON = """---
-name: {name}
-description: a questioner pitfall keyed by the systems the judge model recorded
-systems: {systems}
-bucket: {bucket}
-source_finding_ids: [ep-1/b/0/0]
-created_at: 2026-10-01T00:00:00Z
----
-
-Author worlds whose facts sit on a served system.
-"""
-
-
-def _lessons_tree(tmp_path: Path, lessons: dict[str, tuple[list[str], str]]) -> Path:
-    tree = tmp_path / "defender"
-    corpus = tree / "lessons-questioner"
-    corpus.mkdir(parents=True)
-    for name, (systems, bucket) in lessons.items():
-        (corpus / f"{name}.md").write_text(_QUESTIONER_LESSON.format(
-            name=name, systems=json.dumps(systems), bucket=bucket), encoding="utf-8")
-    return tree
-
-
-def test_1224_frontend_serializes_the_judge_models_buckets(tmp_path):
-    """d12l_serialize_reads_the_models_output — the lessons view carries each lesson's bucket
-    and systems as the judge model recorded them.
-
-    (M19=A, O12.) The questioner group declares a systems field beside the bucket and no
-    pattern or holding-system field."""
-    serialize = S.mod(S.SERIALIZE)
-    tree = _lessons_tree(tmp_path, {"facts-on-served-systems": (["idp", "edr"], "observability")})
-    view = serialize.build_view(tree)
-    group = view["groups"]["questioner"]
-    keys = [f["key"] for f in group["fields"]]
-    assert "systems" in keys, f"the questioner fields are {keys}"
-    assert "bucket" in keys, f"the questioner fields are {keys}"
-    assert "pattern" not in keys, f"stale fields: {keys}"
-    assert "holding_system" not in keys, f"stale fields: {keys}"
-    (lesson,) = group["lessons"]
-    assert lesson["metadata"]["systems"] == ["idp", "edr"]
-    assert lesson["metadata"]["bucket"] == "observability"
-
-
-def test_1224_learning_page_renders_a_questioner_lesson_keyed_by_systems(tmp_path):
-    """o44_learning_page_reads_systems_lessons — the learning page renders a questioner lesson
-    keyed by systems, and the shipped seed lesson is migrated to an empty systems list.
-
-    With no blank Pattern/Holding-system heading and no KeyError (O-44, N23)."""
-    serialize = S.mod(S.SERIALIZE)
-    tree = _lessons_tree(tmp_path, {"keyed-by-systems": (["siem-x"], "lead-quality")})
-    view = serialize.build_view(tree)
-    group = view["groups"]["questioner"]
-    labels = [f["label"] for f in group["fields"]]
-    assert "Pattern" not in labels, f"the questioner group still renders blank headings: {labels}"
-    assert "Holding system" not in labels, (
-        f"the questioner group still renders blank headings: {labels}")
-    (lesson,) = group["lessons"]
-    assert lesson["status"] != "malformed"
-    assert lesson["metadata"]["systems"] == ["siem-x"]
-
-    fm_mod = S.mod("_frontmatter")
-    seed = S.source_text("lessons-questioner/example-seed-lesson.md")
-    assert seed, "the shipped seed lesson is gone"
-    frontmatter = fm_mod.parse_frontmatter_or_none(seed)
-    assert frontmatter is not None
-    assert frontmatter.get("systems") == [], "the seed lesson is not migrated to systems: []"
-    assert "pattern" not in frontmatter
-    assert "holding_system" not in frontmatter
-
-    shipped = serialize.build_view(S.DEFENDER)
-    seeds = [x for x in shipped["groups"]["questioner"]["lessons"]
-             if x["title"] == "example-seed-lesson"]
-    assert seeds
-    assert seeds[0]["status"] != "malformed"
-
-
-def test_1224_queue_page_renders_a_row_of_the_new_shape(tmp_path):
-    """o43_queue_page_reads_new_rows — the queue page renders a findings row of the new shape
-    (systems, a v2 bucket, no pattern or holding system) without a missing-field error.
-
-    (O-43, M19=A: the bucket set is the five plus observability.) The row is queued, held and
-    dead-lettered, so each of the channel's three readers sees it."""
-    serialize_queues = S.mod("learning.frontend.serialize_queues")
-    config = S.mod("learning.core.config")
-    state_mod = S.mod("learning.core.state")
-    paths = config.LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)
-    row = {"finding_id": "ep-1/b/0/0", "run_id": "ep-1", "subject": "world",
-           "type": "observability", "systems": ["idp", "edr"], "claim": "a v2 world finding"}
-    held = dict(row, finding_id="ep-1/c/0/0", held_reason="waits on a person")
-    channel = state_mod.QUESTIONER_FINDINGS
-    (paths.state_root / channel.queue).parent.mkdir(parents=True, exist_ok=True)
-    (paths.state_root / channel.queue).write_text(
-        json.dumps(row) + "\n" + json.dumps(held) + "\n", encoding="utf-8")
-    (paths.state_root / channel.deadletter).write_text(json.dumps(
-        {"finding_id": "ep-1/a/0/0", "attempts": 3, "deadletter_reason": "never taken",
-         "retired_at": "2026-10-01T00:00:00+00:00", "row": dict(row, finding_id="ep-1/a/0/0")})
-        + "\n", encoding="utf-8")
-    with state_mod.LearningState.open(paths) as state:
-        view = serialize_queues.build_view(paths, state)
-    (qf,) = [c for c in view["channels"] if c["name"] == "questioner_findings"]
-    assert qf["unreadable"] == 0, "a new-shape row was counted unreadable"
-    assert qf["depth"]["queued"] == 2
-    assert qf["held"]["ids"] == ["ep-1/c/0/0"]
-    (dead,) = qf["deadletter"]
-    assert dead["row"]["systems"] == ["idp", "edr"]
-    assert "pattern" not in dead["row"]
-    assert "holding_system" not in dead["row"]

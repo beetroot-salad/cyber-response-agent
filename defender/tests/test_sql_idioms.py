@@ -1,45 +1,11 @@
-"""The SQL idioms a gather lead is taught must actually RUN, through the real command.
-
-`skills/gather/SKILL.md` sends every investigating lead to `defender-sql.md` before it
-writes SQL, and `defender-sql.md` teaches one binding per payload shape. A binding that
-does not run is not a documentation bug — it is a lead that burns its turns on Binder
-Errors and then reports an absence it never established.
-
-These guards were written for a judge pipeline that no longer exists and were deleted
-whole with it (`e9e11a48`, #922); 20 of the 23 were never about the judge at all, they
-were about the sql engine (`runtime/sql_engine/sql.py`), which is still the lead's tool.
-This file is those 20, restored against the surfaces that survive and re-driven as a REAL
-subprocess: `sys.executable -P -m defender.runtime.sql_engine.sql '<query>'` with the
-payload on stdin is what a lead's `cat payload.json | defender-sql '...'` actually does, so
-the exit code, the stdout JSON and the stderr hint are all observed the way the lead observes
-them. `test_sql.py` keeps
-the in-process harness for the internals (sandbox, column disambiguation); nothing here
-monkeypatches anything.
-
-The shapes are the ones a gather_raw payload actually comes in, from the corpus survey
-that motivated the tool:
-
-    {index, total, returned, truncated, hits}   -> unnest(hits) yields a STRUCT
-    {columns, values, row_count}  (ES|QL)       -> declared: `--rows values --names columns`
-                                                   makes each name a column (#1138)
-    flat object                                 -> one row, its keys are the columns
-    bare array                                  -> one row per element
-    empty / not JSON                            -> input error (exit 2), NOT an empty result
-
-duckdb lives in the `runtime` extra. CI syncs it (every test job runs `uv sync --extra dev
---extra runtime`), so these guards do block a merge; a dev-only checkout skips exactly the
-tests that run a QUERY — the tool imports duckdb lazily, so `--help`, the adapter binding
-and the doc census need nothing and run everywhere.
-"""
+"""The SQL idioms a gather lead is taught run through the real `defender-sql` subprocess: one binding per payload shape (search hits, ES|QL declared rows, flat object, bare array), the hints on a query error, truncation notes, and the arrow-precedence refusals. Internals (sandbox, column disambiguation) are in test_sql.py."""
 from __future__ import annotations
 
 import json
 import re
 import subprocess
-from pathlib import Path
 
 import pytest
-from markdown_it import MarkdownIt
 
 from defender._io import read_text_utf8
 from defender.scripts.adapters.elastic_adapter import esql_payload
@@ -54,8 +20,6 @@ from defender.tests._defender_sql import (
 from defender.tests._sql_warm import run_sql_warm
 from defender.tests._locale import C_LOCALE_ENV
 
-_DOC = DEFENDER / "skills" / "gather" / "defender-sql.md"
-_SKILLS = DEFENDER / "skills"
 
 #: The real ES|QL payload a lead was handed in a checked-in scenario run: `columns`
 #: `failed:long, source.ip:ip`, three POSITIONAL rows, `row_count: 3`. Hand-writing this
@@ -69,11 +33,6 @@ _REAL_ESQL = (
 def esql() -> str:
     """The real ES|QL payload, as text — what goes on the tool's stdin."""
     return read_text_utf8(_REAL_ESQL)
-
-
-@pytest.fixture(scope="module")
-def doc() -> str:
-    return read_text_utf8(_DOC)
 
 
 def _sql(
@@ -101,12 +60,7 @@ def _declared(payload: str, query: str, declaration: tuple[str, ...] = _ESQL_DEC
 
 
 def _hint(proc: subprocess.CompletedProcess) -> str:
-    """What the TOOL added to a query error, and nothing duckdb said.
-
-    stderr carries duckdb's own message and its `LINE 1:` echo of the query before the
-    tool's `hint:` — so a negative assertion ("the other fixture's columns are not named")
-    made against the whole of stderr is really made against the query text and duckdb's
-    prose, and reddens on a reword that has nothing to do with the hint."""
+    """What the TOOL added to a query error, and nothing duckdb said."""
     _, marker, hint = proc.stderr.partition("hint:")
     assert marker, f"no hint on stderr: {proc.stderr!r}"
     return hint
@@ -170,12 +124,7 @@ def test_hits_envelope_truncation_columns_are_readable():
 def test_esql_shape_on_the_real_tracked_payload(esql):
     """`{columns, values, row_count}` — driven off the checked-in payload a lead was really
     handed, not a hand-written imitation. Bound to the adapter by
-    `test_the_adapter_emits_the_shape_this_fixture_has`, which is what makes "a change to the
-    ES|QL adapter's output shape breaks this" true rather than hopeful.
-
-    Declared (#1138 O1), the rows ARE the table: one row per row, one column per name, in the
-    names' order. Unflagged the payload is one object and so one row (#1138 O6: unchanged) —
-    the envelope's own `row_count` is still readable that way."""
+    `test_the_adapter_emits_the_shape_this_fixture_has`, which is what makes "a change to the"""
     assert set(json.loads(esql)) >= {"columns", "row_count", "values"}, "the real fixture changed shape"
     assert _declared(esql, "SELECT count(*) AS n FROM data") == [{"n": 3}]
     assert [(r["column_name"], r["column_type"]) for r in _declared(esql, "DESCRIBE data")] == [
@@ -186,9 +135,7 @@ def test_esql_shape_on_the_real_tracked_payload(esql):
 def test_esql_rows_are_queried_by_name_once_declared(esql):
     """The trap the positional recipe lived in: `unnest(values)` yields a POSITIONAL `JSON[]`,
     so the struct spelling `v."source.ip"` is a Binder Error — still, unflagged — and the only
-    way through was `v[N]->>'$'` plus a cast, because `->>'$'` is TEXT and `'412' < '9'` is true
-    lexically. Declared, the column is addressed by its name and `failed` is a number the
-    payload sent as a number: no position, no arrow, no cast (#1138 O1)."""
+    way through was `v[N]->>'$'` plus a cast, because `->>'$'` is TEXT and `'412' < '9'` is true"""
     struct_idiom = _sql(
         esql,
         'SELECT count(*) FROM (SELECT unnest(values) v FROM data) WHERE v."source.ip" = \'x\'',
@@ -322,14 +269,7 @@ def test_query_error_on_hits_shape_hint_points_at_the_struct():
 
 def test_the_hits_hint_column_list_is_derived_from_each_payloads_own_keys():
     """The hits hint is checked above against ONE envelope, whose keys are the canonical
-    `index, total, returned, truncated, hits` — so a hint that hardcoded that list would pass.
-
-    This envelope carries `hits` under a different set of siblings (no `index`, no `total`, no
-    `truncated`, plus keys the canonical one never has). The column list is the part of the
-    hint that must be read off the payload in hand, and it has to name THESE keys, in the
-    payload's own order, with none of the canonical ones invented alongside them. The `hits`
-    branch is still the branch that is taken — the copyable form is the same — which is what
-    separates "derived the columns" from "took a different branch"."""
+    `index, total, returned, truncated, hits` — so a hint that hardcoded that list would pass."""
     payload = json.dumps({
         "query": "user:alice", "hits": [{"user": "alice", "src": "10.0.0.1"}],
         "returned": 1, "note": "partial",
@@ -394,10 +334,7 @@ def test_the_hits_hint_form_runs_with_its_placeholders_filled():
 
 def test_each_error_class_gets_only_the_clause_that_answers_it():
     """duckdb self-answers most of what lands here (`Candidate Entries: "user"`, `Did you
-    mean`), and a paragraph appended to every failure buries the one sentence that applies.
-    So the shape skeleton is unconditional — it is what stops the NEXT query failing — while
-    the prose clause is keyed to what duckdb actually said. An unrelated error gets the
-    skeleton and nothing else: no lateral-join lecture, no quoting rule, no DESCRIBE."""
+    mean`), and a paragraph appended to every failure buries the one sentence that applies."""
     lateral = _hint(_sql(_TS_HITS, 'SELECT h."@timestamp" FROM data, unnest(hits) AS h'))
     assert "binds `h` to the TABLE" in lateral
     assert "column is called `unnest`" in lateral
@@ -422,14 +359,7 @@ def test_each_error_class_gets_only_the_clause_that_answers_it():
 def test_the_clause_is_keyed_off_duckdbs_message_not_off_the_querys_own_text():
     """The four probes above are separable by their own SQL text just as cleanly as by what
     duckdb said, so a dispatch that pattern-matched the QUERY — `", unnest("` means lateral,
-    `".@"` means quoting — would pass the whole of it and then go silent on the next lead who
-    spelled the same mistake differently.
-
-    So: the same two error CLASSES, respelled. A different lateral alias (`ev`, not `h`), and
-    a different `@`-field under a different subquery alias (`rec.@version`, not `h.@timestamp`,
-    on a field this payload does not even carry). Each must get the SAME clause as its sibling
-    above — which only a dispatch reading duckdb's message can do, because the query text it
-    would have keyed on is gone."""
+    `".@"` means quoting — would pass the whole of it and then go silent on the next lead who"""
     # These two probes assert duckdb's OWN wording on purpose: `_error_note` in `sql.py` keys
     # the extra clause off these strings, case-folded, so a duckdb release that rewords them
     # is a tool regression (the clause silently stops appearing), and this is where it
@@ -529,16 +459,7 @@ def test_non_truncated_payload_emits_no_note():
 
 def test_the_note_keys_on_truncated_not_on_returned_being_short_of_total():
     """The two payloads above have `truncated` and `returned < total` moving together, so a
-    note keyed on the ARITHMETIC would pass both. These two pull the signals apart.
-
-    `truncated` is the source's own statement that it stopped early; `returned < total` is an
-    inference that is wrong in both directions. A page-sized source can set `truncated` on a
-    page that happens to be the whole match set (dedup, a post-filter, a `total` that is an
-    estimate) — the caller still must not read a miss as an absence. And `total` is routinely
-    a match count from a different scope than `hits` (a count over the index vs. the rows this
-    query returned), so `returned < total` on an untruncated payload is normal and a note there
-    would cry wolf on every well-formed result.
-    """
+    note keyed on the ARITHMETIC would pass both. These two pull the signals apart."""
     flagged_but_complete = _sql(
         '{"total":1,"returned":1,"truncated":true,"hits":[{"user":"a"}]}',
         "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data) WHERE h.user = 'mallory'",
@@ -567,39 +488,12 @@ def test_the_note_keys_on_truncated_not_on_returned_being_short_of_total():
 def test_empty_payload_is_an_error_not_an_empty_result(payload):
     """An empty payload file is common (41 of the 640 files in the corpus survey were
     zero bytes), and `jq` exited 0 printing nothing on one — which reads downstream as "the
-    entity is absent". This exits 2 and says so, and prints NO rows on stdout, so an empty
-    result set can never be confused with a missing observation. The zero-byte file and the
-    whitespace-only file are different inputs on stdin; both must take this branch."""
+    entity is absent". This exits 2 and says so, and prints NO rows on stdout, so an empty"""
     proc = _sql(payload, "SELECT count(*) FROM data")
     assert proc.returncode == EXIT_INPUT_ERROR
     assert proc.stdout == ""
     assert "no input on stdin" in proc.stderr
     assert "NOT an empty result set" in proc.stderr
-
-
-def test_the_doc_teaches_the_exit_codes_the_tests_pin(doc):
-    """The exit codes in `_defender_sql` are literals BECAUSE they are what the doc teaches;
-    the spawn tests hold the tool to them, and this holds the doc to them, so neither the
-    tool nor the sentence can renumber alone.
-
-    #1138's exit table moved one thing: a wrong `--rows`/`--names` declaration is a `1`, the
-    lead's mistake to fix like a query error (and a lesson for the pitfalls curator), while `2`
-    stays the payload that never arrived or is not JSON. So the paragraph's `1` must name the
-    declaration beside the query error, and its `2` the payload — read clause by clause, the
-    digits pinned and the prose around them free."""
-    paragraph = next((p for p in re.split(r"\n\s*\n", doc)
-                      if "exit code" in p.lower() and re.search(r"`\d+`\s*=", p)), None)
-    assert paragraph, "the doc no longer has an exit-code paragraph"
-    marks = list(re.finditer(r"`(\d+)`\s*=\s*", paragraph))
-    clauses = {
-        int(m.group(1)): paragraph[m.end():marks[i + 1].start() if i + 1 < len(marks) else None]
-        for i, m in enumerate(marks)
-    }
-    assert set(clauses) == {EXIT_QUERY_ERROR, EXIT_INPUT_ERROR}, clauses
-    assert "query error" in clauses[EXIT_QUERY_ERROR], clauses
-    assert "--rows" in clauses[EXIT_QUERY_ERROR] or "--names" in clauses[EXIT_QUERY_ERROR], (
-        f"the doc's `1` does not cover a wrong declaration: {clauses[EXIT_QUERY_ERROR]!r}")
-    assert "payload" in clauses[EXIT_INPUT_ERROR], clauses
 
 
 def test_markdown_payload_is_an_input_error():
@@ -621,24 +515,7 @@ def test_a_real_payload_on_the_same_query_is_not_an_input_error():
 
 
 def test_the_adapter_emits_the_shape_this_fixture_has(esql):
-    """The guard that stops the ES|QL tests above from testing a file instead of the code.
-
-    A checked-in fixture asserts nothing about production: the adapter once learned to re-zip
-    `values` into per-row dicts while the fixture went on saying positional, and every
-    assertion against the file kept passing against a shape production had stopped emitting —
-    which is how `sql.py`'s ES|QL hint and `defender-sql.md` came to teach a recipe that
-    raises a Binder Error. So bind to the ADAPTER. `esql_payload` is the pure shaping step —
-    no HTTP, no transport seam, nothing to monkeypatch — and re-introducing the zip inside it
-    turns this red.
-
-    The wire response is rebuilt FROM THE FIXTURE's own `columns` and `values`, so the
-    adapter is driven at the fixture's real size — three rows — rather than at a hand-written
-    two. A re-zip that only trips above a row count (a `len(values) > 2` fast path, a
-    batch-size branch) is invisible to a two-row probe, and two rows is also the one width at
-    which a transposed zip is hard to tell from an untransposed one. Feeding the fixture's own
-    input makes the binding bidirectional: the fixture is what the adapter is asked to
-    produce, and the adapter is what the fixture is checked against.
-    """
+    """The guard that stops the ES|QL tests above from testing a file instead of the code."""
     fixture = json.loads(esql)
     assert len(fixture["values"]) == 3, "the fixture changed size — this test is no longer at its size"
     raw = {"columns": fixture["columns"], "values": fixture["values"]}
@@ -660,248 +537,6 @@ def test_the_adapter_emits_the_shape_this_fixture_has(esql):
     assert set(fixture) <= set(payload), \
         f"fixture carries keys the adapter does not: {set(fixture) - set(payload)}"
     assert fixture["row_count"] == len(fixture["values"]) == payload["row_count"]
-
-
-# ------------------------------------------ O5: every unnest a lead is shown names a live shape
-
-
-#: The one key `unnest` can be pointed at on a lead-facing surface: `hits`, the search-hits
-#: shape's rows. ES|QL's `values` left the list with #1138 — positional rows are DECLARED
-#: (`--rows values --names columns`), never unnested — and no adapter emits a wrapper, so
-#: `unnest(result.hits)`, the recipe of a code path that is gone, and `unnest(values)`, the
-#: recipe #1138 retired, are not spellings to hunt for but simply not this one. (A declared
-#: list column is taught as `list_contains(...)`, or `unnest` named bare: an `unnest(<column>)`
-#: on these surfaces is outside the whitelist.)
-_LIVE_SHAPES = {"hits"}
-
-#: Case-insensitive with optional space before the paren: SQL keywords are, and the recipes a
-#: curator records are LLM-written, which uppercases them as often as not.
-_UNNEST_ARG = re.compile(r"unnest\s*\(\s*([^)]*?)\s*\)", re.IGNORECASE)
-
-
-def _unnest_args(text: str) -> set[str]:
-    """What each `unnest(...)` on `text` reaches, with the table's own qualifier stripped —
-    `unnest(data.hits)` reaches `hits`; `unnest(result.hits)` reaches a wrapper that is not
-    there, and stays spelled as it is so the failure names it."""
-    return {re.sub(r"^data\.", "", arg, flags=re.IGNORECASE) for arg in _UNNEST_ARG.findall(text)}
-
-
-#: The engine `bin/defender-sql` runs: its source carries the help epilog and the hints.
-_SQL_ENGINE = DEFENDER / "runtime" / "sql_engine" / "sql.py"
-
-
-def _lead_surfaces() -> list[Path]:
-    """Everything a gather lead reads or runs when it writes SQL over a payload: the tool
-    itself, and every skill doc — `defender-sql.md`, the adapter contract, the query
-    templates, and each system's recorded execution notes, which is where a curator would
-    write a recipe down. Enumerated, not hand-listed, so a new doc is censused on arrival."""
-    return [_SQL_ENGINE, *sorted(_SKILLS.rglob("*.md"))]
-
-
-def test_every_unnest_on_a_lead_facing_surface_names_a_live_shape():
-    """A census by whitelist rather than by the spelling of the one dead recipe: on every
-    surface, whatever `unnest(...)` is pointed at must be a key an adapter actually emits.
-    This is what keeps `unnest(result.hits)` — and any wrapper-reaching spelling nobody has
-    written yet — from coming back through a doc, a query template, or a system's execution
-    notes, none of which a three-file list would have watched."""
-    # Keyed by the path, not the basename: every system has its own `execution.md`, and a
-    # basename key would keep only the last one read.
-    seen = {
-        str(path.relative_to(DEFENDER)): _unnest_args(read_text_utf8(path))
-        for path in _lead_surfaces()
-    }
-    dead = {name: args - _LIVE_SHAPES for name, args in seen.items() if args - _LIVE_SHAPES}
-    assert not dead, f"a lead-facing surface unnests something no adapter emits: {dead}"
-    # Paired control: the census really covered the surfaces that teach the idioms, and between
-    # them they teach the live shape — a zero above cannot come from reading nothing.
-    teaching = {name for name, args in seen.items() if args}
-    assert {
-        "runtime/sql_engine/sql.py", "skills/gather/defender-sql.md", "skills/connect/adapter.md",
-    } <= teaching, teaching
-    assert set().union(*seen.values()) == _LIVE_SHAPES
-
-
-def test_the_help_epilog_the_lead_actually_prints_is_clean_too():
-    """The census above reads `sql.py` as a FILE. What a lead reads is `--help`, and a recipe
-    reintroduced through argparse's `%(prog)s` interpolation is not in the source text at all.
-    So run the program and read its output, under the same whitelist. The paired control is
-    the live idiom: the epilog really does hand the lead a hits query, so a clean census here
-    cannot come from an epilog that says nothing."""
-    proc = run_sql_py("--help")
-    assert proc.returncode == EXIT_OK, proc.stderr
-    printed = proc.stdout + proc.stderr
-    assert _unnest_args(printed) == {"hits"}, f"`--help` unnests something no adapter emits: {printed!r}"
-    # argparse reflows the epilog at the terminal width, so the control is read unwrapped.
-    unwrapped = " ".join(printed.split())
-    assert "unnest(hits) h FROM data" in unwrapped
-    assert "no wrapper envelope to reach" in unwrapped
-
-
-def test_the_dead_recipe_stays_dead():
-    """Why the census above is worth having: the recipe does not merely look stale, it FAILS.
-    Pinning the failure keeps anyone from reintroducing it on the strength of an old doc."""
-    proc = _sql(_HITS, "SELECT count(*) FROM (SELECT unnest(result.hits) h FROM data)")
-    assert_query_error(proc, "the dead recipe ran")
-    # ...and fails for the reason the census rests on: `result` is the identifier duckdb
-    # could not resolve, because no adapter emits that wrapper. Any wording quotes the
-    # name it could not find; read before the `LINE 1:` echo of the query, which would
-    # carry `result` for ANY failure.
-    message = proc.stderr.partition("\nLINE ")[0]
-    assert '"result"' in message, proc.stderr
-    # and the live spelling, on the same payload, works
-    assert _rows(_HITS, "SELECT count(*) AS n FROM (SELECT unnest(hits) h FROM data)") \
-        == [{"n": 3}]
-
-
-# ------------------------------------ doc binding: what defender-sql.md prints, run verbatim
-
-
-#: A struct-style field access on an ES|QL `values` row — `v.host`, `v."source.ip"`. The
-#: placeholder `v.<field>` the doc uses to NAME the failing idiom is deliberately not matched:
-#: what is banned is a concrete field spelled after `v.`, which is a recipe rather than a
-#: citation. `(?<![A-Za-z0-9_])` keeps a hostname or a version string from counting.
-_STRUCT_ACCESS_ON_V = re.compile(r"(?<![A-Za-z0-9_])v\s*\.\s*[A-Za-z_\"]", re.IGNORECASE)
-
-#: The lateral spelling, `FROM data, unnest(hits) [AS] h` — the one that looks right and binds
-#: `h` to the TABLE. Case-insensitive for the same reason as `_UNNEST_ARG`.
-_LATERAL_FORM = re.compile(r"FROM\s+data\s*,\s*unnest\s*\(\s*hits\s*\)", re.IGNORECASE)
-
-
-#: A line that LOOKS like a fence edge to someone reading the raw file.
-_FENCE_EDGE = re.compile(r"^[ \t]*(`{3,}|~{3,})", re.M)
-#: The info string names sql — ` ```sql`, ` ```SQL {.x}`, ` ```sql{.x}` — and not ` ```sqlite`.
-_SQL_INFO = re.compile(r"sql(?![\w-])", re.I)
-
-
-def _sql_fences(text: str) -> list[str]:
-    """The doc's sql-tagged fences — what a lead copies, as opposed to what the prose discusses.
-
-    A CommonMark parse, not a regex: tildes, four-backtick fences, a space before the tag,
-    ` ```SQL`, ` ```sql {.x}` are all the same fence to a renderer and so to this scanner, and
-    ` ```sqlite` is not. A hand-rolled pattern tolerated a list of spellings and missed the
-    rest, which is how a retagged fence carrying a banned form went unscanned (#1059).
-
-    The doc's reader is not a renderer, though — the gather subagent reads it as raw text and
-    copies what looks like a fence. A fence CommonMark does not see (under an HTML wrapper
-    with no blank line, indented four spaces) is still copyable, so the parse is checked
-    against the raw text: every fence-looking line must lie inside a fence the parser found
-    (as one of its edges, or nested in its body). The scanner then fails loudly on the fence
-    it cannot read, instead of skipping it."""
-    fences = [tok for tok in MarkdownIt().parse(text) if tok.type == "fence"]
-    spans = [tok.map for tok in fences]  # [first line, one past last), 0-based
-    lines = text.split("\n")
-    stray = [
-        f"{n + 1}: {line.strip()}" for n, line in enumerate(lines)
-        if _FENCE_EDGE.match(line) and not any(a <= n < b for a, b in spans)
-    ]
-    assert not stray, (
-        "fence-looking lines the markdown parser does not read as a fence — a reader "
-        f"would copy them and this scanner cannot see them: {stray}"
-    )
-    return [tok.content for tok in fences if _SQL_INFO.match(tok.info.strip())]
-
-
-#: A `<field>`-style placeholder — a template for the lead to fill, not a query to run.
-_PLACEHOLDER = re.compile(r"<[A-Za-z_][\w .-]*>")
-_QUOTED_NAME = re.compile(r'"([^"]+)"')
-#: The tracked fixture's names, as the declaration makes them columns.
-_FIXTURE_NAMES = {"failed", "source.ip"}
-#: #1138 O1's witness filter: a dotted name compared as text AND a number compared as a number.
-_O1_FILTER = re.compile(r'"source\.ip"\s*=\s*\'203\.0\.113\.7\'\s+AND\s+failed\s*>\s*9\b', re.I)
-_POSITIONAL_RECIPE = re.compile(r"v\s*\[\s*\d+\s*\]\s*->>")
-
-
-def _declared_fences(doc: str) -> list[str]:
-    """The doc's copyable SQL written for the DECLARED ES|QL table: an sql fence that names
-    only the tracked fixture's columns (double-quoted, as a dotted name must be), holds no
-    placeholder to fill and no `unnest`. A fence for another table (a list column, a JSON
-    column) names a column the fixture does not have and is not one of these."""
-    fences = []
-    for fence in _sql_fences(doc):
-        quoted = set(_QUOTED_NAME.findall(fence))
-        if (quoted and quoted <= _FIXTURE_NAMES and not _PLACEHOLDER.search(fence)
-                and "unnest" not in fence.lower()):
-            fences.append(fence.strip())
-    return fences
-
-
-def _typed_oracle(payload_doc: dict, query: str) -> list[dict]:
-    """What `query` answers over the fixture's rows in a table typed BY HAND the way #1138's
-    rule types them — `failed` BIGINT (every cell a JSON integer), `source.ip` VARCHAR (every
-    cell a string) — computed in-process, independently of the tool."""
-    duckdb = pytest.importorskip("duckdb")
-    con = duckdb.connect(":memory:")
-    con.execute('CREATE TABLE data ("failed" BIGINT, "source.ip" VARCHAR)')
-    con.executemany("INSERT INTO data VALUES (?, ?)", payload_doc["values"])
-    cursor = con.execute(query)
-    names = [d[0] for d in cursor.description]
-    return [dict(zip(names, record, strict=True)) for record in cursor.fetchall()]
-
-
-def test_the_docs_declared_examples_run_and_answer_what_a_typed_table_answers(doc, esql):
-    """`defender-sql.md`'s copyable SQL for positional rows is written against the DECLARED
-    table (#1138 O9): each such fence, run as written under `--rows values --names columns` over
-    the real fixture, exits 0 and answers exactly what the same SQL answers over a table typed
-    by hand from the fixture's JSON values — so the doc cannot teach a query that runs but
-    answers wrong (a lexical comparison, a text sum). One of them is O1's witness, the dotted
-    name compared as text AND the count compared as a number, and it selects the 412 row."""
-    for flag in (r"--rows[ =]values", r"--names[ =]columns"):
-        assert re.search(flag, doc), "the doc does not show the declaration ES|QL is queried under"
-    fences = _declared_fences(doc)
-    assert fences, "the doc has no runnable SQL fence for the declared ES|QL table"
-    payload_doc = json.loads(esql)
-    for fence in fences:
-        answer = _declared(esql, fence)
-        assert answer == _typed_oracle(payload_doc, fence), f"the doc's fence answers wrong: {fence!r}"
-
-    witness = [f for f in fences if _O1_FILTER.search(f)]
-    assert witness, "no doc fence filters `\"source.ip\" = '203.0.113.7' AND failed > 9`"
-    for fence in witness:
-        answer = _declared(esql, fence)
-        assert len(answer) == 1, (fence, answer)
-        assert 412 in answer[0].values(), (fence, answer)
-
-
-def test_the_doc_no_longer_teaches_the_positional_recipe(doc):
-    """The recipe the declaration replaced is gone from the doc (#1138 O9): no `v[N]->>'$'`, no
-    `unnest(values)`, no `::BIGINT` over an unpacked position — a number the payload sent as a
-    number needs no cast once declared — and no copyable fence reaches into a `values` row.
-    The arrow-precedence rule stays (it is about JSON columns and JSON sources, not positions)."""
-    assert not _POSITIONAL_RECIPE.search(doc), "the doc still teaches `v[N]->>`"
-    assert not re.search(r"unnest\s*\(\s*values\s*\)", doc, re.I), "the doc still unnests `values`"
-    assert "(v[3]->>'$')::BIGINT" not in doc, "the doc still teaches the positional cast"
-    for fence in _sql_fences(doc):
-        assert _STRUCT_ACCESS_ON_V.search(fence) is None, f"a copyable fence cannot run: {fence!r}"
-    assert "binds more loosely than" in doc, "the doc dropped WHY `->>` needs parentheses"
-
-
-def test_the_docs_hits_idiom_is_literal_and_runs(doc):
-    """The doc's search-hits binding, same treatment: present as a literal, then executed
-    with only its `<field>`/`<other>`/`<value>` placeholders filled — no alias added that
-    the doc's own template does not carry."""
-    idiom = ("SELECT h.<field> FROM (SELECT unnest(hits) h FROM data) "
-             "WHERE h.<other> = '<value>'")
-    assert idiom in doc, "the doc's search-hits idiom changed"
-
-    # The lateral form is the one that looks right and binds `h` to the TABLE. It may appear
-    # ONLY as the named trap, never as something a lead copies: no fence carries it, and every
-    # occurrence sits inside the sentence that rules it out.
-    fences = _sql_fences(doc)
-    for fence in fences:
-        assert _LATERAL_FORM.search(fence) is None, (
-            f"a copyable fence hands back the lateral form, which does not bind: {fence!r}"
-        )
-    assert idiom.strip() in [f.strip() for f in fences], "the subquery form left the copyable fences"
-    for found in _LATERAL_FORM.finditer(doc):
-        window = doc[max(0, found.start() - 250):found.start() + 350]
-        assert any(marker in window for marker in (
-            "does not do what it looks like", "names the TABLE", "does not resolve",
-        )), "the lateral form appears without the caveat that it does not bind"
-
-    runnable = _fill(idiom, {
-        "h.<field>": "h.user", "h.<other>": "h.host", "<value>": "web-1",
-    })
-    assert _rows(_HITS, runnable) == [{"user": "alice"}, {"user": "bob"}]
 
 
 # ---- `->>` binds more loosely than the operators before it ---------------------------------------
@@ -937,9 +572,7 @@ def test_a_declared_filter_survives_a_second_condition(esql):
 def test_a_misbound_arrow_is_refused_with_its_cause_and_a_fix_that_names_no_position(esql):
     """duckdb would name only the symptom (`Failed to cast value to numerical`). The tool refuses
     first and names the cause and the fix — whose example is now a generic JSON column,
-    `(col->>'$')`, not a `v[N]` position (#1138 O9) — and, the payload being positional rows,
-    the declaration that makes the arrow unnecessary (O6). The same query parenthesised runs
-    and selects: `_arrow_refusal` is #1132's backstop and stays."""
+    `(col->>'$')`, not a `v[N]` position (#1138 O9) — and, the payload being positional rows,"""
     unwrapped = "v[1]->>'$' = '412' AND v[2]->>'$' = '203.0.113.7'"
     proc = _sql(esql, f"SELECT count(*) AS n {_UNNESTED_VALUES} WHERE {unwrapped}")
     assert_query_error(proc, "the unparenthesised AND was not refused")

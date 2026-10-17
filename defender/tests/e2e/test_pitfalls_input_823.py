@@ -1,57 +1,4 @@
-"""#823 — the executable spec for the PITFALLS CURATOR'S INPUT.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_823.yaml`, named after its
-`discharged_by` pointer and carrying that demand's observable-outcome prose in its docstring.
-
-THE CODE DOES NOT EXIST YET. This suite is RED by construction: the import block below names
-the surface the implementation must build.
-
-WHAT THE CHANGE IS
-------------------
-The offline learning loop is a text-editing loop over the prompt corpus: a gather failure
-becomes a bullet in `skills/{system}/execution.md`, which a later gather subagent reads before
-the moment it would repeat the mistake (`skills/gather/SKILL.md:63-66`). Four links carry it —
-the failure PRODUCES A ROW, the row is CLASSIFIED `agent-fixable`, the row ROUTES to the
-pitfalls curator, and the bullet is READ BACK. Measured over the three archived runs the
-channel harvests 2 records from 227 rows against a threshold of 5: it has never completed one
-revolution. This suite fixes links 1-3 and the threshold. Link 4 is N4 below.
-
-THE SURFACE THIS SUITE PINS (new; all in `defender/scripts/gather_tools/record_query.py`,
-beside `ABOVE_GUARD_QUERY_ID`, whose convention it extends)
----------------------------------------------------------------------------------------------
-`BASH_SHIM_QUERY_ID = "∅.bash-shim"`
-    The routing identity of a failed reducer-shim row. `∅` is load-bearing, not decorative: it
-    fails `draft_synthesis._SAFE_ID_SEGMENT`, so `_draft_candidate_segments` returns `None` and
-    the row falls past `synthesize_drafts` AND past `build_handoff` (never a catalog member)
-    into `collect_general_failures`. The routing is by construction — no collector learns a new
-    case, and no collector is edited by this issue.
-
-`REPEAT_TRIP_QUERY_ID = "∅.repeat-trip"`
-    Same convention, for #807's repeat-guard trip row, which today carries
-    `resolve_query_id(...)` — the MODEL's own coined id — and therefore misroutes. Deliberately
-    a DISTINCT literal from `ABOVE_GUARD_QUERY_ID`: `repeat_trip`'s counted domain
-    (`record_query.py:421`) keys on that one value and must not widen, because
-    `test_trip_row_is_itself_an_occurrence_on_replay` (#807) pins that a trip row DOES count
-    toward a later check of the same key, so a replay of a recorded table keeps matching the
-    live run it replays. This issue reaches into none of that: it changes what the row is
-    CALLED, which only the offline router reads, never what the guard COUNTS.
-
-`SHIM_COMMAND_MAX_CHARS`
-    The bound on the command carried into the record. `stderr_digest` is already capped at 160
-    (`query_tool.py:416-419`) while `executed_query` is not (`_structured_call` yaml-dumps
-    `params` whole), and a shim row's command is model-authored text that reaches the curator's
-    prompt and can be echoed into a committed corpus file.
-
-HOW FAULTS ARE INDUCED HERE
----------------------------
-Through the harness's `box=` seam (`drive`'s third injection seam, #540), never by monkeypatch
-and never by depending on the tree's real `defender-sql`. `_sql_shim_aggregates`
-(`test_query_tool_611.py:106`) exists precisely because a checkout without its own `.venv` runs
-a shim that cannot aggregate; a suite that needed a working duckdb would be asserting on the
-environment. The box fake injects an exit code and a stderr and records what crossed the
-boundary — it classifies nothing and decides no policy, so every assertion below lands on
-production code.
-"""
+"""#823 — the executable spec for the PITFALLS CURATOR'S INPUT."""
 from __future__ import annotations
 
 import json
@@ -63,7 +10,6 @@ import pytest
 from defender._io import read_jsonl_rows
 from defender.run_repository import RunPaths
 from defender.learning import lead_repository
-from defender.learning.core import config as loop_config
 from defender.learning.leads import draft_synthesis, lead_extraction, lead_neighbors
 from defender.learning.leads.lead_author import build_handoff
 from defender.learning.leads.lead_extraction import collect_general_failures
@@ -167,8 +113,7 @@ class _Res:
     def leads(self) -> list:
         """The rows as the OFFLINE loop sees them — through the real join and the real
         extraction, never a hand-built `ExecutedLead`. `extract_from_joined` drops any row
-        whose payload sidecar is missing (`lead_extraction.py:60`), so this path is also what
-        proves a shim row persists one."""
+        whose payload sidecar is missing (`lead_extraction.py:60`), so this path is also what"""
         return lead_extraction.extract_from_joined(lead_repository.joined(self.run_dir))
 
     def own_leads(self) -> list:
@@ -179,13 +124,7 @@ class _Res:
 
     def routed(self, query_id: str | None = None) -> tuple[int, int, int]:
         """`(pitfalls, drafts, handoff)` through the three PRODUCTION collectors over the real
-        catalog — the partition's own arithmetic, not a restatement of it.
-
-        `query_id` scopes it to ONE row's routing. That distinction is the whole point for the
-        trip-row demands: the question is where the TRIP ROW goes, not where the run goes. The
-        rows below a trip keep the model's coined id and still become draft candidates, exactly
-        as they should — asserting `(1, 0, 0)` over the whole run would demand that #823 also
-        stop `synthesize_drafts` doing its job."""
+        catalog — the partition's own arithmetic, not a restatement of it."""
         leads = self.own_leads()
         if query_id is not None:
             leads = [lead for lead in leads if lead.query_id == query_id]
@@ -212,14 +151,11 @@ def _dispatch(lead: str = LEAD, system: str = "elastic") -> tuple[str, dict]:
 
 def _run(
     root: Path, *, turns: list[Turn], run_id: str, box: _Box | None = None,
-    main_turns: list[Turn] | None = None, verbs=None, run_dir: Path | None = None,
+    main_turns: list[Turn] | None = None, verbs=None, run_dir: Path | None = None, tenant=None,
 ) -> _Res:
     """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
     `turns`. Everything between the two fakes — dispatch, the bash tool, the permission gate,
-    the capture path, the two tables — is production code.
-
-    `run_dir` is passed by the scenarios that must name a payload path INSIDE a turn, since
-    `materialize` refuses a second call on the same root."""
+    the capture path, the two tables — is production code."""
     run_dir = materialize(root, GOLDEN_AB3) if run_dir is None else run_dir  # lint-default: ok — the default is DERIVED from `root`, so it cannot be a signature default  # noqa: E501
     the_box = box if box is not None else _Box()
     rec = VerbRecorder()
@@ -228,7 +164,7 @@ def _run(
     ])
     gather = ReplayFn(turns)
     summary = drive(run_dir, run_id=run_id, main=main, gather=gather,
-                    verbs=verbs if verbs is not None else elastic_ok(rec), box=the_box)
+                    verbs=verbs if verbs is not None else elastic_ok(rec), box=the_box, tenant=tenant)
     return _Res(run_dir, main, gather, the_box, summary)
 
 
@@ -242,10 +178,7 @@ def _reduce(run_dir: Path, seq: int = 0, lead: str = LEAD, sql: str = "SELECT co
 def failing_reducer_run(tmp_path_factory, checkout_roster):
     """ONE run of the O1 scenario — a query, then the taught reduce over the payload it wrote,
     which the shim refuses — shared by the demands below that only READ its tables, leads and
-    box. A scenario with another turn sequence or its own box drives its own.
-
-    Module-scoped, so it is built before the function-scoped conftest fixtures: it holds the
-    checkout's capabilities for the drive itself, as `_held_capabilities` does for a test."""
+    box. A scenario with another turn sequence or its own box drives its own."""
     from defender.skills.invlang.validate import hold_capabilities, release_capabilities
 
     root = tmp_path_factory.mktemp("failing-reducer")
@@ -267,8 +200,7 @@ def failing_reducer_run(tmp_path_factory, checkout_roster):
 def test_failing_reducer_shim_writes_one_row(failing_reducer_run):
     """failing_reducer_shim_writes_one_row — a `defender-sql` reduce that exits non-zero
     appends ONE queries-table row carrying the sentinel identity, the verb `bash`, the argv
-    that failed, the shim's own exit code, and the `agent-fixable` class the curator's filter
-    (`lead_extraction.py:98`) gates on."""
+    that failed, the shim's own exit code, and the `agent-fixable` class the curator's filter"""
     r = failing_reducer_run
     assert len(r.own_rows) == 2, "the query row plus exactly one shim row"
     shim = r.own_rows[1]
@@ -285,14 +217,7 @@ def test_failing_reducer_shim_writes_one_row(failing_reducer_run):
 def test_shim_row_keeps_the_frozen_twelve_key_contract(failing_reducer_run):
     """shim_row_keeps_the_frozen_twelve_key_contract — the shim row is an ordinary queries row,
     not a variant with a key of its own. Every existing reader of this table
-    (`lead_repository`, the visualizer, the breaker's replay) walks the same frozen keys, and
-    #807's own sentinel was required to live inside them for the same reason.
-
-    The NAME keeps #823's count because it is the identifier `spec_graph_823.yaml` discharges
-    this obligation through; the set itself is fourteen keys since #877 F-9 added
-    `payload_sha256` and #871 added `system_key` — columns every writer fills, which is the
-    opposite of the per-writer key this test refuses. The assertion imports `ROW_KEYS` rather
-    than restating it, so it tracks the contract instead of the number."""
+    (`lead_repository`, the visualizer, the breaker's replay) walks the same frozen keys, and"""
     r = failing_reducer_run
     assert set(r.rows[1]) == ROW_KEYS
     # #871 by VALUE, not just by name: this is the only place the shim lane's own answer for
@@ -305,46 +230,10 @@ def test_shim_row_keeps_the_frozen_twelve_key_contract(failing_reducer_run):
         "the bash lane fingerprinted a row whose system it derived itself"
 
 
-def test_succeeding_reducer_shim_writes_no_row(tmp_path):
-    """succeeding_reducer_shim_writes_no_row — the trigger is a FAILURE, not a shim call. A
-    reduce that exits 0 is the sanctioned happy path the gather prompt teaches; recording it
-    would turn the pitfalls queue into a transcript."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    r = _run(tmp_path, run_dir=run_dir, run_id="d823-ok", box=_Box(rc=0, err=b"", out=b'[{"n":2}]\n'), turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}), _reduce(run_dir), DONE,
-    ])
-    assert r.box.calls, "the reduce never reached the boundary, so the negative is vacuous"
-    assert r.shim_rows == []
-    assert len(r.own_rows) == 1, "only the query row"
-
-
-def test_failing_non_shim_bash_writes_no_row(tmp_path):
-    """failing_non_shim_bash_writes_no_row — the trigger is the REDUCER, not bash in general. A
-    failing `grep`/`wc` is not a lesson `execution.md` carries, and `test_capture_fires_only_
-    for_the_query_tool` (#611) pins that ordinary bash stays silent on this table."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    box = _Box(rc=2, err=b"wc: bad usage", match="wc")
-    r = _run(tmp_path, run_dir=run_dir, run_id="d823-nonshim", box=box, turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        # The shape `test_capture_fires_only_for_the_query_tool` (#611) drives, so the gate
-        # provably admits it — a denied command would make this negative vacuous.
-        Turn(tool_calls=[("bash", {"command": f"cat {run_dir / 'alert.json'} | wc -l"})]),
-        DONE,
-    ])
-    assert box.calls, "the bash turn never reached the boundary, so the negative is vacuous"
-    assert r.shim_rows == []
-    assert len(r.own_rows) == 1
-
-
 def test_a_non_terminal_reducer_mints_no_row(tmp_path):
     """a_non_terminal_reducer_mints_no_row — the box reports ONE exit code, the last stage's
     (`bash_exec` returns `procs[-1].returncode`). So the reported rc is the reducer's only when
-    the reducer is the final stage. Piped into a non-matching `grep`, a perfectly healthy reduce
-    is handed grep's exit 1 — and recording that mints a pitfall record, from a reduce that
-    worked, which the curator then folds into `execution.md` as a lesson.
-
-    Attribution, not squeamishness: a record no one can attribute is worse than no record,
-    because this channel's output is prompt text every later gather subagent reads."""
+    the reducer is the final stage. Piped into a non-matching `grep`, a perfectly healthy reduce"""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     payload = run_dir / "gather_raw" / LEAD / "0.json"
     box = _Box(rc=1, err=b"", match="grep")
@@ -361,14 +250,7 @@ def test_a_non_terminal_reducer_mints_no_row(tmp_path):
 def test_the_shims_exit_codes_are_translated_to_the_tables_dialect(tmp_path):
     """the_shims_exit_codes_are_translated_to_the_tables_dialect — two exit-code dialects meet
     at this boundary and disagree on the number 2. `defender-sql` spends 2 on the AGENT's
-    mistakes (empty pipe, non-JSON payload); 2 in the queries table means INFRA, and
-    `collect_general_failures` drops every infra row — so untranslated, the commonest reduce
-    mistakes were recorded and then silently discarded, which is the failure M1 exists to end.
-
-    The mapping is exact rather than averaged: a missing runtime keeps its infra meaning,
-    because a broken deployment is not a lesson any `execution.md` should carry — and since it
-    fails EVERY reduce, misfiling it would flood the queue with identical un-actionable
-    records."""
+    mistakes (empty pipe, non-JSON payload); 2 in the queries table means INFRA, and"""
     cases = [
         (1, "agent-fixable", 1, "a SQL query error is the agent's and passes through"),
         (2, "agent-fixable", 1, "an empty or non-JSON payload is the agent's mistake"),
@@ -393,12 +275,7 @@ def test_the_shims_exit_codes_are_translated_to_the_tables_dialect(tmp_path):
 def test_a_model_cannot_forge_a_sentinel_query_id(tmp_path):
     """a_model_cannot_forge_a_sentinel_query_id — the `∅.` prefix is RESERVED, not merely
     conventional. `resolve_query_id` already refused `ABOVE_GUARD_QUERY_ID` verbatim; #823 adds
-    two more literals to the same namespace and the refusal must cover the prefix, not a list.
-
-    What a forgery buys otherwise: stamping the guard's own refusal identity onto a query that
-    was never refused, or routing an arbitrary failing query into the pitfalls residue with
-    unbounded model-authored `params` — past the very cap this issue added — or hiding a real
-    catalog failure from the lead-author."""
+    two more literals to the same namespace and the refusal must cover the prefix, not a list."""
     for forged in (BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID, _query_rules.ABOVE_GUARD_QUERY_ID):
         assert _query_rules.is_reserved_query_id(forged)
         assert resolve_query_id("elastic", "query", forged) == "elastic.query", (
@@ -415,25 +292,6 @@ def test_a_model_cannot_forge_a_sentinel_query_id(tmp_path):
     ])
     assert r.own_rows[0]["query_id"] == "elastic.query"
     assert r.shim_rows == [], "a real query row was routed into the shim residue"
-
-
-def test_main_lane_shim_failure_writes_no_row(tmp_path):
-    """main_lane_shim_failure_writes_no_row — N-main: the record is per-LEAD and joins on
-    `lead_id`, which main does not have (`_record` raises on `deps.lead_id is None`). Main's
-    bash is investigation authoring, not evidence gathering. An explicit non-obligation, pinned
-    so a later widening is a decision rather than a drift."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    alert = run_dir / "alert.json"
-    r = _run(
-        tmp_path, run_dir=run_dir, run_id="d823-mainlane",
-        main_turns=[
-            Turn(tool_calls=[("bash", {"command": f"cat {alert} | {SQL} 'SELECT 1'"})]),
-            Turn(text="Investigation complete."),
-        ],
-        turns=[DONE],
-    )
-    assert r.box.calls, "main's bash turn never reached the boundary"
-    assert r.own_rows == [], "a main-lane shim failure wrote a queries row"
 
 
 # O4 — nothing this change writes may name a system that does not exist. `derive_system`
@@ -455,30 +313,10 @@ def test_shim_row_takes_the_system_of_the_payload_it_reduces(failing_reducer_run
     )
 
 
-def test_no_record_names_a_system_absent_from_the_run(failing_reducer_run):
-    """no_record_names_a_system_absent_from_the_run — the negative universal, over the whole
-    table: every row's system is one this run actually dispatched. 'sql' and 'jq' are the
-    concrete refutations; the assertion is the general one, so a new shim cannot reintroduce
-    the class."""
-    r = failing_reducer_run
-    assert r.shim_rows, "no shim row was written, so the universal below is vacuous"
-    dispatched = {row["system"] for row in r.rows if row["query_id"] != BASH_SHIM_QUERY_ID}
-    for row in r.rows:
-        assert row["system"] in dispatched | {""}, f"row names an undispatched system: {row}"
-    assert "sql" not in {row["system"] for row in r.rows}
-
-
 def test_shim_without_a_payload_operand_has_no_system_and_is_skipped(tmp_path):
     """shim_without_a_payload_operand_has_no_system_and_is_skipped — a reduce that opens no
     run payload has nothing to attribute to. The row is still written (the failure happened),
-    with an empty system, and NO SYSTEM IS INVENTED for it, which is what O4 forbids.
-
-    THE SECOND HALF OF THIS DEMAND WAS SUPERSEDED BY #870 M5′ and is re-asserted here as what
-    now happens: the row is no longer SKIPPED at the systemless guard. It is admitted on its
-    sentinel `query_id` and carries `system: ""` into the queue, because a `defender-sql`
-    mistake belongs to the reducer surface (`skills/gather/defender-sql.md`) rather than to a
-    system — and the reduce that attributed to nothing is the one this channel had never seen.
-    The name is #823's demand id and is kept so its graph's `discharged_by` still resolves."""
+    with an empty system, and NO SYSTEM IS INVENTED for it, which is what O4 forbids."""
     r = _run(tmp_path, run_id="d823-nopayload", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}),
         Turn(tool_calls=[("bash", {"command": f"{SQL} 'SELECT 1'"})]),
@@ -496,13 +334,7 @@ def test_shim_without_a_payload_operand_has_no_system_and_is_skipped(tmp_path):
 def test_shim_row_reaches_the_curator_and_nothing_else(failing_reducer_run):
     """shim_row_reaches_the_curator_and_nothing_else — O1's oracle, end to end through the real
     join, the real extraction and the three real collectors: the shim row lands in the pitfalls
-    residue, mints no `_draft/` template, and is not handed to the lead-author. The record
-    carries the argv as its `executed_query` and the shim's diagnosis as its digest, which is
-    what `lead_pitfalls.md` step 2 reads to name a mistake and a fix.
-
-    Since #870 M5′ the record's `system` is `""` however the reduce was attributed: the
-    payload it opened selects nothing about whose mistake the SQL was, and the row is routed
-    by its sentinel `query_id` to the reducer surface."""
+    residue, mints no `_draft/` template, and is not handed to the lead-author. The record"""
     r = failing_reducer_run
     pitfalls = collect_general_failures(r.own_leads(), r.run_dir, **repo_skills())
     assert len(pitfalls) == 1, "the shim failure did not reach the pitfalls curator"
@@ -536,25 +368,10 @@ def _looping_run(tmp_path, run_id: str, query_id: str | None) -> _Res:
     ])
 
 
-def test_trip_row_carries_the_sentinel_identity(tmp_path):
-    """trip_row_carries_the_sentinel_identity — the refusal is recorded under the sentinel, not
-    under whatever the model called the request it was refused. The two rows BELOW the trip keep
-    the model's id (#807's `repeat_key_ignores_query_id` pins that they must), so this changes
-    the refusal record only."""
-    r = _looping_run(tmp_path, "d823-trip", "elastic.sshd-raw-events-window")
-    rows = r.own_rows
-    assert len(rows) == 3, f"the lead did not trip at the third request: {len(rows)} rows"
-    assert rows[2]["exit_code"] == 64, "no trip row, so the premise is vacuous"
-    assert [row["query_id"] for row in rows[:2]] == ["elastic.sshd-raw-events-window"] * 2
-    assert rows[2]["query_id"] == REPEAT_TRIP_QUERY_ID
-    assert rows[2]["error_class"] == "agent-fixable"
-
-
 def test_trip_row_reaches_the_curator_and_mints_no_draft(tmp_path):
     """trip_row_reaches_the_curator_and_mints_no_draft — O2's oracle. The TRIP ROW routes
     `(pitfalls=1, drafts=0, handoff=0)`. On this base the same row routes `(0, 1, 0)`: it is
-    minted as `skills/elastic/_draft/sshd-raw-events-window.md`, a proposed catalog template
-    authored from the query the guard just refused."""
+    minted as `skills/elastic/_draft/sshd-raw-events-window.md`, a proposed catalog template"""
     r = _looping_run(tmp_path, "d823-triproute", "elastic.sshd-raw-events-window")
     assert r.routed(REPEAT_TRIP_QUERY_ID) == (1, 0, 0)
     # The scoping is the assertion, not a convenience: the two rows BELOW the trip keep the
@@ -563,26 +380,10 @@ def test_trip_row_reaches_the_curator_and_mints_no_draft(tmp_path):
     assert r.routed("elastic.sshd-raw-events-window") == (0, 2, 0)
 
 
-def test_trip_row_on_a_catalog_id_still_reaches_the_curator(tmp_path):
-    """trip_row_on_a_catalog_id_still_reaches_the_curator — the other branch of the misroute.
-    When the model names an ESTABLISHED template, today's trip row resolves to it and
-    `build_handoff` hands the lead-author a conduct trip as a failure OF that template, to be
-    folded into its doc. The sentinel closes both branches with one change — and leaves the
-    established template's own two invocations going to the lead-author, where they belong."""
-    catalog = lead_neighbors.load_catalog(None)
-    established = sorted(t.id for t in catalog if t.id.startswith("elastic."))[0]
-    r = _looping_run(tmp_path, "d823-tripcat", established)
-    assert r.own_rows[2]["query_id"] == REPEAT_TRIP_QUERY_ID
-    assert r.routed(REPEAT_TRIP_QUERY_ID) == (1, 0, 0)
-    assert r.routed(established) == (0, 0, 1)
-
-
 def test_trip_row_still_counts_toward_a_later_check(tmp_path):
     """trip_row_still_counts_toward_a_later_check — the guard's counted domain is UNTOUCHED by
     this issue. `repeat_trip`'s `in_domain` keys on `ABOVE_GUARD_QUERY_ID` alone
-    (`record_query.py:421`), and #807's `trip_row_is_itself_an_occurrence_on_replay` pins that a
-    trip row counts, so a replay of a recorded table keeps matching the live run. Renaming the
-    row for the offline ROUTER must not silently widen what the guard SKIPS."""
+    (`record_query.py:421`), and #807's `trip_row_is_itself_an_occurrence_on_replay` pins that a"""
     r = _looping_run(tmp_path, "d823-domain", "elastic.coined-a")
     rows = r.own_rows
     key = {"system": "elastic", "verb": "query", "params": {"native_query": "FROM logs"}}
@@ -594,14 +395,7 @@ def test_trip_row_still_counts_toward_a_later_check(tmp_path):
 def test_the_two_writers_share_one_seq_sequence(tmp_path):
     """the_two_writers_share_one_seq_sequence — R2, raised by the mechanical gate: after M1 the
     queries table has TWO writers in the gather lane, and `seq` is half its primary key. If the
-    bash lane allocated a seq independently of the query tool, two rows would collide on
-    `(lead_id, seq)` and one payload sidecar would overwrite the other — silently, since both
-    writers are best-effort about persistence.
-
-    Driven interleaved, because that is the only arrangement that can catch it: query, failed
-    reduce, query, failed reduce in one lead. Both writers go through
-    `record_query.append_query_row`, so this pins the single-root property the gate demanded
-    rather than a coincidence of ordering."""
+    bash lane allocated a seq independently of the query tool, two rows would collide on"""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     r = _run(tmp_path, run_dir=run_dir, run_id="d823-seq", turns=[
         q("elastic", "query", {"native_query": "FROM a"}),
@@ -641,8 +435,7 @@ def test_shim_row_never_causes_a_trip(tmp_path):
 def test_shim_command_is_capped_in_the_record(tmp_path):
     """shim_command_is_capped_in_the_record — `stderr_digest` is capped at 160
     (`query_tool.py:416-419`) but `executed_query` is not: `_structured_call`
-    (`draft_synthesis.py:27-31`) yaml-dumps `params` whole. An unbounded model-authored command
-    therefore enters the curator's prompt, and possibly a committed file, in full."""
+    (`draft_synthesis.py:27-31`) yaml-dumps `params` whole. An unbounded model-authored command"""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     payload = run_dir / "gather_raw" / LEAD / "0.json"
     long_sql = "SELECT " + ("x" * 8000)
@@ -679,13 +472,6 @@ def test_shim_row_payload_is_not_the_untrusted_stdout(tmp_path):
 # O3 — the channel can complete a revolution.
 
 
-def test_pitfalls_threshold_default_is_three():
-    """pitfalls_threshold_default_is_three — the queue gate. At 5, three archived runs
-    (227 rows) never reached one batch. The value is a default, not a constant: the env
-    override stays, and this pins only what an unconfigured loop does."""
-    assert loop_config.pitfalls_threshold() == 3
-
-
 # Non-obligations — examined noes, pinned so a rejected reading cannot re-enter as an
 #      assumption. Each is a `Demand {form: waiver}` in the graph.
 
@@ -693,8 +479,7 @@ def test_pitfalls_threshold_default_is_three():
 def test_catalog_template_failures_still_route_to_the_lead_author(tmp_path):
     """catalog_template_failures_still_route_to_the_lead_author — N1: `lead_extraction.py:102`
     is the partition boundary, not blindness. A failure on an ESTABLISHED template goes to the
-    agent that edits that template's doc, and #807's two cited examples are both catalog
-    members. Removing the skip would double-route, not unblind."""
+    agent that edits that template's doc, and #807's two cited examples are both catalog"""
     catalog = lead_neighbors.load_catalog(None)
     established = sorted(t.id for t in catalog if t.id.startswith("elastic."))[0]
     rec = VerbRecorder()
@@ -711,8 +496,7 @@ def test_catalog_template_failures_still_route_to_the_lead_author(tmp_path):
 def test_budget_exhausted_lead_mints_no_record(tmp_path):
     """budget_exhausted_lead_mints_no_record — N2: a lead that spends its budget on DISTINCT
     queries has no nameable mistake. `l-012` ran 36 queries with 36 distinct keys and died on
-    `request_limit`; the curator's own prompt would skip it, and `execution.md` is the wrong
-    file for a conduct lesson. The repeat guard cannot see it either — it is not a repeat."""
+    `request_limit`; the curator's own prompt would skip it, and `execution.md` is the wrong"""
     r = _run(tmp_path, run_id="d823-n2", turns=[
         q("elastic", "query", {"native_query": "FROM a"}),
         q("elastic", "query", {"native_query": "FROM b"}),

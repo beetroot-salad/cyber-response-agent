@@ -54,7 +54,7 @@ _UNSAFE_METHODS = frozenset({"write_text", "write_bytes", "mkdir"})
 #: The writer census: a copy of `defender/tests/e2e/_spec771.py`'s
 #: `CENSUS_MODULES | DRAIN_MODULES`, not a derivation, because a repo-root lint may not import
 #: the test package (it drags in pydantic_ai and the whole runtime). Kept in step only by
-#: `test_the_write_lint_hard_gates_the_census_rows_and_ratchets_only_new_ones` (set-for-set);
+#: the write-lint census test (set-for-set);
 #: a census row added there and not here is a module the gate stops covering.
 LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
     "runtime/observe.py",

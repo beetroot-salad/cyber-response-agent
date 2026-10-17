@@ -1,30 +1,4 @@
-"""#961 / #964 — every writer of `investigation.md` meets the schema, and the close is one of
-them.
-
-The two issues are one defect seen from two sides. `_artifact_schema` owns what a well-formed
-artifact is; `permission.decide_write` applies it to every write a MODEL makes. That made a
-sentence true and load-bearing — *a committed investigation parses* — and #954's design rests
-on it explicitly. It was only ever true of the verbs the agent writes through:
-
-  #964  the harness seeds lead-0's declaring `:L findings` row before MAIN's first turn by
-        concatenating text and calling `write_guarded` directly. No tool call, no gate, no
-        schema. Harmless in fact — one block, one row — and load-bearing anyway, because the
-        invariant everything downstream inherits is about the ARTIFACT, not about the verbs.
-  #961  `close_investigation` is the verb that PUBLISHES: it commits the report the learning
-        loop trains on and hands the parsed companion to the review gate. It validated the
-        report it wrote and never the companion it published, so a document carrying an
-        error-severity finding closed successfully.
-
-A third site turned up when `lint_ungated_artifact_write` first ran: the turn-N branch seeds a
-sibling run's whole document from a fence-boundary prefix of the source, and a valid source
-does NOT guarantee a valid prefix. It is tested here with the other two because it is the same
-defect, not a neighbour of it.
-
-What this suite holds that the lint cannot: the lint asks whether a schema call sits in the
-frame, which is a syntactic question. Whether the close actually REFUSES, and whether a
-refusing seed actually declines to write, are behavioural — and #961's half is not a write bug
-at all, so no write-shaped gate could have caught it.
-"""
+"""#961/#964: every writer of investigation.md meets the schema. The close validates the companion it publishes (an error-severity document commits nothing; a forced close is exempt; an unreadable document closes unresolved), reads it once for every gate, and the harness lead-0 seed is validated before it lands and never raises into a run."""
 
 from __future__ import annotations
 
@@ -43,7 +17,6 @@ from defender.tests._invlang_warn_836 import (
 #: A document whose ONLY defect is error-severity: two rows refining one slot to two different
 #: values inside a single block (#962). Error severity is the point — a WARN-family row is the
 #: repair window's business and is refused by a different gate one line up, so a warn document
-#: could not tell the two apart.
 _ERROR_DOC = PROLOGUE + attr_block(
     "l-001|v-001|class|bastion",
     "l-001|v-001|class|workstation",
@@ -57,9 +30,7 @@ _CLEAN_DOC = PROLOGUE + attr_block("l-001|v-001|class|bastion")
 def _pay_inconclusive_price(deps) -> None:
     """#923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a
     source or capability) — unrelated to anything this module tests, which is about
-    #961/#964's gate on the write path itself, not about the price. Append a paying row
-    directly to the run's `investigation.md` bytes (never through a tool, so it cannot itself
-    trip the very gates this suite is testing) rather than editing every fixture document."""
+    #961/#964's gate on the write path itself, not about the price. Append a paying row"""
     from pathlib import Path
 
     path = Path(deps.run_dir) / "investigation.md"
@@ -89,11 +60,7 @@ def _close(deps, disposition, **kw):
 
 def test_a_close_over_an_error_severity_document_commits_nothing(tmp_path):
     """THE defect. A document carrying an error-severity finding used to close successfully and
-    commit `report.md` untouched.
-
-    Asserted on the ARTIFACT, not only on the refusal: what #961 is about is a disposition
-    reaching disk, so a test that only caught the exception would still pass against an
-    implementation that raised after committing."""
+    commit `report.md` untouched."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -120,10 +87,7 @@ def test_the_same_document_without_the_defect_closes(tmp_path):
 
 def test_the_close_refusal_names_the_rows_and_the_repair_verb(tmp_path):
     """The refusal is the model's only channel: it is told its own context IS the file, so a
-    close it cannot act on is a close it will retry unchanged until the budget runs out.
-
-    Three things have to be in it — that nothing was committed, which rows are wrong, and the
-    verb that reaches them."""
+    close it cannot act on is a close it will retry unchanged until the budget runs out."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -141,14 +105,7 @@ def test_the_close_refusal_names_the_rows_and_the_repair_verb(tmp_path):
 def test_the_frameworks_forced_close_is_exempt(tmp_path):
     """The exemption the flagged-row gate already carries, for its own reason: retry
     exhaustion has no model left to repair with, so gating the FORCED close would dead-letter
-    the run at persist for a MISSING report.md.
-
-    A malformed companion is worse to publish than a well-formed one; a run with no
-    disposition at all is worse than either.
-
-    #923: the framework's forced close commits `unresolved` — the host's own verdict — not
-    `inconclusive`, which now carries an entry price a forced caller (no model left to pay it
-    with) is refused for supplying at all (`close_tool.py`'s host-boundary check, fork J31)."""
+    the run at persist for a MISSING report.md."""
     deps, run = main_deps(tmp_path)
     seed_investigation(run, _ERROR_DOC)
 
@@ -169,21 +126,7 @@ def test_the_frameworks_forced_close_is_exempt(tmp_path):
 
 
 def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_path):
-    """H7's condition, and the line the close has to keep straight.
-
-    A document that DECODES and does not validate is refused — the author's malformed
-    document, repairable. A document that cannot be READ is a different thing — nothing can
-    be derived from it — and it must not manufacture an unclosable run (#836's wedge class),
-    nor may the model's verdict commit against it: no gate ever looked at what the
-    disposition claims to conclude. So the close decides it ONCE, ahead of every gate, as
-    the review that cannot run it is — the host's `unresolved` with the typed failure kind —
-    for every way the read can fail THAT NO RETRY CHANGES: bytes that are not UTF-8, a
-    planted entry at the name (a directory, a fifo that would block a plain read forever).
-    The I/O fault is the one shape deliberately NOT here — it is refused to retry instead
-    (`test_an_io_fault_reading_the_companion_is_refused_not_overruled`), because a terminal
-    overrule on a fault the next read may not see would lose a settled verdict to a hiccup.
-
-    Three shapes through the real reader, each asserting the same commit."""
+    """H7's condition, and the line the close has to keep straight."""
     import os
     from defender._vocab import HOST_ONLY_DISPOSITION
     from defender.runtime.close_tool import CAUSE_REVIEW_INCOMPLETE, FORCED_INCONCLUSIVE, STAGE_ERROR
@@ -221,18 +164,7 @@ def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_pat
 def test_an_io_fault_reading_the_companion_is_refused_not_overruled(tmp_path):
     """The I/O fault is the ONE unreadable shape the model's close is refused on rather than
     overruled: `investigation.md` is there, is a plain file, and cannot be opened (EACCES here;
-    EIO on a degraded mount is the live case). A terminal `unresolved` on it would let a
-    one-off fault replace a settled `malicious` — the commit is terminal, so the retry that
-    would have read the file fine is refused as "already closed". The refusal costs a retry,
-    and if the fault persists the retry budget ends at the host's forced close and the same
-    `unresolved`, with the model told why at every step.
-
-    Nothing lands: no report, no record, no trace row — the fault arm's own writes beside an
-    unreadable file were the second way this used to end a run with no report at all.
-
-    The fault is met as `nobody` because root ignores mode bits (the repo's own root-uid
-    caveat); a non-root uid meets it directly and the fork stays so the verdict travels one
-    channel on both."""
+    EIO on a degraded mount is the live case). A terminal `unresolved` on it would let a"""
     from defender.runtime.tools import read_companion
     from defender.tests._roster1035 import EXIT_RAISED_EXPECTED, handed_to_nobody, run_as_nobody
     from defender.tests._spec992 import record_files, trace_files
@@ -258,14 +190,7 @@ def test_an_io_fault_reading_the_companion_is_refused_not_overruled(tmp_path):
 
 
 def test_the_price_gate_still_answers_first_for_what_it_prices(tmp_path):
-    """ORDERING, which is load-bearing rather than cosmetic.
-
-    The structure check runs the WHOLE validator, and some of its rules are conditioned on the
-    disposition the DOCUMENT concludes. Ahead of the entry-price gate it would answer a close
-    of `false-positive` with a complaint about the `benign` the companion happens to declare —
-    true, but about a keyword the model is no longer claiming, and it would shadow the specific
-    obligation the model can actually discharge.
-    """
+    """ORDERING, which is load-bearing rather than cosmetic."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run = main_deps(tmp_path)
@@ -282,21 +207,7 @@ def test_the_price_gate_still_answers_first_for_what_it_prices(tmp_path):
 def test_one_read_answers_every_gate(tmp_path):
     """The close takes ONE reading of `investigation.md` and hands it to every gate, so the
     gates cannot disagree about which bytes they judged — and the reading has exactly three
-    answers, of which only one reaches a gate as a document.
-
-      * never written — `""`: the repair window is empty, the structure check is `None`, and
-        the price gate owes every priced keyword its whole price;
-      * read — the text, with universal newlines, exactly as `Path.read_text` hands it: a
-        document with CRLF endings reaches every gate as it always did;
-      * could not be read — `None`, with the refusal: bytes that do not decode, a non-plain
-        entry at the name, an I/O fault. ONE answer, not three, because no gate treats them
-        apart: the per-request window falls open (a wedged run is the worse failure), and the
-        close decides the rest before any gate (`test_an_unreadable_document_closes_
-        unresolved_not_the_models_verdict`). No lenient decode exists for a gate to read.
-
-    The read goes through the guarded primitive every artifact in the box-writable tree takes,
-    so a fifo planted at the name is refused at the open rather than blocked on: the arm
-    enforces its own bound, since a reader that hangs would wedge CI instead of failing."""
+    answers, of which only one reaches a gate as a document."""
     import os
     import signal
 
@@ -351,15 +262,7 @@ def test_one_read_answers_every_gate(tmp_path):
 def test_the_write_verbs_build_on_the_reading_they_judged(tmp_path):
     """`append_block` and `fix_row` derive their window from ONE guarded reading and build the
     bytes they write from that same reading — never from a second, unguarded `Path.read_text`
-    of the name. The second read used to follow a symlink the guarded read had refused, so the
-    gate judged one document (nothing — an empty window) while the write extended another
-    (whatever the link pointed at): one document, two answers, at the write verbs after the
-    close had stopped doing it.
-
-    Planted symlink: the verb is refused naming the refusal, and the link's target is
-    untouched. Undecodable bytes: refused, with the same reading's reason, and nothing
-    written. Both refusals are the reading's own, so a reworded refusal in `_io` cannot make
-    a planted entry read as a passing fault (`retryable` keys on the errno, not the text)."""
+    of the name. The second read used to follow a symlink the guarded read had refused, so the"""
     from defender._io import ALIAS_READ_REFUSAL
     from defender.runtime.tools import _tool_append_block, _tool_fix_row
     from pydantic_ai.exceptions import ModelRetry
@@ -392,16 +295,7 @@ def test_the_write_verbs_build_on_the_reading_they_judged(tmp_path):
 
 
 def test_a_committed_unfenced_header_does_not_make_the_run_unclosable(tmp_path):
-    """The close reads the document as ITS OWN BASELINE, not against no baseline at all.
-
-    Every check keyed on `current` asks what THIS WRITE INTRODUCES, and a close introduces
-    nothing. `_check_surface` subtracts the baseline's orphaned headers from the proposal's, so
-    with `None` every unfenced block header already committed reads as newly added — a family
-    the write gate deliberately scopes to what a write ADDS, precisely because append-only and
-    a `:R`-only `fix_row` leave those bytes unreachable forever. Read that way the close would
-    refuse, for the life of the run, a document every write gate had accepted, with no repair
-    the model could make.
-    """
+    """The close reads the document as ITS OWN BASELINE, not against no baseline at all."""
     deps, run = main_deps(tmp_path)
     seed_investigation(
         run,
@@ -414,19 +308,7 @@ def test_a_committed_unfenced_header_does_not_make_the_run_unclosable(tmp_path):
 
 
 def test_an_error_severity_row_is_repairable_rather_than_a_dead_end(tmp_path):
-    """The close names `fix_row`, so `fix_row` has to be able to reach what the close refused.
-
-    The repair WINDOW is warn-severity — the rows whose presence blocks an append. The repair
-    SET is what the verb may touch, and an error-severity row belongs in it: it blocks every
-    write just as hard, but was not in the window, so `fix_row` refused it and was not even
-    offered. That left no legal move — close refuses and names `fix_row`, `fix_row` says
-    nothing is flagged, `append_block` refuses the same bytes — and the model would spend its
-    whole retry budget before the framework force-closed `inconclusive`, discarding the
-    disposition the run had actually reached.
-
-    Reachable because a document valid when written can stop being valid later: a rule that
-    ships after the bytes landed judges what is already committed, and #962 is exactly one.
-    """
+    """The close names `fix_row`, so `fix_row` has to be able to reach what the close refused."""
     from defender.runtime.tools import (
         _tool_fix_row, committed_document_refusal, flagged_diagnostics, read_companion,
         repairable_diagnostics,
@@ -450,19 +332,7 @@ def test_an_error_severity_row_is_repairable_rather_than_a_dead_end(tmp_path):
 
 def test_the_repair_set_is_widened_by_severity_and_not_by_scope(tmp_path):
     """An error-severity row OUTSIDE `:R attr_updates` stays out, and that is what keeps the
-    widening safe.
-
-    The warn window walks `:R attr_updates` and nothing else, so every guard downstream of it
-    inherited the scope for free — `_attr_block_columns` answers `None` for a row no such block
-    holds, and `_tool_fix_row` reads that `None` as "skip the shape guard", the guard that
-    makes "no verb mutates or removes a committed `:V`/`:E` record" true by construction.
-    Parse diagnostics carry a locus and a real row for EVERY block, so admitting them by
-    severity alone would put a committed `:V` declaration in the repair set with nothing in
-    front of it: this `new_row` spans two lines and would forge a whole second vertex.
-
-    Both halves are asserted, because either alone leaves the hole open: the row is not in the
-    set, and the verb refuses it if the model quotes it anyway.
-    """
+    widening safe."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime.tools import _tool_fix_row, repairable_diagnostics
@@ -492,14 +362,7 @@ def test_the_repair_set_is_widened_by_severity_and_not_by_scope(tmp_path):
 
 
 def test_a_row_naming_no_text_stays_out_of_the_repair_set(tmp_path):
-    """The set is the rows `fix_row` can ADDRESS, and one nobody can quote back is not one.
-
-    The repeated-lead-id family reports at BLOCK scope, so it carries a locus whose `row_text`
-    is empty — and `fix_row` reads an empty `old_row` as DELETE. Admitting it would offer a
-    repair that names nothing and deletes on sight, and would quietly reverse #954's decision
-    that a document holding that repeat is refused at every write verb with no legacy
-    exemption.
-    """
+    """The set is the rows `fix_row` can ADDRESS, and one nobody can quote back is not one."""
     from defender.runtime.tools import repairable_diagnostics
     from defender.tests._invlang_amendment_954 import VERTICES, findings_block
 
@@ -512,14 +375,7 @@ def test_a_row_naming_no_text_stays_out_of_the_repair_set(tmp_path):
 
 def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, capsys):
     """The close's structure gate fails OPEN on a validator fault, like the gate one line above
-    it (#836 H7) and unlike the WRITE gate it shares a schema with.
-
-    On a write, failing closed is free — nothing lands and the model re-sends. Here the same
-    choice turns a validator BUG into an unclosable run: there is no repair for it, so the
-    model retries until the framework force-closes and the real disposition is discarded. A
-    gate that failed open on unreadable BYTES and closed on an unreadable VALIDATOR would be
-    answering one question two ways.
-    """
+    it (#836 H7) and unlike the WRITE gate it shares a schema with."""
     import defender._artifact_schema as schema
 
     def _boom(_text, _current):
@@ -551,16 +407,7 @@ def test_the_harness_seed_lands_when_it_validates(tmp_path):
 
 
 def test_a_seed_that_would_not_validate_is_not_written(tmp_path, capsys):
-    """The decision #964 asks for, not just the check.
-
-    Writing it anyway would rebuild the bypass under a new name. Skipping costs a reserved id
-    that MAIN may then cite — and the validator answers that citation with `undeclared lead`, a
-    refusal MAIN reads, can act on, and can clear by declaring the lead itself. Loud,
-    actionable and recoverable, where a laundered write is none of the three.
-
-    The baseline here is ALREADY malformed, which is the realistic trigger: the seed is built
-    from a fixed template, so a failure means the document it is appending to was broken before
-    this frame ever looked at it."""
+    """The decision #964 asks for, not just the check."""
     from defender.runtime.lead_zero import _declare_l_finding
 
     run = tmp_path / "run"
@@ -590,9 +437,7 @@ def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):
 def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_making():
     """#964's decision is only safe if what the MODEL sees is actionable: a model that cites a
     reserved id whose declaring row is missing is refused with `undeclared lead`, and that
-    refusal must say declaring the row is a repair, not a reuse of a claimed id. (The ORIENT
-    note that said the same was retired with the ancestor lead, #1222; the refusal is the one
-    place left, and names the correlation lead's id.)"""
+    refusal must say declaring the row is a repair, not a reuse of a claimed id. (The ORIENT"""
     from defender.runtime.lead_zero import L3
     from defender.skills.invlang.validate import diagnose
 
@@ -606,17 +451,7 @@ def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_makin
 # the third site — the turn-N branch's seed
 
 def test_a_valid_document_can_have_an_invalid_fence_prefix():
-    """The premise the branch seed rested on, refuted by construction.
-
-    The reference rules are order-INDEPENDENT: `_check_lead_refs` asks whether a cited lead is
-    declared ANYWHERE in the document, not whether it was declared first. So a source whose
-    `:R` block cites a lead its `:L findings` block declares one fence LATER is well-formed as
-    a whole and `undeclared lead` when cut between the two — which is exactly what a
-    fence-boundary seed does.
-
-    No document in the checked-in corpus has that shape. That is why this is built rather than
-    sampled: the class is reachable, and "we have not seen one" is not the same claim.
-    """
+    """The premise the branch seed rested on, refuted by construction."""
     from defender.skills.invlang.parser import scan_fences
     from defender.skills.invlang.validate import diagnose
     from defender.tests._invlang_amendment_954 import (

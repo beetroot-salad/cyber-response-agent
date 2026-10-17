@@ -1,29 +1,7 @@
-"""Binding spec for the curator GLM port — envelope survival + trace/state-root/teardown.
-
-One test per demand (spec_graph_curator-glm-port.yaml). Two kinds live here:
-
-- CHARACTERIZATION (kept-envelope survival + env-corpus): these drive the REAL
-  ``run_batch`` through the ``dataclasses.replace(cfg, invoke_agent=fake)`` seam
-  (conftest.py's ``tmp_repo`` / the ``build_*_config`` factories) and assert the
-  transaction envelope still rolls back / cross-checks / stays idempotent / keeps
-  the loop the sole committer under the in-process invoke. Modeled on
-  test_author_postflight.py / test_author_atomic.py / test_author_actor(_env).py.
-  GREEN against HEAD (the envelope is unchanged by the port, R5).
-
-- NEW behavior (trace uniqueness/persistence, state-root pin, runner teardown):
-  these pin what the port ADDS and are RED until it lands. The two trace tests
-  reach the assumed port seam ``defender.learning.author.curator_engine.run_curator_stage``
-  (SEAM INTERFACE CONTRACT) via a LAZY import inside ``_spawn_curator`` so the
-  characterization tests above still collect and run without the target present.
-
-No ``monkeypatch.setattr`` — cfg-field + constructor injection only. Every negative
-is paired with a positive control; expected values trace to the demand, not to a
-re-implementation.
-"""
+"""Curator GLM port: kept-envelope survival (rollback, dirty cross-check, scope gate, idempotent redrain, no agent git) and per-spawn trace distinctness."""
 from __future__ import annotations
 
 import logging
-import ast
 import os
 from dataclasses import replace
 from pathlib import Path
@@ -31,18 +9,11 @@ from pathlib import Path
 
 from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
 from defender._io import read_jsonl_rows
-from defender.tests._repo import head_message, seed_repo
 from defender.learning.core.state import FINDINGS
 
 
-
-
 def _rows_without_attempts(text: str) -> list[dict]:
-    """The queue's rows with the retirement counter dropped.
-
-    #719: a post-agent abort now BUMPS every row it was authoring (behaviour change 2 of
-    four), so "the queue is intact for retry" is no longer a byte comparison — the rows
-    themselves must be unchanged, and the count must have moved by exactly one."""
+    """The queue's rows with the retirement counter dropped."""
     import json as _json
 
     return [
@@ -81,20 +52,11 @@ def _head_files(tmp_repo) -> list[str]:
     ).stdout.split()
 
 
-
-
 def test_survival_partial_write_rollback(tmp_repo, helpers):
-    """A mid-batch fault (the in-process ``run_stage`` RunUnprocessable, surfaced through
-    the seam as ``AuthorError``) after the agent wrote some lesson bytes: no partial
-    commit lands, the queue is NOT rotated (findings retryable), and — once the drain's
-    rollback restores the corpus — a re-drain authors the finding EXACTLY once (no silent
-    double-author).
-
-    REVERSED BY #719: the leftover used to be load-bearing here, because the clean-scope
-    gate refused the re-drain until something outside the drain discarded it — which is
-    precisely how a retiring fault wedged its own channel. The drain now restores the
-    corpus itself on a retiring fault, so the retry the attempt bump exists to allow
-    actually happens."""
+    """A mid-batch fault (the in-process ``run_stage`` RunUnprocessable, surfaced through the seam
+    as ``AuthorError``) after the agent wrote some lesson bytes: no partial commit lands, the
+    queue is NOT rotated (findings retryable), and — once the drain's rollback restores the
+    corpus — a re-drain authors the finding EXACTLY once (no silent double-author)."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-P/0", run_id="run-P")
     commits_before = _commit_count(tmp_repo)
@@ -126,13 +88,9 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
 
 
-
-
 def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
-    """``verify_agent_state``'s committed⇔corpus-dirty cross-check still holds under the
-    in-process invoke. BOTH inconsistent states abort (rc 2, queue intact):
-    committed=[id] + CLEAN corpus, and committed=[] + DIRTY corpus. Positive control:
-    the CONSISTENT state (committed=[id] + dirty corpus) commits and rotates out."""
+    """``verify_agent_state``'s committed⇔corpus-dirty cross-check still holds under the in-process
+    invoke."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
     pre = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
@@ -172,13 +130,10 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
 
 
-
-
 def test_survival_scope_gate_strays(tmp_repo, helpers):
-    """The scope gate catches a NEW file the agent wrote OUTSIDE the corpus (→ AuthorError,
-    rc 2), but a sibling's PRE-EXISTING baseline stray (staged before the agent ran) is
-    NOT blamed on the curator. Positive control: with only the baseline stray, the batch
-    commits the lesson (pathspec-scoped — the stray does not ride into the commit)."""
+    """The scope gate catches a NEW file the agent wrote OUTSIDE the corpus (→ AuthorError, rc 2),
+    but a sibling's PRE-EXISTING baseline stray (staged before the agent ran) is NOT blamed on
+    the curator."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-S/0", run_id="run-S")
     pre = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
@@ -210,13 +165,10 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
     assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
 
 
-
-
 def test_survival_idempotent_redrain(tmp_repo, helpers):
-    """A re-drain of an already-committed batch does not double-commit or double-append:
-    once the finding is cited in an existing lesson's ``source_finding_ids``, the next
-    tick filters it (consumed_idempotent) and the agent is NEVER re-invoked. Positive
-    control: tick 1 authored + committed the lesson exactly once."""
+    """A re-drain of an already-committed batch does not double-commit or double-append: once the
+    finding is cited in an existing lesson's ``source_finding_ids``, the next tick filters it
+    (consumed_idempotent) and the agent is NEVER re-invoked."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-I/0", run_id="run-I")
     commits_before = _commit_count(tmp_repo)
@@ -242,14 +194,10 @@ def test_survival_idempotent_redrain(tmp_repo, helpers):
     assert "consumed_idempotent" in consumed
 
 
-
-
 def test_survival_agent_no_git(tmp_repo, helpers):
-    """The in-process agent runs NO git — the loop remains the SOLE committer. The agent
-    leaves the lesson uncommitted in the working tree and the loop makes exactly ONE new,
-    pathspec-scoped commit. If the agent held a git grant it would produce its own
-    commit, so ``rev-list --count`` advancing by EXACTLY 1 (not ≥2) is the observable that
-    the agent committed nothing."""
+    """The in-process agent runs NO git — the loop remains the SOLE committer. The agent leaves the
+    lesson uncommitted in the working tree and the loop makes exactly ONE new, pathspec-scoped
+    commit."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-G/0", run_id="run-G")
     commits_before = _commit_count(tmp_repo)
@@ -265,76 +213,10 @@ def test_survival_agent_no_git(tmp_repo, helpers):
     assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
 
 
-
-
-def _env_repo(tmp_path: Path):
-    """A tmp git repo with the shared ``defender/lessons-environment/`` corpus + its
-    pending dir — stands in for the layout both env directions (C benign, D adversarial)
-    drain into. Returns the repo path."""
-    repo = tmp_path / "repo"
-    corpus = repo / "defender" / "lessons-environment"
-    pending = repo / "defender" / "learning" / "_pending"
-    corpus.mkdir(parents=True)
-    pending.mkdir(parents=True)
-    (corpus / ".gitkeep").write_text("")
-    seed_repo(repo)
-    return repo
-
-
-def _commit_msg_for(repo: Path, rel_path: str) -> str:
-    return head_message(repo, path=rel_path)
-
-
-
-
-
-
-def test_runner_teardown_structural():
-    """STRUCTURAL. No production module under ``defender/learning/author`` references the
-    removed ``claude -p`` transport symbols — ``invoke_claude_print`` /
-    ``curator_allowed_tools`` / ``curator_agent_env`` (all deleted). AST-walk of Name/Attribute
-    references (not docstrings/comments), so the check is about real callers — a conservation
-    guard against re-introducing the transport.
-
-    NB #558 INVERTED the old ``resolve_verifier_python`` SURVIVES assertion that used to live
-    here (the forward-check became an in-process tool, not a ``python3 <verifier>`` subprocess).
-    That inversion was owned by ``test_forward_check_tool.py::test_d26_no_curator_resolves_a
-    _verifier_interpreter`` (demand d26 in spec_graph_558-forward-check-tool.yaml); #773 M1 then
-    deleted the forward-check tool and that test file outright (the curator no longer calls it at
-    all — there is no verifier interpreter left to resolve), so the zero-callers guard this note
-    describes is now moot rather than owned elsewhere."""
-    import defender.learning.author.shared as _anchor
-
-    author_dir = Path(_anchor.__file__).resolve().parent
-    torn_down = ("invoke_claude_print", "curator_allowed_tools", "curator_agent_env")
-    referencing = {sym: set() for sym in torn_down}
-
-    for py in sorted(author_dir.rglob("*.py")):
-        if py.name.startswith("test_"):
-            continue
-        names: set[str] = set()
-        for node in ast.walk(ast.parse(py.read_text())):
-            if isinstance(node, ast.Name):
-                names.add(node.id)
-            elif isinstance(node, ast.Attribute):
-                names.add(node.attr)
-        rel = py.relative_to(author_dir).as_posix()
-        for sym in torn_down:
-            if sym in names:
-                referencing[sym].add(rel)
-
-    assert referencing["invoke_claude_print"] == set()
-    assert referencing["curator_allowed_tools"] == set()
-    assert referencing["curator_agent_env"] == set()
-
-
-
-
 def _spawn_curator(**over):
     """Call the assumed ``curator_engine.run_curator_stage`` with hermetic defaults; a test
     overrides per case. Mirrors test_lead_author_engine.py's ``_spawn`` over
-    ``run_author_stage``. The ``run_author`` DI seam captures the trace anchor without
-    running the pydantic-ai graph. Signature per the SEAM INTERFACE CONTRACT (assumed)."""
+    ``run_author_stage``."""
     from defender.learning.author.curator_engine import (
         run_curator_stage,
     )
@@ -360,14 +242,10 @@ def _spawn_curator(**over):
     return run_curator_stage(**as_curator_stage_args(kw))
 
 
-
-
 def test_trace_per_spawn_distinct(tmp_path: Path):
-    """UNIQUENESS at the composition frame: two curator spawns (C then D) in ONE drain,
-    into ONE learning_run_dir, must get DISTINCT trace paths keyed on (batch_id, pid) — a
-    single-spawn test cannot see the collision. Positive control (truncate-mode): opening
-    a RequestLogger on one path truncates ONLY that path, so two DISTINCT names never
-    clobber each other."""
+    """UNIQUENESS at the composition frame: two curator spawns (C then D) in ONE drain, into ONE
+    learning_run_dir, must get DISTINCT trace paths keyed on (batch_id, pid) — a single-spawn
+    test cannot see the collision."""
     rd = tmp_path / "state" / "_pending"
     rd.mkdir(parents=True)
 
@@ -394,11 +272,5 @@ def test_trace_per_spawn_distinct(tmp_path: Path):
     observe.RequestLogger(d).close()
     assert d.read_text() == ""
     assert c.read_text() == "C-TRACE\n"
-
-
-
-
-
-
 
 

@@ -1,16 +1,4 @@
-"""#920 — the one private-framework symbol the resume seam depends on, pinned.
-
-`branch.framework_view` calls `pydantic_ai._agent_graph._clean_message_history`. That is the
-only private-framework import in the tree, against an unbounded `>=1.107` pin, and it is
-function-local — so a framework that renamed it would fail MID-RESUME, inside a run that has
-already forked a session and written a case pointer, rather than at collection.
-
-This file is that collection-time failure. It asserts the symbol exists AND that it still does
-the thing the seam depends on, because a symbol that survives a rename while changing behaviour
-is the worse of the two failures: `fork` and `hydrate` count store rows, the framework counts
-what it holds after normalising, and the resume works only while both numbers come from the
-same call.
-"""
+"""#920 — the one private-framework symbol the resume seam depends on, pinned."""
 from __future__ import annotations
 
 import pytest

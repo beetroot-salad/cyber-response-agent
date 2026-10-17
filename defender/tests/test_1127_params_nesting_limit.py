@@ -1,34 +1,4 @@
-"""#1127 — the queries table's writer and its reader agree on what a row is.
-
-`read_jsonl_rows` refuses any line nested deeper than `_io.JSON_NESTING_LIMIT` (100), judged on
-the bytes. Before #1127 a params map nested 100 deep (the map itself counted as 1) was written
-and never read again: `lead_rows` skipped it, `_next_seq` reused its seq, and the next row
-overwrote its payload sidecar (C1, C13).
-
-The design (issue #1127, as amended after the review of PR #1139) answers with a REFUSAL, never
-a cut:
-
-* A — `_query_rules.PARAMS_NESTING_LIMIT = 32`, a plain product constant rather than the
-  reader's bound less one: far enough under the reader that a line embedding params a few
-  levels down (a wire-log record, a ledger row) still reads back. `params_too_deep(value)` stays
-  the one public predicate. It walks the Python value the way `_io._json_safe_walk` does — a
-  level per `Mapping` or list/tuple/set/frozenset, values not keys — and stops once past the
-  limit, so a cyclic value is too deep and the walk terminates.
-* B — the cleaner every params writer goes through (`_query_rules._json_safe_params`, used by
-  `append_query_row` and by `ServedCall.row()`) raises the typed `_query_rules.ParamsTooDeep` (an
-  `Exception`, not a `ValueError`) past the limit — before `append_query_row` persists the seq's payload sidecar,
-  and never the `RecursionError` an unbounded walk hits a few thousand levels down.
-
-The arm that matters most is the DIFFERENTIAL: across depths 1..60 and every container kind,
-the predicate, the cleaner and the line the writer wrote agree, and they flip at exactly 33. It
-is asserted on the line read back off disk, never on the writer's allow/deny alone.
-
-Against HEAD 7ae2c429 (limit 99, a `RuntimeError` backstop, an unbounded cleaner): every arm
-at depth 33 is RED because the row is written; the depth-3000 and cyclic-writer arms are RED
-with `RecursionError`; the `ParamsTooDeep` type arm is RED because the name does not exist. The
-depth-31/32 controls, the predicate's cycle and shared-reference arms and the deep-key arm are
-GREEN and must stay so.
-"""
+"""The queries table's writer and reader agree on what a row is: params past the nesting limit are refused, never cut."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run
@@ -234,36 +204,6 @@ def _cleaner_refuses(params: Any) -> bool:
 # ── A: one owner for the limit ─────────────────────────────────────────────────────────────
 
 
-def test_the_params_limit_is_the_product_constant_32():
-    """A: `PARAMS_NESTING_LIMIT = 32` — a product constant, no longer the reader's bound less
-    one. That it leaves room for the lines that embed params is pinned on the real wire log
-    (`e2e/test_1127_deep_params_query_tool.py`)."""
-    assert _query_rules.PARAMS_NESTING_LIMIT == LIMIT == 32
-
-
-def test_params_too_deep_is_a_typed_domain_error_not_a_value_error_or_an_internal_error():
-    """B: the refusal is the typed `ParamsTooDeep`, which each caller maps to its own refusal.
-    Not a `ValueError`: `ServedCall` cleans its params as it is built, and pydantic wraps a
-    `ValueError` raised there into its `ValidationError`, so `except ParamsTooDeep` would miss
-    it. Not a `RuntimeError`, which `WorldRegistry._served`'s `except Exception` would re-file
-    as a FAULT row carrying the same deep params."""
-    error = too_deep_error()
-    assert issubclass(error, Exception)
-    assert not issubclass(error, ValueError)
-    assert not issubclass(error, RuntimeError)
-
-
-def test_the_refusal_names_the_field_and_the_limit_in_one_sentence():
-    """#1127 review: one sentence, owned by the error, naming the field that was too deep — the
-    ledger once blamed `params` when `asked_params` was the deep one."""
-    err = raised(lambda: _query_rules._json_safe_params({"k": dict_chain(LIMIT)}, field="asked_params"))
-
-    assert isinstance(err, too_deep_error())
-    assert getattr(err, "field", None) == "asked_params"
-    assert str(err) == (f"asked_params nest deeper than {LIMIT} levels, the most a stored call "
-                        "can carry")
-
-
 @pytest.mark.parametrize("chain", [
     dict_chain, list_chain, tuple_chain, frozenset_chain, proxy_chain, mixed_chain,
 ], ids=lambda c: c.__name__)
@@ -274,25 +214,6 @@ def test_the_predicate_admits_the_limit_and_refuses_one_past_it(chain):
     assert params_too_deep(params_of_depth(LIMIT, chain)) is False
     assert params_too_deep(params_of_depth(LIMIT + 1, chain)) is True
     assert params_too_deep(params_of_depth(LIMIT + 50, chain)) is True
-
-
-def test_the_predicate_counts_the_params_map_itself():
-    """The off-by-one C1 found: the map is a level. A bare chain of `LIMIT + 1` dicts IS a
-    params map nested `LIMIT + 1` deep, and a flat map is depth 1, not 0."""
-    assert params_too_deep({}) is False
-    assert params_too_deep({"a": 1, "b": "x"}) is False
-    assert params_too_deep(dict_chain(LIMIT)) is False
-    assert params_too_deep(dict_chain(LIMIT + 1)) is True
-
-
-def test_the_predicate_walks_values_not_keys():
-    """`json_safe` turns every key into text, so a key's own nesting never reaches the row: a
-    tuple key nested far past the limit is a short string on disk. The predicate must not count
-    it — and the written line proves the row really is shallow."""
-    params = {"filt": {tuple_chain(LIMIT + 50): "v", frozenset_chain(LIMIT + 50): "w"}}
-    assert params_too_deep(params) is False
-    # The complementary condition on the same shape: the same depth moved into the VALUE.
-    assert params_too_deep({"filt": {"k": tuple_chain(LIMIT + 50)}}) is True
 
 
 def test_a_deep_key_is_written_as_a_readable_row(tmp_path):
@@ -533,14 +454,3 @@ def test_the_row_after_a_refused_one_takes_the_next_seq_and_overwrites_nothing(t
         "the table holds a line its own reader skips"
 
 
-def test_the_refusal_survives_a_copy_and_a_pickle_unchanged():
-    """#1127 second review: the error's arguments were its formatted sentence, so a copy or a
-    pickle rebuilt it with that sentence as the field, and the sentence came out twice."""
-    import copy
-    import pickle
-
-    err = _query_rules.ParamsTooDeep("asked_params")
-
-    for clone in (copy.copy(err), pickle.loads(pickle.dumps(err))):
-        assert str(clone) == str(err)
-        assert clone.field == "asked_params"

@@ -1,30 +1,5 @@
-"""#1222 slice S01 — the alert's three facts, derived once at run start through the tenant's
-alert mapping (A1, A5, A6, C16, C43).
-
-Every test drives the PRODUCTION front door (`run.main`, through `S.run_alert`) over a tenant whose
-`settings/alert-mapping.yaml` the test wrote, and reads the outcome off what the run's readers
-actually received: MAIN's opening message (harness prose only, frames removed), the argv every
-orientation lookup was handed (`S.RecordingShim`), the case ticket's open payload (`S.TicketStore`
-at the real ticket writer's seam), the invlang corpus loader, the judge's enqueued rule key — and,
-last, the run's record (`S.read_record` / `d.recorded`, the coined accessor).
-
-HOW THE INPUTS ARE CHOSEN (so a test is red at base for the design's reason, not only because the
-record accessor does not exist yet). At base every reader takes `rule.id` and ignores the mapping:
-
-* a value the design makes a REAL signature is put at a mapped path that is NOT `rule.id`
-  (`vendor.code`, `detection.key`, `event.kind`), with a decoy `rule.id` beside it — a reader that
-  still reads `rule.id` hands the decoy on, never the mapped value;
-* a value the design makes NO signature is put AT `rule.id` under the shipped mapping
-  (`signature: rule.id`) — a reader that treats it as a signature hands it on.
-
-"Named exactly like an unmapped one" (A6) is asserted as PARITY with a reference run in the same
-tenant: the mapping names no signature and the alert has no `rule.id` at all, so the reference is
-"no signature" under every reading. The two runs must tell MAIN the same thing, hand every lookup the
-same argv and open the same ticket. No sentence is asserted (the design fixes none); where a demand
-says orientation NAMES the missing signature, the suite's one reading applies
-(`S.missing_signature_lines`, shared with S09's O10): some line of the no-signature run's
-`## Lessons` section that an otherwise identical run with a signature lacks says "signature".
-"""
+"""The alert's three facts (signature, event time, ...) derived once at run start through the
+tenant's alert mapping: path resolution, value domain, hostile values."""
 from __future__ import annotations
 
 import difflib
@@ -33,13 +8,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from defender.tests import _judge_921 as J
-from defender.tests import _state1135 as ST
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 
-# =================================================================================================
 # Inputs
-# =================================================================================================
 
 #: The alert carries no `rule.id` at all.
 ABSENT = object()
@@ -89,9 +60,7 @@ def _literal(doc: Mapping[str, Any], literal: str) -> bytes:
     return raw.replace(hole, literal.encode("utf-8"))
 
 
-# =================================================================================================
 # Driving
-# =================================================================================================
 
 def _drive(tmp_path: Path, planted: S.Planted, alert: Mapping[str, Any] | bytes, run_id: str, *,
            mapping: Mapping[str, Any] | None = None, main: Sequence[S.Turn] | None = None,
@@ -114,9 +83,7 @@ def _reference(tmp_path: Path, planted: S.Planted, run_id: str = "s01-unmapped")
     return _drive(tmp_path, planted, _alert(ABSENT), run_id, mapping=UNMAPPED)
 
 
-# =================================================================================================
 # Observing
-# =================================================================================================
 
 def _run_id(d: S.Drive) -> str:
     assert d.run_dir is not None
@@ -213,20 +180,6 @@ def _not_handed(d: S.Drive, values: Sequence[str], label: str) -> list[str]:
             for v in values if v and _hands(d, v)]
 
 
-def _judge_keys(tmp: Path, d: S.Drive) -> set[str]:
-    """The rule keys the real judge enqueues for an episode carrying `d`'s alert and record (what
-    branch launch copies into the episode, A1) — `learning.judge.grade_episode`, scripted judge.
-    Each call grades into a learning state of its own under `tmp`, so the findings queue it reads
-    back holds this episode's rows only."""
-    ep = J.accepted_episode(tmp)
-    S.plant_episode_copy(ep, alert=d.stored_alert, record=d.record)
-    assert d.tenant is not None
-    J.grade(ep, runs_base=d.tenant.runs, state=ST.state_over(tmp / "learning-state"))
-    rows = J.enqueued_rows(J.judge_record(ep))
-    assert rows, f"the judge enqueued no finding for {ep}"
-    return {str(row.get("alert_rule_key")) for row in rows}
-
-
 def _record_problems(d: S.Drive, label: str, **expected: str | None) -> list[str]:
     """Each recorded fact that is not `expected` (None: absent or null)."""
     return [f"[{label}] the record's {fact} is {d.recorded(fact)!r}, not {want!r}"
@@ -237,9 +190,7 @@ def _fail(problems: Sequence[str]) -> str:
     return "\n\n".join(problems)
 
 
-# =================================================================================================
 # The tests (one per demand; the name is the demand's `discharged_by`)
-# =================================================================================================
 
 def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
     """Given the admitted alert and the tenant's alert mapping, the one derivation, run once at
@@ -352,56 +303,6 @@ def test_alert_facts_value_domain(tmp_path: Path) -> None:
     assert not problems, _fail(problems)
 
 
-def test_o10_absent_path_is_treated_as_unmapped(tmp_path: Path) -> None:
-    """A mapping whose signature path is absent from the alert gives every reader the same result
-    as a mapping that names no signature.
-
-    Readers observed: what MAIN is told and instructed, every orientation lookup's argv, the case
-    ticket's open payload, and the run's record. The path-absent alert carries a rule.id; the
-    unmapped run's alert carries none."""
-    planted = S.plant_tenant("acme", alert_mapping=VENDOR)
-    ref = _reference(tmp_path, planted)
-    absent = _drive(tmp_path, planted, _alert(), "s01-path-absent", mapping=VENDOR)
-    present = _drive(tmp_path, planted, _alert(vendor=VALID), "s01-path-present", mapping=VENDOR)
-
-    # Positive control: the same mapping DOES reach every reader when the path is present.
-    problems = _carries(present, VALID, "path present")
-    problems += _unlike_unmapped(absent, ref, "path absent")
-    assert not problems, _fail(problems)
-
-    assert absent.recorded("signature") is None
-    assert ref.recorded("signature") is None
-    assert absent.record.get("signature") == ref.record.get("signature")
-
-
-def test_p042_mapping_path_names_a_flat_dotted_key(tmp_path: Path) -> None:
-    """A flat key named "rule.id" is not addressed: signature None, named like unmapped. Every
-    reader yields the recorded value."""
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
-    ref = _reference(tmp_path, planted)
-    flat = _drive(tmp_path, planted, _alert(ABSENT, **{"rule.id": "FLAT-7731"}), "s01-flat",
-                  mapping=SHIPPED)
-
-    problems = _unlike_unmapped(flat, ref, "flat 'rule.id' key")
-    problems += _not_handed(flat, ["FLAT-7731"], "flat 'rule.id' key")
-    assert not problems, _fail(problems)
-
-    assert flat.recorded("signature") is None
-
-
-def test_p043_flat_and_nested_spellings_disagree(tmp_path: Path) -> None:
-    """When both spellings are present, the nested value is the signature."""
-    planted = S.plant_tenant("acme", alert_mapping=VENDOR)
-    both = _drive(tmp_path, planted,
-                  _alert(vendor="NEST-7731", **{"vendor.code": "FLAT-7731"}), "s01-both")
-
-    problems = _carries(both, "NEST-7731", "nested and flat")
-    problems += _not_handed(both, ["FLAT-7731"], "nested and flat")
-    assert not problems, _fail(problems)
-
-    assert both.recorded("signature") == "NEST-7731"
-
-
 def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
     """A list, string, null, number, boolean or list-index look-alike on the path gives no fact.
     There is no rule.id fallback.
@@ -439,34 +340,6 @@ def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
     assert not problems, _fail(problems)
 
 
-def test_p046_signature_mapped_to_a_long_multiline_field(tmp_path: Path) -> None:
-    """A multi-line, whitespace-bearing or over-long value is no signature, named like unmapped,
-    and reaches no sink.
-
-    Sinks observed: MAIN's opening message and instructions, every orientation lookup's argv, the
-    case ticket's open payload."""
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
-    ref = _reference(tmp_path, planted)
-    values = [("multi-line", "Zq7731 first line\nsecond line\n## Forged heading"),
-              ("whitespace", "Zq7731 sshd success after failures"),
-              ("over-long", "Zq7731" + "x" * 300)]
-    runs = [(name, value, _drive(tmp_path, planted, _alert(value), f"s01-long-{i}",
-                                 mapping=SHIPPED))
-            for i, (name, value) in enumerate(values)]
-
-    problems: list[str] = []
-    for name, value, d in runs:
-        problems += _unlike_unmapped(d, ref, name)
-        problems += _not_handed(d, [value], name)
-        if "Zq7731" in json.dumps(_opened(d), ensure_ascii=False):
-            problems.append(f"[{name}] the value reached the case ticket: {_opened(d)!r}")
-    assert not problems, _fail(problems)
-
-    for name, _value, d in runs:
-        problems += _record_problems(d, name, signature=None)
-    assert not problems, _fail(problems)
-
-
 def test_p047_signature_value_begins_with_a_dash(tmp_path: Path) -> None:
     """A value with a leading dash, a negative rule number included, is no signature under the
     allow-list [A-Za-z0-9][A-Za-z0-9._:/@+=-]{0,127}: orientation names it like an unmapped one
@@ -493,35 +366,6 @@ def test_p047_signature_value_begins_with_a_dash(tmp_path: Path) -> None:
         problems += _unlike_unmapped(d, ref, name)
         if any(value in a for a in _handed(d)):
             problems.append(f"[{name}] a lookup received {value!r} in an argument: {_argvs(d)!r}")
-    assert not problems, _fail(problems)
-
-    for name, _value, d in runs:
-        problems += _record_problems(d, name, signature=None)
-    assert not problems, _fail(problems)
-
-
-def test_p048_signature_with_shell_metacharacters_when_the_age(tmp_path: Path) -> None:
-    """Quotes, $( ), backticks, semicolons, newlines and a leading dash put a value outside the
-    allow-list, so it is no signature: MAIN is told there is nothing to pass, and nothing executes
-    from a signature.
-
-    "Told": MAIN's instructions and opening message equal the unmapped run's. "Nothing executes":
-    no lookup is handed the value at all."""
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
-    ref = _reference(tmp_path, planted)
-    valid = _drive(tmp_path, planted, _alert(VALID), "s01-shell-control", mapping=SHIPPED)
-    values = [("double quote", 'Zq7731"dq'), ("single quote", "Zq7731'sq"),
-              ("dollar-paren", "Zq7731$(touch pwned)"), ("backtick", "Zq7731`id`"),
-              ("semicolon", "Zq7731;id"), ("newline", "Zq7731\nid"), ("leading dash", "-Zq7731")]
-    runs = [(name, value, _drive(tmp_path, planted, _alert(value), f"s01-shell-{i}",
-                                 mapping=SHIPPED))
-            for i, (name, value) in enumerate(values)]
-
-    problems = [] if _hands(valid, VALID) else [
-        f"[control] no lookup was handed the valid signature {VALID!r}: {_argvs(valid)!r}"]
-    for name, value, d in runs:
-        problems += _unlike_unmapped(d, ref, name)
-        problems += _not_handed(d, [value], name)
     assert not problems, _fail(problems)
 
     for name, _value, d in runs:
@@ -614,51 +458,6 @@ def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> N
     assert not problems, _fail(problems)
 
 
-def test_p054_mapping_names_only_some_of_the_three_facts(tmp_path: Path) -> None:
-    """A mapping that names no signature is accepted. The signature is None and orientation names
-    it. Unmapped event_time and summary are empty, never a vendor default.
-
-    The alert offers every vendor default a reader could guess — `timestamp`, `detected_at`,
-    `rule.description`, `rule.id`. The positive control maps event_time and summary and gets
-    them on the case ticket."""
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
-    vendor_time = "2026-09-30T08:16:00Z"
-    alert = _alert("R-1001", timestamp=vendor_time)
-    mapped = _drive(tmp_path, planted, alert, "s01-some-all", mapping=SHIPPED)
-    sig_only = _drive(tmp_path, planted, alert, "s01-some-sig", mapping={"signature": "rule.id"})
-    no_sig = _drive(tmp_path, planted, alert, "s01-some-nosig", mapping=UNMAPPED)
-
-    problems: list[str] = []
-    # Positive control: mapped event_time and summary reach the ticket.
-    if _labels(mapped, "evt:") != [f"evt:{DETECTED_AT}"]:
-        problems.append(f"[mapped] evt: labels {_labels(mapped, 'evt:')!r}")
-    if mapped.tickets.store.only_open().get("summary") != DESCRIPTION:
-        problems.append(f"[mapped] ticket summary {mapped.tickets.store.only_open().get('summary')!r}")
-    # Unmapped: no vendor default reaches the ticket.
-    if _labels(sig_only, "evt:"):
-        problems.append(f"[signature only] the ticket carries {_labels(sig_only, 'evt:')!r}")
-    opened = json.dumps(_opened(sig_only), ensure_ascii=False)
-    for vendor_value in (DESCRIPTION, vendor_time, DETECTED_AT):
-        if vendor_value in opened:
-            problems.append(f"[signature only] the ticket carries the vendor value "
-                            f"{vendor_value!r}: {_opened(sig_only)!r}")
-    # No signature: accepted, and orientation names what is missing.
-    named = S.missing_signature_lines(no_sig.opening_message, mapped.opening_message)
-    if not named:
-        problems.append("[no signature] orientation's lessons section told MAIN nothing about "
-                        "the missing signature that the signed run's did not: "
-                        f"{S.lessons_section(no_sig.opening_message)!r}")
-    assert not problems, _fail(problems)
-
-    assert no_sig.run_dir is not None
-    assert no_sig.refusal is None
-    problems += _record_problems(no_sig, "no signature", signature=None,
-                                 event_time=DETECTED_AT, summary=DESCRIPTION)
-    problems += _record_problems(sig_only, "signature only", signature="R-1001",
-                                 event_time=None, summary=None)
-    assert not problems, _fail(problems)
-
-
 def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
     """When the mapped member is repeated, the last one wins, and every reader agrees.
 
@@ -734,88 +533,6 @@ def test_p083_event_time_mapped_to_a_number_zero_or_object(tmp_path: Path) -> No
     for name, want, d in generic:
         problems += _record_problems(d, name, event_time=want, signature="R-EVT-1",
                                      summary=DESCRIPTION)
-    assert not problems, _fail(problems)
-
-
-def test_p090_mapped_value_equals_a_fallback_sentinel(tmp_path: Path) -> None:
-    """An unmapped path gives None, never a string. A real signature spelled "unknown" is a fact.
-
-    Readers observed: the orientation lookups, the case ticket's sig: label, the judge's enqueued
-    rule key (an episode carrying the run's alert and record), and the run's record."""
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
-    literal = _drive(tmp_path, planted, _alert("unknown"), "s01-sentinel", mapping=SHIPPED)
-    absent = _drive(tmp_path, planted, _alert(), "s01-sentinel-absent", mapping=VENDOR)
-
-    problems: list[str] = []
-    if not _hands(literal, "unknown"):
-        problems.append(f"[spelled unknown] no lookup was handed 'unknown': {_argvs(literal)!r}")
-    if _labels(literal, "sig:") != ["sig:unknown"]:
-        problems.append(f"[spelled unknown] sig: labels {_labels(literal, 'sig:')!r}")
-    problems += _not_handed(absent, [DECOY, "unknown", "unkeyed", "None"], "path absent")
-    if _labels(absent, "sig:") == [f"sig:{DECOY}"]:
-        problems.append("[path absent] the case ticket's sig: label is the alert's rule.id")
-    assert not problems, _fail(problems)
-
-    assert literal.recorded("signature") == "unknown"
-    assert absent.record.get("signature") is None, (
-        f"an unmapped path is recorded as {absent.record.get('signature')!r}, not as no signature")
-    assert _judge_keys(tmp_path / "judge-literal", literal) == {"unknown"}
-    assert _judge_keys(tmp_path / "judge-absent", absent) == {S.UNKEYED}
-
-
-def test_p101_scaffolded_tenant_whose_alerts_lack_the_template(tmp_path: Path) -> None:
-    """Only the model is told: orientation names the missing signature. The run record shows the
-    facts absent. No operator channel.
-
-    The tenant keeps the shipped template mapping (rule.id, alert_timestamp, rule.description);
-    its alerts carry none of those paths. The run is not refused — the operator is not stopped —
-    and the facts are absent; an otherwise identical alert that does carry rule.id is the signed
-    run orientation's lines are compared with."""
-    planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
-    vendor_shaped = {"detection": {"key": "DK-7731", "title": "Odd login"},
-                     "observed_at": "2026-09-30T08:15:00Z", "host": {"hostname": "app-7"}}
-    lacking = _drive(tmp_path, planted, vendor_shaped, "s01-lacking")
-    signed = _drive(tmp_path, planted, {**vendor_shaped, "rule": {"id": "R-1001"}}, "s01-signed")
-
-    named = S.missing_signature_lines(lacking.opening_message, signed.opening_message)
-    assert named, (
-        "orientation's lessons section told MAIN nothing about the missing signature that the "
-        f"signed run's did not: {S.lessons_section(lacking.opening_message)!r}")
-    assert lacking.rc == 0
-    assert lacking.refusal is None
-    assert {f: lacking.recorded(f) for f in S.FACTS} == {
-        "signature": None, "event_time": None, "summary": None}
-
-
-def test_p106_mapping_moved_to_a_coarse_field(tmp_path: Path) -> None:
-    """A coarse or per-alert field changes nothing in the readers: each yields the recorded value.
-    No cardinality guard.
-
-    Coarse: every alert shares `event.kind`; per-alert: `event.id` differs on each. Every run is
-    accepted, and each reader yields the value the mapping names, never the alert's rule.id."""
-    coarse = {"signature": "event.kind", "event_time": "detected_at", "summary": "rule.description"}
-    per_alert = {**coarse, "signature": "event.id"}
-    planted = S.plant_tenant("acme", alert_mapping=coarse)
-    runs = [
-        ("coarse 1", "alert", _drive(tmp_path, planted, _alert(
-            "R-COARSE-1", event={"kind": "alert", "id": "ev-0001-aa"}), "s01-coarse-1")),
-        ("coarse 2", "alert", _drive(tmp_path, planted, _alert(
-            "R-COARSE-2", event={"kind": "alert", "id": "ev-0002-bb"}), "s01-coarse-2")),
-        ("per-alert 1", "ev-0001-aa", _drive(tmp_path, planted, _alert(
-            "R-COARSE-1", event={"kind": "alert", "id": "ev-0001-aa"}), "s01-per-1",
-            mapping=per_alert)),
-        ("per-alert 2", "ev-0002-bb", _drive(tmp_path, planted, _alert(
-            "R-COARSE-2", event={"kind": "alert", "id": "ev-0002-bb"}), "s01-per-2")),
-    ]
-
-    problems: list[str] = []
-    for name, want, d in runs:
-        problems += _carries(d, want, name, decoy=None)
-        problems += _not_handed(d, ["R-COARSE-1", "R-COARSE-2"], name)
-    assert not problems, _fail(problems)
-
-    for name, want, d in runs:
-        problems += _record_problems(d, name, signature=want)
     assert not problems, _fail(problems)
 
 

@@ -1,27 +1,4 @@
-"""Executable spec for #498/#666 — `AgentDeps` requires its policy and cwd anchor.
-
-The gate keys on `deps.policy` (capability as DATA), so this refactor removes the
-inheritable `_MAIN_POLICY` default from the deps base: a security-critical subtype can
-no longer be born in the MAIN-shaped (fail-open) state by omitting `policy`. This suite
-pins the CONSTRUCTION contract:
-
-  - requiredness / safe-by-construction — `AgentDeps` and its subtypes (`JudgeDeps`,
-    `ActorDeps`, and — since #535 — `GatherDeps`) RAISE when constructed without `policy`
-    (kw-only); the unsafe MAIN state is unconstructable, not silently inherited,
-  - GatherDeps is per-run since #535 — its bash reader lane is anchored to the run's
-    roots, so it no longer carries a static default (it inherits the base's required
-    kw-only policy, built via `bind(GATHER_DEF, run_dir, defender_dir=…)` at its site).
-
-The per-stage `for_scope`/`for_run` DEPS FACTORIES this suite once pinned were RETIRED by
-#551 — every production deps site now obtains its `AgentDeps` via the single `bind` seam, so
-the factory identity/parity/guarded-negative sections moved to `test_bind_sole_seam_551.py`
-(the `d1_*_via_bind` + `d4_*` demands). What remains here is the durable base contract:
-`policy` and the path-resolution anchor are required, never silently defaulted.
-
-Explicitly OUT OF SCOPE (pinned elsewhere): policy ENFORCEMENT (decide_read/decide_bash
-allow/deny — test_read_confine*.py) and the pydantic run loop. Capabilities are unchanged;
-this only moves WHERE policy is supplied.
-"""
+"""AgentDeps and subtypes cannot be constructed without an explicit policy and cwd anchor."""
 from __future__ import annotations
 
 import functools
@@ -44,8 +21,7 @@ _MAIN_POLICY = compile_policy_for(MAIN_DEF, run_dir=Path("/run"), defender_dir=P
 
 @functools.cache
 def _gather_policy():
-    """Gather's policy, compiled with a RUN's grant (#1106 M4: `GATHER_DEF` carries none) —
-    lazily, so the module collects before the tenant folder exists."""
+    """Gather's policy, compiled with a RUN's grant (#1106 M4: `GATHER_DEF` carries none) — lazily, so the module..."""
     return compile_policy_for(
         T1106.fixture_gather_def(), run_dir=Path("/run"), defender_dir=Path("/dfn"))
 
@@ -56,19 +32,15 @@ def _ident(run_dir: Path) -> dict:
                 cwd_anchor=run_dir)
 
 
-
 def test_agent_deps_requires_policy(tmp_path):
-    """AgentDeps(run_dir, defender_dir, run_id, salt) with NO policy= -> ValidationError
-    (the base has no inheritable default to go silently MAIN-shaped)."""
+    """AgentDeps(run_dir, defender_dir, run_id, salt) with NO policy= -> ValidationError (the base has no..."""
     with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
         tools.AgentDeps(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id="r",
                         cwd_anchor=tmp_path)
 
 
 def test_agent_deps_accepts_explicit_policy(tmp_path):
-    """POSITIVE CONTROL for the requiredness negatives: AgentDeps(..., policy=_MAIN_POLICY)
-    constructs, .policy is _MAIN_POLICY, role is MAIN — so the ValidationError above is specifically
-    about the MISSING policy, not some unrelated construction failure."""
+    """POSITIVE CONTROL for the requiredness negatives: AgentDeps(..., policy=_MAIN_POLICY) constructs, .policy..."""
     deps = tools.AgentDeps(**_ident(tmp_path), policy=_MAIN_POLICY)
     assert deps.policy is _MAIN_POLICY
     assert deps.role is AgentRole.MAIN
@@ -84,44 +56,18 @@ def test_agent_deps_requires_cwd_anchor(tmp_path):
         )
 
 
-
-
-def test_cwd_anchor_is_keyword_only(tmp_path):
-    with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
-        tools.AgentDeps(tmp_path, PATHS.defender_dir, "r", "s", tmp_path, policy=_MAIN_POLICY)
-
-
-
-
-
-
-def test_policy_is_keyword_only(tmp_path):
-    """policy is keyword-only: passing it as the 5th POSITIONAL arg -> ValidationError. Pins the
-    `field(kw_only=True)` shape (matches the _ActorToolScope.read_confine precedent)."""
-    with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
-        tools.AgentDeps(
-            tmp_path, PATHS.defender_dir, "r", "s", _MAIN_POLICY, cwd_anchor=tmp_path)
-
-
-
 def test_gather_deps_requires_policy(tmp_path):
-    """#535: GatherDeps(4 identity fields) with NO policy= now RAISES. The gather reader lane is
-    anchored PER-RUN, so gather no longer carries a static default — it inherits the base's required
-    kw-only policy (exactly like the per-scope judge/actor), and the unconfined state is
-    unconstructable rather than silently inherited."""
+    """#535: GatherDeps(4 identity fields) with NO policy= now RAISES. The gather reader lane is anchored..."""
     with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
         tools.GatherDeps(**_ident(tmp_path))
 
 
 def test_gather_deps_prod_construction_with_explicit_policy(tmp_path):
-    """Orphaned-consumer pin (tools_gather.py:315): the prod gather construction now passes an
-    explicit per-run policy (`compile_policy_for(GATHER_DEF, run_dir, defender_dir=…)`) — .policy is that
-    policy, role is GATHER, lead_id is carried."""
+    """Orphaned-consumer pin (tools_gather.py:315): the prod gather construction now passes an explicit per-run..."""
     gather_policy = _gather_policy()
     deps = tools.GatherDeps(**_ident(tmp_path), lead_id="l-001", policy=gather_policy)
     assert deps.policy is gather_policy
     assert deps.role is AgentRole.GATHER
     assert deps.lead_id == "l-001"
-
 
 

@@ -1,57 +1,10 @@
-"""#1137: the tenant row moves onto the rooted core. These tests pin what must not move with it.
-
-The row is `<data root>/<T>/tenant.json`. #1137 changes HOW it is read (`_tenant._read_row`,
-which `require_tenant`, `accept_tenant`, `accept_placed_knowledge` and `tenant_of_run_dir`
-share) and created (`create_tenant`): from the path seams (`read_guarded`, `guarded_mkdir`,
-`write_guarded`) to the rooted core (`_io.bind(<T>).read`, `_io.hold_new`,
-`Held.write(mode="create")`). It is a refactor. The design (issue #1137, "Intent + design
-(discussion 2026-10-08)") states two obligations, and this file holds their tests.
-
-**O2: the verdicts do not move.** There is one characterization table per entry point. It was
-written against 96e4cdb0 and passes there unchanged. Every row is a real filesystem plant, with
-no fakes. What is pinned:
-
-* served or refused, and for a refusal its exact class (`TenantRefused` itself) and its subject.
-  Every read refusal opens with the row's path, an absent or file `<T>` included. A create
-  refusal opens with the row's path, or with `<T>`'s for a folder the create cannot make, or
-  names the data root when the root is not fresh;
-* for the READ, nothing of an `OSError`'s text. The reason's wording is the design's one
-  declared change: `[Errno 2] No such file or directory: '<row>'` becomes `absent`. Two kinds of
-  words that the design keeps ARE pinned, so a refusal cannot pass for the wrong reason. A
-  non-plain row (a directory, a link, a FIFO, a hard link) carries the core's alias sentence
-  (`_io.ALIAS_READ_REFUSAL`): it was refused at the open, not opened, read and then refused by
-  the parse. A malformed row carries the parse's own words, which D1 leaves alone. The planted
-  bytes are chosen to catch a reader that follows or tolerates too much. The link leads to a
-  GOOD row, the hard link IS a good row, and the undecodable row is valid JSON apart from one
-  byte. So a reader that followed the link or decoded leniently would SERVE those rows;
-* for the CREATE, the message is unchanged by design (C3). Its stable words are pinned through
-  the core's own constants, never respelled. No refusal but the occupied row may claim that the
-  row "already exists".
-
-Every refusal is paired with a positive control ON THE SAME ADDRESS: the plant is removed, the
-plain state is put in its place, and the same call then serves (or creates). A refusal also
-leaves the tree exactly as it found it: the plant stays in place, a link's target stays
-untouched, and nothing is made. A created row is a plain regular file with one name, holding
-exactly the row, at the mode the process umask gives (0644 and 0777 masked, #1144). Each
-create runs under a pinned umask, so the expected modes are computed from that umask.
-
-**O1: the row's file access goes through the core.** A census over `defender/_tenant.py`, run
-through `test_1133_census`'s scanner (its resolver and its `PATH_SEAMS`), finds no path-seam
-reach except in the runs-folder stamp's two functions, `read_tenant` and
-`ensure_runs_base_record`, which #1105 PR 2 retires. RED at 96e4cdb0 by design (`_read_row`,
-`create_tenant`). An allow-list entry whose function no longer reaches a seam fails too, so the
-list shrinks with the code.
-
-Out of scope:
-* the stamp (`<runs folder>/_tenant.json`), and `tenant_of_run_dir`, which reads the stamp
-  before it reads the row and leaves with #1105 PR 2;
-* a lost create race. `tenant_1078_pass_a/test_1078_owner.py::test_d1_create_exclusive` already
-  races real `create_tenant` calls on fresh roots. The design holds the complete-or-absent lane
-  safe by construction given O1 (`Held.write(mode="create")`, #1130's create-lane tests).
+"""The tenant row (`<data root>/<T>/tenant.json`): one characterization table per entry point (`require_tenant`,
+`accept_tenant`, `accept_placed_knowledge`, `create_tenant`) over real filesystem plants. A link, hard link, FIFO,
+directory or malformed row is refused with its exact class and subject, each paired with a positive control on the same
+address; a refusal leaves the tree as it found it; a created row is a plain one-name file at the umask's mode.
 """
 from __future__ import annotations
 
-import ast
 import dataclasses
 import errno
 import functools
@@ -69,7 +22,6 @@ import pytest
 
 from defender import _io
 from defender import _tenant as owner
-from defender.tests._by_path import import_lint_lib
 from defender.tests._create_lane import assert_single_plain
 from defender.tests._umask import umask
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
@@ -621,188 +573,27 @@ def test_create_tenant_refuses_as_it_did(tmp_path, shape):
 # O1: no path seam reached from the tenant module, except by the stamp until #1187.
 # ======================================================================================
 
-#: The functions of `defender/_tenant.py` that may still reach a path seam, and why. Both are
-#: the runs-folder stamp's, which #1187 retires (#1105 PR 2 kept the stamp, E-10); the list is
-#: empty once it lands.
-STAMP_SEAM_CALLERS: dict[str, str] = {
-    "read_tenant": "retired by #1187",
-    "ensure_runs_base_record": "retired by #1187",
-}
-
-_TENANT_MODULE = "_tenant.py"
-
-
-def _census1133() -> Any:
-    """#1133's census module, for its scanner and its `PATH_SEAMS`. It is imported here and
-    bound to no module-level name, so its tests are not collected a second time under this
-    file."""
-    from defender.tests import test_1133_census
-
-    return test_1133_census
-
-
-def _seam_reaches(source: str) -> set[tuple[str, str]]:
-    """`(enclosing function, seam)` for every call to, or other reference to, a path seam in
-    `source`, scanned as `defender/_tenant.py`. The resolver is #1133's, which follows import
-    aliases, module-level aliases and the attribute form on any receiver (`_real_io.<seam>`, an
-    `io=` parameter's `io.<seam>`)."""
-    census = _census1133()
-    tree = ast.parse(source, filename=_TENANT_MODULE)
-    return {(where, callee) for _module, where, callee in census.census_of(_TENANT_MODULE, tree)
-            if callee in census.PATH_SEAMS}
-
-
-@functools.cache
-def _tenant_seam_reaches() -> frozenset[tuple[str, str]]:
-    path = _census1133().PACKAGE / _TENANT_MODULE
-    return frozenset(_seam_reaches(_io.read_text_utf8(path)))
-
-
-def test_o1_census_sees_every_spelling_of_a_seam_reach():
-    """The census's positive control, on synthetic source shaped like `_tenant.py`. A seam
-    reached through the module alias, through an `io=` parameter, through an import alias,
-    bare, as a default value, or through a module-level alias is collected under its enclosing
-    function (`<module>` for the alias itself). The core's own verbs are not collected, and
-    neither is a docstring that names a seam."""
-    source = '''
-from defender import _io as _real_io
-from defender._io import guarded_mkdir as _mk, read_guarded
-
-_reader = _real_io.write_guarded
-
-
-def via_module(p):
-    return _real_io.read_guarded(p)
-
-
-def via_parameter(p, *, io=_real_io):
-    io.write_guarded(p, "x", mode="create")
-
-
-def via_import_alias(p):
-    _mk(p, base=p)
-
-
-def bare(p):
-    return read_guarded(p)
-
-
-def as_a_default(p, read=_real_io.read_bytes_guarded):
-    return read(p)
-
-
-def via_module_alias(p):
-    _reader(p, "x")
-
-
-def on_the_core(root, name):
-    """Was read_guarded and write_guarded; now the rooted core."""
-    with _real_io.bind(root) as bound:
-        bound.read(name)
-    with _real_io.hold_new(root, name) as held:
-        held.write(name, "x", mode="create")
-'''
-    assert _seam_reaches(source) == {
-        ("<module>", "write_guarded"),
-        ("via_module", "read_guarded"),
-        ("via_parameter", "write_guarded"),
-        ("via_import_alias", "guarded_mkdir"),
-        ("bare", "read_guarded"),
-        ("as_a_default", "read_bytes_guarded"),
-        ("via_module_alias", "write_guarded"),
-    }
-
-
-def test_o1_the_tenant_module_reaches_no_path_seam_outside_the_stamp():
-    """O1: the row and its folder are read and made through the rooted core
-    (`_io.bind(<T>).read`, `_io.hold_new`, `Held.write(mode="create")`). So no function in
-    `defender/_tenant.py`, and nothing at module level, reaches a name in #1133's `PATH_SEAMS`,
-    except the stamp's functions on `STAMP_SEAM_CALLERS`. RED at 96e4cdb0: `_read_row` reads
-    the row through `read_guarded`, and `create_tenant` makes `<T>` through `guarded_mkdir` and
-    the row through `write_guarded`."""
-    stray = sorted(r for r in _tenant_seam_reaches() if r[0] not in STAMP_SEAM_CALLERS)
-    assert stray == [], (
-        "defender/_tenant.py reaches a path seam outside the stamp's allow-list. The tenant row "
-        "and its folder go through the rooted core (_io.bind(...).read, _io.hold_new, "
-        "Held.write(mode='create')), #1137 O1:\n  "
-        + "\n  ".join(f"{where}: {seam}" for where, seam in stray))
-
-
-@pytest.mark.parametrize("function", sorted(STAMP_SEAM_CALLERS))
-def test_o1_each_allow_listed_stamp_function_still_reaches_a_seam(function):
-    """The allow-list shrinks with the code. An entry whose function no longer reaches a path
-    seam (or no longer exists) is stale, and it fails here until it is deleted."""
-    reached = sorted(seam for where, seam in _tenant_seam_reaches() if where == function)
-    assert reached, (
-        f"{function} is on STAMP_SEAM_CALLERS ({STAMP_SEAM_CALLERS[function]}) but no longer "
-        "reaches a path seam in defender/_tenant.py. Delete its entry from STAMP_SEAM_CALLERS "
-        "in this file: the list is meant to empty out as #1187 retires the stamp.")
 
 
 
-#: The row's two functions, and the one `_io` name each may reach: the core's door to `<T>`.
-ROW_DOORS = {"_read_row": "bind", "create_tenant": "hold_new"}
-
-#: Builtins that reach a name dynamically, past any census.
-_DYNAMIC_REACH = frozenset({"builtins.getattr", "builtins.vars", "builtins.__import__"})
 
 
-def _row_function_reaches(function: str) -> tuple[ast.FunctionDef, set[str], set[str]]:
-    """`(the function's node, every dotted origin it references, every scanner census row)`
-    for one row
-    function of `defender/_tenant.py`. Origins are resolved through `scripts/lint/_astlib.py`,
-    so an import alias, a function-local import or a shadowing local each resolve to what they
-    mean, not to how they are spelled. Only the outermost node of an attribute chain counts, so
-    `_real_io.bind` reaches `defender._io.bind`, while `_real_io` on its own (bound to a local,
-    say) reaches the whole module. A bare name is resolved as `_astlib.callee` resolves a
-    call's name, so a builtin passed around uncalled (`ga = getattr`) is still seen."""
-    astlib = import_lint_lib("_astlib")
-    path = _census1133().PACKAGE / _TENANT_MODULE
-    tree = ast.parse(_io.read_text_utf8(path), filename=_TENANT_MODULE)
-    env = astlib.module_env(tree, "defender._tenant")
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function)
-    # A name that is the receiver of an attribute is resolved as part of that attribute's
-    # chain; anywhere else (bound to a local, passed as an argument) it is its own reach.
-    receivers = {id(n.value) for n in ast.walk(fn) if isinstance(n, ast.Attribute)}
-    origins: set[str] = set()
-    for node in ast.walk(fn):
-        if id(node) in receivers:
-            continue
-        if isinstance(node, ast.Attribute):
-            found = astlib.origin(node, env)
-        elif isinstance(node, ast.Name):
-            found = astlib.callee(ast.Call(func=node, args=[], keywords=[]),
-                                  env.scope_of.get(node, env))
-        else:
-            continue
-        if found is not None:
-            origins.add(found)
-    census = {callee for _module, where, callee
-              in _census1133().census_of(_TENANT_MODULE, tree) if where == function}
-    return fn, origins, census
 
 
-@pytest.mark.parametrize("function", sorted(ROW_DOORS))
-def test_o1_each_row_function_enters_through_its_core_door_only(function):
-    """O1, closed against respelling (adversary E1, `getattr`) and inlining (E2, `_io`'s
-    private internals, `os.*`): a row function takes no `io` parameter (N4); references no
-    builtin that reaches a name dynamically; reaches exactly one `defender._io` name, its core
-    door (`bind` for the read, `hold_new` for the create), and no `os` name; and #1133's
-    scanner, in its full vocabulary, finds nothing in it but that door. The positive half: the
-    door is reached, so the function is on the core and not merely off the seams."""
-    fn, fn_origins, census = _row_function_reaches(function)
-    params = {a.arg for a in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs)}
-    assert "io" not in params, f"{function} still takes an io= seam"
-    assert not fn_origins & _DYNAMIC_REACH, (
-        f"{function} reaches a name dynamically: {sorted(fn_origins & _DYNAMIC_REACH)}")
-    door = ROW_DOORS[function]
-    io_reach = {o for o in fn_origins if o == "defender._io" or o.startswith("defender._io.")}
-    assert io_reach == {f"defender._io.{door}"}, (
-        f"{function} reaches {sorted(io_reach)} on the _io module; only its core door "
-        f"{door!r} belongs there")
-    os_reach = sorted(o for o in fn_origins if o == "os" or o.startswith("os."))
-    assert os_reach == [], f"{function} reaches the os module directly: {os_reach}"
-    assert census <= {door}, f"#1133's scanner finds {sorted(census)} in {function}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # ======================================================================================

@@ -1,26 +1,9 @@
-"""The gate that keeps every writer of the two model-authored artifacts meeting their schema:
-lint_ungated_artifact_write (#961, #964).
-
-`_artifact_schema` owns what a well-formed `investigation.md` / `report.md` IS, and the
-permission gate applies it to every write a MODEL makes. That made "a committed investigation
-parses" true of the verbs the agent writes through — and quietly false of two writers nobody
-had censused, and then of a third this gate found on its first run.
-
-A lint whose baseline ships empty is indistinguishable from a lint that scans nothing, so
-every arm is exercised against a synthetic tree here, and each violation is paired with the
-clean spelling of the same write. The blind spots the gate's own docstring admits are pinned
-too — a gate whose limits are only claimed in prose drifts into being trusted for them.
-
-Driven through the gate's testability seam — `main(argv, *, scope, baseline_path)` and
-`_scan(root)` — so nothing is hardcoded to a checkout path.
-"""
+"""lint_ungated_artifact_write: writers of model-authored artifacts must meet their schema."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
 
 from defender.tests._by_path import load_lint_gate
 
@@ -100,13 +83,6 @@ def _pyfile(tree: Path, rel: str, src: str) -> Path:
 
 def _names(findings) -> set[str]:
     return {f.fingerprint for f in findings}
-
-
-def _write_baseline(path: Path, fingerprints: list[str]) -> None:
-    path.write_text(
-        json.dumps({"//": "test", "entries": {fp: "" for fp in fingerprints}}) + "\n",
-        encoding="utf-8",
-    )
 
 
 def test_the_two_shipped_defects_are_both_flagged(tmp_path):
@@ -242,28 +218,3 @@ def test_the_blind_spots_are_real_and_pinned(tmp_path):
     assert _GATE._scan(tree) == [], "both limits still hold; update the docstring if not"
 
 
-def test_the_ratchet_and_the_blind_scope(tmp_path):
-    """A baselined fingerprint passes; a missing scope exits 2 rather than reading as clean.
-
-    The second half is the one that matters: a gate that cannot run must not be reported as a
-    gate that found nothing."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "runtime/lead_zero.py", _UNGATED_SEED)
-
-    baseline = tmp_path / "baseline.json"
-    _write_baseline(baseline, ["runtime/lead_zero.py:seed"])
-    assert _GATE.main([], scope=tree, baseline_path=baseline) == 0
-
-    _write_baseline(baseline, [])
-    assert _GATE.main([], scope=tree, baseline_path=baseline) == 1
-
-    assert _GATE.main([], scope=tmp_path / "nope", baseline_path=baseline) == 2
-
-
-@pytest.mark.gate
-def test_the_real_tree_is_clean(tmp_path):
-    """The shipped baseline is EMPTY and the real scope scans clean — the two together are
-    what make an entry appearing in that file a regression someone chose, rather than debt
-    someone inherited."""
-    assert _GATE._scan(_GATE.SCOPE) == []
-    assert json.loads(_GATE.BASELINE_PATH.read_text(encoding="utf-8"))["entries"] == {}

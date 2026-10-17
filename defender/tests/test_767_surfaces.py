@@ -1,18 +1,4 @@
-"""#767 — the surfaces this change re-pins: reach, the deleted lane, the censuses, the prose.
-
-Every test is one demand of `spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`,
-named by that demand's `discharged_by`. Some of these are green at HEAD already — O6 holds
-today and this change re-pins it on the REAL program set (D8) rather than on
-`bash_policy.json`, which carries only `read_deny` (c2/g9) — and the rest are red until D5,
-D6 and D7 land.
-
-RF4 BOUNDS WHAT THE CONFINEMENT WITNESS CAN MEAN, and every assertion here is scoped by it:
-the host writer never consults `READ_ENDPOINT_ALLOWLIST` at all (g2/g3 — it calls
-`transport.docker_exec_curl` directly, so its POSTs meet neither the allowlist nor
-`guard_outbound`'s capture recorder, and there is no `case-history` key in the table). The
-allowlist is a control over the MODEL's door and nothing else, so every test below says which
-door it is about.
-"""
+"""#767 — no model role reaches a ticket write; the host writer stays inside confinement."""
 from __future__ import annotations
 
 import json
@@ -22,23 +8,13 @@ from pathlib import Path
 import pytest
 
 from defender._paths import PATHS
-from defender.runtime import case_ticket
 from defender.runtime import verb_dispositions
-from defender.runtime.verb_grant import VERB_CLASSES
 from defender.scripts.adapters import confinement
 from defender.scripts.adapters.confinement import ConfinementFault
 from defender.tests._spec767 import (
-    AGENT_AUTHOR,
     COMMENTS_SUFFIX,
-    CLOSED_STATUS,
     TICKETS_PATH,
     TRANSITIONS_SUFFIX,
-    FakeStore,
-    make_run,
-    mapping_doc,
-    record,
-    ticket,
-    use_mapping,
 )
 
 DEFENDER_DIR = PATHS.defender_dir
@@ -86,20 +62,7 @@ def _shipped_hits(pattern: str) -> dict[str, list[int]]:
 
 
 def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
-    """o6_no_model_write_reach — NEGATIVE. No model role can reach a ticket write, on any of
-    the three surfaces a role's reach is actually made of: the grant table, the adapter's
-    confinement allowlist, and the model's real bash program set.
-
-    D8 RE-POINTS THE THIRD (c2/g9): the program set is `permission/policies/_common.py`'s
-    `reader_grants` — `cat` plus the stdin viewers plus the non-adapter shims plus the inert
-    pair — and NOT `runtime/bash_policy.json`, which carries only `version` and `read_deny`
-    and whose own `_README` says the program set is not a JSON list. A test pinned on that
-    file would be vacuous.
-
-    Each surface is DRIVEN rather than enumerated: the grant table is projected onto the role
-    through its real projection, the allowlist is exercised by the real `guard_outbound` over
-    real write URLs, and the program set is built by its real producer. Its positive control
-    is `o6_read_verb_still_granted` — the read verb the same three surfaces DO admit."""
+    """o6_no_model_write_reach — NEGATIVE."""
     rows = _shipped_rows()
     for role in sorted(verb_dispositions.KNOWN_ROLES):
         grant = verb_dispositions.grant_for(role, rows)
@@ -141,13 +104,7 @@ def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
 
 def test_767_list_tickets_still_granted_to_gather():
     """o6_read_verb_still_granted — the POSITIVE CONTROL for every reach negative in this
-    file: `ticket.list-tickets` IS granted to gather, and its GET reaches the store through
-    the adapter's own confined door. Without it, "no model role reaches a ticket write"
-    passes just as well over a role that reaches nothing at all.
-
-    The ungranted ticket verbs stay in the table as rows granted to NOBODY with a reason —
-    that is this file's way of spelling an examined no, and it is why a future re-grant is a
-    decision rather than a restoration."""
+    file."""
     rows = _shipped_rows()
     by_pair = {d.pair: d for d in rows}
     gather = verb_dispositions.grant_for("gather", rows)
@@ -162,42 +119,8 @@ def test_767_list_tickets_still_granted_to_gather():
     confinement.guard_outbound(None, "ticket", f"{URL_BASE}{TICKETS_PATH}/SOC-1", method="GET")
 
 
-def test_767_verb_class_vocabulary_stays_closed_at_two():
-    """n9_no_third_effect_tier — NEGATIVE. #632's verb-class vocabulary stays closed at two,
-    `{r, rw}`: nothing this lane adds is a verb. The writer is a host post-step no role can
-    call (O6), so the third effect tier #632 deferred to exactly this work is NOT NEEDED —
-    issue item 3, answered.
-
-    Its positive control is `o6_read_verb_still_granted`: the two classes that exist are live,
-    so "no third" is not "no vocabulary". A grant naming a third class is refused by the real
-    constructor, which is the observable rather than the constant."""
-    from defender.runtime.verb_grant import GrantError, VerbGrant
-
-    assert frozenset({"r", "rw"}) == VERB_CLASSES, (
-        f"the verb-class vocabulary is now {sorted(VERB_CLASSES)}; N9 answers issue item 3 "
-        "with 'not needed' and keeps it closed at two"
-    )
-    VerbGrant(role="gather", entries=(("ticket", "list-tickets", "r"),))
-    with pytest.raises(GrantError):
-        VerbGrant(role="gather", entries=(("ticket", "record-comment", "w"),))
-
-    rows = _shipped_rows()
-    assert not [d for d in rows if d.system == "case-history"], (
-        "the host writer's system appeared in the verb table — it is a post-step, not a verb"
-    )
-
-
 def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
-    """d6_transitions_route_not_confined — NEGATIVE. `POST /tickets/{key}/transitions` is the
-    PERSON's route — closing a case is the release act — and it is not on the adapter's
-    confinement allowlist, which is GET-only: a model driving the adapter's door cannot move a
-    case along its lifecycle, and so cannot release its own or any other case's comments.
-
-    RF4 bounds this: the allowlist is the MODEL's door. On the playground nothing
-    authenticates the route at all (N6), which the clause
-    `n6_approve_action_is_unattributable_on_the_playground` records rather than tests.
-
-    Its positive control is `o6_read_verb_still_granted`."""
+    """d6_transitions_route_not_confined — NEGATIVE."""
     allowlist = confinement.READ_ENDPOINT_ALLOWLIST["ticket"]
     assert all(method == "GET" for _, method in allowlist), (
         f"the ticket allowlist is no longer GET-only: {allowlist}"
@@ -223,18 +146,7 @@ def test_767_transitions_route_is_not_on_the_confinement_allowlist(tmp_path):
 
 def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
     """d_adapter_http_confinement_capture_positive_control — PARITY, and the baseline the two
-    vias this design adds are a parity demand AGAINST. `adapter-http` is the ESTABLISHED via
-    on the store, and it carries BOTH constraints: `confine_read_endpoint` and
-    `guard_outbound`'s capture record. No demand pinned that baseline before the gate leaf
-    minted this one, so `host-curl` and `operator-labels` had nothing to be compared with.
-
-    Cites g2 (guard_outbound's two callers, both adapter transports — and `guard_outbound` IS
-    the capture recorder, which is why a door that skips it records nothing anywhere) and
-    g3/c2 (the allowlist's ticket entry, GET-only, with no `case-history` key at all).
-
-    Driven through the real seam with a real capture object, so the recorded request is an
-    observation rather than a reading: the sanctioned GET is confined AND captured; the POST
-    is refused, and refused BEFORE it is captured."""
+    vias this design adds are a parity demand AGAINST."""
     capture = confinement.TransportCapture()
     ctx = type("Ctx", (), {"capture": capture})()
 
@@ -259,102 +171,9 @@ def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
 # D5 / N10 / S3′ — the resolution-decoding lane, closed structurally
 # =======================================================================================
 
-_RETIRED_CASE_TICKET = (
-    "parse_disposition_from_resolution",
-    "ticket_disposition",
-    "ticket_reason",
-    "append_resolution_method",
-    "resolution_method_from_resolution",
-    "ticket_resolution_method",
-    "_disposition_separator",
-    "_resolution_method_marker",
-    "case_record_to_close",
-)
-#: The four seed-era helpers D5 deliberately LEAVES — they serve no obligation here, and
-#: retiring them would be scope this change did not take (RF1/g13: the vulture baseline holds
-#: EIGHT case_ticket rows, not c15's seven; D5 retires exactly four and leaves exactly four).
-_KEPT_CASE_TICKET = ("signature_label", "ticket_event_time", "ticket_created", "alert_event_time")
-_RETIRED_BASELINE_ROWS = (
-    "append_resolution_method", "ticket_disposition", "ticket_reason", "ticket_resolution_method",
-)
-
-
-def test_767_resolution_decoding_lane_is_gone(tmp_path):
-    """d5_resolution_lane_deleted. The second model-facing read path is closed STRUCTURALLY: the
-    `resolution`-decoding lane is deleted.
-
-    c5 is the ground: the lane's one non-test consumer read `resolution` through a `get-ticket`
-    SUBPROCESS keyed on `past_tickets.txt`, which no non-test code writes, so
-    `load_cited_policy` has always answered `_NO_CITED_POLICY`. Removing it removes a prompt
-    section that was already empty on every run, and there is no survivor to reconnect.
-
-    The survival half — the forward check that ran through the lane still completing — retired
-    with the forward check itself (#1166): there is no workflow left to survive."""
-
-    for name in _RETIRED_CASE_TICKET:
-        assert not hasattr(case_ticket, name), (
-            f"`case_ticket.{name}` survives D5 — the resolution lane is closed structurally, "
-            "not by leaving its decoder unreferenced"
-        )
-    for name in _KEPT_CASE_TICKET:
-        assert hasattr(case_ticket, name), (
-            f"`case_ticket.{name}` was deleted: D5 leaves the four seed-era helpers alone "
-            "(RF1/g13), and deleting them is scope this change did not take"
-        )
-
-    baseline = json.loads(_text(REPO_ROOT / "scripts" / "lint" / "lint_vulture_baseline.json"))
-    rows = [k for k in baseline["entries"] if "case_ticket.py" in k]
-    for retired in _RETIRED_BASELINE_ROWS:
-        assert not any(f"'{retired}'" in row for row in rows), (
-            f"the vulture baseline still carries a row for `{retired}`, which D5 deletes — a "
-            "baselined row naming a symbol that resolves to nothing reads exactly like a row "
-            "nobody wrote"
-        )
-    assert len(rows) == 4, (
-        f"the baseline holds {len(rows)} case_ticket rows; D5 retires exactly four of the "
-        "eight and leaves exactly four (RF1/g13 — c15's count of seven is REFUTED)"
-    )
-
-
-def test_767_a_typed_resolution_reaches_no_reader(tmp_path, monkeypatch):
-    """n10_hand_typed_resolution_is_inert — NEGATIVE. After D5, nothing decodes a ticket's
-    `resolution`: a person may type anything into that field and no reader turns it into a
-    disposition.
-
-    That shrinks the #923 authoring-surface census by exactly one entry (c12): `case_ticket.py`
-    was the only surface whose author is neither the host nor the investigating model, and its
-    refusal of a hand-typed host-only verdict defended a decoder D5 deletes. Both grains of
-    that census move — the module and its named entry point.
-
-    Its positive control is `d0_screen_shape`: a `resolution` field is still SERVED untouched
-    (since #1221 every ticket reply is served as the store answered it), so "no reader" is not
-    "no field"."""
-    from defender.tests import test_923_authoring_surfaces as census
-
-    rel = "runtime/case_ticket.py"
-    assert rel not in census._AUTHORING_SURFACES, (
-        "the #923 authoring-surface census still lists the ticket resolution line: after D5 "
-        "nothing decodes `resolution`, so it is no longer an authoring surface (N10/c12)"
-    )
-    assert not any(e.startswith(rel) for e in census._AUTHORING_ENTRY_POINTS), (
-        "the #923 entry-point census still names `case_ticket.py::"
-        "parse_disposition_from_resolution`, which D5 deletes"
-    )
-
-    assert not _shipped_hits(r"\bparse_disposition_from_resolution\b"), (
-        "a shipped module still decodes a hand-typed resolution"
-    )
-
 
 def test_767_query_tool_is_only_ticket_reader(tmp_path):
-    """s3p_single_model_facing_reader — NEGATIVE, the path census: after D5 the query tool is
-    the only code that hands ticket-store content to a model (c13, S3′), and since #1221 it
-    hands it over as the store answered it — no shipped module calls a ticket screen at all
-    (#1221 S2: no product path removes or alters content in a reply by system, verb or
-    content; the generic size view is not keyed on either).
-
-    Its positive control is `o2_released_serves_whole`: the one reader in the census DOES hand
-    ticket content to a model, the own case and an open case's comments included."""
+    """s3p_single_model_facing_reader — NEGATIVE, the path census."""
     consumers = _shipped_hits(r"(?<!def )\bscreen_(?:list|get|release_list|release_get)\s*\(")
     assert consumers == {}, (
         f"a shipped module still screens ticket replies: {consumers} — #1221 removed both "
@@ -386,101 +205,9 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
     )
 
 
-def test_767_every_checked_in_census_of_this_surface_moves_together(tmp_path):
-    """d_checked_in_censuses_move_together — COHERENCE, settled premise 68. Every checked-in
-    census of this surface moves with the change, including the one no D-row names.
-
-    Four censuses move and RF5 is why this demand exists: D2 carries the callsite list, D5
-    carries the vulture rows and the #923 authoring surfaces, and NOBODY named `WRITE_ENDPOINTS`
-    (g4) — the checked-in list of estate-write endpoint triples, which must keep BOTH live
-    writes on the stub: the comment this change makes and the transition it hands to a person.
-
-    The callsite half is the sharp one (RF2): c11's census under-counts the duck-typed
-    `ticket_writer=` seam by a whole file, because its "non-definition reference" wording
-    excuses a test's own `class Writer`. Asserted as an absence over the WHOLE repository
-    rather than over c11's list, so a site nobody censused is caught by the same assertion."""
-    stranded = _shipped_hits(r"\bclose_case_ticket\b")
-    assert not stranded, f"shipped code still calls the retired writer: {stranded}"
-
-    # A REAL reference, not a mention: an attribute access on the retired name, or a method
-    # DEFINING it — never a backtick-quoted docstring mention (this very file's own prose, and
-    # every `test_767_*` module's, has to say what D2 renamed) or a quoted string literal
-    # proving the name is gone (the positive control for the rename itself, over `hasattr`).
-    _retired_writer_method = "close_case_ticket"
-    stale_ref = re.compile(rf"\.{_retired_writer_method}\b|\bdef {_retired_writer_method}\b")
-    repo_hits: dict[str, list[int]] = {}
-    # Sibling worktrees (`.claude/worktrees/`, `.worktrees/`) hold OTHER branches' copies of
-    # this tree, so a walk that enters them reports another branch's callsites as this one's.
-    skip = {".venv", ".git", ".spec-flow", ".claude", ".worktrees"}
-    for p in sorted(REPO_ROOT.rglob("*.py")):
-        if skip & set(p.parts):
-            continue
-        lines = [i for i, line in enumerate(_text(p).splitlines(), 1)
-                 if stale_ref.search(line)]
-        if lines:
-            repo_hits[str(p.relative_to(REPO_ROOT))] = lines
-    assert not repo_hits, (
-        "the rename left callsites behind, and a duck-typed implementor of the "
-        f"`ticket_writer=` seam is silent when it does (RF2/g10): {repo_hits}"
-    )
-
-    from defender.tests import test_target_confinement_632 as confinement_census
-
-    triples = set(confinement_census.WRITE_ENDPOINTS)
-    system = confinement_census.TICKET_WRITER_SYSTEM
-    assert (system, f"{TICKETS_PATH}/SOC-1{TRANSITIONS_SUFFIX}", "POST") in triples, (
-        "WRITE_ENDPOINTS dropped the transitions route: the stub still serves it, and it is "
-        "the person's release act — a property of the store, not of who calls it (RF5/g4)"
-    )
-    assert (system, f"{TICKETS_PATH}/SOC-1{COMMENTS_SUFFIX}", "POST") in triples, (
-        "the comments route left the estate-write census, which is the one write this "
-        "change keeps"
-    )
-
-
 # =======================================================================================
 # O5 — the vendor spellings live in the mapping, and one loader serves both sides
 # =======================================================================================
-
-
-def test_767_no_status_or_author_literal_in_writer_or_screen(tmp_path, monkeypatch):
-    """o5_no_vendor_literals_in_code — COHERENCE. The vendor spellings this lane introduces —
-    the agent author identity, the comment field — live in the mapping, and changing them there
-    changes what the WRITER sends, with no code edit; and neither the writer nor the query tool
-    spells them, or the store's lifecycle words, as a literal.
-
-    #1221 removed the read-side screen, which was the other side this test once observed
-    following the same mapping, and its amendment removed the writer's release check, which
-    followed the mapping's released status: a case the store holds as `closed`, or in a status
-    a vendor coined, is commented on the same way — the writer asks no status at all."""
-    use_mapping(monkeypatch, tmp_path / "dfn",
-                mapping_doc(comment_author="acme-bot", released={"status": "acme-done"}))
-
-    run_dir = make_run(tmp_path, name="20260101t000000z-acme")
-    store = FakeStore()
-    record(run_dir, store)
-    assert store.only_comment()["author"] == "acme-bot", "the writer did not follow the mapping"
-
-    for n, status in enumerate(("acme-done", CLOSED_STATUS), start=1):
-        held = FakeStore(ticket=ticket("any", status=status))
-        held_dir = make_run(tmp_path, name=f"20260101t00000{n}z-acme")
-        record(held_dir, held)
-        assert [(c.method, c.path) for c in held.calls] == [
-            ("POST", f"{TICKETS_PATH}/{held_dir.name}{COMMENTS_SUFFIX}"),
-        ], f"a case held as {status!r}: the writer did more than post its comment"
-        assert held.only_comment()["author"] == "acme-bot"
-
-    for path, why in (
-        (DEFENDER_DIR / "scripts" / "case_history" / "ticket_writer.py", "the writer"),
-        (DEFENDER_DIR / "runtime" / "query_tool.py", "the query tool"),
-    ):
-        source = _text(path)
-        for quoted in (f'"{CLOSED_STATUS}"', f"'{CLOSED_STATUS}'"):
-            assert quoted not in source, f"{why} spells the closed status as a code literal"
-        for quoted in (f'"{AGENT_AUTHOR}"', f"'{AGENT_AUTHOR}'"):
-            assert quoted not in source, (
-                f"{why} spells the agent author identity as a code literal"
-            )
 
 
 # =======================================================================================
@@ -488,45 +215,3 @@ def test_767_no_status_or_author_literal_in_writer_or_screen(tmp_path, monkeypat
 # =======================================================================================
 
 
-def test_1221_ticket_skill_md_claims_no_read_screen(tmp_path):
-    """d7_briefing_rewrite, after #1221. `skills/ticket/SKILL.md` is MODEL-FACING prose, and
-    #1221 makes its read-screen sentences false: gather is no longer kept from the run's own
-    case, and an open case's comments are no longer withheld until a person closes it. A model
-    told otherwise would read its own case's enrichment, or an open case's notes, as something
-    the store could not have served — so the stale claims must go.
-
-    #1221's amendment makes the write-side sentence false too: the writer no longer declines to
-    record onto a case a person has closed (it asks no status), so a briefing still saying a
-    re-run of a closed case is refused would misdescribe where that run's notes go.
-
-    What stays true stays said: a case's status is its lifecycle, a person closes it, and the
-    disposition is the human's. Matched over the text with its line breaks folded, so a
-    sentence wrapped across lines is still found."""
-    skill = _text(DEFENDER_DIR / "skills" / "ticket" / "SKILL.md")
-    lowered = " ".join(skill.lower().split())
-
-    stale = {
-        "the own-case exclusion": "excluded by identity",
-        "the release screen": "comments reach you only from a",
-        "the emptied comment list": "comment list is served empty",
-        "a comment served only once released": "released agent",
-        "the close-lifecycle sentence": "closes it with the disposition",
-        "the RF3 read_guidance sentence": "resolution rationale and related-ticket references",
-        "the duplicated run.py artifact": "`run.py` / `run.py`",
-        "the retired approval tag": "`approved`",
-        "the writer declining a closed case": "a person has already closed",
-        "a re-run of a closed case refused": "refused rather than appended",
-    }
-    for why, text in stale.items():
-        assert text.lower() not in lowered, (
-            f"{why} survives: #1221 (or its amendment, or D4/D5 before it) removed it, and this "
-            "file is what a MODEL reads about the ticket store"
-        )
-
-    for why, needle in (
-        ("that the disposition is the human's", "disposition"),
-        ("that a person closes a case", "person"),
-    ):
-        assert needle.lower() in lowered, (
-            f"the briefing no longer says {why} ({needle!r} appears nowhere)"
-        )

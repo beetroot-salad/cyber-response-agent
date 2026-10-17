@@ -1,14 +1,4 @@
 """#773 — the drain computes everything from ONE truth, the settled corpus tree.
-
-Regression coverage for the review of PR #1064, whose findings all shared a shape: the
-drain kept a second truth alive beside the tree — a pass-1 verdict that outlived the bytes
-it judged, the curator's own account of what it committed, a copy of the first spawn's
-cleanup that the second spawn was held to differently. (#1166 deleted the verdict and the
-second spawn; what is left here is the tree's side of each probe.) Each test here is one of those
-probes, replayed against the rewrite that removed the second truth.
-
-NOT part of the locked #773 spec suite (`test_773_*.py` committed by write-tests) — these
-live beside it and drive the same scene substrate.
 """
 from __future__ import annotations
 
@@ -69,10 +59,7 @@ def _rewriting_scene(tmp_path, edit):
 
 def test_a_concurrent_edit_that_strips_the_citations_mid_read_is_not_committed(tmp_path):
     """While the drain reads `l1.md`'s citations, another writer strips them (after the
-    second read: the attributable check's is the first, the citation read's own first round
-    the second). The citations the drain approved on cannot stand for bytes that cite
-    nothing: the re-read sees the move, the file is not approved, not committed, and the tree
-    is put back. (#1166 moved this from the deleted forward check to the citation read.)"""
+    second read."""
     stripped = S.lesson(body="no citations any more")
     sc = _rewriting_scene(tmp_path, lambda n: n == 2 and (
         sc.corpus / "l1.md").write_text(stripped, encoding="utf-8"))
@@ -85,10 +72,7 @@ def test_a_concurrent_edit_that_strips_the_citations_mid_read_is_not_committed(t
 
 
 def test_a_file_that_never_holds_still_under_the_citation_read_refuses_the_tick(tmp_path):
-    """A writer that rewrites `l1.md` after every read, each version still citing f1: no
-    round of the citation read sees the same bytes twice, so the tick refuses with
-    `AuthorError` (rc 2, f1 charged an attempt) rather than commit bytes no citation was read
-    from."""
+    """A writer that rewrites `l1.md` after every read, each version still citing f1."""
     sc = _rewriting_scene(tmp_path, lambda n: (sc.corpus / "l1.md").write_text(
         S.lesson("f1", body=f"version {n}"), encoding="utf-8"))
 
@@ -150,11 +134,7 @@ def test_a_finding_the_curator_did_not_report_but_an_approved_file_cites_is_comm
 
 
 def test_a_finding_the_curator_filed_as_skipped_but_wrote_a_lesson_for_takes_the_trees_fate(tmp_path):
-    """The curator says "skip x" and also writes a lesson citing x. The tree outranks the
-    bucket: x is judged, and on a GOOD it is committed — once, in one category.
-
-    `verify_agent_report` refuses a dirty corpus with an empty `committed` (the self-report
-    and tree disagree), so the shape needs a second, honestly committed row beside x."""
+    """The curator says "skip x" and also writes a lesson citing x."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("x", run_id="x"), S.finding_row("y", run_id="y")],

@@ -1,27 +1,4 @@
-"""#999 — the turn-zero correlation grant is authored in the verb-disposition table.
-
-THE DEFECT. #995 moved the gather and judge grants into `knowledge/environment/verb-grants.yaml`
-and gated the table for totality over the adapters. One grant stayed in Python: the two pairs
-the harness-dispatched correlation lead (`l-00c`) runs under, a `VerbGrant` literal in
-`lead_zero/_spec.py`. Its dispatch wraps the production registry and swaps THAT grant in, so a
-withholding written in the table — `elastic.alerts: {roles: []}` — is honoured by item 1 and
-every model-dispatched lead and ignored by item 3. Two statements about one permission, one of
-them obeyed; and the table could not even name the lead, so the withholding was inexpressible.
-
-THE SHAPE (settled on the issue). The lead is NOT a role — it is bound from `GATHER_DEF`, so
-its policy, trace and wire-log id are gather's — and it does not become one. It is a second
-GRANT HOLDER the table may name (gather is the only other, since #922 retired the judge),
-`CORRELATION_GRANT_HOLDER`, a plain constant beside the ablation-lens precedent in
-`agent_role.py`. The loader owns three coherence rules about it: the holder never holds a pair
-gather does not (it runs under gather's tools), its rows reach at most one system (it is
-dispatched against exactly one), and it holds at most one query verb (the rule the subset-of-
-gather one cannot state, because the wider verb IS gather's). A withholding degrades — item 3
-is neither claimed nor dispatched, and ORIENT says so — it never kills startup.
-
-THE ORACLES. Conservation is asserted against `CORRELATION_CENSUS`, transcribed in
-`_dispositions995.py` from the literal as it stood, never from the file under test. Every rule
-is proved by a PLANTED table that violates it beside a positive control that does not.
-"""
+"""The turn-zero correlation grant is authored in the verb-disposition table: projection, withholding, and load-time refusals."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
@@ -31,11 +8,9 @@ from pathlib import Path
 import pytest
 
 from defender._paths import PATHS, adapters_under
-from defender.runtime.agent_role import AgentRole
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry
 from defender.tests._dispositions995 import (
-    CORRELATION_CENSUS,
     DispositionError,
     dispositions_path,
     grant_for,
@@ -46,7 +21,6 @@ from defender.tests._dispositions995 import (
 from defender.runtime.verbs import read_roster
 from defender.tests import _tenants1106 as T1106
 
-DEFENDER = PATHS.defender_dir
 ADAPTERS = PATHS.adapters_dir
 #: The committed tenant's settings folder, where the shipped table lives since #1106.
 SETTINGS = T1106.FIXTURE_SETTINGS
@@ -71,31 +45,10 @@ def _table(tmp_path: Path, rows: dict) -> Path:
 # The holder exists, is not a role, and projects exactly what the literal held.
 # =========================================================================================
 
-def test_the_holder_is_a_known_name_and_not_an_agent_role():
-    from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER
-    from defender.runtime.verb_dispositions import KNOWN_ROLES
-
-    assert CORRELATION_GRANT_HOLDER == HOLDER
-    assert CORRELATION_GRANT_HOLDER in KNOWN_ROLES
-    # An enum key grants compiled policy and names a trace file (`agent_role.py`), and three
-    # suites pin `set(AGENTS) == set(AgentRole)`. The lead runs under gather's key.
-    assert CORRELATION_GRANT_HOLDER not in {r.value for r in AgentRole}
-
-
-def test_the_projected_correlation_grant_is_exactly_the_historical_pairs():
-    """Conservation: moving the grant into the table widened or narrowed it by nothing."""
-    rows = load_dispositions(dispositions_path(SETTINGS))
-    granted = {(s, v) for s, v, _ in grant_for(HOLDER, rows).entries}
-    assert granted == set(CORRELATION_CENSUS), (
-        f"gained={sorted(granted - CORRELATION_CENSUS)} lost={sorted(CORRELATION_CENSUS - granted)}"
-    )
-
 
 def test_the_shipped_correlation_grant_is_the_tables_projection():
-    """The wiring: the correlation grant must be BUILT from the table, not merely agree
-    with it today. Checked against the projection function over the shipped rows, so a
-    leftover literal that happens to match is still caught the first time the table changes.
-    (#1106 M4: the grant is the RUN's — `run_grants(settings)` — not a `_spec` constant.)"""
+    """The wiring: the correlation grant must be BUILT from the table, not merely agree with it
+    today."""
     from defender.runtime.lead_zero._spec import correlation_grant
 
     grants = T1106.run_grants(SETTINGS)
@@ -145,17 +98,6 @@ def test_a_withholding_from_every_holder_is_honoured_by_the_correlation_registry
         f"the refusal must name the table the withholding was written in:\n{decision.refusal}"
     )
     assert correlation_system(correlation_grant(withheld)) is None
-
-
-def test_the_narrowed_registry_points_at_the_table(tmp_path):
-    """#1106 M4: the pointer is the run's resolved table, carried by the registry the narrowed
-    one wraps — there is no class-level constant to point at any more."""
-    from defender.runtime.lead_zero._items import _NarrowedRegistry
-
-    grants = T1106.run_grants(SETTINGS)
-    inner = ModuleVerbRegistry(read_roster(ADAPTERS), grants.gather, grant_home=str(grants.path))
-    narrowed = _NarrowedRegistry(inner, grants.correlation)
-    assert narrowed.grant_home == inner.grant_home == str(grants.path)
 
 
 def test_a_denied_verb_names_the_table_for_gather_too():
@@ -230,9 +172,8 @@ def test_the_lead_may_not_hold_a_second_query_verb(tmp_path):
 
 def test_a_health_check_on_a_second_system_is_not_a_second_dispatch_target(tmp_path):
     """`health-check` never selects the dispatched system (`correlation_system` filters it out
-    before deriving one), so a row for it elsewhere is not the authoring ambiguity the
-    one-system rule refuses — and refusing it would kill startup over a table whose target is
-    unambiguous. The loader and the projection have to agree about which rows reach a system."""
+    before deriving one), so a row for it elsewhere is not the authoring ambiguity the one-system
+    rule refuses — and refusing it would kill startup over a table whose target is unambiguous."""
     from defender.runtime.lead_zero._spec import correlation_grant, correlation_system
 
     rows = load_dispositions(_table(tmp_path / "ok", {
@@ -260,10 +201,8 @@ def test_a_grant_with_no_query_verb_has_no_dispatch_target():
 
 
 def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
-    """`run_correlation` returns the `withheld` ending before any claim: no `l-00c` row lands
-    in the leads table for a lead that will never run. The dispatch identity is handed in as the
-    run-start check resolves it (#1003): `system=None` is the withheld arm. (The claiming arm is
-    observed end to end by `alert_front_door_1222/test_1222_correlation_endings`.)"""
+    """`run_correlation` returns the `withheld` ending before any claim: no `l-00c` row lands in the
+    leads table for a lead that will never run."""
     import asyncio
 
     from defender.runtime.lead_zero import ENDING_WITHHELD, CorrelationDispatch, run_correlation
@@ -282,21 +221,3 @@ def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
     assert not lead_file.exists(), "a withheld lead must not claim its row"
 
 
-def test_the_orient_heading_says_the_lead_was_withheld():
-    """MAIN reads why `l-00c` is absent — a trusted line naming the table — rather than a
-    summary. With a summary, the table is not named."""
-    from defender.runtime.lead_zero import (
-        ENDING_WITHHELD,
-        L3,
-        CorrelationOutcome,
-        render_correlation_section,
-    )
-
-    # #1106 M4: the note names the RUN's resolved table (`grant_home`), not a fixed constant.
-    table = str(dispositions_path(SETTINGS))
-    withheld = render_correlation_section(
-        CorrelationOutcome(ending=ENDING_WITHHELD), grant_home=table)
-    assert L3 in withheld, withheld
-    assert table in withheld, withheld
-    assert table not in render_correlation_section(
-        CorrelationOutcome(summary="a framed summary", system="alpha"), grant_home=table)

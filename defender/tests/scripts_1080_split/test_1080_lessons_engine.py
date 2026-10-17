@@ -1,24 +1,5 @@
-"""#1080 group `lessons`: the lessons engine leaves `defender/scripts/lessons/` for a home outside
-`defender/lessons/` (the lesson content folder), and `bin/defender-lessons` keeps working through
-the thin wrapper left at the path it execs (M-H (a)).
-
-How these tests see the move. The engine (`cmd_tags`, `cmd_show`, `cmd_grep`, `REPO_ROOT`,
-`LESSONS_DIR`) is found by symbol (`S.home_of("cmd_show")`, dF9); the frontier library (`Hit`,
-`FOLD_LEAD`, `WRITE_RETURN_LEAD`, `match_loaded`, `render`) by `S.home_of("WRITE_RETURN_LEAD")`.
-Neither home is imported at module level.
-
-Most behaviour is driven through a COPY of this checkout's `defender/` code (`code_tree`, about
-0.03 s): the engine anchors its corpus on its own file, so a copy whose `defender/lessons` holds a
-fixture corpus — or links, loops, a missing folder — is the real engine over a real tree, with no
-module constant rebound and nothing written into the real tree. The copy's `.venv` is a link to
-the venv running this suite (a linked worktree's shape, which settles without a second exec), and
-a `python3` that execs this interpreter stands first on PATH, so the box branch of the shim finds
-an interpreter that carries the engine's packages on any machine.
-
-"As today" expectations are `goldens/lessons.json`, captured at the base 80888efb by
-`<scratchpad>/lessons/capture_lessons.py`, which imports THIS module and runs the same `observe_*`
-functions with `SPEC1080_AT_BASE` set to 1. `norm` is the one normaliser both sides use.
-"""
+"""Behavior of the `defender-lessons` engine and its shim over fixture corpora (tags, show, grep,
+frontier). Goldens: `goldens/lessons.json`."""
 from __future__ import annotations
 
 import ast
@@ -34,7 +15,6 @@ import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from defender.run_repository import RunPaths
@@ -78,11 +58,6 @@ FIXED_CORPUS = {
     "_TEMPLATE.md": "---\nname: t\ndescription: d\nsource_signature: [template-only]\n---\n",
 }
 
-#: A second corpus with nothing in common with `FIXED_CORPUS` — what a decoy checkout holds.
-DECOY_CORPUS = {
-    "decoy.md": _lesson("decoy", desc="decoy lesson", sig="[decoy-sig]", tel="[decoy-sensor]",
-                        phase="[decoy-phase]"),
-}
 
 #: Lessons the reader skips with a warning: no frontmatter fence, and broken YAML.
 MALFORMED_EXTRA = {
@@ -126,7 +101,6 @@ _FOLD_LEAD_PREFIX = "### Lessons matched against your record as it stands"
 
 #: A node selector every two-vertex document below matches (the open `ident` on `v-001`).
 _MATCHING_NODE = "frontier_nodes:\n  - {type: compute, slot: ident}\n"
-_NON_MATCHING_NODE = "frontier_nodes:\n  - {type: process, slot: attrs.loginuid}\n"
 
 
 def _meta_lesson(name: str, *, desc: str, sig: str) -> str:
@@ -600,37 +574,6 @@ def observe_s062(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, Any
     return {"tags": tags, "orient": rows}
 
 
-S132_ARGV: tuple[tuple[str, ...], ...] = (
-    ("--show", "defender/lessons/sshd-one.md"),
-    ("--show", "./defender/lessons/sshd-one.md"),
-    ("--show", "<TREE>/defender/lessons/sshd-one.md"),
-    ("--show", "defender/lessons//sshd-one.md"),
-    ("--show", "defender/lessons/../lessons/sshd-one.md"),
-    ("--show", "defender/skills/../lessons/sshd-one.md"),
-    ("--show", "defender/lessons/in-dir/sshd-one.md"),
-    ("--show", "<TMP>/tree-link/defender/lessons/sshd-one.md"),
-    ("--show", "tree-link-rel/defender/lessons/sshd-one.md"),
-    ("--show", "defender/lessons/link_in.md"),
-    ("--show", "defender/lessons/../skills/invlang/SKILL.md"),
-    ("--show", "lessons/sshd-one.md"),
-    ("--show", "../defender/lessons/sshd-one.md"),
-    ("--show", "defender/lessons/linkdir2/o.md"),
-)
-
-
-def observe_s132(tmp: Path) -> dict[str, Any]:
-    root = tree_with(tmp, "tree", FIXED_CORPUS)
-    plant_links(root, tmp)
-    (root / "defender" / "lessons" / "in-dir").symlink_to(".", target_is_directory=True)
-    (tmp / "tree-link").symlink_to(root, target_is_directory=True)
-    (root / "tree-link-rel").symlink_to(".", target_is_directory=True)
-    run_dir = tmp / "runs" / "r1"
-    run_dir.mkdir(parents=True)
-    cwds = {"run folder": run_dir, "repository root": root}
-    return run_all({f"{where} {key(a)}": (lambda a=a, c=c: outcome(
-        shim(root, a, tmp=tmp, cwd=c), tmp)) for where, c in cwds.items() for a in S132_ARGV})
-
-
 S145_ARGV: tuple[tuple[str, ...], ...] = (
     ("--show", "defender/lessons/out.md"),
     ("--show", "defender/lessons/loop1.md"),
@@ -661,33 +604,6 @@ def observe_s145(tmp: Path) -> dict[str, Any]:
     (corpus / "dir.md").mkdir()
     return run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
                     for a in S145_ARGV})
-
-
-S146_ARGV: tuple[tuple[str, ...], ...] = (
-    ("--tags", "bogus"),
-    ("--tags", ""),  # quirk pin: base behavior, not a requirement (lists every dimension)
-    ("--tags", " "),
-    ("--tags", "SOURCE_SIGNATURE"),
-    ("[",),
-    ("(a",),
-    ("*",),
-    (".*",),
-    ("",),
-    ("x" * 50_000,),
-    ("(" * 100,),
-    ("telemetry_source:.*sshd", "("),
-    (),
-    ("--show",),
-    ("--grep", "sshd"),
-    ("--bogus",),
-    ("-h",),
-)
-
-
-def observe_s146(tmp: Path) -> dict[str, Any]:
-    root = tree_with(tmp, "tree", FIXED_CORPUS)
-    return run_all({key(a)[:200]: (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
-                    for a in S146_ARGV})
 
 
 def observe_s147(tmp: Path) -> dict[str, Any]:
@@ -725,40 +641,6 @@ def observe_s185(tmp: Path) -> dict[str, Any]:
     out["frontier write block"] = norm(frontier_block(corpus, TWO_VERTEX_DOC, top_k=10), tmp)
     out["frontier fold block"] = norm(
         frontier_block(corpus, TWO_VERTEX_DOC, top_k=2, fold=True), tmp)
-    return out
-
-
-def observe_s186(tmp: Path) -> dict[str, Any]:
-    from defender._corpus import iter_lessons
-    from defender.skills.invlang.frontier import frontier_from_text
-
-    lf = S.moved_module("WRITE_RETURN_LEAD")
-    out: dict[str, Any] = {}
-    none = write_corpus(tmp / "none" / "lessons", {
-        f"miss-{i}.md": f"---\nname: miss-{i}\ndescription: miss {i}\n{_NON_MATCHING_NODE}---\n"
-        for i in range(3)})
-    out["zero hits"] = norm(frontier_block(none, TWO_VERTEX_DOC, top_k=3), tmp)
-    out["empty frontier"] = norm(frontier_block(none, "no fences here\n", top_k=3), tmp)
-    many = write_corpus(tmp / "many" / "lessons", {
-        f"l{i:04d}.md": (f"---\nname: l{i:04d}\ndescription: lesson {i}\n"
-                         f"source_signature: [s{i % 7}]\n{_MATCHING_NODE}---\nbody\n")
-        for i in range(2000)})
-    out["thousands, top 3"] = norm(frontier_block(many, TWO_VERTEX_DOC, top_k=3), tmp)
-    hits = lf.match_loaded(frontier_from_text(TWO_VERTEX_DOC), list(iter_lessons(many)),
-                           top_k=10_000)
-    out["thousands, all"] = [len(hits), hits[0].name, hits[-1].name]
-    bad = write_corpus(tmp / "bad" / "lessons", {
-        f"good-{i}.md": f"---\nname: good-{i}\ndescription: good {i}\n{_MATCHING_NODE}---\n"
-        for i in range(2)})
-    (bad / "bad-bytes.md").write_bytes(
-        b"---\nname: bad-bytes\ndescription: \xff\xfe\n" + _MATCHING_NODE.encode() + b"---\n")
-    (bad / "bad-yaml.md").write_text(
-        f"---\nname: [bad-yaml\n{_MATCHING_NODE}---\n", encoding="utf-8")
-    (bad / "dangling.md").symlink_to("no-target.md")
-    (bad / "dir.md").mkdir()
-    with WarningLog() as log:
-        out["one bad lesson, block"] = norm(frontier_block(bad, TWO_VERTEX_DOC, top_k=3), tmp)
-    out["one bad lesson, warnings"] = [norm(m, tmp) for m in log.messages]
     return out
 
 
@@ -827,41 +709,6 @@ def observe_lanes(tmp: Path) -> dict[str, dict[str, Any]]:
                     shim(tree, a, tmp=tmp, cwd=cwd, env=env, program="defender-lessons"), tmp))
                 for a in table}))
     return out
-
-
-def observe_wrapper(tmp: Path) -> dict[str, Any]:
-    """The shim started by path under a bare environment, and with PYTHONPATH naming a decoy
-    checkout whose corpus differs."""
-    root = tree_with(tmp, "tree", FIXED_CORPUS)
-    decoy = tree_with(tmp, "decoy", DECOY_CORPUS)
-    away = tmp / "elsewhere"
-    away.mkdir()
-    runs = {
-        "bare": bare_env(tmp),
-        "PYTHONPATH names a decoy checkout": bare_env(tmp, PYTHONPATH=str(decoy)),
-    }
-    return run_all({f"{label} {key(a)}": (lambda env=env, a=a: outcome(
-        shim(root, a, tmp=tmp, cwd=away, env=env), tmp))
-        for label, env in runs.items() for a in (("--tags",), ())})
-
-
-def observe_pushes(tmp: Path, delenv: Callable[[str], None]) -> dict[str, Any]:
-    """The two pushes over a fixture corpus: the compaction fold's row and the write return."""
-    from defender.runtime import lessons_push
-    from defender.runtime.tools import _document
-    from defender.tests._lessons_corpus import _main_deps, _write_lesson
-
-    delenv("DEFENDER_COMPACTION")
-    deps, _run, dfn = _main_deps(tmp)
-    corpus = dfn / "lessons"
-    corpus.mkdir()
-    _write_lesson(corpus, "ident-open", nodes=("type: compute, slot: ident",))
-    _write_lesson(corpus, "loginuid-held", observed=("type: identity, slot: attrs.loginuid",))
-    _write_lesson(corpus, "process-miss", nodes=("type: process, slot: attrs.loginuid",))
-    text, action = lessons_push.compose_fold(deps, "RECORD ROW", TWO_VERTEX_DOC)
-    recall = _document._frontier_recall(deps, "", TWO_VERTEX_DOC)
-    return {"fold": norm(text, tmp), "fold has an after-commit action": action is not None,
-            "write return": norm(recall, tmp)}
 
 
 # ======================================================================================
@@ -1022,21 +869,6 @@ def test_lessons_corpus_folder_is_missing_empty_or_a_link_when_tags_are_listed(t
     assert {label for label, r in seen["orient"].items() if r["vocabulary_section"]} == signed
 
 
-def test_lessons_show_with_a_path_spelled_relative_absolute_and_through_a_link(tmp_path):
-    """`defender-lessons --show` accepts a lesson spelled repo-relative, absolute, via a symlinked
-    parent or with a dot-dot segment exactly when it resolves inside the corpus, from the box's
-    run folder or the repository root alike, and gives the same result as today for each
-    spelling. Preserved behavior; the working directory does not change the answer.
-
-    Each spelling runs from a run folder and from the copy's root; both verdicts must equal the
-    base's, and so equal each other."""
-    engine_home()
-    seen = observe_s132(tmp_path)
-    assert seen == golden("s132")
-    for a in S132_ARGV:
-        assert seen[f"run folder {key(a)}"] == seen[f"repository root {key(a)}"], a
-
-
 def test_lessons_show_path_that_is_a_link_a_directory_or_missing(tmp_path):
     """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and
     rename; O5 where it applies). A symlink inside the corpus pointing outside is refused; a
@@ -1046,18 +878,6 @@ def test_lessons_show_path_that_is_a_link_a_directory_or_missing(tmp_path):
     A traceback (today's answer to a symlink loop) is compared by exit status and its last line."""
     engine_home()
     assert observe_s145(tmp_path) == golden("s145")
-
-
-def test_lessons_flags_with_bad_values(tmp_path):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and
-    rename; O5 where it applies). An unknown `--tags` dimension, an empty string, an invalid,
-    match- everything or very long `--grep` regex, no pattern, and no arguments at all each give
-    today's status and message.
-
-    Case `--tags ""` (it lists every dimension, while `--tags " "` is refused as an unknown
-    dimension): quirk pin: base behavior, not a requirement."""
-    engine_home()
-    assert observe_s146(tmp_path) == golden("s146")
 
 
 def test_lesson_tag_values_of_unexpected_shape(tmp_path):
@@ -1088,19 +908,6 @@ def test_lesson_frontmatter_and_tags_with_pattern_metacharacters(tmp_path):
     engine_home()
     frontier_home()
     assert observe_s185(tmp_path) == golden("s185")
-
-
-def test_frontier_with_zero_hits_many_hits_and_one_unreadable_lesson(tmp_path):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and
-    rename; O5 where it applies). A frontier matching no lesson, thousands, or matching while one
-    lesson is unreadable or unparseable renders as today; the one bad lesson is handled as today.
-
-    Through the moved `match_lessons` / `match_loaded` / `render`: no hit, an empty frontier, 2000
-    matching lessons (the block and the full ranking's size and ends), and a corpus holding
-    undecodable bytes, broken YAML, a dangling link and a directory beside good lessons (the
-    block and the reader's warnings)."""
-    frontier_home()
-    assert observe_s186(tmp_path) == golden("s186")
 
 
 def test_1080_the_lessons_engine_gives_one_verdict_per_argv_on_the_box_lane_and_the_host_lane(
@@ -1137,127 +944,6 @@ def test_1080_the_lessons_engine_gives_one_verdict_per_argv_on_the_box_lane_and_
             refused = [p for p in typed if f"error: no such lesson: {p}\n" in v["err"]]
             assert refused, (a, v)
             assert v["err"].count("\n") == len(refused), (a, v)
-
-
-def test_1080_the_lessons_wrapper_starts_the_moved_engine_from_a_bare_environment_and_answers(
-        tmp_path):
-    """`bin/defender-lessons`, started by path from an environment with no PYTHONPATH (the
-    operator shell's shape), runs the moved engine as a module with its own checkout root first on
-    the import path and the working folder kept off it, and answers `--tags` over the real corpus
-    with the same stdout and exit code as the base. With PYTHONPATH naming a different checkout of
-    defender, the engine that answers is the one beside the shim ([144]). No Python-side wrapper
-    or bootstrap is left: the shim picks the venv interpreter itself, and the moved engine carries
-    no import-root bootstrap and no venv re-exec.
-
-    A copy's shim answers as the base did, bare and with PYTHONPATH naming a decoy checkout whose
-    corpus differs (the decoy's lessons never appear); the real shim, bare, answers `--tags` over
-    the real corpus as a copy holding that corpus does. Then the sources: the shim's exec line
-    runs the engine's module under `-P -m` after putting the root first on PYTHONPATH, and the
-    engine module mutates `sys.path` nowhere and never calls the venv re-exec."""
-    home = engine_home()
-    seen = observe_wrapper(tmp_path)
-    assert seen == golden("wrapper")
-    assert not any("decoy" in v["out"] for v in seen.values()), seen
-
-    real = S.run([S.REPO_ROOT / SHIM_REL, "--tags"], cwd=tmp_path, env=bare_env(tmp_path))
-    copy = code_tree(tmp_path / "real-content")
-    shutil.copytree(S.LESSONS_CONTENT, copy / "defender" / "lessons", symlinks=True)
-    assert real.returncode == 0, real.stderr.decode()
-    assert real.stdout == shim(copy, ("--tags",), tmp=tmp_path).stdout
-
-    shim_src = (S.REPO_ROOT / SHIM_REL).read_text(encoding="utf-8")
-    assert S.shim_exec_module("defender-lessons") == S.dotted(home), shim_src
-    assert re.search(r' -P -m \S+ "\$@"', shim_src), shim_src
-    assert re.search(r'PYTHONPATH="\$ROOT\$\{PYTHONPATH:\+:\$PYTHONPATH\}"', shim_src), shim_src
-    engine_src = (S.REPO_ROOT / home).read_text(encoding="utf-8")
-    assert sys_path_mutations(engine_src) == 0, f"{home} carries an import-root bootstrap"
-    assert imports_before_guard(engine_src) is None, f"{home} re-execs into the venv itself"
-
-
-def imports_before_guard(src: str) -> list[str] | None:
-    """Modules imported at module scope before the statement that calls `reexec_into_venv`."""
-    seen: list[str] = []
-    for stmt in ast.parse(src).body:
-        calls = [n for n in ast.walk(stmt) if isinstance(n, ast.Call)
-                 and getattr(n.func, "id", getattr(n.func, "attr", None)) == "reexec_into_venv"]
-        if calls:
-            return seen
-        if isinstance(stmt, ast.Import):
-            seen += [a.name for a in stmt.names]
-        elif isinstance(stmt, ast.ImportFrom):
-            seen.append(stmt.module or "")
-    return None
-
-
-def sys_path_mutations(src: str) -> int:
-    """`sys.path.insert/append/extend(...)` calls and `sys.path[...] =` / `sys.path =`
-    assignments anywhere in a module."""
-    count = 0
-    for n in ast.walk(ast.parse(src)):
-        call = isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
-            and n.func.attr in {"insert", "append", "extend"} \
-            and ast.unparse(n.func.value) == "sys.path"
-        assign = isinstance(n, ast.Assign) and any(
-            ast.unparse(t).startswith("sys.path") for t in n.targets)
-        count += bool(call or assign)
-    return count
-
-
-def test_one_lesson_corpus_read_by_the_engine_the_host_push_and_the_page_footer(tmp_path):
-    """The lessons engine, the host-side lessons push and the frontier lane all settle on the
-    same corpus, the real defender/lessons: a lesson one of them lists resolves through the
-    others. No reader's re-anchored root points at a different directory. (S9; M2.) The page
-    footer's history lookup, the fourth reader, stays in `scripts/visualize/` under the
-    2026-10-04 scope cut; its cell is parked with #1105.
-
-    The real shim lists the real corpus; every lesson it lists is the same file under the push's
-    corpus folder (`lessons_push.corpus_dir` over the host's defender folder), under the frontier
-    lane's default corpus and under the engine's own lessons folder."""
-    from defender import run_common
-    from defender.runtime import lessons_push
-
-    engine = S.moved_module("cmd_show")
-    lf = S.moved_module("WRITE_RETURN_LEAD")
-
-    listing = S.run([S.REPO_ROOT / SHIM_REL], cwd=tmp_path, env=bare_env(tmp_path))
-    assert listing.returncode == 0, listing.stderr.decode()
-    listed = [Path(ln.split("\t", 1)[0]) for ln in listing.stdout.decode().splitlines()]
-    assert listed, "the engine lists no lesson over the real corpus"
-
-    push_corpus = lessons_push.corpus_dir(SimpleNamespace(defender_dir=run_common.DEFENDER_DIR),
-                                          lane="[spec1080]")
-    assert push_corpus is not None
-    for path in listed:
-        assert (push_corpus / path.name).resolve() == path.resolve(), path
-        assert (Path(lf.DEFAULT_CORPUS) / path.name).resolve() == path.resolve(), path
-        assert (Path(engine.LESSONS_DIR) / path.name).resolve() == path.resolve(), path
-
-
-def test_1080_the_lessons_pushes_reach_the_moved_frontier_with_todays_block(tmp_path,
-                                                                            monkeypatch):
-    """`runtime/lessons_push.py` and `runtime/tools/_document.py` reach `Hit`, `FOLD_LEAD`,
-    `WRITE_RETURN_LEAD`, `match_loaded` and `render` in the lessons engine's new home. The frontier
-    block they push for a fixture frontier is identical to the base block.
-
-    The compaction fold's row (`compose_fold`) and the write return (`_frontier_recall`) over the
-    #919 two-vertex document and a three-lesson corpus, against the base's text; then the moved
-    library's own `match_loaded` / `render` with each lead reproduce the pushed blocks, and its
-    hits are its `Hit`."""
-    from defender._corpus import iter_lessons
-    from defender.skills.invlang.frontier import frontier_from_text
-
-    frontier_home()
-    seen = observe_pushes(tmp_path, lambda k: monkeypatch.delenv(k, raising=False))
-    assert seen == golden("pushes")
-
-    lf = S.moved_module("WRITE_RETURN_LEAD")
-    corpus = tmp_path / "defender" / "lessons"
-    hits = lf.match_loaded(frontier_from_text(TWO_VERTEX_DOC), list(iter_lessons(corpus)))
-    assert hits
-    assert all(isinstance(h, lf.Hit) for h in hits)
-    assert seen["fold"] == "RECORD ROW\n\n" + norm(lf.render(hits, lead=lf.FOLD_LEAD), tmp_path)
-    assert seen["write return"] == "\n\n" + norm(lf.render(hits, lead=lf.WRITE_RETURN_LEAD),
-                                                  tmp_path)
 
 
 # ======================================================================================

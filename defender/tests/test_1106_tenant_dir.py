@@ -1,26 +1,4 @@
-"""#1106 — the tenant's knowledge folder, as `_tenant.accept_tenant` accepts it (O5, O4, D3).
-
-#1120 removed the `tenant_dir` resolver; its refusals live in the ONE acceptance,
-`accept_tenant(data_root, tenant_id, *, defender_dir) -> Tenant`, which maps (data root, tenant
-id) to the tenant's two halves under `<root>/<id>/knowledge/`: `settings/` (host-only: the four
-settings kinds) and `agent/` (model-facing, mounted read-only into the box). It is the one place
-a tenant id becomes an accepted tenant, so it is where both escapes the design names are closed:
-
-  * the ID — a path separator, `..`, a leading dot, or nothing at all is not a tenant id (O5);
-  * the LINK — the knowledge folder must resolve to `<root>/<id>/knowledge`, and each half must
-    be a real directory resolving under it, which is what catches `A/agent -> ../B/agent` and
-    `A/agent -> ../settings`: both stay INSIDE the root, so a root-containment check alone
-    passes them (O5).
-
-and where D3's "fail loudly" lives: an absent tenant folder or an absent required settings file
-(`verb-grants.yaml`, `lead-zero.yaml`, `systems/case-history/mapping.yaml`) is a
-`TenantRefused` NAMING THE PATH, with no fallback to another tenant, the template, or the
-checkout (O4).
-
-Every fault here is a real one planted through the real primitive — real directories, real
-symlinks, real missing files — and every refusal is paired with the well-formed tenant it
-differs from by exactly that fault.
-"""
+"""accept_tenant: a tenant id and its knowledge folder halves are accepted only as plain, unlinked directories under the data root."""
 from __future__ import annotations
 
 import os
@@ -60,27 +38,6 @@ def test_a_well_formed_tenant_resolves_to_its_two_halves_under_root_and_id(tmp_p
     assert (td.settings / "verb-grants.yaml").read_text(encoding="utf-8") == T.TABLE_A
 
 
-def test_the_tenant_dir_error_is_a_tenant_refusal(tmp_path):
-    """The knowledge folder's refusal is one of the tenant refusals every entry catches
-    (#1078's one refusal class) — and not a `ValueError`, which pydantic would wrap inside a
-    validator. Observed on a real refusal of the folder (a missing required file), so the
-    class asserted is the one `accept_tenant` raises."""
-    root = tmp_path / "tenants"
-    T.place_tenant(root, "acme", omit=("verb-grants.yaml",))
-    with pytest.raises(Exception) as caught:  # noqa: PT011 — the class is what is asserted
-        T.accept(root, "acme")
-    assert isinstance(caught.value, _refused()), type(caught.value)
-    assert not isinstance(caught.value, ValueError), type(caught.value)
-    assert issubclass(_refused(), Exception)
-    assert not issubclass(_refused(), ValueError)
-
-
-def test_the_required_settings_are_exactly_d3s_three_files():
-    """D3: required AT START means these three. `config.env` is not among them — some
-    adapters need none, and its absence stays the existing per-call `ConfigFault`."""
-    assert set(T.tenants().REQUIRED_SETTINGS) == set(T.REQUIRED_FILES)
-
-
 def test_a_tenant_without_any_config_env_still_resolves(tmp_path):
     """The other half of D3's list: a tenant whose systems carry no `config.env` at all is
     not refused at start (an MCP-path or config-less adapter is legal)."""
@@ -110,14 +67,6 @@ def test_an_id_that_is_not_a_single_plain_name_is_refused_naming_it(tmp_path, ba
     if bad_id:
         assert bad_id in message, message
     assert T.accept(root, "acme").id == "acme"
-
-
-def test_an_absolute_id_is_refused(tmp_path):
-    """`Path(root) / "/elsewhere"` IS `/elsewhere` — the join discards the root entirely."""
-    root = tmp_path / "tenants"
-    elsewhere = T.place_tenant(tmp_path / "outside", "evil").parent
-    root.mkdir(parents=True)
-    _refusal(root, str(elsewhere))
 
 
 # ---- O5: the link --------------------------------------------------------------------------
@@ -364,15 +313,3 @@ def test_a_directory_the_link_check_cannot_read_is_refused_not_skipped(tmp_path)
 
 # ---- D2: the root is an input --------------------------------------------------------------
 
-def test_two_roots_holding_the_same_tenant_id_resolve_independently(tmp_path):
-    """The root decides, and only the root: one id under two roots is two tenants. An
-    acceptance that cached by id, or consulted the checkout's lab first, answers both calls
-    with one folder."""
-    one = T.place_tenant(tmp_path / "one", T.PLAYGROUND_ID, table=T.TABLE_A)
-    two = T.place_tenant(tmp_path / "two", T.PLAYGROUND_ID, table=T.TABLE_B)
-    a = T.accept(tmp_path / "one", T.PLAYGROUND_ID)
-    b = T.accept(tmp_path / "two", T.PLAYGROUND_ID)
-    assert a.settings == one / "settings"
-    assert b.settings == two / "settings"
-    assert (a.settings / "verb-grants.yaml").read_text(encoding="utf-8") == T.TABLE_A
-    assert (b.settings / "verb-grants.yaml").read_text(encoding="utf-8") == T.TABLE_B

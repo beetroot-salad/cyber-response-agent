@@ -1,20 +1,5 @@
-"""#1221 O1 — every comment the host posts opens with the agent tag naming the authoring run.
-
-The design (issue #1221, D1/M1): the write-back stays a plain comment, and the host marks it as
-model-made by putting ONE plain-text line at the START of the body — a fixed prefix
-(`case_ticket.AGENT_TAG_PREFIX`) plus the authoring run's id (`case_ticket.agent_comment_tag`).
-It is added at the single POST every comment leaves through, never through the tenant's
-`comment.body` template, so a tenant mapping cannot drop it and a future comment kind cannot
-miss it. It names the RUN (`run_dir.name`), not the case key, which on the platform is the
-vendor's ticket id. Its bytes come out of the body's wire bound, and it sits at the start
-because a long reply reaches gather with each string leaf clipped to its first 600 characters
-(`runtime/payload_view.py`): a trailing tag would be cut while the verdict above it survived.
-
-Every test here drives the REAL writer (`ticket_writer.record_case_ticket`) through its one
-seam, `TicketWriterDeps.request`, with a fake that CAPTURES the outbound payload, and asserts
-on what the fake received. The two new names are reached through `require` at call time, so a
-missing one is one red per test, never a collection error.
-"""
+"""#1221: every comment the host posts opens with the agent tag naming the authoring run, added at
+the single POST through the real writer and surviving the wire bound and the listing clip."""
 from __future__ import annotations
 
 import html
@@ -84,13 +69,7 @@ def _comment_post(store: FakeStore) -> tuple[str, str]:
 
 
 def test_1221_the_tag_is_one_plain_line_naming_the_run():
-    """The tag is one plain-text line: the fixed prefix, then the run id verbatim. It carries
-    no line break of any kind, and it reads the same after the two encodings it meets on its
-    way to a model or a person: JSON escaping (gather is served every reply as escaped JSON,
-    and the teaching quotes the prefix, so an escaped tag would not match the words the model
-    was taught) and HTML escaping (a vendor's ticket UI). It carries none of the markdown
-    characters that would restyle it, and it is short — under 200 characters even for the
-    longest run id the product mints — so it sits well inside the 600-character leaf clip."""
+    """The tag is one plain-text line."""
     prefix = _prefix()
     assert isinstance(prefix, str), f"the tag prefix is not a string: {prefix!r}"
     assert prefix.strip(), f"the tag prefix is blank: {prefix!r}"
@@ -164,10 +143,7 @@ def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path, monkeypatch):
     """The tag names the run (`run_dir.name`) even when the case is written under another key —
     on the platform the case key is the vendor's ticket id — and it reaches the wire even when
     the tenant's `comment.body` template has no placeholder for either id: the tag never goes
-    through the template, so a mapping cannot drop it.
-
-    The complementary control: a template that DOES render `{case_id}` renders the KEY there,
-    while the tag line still names the run."""
+    through the template, so a mapping cannot drop it."""
     key = "SOC-VENDOR-4242"
     run_dir = make_run(tmp_path, name=RUN_ID, body=NARRATIVE)
     assert _tag(RUN_ID) != _tag(key), "the control is vacuous: the two ids tag alike"
@@ -231,9 +207,7 @@ def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
     """With a narrative far past the bound, the whole posted body — tag line included — is at
     most `WIRE_BOUND_BYTES` UTF-8 bytes, the tag line is intact at its start, and the cut is
     the narrative's (the body still ends in the one visible `…`). The tag's bytes come out of
-    the bound, never on top of it, for the longest run id too.
-
-    The complementary control: a narrative well under the bound crosses whole, with no `…`."""
+    the bound, never on top of it, for the longest run id too."""
     run_dir = make_run(tmp_path, name=run_id, body=filler * 20000)
     store = FakeStore()
     record(run_dir, store)
@@ -259,17 +233,7 @@ def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
 
 
 def test_1221_the_tag_survives_the_listing_view_clip(tmp_path):
-    """scale_model_view_stays_bounded, and the tag inside it. A ticket listing reaches gather
-    through `payload_view.render`: verbatim below `PASSTHROUGH_MAX_BYTES_DEFAULT` (8192 bytes),
-    and above it reduced, with every string leaf clipped to its first `LEAF_MAX_CHARS` (600)
-    characters or fewer and the reduction marked.
-
-    The comments here are the writer's own maximal bodies, each opening with its tag, over a
-    narrative of distinct words so what a view kept can be told apart. One such case still
-    renders verbatim, its last surviving word included; two do not, and in the reduced view
-    each comment still opens with its tag line and its first words while its last surviving
-    word is gone — the clip is real, so the tag's survival is not a view that kept
-    everything."""
+    """scale_model_view_stays_bounded, and the tag inside it."""
     narrative = " ".join(f"word{i:05d}" for i in range(4000))
     bodies, last_words = {}, {}
     for run_id in (RUN_ID, BRANCH_RUN_ID):

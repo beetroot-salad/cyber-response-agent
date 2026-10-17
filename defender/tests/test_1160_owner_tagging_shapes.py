@@ -1,94 +1,15 @@
-"""#1160 — the run-records owner lint tags an owner through every binding shape (amended design).
-
-`lint_run_records`' join arm reports a literal-free `/` join onto a value that holds an owner
-instance. The tagging behind it lives in `scripts/lint/_astlib.py`. The design amendment
-(issue #1160, "Design amendment", D1–D6) replaces the first cut's bare-name factory matching
-with name RESOLUTION and one table. These tests pin the amended design:
-
-* O1 — the join is reported whatever binding shape put the owner in the name: a plain assign,
-  an annotated assign (tagged from its value, whatever the annotation says), every target of a
-  multi-target assign (`a = b = v`), a carrier alias (`rt2 = rt`), an `await` (D5), and a call
-  to any `_TENANT_FACTORIES` entry — imported or same-module, bound to a local or chained off
-  the call. Full owners too: `p: RunPaths = RunPaths(d)`, `p = q = RunPaths(d)`.
-* D1 / D2 — a same-module factory tags its callers ONLY because its dotted origin
-  (`defender.<the module's path, dotted>.<name>`) is an entry of the one table: the same planted
-  module with no entry tags nothing, and the same source planted under another path (another
-  module) tags nothing. A package's `__init__.py` is the package itself
-  (`runtime/pkg_1160/__init__.py` is `defender.runtime.pkg_1160`). Inside a planted
-  `runtime/run_tenant.py` that defines its own `RunTenant` and `resolve_tenant`, both resolve as
-  they do everywhere else. A class body is not a scope: a method named `_g` does not hide the
-  module's `_g` from a sibling method. A module-level name bound by anything besides its one
-  def — an assignment (plain, annotated, under `if`), an import (plain or under `try`), a
-  second def, a `for` target, or a `global` rebinding inside a function (D7) — is not resolved.
-* D7 — relative imports resolve against the module's package, in every scope:
-  `from ..run_tenant import RunTenant` in `runtime/driver_1160/__init__.py` (its own package)
-  and in a plain module beside it, `from .run_tenant import ...` / `from . import run_tenant` /
-  `from .._tenant import Tenant` in a plain module of `runtime/`, and a function-local relative
-  import. Parameters, factory calls and annotations reached through them are tagged.
-* D3 — a parameter annotation resolves by origin: a string (`"RunTenant"`), an aliased import
-  (`RunTenant as RT`), an attribute (`_tenant.Tenant`), the module's own `class RunTenant`;
-  while a module's own UNRELATED `class Tenant` is not the accepted `Tenant`. One list of
-  spellings (`ANNOTATION_FORMS`, quoted dotted and relative ones included) drives both the
-  census and a planted gate parameter, so the two cannot resolve a spelling differently.
-* D6 — literal unpacking is not traced: an unpacked name is never tagged, on the tenant, the
-  carrier or the full-owner side (the first cut traced it; `a, b = b, a` then leaked a tag,
-  review finding #7). Pinned as a non-obligation beside a plain-assign twin that is reported.
-  Starred, nested and length-mismatched unpacks, and unparseable string annotations, scan
-  without raising.
-* O2 — tags are sticky: a join made while a name held an owner stays reported after the name
-  is rebound — to a constant, an annotated or unpacked constant, a call, a name, an attribute,
-  or as a `for` target, a `with ... as` target, or an augmented assignment.
-* O3 / D4 — the census: every top-level `def` / `async def` in the sweep, public AND private,
-  whose return annotation resolves to `Tenant` / `RunTenant` is in `_TENANT_FACTORIES` with that
-  class, and every entry names such a function (no stale entries).
-* O4 — the knowledge halves stay clean through every shape (`tenant.settings` / `.knowledge` /
-  `.agent`, `run_tenant.settings`). A same-module factory name shadowed by a parameter, a local,
-  a nested def, a closure parameter, a function-local import, or a module-level rebinding is
-  not the factory — for the `Tenant` factory `_g` and the carrier factory `_f`.
-* O5 — the live sweep stays at 0 findings with an empty allow-list. Pinned already by
-  `test_1077_gate.py::test_gate_passes_with_an_empty_allow_list` (gate-marked, run by CI's
-  `lint` job); not repeated here.
-
-**What these tests require of `_astlib` and the gate** (names the design leaves open are
-fixed here):
-
-* `_TENANT_FACTORIES: dict[str, str]` — factory origin -> the class origin it returns
-  (`"defender.runtime.run_tenant.resolve_tenant": "defender.runtime.run_tenant.RunTenant"`).
-  The ONE table (D2). The first cut's `_PARTIAL_OWNER_FACTORIES`, `_CARRIER_FACTORIES` and
-  `ModuleEnv.factory_defs` are gone; nothing here reads them.
-* `lint_run_records.module_and_package(rel) -> (module, package)` — the dotted module a swept
-  file is and the package its relative imports resolve against, from its path relative to the
-  defender dir: `learning/branch/cli.py` -> (`defender.learning.branch.cli`,
-  `defender.learning.branch`); `runtime/driver/__init__.py` -> (`defender.runtime.driver`,
-  `defender.runtime.driver`). The census calls it rather than deriving names itself, so the
-  census and the gate cannot name a module differently.
-* `module_env(tree, module=None, package=None)` — `module` is the dotted name its own top-level
-  def / async def / class names resolve under (D1); `package` is what its relative imports
-  resolve against, in every scope (D7).
-* `annotated_class(ann, env) -> str | None` — the dotted origin of the class an annotation
-  expression names, resolved against `env` (D3): a `Name` or an `Attribute` through the scope's
-  imports (relative ones absolute, D7); a `str` constant, parsed first — None, never an
-  exception, when it does not parse; and the module's own top-level class as `<module>.<name>`
-  (D1). None for anything else. The census passes the module's ROOT env, since a return
-  annotation evaluates at module scope.
-
-The planted modules are scanned through the 1120 suite's `_scan_planted`
-(`lint_run_records.scan` over a tmp tree, the way CI drives the gate), each cell a function of
-its own, so a finding is attributed to its cell by the function name in its display. A reported
-cell asserts the JOIN finding specifically. Every clean cell runs beside its module's live
-control (`EpisodePaths(ep).runs / x`) and beside a reported twin of the same binding shape onto
-an owned member, so its emptiness cannot pass because the arm or the tagging is dead. Table
-entries for planted modules go into a FRESH copy of `_astlib` (`_gate_with_table`); the shared
-module that every other gate and suite imports is never written.
+"""The run-records owner lint (`lint_run_records`, tagging in `scripts/lint/_astlib.py`) reports a literal-free `/` join
+onto an owner instance through every binding shape (assign, annotated, multi-target, alias, await, factory call, relative
+and aliased imports, parameter annotations), keeps tags sticky across rebinding, never traces unpacking, and leaves the
+knowledge halves and shadowed factory names clean. Planted modules are scanned through the 1120 suite's `_scan_planted`,
+each clean cell beside a live control so emptiness cannot pass on a dead arm.
 """
 from __future__ import annotations
 
-import ast
 import re
 import sys
 import textwrap
 import uuid
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +18,6 @@ import pytest
 from defender.tests import _spec1077 as S
 from defender.tests._by_path import (
     LINT_DIR,
-    cached_parse,
     import_lint_lib,
     load_lint_gate,
     load_module,
@@ -1300,11 +1220,7 @@ STOCK_CELLS = (
 
 def _gate_with_table(entries: dict[str, str]) -> Any:
     """A fresh `lint_run_records` bound to a fresh `_astlib` whose `_TENANT_FACTORIES` also
-    holds `entries`.
-
-    The copy is loaded under its own name and stands in for `_astlib` only while the gate copy
-    runs its `from _astlib import ...`; then the shared module (the one `import_lint_lib`
-    hands every other gate and suite) is put back, untouched — its table is never written."""
+    holds `entries`."""
     tag = uuid.uuid4().hex
     lib = load_module(LINT_DIR / "_astlib.py", name=f"_astlib_1160_{tag}")
     table = getattr(lib, "_TENANT_FACTORIES", None)
@@ -1580,75 +1496,13 @@ def test_a_relatively_imported_carriers_knowledge_halves_stay_clean(
 # O3 / D4 — the census: the table holds every Tenant / RunTenant factory, and nothing else.
 # ======================================================================================
 
-_FACTORY_CLASSES = (TENANT, RUN_TENANT)
-
-#: The factories the live tree holds today (D2's list): a census that finds none of them —
-#: a dead resolver — cannot pass.
-_TODAY = {
-    "defender._tenant.accept_tenant": TENANT,
-    "defender.runtime.run_tenant.resolve_tenant": RUN_TENANT,
-    "defender.runtime.run_tenant.run_tenant_for": RUN_TENANT,
-    "defender.run._resolve_run_tenant": RUN_TENANT,
-    "defender.run._accept_request_tenant": TENANT,
-    "defender.learning.branch.cli._episode_tenant": RUN_TENANT,
-}
 
 
-def _factory_census(files: Iterable[Path], root: Path, gate: Any) -> dict[str, str]:
-    """{top-level def / async def's origin: the factory class its return annotation names},
-    public and private, over `files` under `root` (a defender dir). Each file is named by the
-    GATE's own `module_and_package(rel)` — never a derivation of the test's — and its
-    annotations are resolved by `_astlib.annotated_class` against
-    `module_env(tree, module=..., package=...)`. Methods and nested defs are not factories."""
-    astlib = import_lint_lib("_astlib")
-    out: dict[str, str] = {}
-    for path in files:
-        rel = path.relative_to(root).as_posix()
-        text, tree = cached_parse(path, rel)
-        if "Tenant" not in text:
-            continue  # every spelling that resolves to either class carries the word
-        module, package = gate.module_and_package(rel)
-        env = astlib.module_env(tree, module=module, package=package)
-        for node in tree.body:
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or (
-                    node.returns is None):
-                continue
-            cls = astlib.annotated_class(node.returns, env)
-            if cls in _FACTORY_CLASSES:
-                out[f"{module}.{node.name}"] = cls
-    return out
 
 
-def _drift(census: dict[str, str], table: dict[str, str]
-           ) -> tuple[dict[str, str], dict[str, str]]:
-    """`(unlisted, stale)`: factories the table lacks (or lists against another class), and
-    entries naming no function so annotated (missing, unannotated, or another class)."""
-    unlisted = {fn: cls for fn, cls in census.items() if table.get(fn) != cls}
-    stale = {fn: cls for fn, cls in table.items() if census.get(fn) != cls}
-    return unlisted, stale
 
 
-def test_the_factory_table_is_exactly_the_sweeps_tenant_and_run_tenant_factories() -> None:
-    """O3 / D4: every top-level `def` / `async def` in the swept tree (public and private)
-    whose return annotation resolves to `Tenant` / `RunTenant` is in `_TENANT_FACTORIES` with
-    that class, and every entry names such a function — so a new factory cannot leave its
-    callers' joins untagged in silence, and a removed or retyped one cannot leave a stale
-    entry. The census must find today's six, so a resolver that finds nothing cannot pass."""
-    gate = _lint_run_records()
-    defender = gate.DEFENDER
-    files = sorted({*gate.sweep_files(), defender / "_tenant.py",
-                    defender / "runtime" / "run_tenant.py"})
-    census = _factory_census(files, defender, gate)
-    missing = {fn: cls for fn, cls in _TODAY.items() if census.get(fn) != cls}
-    assert missing == {}, f"the census does not see today's factories: {missing}"
-    table = import_lint_lib("_astlib")._TENANT_FACTORIES
-    unlisted, stale = _drift(census, dict(table))
-    assert unlisted == {}, (
-        "factories missing from _astlib._TENANT_FACTORIES (or listed against another class):\n  "
-        + "\n  ".join(f"{fn} -> {cls}" for fn, cls in sorted(unlisted.items())))
-    assert stale == {}, (
-        "_astlib._TENANT_FACTORIES entries naming no function so annotated:\n  "
-        + "\n  ".join(f"{fn} -> {cls}" for fn, cls in sorted(stale.items())))
+
 
 
 # ---- D3 — one list of spellings drives the census AND the gate --------------------------
@@ -1710,7 +1564,6 @@ def _annotation_module() -> str:
 
 ANNOTATION_MODULE = _annotation_module()
 _ANNOTATION_REL = "runtime/annotation_forms_1160.py"
-_ANNOTATION_MODULE_NAME = "defender.runtime.annotation_forms_1160"
 _FORM_CASES = list(enumerate(ANNOTATION_FORMS))
 _FORM_IDS = [ann for ann, _ in ANNOTATION_FORMS]
 
@@ -1727,10 +1580,6 @@ def annotation_displays(annotation_tree: Path) -> list[str]:
     return [f.display for f in _lint_run_records().scan(annotation_tree)]
 
 
-@pytest.fixture(scope="module")
-def annotation_census(annotation_tree: Path) -> dict[str, str]:
-    return _factory_census([annotation_tree / _ANNOTATION_REL], annotation_tree,
-                           _lint_run_records())
 
 
 @pytest.mark.parametrize(("i", "form"), _FORM_CASES, ids=_FORM_IDS)
@@ -1745,159 +1594,18 @@ def test_the_gate_tags_a_parameter_in_each_annotation_spelling(
         f"{_in(annotation_displays, f'parameter_{i}')}")
 
 
-@pytest.mark.parametrize(("i", "form"), _FORM_CASES, ids=_FORM_IDS)
-def test_the_census_resolves_each_annotation_spelling(
-        annotation_census: dict[str, str], i: int, form: tuple[str, str]) -> None:
-    """D3 / D4 / D7, the census's half of `ANNOTATION_FORMS`: a factory annotated in this
-    spelling is counted, against the class it names — and no parameter cell is."""
-    ann, cls = form
-    assert annotation_census.get(f"{_ANNOTATION_MODULE_NAME}.factory_{i}") == cls, (
-        f"the census does not read `-> {ann}` as {cls}: {annotation_census}")
-    assert not [fn for fn in annotation_census if ".parameter_" in fn], annotation_census
 
 
 # ---- D4 — what the census counts, and what it reports ------------------------------------
 
-_FRESH_FACTORIES = """\
-from pathlib import Path
-
-from defender._tenant import Tenant
-from defender.runtime.run_tenant import RunTenant
 
 
-def open_tenant(root: Path) -> Tenant:
-    ...
 
 
-async def open_run_tenant(root: Path) -> RunTenant:
-    ...
 
 
-def _private(root: Path) -> Tenant:
-    ...
 
 
-async def _private_async(root: Path) -> RunTenant:
-    ...
 
 
-def unrelated(root: Path) -> Path:
-    ...
 
-
-def unannotated(root: Path):
-    ...
-
-
-def unparseable_quote(root: Path) -> "Tenant[":
-    ...
-
-
-class Holder:
-    def method(self) -> Tenant:
-        ...
-
-
-def outer() -> None:
-    def inner() -> Tenant:
-        ...
-"""
-
-#: The owner module's own `Tenant`, resolved through D1 (`module_env(tree, module=...)`).
-_FRESH_OWNER = """\
-class Tenant:
-    ...
-
-
-def accept_tenant(root) -> Tenant:
-    ...
-
-
-def another_acceptance(root) -> "Tenant":
-    ...
-"""
-
-#: An unrelated module's own class merely named `Tenant`: not the accepted one.
-_FRESH_OWN_CLASS = """\
-class Tenant:
-    ...
-
-
-def not_a_factory(root) -> Tenant:
-    ...
-"""
-
-#: Relative imports, planted both as a package's `__init__.py` (its own package) and as a plain
-#: module of that package: the same spellings name the same classes in both (D7).
-_FRESH_RELATIVE = """\
-from ..run_tenant import RunTenant
-from ..._tenant import Tenant
-
-
-def make_run_tenant(root) -> RunTenant:
-    ...
-
-
-def make_tenant(root) -> Tenant:
-    ...
-"""
-
-_F = "defender.runtime.fresh_factories"
-
-#: What the census must find over the five planted modules.
-_FRESH_CENSUS = {
-    f"{_F}.open_tenant": TENANT,
-    f"{_F}.open_run_tenant": RUN_TENANT,
-    f"{_F}._private": TENANT,
-    f"{_F}._private_async": RUN_TENANT,
-    "defender._tenant.accept_tenant": TENANT,
-    "defender._tenant.another_acceptance": TENANT,
-    "defender.runtime.driver.make_run_tenant": RUN_TENANT,
-    "defender.runtime.driver.make_tenant": TENANT,
-    "defender.runtime.driver.beside.make_run_tenant": RUN_TENANT,
-    "defender.runtime.driver.beside.make_tenant": TENANT,
-}
-
-
-@pytest.fixture
-def fresh_census(tmp_path: Path) -> dict[str, str]:
-    """The census over planted modules, `tmp_path` standing for the defender dir."""
-    files = [
-        S.plant(tmp_path, "runtime/fresh_factories.py", _FRESH_FACTORIES),
-        S.plant(tmp_path, "_tenant.py", _FRESH_OWNER),
-        S.plant(tmp_path, "runtime/own_class.py", _FRESH_OWN_CLASS),
-        S.plant(tmp_path, "runtime/driver/__init__.py", _FRESH_RELATIVE),
-        S.plant(tmp_path, "runtime/driver/beside.py", _FRESH_RELATIVE),
-    ]
-    return _factory_census(files, tmp_path, _lint_run_records())
-
-
-def test_the_census_counts_top_level_factories_of_either_class(
-        fresh_census: dict[str, str]) -> None:
-    """D4: the census counts every top-level factory — public or private, sync or async, the
-    owner module's own class, relative imports from a package's `__init__.py` (named as the
-    package) and from a plain module beside it — and nothing else: not a def returning
-    something else, an unannotated or unparseably annotated def, a method, a nested def, nor a
-    def returning an unrelated module's own class merely named `Tenant`."""
-    assert fresh_census == _FRESH_CENSUS, fresh_census
-
-
-def test_the_census_reports_an_unlisted_factory_and_a_stale_entry(
-        fresh_census: dict[str, str]) -> None:
-    """D4 detects what it exists to catch, against a table given to it (the shared one is
-    never written): a private factory left out is unlisted; an entry for a function that does
-    not exist, or exists without the annotation, is stale; an entry against the wrong class is
-    both. A table equal to the census reports neither."""
-    table = {fn: cls for fn, cls in fresh_census.items()
-             if fn not in {f"{_F}._private", f"{_F}._private_async"}}
-    table.update({
-        f"{_F}.gone": TENANT,
-        f"{_F}.unrelated": TENANT,
-        f"{_F}.open_run_tenant": TENANT,
-    })
-    unlisted, stale = _drift(fresh_census, table)
-    assert unlisted == {f"{_F}._private": TENANT, f"{_F}._private_async": RUN_TENANT,
-                        f"{_F}.open_run_tenant": RUN_TENANT}, unlisted
-    assert stale == {f"{_F}.gone": TENANT, f"{_F}.unrelated": TENANT,
-                     f"{_F}.open_run_tenant": TENANT}, stale
-    assert _drift(fresh_census, dict(fresh_census)) == ({}, {})

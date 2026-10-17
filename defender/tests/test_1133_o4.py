@@ -1,48 +1,6 @@
-"""#1133 O4 / O4.8 / S1 — behaviour is otherwise unchanged; each declared tightening, through
-the real migrated entry point, with its rev-2 signature (D3').
-
-One section per item, each driven through the smallest real entry point with its own injection
-seams (`cli.prepare_episode`'s `prime=`, `grade_episode`'s `judge=`, `run.main`'s `lifecycle=` / `materialize=`, the
-`Episode`'s `io=`), never `monkeypatch.setattr`. Every plant is a real filesystem entry, and
-every negative has a positive control on the same address.
-
-- O4.3 / O4.8.3 `capture.prime_base(source_run_dir, episode)` creates the base whole with one
-  exclusive create. Rev 3 (R3): anything named `base.jsonl` in the `served/` listing (a plain
-  file, a link, a hard link, a FIFO, a directory) is the one "already holds a primed base"
-  `LedgerError`, before the capture is read; the create still refuses a rival that lands after
-  the listing. A linked `served/` is the core's FOLDER refusal (R2), raised as is — not the
-  "already primed" refusal.
-- O4.4 `Ledger.for_world(episode, token)`: a plant at `served/<token>.jsonl` or at `served/`
-  refuses `declare()` and `record()`.
-- O4.8.1 `Ledger.for_world(episode, <bad or non-case-stable id>)` is `LedgerError` at
-  construction, before anything is written — every id the owner's minting check refuses (a
-  newline, a NUL, an over-long name among them), not only the ones a hand-rolled check sees;
-  since rev 3 the WHOLE token must be case-stable (a dot-less `Control`, an upper-case head).
-- O4.5 the priming claim, through `cli.prepare_episode`, which now returns the `Episode` (and
-  closes it on its own exception); the `prime=` seam is handed `(source_run_dir, episode)`. An
-  occupied claim is reached through `cli._prime_once`: a launch never adopts a taken directory.
-- O4.6 / S1 the judge's draw removal: a non-plain draw (the core's leaf refusal, rev 3's
-  `NotPlainEntry`) is refused, logged and left, and the pass goes on; any OTHER `OSError` from
-  the removal (EACCES, EPERM, EROFS, and equally EIO or ENOTDIR, injected through the
-  `Episode`'s `io=` seam) stops the pass and the stale draw stays. A draw writes nothing only
-  once every ask of it (N22's re-asks) was refused. (A linked `judge/` folder is
-  not the leaf class: `test_1133_rev3.py`.)
-- D3' `enqueue.draws_on_disk(view, label)` / `draws_on_disk_report(view, label)`: every `.yaml`
-  entry of any kind is counted, and a link at `worlds/`, `worlds/<label>` or its `judge/` yields
-  no draws (C13: `worlds/b -> worlds/c` never yields c's draws under b).
-- O4.8.2 `grade_episode` / `render_episode` on a missing episode dir are `JudgeRefused`, and the
-  dir is not recreated (C14).
-- The sibling door: `run.py --resume <manifest>` refuses a manifest not named `family.yaml`
-  before anything is spent; and it holds ONE descriptor on the episode dir for the run — the
-  `Episode` it hands the lifecycle.
-
-(#1224 retired O4.1, O4.2 and D4' with the staging and review records and the review's scratch,
-and D3' "Changed" with the world-token alphabet the manifest now enforces.)
-
-Red before rev 3 (on the rev-2 tree): the linked-`served/` prime (today mapped to "already primed"), the dot-less and
-upper-case-head O4.8.1 rows, and every leaf-plant row checked with `assert_refusal` (no
-`_io.NotPlainEntry`). Everything else holds today and is pinned to keep holding.
-"""
+"""#1133 O4: declared behaviour tightenings through the real migrated entry points (prime_base, Ledger,
+prepare_episode's claim, the judge's draw removal, draws_on_disk, grade/render on a missing episode,
+the --resume door). Plants are real filesystem entries; each negative has a positive control."""
 from __future__ import annotations
 
 from defender.run_repository import Run

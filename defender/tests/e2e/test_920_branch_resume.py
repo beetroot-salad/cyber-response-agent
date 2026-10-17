@@ -1,34 +1,4 @@
-"""#920 PR 1 — a finished investigation resumes at one of its own messages.
-
-Driven end-to-end through the REAL `driver.run_investigation` with a `FunctionModel` replay
-(`override_allow_model_requests(False)` makes any provider call raise). Two properties:
-
-**O1 — the prefix is rendered exactly once.** A resumed run forks the source session, is
-handed the fork's own send-role hydration as `message_history`, and ingests only what the
-model newly produced. Observed failing by `IngestTailUnderflow` — which the driver CATCHES
-and reports as `truncated_by="store"` rather than as a crash, so the assertion is on the
-summary rather than on a raised exception — or by prefix rows appearing twice under the child.
-
-**A resumed run does not re-orient.** The correlation lead is turn-0 work: it reads the alert
-cold and reports before MAIN's first message, and a branch point is by construction past that.
-The discriminator is that the sibling IS handed a verb registry — the same `elastic_backend`
-whose recorder catches the call `l-00c` makes on the source run — and still issues nothing.
-Without that arm the property would be satisfied by a run with no backend to call.
-
-THE SOURCE RUN IS DRIVEN, NOT LOADED. `sessions/` is gitignored, so a store read off disk
-would be a store nobody built; and the branch-point checks read the source run's captured
-queries and its invlang document, which a hand-planted store would not have. Both come from a
-real run through the #808 scenario builder, whose correlation lead issues one real call
-against an injected elastic backend. The document is authored one `append_block` per fence,
-because that is the authoring path `frontier_at` describes and the only one under which the
-branch point's message index says anything about how much of the document had landed.
-
-Since #1222 the correlation summary rides MAIN's opening message instead of being injected as
-a synthesized row, so there is no longer a "prefix carrying a synthesized turn" scenario.
-
-The unit-level halves — that `fork` and `hydrate(role="send")` truncate through one function,
-and which branch points are legal at all — live in `tests/test_920_branch_seam.py`.
-"""
+"""#920 PR 1 — a finished investigation resumes at one of its own messages."""
 from __future__ import annotations
 
 import importlib
@@ -114,30 +84,14 @@ def _source_run(tmp_path, sink, *, docs):
 
 
 def _spec(source, store):
-    """A `BranchSpec` fixed at the source run's own tip — the last message it produced.
-
-    Built through `spec_at`, which derives the spec's `as_of` (#947) with the runtime's own
-    `branch_point_time`: T0 is a coordinate of the branch point rather than of the sibling, and
-    `validate` refuses a spec that carries any other moment — so a resume driven with a
-    hand-chosen one would be refused before the driver ever reached the seams this file is
-    about."""
+    """A `BranchSpec` fixed at the source run's own tip — the last message it produced."""
     ss = store_mod()
     prefix_ids = ss.path_row_ids(store, ss.main_session_id(store))
     return spec_at(store, source.run_dir, prefix_ids[-1], prompt=CONTINUATION), prefix_ids
 
 
 def _resume(spec, sibling_dir, *, main, verbs=None):
-    """Drive the sibling, turning an escape out of the driver into the demand it fails.
-
-    `run_investigation` reports the failures it OWNS through `truncated_by`; anything that
-    escapes it is a resume the runtime could not start at all, and a bare traceback out of the
-    framework names the demand nowhere.
-
-    NO `store_factory=`, deliberately. A resume is supposed to DERIVE its store from the spec —
-    `_resolve_store_factory` is the whole of that contract — and handing the factory in
-    alongside is what let every arm below stay green over a driver that had lost the derivation
-    entirely. Without it, a regression there opens a fresh empty database and dies at
-    `main_session_id` with "found 0", which is what these demands should see."""
+    """Drive the sibling, turning an escape out of the driver into the demand it fails."""
     kw = {"verbs": verbs} if verbs is not None else {}
     try:
         return drive(sibling_dir, run_id="branch-920-sibling", main=main,
@@ -150,18 +104,9 @@ def _resume(spec, sibling_dir, *, main, verbs=None):
 
 
 def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
-    """    A real run branches at a named message through `run_investigation(resume=…)`: the sibling
+    """A real run branches at a named message through `run_investigation(resume=…)`: the sibling
     joins the source run's database, its session forks off the branch point, its first model
-    request carries the inherited prefix and its own continuation prompt, and everything it
-    produces lands as NEW rows — the prefix is not written a second time and no
-    `IngestTailUnderflow` ends the run.
-
-    The row assertions are one property seen from three sides. The path check says the
-    inherited rows are inherited; the ownership check says the child wrote only its own; the
-    `truncated_by` check says the run reached its end rather than being stopped by the store.
-    A resume that duplicated the prefix passes the last of those alone, which is why all three
-    are here — and the final check refuses a vacuous pass where the sibling appended nothing
-    at all."""
+    request carries the inherited prefix and its own continuation prompt, and everything it"""
     # provenance: issue O1 and its done-when — "a real run branches at a named message from a
     # supported entry point, in every sibling, with no IngestTailUnderflow and no duplicated
     # prefix rows". Claims C4 (executed) and C5.
@@ -206,21 +151,8 @@ def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
 
 
 def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
-    """    The sibling's first `append_block` lands ON TOP of the source's document, in the
-    sibling's own run dir.
-
-    The session is inherited and the run dir is FRESH, so the document has to be carried across
-    or the two halves disagree from turn one: the model's own history says it authored seven
-    fences, `_opening_prompt` hands it coordinates into that document, and `_tool_append_block`
-    writes `deps.run_dir/"investigation.md"`. Un-seeded, that call reported `(1835 total)`
-    against a source document of 13564 bytes, and the model could not read the original back
-    either — `permission.decide_read` is rooted at the sibling's run dir, so the source's copy
-    is denied.
-
-    Driven end to end rather than asserted at the seam, because everything downstream reads
-    this file: `_check_append_only` has no blocks to conserve without it, `_frontier_recall`
-    sees a document that never moved, and the close gate's projection reads the sibling's
-    verdict against no belief history at all."""
+    """The sibling's first `append_block` lands ON TOP of the source's document, in the
+    sibling's own run dir."""
     # provenance: `_opening_prompt`'s own docstring names the problem it cannot solve alone;
     # `branch.seed_investigation` is the other half.
     sink: list = []
@@ -264,16 +196,9 @@ def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
 
 
 def test_a_resumed_run_does_not_orient_again(tmp_path):
-    """    A resumed run skips the correlation lead entirely: no new `l-00c` leads row, no new
+    """A resumed run skips the correlation lead entirely: no new `l-00c` leads row, no new
     query rows under the reserved id — even though the sibling is handed the same kind of verb
-    registry the source run dispatched `l-00c` through.
-
-    The source run is the control in the same test, deliberately: it claims `l-00c` and issues
-    a real backend call through its own recorder, so "the sibling issued none" is measured
-    against a demonstrated capability rather than against an assumption. The prompt half is
-    the mirror — the ORIENT scaffold and the correlation heading appear exactly ONCE in the
-    sibling's first request, inherited through `message_history`, not rebuilt in front of it.
-    """
+    registry the source run dispatched `l-00c` through."""
     # provenance: the discussion's second corrected premise — "`_user_prompt` unconditionally
     # builds a fresh orientation prompt, which is wrong on a resume where the continuation
     # prompt is a parameter and part of the measured instrument".

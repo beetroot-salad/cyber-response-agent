@@ -64,6 +64,14 @@ ENDING_TRIPPED_BREAKER = "tripped_breaker"
 ENDING_EMPTY_OUTPUT = "empty_output"
 ENDING_EVERY_CALL_FAILED = "every_call_failed"
 ENDING_TIMED_OUT = "timed_out"
+#: #1256 O-6: the lead's system was down from run start (not configured, or its adapter broken),
+#: so the lead ended before its claim and its gather count, as the withheld ending does. One
+#: ending for every start-time cause; its sentence names the cause.
+ENDING_DOWN_AT_START = "down_at_start"
+#: #1256 O-5b: a call of the lead raised `ConfigFault` its system's start check did not catch,
+#: so the system went down as not configured while the lead ran. Never the breaker's ending: the
+#: escaped fault is not charged (DP3, DP4).
+ENDING_DOWN_MID_LEAD = "down_mid_lead"
 
 #: The run-level end the correlation lead's own deadline names on its session
 #: (`session_store.TRUNCATED_BY_TIMED_OUT`).

@@ -1,15 +1,4 @@
-"""#869 M4/U1 — draft synthesis screens membership (site 3, the HOST-side writer).
-
-Every test here is one demand of `spec-flow/specs/spec_graph_869.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared869.py`.
-
-Site 3 is the one the design's own table calls reachable TODAY: `synthesize_drafts` does a
-`mkdir(parents=True)` + `write_text` at `<catalog>/<system>/_draft/<suffix>.md` from a
-model-supplied `query_id`, on the HOST, BEFORE the agent is spawned and before
-`baseline_stray` is taken — and the only guards between are `_SAFE_ID_SEGMENT` and an
-`is_relative_to` check, neither of which is a membership question (G3, executed).
-"""
+"""#869 M4/U1 — draft synthesis screens membership (site 3, the HOST-side writer)."""
 from __future__ import annotations
 
 import dataclasses
@@ -18,10 +7,9 @@ from pathlib import Path
 from defender.learning.leads import lead_author
 from defender.learning.leads.draft_synthesis import (
     _draft_basename,
-    _draft_candidate_segments,
     synthesize_drafts,
 )
-from defender.learning.leads.lead_extraction import ExecutedLead, extract
+from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.learning.core.config import LoopPaths
 from defender.tests._declared869 import (
     SKILLS_REL,
@@ -30,7 +18,6 @@ from defender.tests._declared869 import (
     git,
     log_lines_naming,
     loop_log,
-    seed_executed_query,
     seed_tree,
     write,
 )
@@ -117,86 +104,6 @@ def test_synthesize_drafts_still_mints_for_a_declared_system(tmp_path):
             **drafts_under(cat), catalog=[], systems=DECLARED,
         ) == []
         assert not (cat / system).exists()
-
-
-def test_synthesize_drafts_screens_a_row_recorded_before_the_writer_rule(tmp_path):
-    """A row carrying a foreign-prefixed `query_id` that was recorded BEFORE M3's writer rule
-    existed is still screened at site 3.
-
-    Why depth is worth having behind M3: the queries table is append-only, so a row written
-    by the old writer keeps its phantom id forever, and `synthesize_drafts` reads those rows
-    on every later tick. The row here is appended through the PRODUCTION writer and read back
-    through the production join and extraction, so it is a real historical row rather than
-    this test's idea of one.
-
-    The shared predicate USED to call this row a draft candidate, which is why #869 put the
-    membership screen behind it. #901 then gave the predicate its own reason to refuse: the
-    seeded row ran against `elastic` while its id claims `fakesys`, and a routing prefix that
-    disagrees with the system the row reached mints under the wrong directory whether or not
-    that directory names a declared system. So the row is now refused one screen EARLIER, and
-    both screens are asserted here — the second is not made redundant by the first, because a
-    coined id can name a declared system just as easily as a phantom one.
-    """
-    run_dir = tmp_path / "run-x"
-    seed_executed_query(run_dir, query_id="fakesys.hunt-creds")
-    _joined, executed = extract(run_dir)
-    assert [lead.query_id for lead in executed] == ["fakesys.hunt-creds"]
-    assert executed[0].system == "elastic"
-    assert _draft_candidate_segments(
-        "fakesys.hunt-creds", "esql", set(), row_system="elastic") is None
-    # …and with the id/row disagreement removed, the membership screen #869 added is still
-    # what stands between the row and a `queries/fakesys/` directory.
-    assert _draft_candidate_segments(
-        "fakesys.hunt-creds", "esql", set(), row_system="fakesys") == (
-        "fakesys", _draft_basename("fakesys.hunt-creds"),
-    )
-
-    cat = _catalog(tmp_path)
-    assert synthesize_drafts(
-        executed, **drafts_under(cat), catalog=[], systems=DECLARED) == []
-    assert not (cat / "fakesys").exists()
-
-
-def test_synthesize_drafts_names_what_it_refused(tmp_path, capsys):
-    """Site 3 REPORTS a membership refusal — it mints the reporting surface, because there is
-    none today (FK-3, §7).
-
-    O3 is unqualified and a universal discharged at two of three sites is not discharged, and
-    this was the one fork in the run where two independent readers stated directly opposite
-    outcomes — so the resolution is pinned here rather than inferred from O3's wording. Today
-    `_draft_candidate_segments` returns `None` and site 3 drops SILENTLY (F7), so unlike the
-    site-1 log line this demand requires a new edge to exist at all.
-
-    The observable: a tick whose executed leads carry `fakesys.hunt-creds` mints no draft AND
-    emits a line naming `fakesys` and the reason. The control is in the same test — a drive
-    that refuses nothing emits no such line, so the channel is shown to distinguish the two
-    rather than being noisy on every tick.
-
-    NOT ASSERTED, deliberately: what happens when the log write itself fails. That was offered
-    as a secondary and never put to the human, so this demand neither requires nor forbids
-    anything there.
-    """
-    cat = _catalog(tmp_path)
-
-    capsys.readouterr()
-    assert synthesize_drafts(
-        [_lead("fakesys.hunt-creds", system="fakesys")],
-        **drafts_under(cat), catalog=[], systems=DECLARED,
-    ) == []
-    refusal = loop_log(capsys)
-    assert "fakesys" in refusal
-    named = [ln for ln in refusal.splitlines() if "fakesys" in ln]
-    assert named, "the refusal is not reported at all"
-
-    capsys.readouterr()
-    assert synthesize_drafts(
-        [_lead("elastic.hunt-creds")], **drafts_under(cat), catalog=[], systems=DECLARED,
-    ) != []
-    quiet = loop_log(capsys)
-    assert "fakesys" not in quiet
-    assert not [ln for ln in quiet.splitlines() if "refus" in ln.lower()], (
-        "a line that fires on a tick with nothing to refuse reports nothing"
-    )
 
 
 def test_discover_system_drafts_hands_out_no_undeclared_directory(

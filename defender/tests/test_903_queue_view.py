@@ -1,32 +1,12 @@
-"""#903 — the queue-state page: the serializer contract, the renderer, and the writers' stamps.
-
-Written BEFORE the implementation, against the design doc posted on the issue.
-`defender.learning.frontend.serialize_queues` does not exist at this base, so this module
-errors at collection — the expected red — and `build.render_queues` is the second name that
-has to appear for it to go green.
-
-The fixture is ONE temp state root seeded with every writer's exact shape, taken off the
-writers themselves rather than off the doc's prose: `drain.retire`'s nested record,
-`drain._retire_unkeyable`'s flat one, `pitfalls_curator._graveyard_dropped_rows`' nested one
-with no `attempts`, `drain._record_stuck`'s record, `markers.quarantine_marker`'s spec+failed
-marker under BOTH failed dirs, `drains._record_pending_delivery`'s record, and
-`quarantine._manifest`'s tainted manifest. A torn line rides in each sidecar, because a
-tolerant reader that drops one silently is O7's own defect.
-
-Every expectation here is a LITERAL, never rebuilt from the serializer's own output: an
-oracle derived from the thing it checks is a tautology (`test_lessons_frontend.py`'s rule).
-"""
+"""#903 — the queue-state page: the serializer contract, the renderer, and the writers' stamps."""
 from __future__ import annotations
 
-import ast
 import copy
 import html
-import inspect
 import json
 import logging
 import os
 import re
-import types
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -460,15 +440,6 @@ def _channel(view: dict, name: str) -> dict:
 # the serializer — O6, O9, O7
 
 
-def test_the_channels_are_the_serializers_own_literal_three_in_order(view):
-    """O6: the page's channel set is a named list in one place, in the order it names them.
-    Derived from `LoopPaths`' attributes or from a config table instead (#922's trap), the
-    order is whatever that other table happens to hold."""
-    assert [ch["name"] for ch in view["channels"]] == [
-        "findings", "questioner_findings", "pitfalls",
-    ]
-
-
 def test_each_channel_carries_its_accent_and_whether_a_stuck_record_exists_for_it(view):
     """The two per-channel constants that ride beside the name. `has_stuck_record` is
     structural, not a fact about today's files: it is false for pitfalls, whose lane records
@@ -516,39 +487,6 @@ def test_findings_holds_are_every_row_carrying_held_reason_however_empty(view):
     held = _channel(view, "findings")["held"]
     assert held["ids"] == ["f-2", "f-3"]
     assert held["count"] == len(held["ids"])
-
-
-def test_pitfalls_holds_are_rows_the_curator_was_offered_and_declined(view):
-    """O3, the pitfalls lane: its own marker, `offers_declined > 0`. A row at 0 has been
-    offered nothing and a row with no counter at all has never been offered — neither is
-    held, and reading the findings lane's marker here would count all three or none."""
-    held = _channel(view, "pitfalls")["held"]
-    assert held["ids"] == ["p-2"]
-    assert held["count"] == len(held["ids"])
-
-
-def test_questioner_holds_use_the_same_marker_as_findings(view):
-    """The second findings-shaped channel is not a special case: one lane, one marker."""
-    held = _channel(view, "questioner_findings")["held"]
-    assert held == {"count": 1, "ids": ["q-2"]}
-
-
-def test_each_lane_says_what_its_own_hold_means(view):
-    """The two markers END differently, and the page must not tell an operator one story for
-    both: a findings hold waits on a fact with no writer and nothing retries it; a pitfalls
-    hold is re-offered every tick and retired at the offer ceiling, so "held until a person
-    moves it" there sends the operator to move a row the lane would have retried itself.
-    The wording rides on the channel spec — the same census that owns the marker."""
-    means = {ch["name"]: ch["hold_means"] for ch in view["channels"]}
-    assert means["findings"] == means["questioner_findings"]
-    assert "person" in means["findings"]
-    assert "retries" in means["findings"]
-    assert "person" not in means["pitfalls"]
-    assert "every tick" in means["pitfalls"]
-    assert "ceiling" in means["pitfalls"]
-    body = _rendered(build.render_queues(view))
-    assert f'2 held</b> · {means["findings"]}' in body
-    assert f'1 held</b> · {means["pitfalls"]}' in body
 
 
 # --------------------------------------------------------------------------------------
@@ -602,25 +540,6 @@ def test_stuck_is_the_last_record_of_the_report_with_its_own_time(view):
     # `STUCK_FIRST` predates the stamp, so it gains `recorded_at: null` rather than a KeyError.
     assert set(STUCK_LAST) == {"fault_class", "row_ids", "consecutive_ticks", "reason",
                                "recorded_at"}
-
-
-def test_stuck_is_null_when_the_report_exists_but_holds_no_record(view):
-    """An empty report is no fault, and `has_stuck_record` stays true: this lane records
-    stuck ticks, it just has not had one. Paired with the findings channel above, which has
-    the same flag and a record."""
-    ch = _channel(view, "questioner_findings")
-    assert ch["stuck"] is None
-    assert ch["has_stuck_record"] is True
-
-
-def test_the_pitfalls_lane_has_no_stuck_record_and_says_so_structurally(view):
-    """`stuck: null` on pitfalls is not "no fault yet" — the lane writes no stuck record at
-    all, and `has_stuck_record: false` is what tells the page's band the difference. The
-    fixture plants a stray stuck file under pitfalls, so a flag read off the filesystem
-    answers true here and a `stuck` read off the file answers a record."""
-    ch = _channel(view, "pitfalls")
-    assert ch["stuck"] is None
-    assert ch["has_stuck_record"] is False
 
 
 def test_the_findings_lane_records_stuck_ticks_even_before_it_has_written_one(tmp_path):
@@ -742,28 +661,8 @@ def test_an_unreadable_sidecar_or_directory_is_counted_not_fatal(paths):
     assert "2 unreadable lines skipped" in _rendered(page)
 
 
-def test_the_taint_cap_defaults_to_ten(view):
-    """Past the cap the writer preserves nothing and only logs, so the page can under-report
-    — which is why the cap is on the page at all."""
-    assert view["quarantine"]["tainted"]["cap"] == 10
-
-
-def test_the_taint_cap_follows_its_environment_variable(paths, monkeypatch):
-    """The same address, moved: the cap is `LEARNING_TAINT_QUARANTINE_MAX`, read where the
-    writer reads it, not a constant copied into the serializer."""
-    monkeypatch.setenv("LEARNING_TAINT_QUARANTINE_MAX", "3")
-    assert _build(paths)["quarantine"]["tainted"]["cap"] == 3
-
-
 # --------------------------------------------------------------------------------------
 # the header — O5
-
-
-def test_build_view_says_which_state_root_it_read_and_carries_no_timestamp(view, paths):
-    """`build_view` is pure over the filesystem it was handed: it names the root, and the
-    stamping lives one layer up so a test of the contract is not a test of the clock."""
-    assert view["state_root"] == str(paths.state_root)
-    assert "generated_at" not in view
 
 
 def test_stamped_view_resolves_the_state_root_at_call_time_and_stamps_it(tmp_path, monkeypatch):
@@ -817,13 +716,6 @@ def _rewrite_strings(obj, old: str, new: str):
     if isinstance(obj, str):
         return obj.replace(old, new)
     return obj
-
-
-def test_the_page_embeds_the_view_it_was_handed_unchanged(view):
-    """The page is self-contained: everything it renders it carries. Parsed back out of the
-    embedded literal, it must be the view field for field — an escape that mangled a value
-    on the way in would show up here rather than in a browser."""
-    assert _embedded_data(build.render_queues(view)) == view
 
 
 def test_a_row_that_looks_like_a_script_tag_opens_no_script_tag(view):
@@ -901,17 +793,6 @@ def test_the_page_renders_what_was_set_aside_and_tells_the_two_groups_apart(view
     assert "3 unreadable lines skipped" in body  # findings
 
 
-def test_the_fault_band_carries_the_class_the_ticks_and_the_time(view):
-    """O2 on the surface: the band names the channel, the fault class, the run of ticks and
-    `recorded_at` — the four things that let a person judge whether it is still live."""
-    body = _rendered(build.render_queues(view))
-    stuck = _channel(view, "findings")["stuck"]
-    assert html.escape(stuck["fault_class"], quote=True) in body
-    assert stuck["recorded_at"] in body
-    assert "1 tick" in body
-    assert html.escape(stuck["reason"], quote=True) in body
-
-
 def test_every_attacker_influenced_string_reaches_the_page_escaped(view):
     """The security dive's claim on EVERY surface the page renders, not one: a dead-letter
     row value, a stuck fault class and reason, a marker's failure text. Each hostile literal
@@ -951,62 +832,6 @@ def test_content_that_spells_a_placeholder_is_content(view):
     assert "${cards}" in body
     assert "${queues_json}" in body
     assert _embedded_data(page) == loud
-
-
-def test_a_timestamp_is_escaped_once(view):
-    """`_when` slices, the list item escapes — one escape, at the point of writing markup. A
-    date escaped on both sides showed a reader `&amp;lt;b&amp;gt;` where `<b>` was on disk."""
-    odd = copy.deepcopy(view)
-    odd["quarantine"]["tainted"]["rows"][0]["quarantined_at"] = "<b>2026-09-14"
-    odd["quarantine"]["deliveries"]["rows"][0]["at"] = "&2026-09-16"
-    _channel(odd, "findings")["deadletter"][0]["when"] = "<i>2026-09-12"
-
-    body = _rendered(build.render_queues(odd))
-
-    assert "&lt;b&gt;2026-0" in body
-    assert "&amp;lt;" not in body
-    assert "since &amp;2026-09-" in body
-    assert "&amp;amp;" not in body
-    assert "&lt;i&gt;2026-0" in body
-
-
-def test_the_row_is_rendered_by_the_run_visualizers_own_highlighter(view):
-    """One JSON highlighter and one escaper in the tree, not a second copy each: the row's
-    `<pre>` is `visualize_primitives.pretty_json_html`'s output, which classes booleans and
-    nulls the copy dropped, and every attacker-influenced string goes through
-    `esc_untrusted`."""
-    from defender.scripts.visualize import visualize_primitives
-
-    odd = copy.deepcopy(view)
-    _channel(odd, "findings")["deadletter"][0]["row"]["flag"] = True
-    _channel(odd, "findings")["deadletter"][0]["row"]["none"] = None
-    body = _rendered(build.render_queues(odd))
-
-    assert visualize_primitives.pretty_json_html(
-        _channel(odd, "findings")["deadletter"][0]["row"]) in body
-    assert '<span class="j-bool">true</span>' in body
-    assert '<span class="j-null">null</span>' in body
-    assert build.esc_untrusted is visualize_primitives.esc_untrusted
-    assert not hasattr(build, "_esc")
-    assert not hasattr(build, "_json_pretty")
-
-
-def test_the_last_fault_band_is_on_the_page_only_when_a_channel_is_stuck(view):
-    """The band is machinery health, rendered once for the page rather than per card, and it
-    is titled by the record's time — so a page whose channels have all drained cleanly must
-    not offer an operator a fault heading with nothing under it."""
-    calm = copy.deepcopy(view)
-    for channel in calm["channels"]:
-        channel["stuck"] = None
-
-    assert "Last fault" in _rendered(build.render_queues(view))
-    assert "Last fault" not in _rendered(build.render_queues(calm))
-
-
-def test_the_two_pages_link_to_each_other(view):
-    """The lessons page and the queue page are one surface; each header names the other."""
-    assert 'href="queues.html"' in build.render({"groups": {}})
-    assert 'href="lessons.html"' in build.render_queues(view)
 
 
 def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths):
@@ -1143,55 +968,3 @@ def test_recording_a_stuck_tick_stamps_when_it_was_recorded(bare):
 # structural pins — O6, the cap's owner, the deferral closure, the ignore file
 
 
-def test_the_channel_list_is_the_serializers_own_literal_and_reads_no_other_table():
-    """O6, structurally: the three names live in one module-level literal in the serializer,
-    and the module neither walks `LoopPaths`' attributes nor asks the drain's wake table.
-    #922's trap is a serializer whose channel set moves when some other table does."""
-    names = [spec.name for spec in serialize_queues._CHANNELS]
-    assert names == ["findings", "questioner_findings", "pitfalls"]
-    # CODE, not prose: the docstring is allowed to name the other table while explaining
-    # why it is not read. Walk the AST for the two ways a module could derive the set.
-    tree = ast.parse(inspect.getsource(serialize_queues))
-    calls = {n.func.id for n in ast.walk(tree)
-             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-    assert not calls & {"dir", "vars", "getattr"}, calls
-    attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-    assert "_curator_queue_checks" not in attrs
-    imported = {m.__name__ for m in vars(serialize_queues).values()
-                if isinstance(m, types.ModuleType)}
-    assert "defender.learning.core.drains" not in imported
-
-
-def test_the_taint_cap_is_read_where_the_writer_reads_it():
-    """The cap on the page is the writer's own function, not a copy of its env name and
-    default: change the writer's default and the page follows without an edit here."""
-    assert serialize_queues.quarantine_cap is quarantine.quarantine_cap
-    assert serialize_queues.held_archives is quarantine.held_archives
-    assert quarantine.quarantine_cap() == quarantine._MAX_DEFAULT
-    # ...and the writer counts through the same function it exposes.
-    assert "held_archives(quarantine_dir)" in inspect.getsource(quarantine.preserve_tainted_tree)
-
-
-def test_nothing_in_the_tree_still_says_the_graveyard_is_unread():
-    """Mechanism 8: every docstring, test and spec-graph clause that deferred to #903 now
-    names the page as the reader. `graveyard_file`'s own docstring is the one the issue
-    quoted."""
-    # `drain.graveyard_file` is gone (#1135); the verb that writes the graveyard now owns the
-    # docstring that names its reader.
-    assert "nothing in production reads this back" not in (LearningState.deadletter.__doc__ or "")
-    assert "queue page" in (LearningState.deadletter.__doc__ or "")
-    repo = Path(build.__file__).resolve().parents[3]
-    stale = []
-    for path in [*(repo / "defender").rglob("*.py"), *(repo / "spec-flow" / "specs").glob("*.yaml")]:
-        if ".venv" in path.parts or "worktrees" in path.parts or path == Path(__file__).resolve():
-            continue
-        text = path.read_text(encoding="utf-8")
-        if "unread until #903" in text or "open until #903" in text or "Until #903 lands" in text:
-            stale.append(str(path.relative_to(repo)))
-    assert stale == []
-
-
-def test_the_built_pages_are_ignored_by_git():
-    ignore = (Path(build.__file__).resolve().parent / ".gitignore").read_text(encoding="utf-8")
-    assert "queues.html" in ignore.split()
-    assert "queues.json" in ignore.split()

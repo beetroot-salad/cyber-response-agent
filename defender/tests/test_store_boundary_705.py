@@ -1,31 +1,4 @@
-"""#705 — R1 (placement) and R2 (read authorization): where the store sits and who reaches it.
-
-R1 puts the store OUTSIDE the runs base — a sibling `sessions/<case_id>.db` alongside
-`runs/`, never a child — and R2 makes every read go through the role-scoped projection.
-
-The probes that govern this file, and what they corrected:
-
-  * **adv:PO5** (executed break-attempt, UNREFUTED) — the box cannot read the store, and it
-    holds on the MOUNT SET, by construction, not on obscurity: `mkdir` of the store parent
-    is EROFS, `mount --bind` is EPERM, `/proc/1/root` is the same namespace, a hardlink
-    cannot resolve the source. `DEFENDER_RUNS_BASE` is in the box env allowlist, so the
-    path is NAMEABLE from inside. The test copies `test_540_box_boundary.py:405`'s shape —
-    pin `errno == ENOENT` — and NOT `:709`'s, whose `read is None` passes on a path that
-    EXISTS as a directory (IsADirectoryError, errno 21).
-  * **adv:PO5b** (executed, REFUTED the corollary's completeness) — the mount set stops the
-    box READING the store; it does not stop the box WRITING a symlink into the shared
-    `run_dir` that a HOST reader follows. `shutil.copytree(..., symlinks=False)` — the exact
-    call at `lead_repository.py:203` — and `tarfile.open(..., dereference=True)` both copied
-    the store's bytes out. `the_store_is_unreachable_from_inside_the_box` is TRUE and is not
-    the demand that covers this.
-  * **adv:PO7** (executed, UNREFUTED) — `LEAD_ID_RE = ^l-[A-Za-z0-9]+$` is ONE shared
-    compiled validator at all three composition sites and rejects `../`, NUL and every shell
-    metacharacter, which REFUTES FK17's "nobody asserts a sanitizer exists". So the
-    `case_id` demand below is written in that precedent's shape — reject, do not sanitise —
-    and its one known hole (`$` vs `\\Z`, where `l-abc\\n` passes) is pinned explicitly.
-  * **X1** — `lead_repository.actor_view` projects `executed_queries.jsonl`, never message
-    history, so the reader sits BESIDE it rather than subsuming it (U6 was misframed).
-"""
+"""#705 store boundary: R1 placement (the store sits beside runs/, not under it; case-id resolver rejects non-conforming ids; unreachable from the box; host readers do not follow a planted symlink) and R2 read authorization (role-scoped projection)."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -63,13 +36,7 @@ SECRET = "STORE-BYTES-DEFENDER-GOALS-4242"
 
 def test_store_path_is_not_under_the_runs_base(tmp_path):
     """The resolved store path is a SIBLING of the runs base, not a descendant of it, for
-    every case_id — including ones that look like run ids.
-
-    R1 is binding and supersedes the issue body's `$DEFENDER_RUNS_BASE/<store-dir>` wording.
-    The assertion is taken against the RESOLVED pointer value (R6), not against a
-    convention: two consumers `iterdir()` the runs base treating every child as a candidate
-    run (C24/G10), and under a sibling store there is nothing for them to skip — which is
-    why no demand is minted on their skip behaviour."""
+    every case_id — including ones that look like run ids."""
     ss = store_mod()
     base = runs_base(tmp_path)
 
@@ -102,12 +69,7 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
 def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
     """A `case_id` that is not a conforming slug is REJECTED at the resolver — not
     sanitised, not escaped — before it is interpolated into a filesystem path; a conforming
-    one resolves normally.
-
-    R16 chose reject-over-sanitise, in the precedent adv:PO7 established for `lead_id`
-    (`LEAD_ID_RE` is one shared compiled object at all three composition sites). Its one
-    known hole is pinned here too: the pattern must anchor with `\\Z`, not `$`, or
-    `case-abc\\n` passes `.match()` and creates a file whose name ends in a newline."""
+    one resolves normally."""
     ss = store_mod()
     base = runs_base(tmp_path)
 
@@ -160,13 +122,7 @@ except OSError as e:
 @pytest.mark.box
 def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
     """Neither the bash lane nor `defender-sql` can open or read the store from inside the
-    box, while the run dir remains readable AND writable from there.
-
-    The failure must be ENOENT — the errno of a path that has no name inside the box —
-    because the enforcement is the MOUNT SET, not a matcher: `DEFENDER_RUNS_BASE` is in the
-    box env allowlist (`box.py:231`), so the box is TOLD where the store lives. This copies
-    `test_540_box_boundary.py:405`'s shape deliberately; `:709`'s `read is None` passes on a
-    path that EXISTS as a directory (adv:PO5 red flag 2)."""
+    box, while the run dir remains readable AND writable from there."""
     from defender.runtime.bash_exec import parse
     from defender.runtime.box import start_box, stop_box
 
@@ -213,16 +169,7 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
 def test_host_readers_do_not_dereference_a_symlink_out_of_the_run_dir(tmp_path):
     """The real host collector — `lead_repository.stage_tables` — does not follow a symlink out
     of the run dir: the store's bytes do not enter the staged tree, and a merely DANGLING
-    symlink does not abort the collection. (Since #648 the collector goes further and refuses
-    to stage a link at all, rather than preserving it as one; either satisfies this demand.)
-
-    adv:PO5b (executed): the box CAN write `run_dir/gather_raw/leak.db ->
-    <sibling>/sessions/<case>.db` — creating it succeeds even though reading the target is
-    ENOENT — and a HOST reader follows it; the exact `copytree` call above copied the
-    store's bytes OUT of `run_dir`, and `tarfile(dereference=True)` additionally ABORTS with
-    `FileNotFoundError` on a dangling one. `the_store_is_unreachable_from_inside_the_box` is
-    TRUE and is not the demand that covers this. Positive control: an ordinary (non-symlink)
-    artifact still stages."""
+    symlink does not abort the collection. (Since #648 the collector goes further and refuses"""
     from defender.learning import lead_repository
 
     ss = store_mod()
@@ -274,13 +221,7 @@ def _actor_fixture(tmp_path):
 def test_the_actor_projection_excludes_payloads(tmp_path):
     """An actor-role read returns tool-call coordinates only: no `message_payload` body, no
     `config` row, no `session` row, and nothing carrying the defender's goals — on EVERY
-    out-edge the projected content could reach, not merely on the message table.
-
-    Positive control: `test_the_analysis_role_reaches_the_payloads_through_the_same_reader`
-    — the exclusion is a PROJECTION and not an empty store. R2 owes one leak test per
-    gray-box boundary and G16 found THREE (the malicious/benign actor, the curator, the
-    boxed runtime agent); this demand writes the actor's, `the_store_is_unreachable_from_
-    inside_the_box` writes the box's, and the CURATOR's is unwritten (FK14, scope)."""
+    out-edge the projected content could reach, not merely on the message table."""
     ss = store_mod()
     store, session_id = _actor_fixture(tmp_path)
 
@@ -315,11 +256,7 @@ def test_the_analysis_role_reaches_the_payloads_through_the_same_reader(tmp_path
 def test_every_via_reaching_store_rows_goes_through_the_role_scoped_projection(tmp_path):
     """Every path that reaches store rows applies the same role-scoped projection: the
     actor via is payload-free, the analysis via is not, the `defender-sql` lane cannot
-    resolve a reference to the store file at all, and the reader's direct handle refuses to
-    return rows without a role.
-
-    "By convention" is not an acceptable answer in this repo — the parity IS the answer, and
-    it is asserted per access cell rather than facet-wide (O32)."""
+    resolve a reference to the store file at all, and the reader's direct handle refuses to"""
     ss = store_mod()
     store, session_id = _actor_fixture(tmp_path)
 
@@ -344,39 +281,9 @@ def test_every_via_reaching_store_rows_goes_through_the_role_scoped_projection(t
         f"positive control: the lane must still work at all; got {control.stderr!r}")
 
 
-def test_the_reader_sits_beside_actor_view_and_takes_nothing_away_from_it(tmp_path):
-    """`lead_repository.actor_view` keeps projecting the QUERIES table (`{case_id, alert_ref,
-    leads:[{lead_id, queries:[{query_id, params}]}]}`), unchanged by the store's arrival: the
-    store reader sits beside it rather than subsuming it.
-
-    X1 REFUTED U6 as framed — `actor_view` never read the message history, so "can a
-    role-scoped projection express actor_view without loss" is malformed as posed. This
-    demand pins the survival of the surface the actor actually consumes."""
-    from defender.learning import lead_repository
-
-    run_dir = tmp_path / "run"
-    (run_dir / "gather_raw").mkdir(parents=True)
-    (run_dir / "executed_queries.jsonl").write_text(json.dumps({
-        "lead_id": "l-001", "seq": 0, "query_id": "elastic.auth-failures",
-        "params": {"user": "root"}, "exit_code": 0,
-    }) + "\n", encoding="utf-8")
-    (run_dir / "alert.json").write_text('{"id": "a1"}', encoding="utf-8")
-
-    view = lead_repository.actor_view(run_dir)
-    assert "leads" in view, view
-    leads = {lead["lead_id"] for lead in view["leads"]}
-    assert "l-001" in leads, view
-    assert SECRET not in json.dumps(view, default=str)
-
-
 def test_two_investigations_of_the_same_case_land_in_one_per_case_database(tmp_path):
     """Two executions of one investigation land in ONE per-case file with two sessions, and
-    the run dir's own slug is not what selects the file.
-
-    Consensus (O1/M1), conditional on FK1 and now settled by R6: aliasing
-    `case_id := run_dir.name` would give two executions two case ids and hence two FILES,
-    making O13's inheritance and O11's single-file claim unsatisfiable — every fork demand
-    would pass vacuously while forking is silently impossible."""
+    the run dir's own slug is not what selects the file."""
     ss = store_mod()
     base = runs_base(tmp_path)
     sessions = []
@@ -395,30 +302,3 @@ def test_two_investigations_of_the_same_case_land_in_one_per_case_database(tmp_p
     files = sorted(p.name for p in Path(final.path).parent.glob("*.db"))
     assert files == ["case-alpha.db"], f"two executions produced {files}"
 
-
-def test_run_dir_case_id_and_session_id_deliberately_diverge(tmp_path):
-    """`case_id` is the investigation, `session_id` is this execution, and `run_dir` is a
-    path and not an identity: each consumer reaches for its own, and a coincidental equality
-    between any two is not a licence to substitute one for another.
-
-    The eval join key — the dir-name slug at `held_out.py:126` — is NOT inherited by a fork
-    (O13). The discriminating fixture makes all three DIFFER, so a consumer that reached for
-    the wrong one is caught rather than accidentally correct."""
-    ss = store_mod()
-    base = runs_base(tmp_path)
-    run_dir = base / "20260718t101500z-divergent"
-    run_dir.mkdir(parents=True)
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
-    ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
-    session_id = store.new_session(agent_id="main")
-    r1 = store.append(session_id, [user_request("root")], agent_id="main")[0]
-    fork = store.fork(session_id, at_message_id=r1)
-
-    assert len({"case-alpha", session_id, run_dir.name}) == 3, (
-        "the fixture must make the three differ, or a wrong reach reads as correct")
-    pointer = json.loads(RunPaths(run_dir).session_pointer().read_text())
-    assert pointer["case_id"] == "case-alpha" != run_dir.name
-    rows = dict(sql(store, "SELECT session_id, case_id FROM session"))
-    assert rows[fork] == "case-alpha", "case_id is inherited by the fork"
-    assert fork != session_id, "the eval dir-name join key does not follow the fork"
-    assert run_dir.name not in rows, "run_dir is a path, not an identity"

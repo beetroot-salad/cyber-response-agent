@@ -1,16 +1,5 @@
-"""PR #1232 — the family-stamp gate, the judge's and the episode readers'.
-
-Seventh round (finding 3): `verify_family` withholds the family stamp (`provenance.json`) when
-the siblings ran other code or knowledge than the source, on unverified or dirty trees, or
-under mixed tenants, and only logged why. Before #1224 such a family was recorded `incomplete`
-and the judge refused it; M05=A retired `incomplete` and nothing replaced the gate, so a
-non-comparable family was graded and its findings queued. What holds now (human decision
-2026-10-10): `verify_family` records its reason (`not_comparable.yaml`), and an accepted family
-with no readable family stamp is stamped not-graded `not comparable` naming that reason — no
-model call, nothing queued. A torn stamp counts as absent. `episode.verdicts` and
-`episode.delta_o` refuse the same family through the same predicate
-(`outcome.not_comparable_reason`).
-"""
+"""A family without a readable family stamp is stamped not-graded `not comparable`; `verify_family`
+records why it withheld the stamp and the judge and episode readers refuse a stampless family."""
 from __future__ import annotations
 
 import json
@@ -83,10 +72,7 @@ def _stampless(tmp_path):
 
 
 def test_an_accepted_family_with_no_family_stamp_is_stamped_not_comparable(tmp_path):
-    """Seventh round (finding 3): an accepted family whose stamp `verify_family` withheld was
-    graded and its findings queued. Now it is stamped not-graded `not comparable`, the reason
-    naming the missing stamp and `verify_family`'s own reason; the model is never called and
-    nothing is queued."""
+    """Seventh round (finding 3)."""
     ep = _stampless(tmp_path)
     _withhold(ep)
     judge = _judge()
@@ -203,12 +189,7 @@ def test_the_episode_readers_refuse_a_stampless_family(tmp_path):
 
 
 def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_path):
-    """Seventh round (finding 3), FORK-1 as amended: a finished sibling with no scrub verdict
-    withheld the family stamp, so with the judge's gate the whole family would have gone
-    ungraded for one world's fault. Now it is that world's own `not archived` record (S10,
-    counted by O5): the stamp is written over the verified, archived siblings — the unwalked
-    sibling's other commit is no part of it — nothing records the family not comparable, and
-    the judge grades the rest."""
+    """Seventh round (finding 3), FORK-1 as amended."""
 
     T.runs_base(tmp_path)
     # #1234 A3: the control is archived too — every world is judged against it, and a family

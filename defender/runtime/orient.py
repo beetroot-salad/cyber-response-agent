@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import re
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from defender import _alert_input
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft
 from defender._untrusted import wrap_fresh
+from defender.runtime.system_status import NONE_DOWN
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _DEFENDER_DIR.parent
@@ -159,13 +160,16 @@ def _build_corpus_vocab_section(
     return None
 
 
-def orientation(
+def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a run fact
     run_dir: Path, defender_dir: Path, alert_path: Path,
     *, systems: Sequence[str], lead_zero_section: str | None = None,
     shim: ShimRunner | None = None, tenant_agent: Path | None = None,
+    down: Mapping[str, str] = NONE_DOWN,
 ) -> str:
     """`shim` is the injection seam for the lessons and corpus-vocabulary sections' three
-    subprocesses; omitted, they run for real."""
+    subprocesses; omitted, they run for real. `down` is each system down for the run as this
+    view is built, with its cause (#1256 O-3, `system_status.down_notes`), marked in the
+    workspace view."""
     run_shim = shim if shim is not None else _shim
     try:
         from defender import run_common
@@ -192,7 +196,8 @@ def orientation(
 
     try:
         from defender.scripts.workspace_map import workspace_map
-        sections.append("## Workspace\n" + workspace_map(run_dir, systems=systems).strip())
+        sections.append(
+            "## Workspace\n" + workspace_map(run_dir, systems=systems, down=down).strip())
     except Exception as e:  # noqa: BLE001 — orientation must never break the run
         sections.append(f"## Workspace\n_(unavailable: {e!r} — discover via ls/Read)_")
 

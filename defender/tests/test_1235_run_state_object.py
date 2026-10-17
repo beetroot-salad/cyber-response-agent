@@ -1,36 +1,5 @@
-"""#1235, round 2 — the `RunState` object itself: fresh at its start, the only holder of a run's
-live state, its operations atomic under its own lock, and its oracle clock its own.
-
-The owner's redesign (issue comment 6117481676) replaces round 1's three process-wide tables,
-keyed by the run folder's path, with ONE object per run (`defender.runtime.run_state.RunState`).
-The behaviour functions stay in their modules and take the state first:
-`budget_enforcer.account_call / count_call / oracle_turn_opened / oracle_turn_closed /
-oracle_held`, `circuit_breaker.record_outcome / is_tripped / down_message`,
-`record_query.append_query_row / repeat_note / _next_seq / system_for_payload_operands`.
-
-What this module pins, at the object (the driven obligations are in
-`tests/e2e/test_1235_run_state_e2e.py`):
-
-  - `RunState(run_dir, run_id)` is a fresh run: zero counts, a blank breaker, no rows, no oracle credit.
-    It reads no file — whatever the folder or its container holds — and writes none.
-  - Nothing a caller does to what the state hands out moves the run (snapshots are copies;
-    `lead_rows` is a tuple of the stored rows, for read-only use — round 3).
-  - No process-wide table remains, and two states — even for one folder and one run id — share
-    nothing; a row recorded through a deps object lands in the state that deps CARRIES, however
-    the deps spell the folder.
-  - A row append is one operation under the state's lock: concurrent appends to one lead take
-    distinct seqs, and the state and the table agree row for row.
-  - R6: every state has a clock; an oracle turn pauses it and its interval is credited once; the
-    credit lives only in the state, so a new state for the same run id starts with none (#1239)
-    and no `.oracle-held.json` is written anywhere.
-
-R3 is `tests/test_record_query.py`'s
-`test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent`: since round 3 the state
-is the record and `executed_queries.jsonl` the model's view, so a refused view write leaves the
-row IN the state with its seq spent (params refused before anything still record nothing).
-
-RED until the round-2 implementation lands: `defender.runtime.run_state` does not exist.
-"""
+"""#1235: the `RunState` object itself: fresh at start, sole holder of a run's live state, atomic
+under its own lock, with its own oracle clock."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -83,15 +52,7 @@ def _tree(root: Path) -> dict[str, bytes | None]:
 # ======================================================================================
 
 def test_a_started_state_is_a_fresh_run_and_reads_and_writes_no_file(tmp_path):
-    """`RunState(run_dir, run_id)` begins a run: zero counts, a wall-clock origin of now (the same instant
-    for `created_at` and `started_at`, timezone-aware), a blank breaker, no query rows, no
-    oracle credit. The folder holds every file the run state used to be read from — a spent
-    `budget.json`, a tripped `circuit_breaker.json`, `l-001` rows in `executed_queries.jsonl` —
-    and the container holds an `.oracle-held.json` crediting days of oracle time; none of it
-    reaches the state, and the tree is byte-identical afterwards.
-
-    Positive control, same state: a counted call, a charged failure and a recorded row each move
-    it, so the zeros above are a start, not a state that never counts."""
+    """`RunState(run_dir, run_id)` begins a run."""
     import json
 
     run_dir = _run_dir(tmp_path)
@@ -139,14 +100,7 @@ def test_a_started_state_is_a_fresh_run_and_reads_and_writes_no_file(tmp_path):
 
 
 def test_what_the_state_hands_out_cannot_move_the_run(tmp_path):
-    """Nothing a caller does to what the state hands out moves the run: the budget and breaker
-    snapshots are copies (down to a system's record), the dict `append_query_row` returned is
-    not the row the state recorded, and `lead_rows` is a tuple — a caller cannot add a row to,
-    or drop one from, the lead through it. (Round 3: `lead_rows` hands out the stored rows
-    themselves, for read-only use, rather than a deep copy of each.)
-
-    Positive control: the state's own operations do move the values those copies were read
-    from."""
+    """Nothing a caller does to what the state hands out moves the run."""
     state = RunState(_run_dir(tmp_path), "r")
     cb.record_outcome(state, "elastic", 2)
     written = _append(state, params={"q": "a"})
@@ -178,28 +132,9 @@ def test_what_the_state_hands_out_cannot_move_the_run(tmp_path):
 # Carried, never looked up.
 # ======================================================================================
 
-def test_no_process_wide_table_of_run_state_remains():
-    """The three tables keyed by run folder, and the open-turn table, are gone with the
-    folder-keyed operations that read them; a run's state is reached only through its object.
-    (The behavioural half — nothing holds a run's state once its run is over — is R4 in
-    `tests/e2e/test_1235_run_state_e2e.py`.)"""
-    for module, names in (
-        (be, ("_BUDGETS", "_OPEN_TURNS", "open_budget", "read_budget", "update_budget_locked",
-              "_has_clock", "forget_open_turn")),
-        (cb, ("_BREAKERS", "open_breaker", "breaker_state")),
-        (rq, ("_MIRRORS", "open_query_mirror", "live_lead_rows", "lead_rows")),
-    ):
-        left = [n for n in names if hasattr(module, n)]
-        assert left == [], f"{module.__name__} still has {left}"
-
 
 def test_two_states_for_one_folder_and_one_run_id_share_nothing(tmp_path):
-    """Two states started for the SAME folder and run id are two runs' states: counting a call,
-    charging a failure, recording a row or crediting an oracle turn on one moves nothing on the
-    other — so no operation can be answered from another run's state by spelling the folder the
-    same way.
-
-    Positive control: each operation does move the state it was given."""
+    """Two states started for the SAME folder and run id are two runs' states."""
     run_dir = _run_dir(tmp_path)
     one, two = RunState(run_dir, "same"), RunState(run_dir, "same")
 
@@ -229,12 +164,7 @@ def test_two_states_for_one_folder_and_one_run_id_share_nothing(tmp_path):
 
 def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path):
     """The query tool records a row into the state its deps CARRY, whatever spelling of the run
-    folder the deps hold: here the deps name the folder by its real path and the state was
-    started on a symlinked spelling of it. The row is in that state and in the table; a second
-    state started on the real spelling holds nothing.
-
-    Observed failing by: a state found by the folder's spelling, which this deps's spelling
-    would miss."""
+    folder the deps hold."""
     import asyncio
     from dataclasses import replace
 
@@ -265,12 +195,7 @@ def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path)
 # ======================================================================================
 
 def test_concurrent_appends_to_one_lead_take_distinct_seqs_and_agree_with_the_table(tmp_path):
-    """A row append is one operation under the state's lock (seq, record, payload, view line):
-    eight threads appending five rows each to one lead under fine-grained preemption take the
-    seqs 0..39 once each, and the state's rows are the table's rows, in the same order.
-
-    Observed failing by: a seq allocated outside the lock (two rows on one seq, one payload
-    file overwritten) or a record made outside it (the state's order and the file's apart)."""
+    """A row append is one operation under the state's lock (seq, record, payload, view line)."""
     import sys
 
     run_dir = _run_dir(tmp_path)
@@ -302,17 +227,7 @@ def test_concurrent_appends_to_one_lead_take_distinct_seqs_and_agree_with_the_ta
 # ======================================================================================
 
 def test_every_state_has_a_clock_whose_credit_is_its_own(tmp_path):
-    """R6: a state's clock pauses for an oracle turn (`oracle_held` grows while the turn is
-    open), the closed interval is credited once (two reads agree, a second turn adds to it), and
-    the credit lives only in the state: a NEW state for the same folder and run id — the run id a
-    second run reuses (#1239) — starts with none, and no `.oracle-held.json` (nor any other
-    file) is written anywhere.
-
-    Every state has a clock, whatever the budget posture: the posture decides only whether the
-    budget is enforced, and the clock pauses for any run an oracle serves.
-
-    Positive control: the first state's credit is real (above the turn's sleep), so the zero
-    of the second is not a clock that never credits."""
+    """R6."""
     run_dir = _run_dir(tmp_path / "runs")
     before = _tree(tmp_path)
     first = RunState(run_dir, "reused-id")

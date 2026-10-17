@@ -1,46 +1,4 @@
-"""#1003 — the correlation lead's template is a per-deployment id the table must agree with.
-
-THE DEFECT. #999 moved the lead's GRANT into `knowledge/environment/verb-grants.yaml` and left
-everything the lead does at that target in Python: the template it binds
-(`CORRELATION_TEMPLATE`, a literal naming one vendor), and a contract arguing in one vendor's
-field namespace. So a table that moves the holder — the report's `splunk.search` rows, or the
-same-vendor `elastic.alerts` -> `elastic.query` narrowing — loads clean, derives that system,
-and dispatches a lead told to bind an id its own grant-filtered index cannot list. Eight
-requests are spent discovering nothing is runnable; nothing raises, nothing warns.
-
-THE SHAPE (settled on the issue). The unit of configuration is the TEMPLATE ID, read from a
-one-key per-deployment file (`lead-zero.yaml`), because the template's front matter already
-carries the system and the verb. The table's authority over the lead shrinks to grant-or-
-withhold, and it must AGREE with the template: at run start, before any model exists, the id
-is resolved against the deployment's own catalog and its `(system, verb)` compared with the
-holder's one query pair. A withholding still degrades (the id is not consulted); an
-unresolvable, malformed or disagreeing id REFUSES the run, naming both sides. The authored
-contract keeps the neutral frame and hands the vendor facts to the template's own prose.
-
-ONE RESOLVER. The check is composed of the lead's OWN machinery — the established-tier
-filter its index applies (`_corpus.is_established`) and the id rule its query tool applies
-when it binds (`query_tool.resolve_query_id`) — so "accepted by the check, unbindable by the
-lead" is impossible by construction, not by test. The id is read from the RUN's tree at run
-start, only for a run that will dispatch the lead, and the resolved identity is carried to
-the dispatch rather than re-derived from import-time constants.
-
-THE ORACLES. Every refusal is proved by a PLANTED input — a table through `write_table` +
-`load_dispositions`, a template as a real `.md` read through `read_query_template` /
-`iter_query_templates`, a config as a real yaml — beside a positive control on the same
-address under the complementary condition. The shipped id is transcribed here as a literal
-(`SHIPPED_TEMPLATE_ID`), never re-read from the file under test.
-
-THE NAMES this suite pins (the implementation is written against them):
-  * `defender/runtime/lead_zero_config.py` — `LEAD_ZERO_CONFIG_REL`, `lead_zero_config_path`,
-    `LeadZeroConfigError`, `load_correlation_template`.
-  * `defender/runtime/lead_zero/_agreement.py`, re-exported from `defender.runtime.lead_zero`
-    — `CorrelationDispatch`, `CorrelationDispatchError`, `resolve_correlation_dispatch`.
-  * `defender/runtime/driver/__init__.py` — `_correlation_dispatch_at_run_start`, the frame
-    that reads the run's config and catalog and hands the result to the dispatch.
-  * `defender/knowledge/environment/lead-zero.yaml` — one key, `correlation_template:`
-    (since #1106: `<data root>/<id>/knowledge/settings/lead-zero.yaml`; the committed copy
-    this suite reads is the test fixture's, `knowledge/tenant-fixture/settings/`, #1120 C26).
-"""
+"""The correlation lead's template id is configured per deployment and must agree with the verb-grants table at run start."""
 from __future__ import annotations
 
 import re
@@ -49,14 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from defender._corpus import iter_query_templates, read_query_template, section_bodies
-from defender._paths import PATHS
+from defender._corpus import iter_query_templates, read_query_template
 from defender.runtime.verb_grant import VerbGrant
 from defender.tests._dispositions995 import grant_for, load_dispositions, write_table
 from defender.tests import _tenants1106 as T1106
 
-DEFENDER = PATHS.defender_dir
-SHIPPED_TEMPLATE = DEFENDER / "skills" / "gather" / "queries" / "elastic" / "correlate-alerts-by-entity.md"
 
 #: The holder's name as the table spells it — a literal, as in `test_correlation_holder_999`.
 HOLDER = "lead-zero-correlation"
@@ -170,69 +125,6 @@ def _pair(system: str, verb: str) -> str:
 # The config file: one key, per-deployment, refused the way `verb-grants.yaml` is.
 # =========================================================================================
 
-def test_the_shipped_config_names_the_template_and_the_run_start_frame_reads_it():
-    """Conservation and wiring in one: the shipped `lead-zero.yaml` exists at the path the
-    module derives, names exactly the id `_spec.py` used to spell, and the RUN-START frame
-    over this checkout (`run_tenant.run_tenant_for`, whose value the driver's
-    `_correlation_dispatch_at_run_start` carries) resolves that file's value on the shipped
-    table to a dispatch on `elastic` carrying the id and the table's projection. Serves O1: the id is authored config, and the dispatch is its projection —
-    there is no import-time constant for it to be read from."""
-    from defender.runtime import lead_zero
-    from defender.runtime.driver import _correlation_dispatch_at_run_start
-    from defender.runtime.lead_zero_config import (
-        lead_zero_config_path,
-        load_correlation_template,
-    )
-    from defender.runtime.run_tenant import run_tenant_for
-
-    # #1106: the config lives in the RUN's tenant settings folder (the committed fixture
-    # tenant at the repo root, #1120 C26), and the frame reads it from the tenant and grants
-    # it is handed.
-    settings = T1106.FIXTURE_SETTINGS
-    path = lead_zero_config_path(settings)
-    assert path == settings / "lead-zero.yaml"
-    assert path.is_file(), f"the shipped config is missing at {path}"
-    assert path.relative_to(PATHS.repo_root).as_posix() == \
-        "knowledge/tenant-fixture/settings/lead-zero.yaml"
-
-    assert load_correlation_template(path) == SHIPPED_TEMPLATE_ID
-    grants = T1106.fixture_grants()
-    tenant = T1106.fixture_tenant()
-    assert load_correlation_template(lead_zero_config_path(tenant.settings)) == \
-        SHIPPED_TEMPLATE_ID, "the fixture placed under the data root carries the same config"
-    run_tenant = run_tenant_for(tenant, defender_dir=DEFENDER, dispatches_lead_zero=True)
-    assert _correlation_dispatch_at_run_start(
-        tenant=run_tenant, resume=None, lead_zero_verbs=object(),
-    ) == lead_zero.CorrelationDispatch(
-        template_id=SHIPPED_TEMPLATE_ID, system="elastic", grant=grants.correlation,
-    )
-    assert not hasattr(lead_zero, "CORRELATION_TEMPLATE"), (
-        "the template id is a per-tree fact read at run start; a process-wide constant for "
-        "it is the checkout's value pinned to every tree the run is pointed at"
-    )
-
-
-def test_a_planted_config_is_read_rather_than_a_literal(tmp_path):
-    """O1: the id is what the FILE says. A planted config naming another backend's template
-    returns THAT id — the loader carries no default and no fallback to the shipped value.
-    The positive control on the same address is the shipped id round-tripping."""
-    from defender.runtime.lead_zero_config import load_correlation_template
-
-    planted = _config(tmp_path / "moved", "correlation_template: splunk.correlate-things\n")
-    assert load_correlation_template(planted) == "splunk.correlate-things"
-
-    shipped_shaped = _config(tmp_path / "same", f"correlation_template: {SHIPPED_TEMPLATE_ID}\n")
-    assert load_correlation_template(shipped_shaped) == SHIPPED_TEMPLATE_ID
-
-
-def test_the_loader_does_not_validate_the_id_against_catalog_or_grammar(tmp_path):
-    """The loader returns the STRING; resolving it against a catalog and checking its grammar
-    is the run-start check's job (`resolve_correlation_dispatch`), where the catalog is
-    visible."""
-    from defender.runtime.lead_zero_config import load_correlation_template
-
-    assert load_correlation_template(_config(tmp_path, "correlation_template: not-an-id\n")) == "not-an-id"
-
 
 def test_a_missing_config_is_refused_naming_the_path(tmp_path):
     """No file is not "the shipped default": a deployment tree without the config gets a
@@ -252,10 +144,8 @@ def test_a_missing_config_is_refused_naming_the_path(tmp_path):
     (f"correlation_template: {SHIPPED_TEMPLATE_ID}\nrequest_limit: 8\n", "request_limit"),
 ])
 def test_an_unread_key_is_refused_naming_it(tmp_path, text, refused_key):
-    """Unknown top-level keys are refused the way `verb-grants.yaml`'s are
-    (`_reject_unread_keys`): a key nothing reads is the two-statements-one-honoured defect
-    one level up. The refusal NAMES the key, so a typo sends the author to the typo and not
-    to a hunt for a missing value. Positive control: exactly the one key loads."""
+    """Unknown top-level keys are refused the way `verb-grants.yaml`'s are (`_reject_unread_keys`):
+    a key nothing reads is the two-statements-one-honoured defect one level up."""
     from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
 
     assert load_correlation_template(
@@ -291,10 +181,7 @@ def test_a_config_with_no_usable_id_is_refused_naming_the_path(tmp_path, text):
 
 
 def test_an_undecodable_config_is_refused_naming_the_path_not_raised_raw(tmp_path):
-    """The #677 shape: bytes that are not UTF-8. A raw `UnicodeDecodeError` out of an
-    import-time read is a stack trace, not a refusal naming the file — the typed error is
-    what an operator who just saved the file in the wrong encoding needs. Positive control:
-    the same path, valid bytes, loads."""
+    """The #677 shape: bytes that are not UTF-8."""
     from defender.runtime.lead_zero_config import LeadZeroConfigError, load_correlation_template
 
     path = _config(tmp_path, f"correlation_template: {SHIPPED_TEMPLATE_ID}\n")
@@ -323,16 +210,9 @@ def test_a_repeated_key_is_refused_rather_than_last_wins(tmp_path):
 
 
 def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_handed(tmp_path):
-    """`run_tenant.run_tenant_for(tenant, defender_dir=…)` joins THAT run's config (its
-    tenant's settings folder, #1106) with THAT tree's catalog and the run's own grants, and the
-    driver's `_correlation_dispatch_at_run_start` carries the value it resolved.
-    A tree whose catalog holds only `elastic.other-alerts` and whose config names it resolves
-    to a dispatch on that id — a frame reading the checkout's config would look for the
-    shipped id in this catalog and refuse. Negative control on the same tree: the config
-    removed is `LeadZeroConfigError` (carried as the cause of the run's one `TenantRefused`)
-    naming the tree's path, not the checkout's — and NOT
-    raised for a run that will not dispatch the lead (a resume, no registry), which reads
-    neither file."""
+    """`run_tenant.run_tenant_for(tenant, defender_dir=…)` joins THAT run's config (its tenant's
+    settings folder, #1106) with THAT tree's catalog and the run's own grants, and the driver's
+    `_correlation_dispatch_at_run_start` carries the value it resolved."""
     from defender.runtime.driver import _correlation_dispatch_at_run_start
     from defender.runtime.lead_zero import CorrelationDispatch
     from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
@@ -379,37 +259,9 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
 # O1 — nothing in Python names the vendor the lead dispatches to.
 # =========================================================================================
 
-def test_spec_no_longer_spells_the_template_id():
-    """The literal is gone from `_spec.py`, and so is any read of the config: the vocabulary
-    leaf a dozen modules import for two strings reads no tree, and the id reaches the lead
-    only through the run-start frame. The budget stays the measured constant (N1)."""
-    from defender.runtime.lead_zero import _spec
-
-    source = Path(_spec.__file__).read_text(encoding="utf-8")
-    assert SHIPPED_TEMPLATE_ID not in source, (
-        "_spec.py still spells the template id as a literal — the id is per-deployment "
-        "config now, read through lead_zero_config"
-    )
-    # The WHOLE runtime package, not only `_spec.py`: a loader that returned the literal
-    # (file left on disk so the loader tests still pass) would move the vendor name one
-    # module over and satisfy the scan above (adversary H2).
-    runtime = Path(_spec.__file__).resolve().parents[1]
-    spelled = sorted(
-        str(f.relative_to(runtime)) for f in runtime.rglob("*.py")
-        if SHIPPED_TEMPLATE_ID in f.read_text(encoding="utf-8")
-    )
-    assert spelled == [], f"the template id is spelled as a literal under runtime/: {spelled}"
-    assert not hasattr(_spec, "CORRELATION_TEMPLATE")
-    assert "lead_zero_config" not in source, "the vocabulary leaf must not read the config"
-    assert _spec.CORRELATION_REQUEST_LIMIT == 8
-
 
 def test_a_planted_backend_dispatches_on_its_own_system(tmp_path):
-    """O1, by mechanism (N4: no second template ships). A second established correlation
-    template on `splunk` binding `search`, the id configured, and the holder's rows on
-    `splunk.search`: the resolved dispatch is ON `splunk`, carries the planted id, and
-    its grant is the table's projection handed in, unchanged. Nothing in Python had to name
-    the vendor."""
+    """O1, by mechanism (N4: no second template ships)."""
     from defender.runtime.lead_zero import CorrelationDispatch, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
@@ -435,13 +287,9 @@ def test_a_planted_backend_dispatches_on_its_own_system(tmp_path):
 # =========================================================================================
 
 def test_a_withheld_lead_consults_no_template_and_stays_two_state(tmp_path):
-    """When the table grants the holder no query verb, the dispatch is `system=None` and
-    the catalog is NOT walked — proved by a `templates` iterable that
-    fails the test on iteration, and by a garbage id that would be refused on any other arm
-    passing through untouched. The grant still rides (it is the table's projection), and the
-    ORIENT note stays the existing two-state one: `test_correlation_holder_999::
-    test_the_orient_heading_says_the_lead_was_withheld` pins its text; N5 says no third state
-    is threaded through, and this test only checks that arm is still the one taken."""
+    """When the table grants the holder no query verb, the dispatch is `system=None` and the catalog
+    is NOT walked — proved by a `templates` iterable that fails the test on iteration, and by a
+    garbage id that would be refused on any other arm passing through untouched."""
     from defender.runtime.lead_zero import (
         CorrelationDispatch,
         resolve_correlation_dispatch,
@@ -469,11 +317,9 @@ def test_a_withheld_lead_consults_no_template_and_stays_two_state(tmp_path):
 # =========================================================================================
 
 def test_a_same_vendor_verb_mismatch_is_refused_naming_both_pairs(tmp_path):
-    """The grounding's second row, the one a system-prefix check passes: the configured id
-    resolves to an established `elastic` template binding `query`, and the table grants the
-    holder `elastic.alerts`. Refused, naming the TEMPLATE's pair and the TABLE's pair and the
-    id — so the operator sees both sides of the disagreement at once. Positive control: the
-    same catalog, the id whose template binds `alerts`, resolves."""
+    """The grounding's second row, the one a system-prefix check passes: the configured id resolves
+    to an established `elastic` template binding `query`, and the table grants the holder
+    `elastic.alerts`."""
     from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
@@ -493,11 +339,9 @@ def test_a_same_vendor_verb_mismatch_is_refused_naming_both_pairs(tmp_path):
 
 
 def test_a_table_granting_a_different_verb_is_refused_naming_both_pairs(tmp_path):
-    """O5 (i), the table side of the same disagreement: the holder's rows moved to
-    `elastic.query` (a legitimate-looking narrowing under the loader's own rationale) while
-    the configured id's template binds `alerts`. The loader passes it — all three narrowing
-    rules hold — and the agreement check refuses it, naming `elastic.alerts` (the template)
-    and `elastic.query` (the table). Positive control: the shipped-shaped table resolves."""
+    """O5 (i), the table side of the same disagreement: the holder's rows moved to `elastic.query`
+    (a legitimate-looking narrowing under the loader's own rationale) while the configured id's
+    template binds `alerts`."""
     from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
@@ -521,11 +365,8 @@ def test_a_table_granting_a_different_verb_is_refused_naming_both_pairs(tmp_path
 
 
 def test_the_reports_table_moving_the_holder_to_another_vendor_is_refused(tmp_path):
-    """The report's own rows — `splunk.search` granted to the holder — with the shipped id
-    still configured. Before #1003 this loaded clean and burned the budget; now it is a
-    refusal naming `elastic.alerts` (what the template binds) and `splunk.search` (what the
-    table grants). Positive control: the same rows with the id moved to the splunk template
-    resolve on splunk."""
+    """The report's own rows — `splunk.search` granted to the holder — with the shipped id still
+    configured."""
     from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
@@ -547,13 +388,11 @@ def test_the_reports_table_moving_the_holder_to_another_vendor_is_refused(tmp_pa
 
 
 def test_a_template_binding_the_health_check_verb_is_not_a_dispatch_target(tmp_path):
-    """Agreement is EQUALITY with the holder's one QUERY pair, not `grant.allows`: the holder
-    also holds `elastic.health-check`, so a check written as "does the grant allow the
-    template's pair" would accept an established template binding `verb: health-check` and
-    dispatch a lead with an eight-request budget against a ping (adversary H3;
-    `correlation_system`'s own docstring: "Health-check alone is not a target either").
-    Refused naming `elastic.health-check` and `elastic.alerts`. Positive control: the
-    `alerts` template on the same catalog resolves."""
+    """Agreement is EQUALITY with the holder's one QUERY pair, not `grant.allows`: the holder also
+    holds `elastic.health-check`, so a check written as "does the grant allow the template's
+    pair" would accept an established template binding `verb: health-check` and dispatch a lead
+    with an eight-request budget against a ping (adversary H3; `correlation_system`'s own
+    docstring: "Health-check alone is not a target either")."""
     from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     catalog = tmp_path / "catalog"
@@ -568,27 +407,6 @@ def test_a_template_binding_the_health_check_verb_is_not_a_dispatch_target(tmp_p
     message = str(caught.value)
     assert _pair("elastic", "health-check") in message, message
     assert _pair("elastic", "alerts") in message, message
-
-
-def test_the_grant_reaching_the_dispatch_is_the_tables_projection_whatever_the_id_says(tmp_path):
-    """O5, the negative universal at the unit seam: no id value changes the GRANT a dispatch
-    carries. Two ids resolving to two templates on the same pair yield dispatches whose
-    grant is the table's projection, equal to each other and to what was handed in — the
-    template selects, only the table grants. (`_NarrowedRegistry` pointing at the table is
-    pinned by `test_correlation_holder_999::test_the_narrowed_registry_points_at_the_table`.)"""
-    from defender.runtime.lead_zero import resolve_correlation_dispatch
-
-    catalog = tmp_path / "catalog"
-    _plant(catalog, "elastic", "correlate-alerts-by-entity", verb="alerts")
-    _plant(catalog, "elastic", "another-alerts-template", verb="alerts")
-    grant = _shipped_shaped_grant(tmp_path)
-    templates = _templates(catalog)
-
-    first = resolve_correlation_dispatch(SHIPPED_TEMPLATE_ID, templates, grant)
-    second = resolve_correlation_dispatch("elastic.another-alerts-template", templates, grant)
-    assert first.grant == second.grant == grant
-    assert {(s, v) for s, v, _ in first.grant.entries} == {("elastic", "alerts"), ("elastic", "health-check")}
-    assert first.template_id != second.template_id
 
 
 # =========================================================================================
@@ -608,17 +426,10 @@ def test_the_grant_reaching_the_dispatch_is_the_tables_projection_whatever_the_i
     "splunk.carrier",
 ])
 def test_an_id_the_lead_could_not_bind_as_its_own_is_refused_even_when_a_file_carries_it(tmp_path, bad_id):
-    """The bind-time arm is `query_tool.resolve_query_id`'s verdict, not a "not found": the
-    catalog is planted with a file whose `id:` is exactly the string (the corpus reader
-    accepts any string), established, binding the granted verb — and the id is still
-    refused, naming it, because the lead's own `query` call would not record it verbatim.
-    Without that file, "not found" would discharge the same assertion for the wrong reason.
-    Positive control: a well-formed id over the same-shaped file resolves.
-
-    NOT refused here: a suffix the tool binds (`elastic.Correlate_Alerts` — `_KEBAB_SEGMENT`
-    admits it). Whether the corpus should carry such an id is the corpus lint's question; a
-    run-start check that refused an id the lead can bind would be a second grammar, and the
-    two would drift."""
+    """The bind-time arm is `query_tool.resolve_query_id`'s verdict, not a "not found": the catalog
+    is planted with a file whose `id:` is exactly the string (the corpus reader accepts any
+    string), established, binding the granted verb — and the id is still refused, naming it,
+    because the lead's own `query` call would not record it verbatim."""
     from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
     from defender.runtime.query_tool import resolve_query_id
 
@@ -641,28 +452,9 @@ def test_an_id_the_lead_could_not_bind_as_its_own_is_refused_even_when_a_file_ca
     assert "not the table" in message, f"a fault in the file must not send the operator to the table:\n{message}"
 
 
-def test_an_id_the_lead_binds_verbatim_is_accepted_exactly_when_the_tool_would(tmp_path):
-    """The positive half of the bind-time arm, pinned to the tool: an id `resolve_query_id`
-    hands back verbatim on the granted system is resolved, even a suffix the design's prose
-    would not spell (uppercase, an underscore) — because a lead handed that id WILL bind it.
-    One resolver: the check's verdict is the tool's verdict on the same string."""
-    from defender.runtime.lead_zero import resolve_correlation_dispatch
-    from defender.runtime.query_tool import resolve_query_id
-
-    odd = "elastic.Correlate_Alerts"
-    assert resolve_query_id("elastic", "alerts", odd) == odd, "the fixture's id must be one the tool binds"
-    catalog = tmp_path / "catalog"
-    _plant(catalog, "elastic", "carrier", tid=odd, verb="alerts")
-    dispatch = resolve_correlation_dispatch(odd, _templates(catalog), _shipped_shaped_grant(tmp_path))
-    assert (dispatch.system, dispatch.template_id) == ("elastic", odd)
-
-
 def test_two_established_files_carrying_the_id_are_refused_naming_both_paths(tmp_path):
-    """An ambiguous catalog is refused AS ambiguous, whichever file sorts first — never
-    settled by `matches[0]`. Proved from both sides of the sort: with the granted verb on the
-    later file the naive pick refuses as a MISMATCH (sending the operator to the table for a
-    duplicate-id fault); with it on the earlier file the naive pick ACCEPTS. Both orders
-    refuse here, naming both paths. Positive control: either file alone resolves."""
+    """An ambiguous catalog is refused AS ambiguous, whichever file sorts first — never settled by
+    `matches[0]`."""
     from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     grant = _shipped_shaped_grant(tmp_path)
@@ -685,10 +477,10 @@ def test_two_established_files_carrying_the_id_are_refused_naming_both_paths(tmp
 
 
 def test_a_grant_holding_two_query_pairs_is_refused_as_the_functions_own_contract(tmp_path):
-    """A grant that did not come through the loader (which refuses a second query verb for
-    this holder) and holds two query pairs on one system: `correlation_system` derives one
-    system from it, and the check must not compare the template with whichever pair sorts
-    first — it raises `GrantError`, the way `correlation_system` does for two systems."""
+    """A grant that did not come through the loader (which refuses a second query verb for this
+    holder) and holds two query pairs on one system: `correlation_system` derives one system from
+    it, and the check must not compare the template with whichever pair sorts first — it raises
+    `GrantError`, the way `correlation_system` does for two systems."""
     from defender.runtime.lead_zero import resolve_correlation_dispatch
     from defender.runtime.verb_grant import GrantError
 
@@ -724,10 +516,9 @@ def test_a_typo_resolving_to_nothing_is_refused_naming_the_id(tmp_path):
 
 def test_a_draft_or_misfiled_copy_does_not_resolve(tmp_path):
     """"Established, non-draft" is BOTH halves, THE predicate `_template_index` filters on
-    (`_corpus.is_established` — one function, both callers): a copy under `_draft/`
-    (whatever its status says) and a file at the system root with `status: draft` each fail
-    to resolve, because neither is in the index the lead is told to read. Positive control:
-    the same file at the root, `status: established`, resolves."""
+    (`_corpus.is_established` — one function, both callers): a copy under `_draft/` (whatever its
+    status says) and a file at the system root with `status: draft` each fail to resolve, because
+    neither is in the index the lead is told to read."""
     from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     grant = _shipped_shaped_grant(tmp_path)
@@ -754,29 +545,13 @@ def test_a_draft_or_misfiled_copy_does_not_resolve(tmp_path):
     assert ok.system == "elastic"
 
 
-def test_an_empty_catalog_is_refused_not_dispatched(tmp_path):
-    """A deployment whose catalog dir is absent walks nothing (`iter_query_templates` yields
-    nothing for a missing dir) — and that is an unresolvable id, not a dispatch: the lead
-    would be told to bind a template no index lists."""
-    from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
-
-    with pytest.raises(CorrelationDispatchError) as caught:
-        resolve_correlation_dispatch(
-            SHIPPED_TEMPLATE_ID, _templates(tmp_path / "nowhere"), _shipped_shaped_grant(tmp_path),
-        )
-    assert SHIPPED_TEMPLATE_ID in str(caught.value)
-
-
 # =========================================================================================
 # O6 (b) — a template with no `verb:` is malformed, not a table mismatch on `(system, '')`.
 # =========================================================================================
 
 def test_a_template_declaring_no_verb_is_refused_as_malformed_not_as_a_mismatch(tmp_path):
     """Built through the REAL reader: a `.md` with no `verb:` line parses to `verb == ""`
-    (`_corpus.py`'s fallback, asserted as the precondition). The refusal says the template
-    declares no `verb:` and names the id; it does NOT render `elastic.` with an empty verb as
-    the template's pair, which would send the operator to the table for a fault in the file.
-    Positive control: the same file with `verb: alerts` added resolves."""
+    (`_corpus.py`'s fallback, asserted as the precondition)."""
     from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     grant = _shipped_shaped_grant(tmp_path)
@@ -808,34 +583,3 @@ def test_a_template_declaring_no_verb_is_refused_as_malformed_not_as_a_mismatch(
 # O4 — the template carries the vendor facts the harness stopped saying.
 # =========================================================================================
 
-def test_the_template_carries_the_rule_field_pitfall_and_its_declarations_are_intact():
-    """The sentence the harness dropped — the documents the lead is bound from may carry
-    `kibana.alert.rule.*`, and it is not an axis to AND into `${entity_filter}` — is ADDED
-    to the template's Pitfalls (the grounding found it was not there). The front matter the
-    estate stager consumes (`verb`, `params`, `body_substitutions`) is unchanged, and the
-    template stays established under its id."""
-    template, reason = read_query_template(SHIPPED_TEMPLATE)
-    assert template is not None, reason
-    assert template.id == SHIPPED_TEMPLATE_ID
-    assert template.status == "established"
-    assert template.verb == "alerts"
-    assert template.params == ("end", "start")
-    assert template.body_substitutions == ("entity_filter",)
-
-    pitfalls = section_bodies(template.body).get("Pitfalls", "")
-    assert "kibana.alert.rule" in pitfalls, (
-        "the template's Pitfalls do not tell the lead that its input documents may carry "
-        "`kibana.alert.rule.*` and that the rule is not an axis to bind"
-    )
-    # ONE bullet carries the field, the filter and the NEGATION together: presence of the
-    # two tokens alone is satisfied by the inverted instruction ("AND the rule into the
-    # filter so the count stays on this rule"), rendered to every gather lead on the system
-    # (adversary H5). Bullets are the `- ` items of the section.
-    bullets = [b for b in re.split(r"\n(?=- )", pitfalls) if "kibana.alert.rule" in b]
-    assert bullets, pitfalls
-    rule_bullet = bullets[0]
-    assert "entity_filter" in rule_bullet, "the pitfall must say where the rule must NOT be ANDed"
-    assert re.search(r"\b(?:do not|not an axis|is not an axis)\b", rule_bullet, re.IGNORECASE), (
-        f"the rule-field pitfall does not NEGATE binding the rule:\n{rule_bullet}"
-    )
-    assert not re.search(r"\bso the count stays on this rule\b", rule_bullet, re.IGNORECASE)

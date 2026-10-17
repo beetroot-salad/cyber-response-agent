@@ -1,39 +1,16 @@
-"""Site A-E fold contracts for #591 (spec_graph_591-frontmatter-fold.yaml).
-
-Each folded reader (predicted_disposition / read_description + descriptor_catalog /
-parse_report / check_skill / strip_frontmatter) must route through the ONE
-canonical grammar in defender/_frontmatter.py. #810 finished that fold for the
-last one: `strip_frontmatter` now LIVES in `_frontmatter` rather than being a
-private copy in `orient` that delegated to it, so the prompt loaders in
-`runtime/driver.py` could reach it too. Most tests here are RED against
-HEAD — they fail on the OLD loose/hand-rolled behavior, on a missing seam, or on
-a read that raises where the fold makes it fall back. That red is the point; it
-goes green when the implementation lands.
-
-Fixtures that carry CRLF or non-UTF8 bytes are written with ``write_bytes`` so
-text-mode newline translation / decode cannot mask them.
-
-Import conventions mirror the collected neighbors:
-  - the hook + validate_scaffold are __main__ scripts -> importlib.spec_from_file_location
-    (as tests/test_inject_system_skill_description.py loads the hook);
-  - orient / held_out / visualize resolve through the ``defender.*`` namespace
-    (as tests/test_orient.py and tests/test_visualize_runtime.py do);
-"""
+"""Each frontmatter reader (predicted_disposition, read_description, descriptor_catalog, parse_report, check_skill, strip_frontmatter) routes through the one canonical grammar."""
 from __future__ import annotations
 
 from pathlib import Path
 
-from defender._frontmatter import parse_frontmatter_or_none, strip_frontmatter
+from defender._frontmatter import parse_frontmatter_or_none
 from defender.tests._by_path import DEFENDER, load_module
 from defender.evals.held_out import predicted_disposition
 from defender._vocab import DISPOSITION_ENUM
 from defender.runtime.verb_grant import VerbGrant
 from defender.scripts.visualize import visualize_primitives as vp
 from defender.runtime.verbs import read_roster
-
-WORKTREE = Path(__file__).resolve().parents[2]
-
-
+from defender.tests import _system_index_1256 as SI
 
 
 def _hook():
@@ -62,14 +39,8 @@ def _skill(skills_dir: Path, system: str, content: bytes) -> None:
 
 
 def _name_status(scaffold, defroot: Path, system: str) -> str:
-    """The name-check outcome of check_skill: 'PASS', 'FAIL', 'MISSING' or 'UNREADABLE' — or
-    the raised exception propagates (the pre-fold crash on unreadable bytes).
-
-    'UNREADABLE' is its own answer because the rule splits it out from the identity one (#901):
-    a file that cannot be decoded reported as "frontmatter name is not defender-x" sends the
-    reader to a line that may be perfectly correct. It is still a FAIL row in the report — what
-    changed is which sentence it carries, so a helper keyed on the identity sentence alone would
-    read the split as "no row at all"."""
+    """The name-check outcome of check_skill: 'PASS', 'FAIL', 'MISSING' or 'UNREADABLE' — or the
+    raised exception propagates (the pre-fold crash on unreadable bytes)."""
     rep = scaffold.Report()
     scaffold.check_skill(rep, defroot, system)
     for status, msg in rep.rows:
@@ -135,6 +106,8 @@ def test_d0_read_description(tmp_path):
 
 
 def test_d0_descriptor_catalog_seam(tmp_path):
+    """#1256 r4: the catalog is gather's system index, built once (`descriptor_index`) and
+    rendered at use; rendered with nothing down it lists what `descriptor_catalog` did."""
     hook = _hook()
     skills = tmp_path / "skills"
     adapters = tmp_path / "adapters"
@@ -146,25 +119,23 @@ def test_d0_descriptor_catalog_seam(tmp_path):
 
     grant = VerbGrant(role="gather", entries=(("alpha", "ping", "r"), ("beta", "ping", "r")))
 
-    out = hook.descriptor_catalog(skills, read_roster(adapters), grant)
-    assert out == "- `alpha`: alpha desc"
+    out = SI.index_text(hook, skills, read_roster(adapters), grant)
+    assert SI.listing(out) == ["- `alpha`: alpha desc"]
 
     empty_adapters = tmp_path / "adapters2"
     empty_adapters.mkdir()
     (empty_adapters / "beta_adapter.py").write_text("# adapter\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
-    assert hook.descriptor_catalog(skills, read_roster(empty_adapters), grant) is None
+    assert SI.listing(SI.index_text(hook, skills, read_roster(empty_adapters), grant)) == []
 
-    a = hook.descriptor_catalog(skills, read_roster(adapters), grant)
-    b = hook.descriptor_catalog(skills, read_roster(empty_adapters), grant)
-    assert a == "- `alpha`: alpha desc"
-    assert b is None
+    a = SI.index_text(hook, skills, read_roster(adapters), grant)
+    b = SI.index_text(hook, skills, read_roster(empty_adapters), grant)
+    assert SI.listing(a) == ["- `alpha`: alpha desc"]
+    assert SI.listing(b) == []
 
 
 def test_d0_parse_report(tmp_path):
-    """#785 typed the viewer's read (a `ReportRead`, not a merged frontmatter dict), so the
-    shape assertions here read fields instead of dict equality. The #591 demand is unchanged:
-    every fallback below is a FALLBACK, not a raise, and the grammar deciding them is the one
-    canonical parser."""
+    """#785 typed the viewer's read (a `ReportRead`, not a merged frontmatter dict), so the shape
+    assertions here read fields instead of dict equality."""
     missing = vp.parse_report(tmp_path / "nope")
     assert (missing.disposition, missing.body) == (None, "")
     undecodable = vp.parse_report(
@@ -207,17 +178,11 @@ def test_d0_check_skill(tmp_path):
     ) == "UNREADABLE"
 
 
-def test_d0_strip_frontmatter():
-    assert strip_frontmatter("---\ndescription: x\n---\nBODY\n") == "BODY"
-    no_fence = "no fence here\nplain body\n"
-    assert strip_frontmatter(no_fence) == no_fence
-
-
 def test_d_parity_grammar(tmp_path):
     """Over a shared corpus, predicted_disposition is non-None exactly when
-    parse_frontmatter_or_none yields a mapping whose disposition is a str in the
-    enum — so primary + secondary (which now call this same function) accept and
-    reject identical documents by construction."""
+    parse_frontmatter_or_none yields a mapping whose disposition is a str in the enum — so
+    primary + secondary (which now call this same function) accept and reject identical documents
+    by construction."""
     corpus = {
         "well-formed": b"---\ndisposition: benign\n---\nbody\n",
         "junk-opener": b"---disposition: benign\n...\n---\nbody\n",
@@ -269,8 +234,6 @@ def test_d_wellformed_report_unflipped(tmp_path):
     assert predicted_disposition(run) == "benign"
 
 
-
-
 def test_d_unfenced_skill_none(tmp_path):
     """NEGATIVE: an unfenced SKILL.md with interior '---' thematic breaks around
     attacker text reaches neither read_description nor the descriptor_catalog.
@@ -286,7 +249,7 @@ def test_d_unfenced_skill_none(tmp_path):
 
     grant = VerbGrant(role="gather", entries=(("evil", "ping", "r"), ("good", "ping", "r")))
     assert hook.read_description("evil", skills_dir=skills) is None
-    catalog = hook.descriptor_catalog(skills, read_roster(adapters), grant) or ""
+    catalog = SI.index_text(hook, skills, read_roster(adapters), grant) or ""
     assert "BOGUS" not in catalog
     assert "`evil`" not in catalog
     assert hook.read_description("good", skills_dir=skills) == "real desc"
@@ -302,7 +265,8 @@ def test_d_fenced_skill_desc(tmp_path):
     (adapters / "good_adapter.py").write_text("# a\nVERBS = {\"ping\": lambda ctx: {}}\n", encoding="utf-8")
     assert hook.read_description("good", skills_dir=skills) == "real desc"
     grant = VerbGrant(role="gather", entries=(("good", "ping", "r"),))
-    assert hook.descriptor_catalog(skills, read_roster(adapters), grant) == "- `good`: real desc"
+    assert SI.listing(SI.index_text(hook, skills, read_roster(adapters), grant)) == [
+        "- `good`: real desc"]
 
 
 def test_d_trailing_space_opener_none(tmp_path):
@@ -365,16 +329,16 @@ def test_d_catalog_survival():
 
     hook = _hook()
     # #1106 M4: the gather grant is a run's (the playground tenant's), not GATHER_DEF's.
-    out = hook.descriptor_catalog(
-        hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), T1106.fixture_grants().gather)
-    assert out is not None
+    out = SI.index_text(
+        hook, hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), T1106.fixture_grants().gather)
+    assert SI.listing(out)
     adapters_dir = DEFENDER / "scripts" / "adapters"
     systems = sorted(
         p.name[: -len("_adapter.py")].replace("_", "-")
         for p in adapters_dir.glob("*_adapter.py")
     )
     assert systems
-    lines = out.splitlines()
+    lines = SI.listing(out)
     assert len(lines) == len(systems)
     assert "- `elastic`:" in out
 
@@ -445,15 +409,3 @@ def test_d_unreadable_skill_fail_row(tmp_path):
     assert _name_status(scaffold, defroot, "gone") == "MISSING"
 
 
-def test_d_closer_at_eof_strips():
-    stripped = strip_frontmatter("---\ndescription: x\n---")
-    assert "---" not in stripped
-    assert "description" not in stripped
-    assert strip_frontmatter("---\ndescription: x\n---\nBODY\n") == "BODY"
-
-
-def test_d_no_fence_unchanged():
-    no_fence = "no leading fence\njust body\n"
-    assert strip_frontmatter(no_fence) == no_fence
-    empty_mapping = "---\n---\n"
-    assert strip_frontmatter(empty_mapping) == empty_mapping

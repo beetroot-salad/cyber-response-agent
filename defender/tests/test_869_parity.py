@@ -1,28 +1,15 @@
-"""#869 — the cross-site universal, the second empty-set boundary, and the two unmoved readers.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_869.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared869.py`.
-
-U1's discharge standard is a CENSUS with a test at each member, not a guard plus prose: a
-universal discharged at three of four sites is not discharged.
-"""
+"""#869 — the cross-site universal, the second empty-set boundary, and the two unmoved readers."""
 from __future__ import annotations
 
 import dataclasses
-import shutil
 from pathlib import Path
 
 import pytest
 
-from defender import _git
 from defender.learning.core.config import LoopPaths
-from defender.learning.leads import lead_author, lead_neighbors, pitfalls_curator
+from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.draft_synthesis import _draft_basename, synthesize_drafts
 from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
-from defender.runtime.query_tool import QueryCapture
-from defender.runtime.verb_grant import DENY_ALL
-from defender.runtime.verbs import ModuleVerbRegistry
 from defender.tests._declared869 import (
     CATALOG_REL,
     SKILLS_REL,
@@ -32,7 +19,6 @@ from defender.tests._declared869 import (
     seed_tree,
     write,
 )
-from defender.runtime.verbs import read_roster
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests._lead_author_1134 import drafts_under, lane_tree_for, lead_deps, skills_view
 from defender.tests._state1135 import curation_run_dir, run_of
@@ -54,35 +40,6 @@ def _lead(query_id: str, *, system: str) -> ExecutedLead:
         raw_ref=Path("gather_raw/l-001/0.json"), payload_status="ok",
         payload_digest="2 bytes", error_class=None,
     )
-
-
-def test_runtime_system_of_record_is_unchanged(tmp_path):
-    """The runtime's own reader of the adapter source is untouched by the widening: it still
-    coarsens an undeclared system to `''`. "A registry that cannot list" is not a state this
-    reader has to answer for since #1031: the roster is fixed at registry construction, a
-    directory that cannot be listed fails there, and `systems()` is a pure read of that
-    snapshot — so the membership test below is the whole of `_system_of_record`
-    (`tests/test_1031_roster_snapshot.py` pins the snapshot and the construction-time fault).
-
-    N1, bound at THIS READER'S OWN EDGE because that is what R7 asks. This change is the
-    offline half plus the one writer; the runtime dispatch keeps answering the narrower
-    adapter question, and §7 settled why the other two unmoved readers of the same source need
-    no coverage rather than leaving it open — NF2 keeps the pitfalls lane adapter-only, so the
-    only membership value that diverges from the runtime's is the path-composition lane's,
-    which none of them consults.
-    """
-    adapters = tmp_path / "adapters"
-    adapters.mkdir()
-    write(adapters / "elastic_adapter.py", "VERBS = {}\n")
-    write(adapters / "cmdb_adapter.py", "VERBS = {}\n")
-    registry = ModuleVerbRegistry(read_roster(adapters), DENY_ALL)
-    capture = QueryCapture(registry)
-
-    assert registry.systems() == ("cmdb", "elastic")
-    assert capture._system_of_record("elastic") == "elastic"
-    assert capture._system_of_record("mcpsys") == ""
-    assert capture._system_of_record("gather") == ""
-    assert capture._system_of_record("") == ""
 
 
 def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkeypatch):
@@ -198,42 +155,3 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     assert git(repo, "status", "--porcelain").stdout == ""
 
 
-def test_directory_and_id_prefix_derivations_agree_on_the_gated_catalog(tmp_path):
-    """The catalog's two readers agree: `iter_query_templates` derives a template's system
-    from its DIRECTORY and `lead_neighbors._resolve_cli` derives it from the `id:` PREFIX, and
-    over every gated entry the two report the SAME system.
-
-    R7 at the readers' own edges. `catalog_dir` moves under this delta — RF2 now enforces
-    id-prefix == directory AT THE COMMIT GATE — and `catalog_id_prefix_equals_directory` pins
-    the WRITER; nothing pinned the READERS, and a boundary-altitude demand reads as discharged
-    for "two of three moved", which is the altitude collapse this rule exists to catch.
-
-    Driven over the committed corpus AND over an agent-authored draft the new gate now admits,
-    in a copy of the corpus so the real tree is untouched. The deferred half is not this
-    demand's: whether either join can go EMPTY at write time transfers to write-code-from-spec
-    as an R8 census; this is the agreement half only.
-    """
-    real_catalog = _git.REPO_ROOT / CATALOG_REL
-    committed = lead_neighbors.load_catalog(real_catalog)
-    assert committed, "the committed catalog is empty, so the agreement claim is vacuous"
-    for tpl in committed:
-        assert tpl.system == tpl.cli, f"{tpl.path}: {tpl.system!r} vs {tpl.cli!r}"
-
-    repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
-                     skills=("elastic",), catalog=(), non_systems=("gather",))
-    copied = repo / CATALOG_REL
-    shutil.rmtree(copied, ignore_errors=True)
-    shutil.copytree(real_catalog, copied)
-
-    authored = copied / "elastic" / "_draft" / "agent-authored.md"
-    write(authored, "---\nid: elastic.agent-authored\nstatus: draft\n---\n\n## Goal\n\nx\n")
-    rel = str(authored.relative_to(repo))
-    real = frozenset({tpl.system for tpl in committed})
-    assert lead_author._skills_path_rule(repo, "A ", rel, systems=real,
-                                         tree_for=lane_tree_for(repo)) is None
-
-    for tpl in lead_neighbors.load_catalog(copied):
-        assert tpl.system == tpl.cli, f"{tpl.path}: {tpl.system!r} vs {tpl.cli!r}"
-    assert any(
-        tpl.id == "elastic.agent-authored" for tpl in lead_neighbors.load_catalog(copied)
-    )

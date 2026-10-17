@@ -1,22 +1,9 @@
-"""Circuit-breaker exit-code taxonomy + the usage-error structured signal.
-
-The breaker counts only genuine infra failures (exit 2 / 124). A usage error —
-the agent passing a bad flag / unknown subcommand — must NOT count: exit 64 is
-reserved for it, keeping the agent's CLI typos out of the connectivity bucket.
-This replaces the old, fragile stderr-phrase heuristic (#301). No adapter has a
-CLI any more (#1107 deleted the last one), so nothing mints 64 itself.
-"""
+"""Circuit-breaker exit-code taxonomy + the usage-error structured signal."""
 from __future__ import annotations
 
 import pytest
 
-from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.adapters import ticket_adapter
 from defender.runtime import circuit_breaker as cb
-
-
-def test_usage_exit_code_is_reserved():
-    assert transport.USAGE_EXIT_CODE == 64
 
 
 @pytest.mark.parametrize(("exit_code", "counts"), [
@@ -30,19 +17,6 @@ def test_is_infra_failure_keys_on_exit_code_only(exit_code, counts):
     assert cb.is_infra_failure(exit_code) is counts
 
 
-def test_argparse_heuristic_is_gone():
-    assert not hasattr(cb, "_ARGPARSE_USAGE_RE")
-
-
-def test_no_adapter_has_a_cli_left_to_mistype():
-    """The ticket adapter's CLI is gone (#1107): there is no argv an agent can mistype, so no
-    adapter exits 64 and the parser class that minted it no longer exists."""
-    for name in ("build_parser", "main", "_cli_context"):  # lint-stale-ref: ok — asserts these are gone
-        assert not hasattr(ticket_adapter, name), f"ticket_adapter still has `{name}`"
-    assert not hasattr(transport, "AdapterArgumentParser")
-    assert not cb.is_infra_failure(transport.USAGE_EXIT_CODE)
-
-
 def _state(run_dir):
     """A run's state (#1235 round 2): the breaker lives on the run's one `RunState`."""
     from defender.runtime.run_state import RunState
@@ -51,10 +25,7 @@ def _state(run_dir):
 
 
 def test_usage_error_does_not_trip_breaker(tmp_path):
-    """Exit 64 is the agent's own usage error: it charges nothing. #1235: the breaker is
-    the run's state, so "charged nothing" is read off its `breaker_snapshot`, not off the
-    absence of a file. Positive control: test_two_infra_failures_trip_breaker, where the
-    same read DOES show the system's failures."""
+    """Exit 64 is the agent's own usage error: it charges nothing. #1235: the breaker is the run's state, so..."""
     state = _state(tmp_path)
     cb.record_outcome(state, "elastic", 64)
     cb.record_outcome(state, "elastic", 64)
@@ -76,11 +47,7 @@ def test_two_infra_failures_trip_breaker(tmp_path):
 
 
 def test_a_new_runs_state_starts_with_a_blank_breaker(tmp_path):
-    """A run's breaker starts blank (#1235: `RunState(...)` is the run's start): whatever an
-    earlier run over the same folder tripped, the new run begins with no system down.
-
-    Positive control: the earlier run's state WAS tripped, so the healthy read of the new one
-    is a fresh start rather than a breaker that never counted."""
+    """A run's breaker starts blank (#1235: `RunState(...)` is the run's start): whatever an earlier run over the..."""
     earlier = _state(tmp_path)
     cb.record_outcome(earlier, "elastic", 2)
     cb.record_outcome(earlier, "elastic", 2)
@@ -93,14 +60,7 @@ def test_a_new_runs_state_starts_with_a_blank_breaker(tmp_path):
 
 
 def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
-    """#1235 D3: the breaker lives in the run's state, and no file in the run folder moves
-    it. Two real infra failures trip `elastic` and write nothing; a `circuit_breaker.json`
-    planted over that run claiming a blank breaker leaves `elastic` down; one claiming a
-    healthy `cmdb` tripped does not put `cmdb` down; and unreadable bytes at that name are
-    no longer "tripped" (the unreadable-state branch retired with the file).
-
-    Positive control on the same folder: `elastic`, tripped by the host's own record, IS
-    down, with the down message the host has always given."""
+    """#1235 D3: the breaker lives in the run's state, and no file in the run folder moves it. Two real infra..."""
     run_dir = tmp_path / "runs" / "run-1235"
     run_dir.mkdir(parents=True)
     state = _state(run_dir)
@@ -128,31 +88,41 @@ def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
     assert "cmdb" not in snapshot["systems"], snapshot
 
 
-def test_a_breaker_tripped_by_config_faults_names_configuration(tmp_path):
-    """#1246: a missing or broken config (`ConfigFault`) exits 2 like a transport failure and
-    charges the same breaker — intended — so the messages it produces cannot blame
-    connectivity alone; the breaker sees exit codes, not which fault raised them. The two
-    messages that name causes read one phrase; MAIN's opening correlation sentence for a
-    tripped system claims no cause at all; the operator's escalation note names config too."""
+def test_the_breakers_causes_are_reachability_not_configuration(tmp_path):
+    """#1256 (DP2) supersedes #1246's wording: whether a system is configured is decided at run
+    start, so a not-configured system is refused before any call and never charged (the run-flow
+    proof is `startup_usability_1256/test_1256_run_flow.py`). The breaker then counts only what
+    can change during a run — outages, errors, timeouts — and "not configured" leaves its
+    vocabulary: `INFRA_CAUSES`, the tripped system's down message and the run kill narrow back
+    to reachability. Unchanged: the down message still restates its count and the causes, the
+    causes stay examples (exit 2 is also a 5xx, a garbled reply, an adapter crash) under the
+    breaker's own codes, MAIN's opening correlation sentence for a tripped system claims no
+    cause, and the operator's escalation note still names configuration (#1256 does not change
+    it).
+
+    The system is tripped here with literal exit 2s — what a transport fault exits with. The
+    breaker sees codes only; which faults never reach it is the run's gates' business, so this
+    test does not ask whether `record_outcome` would charge a `ConfigFault`'s code."""
     from defender.runtime.case_ticket import ESCALATION_COMMENT_BODY
     from defender.runtime.lead_zero import (
         ENDING_TRIPPED_BREAKER,
         CorrelationOutcome,
         render_correlation_section,
     )
-    from defender.scripts.adapters.faults import ConfigFault
 
+    assert "configur" not in cb.INFRA_CAUSES.lower(), \
+        f"the breaker's causes still offer configuration (DP2): {cb.INFRA_CAUSES!r}"
 
     state = _state(tmp_path)
     for _ in range(cb.PER_SYSTEM_FAIL_LIMIT):
-        cb.record_outcome(state, "elastic", ConfigFault.exit_code)
-    assert cb.is_tripped(state, "elastic"), "config faults no longer charge the breaker"
+        cb.record_outcome(state, "elastic", 2)
+    assert cb.is_tripped(state, "elastic"), "precondition: two infra failures trip the breaker"
     down = cb.down_message(state, "elastic")
     assert f"{cb.PER_SYSTEM_FAIL_LIMIT} {cb.INFRA_CAUSES}" in down, \
-        f"the down message restates the causes: {down!r}"
-    # Exit 2 is also a 5xx, a garbled reply, an adapter crash: the causes are examples, not a
-    # closed list, and the codes are the breaker's own set.
-    assert "not configured" in down, f"the down message never names a config cause: {down!r}"
+        f"the down message restates its count and the causes: {down!r}"
+    assert "tripped" in down, f"the down message names the trip: {down!r}"
+    assert "not configured" not in down.lower(), \
+        f"a tripped system's down message still names a config cause (DP2): {down!r}"
     assert "e.g." in down, f"the down message closes its list of causes: {down!r}"
     codes = " / ".join(str(c) for c in sorted(cb.INFRA_EXIT_CODES))
     assert f"exit {codes}" in down, f"the down message restates the infra codes: {down!r}"
@@ -160,6 +130,10 @@ def test_a_breaker_tripped_by_config_faults_names_configuration(tmp_path):
     aborted = str(cb.RunAborted(cb.RUN_FAIL_KILL_LIMIT, ["elastic"]))
     assert f"{cb.RUN_FAIL_KILL_LIMIT} {cb.INFRA_CAUSES}" in aborted, \
         f"the run-kill message restates the causes: {aborted}"
+    assert "unconfigured" not in aborted.lower(), \
+        f"the run-kill message still blames configuration (DP2): {aborted}"
+    assert "not configured" not in aborted.lower(), \
+        f"the run-kill message still names 'not configured' (DP2): {aborted}"
 
     opening = render_correlation_section(
         CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system="elastic"), grant_home="-")

@@ -1,17 +1,8 @@
-"""Unit tests for the pure per-loop compaction core (runtime/compaction.py).
-
-Pins the behaviour the offline dry-run and the live hook rely on: loop detection,
-the marker-gated fold boundary (`:T close` is the trigger; the data floor + the
-`< active` guard are belt-and-suspenders), the frontier trimming that keeps the
-active loop out of the frozen snapshot, freeze/reuse transitions, the fallbacks,
-and the size + reconstruction helpers. No I/O, no PydanticAI — everything
-operates on the message-dump dict form.
-"""
+"""Unit tests for the pure per-loop compaction core (runtime/compaction.py)."""
 
 from __future__ import annotations
 
 from defender.runtime import compaction as C
-
 
 
 _LH = ":L findings [id|loop|name|target|tests|system|window]"
@@ -90,7 +81,6 @@ def _history(n: int = 5) -> list:
     return [_req() if i % 2 == 0 else _resp() for i in range(n)]
 
 
-
 def test_detect_loop_single():
     assert C.detect_loop(LOOP1) == 1
 
@@ -101,7 +91,6 @@ def test_detect_loop_takes_max():
 
 def test_detect_loop_empty_is_none():
     assert C.detect_loop("") is None
-
 
 
 def test_fold_boundary_unresolved_loop1_is_zero():
@@ -144,7 +133,6 @@ def test_frontier_through_excludes_active_loop():
     ft = C._frontier_through(RESOLVED1_PLAN2, 1)
     assert "l-001" in ft
     assert "l-005" not in ft
-
 
 
 def test_passes_through_until_a_loop_resolves():
@@ -199,7 +187,6 @@ def test_prefix_is_byte_stable_across_a_loop():
     assert a == b
 
 
-
 def test_fallback_when_cut_not_on_boundary():
     history = _history()
     bad = C.FrozenState(prefix=(history[0], C.render_frontier_message(RESOLVED1_PLAN2)),
@@ -214,7 +201,6 @@ def test_fallback_when_cut_not_on_boundary():
 def test_loop_undetermined_passes_through_without_state():
     step = C.compact(_history(1), "", None)
     assert step.action == "passthrough"
-
 
 
 def test_payload_chars_counts_text_and_tool_args():

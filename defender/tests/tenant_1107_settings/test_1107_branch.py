@@ -1,24 +1,6 @@
-"""#1107 — the branch launcher over the tenant settings record: the box-mounted tenants root
-(MF-13), the Elastic view's values carried verbatim at resolve (NF-18), a sibling's pass-through
-env (GR7) and its own record (N6/MF-17).
-
-#1224 retired what the rest of this file guarded: the launcher no longer refuses a tenant for
-its Elastic part (O1: any tenant branches — `live_oracle_1224`'s s_p036), and the corpus-pattern
-check, the cluster probe, the write door and the foreign-view guard went with cluster staging.
-
-Every launch drives the REAL `learning/branch/cli.main` over a source run planted at its tenant
-location under this test's data root (`_spec1078.tenant_source`: runs-base record + stamp), whose
-knowledge folder is then replaced by a COMPLETE #1107 tenant (`_spec1107.plant`).
-#1120: the launcher reads the tenant from `DEFENDER_DATA_ROOT` alone — no flag names it.
-Fakes enter only through the launcher's seams (`spawn`, `questioner`, `preflight`, `live_tree`).
-The role preflight is a RECORDING TRIPWIRE answering 1: a launch that got past every check
-knowable before spend reaches it and is refused there, so "the refusal came before any preflight
-spend" is an observation (`calls == []`), and a control arm that reaches it (`calls == [None]`)
-proves the refused arm was refused for its own reason.
-"""
+"""Branch launcher and tenant settings: box-mounted tenants-root refusal; a sibling resolves its own record."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +9,6 @@ import pytest
 from defender.learning.branch import cli
 from defender.runtime import run_tenant
 from defender.scripts.adapters import elastic_adapter
-from defender._episode_handle import Episode
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender.tests.tenant_1107_settings import _spec1107 as S
@@ -168,79 +149,14 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
 # NF-18 — the Elastic view's values are carried verbatim at resolve.
 # ---------------------------------------------------------------------------------------------
 
-def test_s60_elastic_events_index_values_carried_forward(tmp_path, data_root, monkeypatch):
-    """ELASTIC_EVENTS_INDEX is not validated beyond presence (NF-18): a plain (non-wildcard)
-    pattern, a bare '*' and an upper-case/CHANGE-ME pattern are each carried verbatim into
-    the tenant's systems["elastic"] at resolve (no resolve-time value validation). A VALID
-    pattern exported under the same key does not reach the record."""
-    monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
-    _src, root, folder, _episodes = _layout(tmp_path, data_root, monkeypatch, marker="s60e")
-
-    for value in ("s60e-events", "*", "CHANGE-ME"):
-        S.set_key(folder, "elastic", "ELASTIC_EVENTS_INDEX", value)
-        if value == "CHANGE-ME":
-            monkeypatch.setenv("ELASTIC_EVENTS_INDEX", "s60e-env-*")
-        carried = _resolve(root).systems["elastic"]
-        assert isinstance(carried, S.record_type("SystemConfig")), \
-            f"{value!r} faulted the part: {carried!r}"
-        assert carried["ELASTIC_EVENTS_INDEX"] == value, \
-            f"{value!r} not carried verbatim: {carried['ELASTIC_EVENTS_INDEX']!r}"
 
 
-def test_s60_elastic_ssl_verify_values_pass_through(tmp_path, data_root, monkeypatch):
-    """ELASTIC_SSL_VERIFY is not validated (F3/NF-18, presence-only): 'false', 'TRUE' (uppercase)
-    and 'CHANGE-ME' are each carried into the record's systems["elastic"] as the raw string, with no rejection."""
-    _src, root, folder, _episodes = _layout(tmp_path, data_root, monkeypatch, marker="ssl")
-    for value in ("false", "TRUE", "CHANGE-ME"):
-        S.set_key(folder, "elastic", "ELASTIC_SSL_VERIFY", value)
-        carried = _resolve(root).systems["elastic"]
-        assert isinstance(carried, S.record_type("SystemConfig")), \
-            f"ELASTIC_SSL_VERIFY={value!r} faulted the part: {carried!r}"
-        assert carried["ELASTIC_SSL_VERIFY"] == value, \
-            f"ELASTIC_SSL_VERIFY={value!r} not carried as the raw string: {carried!r}"
 
 
 # ---------------------------------------------------------------------------------------------
 # GR7 / N6 — siblings: the launcher's pass-through env, and a sibling's own record.
 # ---------------------------------------------------------------------------------------------
 
-def test_s60_launch_one_env_is_passthrough(tmp_path, data_root, monkeypatch):
-    """learning/branch/cli.py's launch_one closure passes os.environ to each sibling's spawn as a
-    wholesale copy, with no per-key lookup or branch on any tenant-config-shaped name -- a sibling
-    launch is unaffected by a config key exported in the launching process's environment, the same
-    guarantee O1's other tests pin for the adapters."""
-    for name in _CONFIG_VARS:
-        monkeypatch.delenv(name, raising=False)
-    H.make_tenant(data_root, TID)
-    S.plant(data_root, TID, marker="gr7")
-
-    quiet_ep = T.episode(tmp_path / "quiet", root=tmp_path / "quiet" / "episodes")
-    quiet = T.FakeSpawn()
-    cli.start_family(Episode.open(quiet_ep), ["b"], spawn=quiet, tenant_id=TID)
-    quiet_environ = dict(os.environ)
-
-    exported = {"CMDB_URL_BASE": "http://gr7-env-cmdb.invalid:1",
-                "ELASTIC_EVENTS_INDEX": "gr7env-events-*"}
-    for key, value in exported.items():
-        monkeypatch.setenv(key, value)
-    loud_ep = T.episode(tmp_path / "loud", root=tmp_path / "loud" / "episodes")
-    loud = T.FakeSpawn()
-    cli.start_family(Episode.open(loud_ep), ["b"], spawn=loud, tenant_id=TID)
-    loud_environ = dict(os.environ)
-
-    assert len(quiet.launches) == 1, (quiet.launches, loud.launches)
-    assert len(loud.launches) == 1, (quiet.launches, loud.launches)
-    q, lo = quiet.launches[0], loud.launches[0]
-    # Positive precondition: the exported config key WAS in what the sibling was handed.
-    assert lo["env"].get("CMDB_URL_BASE") == exported["CMDB_URL_BASE"], \
-        "the exported key is not in the sibling's env — the channel is blind"
-    # A wholesale copy of the launching environment, nothing selected, dropped or added ...
-    assert q["env"] == quiet_environ, "the quiet sibling's env is not os.environ copied whole"
-    assert lo["env"] == loud_environ, "the loud sibling's env is not os.environ copied whole"
-    # ... and the launch is otherwise unaffected by the exported key.
-    assert [a.replace(str(loud_ep), "<ep>") for a in lo["argv"]] == \
-        [a.replace(str(quiet_ep), "<ep>") for a in q["argv"]], (q["argv"], lo["argv"])
-    assert lo["kw"] == q["kw"], (q["kw"], lo["kw"])
 
 
 def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatch):

@@ -1,19 +1,4 @@
-"""#870 O3 — the round's own oracle, end to end and across the process boundary.
-
-This file carries ONE demand of `spec-flow/specs/spec_graph_870.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared870.py`.
-
-IT LIVES AT THE TOP LEVEL OF `defender/tests/` ON PURPOSE, not under `tests/e2e/`: the graph
-declares `tests: defender/tests`, and the checkers glob `<dir>/*.py` without recursing — a
-replay-driven test placed under `e2e/` falls outside that scan and its demand reports as a
-prose orphan. Importing `defender.tests.e2e._replay_harness` from here is established practice
-(`test_869_queries_row.py`, `test_record_query.py` and ~15 others).
-
-It crosses the process boundary FF-7 names: the row is written by the RUNTIME process and read
-by the LEARNING process with no import edge between them, so the two halves are driven in one
-test rather than joined by a shared assumption about what the table holds.
-"""
+"""#870 O3 — the round's own oracle, end to end and across the process boundary."""
 from __future__ import annotations
 
 from pathlib import Path

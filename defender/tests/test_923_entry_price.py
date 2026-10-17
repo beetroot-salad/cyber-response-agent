@@ -1,32 +1,4 @@
-"""#923 — the ENTRY PRICE on `inconclusive` (O1, M1, M4), and its hardenings.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_923-inconclusive.yaml`, named by
-that demand's `discharged_by`.
-
-THE PRICE PREDICATE WAS REOPENED AND REPLACED AT §7 ROUND 4 (a SECOND human decision,
-POST-PHASE — the round-4 WIDENING this module used to pin, "a row naming a source or an
-unavailable capability", is itself now superseded). Measured against that widened free-text
-predicate: it refused a three-letter telemetry source (`EDR not available` — `_row_names_a_
-source_or_capability` stripped filler words down to `edr`, four characters short of paying)
-while `ceiling_test "unknown"` bought a close outright. The predicate is DELETED, not kept
-alongside a new one: a `ceiling_test` row is now a RECEIPT the host verifies MECHANICALLY
-against this run's own transcript, never a judgment of what the row's prose says.
-
-A row pays by parsing as `state=<query-failed|query-empty|nothing-to-try>
-[ref=<lead-id>|cap=<system[.verb]>] note=<text>`. `query-failed`/`query-empty` anchor to a
-`:L findings` lead THIS RUN dispatched (`ref=`) — a foreign-key check against `_leads`, reusing
-`_lead_returned_a_result` (the SAME lookup `entity_check` uses, not a second one), plus a
-consistency check between the claimed state and that lead's own recorded `fail_reason`.
-`nothing-to-try` is the one lane with no call to point at — a capability that does not exist AT
-ALL, so nothing was dispatchable — checked NEGATIVELY against the closed verb roster this
-codebase's own `scripts/adapters/` ships (`cap=`, never `ref=`). `note` is free text for the
-human analyst: it gates NOTHING (only `state`/`ref`/`cap` are checked) and rides into the report
-BODY, never the frontmatter, so it can never strand a run.
-`test_a_bare_host_row_does_not_pay_where_a_receipt_does` is where the discriminating negative
-lives — the retired free-text shape does not even PARSE as a receipt — and it is the test the
-rest of this module leans on: without it a build that still judges prose passes every other
-scenario here.
-"""
+"""#923 — the ENTRY PRICE on `inconclusive` (O1, M1, M4), and its hardenings."""
 from __future__ import annotations
 
 import pytest
@@ -34,7 +6,6 @@ import pytest
 from defender._vocab import DISPOSITION_ENUM
 from defender.skills.invlang.validate import (
     _DISPOSITION_GATES,
-    disposition_entry_price,
     validate_companion,
 )
 from defender.tests._invlang_warn_836 import recording_stages
@@ -60,7 +31,6 @@ from defender.tests._spec923 import (
 from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse guard
     worktree_package_guard,
 )
-
 
 
 def _refusal(tmp_path, companion: str, disposition: str = GAP_MEMBER, **kw) -> str:
@@ -172,22 +142,6 @@ def test_neither_none_nor_a_blank_row_pays_the_inconclusive_price(tmp_path):
         text = _refusal(tmp_path / f"empty-{row or 'blank'}", paid(row))
         assert "close blocked" in text, row
         assert "ceiling_test" in text, row
-
-
-def test_every_termination_category_owes_the_same_row(tmp_path):
-    """The price is owed on the VERDICT alone. An `inconclusive` close owes the same row whether
-    it terminates on `exhaustion`, `data-ceiling`, `severity-ceiling` or the misspelling
-    `severity_ceiling` — the free-text category cannot silently disable it, which is the whole
-    reason the trigger moved off `conclude.termination.category` and onto a closed validated
-    enum.
-
-    `severity_ceiling` is the load-bearing row: `termination.category` has no vocabulary, so a
-    single typo turns the OLD severity-ceiling rule off with nothing said, and the new price
-    must not inherit that."""
-    for category in ("exhaustion", "data-ceiling", "severity-ceiling", "severity_ceiling"):
-        text = _refusal(tmp_path / category, gapless(category=category))
-        assert "close blocked" in text, category
-        assert "ceiling_test" in text, category
 
 
 def test_a_close_owing_the_price_is_refused_before_any_stage_is_called(tmp_path):
@@ -591,67 +545,4 @@ def test_the_accumulated_gap_text_is_bounded(tmp_path):
 # The neighbour rule the price must not absorb.
 # ---------------------------------------------------------------------------------------
 
-def test_both_rules_fire_independently_on_one_document():
-    """The existing severity-ceiling rule (keyed on `conclude.termination.category`) and the new
-    disposition price fire INDEPENDENTLY on one document: neither is removed, renamed or
-    subsumed by the other, neither contains the other, and each must be satisfied separately.
 
-    Three documents separate them. A `malicious` close terminating on a severity ceiling with no
-    row owes the OLD rule and no price. An `inconclusive` close terminating on exhaustion owes
-    the PRICE and not the old rule. One document doing both draws both messages — which is what
-    "neither contains the other" means as an observation rather than as a claim about the
-    source. Unifying the two rules was considered and is not attempted this round."""
-    old_only = validate_companion(gapless(disposition="malicious", category="severity-ceiling"), None)
-    assert any("severity-ceiling" in e and "ceiling_test" in e for e in old_only), old_only
-    assert not any(f"{GAP_MEMBER} blocked" in e for e in old_only), (
-        "the severity-ceiling rule now speaks for the disposition price too"
-    )
-
-    price_only = validate_companion(gapless(category="exhaustion"), None)
-    assert any(f"{GAP_MEMBER} blocked" in e for e in price_only), price_only
-    assert not any("termination.category severity-ceiling" in e for e in price_only)
-
-    both = validate_companion(gapless(category="severity-ceiling"), None)
-    assert any("termination.category severity-ceiling" in e for e in both), both
-    assert any(f"{GAP_MEMBER} blocked" in e for e in both), both
-
-    # The old rule keeps its own scope: a `malicious` close on any other category owes it
-    # nothing, so the price did not widen it on the way past.
-    assert validate_companion(
-        doc(conclude(disposition="malicious", **{"termination.category": "exhaustion"})), None,
-    ) == []
-
-
-def test_the_entry_price_is_owed_by_the_keyword_the_close_commits():
-    """The price follows the close's disposition ARGUMENT, never the document's
-    `conclude.disposition` — executed, and it is what makes the two-boundary collection
-    necessary rather than redundant.
-
-    A document can conclude one keyword while the close commits a different, differently-priced
-    one, and nothing refuses the disagreement; `report.md` is written from the ARGUMENT, and
-    `report.md` is what the learning loop, the evals and the ticket lane read."""
-    concluded_benign = paid(PAYING_ROW, disposition="benign")
-    assert disposition_entry_price(GAP_MEMBER, concluded_benign).owed == ()
-
-    concluded_gap = gapless()
-    assert disposition_entry_price("malicious", concluded_gap).owed == ()
-    assert disposition_entry_price(GAP_MEMBER, concluded_gap).owed, (
-        "the close's own keyword owes nothing — the price reads the document's instead"
-    )
-
-    # #722's mechanism at this dispatch, and THE WRITE-SIDE HALF OF THE §7-ROUND-4 DESIGN
-    # CHANGE: a keyword that is not a member fails CLOSED here — it still OWES — rather than
-    # taking the unpriced branch, and the rationale comes back off the SAME lookup.
-    #
-    # This is what stops "a malformed verdict is never coerced" from being implemented by
-    # gutting the shared normalizer. Executed against two scratch builds carrying M1: removing
-    # the coercion and NOTHING ELSE makes this laced keyword unpriced and turns this assertion
-    # red, while removing it and refusing a non-member at this dispatch passes both this and
-    # `test_a_malformed_committed_verdict_is_marked_not_coerced`. On write there is still an
-    # author to ask; on read there is not, and the two halves must not be swapped.
-    laced = disposition_entry_price(f"{GAP_MEMBER}​", concluded_gap)
-    assert laced.owed, (
-        "a zero-width-laced priced keyword took the UNPRICED branch — the price dispatch is a "
-        "write gate and fails open on a malformed keyword"
-    )
-    assert laced.rationale

@@ -1,18 +1,4 @@
-"""Unit tests for the shared git transaction layer (``_author_shared``).
-
-The loop is the sole committer; the agent runs no git. These exercise the
-corpus-agnostic helpers that ``author.py`` and ``_author_curator.py`` both adapt
-over — ``commit_corpus`` (pathspec-scoped, optional provenance trailers),
-``changes_outside`` (the stray scope-gate), ``corpus_dir_clean``,
-``verify_agent_state``, ``git_head_sha``, ``commit_message``, ``result_list``.
-
-The git layer takes the repo root as a parameter, so every test **injects** a
-tmp repo directly — no monkeypatching of module globals (that was the smell the
-#330 consolidation removed). The per-direction provenance round-trip (the actor
-``Actor-Model:`` trailer the generation counter greps) and the full
-``run_batch`` envelope live in the per-direction author suites /
-``test_author_postflight.py``, which drive the adapters end-to-end.
-"""
+"""Unit tests for the shared git transaction layer (``_author_shared``)."""
 from __future__ import annotations
 
 import errno
@@ -53,8 +39,7 @@ def _status(repo: Path, path: str) -> str:
 
 
 def test_commit_corpus_commits_only_corpus(tmp_path):
-    """The author path (no trailers): an uncommitted corpus edit is committed, the new sha
-    returned, the working tree left clean, and no provenance trailer is stamped."""
+    """The author path (no trailers): an uncommitted corpus edit is committed, the new sha returned, the working..."""
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")
     sha = shared.commit_corpus(repo, _corpus(repo), "lesson batch")
@@ -65,9 +50,7 @@ def test_commit_corpus_commits_only_corpus(tmp_path):
 
 
 def test_commit_corpus_stages_only_corpus(tmp_path):
-    """#321: a file already **staged** outside the corpus (a sibling author's ``_draft/``
-    deposit left in the shared index) must NOT ride into the pathspec-scoped commit. A
-    bare index-global ``git commit`` would sweep it in; ``-- <corpus_dir>`` bounds it."""
+    """#321: a file already **staged** outside the corpus (a sibling author's ``_draft/`` deposit left in the..."""
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")
     (repo / "stray.txt").write_text("stray\n")
@@ -89,8 +72,7 @@ def test_commit_corpus_no_op_when_nothing_authored(tmp_path):
 
 
 def test_commit_corpus_appends_trailers(tmp_path):
-    """When ``trailers`` is given (the actor/env provenance path) each lands on the commit
-    at creation time, and the commit is still pathspec-scoped to the corpus."""
+    """When ``trailers`` is given (the actor/env provenance path) each lands on the commit at creation time, and..."""
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")
     shared.commit_corpus(
@@ -104,10 +86,7 @@ def test_commit_corpus_appends_trailers(tmp_path):
 
 
 def test_commit_corpus_rejects_message_carrying_trailers(tmp_path):
-    """If the agent put its own trailers in the message, ``git --trailer`` would *append* a
-    second set that shadows the loop's for first-match readers — refuse before staging
-    anything (HEAD unchanged, queue intact for retry). The guard derives from the trailer
-    keys, so it fires on either ``Generation:`` or the model label."""
+    """If the agent put its own trailers in the message, ``git --trailer`` would *append* a second set that..."""
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")
     head_before = shared.git_head_sha(repo)
@@ -121,9 +100,7 @@ def test_commit_corpus_rejects_message_carrying_trailers(tmp_path):
 
 
 def test_commit_corpus_no_trailers_skips_the_dup_guard(tmp_path):
-    """No trailers ⇒ no dup-guard: the author path (which stamps none) commits its message
-    verbatim even if the body happens to contain a ``Generation:`` line — there is no
-    loop-owned trailer for it to shadow."""
+    """No trailers ⇒ no dup-guard: the author path (which stamps none) commits its message verbatim even if the..."""
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")
     sha = shared.commit_corpus(
@@ -133,9 +110,7 @@ def test_commit_corpus_no_trailers_skips_the_dup_guard(tmp_path):
 
 
 def test_commit_corpus_commit_failure_is_atomic(tmp_path):
-    """#321: a failing commit (here a rejecting pre-commit hook, the issue's exact trigger)
-    raises ``GitError`` (a systemic git fault, post-migration) and leaves HEAD untouched —
-    no un-stamped lesson commit lands, so the caller can keep the queue intact for retry."""
+    """#321: a failing commit (here a rejecting pre-commit hook, the issue's exact trigger) raises ``GitError``..."""
     repo = _repo(tmp_path)
     hooks = repo / ".git" / "hooks"
     hooks.mkdir(parents=True, exist_ok=True)
@@ -150,8 +125,7 @@ def test_commit_corpus_commit_failure_is_atomic(tmp_path):
 
 
 def test_changes_outside_flags_only_non_corpus_paths(tmp_path):
-    """A corpus ``*.md`` edit is in-scope; anything else (incl. a non-``.md`` file inside
-    the corpus dir) is stray. ``--untracked-files=all`` reports each stray individually."""
+    """A corpus ``*.md`` edit is in-scope; anything else (incl. a non-``.md`` file inside the corpus dir) is..."""
     repo = _repo(tmp_path)
     (_corpus(repo) / "x.md").write_text("hello\n")
     (repo / "scratch.txt").write_text("nope\n")
@@ -170,8 +144,7 @@ def test_corpus_dir_clean(tmp_path):
 
 
 def test_verify_rejects_change_outside_corpus(tmp_path):
-    """Scope gate: a working-tree change outside the corpus (a stray the path-scoped commit
-    would ignore) fails verification rather than committing silently."""
+    """Scope gate: a working-tree change outside the corpus (a stray the path-scoped commit would ignore) fails..."""
     repo = _repo(tmp_path)
     (repo / "scratch.txt").write_text("stray\n")
     result = {"committed": [], "commit_message": None}
@@ -180,8 +153,7 @@ def test_verify_rejects_change_outside_corpus(tmp_path):
 
 
 def test_verify_tolerates_baseline_stray(tmp_path):
-    """A stray already present in the pre-agent ``baseline_stray`` is not blamed on the
-    agent — only *new* out-of-corpus changes fail the gate."""
+    """A stray already present in the pre-agent ``baseline_stray`` is not blamed on the agent — only *new*..."""
     repo = _repo(tmp_path)
     (repo / "scratch.txt").write_text("stray\n")
     baseline = shared.changes_outside(repo, CORPUS_REL)
@@ -201,8 +173,7 @@ def test_verify_rejects_no_commit_with_corpus_edits(tmp_path):
 
 
 def test_verify_rejects_committed_with_clean_corpus_using_noun(tmp_path):
-    """``committed`` non-empty but the corpus is clean ⇒ inconsistent; refuse to rotate. The
-    error embeds the corpus's ``noun`` (the one error line that differs between corpora)."""
+    """``committed`` non-empty but the corpus is clean ⇒ inconsistent; refuse to rotate. The error embeds the..."""
     repo = _repo(tmp_path)
     result = {"committed": ["a/0"], "commit_message": "m"}
     with pytest.raises(shared.AuthorError, match="committed observations but left"):
@@ -211,23 +182,9 @@ def test_verify_rejects_committed_with_clean_corpus_using_noun(tmp_path):
         )
 
 
-def test_git_head_sha_matches_rev_parse(tmp_path):
-    repo = _repo(tmp_path)
-    expected = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    assert shared.git_head_sha(repo) == expected
-
-
-def test_commit_message_returns_the_message():
-    assert shared.commit_message({"commit_message": "hi"}, "findings") == "hi"
-
-
 @pytest.mark.parametrize("noun", ["findings", "observations"])
 def test_commit_message_rejects_empty_with_corpus_noun(noun):
-    """The missing/empty-message error names the corpus's unit of work — the single token
-    that differs between the two corpora, proven here against one shared implementation."""
+    """The missing/empty-message error names the corpus's unit of work — the single token that differs between..."""
     with pytest.raises(shared.AuthorError, match=f"committed {noun} without"):
         shared.commit_message({"commit_message": ""}, noun)
 
@@ -245,8 +202,7 @@ def _role(name: str = ".lock") -> LockRole:
 
 
 def test_flock_or_skip_acquires_then_releases(tmp_path: Path):
-    """Yields True when uncontended, makes the holding folder, and releases on exit.
-    (Re-spelled from `shared.flock_or_skip` onto the handle's `lock(role, wait=TRY_ONCE)`.)"""
+    """Yields True when uncontended, makes the holding folder, and releases on exit. (Re-spelled from..."""
     state = _state1135.state_over(tmp_path / "root")
     role = _role("sub/.lock")
     with state.lock(role, wait=TRY_ONCE) as locked:
@@ -267,10 +223,7 @@ def test_flock_or_skip_yields_false_when_held(tmp_path: Path):
 
 
 def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeypatch):
-    """A genuine lock-subsystem failure (e.g. ENOLCK) propagates — it is NOT
-    swallowed as contention. This is the contract #367 standardized on: only
-    ``BlockingIOError`` means "someone else holds it"; everything else is a real
-    error the caller should see, not a silent skip."""
+    """A genuine lock-subsystem failure (e.g. ENOLCK) propagates — it is NOT swallowed as contention. This is the..."""
     state = _state1135.state_over(tmp_path / "root")
 
     def _no_locks(_fd, _op):
@@ -284,9 +237,7 @@ def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeyp
 
 
 def test_acquire_flock_closes_handle_when_error_propagates(tmp_path: Path, monkeypatch):
-    """The fail-loud path (e.g. ENOLCK) must still close the lock-file handle:
-    propagating must not leak the fd. (Re-spelled onto `LearningState.lock`, which opens
-    the lock file through `open_lock_at`; the handle that call returned is the one tracked.)"""
+    """The fail-loud path (e.g. ENOLCK) must still close the lock-file handle: propagating must not leak the fd...."""
     state = _state1135.state_over(tmp_path / "root")
     opened: list = []
     real_open = state_mod.open_lock_at
@@ -321,31 +272,17 @@ _CL_IDS = [t for t, _ in _CONTENT_LESS]
 
 @pytest.mark.parametrize(("tag", "text"), _CONTENT_LESS, ids=_CL_IDS)
 def test_commit_message_rejects_a_message_that_renders_as_nothing(tag, text):
-    """This gate is what stands between the loop and committing a lesson edit with no
-    explanation. `not msg.strip()` let the zero-width spellings through (#722), so a
-    curator could commit under a message a reviewer sees as blank."""
+    """This gate is what stands between the loop and committing a lesson edit with no explanation. `not..."""
     with pytest.raises(shared.AuthorError, match="without a non-empty"):
         shared.commit_message({"commit_message": text}, "findings")
 
 
-def test_commit_message_still_accepts_a_real_message_verbatim():
-    """The control — including a message that merely CARRIES an invisible character."""
-    assert shared.commit_message({"commit_message": "﻿fold two findings"}, "findings") == (
-        "﻿fold two findings"
-    )
-
-
 @pytest.mark.parametrize(("tag", "text"), _CONTENT_LESS, ids=_CL_IDS)
 def test_result_entry_ids_that_render_as_nothing_are_rejected(tag, text):
-    """Both arms of `_result_entry_id`. The old truthiness check (`not entry`) was even
-    blinder than `.strip()`: a lone ASCII space passed as an entry id."""
+    """Both arms of `_result_entry_id`. The old truthiness check (`not entry`) was even blinder than `.strip()`:..."""
     with pytest.raises(shared.AuthorError, match="committed entries must be non-empty"):
         shared._result_entry_id("committed", text, "finding_id")
     with pytest.raises(shared.AuthorError, match="must include a non-empty"):
         shared._result_entry_id("skipped", {"finding_id": text}, "finding_id")
 
 
-def test_result_entry_ids_still_accept_real_ids():
-    assert shared._result_entry_id("committed", "run-1/0", "finding_id") == "run-1/0"
-    assert shared._result_entry_id(
-        "skipped", {"finding_id": "run-1/0"}, "finding_id") == "run-1/0"

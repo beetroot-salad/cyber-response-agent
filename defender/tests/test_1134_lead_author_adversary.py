@@ -1,32 +1,12 @@
-"""#1134 step 6 (v2, ported to v3): the holes the step-6 adversary found in the suite (E1-E10, R8), each pinned
-by an observable a dishonest variant changes, beside a control on the same address. E1's rows
-and E3's resolver pin live in `test_1134_lead_author_holes.py` (the spy `tree_for` table and the
-label pins); the rest are here.
-
-- E2a / E2b: a commit gate handed a plain `tree_for` (`lambda _p: None`) reads every path by its
-  plain spelling, so a link or a hard link the agent / the curator left in the tree is followed
-  (a symlink committed as mode 120000, an outside file's bytes read and quoted).
-- E4: `where` stat'ed (a following probe) and trusted over the view it spells for.
-- E5: the lift bypass's `contradicts_skill` read by the draft's plain path.
-- E6: `_run_locked`'s reads re-resolving the mount by name (`bind(skills_dir)`), not the held
-  `deps.skills` the trees hold.
-- E7: the label compared to the lead constant instead of looked up in the mount list.
-- E8: deps (the trees' `Held` and bound `tree_for`) cached past the seam's `with`.
-- E9: the writer judging through the handle, then writing by path at the mount's spelling.
-- E10: the stale vulture suppressions on the two entry points kept.
-- R8: `run_pitfalls` reading its queue before it checks the trees.
-
-Linux only in practice, like the files it extends: the read watch is inotify.
+"""Adversary holes for the lead author's commit gates and draft writer: every read goes through the held trees
+(never a plain path), beside a control on the same address.
 """
 from __future__ import annotations
 
-import ast
 import dataclasses
 import errno
-import inspect
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +14,7 @@ import pytest
 
 from defender import _git
 from defender._env import FatalConfigError
-from defender.learning.core import drains, lane_trees, persist
+from defender.learning.core import drains, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.leads import lead_author, lead_neighbors, pitfalls_curator
@@ -130,14 +110,7 @@ def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
     """E2b, through `run_pitfalls(trees=)`: the curator leaves the reducer surface as a symlink
     to an outside file holding a valid edit, or as a hard link to it. The commit gate refuses
     it as unreadable (`LeadAuthorError`), the kernel saw no open (link) or read (hard link) of
-    the outside file, and HEAD is unchanged: no mode-120000 entry, nothing committed.
-
-    `plain` is the control: the same bytes as a plain file are read and committed, a 100644
-    blob, so the gate does read what the curator wrote.
-
-    Catches: `_verify_pitfalls_state(..., tree_for=lambda _p: None)` in `run_pitfalls`: the
-    plain-path fallback follows the link (`is_file()`, `read_text`), finds the frontmatter
-    unchanged and commits the link itself (or the hard link's outside bytes)."""
+    the outside file, and HEAD is unchanged: no mode-120000 entry, nothing committed."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     paths = _pitfalls_tree(tmp_path)
     repo = paths.repo_root
@@ -210,15 +183,7 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
     outside file or a hard link to it. The commit gate refuses it unread: `LeadAuthorError`
     (the template is not a readable query template; the SKILL.md could not be read), no open
     (link) or read (hard link) of the outside file in the kernel watch, nothing it says quoting
-    the outside bytes, and HEAD unchanged (no mode-120000 entry committed).
-
-    `plain` is the control: the same bytes as a plain file are read, so the template is refused
-    for the id it carries (quoted), and the valid SKILL.md passes and is committed as a file.
-
-    Catches: `_run_locked` handing `_verify_skills_state` a plain `tree_for`, whose fallback
-    follows the link (and reads the hard link) and quotes what it found; and a content rule
-    that checks only a `"file"` at the name, so a link passes both halves unchecked and is
-    committed as a link."""
+    the outside bytes, and HEAD unchanged (no mode-120000 entry committed)."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
@@ -275,10 +240,7 @@ def test_the_content_rule_refuses_a_non_file_at_a_checked_name(
     system's `SKILL.md`: a symlink to an outside file holding good bytes, a dangling symlink
     (`"other"`, not `"absent"`) or a FIFO is refused by the reading check (`LeadAuthorError`),
     without blocking, nothing behind the link opened, and the entry left as it was. `plain` is
-    the control: the good bytes as a plain file pass.
-
-    Catches: the content gates asking `kind_at(...) == "file"`, which lets anything else at a
-    checked name through unchecked (to be committed as it stands)."""
+    the control: the good bytes as a plain file pass."""
     at = scene.at(name)
     target = None
     if plant in ("plain", "link"):
@@ -333,10 +295,7 @@ def test_the_draft_is_created_through_the_held_mount(tmp_path: Path, full: bool,
     """E9: the trees held over an `os_` whose disk is full under `gather/queries/elastic`. The
     elastic draft is not created (`created == []`, nothing at its name), and the refusal is
     logged naming the draft. `control`: over the same tree with room, the draft lands with
-    its bytes.
-
-    Catches: a writer that asks `entry_kind`, then writes by path at the mount's own
-    spelling (a path write to `skills._where / name`), which the held `os_` never sees."""
+    its bytes."""
     repo = bare_skills(tmp_path)
     skills_dir = repo / "defender" / "skills"
     seam = NoSpaceUnder(skills_dir / "gather/queries/elastic") if full else RealOs()
@@ -366,11 +325,7 @@ def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
         tmp_path: Path, monkeypatch, caplog):
     """E8: two claims through `drains._invoke_lead_author` with the SAME `paths`, one wazuh row
     then one elastic row. Each mints its own draft and goes on to its agent (reached:
-    `FatalConfigError` from the unroutable model), and no log line says `Bad file descriptor`.
-
-    Catches: deps (the trees' `Held` and bound `tree_for`) kept past the seam's `with` and
-    reused by a later claim over the same working copy: the second claim reads and writes
-    through a closed handle, which answers EBADF as a refusal, so its draft is never minted."""
+    `FatalConfigError` from the unroutable model), and no log line says `Bad file descriptor`."""
     caplog.set_level(logging.DEBUG)
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     repo = _worktree(tmp_path)
@@ -407,10 +362,7 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
     default: one pending system-skill draft saying `contradicts_skill: true`. As a hard link to
     an outside file, its bytes are not read (no read in the kernel watch), so it does not
     bypass the threshold and the agent is never spawned. `plain` is the control: the same
-    draft as a plain file bypasses the threshold and is handed to the agent.
-
-    Catches: `_prepare_handoffs` reading `contradicts_skill` by the draft's plain path (the
-    listing calls a hard link a file; only the read through the handle refuses it)."""
+    draft as a plain file bypasses the threshold and is handed to the agent."""
     monkeypatch.delenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", raising=False)
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
@@ -450,10 +402,7 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
     `skills/gather/queries` (EIO). The lead `wazuh.probe`, answered only by a template there,
     resolves to nothing: no handoff, the agent never spawned, the run done (rc 0).
     `control`: over the real `os` the template answers the lead and is handed to the agent
-    (which fails, rc 1, so the run stops at the spawn, rc 2).
-
-    Catches: `_run_locked` re-resolving the mount by name for its reads (`bind(skills_dir)`), a
-    second handle the trees never held."""
+    (which fails, rc 1, so the run stops at the spawn, rc 2)."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
@@ -502,10 +451,7 @@ def _respelled(paths: list[Path], s: Scene, where: Path) -> list[Path]:
 def test_where_only_spells_for_the_readers(scene: Scene, tmp_path: Path):
     """E4: each reader handed the mount's view and a `where` that names somewhere that does not
     exist answers exactly what it answers with `where=skills_dir`, non-empty, spelled under
-    the `where` it was given; and `where` is never made.
-
-    Catches: a reader that stats `where` (or `where / gather/queries`), a following probe, and
-    trusts it over the view: it answers nothing."""
+    the `where` it was given; and `where` is never made."""
     elsewhere = tmp_path / "spelled-elsewhere"
     view, home = scene.view, scene.skills_dir
 
@@ -536,31 +482,10 @@ def test_where_only_spells_for_the_readers(scene: Scene, tmp_path: Path):
 # E10: the two entry points step 6 gives production callers keep no vulture suppression
 # ---------------------------------------------------------------------------------------
 
-_SUPPRESSION = re.compile(r"noqa:[^\n]*\bV1\d\d\b")
 
 
-def _signature_lines(source: str, fn: ast.FunctionDef) -> str:
-    """The source lines of `fn`'s `def` up to its body (decorators included)."""
-    first = min([fn.lineno, *(d.lineno for d in fn.decorator_list)])
-    return "\n".join(source.splitlines()[first - 1:fn.body[0].lineno - 1])
 
 
-def test_the_lane_trees_entry_points_carry_no_vulture_suppression():
-    """E10: `open_drain_trees` and `DrainTrees.tree_for` have production callers now (each
-    lane's work step opens its trees; the lead author's rules and the curator's put-back look
-    paths up), so neither `def` line keeps the `# noqa: V103` / `# noqa: V105` that stood in
-    for a caller before step 6. A suppression left on a used name hides the day it is unused
-    again."""
-    source = inspect.getsource(lane_trees)
-    tree = ast.parse(source)
-    [opener] = [n for n in tree.body
-                if isinstance(n, ast.FunctionDef) and n.name == "open_drain_trees"]
-    [cls] = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "DrainTrees"]
-    [lookup] = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "tree_for"]
-    for fn in (opener, lookup):
-        header = _signature_lines(source, fn)
-        assert fn.name in header
-        assert not _SUPPRESSION.search(header), (fn.name, header)
 
 
 # ---------------------------------------------------------------------------------------
@@ -575,10 +500,7 @@ def test_run_pitfalls_checks_its_trees_before_it_reads_its_queue(
     an unknown label's, a moved or above lead mount, a mount below `skills/`) raises
     `LeadAuthorError` without opening its queue file: the kernel watch on the queue sees
     nothing. `lane_trees` is the control: under the lead drain's own trees the same tick does
-    read the queue (and, below its threshold, stops there, rc 0).
-
-    Catches: the queue read moved ahead of the trees check, which the row count alone cannot
-    see (a read leaves the queue as it was)."""
+    read the queue (and, below its threshold, stops there, rc 0)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "99")
     if how == "lane_trees":
         paths = LoopPaths(repo_root=_worktree(tmp_path), state_dir=tmp_path / "state")

@@ -1,4 +1,5 @@
-"""Call identity follows #1235's run-owned state, never the writable disk view."""
+"""Call identity follows #1235's run-owned state, never the writable disk view.
+"""
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 

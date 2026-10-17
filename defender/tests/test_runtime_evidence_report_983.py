@@ -1,53 +1,4 @@
-"""#983 mechanism A — the baseline consultation's carrier into `report.md`, and where it stops.
-
-O3 wants a human reading a closed case to see whether the alerted pattern is recognized as
-recurring in this estate, on exactly the cases O1 creates — which are BENIGN closes. The design
-doc says this rides "the same mechanism that already projects `ceiling_test` notes there, not a
-new architecture", and probing that (claim c11 / red flag RF1) found the cited carrier does not
-reach a benign close at all: `conclude_ceiling_test_rows` is called inside the
-`NO_REVIEW_DISPOSITIONS` branch under `if disposition == "inconclusive"`, and the post-review
-`_CloseFields(...)` takes the `ceiling_test=()` default. So the carrier is EXTENDED, not reused:
-a second companion-derived field populated at BOTH construction sites.
-
-WHAT THIS SUITE PINS, beyond the demands:
-
-  * `_gating.conclude_runtime_evidence_rows(companion_text) -> tuple[RuntimeEvidenceReceipt, ...]`
-    beside `conclude_ceiling_test_rows`, for the same reason that one is public: `report.md` is
-    written from the close's disposition ARGUMENT and never re-reads the companion, so the
-    close carries these in itself.
-  * `render_report(..., runtime_evidence=receipts)` renders one line per receipt into the BODY
-    and never the frontmatter. Never the frontmatter for the same reason a `ceiling_test`
-    `note` is not there: the block is under a 512-byte cap (`_artifact_schema`), a size cap on
-    ungated text is itself a gate, and a value the write gate accepted that the render then
-    refused strands the run.
-  * `render_report`'s docstring stops claiming `ceiling_test` is "the ONE exception" to
-    "no model-supplied body". That claim becomes FALSE with a second field, and the docstring
-    is the load-bearing statement of an invariant on a function whose output rides verbatim
-    into the judge's prompt and out through the ticket bridge (claim c12 / RF2) — a stale
-    invariant there is worse than none, because the next author reads it as still true.
-
-  * `RuntimeEvidenceReceipt` is a FROZEN DATACLASS beside `CeilingReceipt`, and the tests
-    assert on its FIELDS. That is this suite's hardening pass, and it is not a style
-    preference: written against a bare pre-rendered string, every assertion in this file was a
-    substring check, and a `conclude_runtime_evidence_rows` that returned
-    `("runtime-evidence 1500 occurrences ...",)` — the fixture's own text, hardcoded — passed
-    all of them. Nothing asked whether a `:R consultations` row had been READ. Fields make
-    that question askable: `window_start`/`window_end` are `datetime`s, so the row's window
-    has to be genuinely parsed, and two rows carrying different windows cannot both come out
-    of one canned string.
-
-    The STRUCTURED half is the window (parsed), the anchor kind, grounding, id and the owning
-    lead — the cells the format itself gives columns to. `result` and `reasoning` are carried
-    VERBATIM as free text, deliberately: the occurrence count and the actor/host scope live
-    inside `result`'s prose because the design adds no columns to `:R consultations`, and
-    regex-mining a model-authored sentence for a number is the free-text judgment #923 spent a
-    round removing from `ceiling_test`. What holds them honest instead is that the render is
-    asserted to carry EACH row's own text, from a fixture whose two rows differ.
-
-Receipts are OBTAINED from `conclude_runtime_evidence_rows` rather than constructed, so the
-projection and the render are pinned to agree — the property `ceiling_test_block`'s "ONE
-renderer for both" comment exists to hold.
-"""
+"""The baseline consultation's carrier into report.md through the close fields."""
 
 from __future__ import annotations
 
@@ -72,24 +23,12 @@ RESULT_90D = "4100 occurrences over 90d; actor uid-0 and host build-runner-07.pr
 
 
 def _utc(text: str) -> dt.datetime:
-    """The moment an ISO-8601 `Z` timestamp names, as an aware UTC `datetime`.
-
-    Spelled here rather than imported from the code under test: an oracle that called the
-    parser it is checking could not disagree with it (`lint-oracle`), and the whole point of
-    asserting on `window_start` is that the receipt did a real parse."""
+    """The moment an ISO-8601 `Z` timestamp names, as an aware UTC `datetime`."""
     return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
 def _receipts(text: str):
-    """The baseline receipts a companion carries.
-
-    Imported inside the call rather than at module scope so the two tests that ask nothing of
-    this function — the docstring invariant and the `_CloseFields` shape — report their own
-    failure instead of being masked by one module-level ImportError.
-
-    The reader takes a PARSED companion (the close holds one by the time it reaches this, and a
-    second parse out here was also an unguarded one on the close paths that reach it without
-    pricing anything). These suites hold text, so the parse is here."""
+    """The baseline receipts a companion carries."""
     from defender.skills.invlang.parser import parse_dense_companion
     from defender.skills.invlang.validate._gating import conclude_runtime_evidence_rows
 
@@ -110,19 +49,7 @@ def _body(report: str) -> str:
 
 
 def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
-    """A receipt is a TYPED record of one `:R consultations` row — the owning lead, the anchor
-    id, the free-text result and reasoning, and the effective window BOTH verbatim and PARSED
-    into two `datetime`s.
-
-    Mirrors `CeilingReceipt` (`validate/_gating`) down to the split it makes: a structured half
-    that is mechanically checkable and a free-text half that is for the human analyst. The
-    parsed window is what makes the guard and the report read ONE value — mechanism A's first
-    guard has to compare the window's end against the alert's timestamp, and a second parse
-    living in the renderer is the two-derivations-of-one-quantity shape (`lint-owns`).
-
-    A FROZEN dataclass, like `CeilingReceipt`: these travel from the projection into the close
-    tool's disposition argument and out into `report.md`, and a mutable record handed across
-    three boundaries is one any of them can edit on the way."""
+    """A receipt is a TYPED record of one `:R consultations` row — the owning lead, the anchor"""
     (receipt,) = _receipts(BENIGN_DOC)
 
     assert dataclasses.is_dataclass(receipt)
@@ -156,17 +83,7 @@ def test_runtime_evidence_receipt_carries_the_rows_parsed_fields():
 
 
 def test_runtime_evidence_rows_project_off_the_consultation_bucket():
-    """`conclude_runtime_evidence_rows` selects the `:R consultations` rows whose `anchor_kind`
-    is `runtime-evidence`, in document order, and nothing else.
-
-    Selection, not a filter over everything the document says: a consultation under some other
-    anchor kind is a different question being answered, and a `:R authz` row is a verdict. Both
-    are excluded, so the projection cannot widen into "every model-authored row" by accident.
-
-    `BENIGN_DOC` is the sharp case and the reason the fixture carries two consultations: the
-    lead's `tacit-knowledge` lookup record sits in the SAME bucket, one row above the baseline,
-    and it is not a baseline. A projection selecting the bucket rather than the anchor kind
-    would carry a registry citation into `report.md`'s recurrence paragraph."""
+    """`conclude_runtime_evidence_rows` selects the `:R consultations` rows whose `anchor_kind` is `runtime-evidence`, in document order, and nothing else."""
     receipts = _receipts(BENIGN_DOC)
     assert [r.anchor_id for r in receipts] == ["tk-baseline-30d"], (
         "the lead's own `tacit-knowledge` lookup record was projected as a baseline — the "
@@ -190,12 +107,7 @@ def test_runtime_evidence_rows_project_off_the_consultation_bucket():
 
 
 def test_runtime_evidence_consultation_lands_in_report_body():
-    """A close projects every qualifying `:R consultations` row into `report.md`'s BODY — one
-    line per row, in the body and never the frontmatter (demand `consultation_reaches_report_body`,
-    fork F4).
-
-    The unit half, over `render_report` itself; the whole-close half (benign AND inconclusive,
-    both `_CloseFields` construction sites) is `e2e/test_tacit_authz_e2e_983.py`."""
+    """A close projects every qualifying `:R consultations` row into `report.md`'s BODY — one"""
     receipts = _receipts(BENIGN_DOC)
     assert len(receipts) == 1, "fixture control: the document carries one qualifying consultation"
     (receipt,) = receipts
@@ -233,49 +145,8 @@ def test_runtime_evidence_consultation_lands_in_report_body():
     )
 
 
-def test_render_report_no_longer_claims_ceiling_test_is_the_one_exception():
-    """`render_report`'s docstring stops claiming `ceiling_test` is "the ONE exception" to
-    "no model-supplied body", and says honestly that there are now two.
-
-    A DOC test because the claim is an INVARIANT, not a comment: `render_report` is one of the
-    most heavily invariant-documented functions in the tree (RS12, the 512-byte cap, the
-    judge-prompt and ticket-bridge egress), and the next author reads a stale invariant as
-    still true. Both halves are asserted — the false claim is gone, AND the rationale that
-    survives it (model-CHOSEN structure, never model-AUTHORED prose) is still stated — so the
-    repair cannot be to delete the paragraph that explains why either exception is safe."""
-    doc = close_tool.render_report.__doc__ or ""
-    assert "the ONE exception" not in doc, (
-        "the docstring still claims a single exception to the host-rendered body while a "
-        "second companion-derived field is being rendered beside it"
-    )
-    assert "runtime_evidence" in doc, (
-        "the second exception is rendered and undocumented — the invariant paragraph names "
-        "`ceiling_test` alone"
-    )
-    assert "model-supplied body" in doc, "RS12 itself must survive the edit"
-    assert "model-CHOSEN structure" in doc or "model-chosen structure" in doc.lower(), (
-        "the rationale that makes either exception safe is what the paragraph is FOR"
-    )
-
-
 def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
-    """#767 SUPERSEDES this demand's premise (`baseline_not_wired_to_ticket`, non-obligation 3)
-    — recorded here rather than left a silently-deleted test, because the reversal is
-    deliberate and total, not an accident this change happened to cause.
-
-    Before #767, `read_case_record`'s outbound reason took the frontmatter's `cause` and fell
-    back to the report's body only when no `cause` was present; every close-gate report carried
-    one, so baseline-consultation text (which lives in the body) never reached the ticket
-    bridge. #767 D3 deletes that fallback: `CaseRecord` now always carries BOTH `cause` and
-    `narrative` (the report's own body, unconditionally), and `case_record_to_comment` renders
-    the narrative into the recorded comment's `body` on every case — that is O4's whole point,
-    "the report body (the model's notes)" is what a person needs to approve. So whatever the
-    model cited while investigating, baseline consultations included, now legitimately crosses
-    to the outbound comment. A LATER run that reads it back is served it (#1221 removed D4's
-    approval screen); what keeps it from passing as a person's finding is the agent tag line
-    every posted comment opens with and rule #27's refusal of a benign close resting on past
-    cases alone (`test_1221_agent_tag.py`, `test_1221_past_case_rule.py`), never an absence of
-    the content on the wire."""
+    """#767 SUPERSEDES this demand's premise (`baseline_not_wired_to_ticket`, non-obligation 3)"""
     from defender.runtime import case_ticket
 
     receipts = _receipts(BENIGN_DOC)
@@ -308,15 +179,7 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
 
 
 def test_the_projection_and_the_render_read_one_set():
-    """Whatever `conclude_runtime_evidence_rows` hands back is what `render_report` writes —
-    the "ONE renderer for both" discipline `ceiling_test_block` already states.
-
-    Two rows that DIFFER in every rendered cell — id, window, count — so three failures are
-    visible that one row or two identical rows would hide: a render that collapses or
-    deduplicates them, a render that emits the first row's values twice, and a projection
-    handing back a canned receipt per row rather than each row's own parse. A reader that
-    re-derived "qualifying" independently could disagree with the projection that already ran
-    and carry a row into `report.md` nothing ever selected."""
+    """Whatever `conclude_runtime_evidence_rows` hands back is what `render_report` writes —"""
     doc = scene.document(
         rows=scene.consult_block(
             scene.consultation_row(),
@@ -355,13 +218,7 @@ def test_the_projection_and_the_render_read_one_set():
 
 
 def test_close_fields_carries_the_baseline_on_every_disposition():
-    """`_CloseFields` carries the baseline as a companion-derived field alongside `ceiling_test`,
-    and it defaults empty.
-
-    The structural half of fork F4: `ceiling_test` is populated at ONE of the two construction
-    sites and only for `inconclusive`, which is why the cited carrier never reaches a benign
-    close. This asserts the field exists and is defaulted; the e2e asserts both sites actually
-    populate it."""
+    """`_CloseFields` carries the baseline as a companion-derived field alongside `ceiling_test`, and it defaults empty."""
     fields = {f.name: f for f in dataclasses.fields(close_tool._CloseFields)}
     assert "runtime_evidence" in fields, (
         "`_CloseFields` has no baseline field — the projection has no way onto either close path"

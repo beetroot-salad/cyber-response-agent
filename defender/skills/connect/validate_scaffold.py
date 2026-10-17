@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
 import os
 import re
@@ -14,7 +15,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._corpus import iter_query_templates  # noqa: E402
 from defender._knowledge import KnowledgePaths  # noqa: E402
 from defender._io import TEXT_READ_ERRORS, read_plain, read_text_soft  # noqa: E402
-from defender._paths import process_defender_dir  # noqa: E402
+from defender._paths import adapters_under, process_defender_dir  # noqa: E402
 from defender._scaffold_rules import (  # noqa: E402
     ScaffoldRuleError,
     VerbResolver,
@@ -25,10 +26,17 @@ from defender.runtime.tenant_settings import (  # noqa: E402
     assignments,
     is_blank,
 )
+from defender.runtime.system_status import (  # noqa: E402
+    ReasonScope,
+    cause_text,
+    judge_adapter,
+)
 from defender.runtime.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
     VerbContext,
     engine_of,
+    fresh_adapter_module,
+    read_roster,
 )
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
@@ -88,7 +96,23 @@ def check_registry(report: Report, defender: Path, system: str):
     else:
         report.add(FAIL, f"VERBS declares no health-check verb (has {sorted(verbs)})")
     check_signatures(report, verbs)
+    check_settings_declared(report, defender, system)
     return verbs
+
+
+def check_settings_declared(report: Report, defender: Path, system: str) -> None:
+    """The adapter declares its settings check, `check_settings(tenant)` (#1256): judged by the
+    run's own judgement of an adapter (`system_status.judge_adapter`) — the one a run start makes
+    of every granted system — with no run record to check over, so it stops at the declaration.
+    An adapter declaring none, or a non-callable one, is down as broken in every run."""
+    adapters = adapters_under(defender)
+    cause = judge_adapter(
+        functools.partial(fresh_adapter_module, read_roster(adapters), system), tenant=None,
+        scope=ReasonScope(defender_dir=defender, adapters_root=adapters))
+    if cause is None:
+        report.add(PASS, "adapter declares its settings check (`check_settings`)")
+    else:
+        report.add(FAIL, f"settings check: {cause_text(cause)}")
 
 
 def check_signatures(report: Report, verbs) -> None:
@@ -96,7 +120,7 @@ def check_signatures(report: Report, verbs) -> None:
     makes. `declared_params` sees only keyword-only params, so a positional param can never
     be bound by the model.
 
-    Mirrors the checks `test_verbs_registry_declares_surface` applies to shipped adapters, so
+    Mirrors the checks CI's verbs-registry test applies to shipped adapters, so
     this gate is no weaker than CI."""
     broken: list[str] = []
     for name in sorted(verbs):

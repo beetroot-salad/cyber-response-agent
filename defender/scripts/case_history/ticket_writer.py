@@ -172,12 +172,12 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
         request-limit, retry-exhausted -> the record, proposing the host's own forced
                                           `unresolved`; no usable report (the forced close
                                           itself failed) -> the escalation note
-        budget, store                  -> no call at all, no receipt
+        budget, store, provider-down   -> no call at all, no receipt
         anything else (None, a real
         vocabulary member with no arm, an out-of-vocabulary string)
                                         -> the record, proposing the report's disposition
 
-    `closed_before_cut` makes the no-verdict arms (`aborted`, `budget`/`store`) record off the
+    `closed_before_cut` makes the no-verdict arms (`aborted`, `budget`/`store`/`provider-down`) record off the
     model's own report instead, when it had already decided before the cut.
 
     §7 R6/FAM-3: a failed or colliding open does NOT suppress this attempt (the two post-steps
@@ -202,7 +202,8 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
     case_id = key if key is not None else run_dir.name
     try:
         truncated_by = run_end.normalized_truncated_by(truncated_by)  # F-I — first act
-        if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE)
+        if (truncated_by in (run_end.TRUNCATED_BY_BUDGET, run_end.TRUNCATED_BY_STORE,
+                             run_end.TRUNCATED_BY_PROVIDER_DOWN)
                 and not closed_before_cut):
             clear_receipt(run)
             _logger.info(f"{case_id}: run ended ({truncated_by}) with no verdict; leaving ticket open")

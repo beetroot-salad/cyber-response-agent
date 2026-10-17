@@ -1,15 +1,4 @@
-"""#1120 piece 1 — `tenant.py scaffold` commits exactly the template the product repo commits,
-and asks git for an identity as the repository it creates will see it (code review, max).
-
-  * A file beside the template that the product repo does not commit (a `.DS_Store`, a stray
-    `.env`) never reaches the tenant's repo, and a local edit to a template file is not
-    carried either: the template is read from the checkout's HEAD.
-  * The operator's own ignore rules (`core.excludesFile`) cannot drop a template file from the
-    commit: scaffold stages exactly the files it wrote.
-  * The identity preflight asks as the new repository will: an `includeIf "gitdir:…"`
-    identity counts, and an enclosing repository's identity is not borrowed (which would let
-    the preflight pass and the commit fail after the first write).
-"""
+"""tenant.py scaffold commits exactly what the product repo's HEAD commits and asks git for the identity the new repo will see."""
 from __future__ import annotations
 
 import os

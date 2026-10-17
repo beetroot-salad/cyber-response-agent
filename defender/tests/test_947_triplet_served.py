@@ -1,19 +1,4 @@
-"""#947 — what a sibling's served payload looks like to the model (M3's read-back half).
-
-Four demands live here rather than beside their neighbours because each is only observable on a
-driven run through the real driver: the wrap a served payload reaches the model inside, and the
-three that pin NEW-DECISION-1's redaction as a WIRED CHANNEL — what the model is handed when a
-fault carries a world's token, that an ordinary fault still says something, and what lands in
-the run's own queries table. They are scripted against the project's replay harness (`tests/e2e/_replay_harness.py`) — a
-`FunctionModel` sequence, a `FakeVerbs` registry, no provider, no cluster — so the scenario is a
-few lines of `Turn(...)` rather than fresh plumbing. The file sits at the suite root rather than
-under `e2e/` because that is the directory the spec graph's `tests:` key names, and the only one
-`check_binds` scans when it resolves a `discharged_by` pointer.
-
-The filter's own contract lives in `test_947_triplet_isolation.py`. (#1224 retired cluster
-staging and its world-view names, so the filter no longer has a staged-name rule; the token
-rule is what these driven runs pin.)
-"""
+"""#947 — what a sibling's served payload looks like to the model (M3's read-back half)."""
 from __future__ import annotations
 
 import re
@@ -66,14 +51,7 @@ LEAD = "l-001"
 
 
 def _drive_one_query(tmp_path, backend, *, native_query="FROM logs-* | LIMIT 1"):
-    """Drive a REAL run: main dispatches one gather lead, and the nested gather agent issues one
-    elastic query against the injected registry. Everything between the two fakes is production
-    code — the dispatch, the query tool, its capture capability, `_record` and `_model_view`.
-
-    Main must dispatch the lead: a scenario that hands `drive` gather turns and a main that ends
-    on text never runs the gather agent at all, so the verb is never reached and every assertion
-    about what came back off it is made about a channel that carried nothing.
-    """
+    """Drive a REAL run: main dispatches one gather lead, and the nested gather agent issues one elastic query against the injected registry."""
     run_dir = materialize(tmp_path, GOLDEN)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -92,12 +70,7 @@ def _drive_one_query(tmp_path, backend, *, native_query="FROM logs-* | LIMIT 1")
 
 
 def _own_failure_rows(run_dir) -> list[dict]:
-    """The failing queries-table rows this scenario's own lead produced.
-
-    `l-000`/`l-00c` are lead-zero's harness-authored leads (#808) and they write their own rows
-    against verbs this registry does not declare; reading the table unfiltered asserts about
-    those instead of about the fault under test.
-    """
+    """The failing queries-table rows this scenario's own lead produced."""
     rows = list(read_jsonl_rows(run_dir / "executed_queries.jsonl"))
     return [r for r in rows if r.get("lead_id") == LEAD and r.get("exit_code") != 0]
 
@@ -114,10 +87,7 @@ def _injected_backend(rec: VerbRecorder) -> FakeVerbs:
 
 
 def test_947_an_injected_document_read_back_is_wrapped_untrusted(tmp_path):
-    """A model-authored injected document read back through a run's own serving path reaches
-    the model inside the untrusted wrap, never as bare text: the payload is present, and the
-    framing the wrap seam adds is present around it, so no injected payload text is offered to
-    the model as instruction."""
+    """A model-authored injected document read back through a run's own serving path reaches the model inside the untrusted wrap, never as bare text"""
     rec = VerbRecorder()
     gather, _run_dir = _drive_one_query(tmp_path, _injected_backend(rec))
     assert rec.calls, "the query never reached the verb, so nothing was served back"
@@ -134,15 +104,7 @@ def test_947_an_injected_document_read_back_is_wrapped_untrusted(tmp_path):
         "the injected document reached the model outside the wrap that frames it")
 
 
-# ---------------------------------------------------------------------------------------
 # §7 NEW-DECISION-1 — the redaction is a WIRED CHANNEL, not a string function
-#
-# The decision was raised at the seam because of a channel: `query_tool._model_view` hands
-# `AdapterFault.detail` to the model verbatim inside the untrusted wrap, and `_record` writes the
-# same text into `executed_queries.jsonl`'s `payload_digest`. A filter that ships and is never
-# called from those two sites satisfies every unit test of the filter itself, so both demands
-# below drive a REAL run through the harness and read the two surfaces the probe named.
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_a_driven_faults_detail_reaches_the_model_with_no_world_token(tmp_path):
@@ -170,10 +132,7 @@ def test_947_a_driven_ordinary_fault_still_reaches_the_model_intact(tmp_path):
 
 
 def test_947_the_queries_table_digest_carries_no_world_token(tmp_path):
-    """The failure digest persisted into the run's own queries table carries no world token
-    either: on the same driven run the row `QueryCapture._record` wrote holds the actionable half
-    of the fault and not the world's id — this table sits in the gather agent's read scope and
-    every downstream joiner reads it."""
+    """The failure digest persisted into the run's own queries table carries no world token either"""
     rec = VerbRecorder()
     _gather, run_dir = _drive_one_query(tmp_path, _faulting_backend(rec, TOKEN_FAULT))
     failures = _own_failure_rows(run_dir)

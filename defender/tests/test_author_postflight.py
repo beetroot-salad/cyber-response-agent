@@ -1,9 +1,4 @@
-"""Post-flight: agent-state verification, queue rotation, no-commit surfacing.
-
-The agent runs **no git**: each fake ``invoke_agent`` leaves ``defender/lessons/`` in
-its final state (writes files, never commits) and returns the commit message as data.
-The loop (``commit_lessons``) is the sole committer.
-"""
+"""Post-flight: agent-state verification, queue rotation, no-commit surfacing."""
 from __future__ import annotations
 
 import json
@@ -14,11 +9,7 @@ from defender.learning.core.state import FINDINGS
 
 
 def _rows_without_attempts(text: str) -> list[dict]:
-    """The queue's rows with the retirement counter dropped.
-
-    #719: a post-agent abort now BUMPS every row it was authoring (behaviour change 2 of
-    four), so "the queue is intact for retry" is no longer a byte comparison — the rows
-    themselves must be unchanged, and the count must have moved by exactly one."""
+    """The queue's rows with the retirement counter dropped."""
     import json as _json
 
     return [
@@ -97,14 +88,7 @@ def test_committed_finding_without_commit_message_aborts(tmp_repo, helpers, monk
 
 
 def test_a_stray_forward_bad_bucket_key_aborts(tmp_repo, helpers, monkeypatch):
-    """#773 M1 retires `held_forward_bad` as a curator-reported bucket outright — the check is
-    the drain's own now (`author/drain.py`'s M3 pipeline), never something the curator's
-    self-report selects. §7 FK-29: the AUTHOR_RESULT partition validator explicitly REJECTS
-    any key outside its declared buckets whose value is bucket-shaped (a list of row-like
-    dicts) — including this retired one — rather than silently accepting a stale key.
-    See `tests/test_773_tool_removal.py::test_author_result_carries_an_unrecognized_bucket_key_773`
-    for the full behavior; this test is this module's own regression pin that the old bucket
-    genuinely has no reader left."""
+    """#773 M1 retires `held_forward_bad` as a curator-reported bucket outright — the check is the drain's own..."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-2/0", run_id="run-2")
 
@@ -150,8 +134,7 @@ def test_consumed_skip_rotates_out(tmp_repo, helpers, monkeypatch):
 
 
 def test_committed_but_corpus_clean_aborts(tmp_repo, helpers, monkeypatch):
-    """``committed`` non-empty but the corpus is clean (agent claimed a commit but left
-    no edits) ⇒ inconsistent; refuse to rotate."""
+    """``committed`` non-empty but the corpus is clean (agent claimed a commit but left no edits) ⇒ inconsistent;..."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-4/0", run_id="run-4")
     pre_pending = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
@@ -192,10 +175,7 @@ def test_no_commit_but_left_corpus_edits_aborts(tmp_repo, helpers, monkeypatch):
 
 
 def test_agent_result_missing_finding_stays_queued_untouched(tmp_repo, helpers, monkeypatch):
-    """#773 C3: a row the curator mentions in NO bucket is left exactly as it was — neither an
-    aborting fault (the validator's old "unseen" completeness check, which #773 drops) nor a
-    counted attempt. It is simply not this tick's business; a later tick may pick it up.
-    `run-6/0`, which the curator DOES place in `consumed_skip`, still rotates out normally."""
+    """#773 C3: a row the curator mentions in NO bucket is left exactly as it was — neither an aborting fault..."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-6/0", run_id="run-6")
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-6/1", run_id="run-6")
@@ -218,11 +198,7 @@ def test_agent_result_missing_finding_stays_queued_untouched(tmp_repo, helpers, 
 def test_prestaged_stray_does_not_ride_into_lesson_commit(
     tmp_repo, helpers, monkeypatch
 ):
-    """A file already **staged** outside defender/lessons/ before the batch (a sibling
-    author's _draft/ deposit left in the shared index) is in ``baseline_stray``, so the
-    scope gate tolerates it — but the pathspec-scoped commit must NOT sweep it into the
-    lesson commit. A bare index-global ``git commit`` would; this guards commit_lessons'
-    ``-- defender/lessons/`` pathspec."""
+    """A file already **staged** outside defender/lessons/ before the batch (a sibling author's _draft/ deposit..."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-8/0", run_id="run-8")
     (tmp_repo.root / "sibling_draft.md").write_text("unrelated staged work\n")
@@ -290,8 +266,7 @@ def test_agent_result_duplicate_classification_aborts(
 
 
 def test_agent_writes_outside_lessons_aborts(tmp_repo, helpers, monkeypatch):
-    """Scope gate: a working-tree change outside the corpus (the path-scoped commit
-    would ignore it) fails verification rather than committing silently."""
+    """Scope gate: a working-tree change outside the corpus (the path-scoped commit would ignore it) fails..."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-7/0", run_id="run-7")
     pre_pending = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())

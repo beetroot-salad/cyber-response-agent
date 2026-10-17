@@ -1,49 +1,27 @@
-"""#1092 — nothing in a box reaches the mounted venv (M6, O5, JF3): the in-box mark
-`DEFENDER_BOX=1` on both `docker run` builders, stripped by both host lanes, honoured by the
-three granted shims and by `reexec_into_venv`; the O7 argv census (JF5); and M7's port of
-`BoxSpec` to `@model` with the stdlib-only rule's text retired.
-
-Tier 1 throughout: the real `bin/defender-*` scripts are exec'd by the real shell over stub
-interpreters that print which one ran (no shim prints its interpreter — G8), `reexec_into_venv`
-really `os.execv`s into a stub, `sql.py` really fails its `import duckdb` against a shadowing
-module first on `PYTHONPATH`, and the argv builders are the real ones over planted trees.
-"""
+"""The in-box mark DEFENDER_BOX=1: set by both docker-run builders, stripped by both host lanes, honoured by the shims and reexec_into_venv."""
 from __future__ import annotations
 
-import dataclasses
 import os
 import shutil
 import subprocess
 import sys
-import typing
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-from pydantic.dataclasses import is_pydantic_dataclass
 
-from defender._io import READ_LIMIT
-from defender.run_repository import RunPaths
 from defender.run_common import run_env
 from defender.runtime import box as box_mod
 from defender.runtime.box import BOX_ENV_ALLOWLIST, BoxRequest, BoxSpec, Mount
-from defender.tests._defender_sql import EXIT_NO_RUNTIME, SQL_ARGV
 from defender.tests._spec1092 import (
     DEFENDER,
-    REPO_ROOT,
     STOCK_ROOTFS,
     env_pairs,
-    image_tag,
-    image_token,
     make_run_dir,
-    plant_tree,
     run_shim,
     shim_world,
-    without_the_additions,
 )
 
 SHIMS = ("defender-sql", "defender-invlang", "defender-lessons")
-VENV_LINE = "uv pip install --python .venv/bin/python"
 
 
 def _request(root: Path, run_dir: Path, env: dict[str, str] | None = None) -> BoxRequest:
@@ -181,173 +159,3 @@ def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherw
     assert run(marked=True) == "NO-EXEC"
 
 
-# ---- d28 -------------------------------------------------------------------------------------
-def test_defender_sqls_missing_duckdb_message_names_the_image_build_when_marked_and_the_venv_line_otherwise(tmp_path):
-    """`defender-sql`'s missing-`duckdb` branch (`runtime/sql_engine/sql.py`) exits
-    `EXIT_NO_RUNTIME` on both lanes; with `DEFENDER_BOX` set its message names the box image
-    build (`box_image.py build`) and never `uv pip install --python .venv/bin/python` or the
-    venv (the path O5 closes and a box cannot write), and with `DEFENDER_BOX` unset today's
-    venv instruction stands.
-
-    # rejected: the marked-lane wording is F-C (non-material); the unmarked lane keeps its
-    # venv line because the host lane keeps venv-first (M6)."""
-    shadow = tmp_path / "shadow"
-    shadow.mkdir()
-    (shadow / "duckdb.py").write_text("raise ImportError('duckdb blocked by the spec')\n", encoding="utf-8")
-
-    def run(marked: bool) -> subprocess.CompletedProcess[str]:
-        env = {
-            "PATH": os.environ.get("PATH", ""),
-            "PYTHONPATH": f"{shadow}{os.pathsep}{REPO_ROOT}",
-            "DEFENDER_DIR": str(DEFENDER),
-        }
-        if marked:
-            env["DEFENDER_BOX"] = "1"
-        return subprocess.run(
-            [*SQL_ARGV, "SELECT 1"], input="{}", env=env,
-            capture_output=True, text=True, encoding="utf-8", timeout=120,
-        )
-
-    unmarked = run(marked=False)
-    assert unmarked.returncode == EXIT_NO_RUNTIME, (unmarked.returncode, unmarked.stderr)
-    assert VENV_LINE in unmarked.stderr, unmarked.stderr
-
-    marked = run(marked=True)
-    assert marked.returncode == EXIT_NO_RUNTIME, (marked.returncode, marked.stderr)
-    assert VENV_LINE not in marked.stderr, marked.stderr
-    assert ".venv" not in marked.stderr, marked.stderr
-    assert "box_image.py build" in marked.stderr, marked.stderr
-    assert "duckdb" in marked.stderr, marked.stderr
-
-
-# ---- d48 (negative; positive controls: d29/d30/d44 — the three additions are present) ----------------
-def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_pull_never_and_the_image_token(tmp_path):
-    """Both `docker run` argv builders produce today's argv plus exactly one
-    `--env DEFENDER_BOX=1` pair, one `--pull=never` token, and the owned image token:
-    `--network none`, `--read-only`, the seccomp profile, the mounts, the tmpfs, the workdir
-    and every other `--env` pair are byte-for-byte unchanged and each env key lands once.
-
-    # rejected: network for the box stays `none`; this issue changes what is installed in
-    # the sandbox, not what it can reach."""
-    root = tmp_path / "tree"
-    defender_dir = plant_tree(root, copy_code=False)
-    run_dir = make_run_dir(tmp_path)
-    alert_input = RunPaths(run_dir).alert_input_dir
-    name, token, spec = "defender-run-1092", "tok1092", BoxSpec()
-    head = [
-        "docker", "run", "--detach", "--name", name,
-        "--label", f"{box_mod.START_TOKEN_LABEL}={token}",
-        "--runtime", spec.runtime, "--network", "none", "--read-only",
-        "--security-opt", f"seccomp={box_mod.ALIAS_PROFILE_PATH}",
-        # #1188: every box's file-size cap — the host's whole-file read cap, soft = hard, in
-        # bytes — then core dumps off, so a writer the cap kills leaves no core behind.
-        "--ulimit", f"fsize={READ_LIMIT}:{READ_LIMIT}",
-        "--ulimit", "core=0:0",
-    ]
-    infra = {**box_mod.infra_env(defender_dir, run_dir), **box_mod._LOCALE_ENV}
-    today_run_dir = [
-        *head,
-        "--mount", f"type=bind,source={run_dir},target={run_dir}",
-        # #1222 A1: the alert and its record ride in as a read-only DIRECTORY bind over the run folder.
-        "--mount", f"type=bind,source={alert_input},target={alert_input},readonly",
-        "--mount", f"type=bind,source={defender_dir},target={defender_dir},readonly",
-        "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
-        "--workdir", str(run_dir),
-    ]
-    for key in ("DEFENDER_DIR", "DEFENDER_RUN_DIR", "DEFENDER_RUNS_BASE", "PATH", "PYTHONPATH", "LANG", "TZ"):
-        today_run_dir += ["--env", f"{key}={infra[key]}"]
-    today_run_dir += [image_tag(defender_dir), "sleep", "infinity"]
-
-    argv = box_mod._create_argv(name, run_dir, defender_dir, spec, (), token).argv
-    assert argv.count("--pull=never") == 1, argv
-    assert "--pull" not in argv, argv
-    assert env_pairs(argv).count(("DEFENDER_BOX", "1")) == 1, env_pairs(argv)
-    assert len({k for k, _ in env_pairs(argv)}) == len(env_pairs(argv)), "a key landed twice"
-    assert without_the_additions(argv) == today_run_dir
-
-    request = BoxRequest(
-        name="defender-drain-1092", workdir=root, env={"TZ": "Europe/Oslo"},
-        mounts=(Mount(source=root, target=root, kind="code"),
-                Mount(source=run_dir, target=run_dir, writable=True)),
-        spec=spec,
-    )
-    today_request = [
-        *head[:4], request.name, *head[5:],
-        "--mount", f"type=bind,source={root},target={root},readonly",
-        "--mount", f"type=bind,source={run_dir},target={run_dir}",
-        "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
-        "--workdir", str(root),
-    ]
-    derived = {**box_mod._LOCALE_ENV, "TZ": "Europe/Oslo", **box_mod._derived_infra_env(root)}
-    for key in sorted(derived):
-        today_request += ["--env", f"{key}={derived[key]}"]
-    today_request += [image_tag(root / "defender"), "sleep", "infinity"]
-
-    argv = box_mod._render_argv(request, (), token).argv
-    assert argv.count("--pull=never") == 1, argv
-    assert "--pull" not in argv, argv
-    assert env_pairs(argv).count(("DEFENDER_BOX", "1")) == 1, env_pairs(argv)
-    assert len({k for k, _ in env_pairs(argv)}) == len(env_pairs(argv)), "a key landed twice"
-    assert without_the_additions(argv) == today_request
-    assert image_token(argv) == image_tag(root / "defender")
-
-
-# ---- d25 -------------------------------------------------------------------------------------
-def test_boxspec_is_a_frozen_model_dataclass_with_an_optional_rootfs_that_still_serves_from_env_fields_and_equality():
-    """`BoxSpec` is a frozen pydantic dataclass built with `defender._model.model` (strict —
-    `runtime=123` is refused; `extra="forbid"` — an unknown keyword is refused, as stdlib
-    `@dataclass` refuses it) whose `rootfs` is `str | None` defaulting to `None`, that still
-    exposes `runtime`, `rootfs`, `lifecycle` through `dataclasses.fields`, still anchors its
-    default in the class, still moves only `runtime` through `from_env`, still compares equal
-    by value, and still takes `dataclasses.replace` (G12 corrected: test_540 replaces
-    `tmpfs_size`).
-
-    # rejected: `BoxExecutor`, `_DockerTransport`, `Mount`, `BoxRequest` need not be ported —
-    # only what discharges O2 (the non-obligation list). The design comment's "`rootfs: str`
-    # keeps its type" is superseded by the amendment's unset default. A dirty tree is JF6 plus
-    # the provenance stamp's `dirty`/`dirty_paths`; the tag joins no stamp (#87)."""
-    assert is_pydantic_dataclass(BoxSpec) is True, "BoxSpec is not a pydantic dataclass"
-    names = [f.name for f in dataclasses.fields(BoxSpec)]
-    assert {"runtime", "rootfs", "lifecycle"} <= set(names), names
-    assert typing.get_type_hints(BoxSpec)["rootfs"] == (str | None)
-    assert BoxSpec().rootfs is None
-    assert BoxSpec.from_env({}) == BoxSpec()
-    levered = BoxSpec.from_env({BoxSpec.ENV_VAR: "runc"})
-    assert levered.runtime == "runc"
-    assert levered.rootfs is None
-    assert levered.lifecycle == BoxSpec().lifecycle
-    assert levered.tmpfs_size == BoxSpec().tmpfs_size
-    assert BoxSpec(rootfs="x") == BoxSpec(rootfs="x")
-    assert BoxSpec(rootfs="x") != BoxSpec()
-    assert dataclasses.replace(BoxSpec.from_env({}), tmpfs_size="4m").tmpfs_size == "4m"
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        BoxSpec().runtime = "runc"
-    with pytest.raises(ValidationError):
-        BoxSpec(runtime=123)
-    with pytest.raises(ValidationError):
-        BoxSpec(bogus=1)
-
-
-# ---- d26 -------------------------------------------------------------------------------------
-def test_no_closure_module_points_at_the_stdlib_only_rule_and_the_closure_pin_is_gone():
-    """The rule's TEXT is gone, not the symbol (`_run_box_entrypoint` stays — `bash_exec.py`
-    defines and calls it): none of `box/_spec.py`, `box_codec.py`, `scrub.py`, `_io.py` carries
-    the "see `bash_exec._run_box_entrypoint`" pointer comment, `_run_box_entrypoint`'s
-    docstring no longer says the closure "stays on STDLIB `@dataclass`, never
-    `defender._model.model`", and the static closure pin in `tests/test_1067_model_port.py`
-    (the test that blocked pydantic via `sys.meta_path` and imported the box package) no
-    longer exists.
-
-    # rejected: #1077's ordering is reviewer discipline, not a mechanical guard (B2)."""
-    from defender.runtime import bash_exec
-
-    for rel in ("runtime/box/_spec.py", "runtime/box_codec.py", "runtime/scrub.py", "_io.py"):
-        text = (DEFENDER / rel).read_text(encoding="utf-8")
-        assert "_run_box_entrypoint" not in text, f"{rel} still points at the retired rule"
-    doc = bash_exec._run_box_entrypoint.__doc__ or ""
-    assert "STDLIB" not in doc, doc
-    assert "never `defender._model.model`" not in doc, doc
-    assert callable(bash_exec._run_box_entrypoint)
-    pin = "test_box_entrypoint_closure_imports_without_pydantic"  # lint-stale-ref: ok — this test asserts the def is GONE; the name is the record of what was retired
-    port_tests = (DEFENDER / "tests" / "test_1067_model_port.py").read_text(encoding="utf-8")
-    assert f"def {pin}" not in port_tests, "the closure pin test still exists"

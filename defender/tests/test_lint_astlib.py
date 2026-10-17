@@ -1,15 +1,4 @@
-"""Unit tests for scripts/lint/_astlib.py — the shared callee/arg resolver the three
-AST lint gates run on (#602/#594).
-
-The gates' own suites prove the end-to-end behavior; this file pins the resolver's
-contract directly, because two of its properties are load-bearing and silent if wrong:
-
-  - ``callee() is None`` means "the receiver is a VALUE, not a module" (duck-typed).
-    A gate that reads None as "skip" would turn every resolvable receiver into a false
-    negative and still show a green empty baseline.
-  - ``origin()`` must NOT walk through a Call. ``zipfile.ZipFile(p).open`` is a value's
-    method, not ``zipfile.open``.
-"""
+"""Unit tests for scripts/lint/_astlib.py, the shared callee/arg resolver used by the lint gates."""
 from __future__ import annotations
 
 import ast

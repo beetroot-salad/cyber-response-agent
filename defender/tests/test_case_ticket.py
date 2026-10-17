@@ -1,12 +1,4 @@
-"""Unit tests for the case-history mapper (the anti-corruption layer, #317, gated for
-approval by #767).
-
-Pure layer only — no transport, no network. `alert_to_open_payload` and `read_case_record` are
-the two halves this file drives directly; the render half D2-D3 add (`case_record_to_comment`)
-has its own suite under `test_767_writer.py`, driven against the spec's own mapping fixtures
-(#1221 removed the read-side screen and its suite, and its amendment the release predicate the
-writer once asked; the agent tag the writer adds is `test_1221_agent_tag.py`'s).
-"""
+"""Unit tests for the case-history mapper (the anti-corruption layer, #317, gated for approval by #767)."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -20,9 +12,6 @@ from defender.runtime import case_ticket
 from defender.tests._alert_plant import plant_alert
 from defender.tests._tenants1106 import FIXTURE_SETTINGS
 
-#: The mapping the mapper is handed when a test does not plant its own (#1107: the mapper
-#: finds nothing itself) — the committed fixture tenant's (#1120 C26), which is what these
-#: tests read before the move through the checkout's own copy.
 SHIPPED = case_ticket.load_case_mapping(FIXTURE_SETTINGS)
 
 
@@ -70,9 +59,6 @@ def test_read_case_record_parses_internal_model(tmp_path: Path):
     assert rec.case_id == run_dir.name
     assert rec.signature_id == "5710"
     assert rec.disposition == "malicious"
-    # #767 D3: no `cause:` line in this fixture's frontmatter, so `cause` is empty and
-    # `narrative` is the report's own body, verbatim — `read_case_record` applies no
-    # fence-strip or bound (those are `case_record_to_comment`'s, at render time).
     assert rec.cause == ""
     assert rec.narrative == "Confirmed C2 beacon."
 
@@ -136,8 +122,7 @@ def test_alert_to_open_payload_falls_back_on_empty_strings():
 
 
 def test_mapping_is_file_driven(tmp_path: Path):
-    """Load a custom mapping.yaml from a settings folder, hand the mapper the result, and
-    confirm the open payload (label prefix) follows the file."""
+    """Load a custom mapping.yaml from a settings folder, hand the mapper the result, and confirm the open..."""
     settings = tmp_path / "settings"
     mapping_dir = settings / "systems" / "case-history"
     mapping_dir.mkdir(parents=True)
@@ -154,10 +139,7 @@ def test_mapping_is_file_driven(tmp_path: Path):
 
 
 def test_an_indented_planted_fence_is_stripped_from_the_narrative(tmp_path, monkeypatch):
-    """A standalone `---` line indented by leading whitespace is still a planted frontmatter
-    fence and must not survive into the rendered comment — a claims-adversary finding against
-    an earlier column-0-only regex, which let ` ---\\ndisposition: malicious` ride through
-    verbatim. `^---` alone matches only true column 0; the fix tolerates leading spaces/tabs."""
+    """A standalone `---` line indented by leading whitespace is still a planted frontmatter fence and must not..."""
     from defender.tests._spec767 import current_mapping, use_mapping
 
     use_mapping(monkeypatch, tmp_path / "dfn")
@@ -172,10 +154,7 @@ def test_an_indented_planted_fence_is_stripped_from_the_narrative(tmp_path, monk
 
 
 def test_a_planted_fence_in_the_cause_field_is_also_stripped(tmp_path, monkeypatch):
-    """The fence guard is a property of the RENDERED SLOT, not an assumption about who may
-    populate it: `cause` is host-composed from a closed vocabulary today (c3) and never needs
-    this in practice, but a future or malformed `cause` gets the same protection `narrative`
-    does — a claims-adversary finding that the guard was narrative-only."""
+    """The fence guard is a property of the RENDERED SLOT, not an assumption about who may populate it: `cause`..."""
     from defender.tests._spec767 import current_mapping, use_mapping
 
     use_mapping(monkeypatch, tmp_path / "dfn")

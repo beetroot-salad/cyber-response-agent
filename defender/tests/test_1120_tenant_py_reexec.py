@@ -1,9 +1,4 @@
-"""#1120 piece 1 — `tenant.py`'s venv re-exec cannot loop (code review, max).
-
-A checkout whose `defender/.venv/bin/python3` exists but whose `pyvenv.cfg` does not (an
-interrupted `uv venv`) runs that interpreter with the BASE install's prefix. A guard keyed on
-the prefix alone exec'd it again, forever, at full CPU with no output.
-"""
+"""tenant.py's venv re-exec cannot loop."""
 from __future__ import annotations
 
 import subprocess

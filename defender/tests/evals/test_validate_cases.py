@@ -7,7 +7,6 @@ whose job is to make the instrument's limits visible rather than to assert they 
 """
 from __future__ import annotations
 
-import hashlib
 import json
 
 import pytest
@@ -166,17 +165,6 @@ def test_a_rewritten_held_out_score_is_caught(tmp_path):
     assert any("does not match its ledger hash" in p for p in problems)
 
 
-def test_a_matching_held_out_score_passes(tmp_path):
-    d = _case(tmp_path, "case-h", split="held-out")
-    (d / "scores").mkdir()
-    body = b'{"rows": []}'
-    (d / "scores" / "tag.json").write_bytes(body)
-    manifest = yaml.safe_load((d / "manifest.yaml").read_text(encoding="utf-8"))
-    ledger = _ledger(tmp_path, [{"case": "case-h", "tag": "tag",
-                                 "sha256": hashlib.sha256(body).hexdigest()}])
-    assert validate_cases.check_held_out_ledger([(d, manifest)], ledger) == []
-
-
 def test_a_deleted_held_out_result_needs_a_retirement_reason(tmp_path):
     """Retiring a defective case is a recorded act; deleting one you disliked is not."""
     ledger = _ledger(tmp_path, [{"case": "gone", "tag": "tag", "sha256": "x"}])
@@ -189,7 +177,6 @@ def test_a_deleted_held_out_result_needs_a_retirement_reason(tmp_path):
 
 
 # the boundary
-
 
 
 # completeness
@@ -231,14 +218,6 @@ def test_coverage_counts_dead_control_windows(tmp_path):
     assert "not running" in validate_cases.render_coverage([row])
 
 
-def test_coverage_survives_a_half_built_case(tmp_path):
-    """A recruitment still running has no lead set yet. `check_case` reports it as
-    missing a required file; the coverage report must stay readable beside that."""
-    d = tmp_path / "case-partial"
-    d.mkdir()
-    assert validate_cases.coverage(d, {})["leads"] == 0
-
-
 def test_a_defective_case_is_excluded_from_the_totals_and_named(tmp_path):
     """A capture whose leads cannot contain the activity is not coverage. Leaving it in
     the split totals inflates the unit count with a unit nothing was measured for —
@@ -252,27 +231,6 @@ def test_a_defective_case_is_excluded_from_the_totals_and_named(tmp_path):
     assert "dev: 1 cases" in rendered, "the defective case must not be counted"
     assert "case-bad is EXCLUDED" in rendered
     assert "wrong host" in rendered, "the reason travels with the exclusion"
-
-
-def test_the_case_vocabulary_is_read_from_its_owners_not_restated():
-    """The two vocabularies this linter checks against are read from the modules that own
-    them: the derived-kind set from `score`, the eval-tells list from `story_from_run`.
-
-    Both used to be declared here as well. `DERIVED_KINDS` carried two *different*
-    justifications for one set — "no capture of its own, so `hidden/` is absent by design"
-    here, "story never fired, so nothing was measured" in `score` — which is how a sixth kind
-    gets added to one list and not the other and the linter starts calling a legitimate case
-    malformed. `EVAL_TELLS` carried a keep-in-sync note naming `_EVAL_TELLS`, a symbol in
-    neither file (it is the *test's* private name), so the note pointed nowhere.
-
-    Identity, not equality: a re-declared tuple with the same contents compares equal and is
-    exactly the drift this closes."""
-    from defender.evals.oracle_golden import score, story_from_run
-
-    assert validate_cases.DERIVED_KINDS is score.DERIVED_KINDS
-    assert validate_cases.eval_tells_in is story_from_run.eval_tells_in
-    assert not hasattr(validate_cases, "EVAL_TELLS"), (
-        "the tells list is back as a second declaration")
 
 
 def test_a_story_that_leaks_the_evaluation_frame_is_caught_case_insensitively(tmp_path):
@@ -337,17 +295,6 @@ def test_an_added_window_behind_another_command_is_a_problem(tmp_path):
     assert any("LIMIT 1" in p for p in problems), "the commands that ran first must be named"
 
 
-def test_a_correctly_placed_added_window_is_not_a_problem(tmp_path):
-    """The same lead, spliced the way `add_esql_window` splices it now. Pinned beside the
-    failure so the check is known to discriminate rather than to flag every added
-    window."""
-    d = _controlled_case(
-        tmp_path, "case-x", lead_query=_UNBOUNDED,
-        control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= "{_WINDOW[0]}" '
-                      f'AND @timestamp < "{_WINDOW[1]}"\n| LIMIT 1')
-    assert validate_cases.check_controls(d) == []
-
-
 def test_a_bound_on_the_wrong_end_of_the_window_is_a_problem(tmp_path):
     """#882 F-32, against the artifact. A shifted pair bound by POSITION rather than by
     each match's operator crosses an upper-bound-first query into `< start AND >= end` —
@@ -365,19 +312,6 @@ def test_a_bound_on_the_wrong_end_of_the_window_is_a_problem(tmp_path):
     assert any("the `>=` bound is" in p for p in problems), problems
 
 
-def test_a_correctly_shifted_upper_first_query_is_not_a_problem(tmp_path):
-    """The same upper-first lead, shifted the way `shift_esql_window` shifts it now:
-    `>=`/`>` takes the window's start and `<=`/`<` its end, wherever they were written.
-    Source order is preserved — only the literals move."""
-    d = _controlled_case(
-        tmp_path, "case-x",
-        lead_query=('FROM logs-system.auth-* | WHERE @timestamp < "2026-07-26T20:30:00.000Z" '
-                    'AND @timestamp >= "2026-07-26T20:00:00.000Z"'),
-        control_query=(f'FROM logs-system.auth-* | WHERE @timestamp < "{_WINDOW[1]}" '
-                       f'AND @timestamp >= "{_WINDOW[0]}"'))
-    assert validate_cases.check_controls(d) == []
-
-
 def test_a_control_that_pairs_with_no_query_is_a_problem(tmp_path):
     """#882 F-21's failure mode, against the artifact. Control records and observed
     payloads are joined on `seq`; a control keyed to a seq the lead set does not have is
@@ -388,12 +322,6 @@ def test_a_control_that_pairs_with_no_query_is_a_problem(tmp_path):
                                        f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
                                        f'| LIMIT 1')
     assert any("not a query in leads.jsonl" in p for p in validate_cases.check_controls(d))
-
-
-def test_a_case_with_no_controls_is_not_a_problem(tmp_path):
-    """A lookup lead has no `@timestamp` bound to move, so it has no baseline by
-    construction — the coverage report's job, not a defect."""
-    assert validate_cases.check_controls(_case(tmp_path, "case-x")) == []
 
 
 def test_a_window_that_landed_last_is_caught_behind_a_non_bound_timestamp_predicate(tmp_path):

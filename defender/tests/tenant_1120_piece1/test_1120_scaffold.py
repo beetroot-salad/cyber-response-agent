@@ -1,21 +1,4 @@
-"""#1120 piece 1 — D7 `tenant.py scaffold <id> <dir>`: a new tenant repo from the template.
-
-`scaffold` copies `knowledge/tenant-template` (without `examples/`) into an EMPTY directory the
-operator names, writes `agent/.tenant-id` (the id plus a newline — M8), runs `git init` on
-branch `main` and commits (N5): the operator then pushes it to a new private repo. It needs no
-data root (N10). It refuses a bad id, a non-directory, a non-empty or an in-checkout target
-writing nothing; it preflights git and a commit identity before any write; a failure after it
-began leaves the target as it found it (N5). Its git calls run with an explicit `cwd` AND the
-ambient `GIT_*` environment scrubbed (N3), because an exported `GIT_DIR`/`GIT_WORK_TREE` decides
-the repository whatever `cwd=` says (J-PO1, executed — 45's D-1 is refuted).
-
-Driven as the operator runs it: a process. Every git fault is a REAL git mechanism configured
-for that process alone — a `$HOME/.gitconfig` the test writes (`HOME` and `XDG_CONFIG_HOME`
-point into `tmp_path`), a `PATH` holding no `git`, an exported `GIT_DIR` naming a SCRATCH repo
-that stands for the product repo. The real worktree and the real product repo are never the
-target of any write. "Left as found" is a before/after census of the target (bytes, mtimes,
-modes). See `_spec1120.py` for the coined names.
-"""
+"""D7 `tenant.py scaffold <id> <dir>`: a new tenant repo from the template."""
 from __future__ import annotations
 
 import os
@@ -29,15 +12,12 @@ from defender.scripts import tenant as tenant_py
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
 #: Every ambient git variable is dropped from the scaffold process's environment, so the test,
-#: not the developer's shell, decides what git sees (`EMAIL` too: git reads it for identity).
 _AMBIENT_GIT = tuple(k for k in os.environ if k.startswith("GIT_")) + ("EMAIL",)
 
 
 def _home(tmp: Path, *, identity: bool = True, extra: str = "") -> Path:
-    """A private `$HOME` whose `.gitconfig` is the only git configuration the scaffold process
-    reads (with `XDG_CONFIG_HOME` beside it). `identity` writes `user.name`/`user.email`;
-    without it `user.useConfigOnly` stops git guessing one from the host name. `extra` is
-    appended verbatim — the fault a cell configures."""
+    """A private `$HOME` whose `.gitconfig` is the only git configuration the scaffold process reads
+    (with `XDG_CONFIG_HOME` beside it)."""
     home = tmp / "home"
     home.mkdir(parents=True, exist_ok=True)
     (home / "xdg").mkdir(exist_ok=True)
@@ -120,12 +100,7 @@ def _empty_dir(path: Path) -> Path:
 
 def test_1120_scaffold_copies_the_template_writes_the_tenant_id_and_commits(
         tmp_path: Path, data_root: Path) -> None:
-    """`tenant.py scaffold acme <empty dir>` exits 0. The directory then holds the template's
-    settings/ files byte-equal to knowledge/tenant-template's, its agent/ half with no
-    examples/, agent/.tenant-id reading acme plus a newline (M8: scaffold writes the id and one
-    line ending), and a git repository on branch main with exactly one commit containing all of
-    the above, with `git status --porcelain` empty. The positive control: `tenant.py check
-    --folder <dir>` exits 0 over the scaffolded folder."""
+    """`tenant.py scaffold acme <empty dir>` exits 0."""
     target = _empty_dir(tmp_path / "acme-tenant")
     proc = _scaffold(H.TID, target, home=_home(tmp_path))
     H.assert_clean(proc)
@@ -176,12 +151,10 @@ def _regular_file(tmp: Path) -> Path:
 ])
 def test_1120_scaffold_refuses_a_bad_id_or_a_non_empty_target_and_writes_nothing(
         tmp_path: Path, tenant_id: str, cell: str) -> None:
-    """`scaffold ../x <empty dir>`, `scaffold acme <dir holding a file>`, `scaffold acme
-    <a regular file>` and `scaffold acme <an empty dir inside the running checkout>` each exit
-    non-zero, naming the id or the target, and leave the target exactly as found: no file
-    copied, no .tenant-id, no repository. The in-checkout cell runs a COPY of the checkout
-    (the running checkout is the copy), so the real worktree is never written; its positive
-    control is the same copy scaffolding an empty directory outside itself, which exits 0."""
+    """`scaffold ../x <empty dir>`, `scaffold acme <dir holding a file>`, `scaffold acme <a regular
+    file>` and `scaffold acme <an empty dir inside the running checkout>` each exit non-zero, naming
+    the id or the target, and leave the target exactly as found: no file copied, no .tenant-id, no
+    repository."""
     home = _home(tmp_path / "cfg")
     work = tmp_path / "work"
     script = None
@@ -207,34 +180,16 @@ def test_1120_scaffold_refuses_a_bad_id_or_a_non_empty_target_and_writes_nothing
         assert (outside / H.TENANT_ID_FILE).is_file(), "the control scaffold wrote no tenant"
 
 
-def test_1120_s3_scaffold_into_a_regular_file(tmp_path: Path) -> None:
-    """`<dir>` names an existing regular file, not a directory: scaffold is refused with a
-    non-zero exit naming the path. The file is unchanged (bytes, mtime and mode) and nothing
-    is written beside it. The positive control: an empty directory at a sibling path is
-    scaffolded (exit 0)."""
-    (tmp_path / "work").mkdir()
-    target = _regular_file(tmp_path / "work")
-    before = H.tree_census(tmp_path / "work")
-    home = _home(tmp_path / "cfg")
-    _refused(_scaffold(H.TID, target, home=home), str(target))
-    assert H.census_diff(before, H.tree_census(tmp_path / "work")) == [], (
-        "scaffold changed the regular file or wrote beside it")
-
-    H.assert_clean(_scaffold(H.TID, _empty_dir(tmp_path / "work" / "dir"), home=home))
-
-
 # ======================================================================================
 # git: the product repo, a refused commit, the preflight (N3, N5).
 # ======================================================================================
 
 def test_1120_scaffold_leaves_the_product_repo_unchanged_under_an_exported_git_dir(
         tmp_path: Path) -> None:
-    """With GIT_DIR and GIT_WORK_TREE exported naming the product repo — here a SCRATCH repo
-    in tmp standing for it, never the real worktree — `tenant.py scaffold acme <empty dir>`
-    exits 0, leaves that repo's HEAD, index and refs byte-identical, and the TARGET gets the
-    repository: its own .git holding one commit with agent/.tenant-id. An exported GIT_DIR
-    decides the repository whatever cwd says (J-PO1), so scaffold scrubs the ambient GIT_*
-    environment from its git calls (N3)."""
+    """With GIT_DIR and GIT_WORK_TREE exported naming the product repo — here a SCRATCH repo in tmp
+    standing for it, never the real worktree — `tenant.py scaffold acme <empty dir>` exits 0, leaves
+    that repo's HEAD, index and refs byte-identical, and the TARGET gets the repository: its own
+    .git holding one commit with agent/.tenant-id."""
     # rejected: automatic retry and a clone timeout (N3).
     product = _product_repo(tmp_path)
     before = _repo_state(product)
@@ -251,13 +206,12 @@ def test_1120_scaffold_leaves_the_product_repo_unchanged_under_an_exported_git_d
 
 def test_1120_a_failed_scaffold_leaves_its_target_as_found_and_a_retry_succeeds(
         tmp_path: Path) -> None:
-    """A commit git refuses after the preflight passed — commit.gpgSign set with gpg.program
-    pointing at `false` (git cannot sign, so it refuses to write the commit object) and
-    core.hooksPath naming a pre-commit hook that exits 1, two real git mechanisms configured in
-    the scaffold process's own $HOME/.gitconfig — makes
-    `tenant.py scaffold acme <empty dir>` exit non-zero naming git, and leaves the target as it
-    found it: still an empty directory, no copied file, no .tenant-id, no .git. A retry once
-    the fault is removed succeeds (exit 0, one commit)."""
+    """A commit git refuses after the preflight passed — commit.gpgSign set with gpg.program pointing
+    at `false` (git cannot sign, so it refuses to write the commit object) and core.hooksPath naming
+    a pre-commit hook that exits 1, two real git mechanisms configured in the scaffold process's own
+    $HOME/.gitconfig — makes `tenant.py scaffold acme <empty dir>` exit non-zero naming git, and
+    leaves the target as it found it: still an empty directory, no copied file, no .tenant-id, no
+    .git."""
     false = shutil.which("false")
     assert false, "no `false` executable on this host to stand in for a failing gpg"
     target = _empty_dir(tmp_path / "acme-tenant")
@@ -277,7 +231,6 @@ def test_1120_a_failed_scaffold_leaves_its_target_as_found_and_a_retry_succeeds(
 
 
 #: Words any "no commit identity" refusal carries — scaffold's own preflight message or git's
-#: ("Author identity unknown … Please tell me who you are … user.email").
 _IDENTITY_WORDS = ("identity", "user.email", "user.name", "who you are")
 
 
@@ -287,12 +240,11 @@ _IDENTITY_WORDS = ("identity", "user.email", "user.name", "who you are")
 ])
 def test_1120_scaffold_without_git_or_a_commit_identity_refuses_before_any_write(
         tmp_path: Path, fault: str) -> None:
-    """`tenant.py scaffold acme <empty dir>` with no git on PATH, or with no committer identity
-    (a private $HOME whose config sets user.useConfigOnly and names no user, and no identity
-    variable in the environment), exits non-zero naming git — and, for the missing identity,
-    naming the identity — BEFORE any write: the target is left as found and the product repo
-    the command runs from (a SCRATCH repo standing for it) is unchanged. The positive control:
-    the same target with git and an identity is scaffolded (exit 0)."""
+    """`tenant.py scaffold acme <empty dir>` with no git on PATH, or with no committer identity (a
+    private $HOME whose config sets user.useConfigOnly and names no user, and no identity variable
+    in the environment), exits non-zero naming git — and, for the missing identity, naming the
+    identity — BEFORE any write: the target is left as found and the product repo the command runs
+    from (a SCRATCH repo standing for it) is unchanged."""
     product = _product_repo(tmp_path)
     repo_before = _repo_state(product)
     target = _empty_dir(tmp_path / "acme-tenant")

@@ -1,15 +1,4 @@
-"""`defender-sql` on a zoned result (#1126).
-
-duckdb needs `pytz` to hand a zoned timestamp to Python and does not declare it, so every zoned
-result — an explicit `::TIMESTAMPTZ`, and also `now()` and `to_timestamp`, which return zoned
-values — ended in an uncaught traceback raised from the row fetch. Now:
-
-- `pytz` is declared next to `duckdb`, and the session's zone is UTC whatever the host's is: a
-  zoned value crosses into Python in UTC, so it is never shifted by the host's offset, and an
-  empty or unknown host zone cannot fail the crossing.
-- An install without `pytz` is a missing runtime (`EXIT_NO_RUNTIME`, the rebuild/install line),
-  reported by the query that needs it and by no other — not the lead's query error.
-"""
+"""defender-sql on a zoned result: UTC session zone, and a missing pytz is a missing runtime."""
 from __future__ import annotations
 
 import json

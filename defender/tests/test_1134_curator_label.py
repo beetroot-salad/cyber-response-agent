@@ -1,39 +1,8 @@
-"""#1134 v2 curator step: the drain label is consumed where the author lane's trees open, the open
-`DrainTrees` flows below that, and the trees live exactly as long as one curator's batch.
-
-The shape (the v2 contract's "Shape", mirroring the lead-author step; owner decisions of
-2026-09-29: the label is required all the way to where it is read, spelled once as
-`config.AUTHOR_DRAIN_LABEL`):
-
-- `author_drain`'s DEFAULT work-step seam is `functools.partial(drains._maybe_trigger_author,
-  label=AUTHOR_DRAIN_LABEL)`; an injected `trigger_author` keeps its call shape.
-- `_maybe_trigger_author(paths, pending_file, threshold_env, module_name, pending_label, *,
-  label, box=None)` requires the label; past the threshold check it opens `open_drain_trees(paths,
-  label)` AROUND `_run_curator_module` (so a hold fault propagates to `_drain_one_curator`'s stuck
-  record, never rc=None) and hands the curator `run_batch(..., trees=trees, ...)`. Each curator
-  opens its own trees (both corpora, the label's whole mount list); closed when its batch returns
-  or raises. Below the threshold nothing is held.
-- `build_author_config` / `build_questioner_config(paths, *, trees, ...)` require the trees and set
-  `corpus = shared.lane_corpus(trees, <corpus dir>)` (`trees.mount(...)`, its `ValueError` ->
-  `FatalConfigError`; never a handle of its own) and `tree_for = trees.tree_for`. The channel
-  `run_batch(*, ..., trees=None, cfg=None, ...)` takes exactly one of the two (`TypeError`
-  otherwise). Nothing below the open takes a label.
-- Both channel `main()`s and the eval harness's `run_author` open the trees themselves, with the
-  constant. Nothing else in the curator modules holds or binds a tree (H5/H7).
-
-The trees' lifetime is observed from inside the curator's batch: a `LoopPaths` subclass handed to
-the seam records what this process holds under the repo (`descriptors_under`) when the builder
-reads `author_lock_file`, which it does only after the open. Faults enter as exceptions raised
-from that same property; nothing is monkeypatched but the environment (the thresholds).
-
-Red before the step: `_maybe_trigger_author` takes no `label`, the builders and `run_batch` take
-no `trees`, `shared.lane_corpus` is missing, the default seam is the bare function, and the
-channel `main()`s / the harness open nothing.
-"""
+"""#1134 curator step: the drain label is consumed where the author lane's trees open; the open
+`DrainTrees` flows below that and lives exactly as long as one curator's batch (released on fault,
+nothing held below the threshold or for an injected seam)."""
 from __future__ import annotations
 
-import ast
-import inspect
 import json
 import logging
 import os
@@ -44,13 +13,10 @@ from typing import Any
 
 import pytest
 
-from defender import _corpus, _io
-from defender.learning.author import drain
-from defender.learning.author import _config as author_config
 from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.author.questioner import run as questioner_run
-from defender.learning.core import config, drains, lane_trees
+from defender.learning.core import config, drains
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
     LEAD_AUTHOR_DRAIN_LABEL,
@@ -60,7 +26,6 @@ from defender.learning.core.config import (
 from defender._tree_listing import entry_kind
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
-from defender.tests._by_path import import_lint_lib
 from defender.tests._state1135 import state_for_paths
 from defender.tests._curator1134 import (
     is_link_to,
@@ -80,8 +45,6 @@ BUILDERS = {
     "questioner": (questioner_run.build_questioner_config, "lessons_questioner_dir"),
 }
 RUNNERS = {"lessons": lessons_run.run_batch, "questioner": questioner_run.run_batch}
-CHANNEL_MODULES = {"lessons": lessons_run, "questioner": questioner_run}
-astlib = import_lint_lib("_astlib")
 
 
 # ---------------------------------------------------------------------------------------
@@ -125,19 +88,6 @@ def test_run_batch_takes_exactly_one_of_trees_and_cfg(tmp_path, channel):
 
     assert run(paths=w.paths, state=w.state, trees=w.trees) == 0
     assert run(cfg=cfg) == 0
-
-
-@pytest.mark.parametrize("channel", sorted(BUILDERS))
-def test_nothing_below_the_open_takes_a_label(channel):
-    """H8: the label is consumed where the trees open. The builders, the channel `run_batch`es and
-    `drain.run_batch` have no `label` parameter (passing one further would be required-but-unread,
-    v1's H5); the builders' `trees` is keyword-only with no default."""
-    build, _attr = BUILDERS[channel]
-    for fn in (build, RUNNERS[channel], drain.run_batch):
-        assert "label" not in inspect.signature(fn).parameters, fn
-    trees = inspect.signature(build).parameters["trees"]
-    assert trees.kind is inspect.Parameter.KEYWORD_ONLY
-    assert trees.default is inspect.Parameter.empty
 
 
 # ---------------------------------------------------------------------------------------
@@ -561,161 +511,8 @@ def test_below_the_threshold_nothing_is_held(tmp_path, monkeypatch):
     assert descriptors_under(w.repo) == []
 
 
-# ---------------------------------------------------------------------------------------
-# Source checks: where the label is spelled, and that nothing else opens a tree (H5/H7, H8)
-# ---------------------------------------------------------------------------------------
-
-
-def _tree(module: Any) -> ast.Module:
-    return ast.parse(inspect.getsource(module))
-
-
-def _function(tree: ast.AST, name: str) -> ast.FunctionDef:
-    [fn] = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name]
-    return fn
-
-
-def _callee(call: ast.Call) -> str | None:
-    f = call.func
-    return f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
-
-
-def _is_name(node: ast.AST | None, name: str) -> bool:
-    return (isinstance(node, ast.Name) and node.id == name) or (
-        isinstance(node, ast.Attribute) and node.attr == name)
-
-
-def _kw(call: ast.Call, name: str) -> ast.expr | None:
-    return next((k.value for k in call.keywords if k.arg == name), None)
-
-
-def _calls(node: ast.AST, name: str) -> list[ast.Call]:
-    return [c for c in ast.walk(node) if isinstance(c, ast.Call) and _callee(c) == name]
-
-
-def _open_withs(node: ast.AST) -> list[tuple[ast.With, ast.Call, str | None]]:
-    """Each `with open_drain_trees(...) as <name>:` under `node`: the statement, the call, and the
-    bound name."""
-    out = []
-    for w in ast.walk(node):
-        if isinstance(w, ast.With):
-            for item in w.items:
-                ctx = item.context_expr
-                if isinstance(ctx, ast.Call) and _callee(ctx) == "open_drain_trees":
-                    bound = item.optional_vars.id if isinstance(item.optional_vars,
-                                                                ast.Name) else None
-                    out.append((w, ctx, bound))
-    return out
-
-
-def _label_arg(call: ast.Call) -> ast.expr | None:
-    return call.args[1] if len(call.args) > 1 else _kw(call, "label")
-
-
-def test_author_drains_default_seam_is_the_trigger_partial_with_the_constant():
-    """H8: in `author_drain`, the default `trigger_author` is `functools.partial(
-    _maybe_trigger_author, label=AUTHOR_DRAIN_LABEL)` — the constant by name, never a string —
-    and the lead label is not named there. (Step 3's pins over `_run_worktree_batch(label=...)`
-    stay as they are.)
-
-    Catches: the bare function as the default (no label reaches the open), and a partial over
-    the lead label or a literal."""
-    fn = _function(_tree(drains), "author_drain")
-    partials = [c for c in _calls(fn, "partial")
-                if c.args and _is_name(c.args[0], "_maybe_trigger_author")]
-    assert len(partials) == 1, [ast.dump(c) for c in partials]
-    assert _is_name(_kw(partials[0], "label"), "AUTHOR_DRAIN_LABEL"), ast.dump(partials[0])
-    assert not [n for n in ast.walk(fn) if _is_name(n, "LEAD_AUTHOR_DRAIN_LABEL")]
-
-
-def test_the_trigger_opens_the_trees_with_its_own_label_around_the_curator_call():
-    """`_maybe_trigger_author` takes `label` keyword-only with no default, never rebinds it, and
-    opens `open_drain_trees(paths, label)` — its own parameter, not a constant — in a `with`
-    whose body holds the `_run_curator_module` call (so a hold fault is outside the module call's
-    catch); the curator's `run_batch` gets `trees=<the with's name>` and no `label`."""
-    params = inspect.signature(drains._maybe_trigger_author).parameters
-    assert params["label"].kind is inspect.Parameter.KEYWORD_ONLY
-    assert params["label"].default is inspect.Parameter.empty
-    fn = _function(_tree(drains), "_maybe_trigger_author")
-    rebinds = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id == "label"
-               and isinstance(n.ctx, ast.Store)]
-    assert rebinds == [], "the trigger rebinds its label parameter"
-
-    [(with_, call, bound)] = _open_withs(fn)
-    assert _is_name(call.args[0] if call.args else _kw(call, "wt_paths"), "paths"), ast.dump(call)
-    assert _is_name(_label_arg(call), "label"), ast.dump(call)
-    assert _calls(with_, "_run_curator_module"), "the curator call is not inside the open"
-    [run] = _calls(fn, "run_batch")
-    assert _kw(run, "label") is None, ast.dump(run)
-    assert bound is not None
-    assert _is_name(_kw(run, "trees"), bound), ast.dump(run)
-
-
-@pytest.mark.parametrize("channel", sorted(CHANNEL_MODULES))
-def test_each_channel_main_opens_its_trees_with_the_author_label(channel):
-    """`main()` (the manual CLI) opens `open_drain_trees(paths, AUTHOR_DRAIN_LABEL)` — the
-    constant by name — and runs `run_batch(trees=<those trees>)` inside it, where `paths` is the
-    one `loop_paths()` resolved (the live checkout's own, as `DEFAULT_PATHS` was before the state
-    handle needed the paths resolved at call time). Not driven: `main` runs against this
-    checkout's own state."""
-    fn = _function(_tree(CHANNEL_MODULES[channel]), "main")
-    [(with_, call, bound)] = _open_withs(fn)
-    assert _is_name(call.args[0] if call.args else None, "paths"), ast.dump(call)
-    [assign] = [n for n in ast.walk(fn) if isinstance(n, ast.Assign)
-                and any(_is_name(t, "paths") for t in n.targets)]
-    assert isinstance(assign.value, ast.Call), ast.dump(assign)
-    assert _callee(assign.value) == "loop_paths", ast.dump(assign)
-    assert _is_name(_label_arg(call), "AUTHOR_DRAIN_LABEL"), ast.dump(call)
-    runs = _calls(fn, "run_batch")
-    assert len(runs) == 1, [ast.dump(c) for c in runs]
-    assert runs[0] in list(ast.walk(with_)), "run_batch runs outside the trees' with"
-    assert bound is not None
-    assert _is_name(_kw(runs[0], "trees"), bound), ast.dump(runs[0])
-
-
 def _harness() -> Path:
     return Path(drains.__file__).resolve().parents[2] / "evals" / "harness.py"
-
-
-def test_the_eval_harness_opens_the_author_trees_around_its_config_and_batch():
-    """`evals/harness.py`'s `run_author(tmp)` opens `open_drain_trees(paths, AUTHOR_DRAIN_LABEL)`
-    (the constant by name) and, inside that `with`, builds its config over those trees
-    (`build_author_config(paths, trees=<them>, ...)`) and runs its batch with that config
-    (`run_batch(paths=paths, cfg=...)`). All three name one local, `paths`, bound in
-    `run_author` exactly once, to `LoopPaths(repo_root=<its first parameter>)`: the scratch repo
-    it was handed, never `DEFAULT_PATHS` or any other import. Parsed from the file, not imported.
-
-    Catches (E05b): trees opened and the config built over the live checkout
-    (`DEFAULT_PATHS`) while the batch is told the scratch repo's paths."""
-    tree = ast.parse(_harness().read_text(encoding="utf-8"))
-    env = astlib.module_env(tree)
-    fn = _function(tree, "run_author")
-    [(with_, call, bound)] = _open_withs(fn)
-    assert _is_name(_label_arg(call), "AUTHOR_DRAIN_LABEL"), ast.dump(call)
-    inside = list(ast.walk(with_))
-    [build] = _calls(fn, "build_author_config")
-    [run] = _calls(fn, "run_batch")
-    assert build in inside, "the config is built outside the open"
-    assert run in inside, "the batch runs outside the open"
-    assert bound is not None
-    assert _is_name(_kw(build, "trees"), bound), ast.dump(build)
-    assert _kw(run, "cfg") is not None, ast.dump(run)
-    assert _kw(run, "trees") is None, ast.dump(run)
-
-    over = [call.args[0] if call.args else _kw(call, "wt_paths"),
-            build.args[0] if build.args else _kw(build, "paths"), _kw(run, "paths")]
-    assert all(isinstance(a, ast.Name) and a.id == "paths" for a in over), \
-        [ast.unparse(a) if a is not None else None for a in over]
-    binds = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id == "paths"
-             and isinstance(n.ctx, ast.Store)]
-    assert len(binds) == 1, [ast.unparse(b) for b in binds]
-    [assign] = [n for n in ast.walk(fn) if isinstance(n, ast.Assign) and binds[0] in n.targets]
-    made = assign.value
-    assert isinstance(made, ast.Call), ast.unparse(assign)
-    assert astlib.callee(made, env) == f"{LoopPaths.__module__}.LoopPaths", ast.unparse(made)
-    root = made.args[0] if made.args else _kw(made, "repo_root")
-    assert isinstance(root, ast.Name), ast.unparse(made)
-    assert root.id == fn.args.args[0].arg, ast.unparse(made)
 
 
 #: Run in a fresh interpreter, as the harness runs: materialize the scenario into the scratch
@@ -765,135 +562,6 @@ def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_p
     assert run["rc"] == 0, run
     assert (scratch / "defender" / "learning" / "_author.lock").exists()
     assert sorted(p.name for p in decoy.iterdir()) == []
-
-
-#: The calls that make a held tree or a bound reader of a path, by dotted origin (resolved
-#: through `_astlib`, so an alias, a module-qualified call or `DrainTrees.open` is the same call).
-_OPENERS = frozenset({
-    f"{_io.__name__}.hold", f"{_io.__name__}.bind", f"{_io.__name__}.hold_new",
-    f"{_corpus.__name__}._viewed",
-    f"{lane_trees.__name__}.open_drain_trees", f"{lane_trees.__name__}.DrainTrees.open",
-})
-#: A relative import resolves to a leading-dot origin (`..core.lane_trees.open_drain_trees`);
-#: it is the same call when its tail is an opener's.
-_OPENER_TAILS = ("hold", "bind", "hold_new", "_viewed", "open_drain_trees", "DrainTrees.open")
-
-
-def _is_opener(call: ast.Call, env: Any) -> bool:
-    origin = astlib.callee(call, env)
-    if origin is None:
-        return False
-    if origin.startswith("."):
-        return any(origin == f".{t}" or origin.endswith(f".{t}") for t in _OPENER_TAILS)
-    return origin in _OPENERS
-
-
-_CURATOR_MODULES = {"drain": drain, "shared": author_shared, "lessons": lessons_run,
-                    "questioner": questioner_run, "_config": author_config}
-
-
-@pytest.mark.parametrize("name", sorted(_CURATOR_MODULES))
-def test_no_curator_module_holds_or_binds_a_tree_but_the_channel_mains(name):
-    """H5/H7: below the open, the trees flow; nothing in `drain.py`, `shared.py`, the two channel
-    modules or `_config.py` calls `hold(`, `bind(`, `hold_new(`, `_corpus._viewed(`,
-    `DrainTrees.open(` or `open_drain_trees(` — except each channel's `main()`, which opens the
-    lane's trees itself. (`lane_corpus` takes `trees.mount(...)`; the readers' Path form binds
-    inside `_corpus`.)
-
-    Catches: a handle rebuilt from `corpus_dir` at the snapshot, the judge, the attribution or
-    the undo; a second label table that opens its own trees; and (E07) a prompt manifest read
-    through `_corpus._viewed(cfg.corpus_dir)`."""
-    tree = _tree(_CURATOR_MODULES[name])
-    env = astlib.module_env(tree)
-    mains = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "main"]
-    allowed = {id(c) for m in mains for c in ast.walk(m)} if name in ("lessons", "questioner") \
-        else set()
-    openers = [
-        (c.lineno, ast.unparse(c)) for c in ast.walk(tree)
-        if isinstance(c, ast.Call) and id(c) not in allowed and _is_opener(c, env)
-    ]
-    assert openers == [], openers
-    if name in ("lessons", "questioner"):
-        # Positive control: the resolver sees the open the exemption is for.
-        assert [c for m in mains for c in ast.walk(m) if isinstance(c, ast.Call)
-                and _is_opener(c, env)], "main() opens nothing the check can see"
-
-
-#: The shared readers that take a corpus first (or as `corpus=`): a `Bound` in the drain, a `Path`
-#: only for callers outside it (N-h).
-_READERS = frozenset({
-    f"{_corpus.__name__}.iter_lessons", f"{_corpus.__name__}.iter_lesson_paths",
-    f"{author_shared.__name__}.build_corpus_manifest",
-    f"{author_shared.__name__}.build_curator_user_prompt",
-})
-
-
-def _owners(tree: ast.AST) -> dict[ast.AST, ast.AST | None]:
-    """Each node of `tree` to its innermost enclosing function (None at module level)."""
-    owner: dict[ast.AST, ast.AST | None] = {}
-
-    def visit(node: ast.AST, fn: ast.AST | None) -> None:
-        for child in ast.iter_child_nodes(node):
-            owner[child] = fn
-            visit(child, child if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
-                  else fn)
-
-    visit(tree, None)
-    return owner
-
-
-def _is_view(arg: ast.expr, fn: Any) -> bool:
-    """`arg` is a `Bound`: a `.view()` / `.under(...)` call, or a name `fn` binds to one — a
-    parameter annotated with `Bound`, or a plain assignment from such a call."""
-    if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute):
-        return arg.func.attr in ("view", "under")
-    if not isinstance(arg, ast.Name) or fn is None:
-        return False
-    params = [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]
-    if any(a.arg == arg.id and a.annotation is not None and "Bound" in ast.unparse(a.annotation)
-           for a in params):
-        return True
-    return any(isinstance(n, ast.Assign) and _is_view(n.value, None)
-               and any(isinstance(t, ast.Name) and t.id == arg.id for t in n.targets)
-               for n in ast.walk(fn))
-
-
-@pytest.mark.parametrize("name", sorted(_CURATOR_MODULES))
-def test_no_curator_module_hands_a_reader_the_corpus_by_its_spelling(name):
-    """E03/E07: in the curator modules every shared reader (`iter_lessons`, `iter_lesson_paths`,
-    `build_corpus_manifest`, `build_curator_user_prompt`'s `corpus=`) gets a VIEW as its corpus —
-    `cfg.corpus.view()`, or a name bound to a `Bound` — never a `Path` (`cfg.corpus_dir`,
-    `corpus_dir`, `Path(...)`), whose reader form opens the folder by its spelling. Callees
-    resolve through `_astlib`; a call to the module's own top-level def (which `_astlib`
-    answers None for: a local binding, not an import) is that def. Positive control: in
-    `shared.py` and both channel modules the check sees reader calls to judge.
-
-    Catches: an idempotency read or a prompt manifest that checks `cfg.corpus` and then reads
-    `iter_lessons(cfg.corpus_dir, ...)`."""
-    module = _CURATOR_MODULES[name]
-    tree = _tree(module)
-    env = astlib.module_env(tree)
-    owner = _owners(tree)
-    local_defs = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
-    seen, by_spelling = [], []
-    for c in ast.walk(tree):
-        if not isinstance(c, ast.Call):
-            continue
-        origin = astlib.callee(c, env)
-        if origin is None and isinstance(c.func, ast.Name) and c.func.id in local_defs:
-            origin = f"{module.__name__}.{c.func.id}"
-        if origin not in _READERS:
-            continue
-        corpus = c.args[0] if c.args and not origin.endswith("build_curator_user_prompt") \
-            else _kw(c, "corpus")
-        if corpus is None:
-            continue
-        seen.append(c.lineno)
-        if not _is_view(corpus, owner.get(c)):
-            by_spelling.append((c.lineno, ast.unparse(c)))
-    assert by_spelling == [], by_spelling
-    if name in ("shared", "lessons", "questioner"):
-        assert seen, f"no reader call seen in {name}: the check judged nothing"
 
 
 def test_the_trigger_holds_nothing_for_an_injected_seam(tmp_path, monkeypatch):

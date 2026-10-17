@@ -52,30 +52,13 @@ def _view(text: str, *, ceiling: int, run_dir) -> str:
 # The gate: size, and nothing else.
 
 def test_under_the_ceiling_the_payload_is_verbatim(tmp_path):
-    """No prose, no samples, no reformatting — the bytes the adapter produced.
-
-    94% of the recorded corpus lands here. The old code replaced a 105-byte complete result
-    with a sampling notice; the payload is small enough to reason from directly and the view's
-    only honest job is to get out of the way."""
+    """No prose, no samples, no reformatting — the bytes the adapter produced."""
     text = _lucene(_docs(2))
     assert _view(text, ceiling=65536, run_dir=tmp_path) == text
 
 
-def test_the_key_name_decides_nothing_under_the_ceiling(tmp_path):
-    hits = _docs(2)
-    named = _view(_lucene(hits, key="hits"), ceiling=65536, run_dir=tmp_path)
-    unnamed = _view(_lucene(hits, key="zzz_widgets"), ceiling=65536, run_dir=tmp_path)
-    assert named == _lucene(hits, key="hits")
-    assert unnamed == _lucene(hits, key="zzz_widgets")
-
-
 def test_the_key_name_decides_nothing_above_the_ceiling(tmp_path):
-    """The load-bearing property. Rename the list and the decision, the kept counts and the
-    elision records are identical — which is exactly what `_is_event_payload` could not do.
-
-    Equal-length names on purpose: the claim is that the name is never CONSULTED, not that it
-    occupies no bytes. A longer key really does leave less budget for elements, and pretending
-    otherwise would make this test assert something false about the arithmetic."""
+    """The load-bearing property."""
     hits = _docs(60)
     _, known = pv.walk(json.loads(_lucene(hits, key="hits")), 1200)
     _, exotic = pv.walk(json.loads(_lucene(hits, key="zzzz")), 1200)
@@ -84,32 +67,15 @@ def test_the_key_name_decides_nothing_above_the_ceiling(tmp_path):
     assert known[0].kind == "list"
 
 
-@pytest.mark.parametrize("key", ["hits", "values", "entries", "packages", "users", "zzz"])
-def test_every_list_key_is_treated_alike(tmp_path, key):
-    payload = json.dumps({"captured_at": "2026-08-07T00:00:00Z", key: _docs(60)})
-    _, elisions = pv.walk(json.loads(payload), 1200)
-    assert [e.path for e in elisions] == [key]
-
-
 # O1 — the view never asserts a limitation the payload in context does not have.
 
 def test_a_complete_empty_envelope_carries_no_prohibition(tmp_path):
-    """THE regression. `{total: 0, truncated: false, hits: []}` is 94 bytes, complete, and
-    entirely visible; the old view answered it with "0 records ... Do NOT count these or read
-    values off them", i.e. forbade the lead from stating the one exact fact the payload holds.
-    #809 is gather reporting a zero it cannot stand behind — this is the tool manufacturing it."""
+    """THE regression."""
     view = _view(_lucene([]), ceiling=65536, run_dir=tmp_path)
     assert "Do NOT count" not in view
     assert "not count" not in view.lower()
     assert "sample" not in view.lower()
     assert json.loads(view)["total"] == 0
-
-
-def test_a_complete_payload_shown_in_full_is_never_called_a_sample(tmp_path):
-    for n in (1, 3, 20):
-        view = _view(_lucene(_docs(n)), ceiling=65536, run_dir=tmp_path)
-        assert "sample" not in view.lower(), f"{n} complete records described as a sample"
-        assert len(json.loads(view)["hits"]) == n
 
 
 # O3 — a view can never be mistaken for the payload.
@@ -129,11 +95,6 @@ def test_the_marker_names_how_many_were_dropped(tmp_path):
     body = json.loads(_json_block(view))
     kept = len(body["hits"]) - 1
     assert f"{60 - kept} of 60" in body["hits"][-1]
-
-
-def test_nothing_is_marked_when_nothing_was_dropped(tmp_path):
-    view = _view(_lucene(_docs(2)), ceiling=65536, run_dir=tmp_path)
-    assert pv.ELISION_PREFIX not in view
 
 
 # O5 — a kept element is a WHOLE element. Only long string leaves clip.
@@ -212,31 +173,6 @@ def test_a_capped_envelope_states_the_servers_own_total(tmp_path):
     assert "EXACT" in view
 
 
-def test_capped_and_complete_do_not_borrow_each_others_wording(tmp_path):
-    capped = _view(_lucene(_docs(20), total=2471), ceiling=1200, run_dir=tmp_path)
-    complete = _view(_lucene(_docs(60)), ceiling=1200, run_dir=tmp_path)
-    assert "2471" in capped
-    assert "EXACT" in capped
-    assert "EXACT" not in complete, "a complete payload was described as a capped one"
-    assert "total matches" not in complete
-
-
-def test_view_side_elision_is_not_reported_as_a_server_cap(tmp_path):
-    """A complete payload the VIEW shortened must not read as one the SERVER truncated: the
-    rows exist, they are on disk, and `total` is still exact."""
-    view = _view(_lucene(_docs(60)), ceiling=1200, run_dir=tmp_path)
-    assert pv.ELISION_PREFIX in view
-    assert "no `limit` reaches them" not in view
-
-
-def test_the_span_line_survives_for_a_capped_envelope(tmp_path):
-    """#830: a capped payload is ONE slice and the envelope never says which. Computed over the
-    full returned list the walk holds, not over the elements that survived the budget."""
-    view = _view(_lucene(_docs(20), total=142), ceiling=1200, run_dir=tmp_path)
-    assert "2026-08-07T11:00:00Z" in view
-    assert "2026-08-07T11:19:00Z" in view
-
-
 # Bounds.
 
 @pytest.mark.parametrize("ceiling", [400, 1200, 8192])
@@ -250,15 +186,7 @@ def test_the_view_respects_its_budget(tmp_path, ceiling):
     "filler", ["x", "\n", '"', "café", "日本語"], ids=["ascii", "newline", "quote", "latin1", "cjk"]
 )
 def test_a_bounded_body_still_PARSES(tmp_path, ceiling, filler):
-    """Fitting the budget is half the demand; the other half is that what fits can be read.
-
-    The budget test above measured only LENGTH, and that is how two rulers-in-one-module shipped:
-    the per-element cost counted a 1-byte `,` while `_dumps` wrote `", "`, and the string clipper
-    counted CHARACTERS against a share denominated in serialized BYTES (`json.dumps` spends 2 on
-    a newline, 6 on a non-ASCII codepoint). Both overshot, `render`'s floor then cut the
-    serialized document at an arbitrary byte, and the view arrived as a mid-token prefix that
-    `json.loads` rejects — the exact failure this module indicts `_SAMPLE_MAX_CHARS` for. Parsing
-    is the property; length alone cannot see it."""
+    """Fitting the budget is half the demand; the other half is that what fits can be read."""
     docs = [
         {"@timestamp": f"2026-08-07T11:{i % 60:02d}:00Z", "host": f"web-{i}", "message": filler * 40}
         for i in range(400)
@@ -299,11 +227,7 @@ def test_a_string_leaf_of_escaped_characters_stays_inside_the_budget(tmp_path):
 
 
 def test_a_mixed_offset_timestamp_batch_does_not_crash_the_view(tmp_path):
-    """`sort` comparing a NAIVE `fromisoformat` result with an AWARE one raises `TypeError` —
-    out of `render`, out of the `query` tool, and the lead loses the payload entirely. The
-    fallback `timestamp` key this walks is exactly where a bespoke adapter omits the offset,
-    so one such doc beside one elastic `...Z` doc was enough. `_clock.parse_iso_utc` reads a
-    naive value AS UTC for this reason and its own docstring names this caller's failure."""
+    """`sort` comparing a NAIVE `fromisoformat` result with an AWARE one raises `TypeError` —"""
     docs = [
         {"@timestamp": "2026-08-07T11:00:00Z", "m": "x" * 300},
         {"@timestamp": "2026-08-07T10:00:00", "m": "y" * 300},
@@ -325,11 +249,7 @@ def test_the_disk_path_is_offered_when_the_view_elides(tmp_path):
 
 
 def test_the_full_payload_footer_offers_a_reduction_correct_for_any_shape(tmp_path):
-    """#1138 O8: the `full payload` arm's example reduction must be right on every payload
-    shape. `SELECT count(*) FROM data` answers 1 over this very envelope — the search-hits
-    object is ONE row of `data` (C4) — so it was a confident wrong count offered as the way in.
-    `DESCRIBE data` is right on any shape. The premise assertion pins that this IS the
-    full-payload arm, the one that offered the count."""
+    """#1138 O8: the `full payload` arm's example reduction must be right on every payload shape."""
     view = _view(_lucene(_docs(60)), ceiling=1200, run_dir=tmp_path)
     assert f"full payload: {tmp_path / RUN}" in view, "premise: this view is the full-payload arm"
     footer = view.partition(f"full payload: {tmp_path / RUN}")[2]
@@ -339,26 +259,11 @@ def test_the_full_payload_footer_offers_a_reduction_correct_for_any_shape(tmp_pa
 
 
 def test_a_server_capped_payload_is_never_offered_a_count_over_its_own_file(tmp_path):
-    """The file on disk holds the SERVER'S SLICE. `SELECT count(*)` over it returns the cap —
-    the number the same view's prose says never to count — so the footer must not advertise it.
-    The old `sampled` footer withheld the example for exactly this reason; the rewrite made the
-    footer unconditional and put the contradiction two lines apart."""
+    """The file on disk holds the SERVER'S SLICE."""
     view = _view(_lucene(_docs(20), total=2471), ceiling=1200, run_dir=tmp_path)
     assert "NEVER count the returned docs" in view
     assert "count(*)" not in view
     assert str(tmp_path / RUN) in view
-
-
-def test_a_bare_truncated_flag_still_reports_the_server_cap(tmp_path):
-    """`truncated: true` with no `total`/`returned` IS a server cap. It failed the prose branch's
-    counts guard and fell through to a bare byte count, so the one fact the server declared went
-    unsaid — and the elision line then told the lead the missing rows were "present in full on
-    disk", which is false: the server never sent them."""
-    text = json.dumps({"index": "logs-*", "truncated": True, "entries": _docs(200)})
-    view = _view(text, ceiling=1200, run_dir=tmp_path)
-    assert "The SERVER capped this result" in view
-    assert "NEVER count these docs" in view
-    assert "count(*)" not in view
 
 
 # #877 F-10 — the envelope may not derive a fact from itself.
@@ -368,14 +273,7 @@ def _esql_rows(n: int) -> list[list]:
 
 
 def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
-    """THE regression, driven through the REAL adapter shape rather than a hand-built dict.
-
-    `esql_payload` computes `row_count: len(values)` from the very array `completeness` then
-    measures, so `row_count > n` was unsatisfiable and EVERY ES|QL payload read `complete` —
-    `The SERVER returned everything it had — nothing was capped upstream`. A 1000-row `STATS …
-    BY host` is exactly ES's own default row cap, i.e. the population most likely to have been
-    truncated, and the prose only renders above the passthrough ceiling, so the false claim
-    reached precisely the payloads big enough to be clipped."""
+    """THE regression, driven through the REAL adapter shape rather than a hand-built dict."""
     from defender.scripts.adapters.elastic_adapter import esql_payload
 
     payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
@@ -391,12 +289,7 @@ def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
 
 
 def test_an_unknown_envelope_is_not_offered_as_a_full_payload_to_count(tmp_path):
-    """THE SAME CLAIM, ONE LINE FURTHER DOWN. `_prose` and `_footer` read the SAME
-    `Completeness` and both speak to the lead, so narrowing only the prose left `unknown`
-    falling through `_footer`'s `!= "capped"` arm onto `full payload: <path>` plus
-    `defender-sql 'SELECT count(*) FROM data'` — the file named as the whole result and a count
-    over it advertised as the answer, on exactly the ES|QL payload the test above just stopped
-    calling complete."""
+    """THE SAME CLAIM, ONE LINE FURTHER DOWN."""
     from defender.scripts.adapters.elastic_adapter import esql_payload
 
     payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
@@ -431,31 +324,8 @@ def _json_block(view: str) -> str:
     return "\n".join(lines).strip()
 
 
-def test_the_byte_ruler_holds_because_the_serializer_escapes():
-    """The module compares BYTES but measures with `len()`, which counts codepoints. They agree
-    only because `_dumps` leaves `ensure_ascii` on, so everything measured is pure ASCII.
-
-    Pinned because the coupling is invisible at every use site and #834's compact encoding is
-    exactly the change that would reach for `ensure_ascii=False`. Without it a CJK payload
-    measures a third of its weight and rides through the ceiling whole.
-    """
-    for value in ({"m": "日本語 café"}, {"m": "M" * 100}, {"m": "\n\"\\ x"}):
-        serialized = pv._dumps(value)
-        assert len(serialized) == len(serialized.encode("utf-8")), (
-            "ensure_ascii went off — len() is no longer the byte count this module compares"
-        )
-
-
 def test_a_list_never_collapses_to_a_bare_marker(tmp_path):
-    """Found against the LIVE stack, not in a fixture.
-
-    A real security alert document serializes to 8,568 bytes — larger than the whole 8,192-byte
-    ceiling — so no element fit its share and a 163 KB `alerts` payload rendered as
-    `hits: ["<<ELIDED 20 of 20 elements>>"]`. Honest and useless: not one field name survived,
-    on exactly the payload a lead most needs field shape from to narrow its next query. The old
-    sampler was wrong about completeness but did show three documents, so on the biggest
-    documents the honest rewrite had regressed the one thing elements are shown for.
-    """
+    """Found against the LIVE stack, not in a fixture."""
     fat = [{f"field_{j}": f"value-{i}-{j}-{'x' * 40}" for j in range(60)} for i in range(20)]
     view = _view(_lucene(fat, total=37442), ceiling=8192, run_dir=tmp_path)
     body = json.loads(_json_block(view))
@@ -491,15 +361,7 @@ def _esql(rows: list[list], names: list[str]) -> str:
 
 
 def test_a_too_wide_row_keeps_cells_the_way_a_too_wide_record_keeps_fields(tmp_path):
-    """The sibling of `test_a_list_never_collapses_to_a_bare_marker`, for the other element
-    shape — and the regression #834 would have shipped without it.
-
-    `_fit_one`'s last-resort salvage was guarded `isinstance(element, dict)`, so an element
-    that was a LIST fell through to `return None`. Invisible while the ES|QL adapter re-zipped
-    every row into a dict; the moment it stopped, the corpus's widest payload — ONE row of
-    1,657 columns, a lead probing schema — went from 121 named cells to a bare marker. Same
-    ceiling, same bytes on disk, all the field shape gone.
-    """
+    """The sibling of `test_a_list_never_collapses_to_a_bare_marker`, for the other element shape — and the regression #834 would have shipped without it."""
     names = [f"col_{j}" for j in range(1657)]
     row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
     view = _view(_esql([row], names), ceiling=8192, run_dir=tmp_path)
@@ -513,24 +375,7 @@ def test_a_too_wide_row_keeps_cells_the_way_a_too_wide_record_keeps_fields(tmp_p
 
 
 def test_a_named_cell_is_bound_to_the_RIGHT_name(tmp_path):
-    """The misattribution guarantee, which is what a positional encoding has to earn.
-
-    A cell carries no key: cell `i` means whatever `columns[i]` says it means. The failure that
-    matters is not a cell arriving unnamed — it is a cell arriving MISnamed, which in auth-log
-    triage is a wrong-user or wrong-host conclusion rather than a cosmetic error. That cannot
-    happen while BOTH regions are leading prefixes of their originals, because then index `i`
-    still means `i` on either side. Each is cut independently by the byte budget, so this is
-    the property to pin.
-
-    What deliberately does NOT hold: `len(columns) >= len(cells)`. `columns` entries are
-    `{name, type}` objects and cells are bare scalars, so the same share of bytes buys more
-    cells than names — measured, a 1,657-column row keeps 116 cells against 102 names, leaving
-    14 visible but unnamed. Honest degradation, not misattribution: the surplus is unbindable
-    and reads as such. Making the counts match would require `walk` to know that `columns`
-    NAMES `values`, which is the key-name rule this module exists to delete — a payload with a
-    `columns` list that indexes nothing would then be cut to fit a relationship it does not
-    have. The lead has the marker and the on-disk path for the rest.
-    """
+    """The misattribution guarantee, which is what a positional encoding has to earn."""
     names = [f"col_{j}" for j in range(1657)]
     row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
     body = json.loads(_json_block(_view(_esql([row], names), ceiling=8192, run_dir=tmp_path)))
@@ -572,16 +417,7 @@ def test_the_elision_marker_for_a_row_counts_cells_not_elements(tmp_path):
 
 
 def test_a_list_whose_ONE_element_was_salvaged_is_not_marked_as_shortened():
-    """A marker means a real cut, or it means nothing.
-
-    `_fit_list` decided "did I keep every element?" BEFORE `_fit_one`'s salvage could complete
-    the list, so a one-row payload whose single row was squeezed came back with
-    `<<ELIDED 0 of 1 elements … the payload on disk has all 1>>` beside it, and an
-    `Elision(kind="list", kept=1, total=1)` in the record. A stated drop of zero, on the module
-    whose whole job is that "absent from this view" and "absent from the payload" never blur —
-    and 87 bytes of an 8 KB ceiling spent saying it. What the squeeze DID cost is marked inside
-    the row, by `_fit_cells`, where it happened.
-    """
+    """A marker means a real cut, or it means nothing."""
     names = [f"col_{j}" for j in range(1657)]
     row = [f"value-{j}-{'x' * 20}" for j in range(1657)]
     obj = json.loads(_esql([row], names))

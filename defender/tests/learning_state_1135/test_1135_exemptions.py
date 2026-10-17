@@ -1,13 +1,5 @@
-"""#1135 — the three exemptions from the refusal's halt (R16: E1 the run-end enqueue, E2 the queue
-page, E3 the judge), the page's planted failed folder (I10), the display readers of the describe
-strings (F7 = JF8 reading A), and the pitfalls stage's own root (X6).
-
-Every plant is a real entry made on disk in the test. Every oracle reads the tree by today's record
-names (R14) through `lstat`/`readlink`, never through the verb under test. The queue page is built
-through `serialize_queues.stamped_view(paths)`, what `frontend/build.main` calls; `build.main`
-itself writes `lessons.json`/`queues.json` into the checkout, so no test here calls it. Shared
-machinery and the names this suite coins are in `_spec1135.py`.
-"""
+"""The exemptions from the state-refusal halt (run-end enqueue, queue page, judge), the page's planted
+failed folder, display readers of the describe strings, and the pitfalls stage's own root."""
 from __future__ import annotations
 
 import copy

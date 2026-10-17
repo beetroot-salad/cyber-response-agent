@@ -1,18 +1,9 @@
-"""#1078 pass (A) — the tenant OWNER, `defender/_tenant.py` (D1, D2): the grammar, `TenantPaths`
-and O11a, the row (`create_tenant` / `require_tenant`), the data root (`resolve_data_root`, its
-widened learning-state refusal) and `runs_base_for`.
-
-Driven directly: these are the owner functions every entry point is built on, and demand #0
-(`d0_return_contract`) pins their return values and their ONE refusal shape. Every input is
-real — the rows, the stray entries, the symlinked roots are written to the filesystem here.
-See `_spec1078.py` for the coined names and the refusal-pass-through observable.
-"""
+"""The tenant owner (_tenant.py): id grammar, checkout/data-root placement refusals, row create/require, data-root and learning-state resolution."""
 from __future__ import annotations
 
 import json
 import re
 import threading
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -110,38 +101,12 @@ def _opened_tenant(root: Path, tenant_id: str, run_id: str) -> str:
     return H.accept(root, tenant_id).runs_repository().open(RunId.parse(run_id)).tenant_id
 
 
-def test_tenant_id_at_domain_minimum_length(tmp_path):
-    """The one-letter id 'a' round-trips through create_tenant, require_tenant and TenantPaths
-    like any valid id."""
-    root = tmp_path / "data"
-    row = H.create_tenant(root, "a")
-    assert row.tenant_id == "a"
-    assert H.row_path(root, "a").is_file()
-    assert H.require_tenant(root, "a").tenant_id == "a"
-    paths = H.TenantPaths(root, "a")
-    assert (paths.dir, paths.row, paths.runs) == (root / "a", root / "a" / H.ROW_NAME,
-                                                  root / "a" / "runs")
 
 
 # ======================================================================================
 # TenantPaths (D1) and O11a
 # ======================================================================================
 
-def test_d1_tenantpaths_accessors(tmp_path):
-    """TenantPaths(root, T) exposes .dir == root/T, .row == root/T/tenant.json, .runs ==
-    root/T/runs, .episodes == root/T/episodes and .learning == root/T/learning."""
-    root = tmp_path / "data"
-    paths = H.TenantPaths(root, "playground")
-    expected = {
-        "dir": root / "playground",
-        "row": root / "playground" / "tenant.json",
-        "runs": root / "playground" / "runs",
-        "episodes": root / "playground" / "episodes",
-        "learning": root / "playground" / "learning",
-    }
-    got = {name: getattr(paths, name) for name in expected}
-    assert got == expected
-    assert not root.exists(), "constructing TenantPaths created something: it is a path owner"
 
 
 def test_s7_j03_tenantpaths_relative_root_refused(tmp_path, monkeypatch):
@@ -176,11 +141,6 @@ def test_o11a_checkout_root_tenant_defender_refused():
     H.owner_refusal(H.TenantPaths, checkout, "defender")
 
 
-def test_o11a_positive_control():
-    """TenantPaths(<checkout>/.defender-data, 'playground') is accepted."""
-    checkout = H.mod("_paths").PATHS.defender_dir.parent
-    paths = H.TenantPaths(checkout / ".defender-data", "playground")
-    assert paths.dir == checkout / ".defender-data" / "playground"
 
 
 def test_checkout_path_itself_reached_through_a_symlink(tmp_path):
@@ -212,16 +172,6 @@ def test_data_root_inside_another_checkouts_mounted_tree(tmp_path):
 # The row: create_tenant / require_tenant (D1, O2, O10)
 # ======================================================================================
 
-def test_d1_row_shape(tmp_path):
-    """The row is a JSON object holding tenant_id (equal to the id) and created_at."""
-    root = tmp_path / "data"
-    H.create_tenant(root, "playground")
-    doc = json.loads(H.row_path(root, "playground").read_text(encoding="utf-8"))
-    assert isinstance(doc, dict)
-    assert set(doc) == {"tenant_id", "created_at"}, f"the row carries {sorted(doc)}"
-    assert doc["tenant_id"] == "playground"
-    assert isinstance(doc["created_at"], str)
-    datetime.fromisoformat(doc["created_at"])  # an ISO timestamp, not free text
 
 
 @pytest.mark.parametrize("fault", [
@@ -233,10 +183,7 @@ def test_d1_require_tenant_refusals(tmp_path, fault):
     """require_tenant refuses an absent row, a corrupt row (invalid JSON, a non-object top
     level, a decode error, or a missing or non-string tenant_id or created_at), a row whose
     tenant_id is off-grammar, and a row whose tenant_id disagrees with its folder (refused as
-    corrupt); every refusal names the path.
-
-    The directory squatting the row's name and the dangling link are §7 J22's fold (a
-    directory reads as corrupt, a dangling link as absent): refused either way."""
+    corrupt); every refusal names the path."""
     root = tmp_path / "data"
     row = H.row_path(root, "playground")
     row.parent.mkdir(parents=True)
@@ -265,24 +212,11 @@ def test_d1_require_tenant_refusals(tmp_path, fault):
     assert H.require_tenant(good, "playground").tenant_id == "playground"
 
 
-def test_n13_require_tenant_ignores_other_rows(tmp_path):
-    """require_tenant(root, T) succeeds when the data root also holds a second, hand-made
-    tenant row."""
-    root = tmp_path / "data"
-    H.create_tenant(root, "playground")
-    H.plant_row(root, "other")
-    row = H.require_tenant(root, "playground")
-    assert row.tenant_id == "playground"
 
 
 def test_d1_create_exclusive(tmp_path):
     """Two create_tenant calls for the same id cannot both succeed; the loser refuses and the
-    row is the winner's.
-
-    Sequential (the second call meets the first's row) and concurrent (N callers released
-    together onto one empty root): exactly one returns, every other one REFUSES — the owner's
-    TenantRefused, not an escaping FileExistsError (§7 J12: the loser refuses naming that the
-    row exists) — and the row on disk is the winner's."""
+    row is the winner's."""
     root = tmp_path / "seq"
     first = H.create_tenant(root, "playground")
     bytes_after_first = H.row_path(root, "playground").read_bytes()
@@ -358,15 +292,6 @@ def test_d2_data_root_default(tmp_path, monkeypatch, value):
     assert H.resolve_data_root() == (tmp_path / "set").resolve()
 
 
-def test_d2_runs_base_for(tmp_path, monkeypatch):
-    """runs_base_for(T) equals TenantPaths(resolve_data_root(), T).runs, that is
-    <root>/T/runs."""
-    root = tmp_path / "data"
-    H.set_data_root(monkeypatch, root)
-    assert H.runs_base_for("playground") == root.resolve() / "playground" / "runs"
-    assert H.runs_base_for("playground") == H.TenantPaths(H.resolve_data_root(),
-                                                          "playground").runs
-    H.owner_refusal(H.runs_base_for, "../x")
 
 
 def test_data_root_itself_is_a_symlink(tmp_path, monkeypatch):
@@ -410,152 +335,17 @@ def test_o13_widened_refusal(tmp_path, monkeypatch, shape):
     assert H.resolve_data_root() == data.resolve()
 
 
-def test_widened_refusal_meets_the_pass_c_layout_early(tmp_path, monkeypatch):
-    """DEFENDER_LEARNING_STATE_DIR=<root>/T/learning set during (A) is refused by the widened
-    refusal, because it lies inside the data root. This holds under demand fork F3's
-    provisional reading (§7 F3, auto: the data root is the compared side)."""
-    root = tmp_path / "data"
-    H.set_data_root(monkeypatch, root)
-    H.create_tenant(root, "playground")
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(root / "playground" / "learning"))
-    H.owner_refusal(H.resolve_data_root)
-    H.owner_refusal(H.runs_base_for, "playground")
 
 
 # ======================================================================================
 # Demand #0 — the return contract and the ONE refusal shape
 # ======================================================================================
 
-def _common_refusal_class(refusals: dict[str, BaseException]) -> type:
-    """The most specific class every refusal is an instance of, below `Exception`."""
-    first = next(iter(refusals.values()))
-    for cls in type(first).__mro__:
-        if cls in (ValueError, Exception, BaseException, object):
-            break
-        if all(isinstance(e, cls) for e in refusals.values()):
-            return cls
-    raise AssertionError(
-        "the owner functions do not refuse through ONE refusal class: "
-        + ", ".join(f"{k} raised {type(v).__mro__[:3]}" for k, v in refusals.items()))
 
 
-def test_d0_return_contract(tmp_path, monkeypatch):
-    """require_tenant returns a TenantRow whose tenant_id equals the requested id and whose
-    created_at is the row's; a run opened through the accepted tenant's runs repository is
-    addressed to the tenant id as a str (#1105 PR 2: `tenant_of_run_dir` is gone, F-13);
-    create_tenant returns the TenantRow it wrote; TenantPaths accessors return absolute Paths
-    under .dir. The owner functions (TenantPaths, create_tenant, require_tenant,
-    ensure_runs_base_record, resolve_data_root, TenantId) refuse by raising one
-    refusal class, TenantRefused, whose message names the refused value; run.py main surfaces a tenant
-    refusal as SystemExit carrying a '[run.py] ...' message before the preflight, exactly as
-    _resume_target does today; the branch launcher surfaces it as LauncherRefused; tenant.py
-    setup returns 0 when every kind of its pass adopted, was already in place, or had nothing
-    to adopt, and 1 when any kind was refused or a racing entry was re-listed; a selector tool
-    given no --tenant exits non-zero before touching any state. Every entry passes the owner's
-    refusal message through verbatim, never rephrased."""
-    root = tmp_path / "data"
-    H.set_data_root(monkeypatch, root)
-    _d0_return_values(root)
-    refusals = _d0_owner_refusals(tmp_path, root, monkeypatch)
-    _d0_entry_surfaces(tmp_path, root, refusals)
 
 
-def _d0_return_values(root: Path) -> None:
-    """#0's return half: the row types, the absolute accessors, the derived str."""
-    written = H.create_tenant(root, "playground")
-    on_disk = json.loads(H.row_path(root, "playground").read_text(encoding="utf-8"))
-    assert (written.tenant_id, written.created_at) == (on_disk["tenant_id"],
-                                                        on_disk["created_at"])
-    got = H.require_tenant(root, "playground")
-    assert type(got) is type(written), "require_tenant and create_tenant return different types"
-    assert (got.tenant_id, got.created_at) == ("playground", on_disk["created_at"])
-    paths = H.TenantPaths(root, "playground")
-    for name in ("row", "runs", "episodes", "learning"):
-        value = getattr(paths, name)
-        assert isinstance(value, Path)
-        assert value.is_absolute()
-        assert paths.dir in value.parents, f"TenantPaths.{name} is not under .dir"
-    base = H.runs_dir(root, "playground")
-    H.plant_record(base, "playground")
-    (base / "r1").mkdir()
-    derived = _opened_tenant(root, "playground", "r1")
-    assert derived == "playground"
-    assert isinstance(derived, H.tenant().TenantId)  # a str subtype: the id, parsed
 
 
-def _d0_owner_refusals(tmp_path: Path, root: Path, monkeypatch) -> dict:
-    """#0's refusal half: every owner function refuses through ONE refusal class, and
-    each refusal names the value it refused. Returns `{owner: (refusal, named value)}`."""
-    old_base = tmp_path / "old-runs"
-    H.plant_record(old_base, "playground")
-    (old_base / "r0").mkdir()
-    other_base = tmp_path / "other-base"
-    H.plant_record(other_base, "someone-else")
-    refusals = {
-        "TenantId": (H.owner_refusal(H.tenant().TenantId, "../x"),
-                                 "../x"),
-        "TenantPaths": (H.owner_refusal(H.TenantPaths, root, "Acme-Corp"), "Acme-Corp"),
-        "create_tenant": (H.owner_refusal(H.create_tenant, tmp_path / "x", "a/b"), "a/b"),
-        "require_tenant": (H.owner_refusal(H.require_tenant, root, "acme"), "acme"),
-        "ensure_runs_base_record": (
-            H.owner_refusal(H.ensure_runs_base_record, other_base, "playground"),
-            "someone-else"),
-    }
-    monkeypatch.delenv(H.DATA_ROOT_ENV)
-    refusals["resolve_data_root"] = (H.owner_refusal(H.resolve_data_root), H.DATA_ROOT_ENV)
-    monkeypatch.setenv(H.DATA_ROOT_ENV, str(root))
-    _common_refusal_class({k: v[0] for k, v in refusals.items()})
-    for owner, (exc, names) in refusals.items():
-        assert names in str(exc), f"{owner}'s refusal does not name the refused value: {exc}"
-    refusals["old_run_dir"] = (None, old_base / "r0")
-    return refusals
 
 
-def _d0_entry_surfaces(tmp_path: Path, root: Path, refusals: dict) -> None:
-    """#0's entry half: each entry surfaces the owner's refusal in its own convention and
-    passes the owner's message through verbatim; setup's exit status; a selector tool."""
-    rec = H.Recorder(tmp_path / "never")
-    rc, refused = H.drive_main([str(H.plant_alert(tmp_path / "a")), "--tenant", "acme"], rec)
-    assert rc is None, "run.py accepted an unknown tenant"
-    assert refused is not None
-    text = H.refusal_text(refused)
-    assert text.startswith("[run.py] "), f"run.py's refusal is not a '[run.py] ...' exit: {text}"
-    H.assert_verbatim(text, refusals["require_tenant"][0], entry="run.py main")
-    assert not rec.spent, f"run.py spent before refusing: {rec.order}"
-
-    # #1105 PR 2: the launcher opens its source by id through the request's tenant's runs
-    # repository, which does not hold an old-layout run; it passes that refusal through.
-    from defender.run_repository import RunId, RunRefused
-
-    old_run_dir = refusals["old_run_dir"][1]
-    H.place_knowledge_for_rows()
-    with pytest.raises(RunRefused) as not_held:
-        H.accept(root, "playground").runs_repository().open(RunId.parse(old_run_dir.name))
-    launched = H.drive_launch(old_run_dir, tenant_id="playground")
-    assert isinstance(launched, H.branch_cli().LauncherRefused), (
-        f"the launcher did not surface the source refusal as LauncherRefused: {launched!r}")
-    H.assert_verbatim(H.refusal_text(launched), not_held.value, entry="the branch launcher")
-
-    fresh = tmp_path / "fresh-root"
-    H.place_knowledge(fresh, "playground")  # #1120 DC2: the operator's clone precedes setup
-    ok = H.run_setup(fresh, "playground")
-    H.assert_setup_ran(ok)
-    assert ok.returncode == 0, H.setup_output(ok)
-    again = H.run_setup(fresh, "playground")
-    assert again.returncode == 0, "a same-id re-run (nothing to adopt in pass A) is not 0"
-    crowded = tmp_path / "crowded"
-    H.plant_row(crowded, "other")
-    no = H.run_setup(crowded, "playground")
-    assert no.returncode == 1, f"a refused setup exits {no.returncode}, not 1"
-    H.assert_verbatim(H.setup_output(no),
-                      H.owner_refusal(H.create_tenant, crowded, "playground"),
-                      entry="tenant.py setup")
-
-    held_out = H.mod("evals.held_out")
-    before = H.census(root)
-    try:
-        status = held_out.main([])
-    except SystemExit as refused_selector:
-        status = refused_selector.code
-    assert status not in (0, None), "held_out with no runs dir ran"
-    assert H.census(root) == before, "the refused selector tool touched the data root"

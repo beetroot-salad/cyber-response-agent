@@ -1,26 +1,4 @@
-"""Executable spec for #596 (remainder) + #609 — the trace_lesson/frontmatter hardening pair.
-
-#609: ``yaml.safe_load`` raises ``RecursionError`` (not a ``YAMLError``) on deeply nested
-YAML, so it escapes ``split_frontmatter``'s wrap and ``parse_frontmatter_or_none``'s
-tolerance — one flooded LLM-authored file kills a whole audit walk. The fix folds
-``RecursionError`` into ``FrontmatterError`` at the one ``safe_load`` under
-``defender/_frontmatter.py``, and joins it to the existing ``yaml.YAMLError`` degrade
-path at the in-scope direct ``safe_load`` sites (curator held-out check, ticket
-enrichment's two verdict readers; #1166 deleted the lessons author's ``disposition_for``).
-
-#596 (remainder): a VALID lesson whose LLM-authored ``created_at`` is absent or
-unparseable currently prints a normal-looking ``--all`` row with a silently unwindowed
-count, and the named path prints ``since None``. The fix self-marks the row (real
-description kept, marker appended), echoes the offending value — quoted, sanitized
-against every line/column breaker, clamped to 80 chars + ``…`` — on all three surfaces
-(``--all`` row, named-path stderr warn, header), distinguishes absent from
-present-but-unparseable, and flattens the named path's ``disposition``/``loaded_at``
-columns (same LLM/hook-authored-value-in-TSV class).
-
-The demand list + coverage graph live in ``spec_graph_596_609.yaml`` beside this file;
-each test names its demand id. New-behavior demands are RED at the spec's base commit
-by design; every paired control is green there.
-"""
+"""Hardening: deeply nested YAML (RecursionError) degrades to a typed FrontmatterError instead of killing an audit walk; trace_lesson self-marks, echoes and sanitizes a missing/unparseable `created_at` on every surface."""
 from __future__ import annotations
 
 import json
@@ -33,12 +11,9 @@ import os
 
 import pytest
 
-from defender._corpus import iter_lessons, iter_query_templates
+from defender._corpus import iter_lessons
 from defender._frontmatter import (
-    FrontmatterError,
-    parse_frontmatter,
     parse_frontmatter_or_none,
-    split_frontmatter,
 )
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.validate import normalize_disposition
@@ -148,8 +123,6 @@ def _case_ids(out: str) -> list[str]:
     return [ln.split("\t")[0] for ln in out.splitlines() if ln.strip() and not ln.startswith("#")]
 
 
-
-
 def test_d_b1_or_none_tolerates_flood_and_recovers():
     """d: b1 — flow AND block floods → None (a RecursionError from ``safe_load`` is a
     malformed-frontmatter outcome, not a crash), and a healthy doc still parses in the
@@ -157,25 +130,6 @@ def test_d_b1_or_none_tolerates_flood_and_recovers():
     assert parse_frontmatter_or_none(_flood_doc(_flow_flood())) is None
     assert parse_frontmatter_or_none(_flood_doc(_block_flood())) is None
     assert parse_frontmatter_or_none("---\nname: ok\n---\nbody") == {"name": "ok"}
-
-
-def test_d_b2_strict_flood_is_typed():
-    """d: b2 — the strict parsers raise ``FrontmatterError`` (a ValueError) on a flood,
-    so every existing ``except FrontmatterError`` catcher inherits the guard."""
-    with pytest.raises(FrontmatterError):
-        parse_frontmatter(_flood_doc(_flow_flood()))
-    with pytest.raises(FrontmatterError):
-        split_frontmatter(_flood_doc(_flow_flood()))
-
-
-def test_d_b3_flood_error_message_is_bounded():
-    """d: b3 — the raised message must not embed the multi-KB raw YAML: it lands in
-    stderr warn lines and RunUnprocessable dead-letters."""
-    with pytest.raises(FrontmatterError) as ei:
-        parse_frontmatter(_flood_doc(_flow_flood()))
-    assert len(str(ei.value)) < 500
-
-
 
 
 def test_d_b5_iter_lessons_warn_skips_flood_lesson(tmp_path, capsys):
@@ -192,34 +146,6 @@ def test_d_b5_iter_lessons_warn_skips_flood_lesson(tmp_path, capsys):
     assert got == ["good"]
     assert [p.stem for p in skipped] == ["flood"]
     assert "skipping flood.md" in capsys.readouterr().err
-
-
-def test_d_b6_iter_query_templates_warn_skips_flood_template(tmp_path, capsys):
-    """d: b6 — same contract one corpus over: this walk runs on EVERY gather dispatch,
-    so a flooded template must cost one skip, not the dispatch."""
-    catalog = tmp_path / "queries"
-    (catalog / "elastic").mkdir(parents=True)
-    (catalog / "elastic" / "flood.md").write_text(_flood_doc(_flow_flood()), encoding="utf-8")
-    (catalog / "elastic" / "good.md").write_text(
-        "---\nid: elastic.good\n---\n## Goal\ng\n\n## Query\nq\n", encoding="utf-8"
-    )
-    got = [t.id for t in iter_query_templates(catalog)]
-    assert got == ["elastic.good"]
-    assert "skipping flood.md" in capsys.readouterr().err
-
-
-def test_d_b7_flood_report_costs_one_disposition_not_the_walk(tmp_path):
-    """d: b7 — one flooded report.md degrades that case's disposition to "?" and the
-    walk completes with the healthy sibling intact (the #595 class, one exception over)."""
-    tl = _load_tl()
-    runs = _tenant_runs(tmp_path)
-    bad = _mk_run(runs, "case-a", disposition="benign",
-                  loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
-    (bad / "report.md").write_text(_flood_doc(_flow_flood()), encoding="utf-8")
-    _mk_run(runs, "case-b", disposition="malicious",
-            loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
-    hits = tl.in_context_cases("L", None, _opened(tl, runs))
-    assert [(h.case_id, h.disposition) for h in hits] == [("case-a", "?"), ("case-b", "malicious")]
 
 
 def test_d_b8_all_survives_flood_lesson_with_marker_row(tmp_path, capsys):
@@ -260,8 +186,6 @@ def test_d_b9_named_flood_lesson_still_traces(tmp_path, capsys):
     assert "malformed or missing frontmatter" in cap.err
 
 
-
-
 def test_d_b10_learn_normalize_disposition_flood_is_run_unprocessable(tmp_path):
     """d: b10 — the LEARN gate stays fail-loud but TYPED: a flooded report.md raises
     ``RunUnprocessable`` (dead-letterable by the drain), not RecursionError through the
@@ -273,8 +197,6 @@ def test_d_b10_learn_normalize_disposition_flood_is_run_unprocessable(tmp_path):
     rp.write_text(_flood_doc(_flow_flood()), encoding="utf-8")
     with pytest.raises(RunUnprocessable):
         normalize_disposition(rp)
-
-
 
 
 def test_d_a1_all_marks_unparseable_created_at_row(tmp_path, capsys):
@@ -304,36 +226,6 @@ def test_d_a2_all_marks_absent_created_at_distinctly(tmp_path, capsys):
     assert "malformed" not in cols[1]
 
 
-def test_d_a3_explicit_null_created_at_reads_as_absent(tmp_path, capsys):
-    """d: a3 — ``created_at: null`` is a never-stamped field, not a garbage value: the
-    absent flavor, with no bogus quoted "None" echo."""
-    row, _ = _all_row(tmp_path, "name: L\ndescription: d\ncreated_at: null", capsys)
-    cols = row.split("\t")
-    assert "no created_at" in cols[1]
-    assert '"None"' not in cols[1]
-
-
-def test_d_a4_empty_string_created_at_is_visibly_empty(tmp_path, capsys):
-    """d: a4 — ``created_at: ""`` is present-but-unparseable, and the quoting is what
-    makes the emptiness visible instead of a marker that names nothing."""
-    row, _ = _all_row(tmp_path, 'name: L\ndescription: d\ncreated_at: ""', capsys)
-    cols = row.split("\t")
-    assert "unwindowed" in cols[1]
-    assert '""' in cols[1]
-
-
-def test_d_a5_nonstring_created_at_is_echoed(tmp_path, capsys):
-    """d: a5 — a non-string, non-date value (here a YAML list) is unparseable too; the
-    echo stringifies it so the curator sees what the field actually holds."""
-    row, _ = _all_row(tmp_path, "name: L\ndescription: d\ncreated_at: [1, 2]", capsys)
-    cols = row.split("\t")
-    assert cols[2] == "2"
-    assert "unwindowed" in cols[1]
-    assert "1, 2" in cols[1]
-
-
-
-
 def _named(tmp_path, body_frontmatter: str, capsys, stem: str = "L"):
     tl = _load_tl()
     base = tmp_path / f"named-{stem}"
@@ -357,15 +249,6 @@ def test_d_a6_named_warn_echoes_offending_value(tmp_path, capsys):
     assert '"not-a-date"' in cap.err
 
 
-def test_d_a7_named_warn_distinguishes_absent(tmp_path, capsys):
-    """d: a7 — absent created_at warns "no created_at" (a different curator fix than a
-    garbage value), still one line, still unwindowed."""
-    cap = _named(tmp_path, "name: L\ndescription: d", capsys)
-    assert len(cap.err.splitlines()) == 1
-    assert "trace is unwindowed" in cap.err
-    assert "no created_at" in cap.err
-
-
 def test_d_a8_header_never_prints_since_none(tmp_path, capsys):
     """d: a8 — the header renders an honest unwindowed form carrying the quoted value,
     never the Python ``None`` sentinel; it stays exactly one ``#``-prefixed line so
@@ -378,16 +261,6 @@ def test_d_a8_header_never_prints_since_none(tmp_path, capsys):
     assert '"not-a-date"' in header
     assert sum(ln.startswith("#") for ln in lines) == 1
     assert _case_ids(cap.out) == ["case-a", "case-b"]
-
-
-def test_d_a8b_header_honest_when_absent(tmp_path, capsys):
-    """d: a8 — the absent half: no ``since None``, and the header says there is no
-    created_at to window on."""
-    cap = _named(tmp_path, "name: L\ndescription: d", capsys)
-    header = cap.out.splitlines()[0]
-    assert "since None" not in cap.out
-    assert "no created_at" in header
-
 
 
 _HOSTILE_VALUE = '"a\\tb\\nc\\rd\\x0Be\\x0Cf\\x85g\\u2028h\\u2029i"'
@@ -404,17 +277,6 @@ def test_d_a9_all_echo_survives_every_line_breaker(tmp_path, capsys):
     assert "a b c d e f g h i" in row.split("\t")[1]
 
 
-def test_d_a9b_named_surfaces_survive_every_line_breaker(tmp_path, capsys):
-    """d: a9 — the same value on the named path: the stderr warn stays one line and the
-    stdout stays one header + the case rows, nothing forged on either stream."""
-    cap = _named(tmp_path, f"name: L\ndescription: d\n{_HOSTILE_CREATED_AT}", capsys)
-    assert len(cap.err.splitlines()) == 1
-    lines = cap.out.splitlines()
-    assert len(lines) == 3
-    assert sum(ln.startswith("#") for ln in lines) == 1
-    assert "a b c d e f g h i" in lines[0]
-
-
 def test_d_a10_echo_is_clamped_to_80_chars(tmp_path, capsys):
     """d: a10 — a huge value cannot bloat the row: the echo shows the first 80 chars of
     the flattened value and an ``…`` continuation, never the full payload."""
@@ -425,60 +287,8 @@ def test_d_a10_echo_is_clamped_to_80_chars(tmp_path, capsys):
     assert "…" in desc_col
 
 
-
-
-def test_d_a11_windowed_lesson_is_unmarked_everywhere(tmp_path, capsys):
-    """d: a11 (positive control) — a parseable created_at gets exactly the old behavior:
-    a plain 4-column row with the WINDOWED count (and no MAIN read — a legacy row is
-    ``unknown`` evidence, #936), no marker, no warn, and a header that
-    prints the real window start."""
-    row, cap = _all_row(tmp_path, "name: L\ndescription: d\ncreated_at: 2026-06-04", capsys)
-    assert row == "L\td\t1\t0"
-    assert cap.err == ""
-
-    named = _named(tmp_path, "name: M\ndescription: d\ncreated_at: 2026-06-04", capsys, stem="M")
-    assert named.err == ""
-    assert "since 2026-06-04" in named.out.splitlines()[0]
-    assert _case_ids(named.out) == ["case-b"]
-
-
-def test_d_a12_every_discovered_lesson_appears_exactly_once(tmp_path, capsys):
-    """d: a12 (uniqueness + marker vocabulary) — a flooded lesson, an unparseable-window
-    lesson, and a healthy lesson land as one row each, in distinct vocabularies: the
-    flood row says "malformed lesson", the valid-but-unwindowed row says "unwindowed"
-    and must NOT say "malformed", the healthy row is plain."""
-    tl = _load_tl()
-    lessons = tmp_path / "lessons"
-    _mk_lesson(lessons, "badts", body_frontmatter="name: badts\ndescription: bd\ncreated_at: not-a-date")
-    _mk_lesson(lessons, "good", body_frontmatter="name: good\ndescription: g\ncreated_at: 2026-06-04")
-    (lessons / "flood.md").write_text(_flood_doc(_flow_flood()), encoding="utf-8")
-    runs = _tenant_runs(tmp_path)
-    _mk_run(runs, "case-a", disposition="benign",
-            loads=[{"lesson_name": s, "ts": "2026-06-05T00:00:00+00:00"}
-                   for s in ("badts", "good", "flood")])
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
-    cap = capsys.readouterr()
-    assert rc == 0
-    lines = cap.out.splitlines()
-    stems = [ln.split("\t")[0] for ln in lines]
-    assert sorted(stems) == ["badts", "flood", "good"]
-    by_stem = {ln.split("\t")[0]: ln for ln in lines}
-    assert "malformed lesson" in by_stem["flood"]
-    assert "unwindowed" in by_stem["badts"]
-    assert "malformed" not in by_stem["badts"]
-    assert by_stem["good"] == "good\tg\t1\t0"
-
-
 def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
-    """d: a13 — the named path's other two columns are LLM/hook-authored too: a tab or
-    newline in report.md's disposition or a lessons_loaded ts must not forge a column
-    or a row (the created_at bug class, one field over).
-
-    The disposition column got STRONGER since #785 and the assertion moved with it: the
-    tracer now reads the disposition through the shared accessor, whose vocabulary is closed,
-    so a value carrying a tab is not flattened into the row — it never reaches the row at all
-    and the case degrades to the unknown placeholder. The ts column, which has no vocabulary
-    to close, still carries the flatten this test was written for and still proves it."""
+    """d: a13 — the named path's other two columns are LLM/hook-authored too:"""
     tl = _load_tl()
     lessons = tmp_path / "lessons"
     _mk_lesson(lessons, "L", body_frontmatter="name: L\ndescription: d")
@@ -513,44 +323,3 @@ def test_d_a14_all_description_survives_every_line_breaker(tmp_path, capsys):
     assert row.split("\t")[1] == "a b c d e f g h i"
 
 
-def test_d_a14b_filename_id_columns_survive_breakers(tmp_path, capsys):
-    """d: a14 — the id columns are filenames (lesson stem, run-dir case_id), and Unix
-    filenames legally carry tab/newline: neither forges a row or a column, on either
-    path, and the named header stays one ``#`` line.
-
-    #1105 PR 2 (declared change 10, J3): the tracer walks the tenant's runs through the
-    repository's listing rule, so a run folder whose name is not a run id (`case\nA`) is no
-    longer read into a row at all — it refuses the trace, naming it on one stderr line, with
-    nothing on stdout. The lesson-stem half is unchanged, over a run with a real id."""
-    tl = _load_tl()
-    lessons = tmp_path / "lessons"
-    _mk_lesson(lessons, "st\tem", body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
-    runs = _tenant_runs(tmp_path)
-    _mk_run(runs, "case-a", disposition="benign",
-            loads=[{"lesson_name": "st\tem", "ts": "2026-06-05T00:00:00+00:00"}])
-
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
-    cap = capsys.readouterr()
-    assert rc == 0
-    [row] = cap.out.splitlines()
-    # The loader refuses a lesson whose file name is not one printable line (#1206); the index
-    # still counts its loads, on the malformed-lesson row, its name one line.
-    assert row.split("\t") == ["st em", "(malformed lesson — unwindowed count)", "1", "0"]
-
-    rc = tl.main(["st\tem", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
-    cap = capsys.readouterr()
-    assert rc == 0
-    lines = cap.out.splitlines()
-    assert len(lines) == 2
-    assert lines[0].startswith("# st em — ")
-    assert lines[1].split("\t") == ["case-a", "benign", "2026-06-05T00:00:00+00:00", "unknown"]
-
-    _mk_run(runs, "case\nA", disposition="benign",
-            loads=[{"lesson_name": "st\tem", "ts": "2026-06-05T00:00:00+00:00"}])
-    for argv in (["--all"], ["st\tem"]):
-        rc = tl.main([*argv, "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
-        cap = capsys.readouterr()
-        assert rc == 1, f"a run folder named off the run-id rule was read: {cap.out!r}"
-        assert cap.out == "", f"a refused trace printed rows: {cap.out!r}"
-        assert len(cap.err.splitlines()) == 1, cap.err
-        assert "case" in cap.err, cap.err

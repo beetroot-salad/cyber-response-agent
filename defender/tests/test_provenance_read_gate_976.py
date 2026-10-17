@@ -1,16 +1,4 @@
-"""The run's provenance stamp is readable by no agent, on both read surfaces (#976).
-
-Modelled on `test_wire_log_read_gate.py`, which pins the same posture for the wire log, and
-built on its fixtures for the same reason: the deny is only interesting NEXT TO a positive
-control, because a gate that also refused `investigation.md` would prove nothing.
-
-WHY THIS FILE EXISTS AT ALL, given the stamp was already suppressed from the workspace map:
-suppression removes a NAME from a listing, not a file from reach. The run root sits inside
-MAIN's and GATHER's `under(run, SEG)` read shape and the JUDGE's `cat` scope is
-`under(run, TREE)`, so before this deny a guessed filename walked straight to the host's
-commit and up to fifty repo-relative paths of somebody's uncommitted work — unframed, because
-a host-written file is never tagged by `is_untrusted_read`.
-"""
+"""The run's provenance stamp is readable by no agent on either read surface, next to a positive control."""
 from __future__ import annotations
 
 import pytest

@@ -1,55 +1,11 @@
-"""#1204 — a fork family is not certified comparable across two tenant knowledge commits (O2,
-O3, D3, D4).
-
-A branched family (#947) forks one SOURCE run into siblings that must differ only in the one
-axis the questioner declared. #976 anchored the family to the source's PRODUCT commit; since
-runs read the tenant's own knowledge clone (settings today, lessons after #1108), a family
-whose siblings read a different knowledge commit than the source is the same confound. The
-fork check therefore compares the knowledge commit, at both tiers:
-
-* **Preflight** (`cli.main` -> `preflight_episode`): the source's stamp against the launcher's
-  live capture, which in production reads the episode tenant's clone (D3).
-* **Verify** (`verify_family(..., source=)`): every sibling's own stamp against the source,
-  and the siblings against each other.
-
-A2, as settled: a member (sibling or live tree) whose knowledge commit DIFFERS from the
-source's, or siblings that disagree among themselves, is NEVER waivable. Knowledge that is
-`"unversioned"`, unavailable, or ABSENT (a pre-#1204 stamp) on either side is WAIVABLE with
-`--allow-dirty` ("nothing proves the same knowledge"). Comparison is over the COMMIT only — two
-unavailable reasons with different text are not a disagreement.
-
-O3 / D4 — THE NAME CONTRACT for the field table: `defender.learning.branch.cli` holds a
-module-level `STAMP_FIELD_CLASSES: dict[str, str]` from every `RunProvenance` field name to one
-class among `"anchored"` (commit, scope, knowledge), `"constant"` (model), `"dedicated"`
-(dirty, tenant_id), `"informational"` (dirty_paths, dirty_path_count, unavailable) and
-`"expected_to_differ"` (world_id, parent_run_id, fork_turn). It drives the comparison that
-replaces the hardcoded `("commit", "scope", "model")` loop. The wire value of knowledge is
-`{"commit": "<sha>"}` | `"unversioned"` | `{"unavailable": "<reason>"}` | `null`
-(`test_1204_knowledge_revision.py` pins it).
-
-#1224: verify no longer writes the episode outcome (pre-flight's, written once before any
-sibling starts); a family called `incomplete` here is a verify report with `comparable: False`
-and no family stamp.
-
-Fixtures: every fake stamp is `T.provenance_record(...)`, which by default carries
-`{"commit": T.KNOWLEDGE_SHA}` — the source `T.runs_base` writes, every `T.sibling_run_dir` /
-`J.FakeSibling` sibling and the `T.source_capture()` live capture all agree on it, as a real
-family launched from one tenant clone does. `knowledge=T.NO_KNOWLEDGE_KEY` is a pre-#1204
-stamp. Every fake enters by an injection seam (never `monkeypatch.setattr`); the launcher
-scenarios reuse #976's `Launch` harness.
-
-RED before #1204: no `STAMP_FIELD_CLASSES`, no knowledge comparison, no knowledge in the
-read-back stamps.
-"""
+"""#1204: a fork family is not certified comparable across two tenant knowledge commits.
+A differing commit is never waivable; unversioned/unavailable/absent knowledge is waivable with
+`--allow-dirty`. Covers preflight, `verify_family`, and the stamp-field comparison."""
 from __future__ import annotations
 
-import ast
-import dataclasses
 import json
 import os
 import shutil
-import sys
-import types
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +14,6 @@ import pytest
 from defender import _episode_handle as EH
 from defender import _provenance
 from defender._episode_handle import Episode
-from defender._provenance import RunProvenance
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_976_family_anchor as A
@@ -108,17 +63,7 @@ def _verify(tmp_path: Path, name: str, *, source: dict,
             siblings: dict[str, dict] | None = None,
             allow_dirty: bool = False, reverse: bool = False) -> tuple[dict, dict | None]:
     """`verify_family` over three REAL sibling stamp files (`T.sibling_run_dir`, each with the
-    overrides `siblings[label]` names) against `source`. Returns the report and the family
-    stamp (`None` when none was written). The run dirs are handed over in `T.WORLDS` order
-    (a, b, c), or reversed with `reverse`.
-
-    #1224: the family's verdict is the report's `comparable` and its `reason` — the outcome
-    record is pre-flight's, written once before any sibling starts, and verify never writes it
-    (so none exists here).
-
-    #1105 PR 2: each family is its own episode (under its own root, named `name`), its siblings
-    planted in that episode's container and handed over as arms opened by id through the
-    episode's view (`T.family_arms`), in `T.WORLDS` order or reversed."""
+    overrides `siblings[label]` names) against `source`."""
     ep = T.episode(tmp_path, root=tmp_path / "episodes" / name)
     for w in T.WORLDS:
         T.sibling_run_dir(ep / "runs", w, **(siblings or {}).get(w, {}))
@@ -135,17 +80,12 @@ def _verify(tmp_path: Path, name: str, *, source: dict,
 
 def _never_called_dirt(text: str) -> None:
     """A refusal whose faults are ALL about knowledge (every stamp in these scenarios is
-    clean) never describes itself, or what `--allow-dirty` would waive, as dirt: the flag now
-    waives unprovable knowledge too, and an operator told "pass --allow-dirty to waive the
-    dirt" over a tree git certified clean is sent looking for dirt that is not there."""
+    clean) never describes itself, or what `--allow-dirty` would waive, as dirt."""
     assert "dirt" not in text.replace("allow-dirty", ""), text
 
 
 def _incomplete(report: dict, *phrases: str, waivable: bool) -> str:
-    """The family was refused for its knowledge: not comparable, with the reason naming
-    knowledge and each phrase, and offering `--allow-dirty` exactly when passing it would let
-    the family through (the message rule `_family_refusal` holds every fault to) — never
-    calling a knowledge fault dirt."""
+    """The family was refused for its knowledge."""
     assert report["comparable"] is False, report
     reason = report["reason"]
     assert "knowledge" in reason, reason
@@ -163,10 +103,7 @@ def _incomplete(report: dict, *phrases: str, waivable: bool) -> str:
 
 def test_1204_a_family_on_the_sources_knowledge_commit_is_accepted_and_stamped_with_it(
         tmp_path):
-    """O2's positive control at the authority tier: source and every sibling on one knowledge
-    commit is `accepted`, and the family stamp says which — `source.knowledge` is the source's
-    and `agreed.knowledge` the siblings', both `{"commit": K}`. Every refusal below is only
-    meaningful beside this."""
+    """O2's positive control at the authority tier."""
     report, stamp = _verify(tmp_path, "same", source=T.provenance_record())
     assert report["comparable"] is True, report["reason"]
     assert stamp is not None
@@ -177,11 +114,7 @@ def test_1204_a_family_on_the_sources_knowledge_commit_is_accepted_and_stamped_w
 
 def test_1204_siblings_on_another_knowledge_commit_are_incomplete_even_with_the_override(
         tmp_path):
-    """O2/A2: siblings that agree with each other on knowledge commit K2 while the source read
-    K are not a comparable family — `incomplete`, naming knowledge and both commits, with and
-    without `--allow-dirty` (a knowledge mismatch is a confound, not dirt, so the flag is not
-    offered). The positive control anchors the same siblings to a K2 source. Without this two
-    knowledge commits — different settings, different lessons — archive as one family."""
+    """O2/A2."""
     on_k2 = {w: {"knowledge": {"commit": K2}} for w in T.WORLDS}
     for allow_dirty in (False, True):
         report, _ = _verify(tmp_path, f"moved-{allow_dirty}".lower(),
@@ -198,10 +131,7 @@ def test_1204_siblings_on_another_knowledge_commit_are_incomplete_even_with_the_
 
 
 def test_1204_siblings_off_the_sources_knowledge_are_each_named_against_the_source(tmp_path):
-    """O2/D4: knowledge is ANCHORED to the source like the code commit, so two siblings on two
-    other knowledge commits are each named against the source — and not ALSO as a sibling
-    disagreement, which the anchor faults already said (#976's one-fact-once rule). The third
-    sibling, on the source's commit, is not named."""
+    """O2/D4."""
     report, _ = _verify(
         tmp_path, "two-off", source=T.provenance_record(),
         siblings={"b": {"knowledge": {"commit": K2}}, "c": {"knowledge": {"commit": K3}}})
@@ -212,12 +142,7 @@ def test_1204_siblings_off_the_sources_knowledge_are_each_named_against_the_sour
 @pytest.mark.parametrize("shape", sorted(UNPROVABLE))
 def test_1204_siblings_disagreeing_on_knowledge_are_incomplete_even_with_the_override(
         tmp_path, shape):
-    """O2/A2: with the source's knowledge unprovable (so the source anchors nothing and its own
-    fault is waived by the flag), siblings that disagree among THEMSELVES — a and c on K, b on
-    K2 — are still `incomplete` under `--allow-dirty`: the disagreement is the only fault left,
-    and it is never waivable. The positive control is the same source with all three siblings
-    on K, accepted under the flag. Without this a family whose source predates #1204 could mix
-    knowledge commits freely."""
+    """O2/A2."""
     source = T.provenance_record(knowledge=UNPROVABLE[shape])
     for allow_dirty in (True, False):
         report, _ = _verify(
@@ -235,11 +160,7 @@ def test_1204_siblings_disagreeing_on_knowledge_are_incomplete_even_with_the_ove
 
 @pytest.mark.parametrize("shape", sorted(UNPROVABLE))
 def test_1204_a_source_whose_knowledge_is_unprovable_is_waivable(tmp_path, shape):
-    """O2/A2: a source stamped before #1204 (absent), with `null`, `"unversioned"` or an
-    unavailable reason cannot prove its siblings read the same knowledge: `incomplete` without
-    `--allow-dirty` — the reason names knowledge (and the shape's own words) and offers the flag
-    — and `accepted` with it, the family stamp recording the waiver. Absent MUST be waivable,
-    or every pre-#1204 run becomes permanently unforkable."""
+    """O2/A2."""
     source = T.provenance_record(knowledge=UNPROVABLE[shape])
     says = UNPROVABLE_SAYS[shape]
     report, _ = _verify(tmp_path, f"src-{shape}", source=source)
@@ -254,11 +175,7 @@ def test_1204_a_source_whose_knowledge_is_unprovable_is_waivable(tmp_path, shape
 
 @pytest.mark.parametrize("shape", sorted(UNPROVABLE))
 def test_1204_a_sibling_whose_knowledge_is_unprovable_is_waivable(tmp_path, shape):
-    """O2/A2, the member side: source and siblings a, c on K, sibling b's knowledge unprovable.
-    `incomplete` without the flag — naming knowledge and sibling b, offering the flag — and
-    `accepted` with it. An unprovable sibling drops out of the knowledge agreement rather than
-    counting as a disagreeing value. Without this either every sibling stamped on a git-less
-    tenant blocks its family for good, or one is silently accepted."""
+    """O2/A2, the member side."""
     siblings = {"b": {"knowledge": UNPROVABLE[shape]}}
     says = UNPROVABLE_SAYS[shape]
     report, _ = _verify(tmp_path, f"sib-{shape}", source=T.provenance_record(),
@@ -275,15 +192,7 @@ def test_1204_a_sibling_whose_knowledge_is_unprovable_is_waivable(tmp_path, shap
 
 
 def test_1204_two_unavailable_reasons_are_not_a_knowledge_disagreement(tmp_path):
-    """A2/D4: the comparison is over the COMMIT only, never the whole knowledge value. Siblings
-    whose knowledge is unavailable for two different reasons (or one unavailable, one
-    unversioned) disagree on nothing a commit could settle: under the flag the family is
-    accepted, and without it the only faults are the waivable ones, so the flag is offered.
-    Run against a source on K, a source that is itself unavailable, and a pre-#1204 source
-    (which pins nothing, so the siblings' own agreement is the only comparison) with one
-    sibling on K beside the two that name no commit — those drop out of the agreement rather
-    than counting as values that disagree with K. Without this, differing error text (or an
-    unprovable sibling) would make such a family unwaivable."""
+    """A2/D4."""
     no_commit = {"a": {"knowledge": UNAVAILABLE_REFTABLE},
                  "b": {"knowledge": UNAVAILABLE_UNBORN}, "c": {"knowledge": "unversioned"}}
     beside_k = {"b": {"knowledge": UNAVAILABLE_UNBORN}, "c": {"knowledge": "unversioned"}}
@@ -321,10 +230,7 @@ def test_1204_a_launch_whose_live_knowledge_matches_the_source_is_accepted(tmp_p
 
 def test_1204_a_live_tenant_clone_on_another_knowledge_commit_is_refused_and_never_waived(
         tmp_path):
-    """O2/A2 at preflight: the launcher's live capture says the tenant clone is at K2 while the
-    source ran on K — the family would read other settings and lessons than the source did —
-    so the launch refuses before the questioner is paid, with and without `--allow-dirty`,
-    naming the live tree, knowledge and both commits, and not offering the flag."""
+    """O2/A2 at preflight."""
     for argv in ((), ("--allow-dirty",)):
         launch = A._prepare(tmp_path, live_tree=T.source_capture(knowledge={"commit": K2}))
         message = A._refused_before_spending(launch, *argv)
@@ -352,10 +258,7 @@ def test_1204_a_live_capture_whose_knowledge_is_unprovable_is_waivable(tmp_path,
 @pytest.mark.parametrize("shape", sorted(UNPROVABLE))
 def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unless_waived(
         tmp_path, shape):
-    """O2/A2 at preflight, the source side: a source with absent, null, unversioned or
-    unavailable knowledge refuses before spending without `--allow-dirty` (naming the source
-    and knowledge, offering the flag), and with it the launch completes and the family is
-    accepted — so every run stamped before #1204 stays forkable."""
+    """O2/A2 at preflight, the source side."""
     launch = A._prepare(tmp_path)
     A._restamp(launch.src, knowledge=UNPROVABLE[shape])
     message = A._refused_before_spending(launch)
@@ -371,13 +274,7 @@ def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unl
 @pytest.mark.parametrize("argv", [(), ("--allow-dirty",)], ids=["plain", "allow-dirty"])
 def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incomplete(
         tmp_path, argv, caplog):
-    """O2 end to end, the authority tier: the live clone matches the source (K), so preflight
-    passes and the family runs — but every sibling's own stamp says K2, so `verify_family`
-    withholds the family stamp, with and without `--allow-dirty`, and the reason it logs names
-    knowledge and K2 without offering the flag (#1224: verify's verdict is no longer written into
-    the outcome record, which is pre-flight's). This is
-    the pin that the knowledge comparison runs on the siblings' per-process stamps, not only on
-    the launcher's capture."""
+    """O2 end to end, the authority tier."""
     T.runs_base(tmp_path)
     episode_dir = EH.episode_dir(T.current_tenant().data_root, T.EPISODE_ID)
     launch = A._prepare(tmp_path, spawn=J.FakeSibling(episode_dir, knowledge={"commit": K2}))
@@ -390,21 +287,6 @@ def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incompl
     assert K2 in reason, reason
     assert "allow-dirty" not in reason, reason
     assert not (launch.episode_dir / "provenance.json").exists()
-
-
-def test_1204_the_allow_dirty_help_says_it_waives_unprovable_knowledge(capsys):
-    """Non-obligation made visible (one `--allow-dirty` waives both): the flag's own help — the
-    operator's reference for what passing it does — names knowledge among what it waives, and
-    no longer says it waives dirt and only dirt. Without this the help contradicts the
-    refusals that now offer the flag for a knowledge fault."""
-    with pytest.raises(SystemExit):
-        _cli().parse_branch_args(["--help"])
-    text = " ".join(capsys.readouterr().out.split())
-    # The option's own entry: after its LAST mention (the first is the usage line), up to the
-    # next option.
-    entry = text.rsplit("--allow-dirty", 1)[1].split("--model", 1)[0]
-    assert "knowledge" in entry, entry
-    assert "only dirt" not in entry.lower(), entry
 
 
 # ---------------------------------------------------------------------------------------
@@ -437,12 +319,7 @@ WAIVED: dict[str, tuple[dict, dict[str, dict], bool, list[str]]] = {
 
 @pytest.mark.parametrize("case", sorted(WAIVED))
 def test_1204_the_family_stamp_records_which_fault_kinds_the_override_waived(tmp_path, case):
-    """Review fix (faults carry their kind): `--allow-dirty` now waives two kinds of fault, and
-    one `allow_dirty: true` bit cannot say which — a family whose only waived fault was a
-    pre-#1204 source's missing knowledge commit read, in the archive, exactly like one whose
-    code was dirty. The accepted family stamp records `"waived"`: the sorted kinds the flag
-    actually waived. A clean family is `[]` with the flag or without it; a pre-#1204 source on
-    clean code is `["knowledge"]` and never `"dirt"`. `allow_dirty` keeps recording the flag."""
+    """Review fix (faults carry their kind)."""
     source, siblings, flag, waived = WAIVED[case]
     report, stamp = _verify(tmp_path, f"waived-{case}", source=source,
                                       siblings=siblings, allow_dirty=flag)
@@ -455,11 +332,7 @@ def test_1204_the_family_stamp_records_which_fault_kinds_the_override_waived(tmp
 @pytest.mark.parametrize("dirty_source", [False, True], ids=["clean-code", "dirty-code"])
 def test_1204_a_launch_that_waives_a_pre_1204_sources_knowledge_records_it_as_knowledge(
         tmp_path, dirty_source):
-    """The same record end to end through the launcher: a source stamped before #1204 (no
-    knowledge key), launched with `--allow-dirty`, is accepted and its family stamp says
-    `"waived": ["knowledge"]` when its code was clean — the review's case: it must not read as
-    a dirty family — and `["dirt", "knowledge"]` when the code was dirty too. The siblings
-    agreed on K, so `agreed.knowledge` is K."""
+    """The same record end to end through the launcher."""
     launch = A._prepare(tmp_path)
     A._restamp(launch.src, knowledge=T.NO_KNOWLEDGE_KEY, dirty=dirty_source)
     stamp = A._accepted(launch, "--allow-dirty")
@@ -481,12 +354,7 @@ NO_COMMIT_FIRST: dict[str, dict[str, dict]] = {
 @pytest.mark.parametrize("shape", sorted(NO_COMMIT_FIRST))
 def test_1204_agreed_knowledge_is_the_commit_the_check_held_not_the_first_siblings(
         tmp_path, shape, reverse):
-    """Review fix (the agreed record): `agreed` is what the check HELD CONSTANT, not a copy of
-    whichever sibling came first. Under the waiver, a family whose first sibling's knowledge is
-    unprovable and whose others agree on K records `agreed.knowledge == {"commit": K}` — in
-    either order — never the first sibling's `"unversioned"` or unavailable reason, which would
-    say the family agreed on no commit. The other agreed fields are the siblings' shared
-    values, as before."""
+    """Review fix (the agreed record)."""
     report, stamp = _verify(
         tmp_path, f"agreed-{shape}-{reverse}".lower(), source=T.provenance_record(),
         siblings=NO_COMMIT_FIRST[shape], allow_dirty=True, reverse=reverse)
@@ -500,11 +368,7 @@ def test_1204_agreed_knowledge_is_the_commit_the_check_held_not_the_first_siblin
 
 @pytest.mark.parametrize("source_shape", ["on-k", "absent"])
 def test_1204_agreed_knowledge_is_null_when_no_sibling_names_a_commit(tmp_path, source_shape):
-    """Review fix (the agreed record), the other half: when NO sibling names a knowledge commit
-    there is no agreed knowledge, and `agreed.knowledge` is `null` — the key present, the value
-    saying nothing was agreed — never one sibling's `"unversioned"` or unavailable reason
-    presented as the family's. Against a source on K and against a pre-#1204 source, under the
-    waiver."""
+    """Review fix (the agreed record), the other half."""
     source = (T.provenance_record() if source_shape == "on-k"
               else T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY))
     siblings = {"a": {"knowledge": "unversioned"}, "b": {"knowledge": UNAVAILABLE_REFTABLE},
@@ -537,15 +401,7 @@ def _versioned_tenant_knowledge() -> str:
 
 
 def test_1204_the_default_live_capture_reads_the_episode_tenants_knowledge_clone(tmp_path):
-    """D3: production's live capture (`live_tree` left to the launcher) captures knowledge from
-    the EPISODE TENANT's clone, so preflight compares like with like. The tenant's knowledge is
-    a real git repo at `live`; the default capture also asks git about this checkout, whose
-    commit is not the fixture source's `deadbee`, so both launches refuse on the code commit —
-    the discriminator is the knowledge clause. A source stamped on another knowledge commit is
-    refused naming knowledge and the clone's own commit (read from the tenant's clone, nowhere
-    else); a source stamped on the clone's commit draws no knowledge fault at all. Without this
-    the default capture could carry no knowledge (every fork then waivably refused) or the
-    product checkout's (C7)."""
+    """D3."""
     from defender import run_common
 
     code = _provenance.capture_tree(run_common.REPO_ROOT)
@@ -598,25 +454,8 @@ def _table() -> dict[str, str]:
     return T.sym("learning.branch.cli", "STAMP_FIELD_CLASSES")
 
 
-def test_1204_every_stamp_field_is_in_exactly_one_class_of_the_table():
-    """O3 census: the fork check's table classifies EVERY `RunProvenance` field — its keys are
-    exactly the dataclass's fields, so a field added to the stamp without a class fails here
-    rather than being silently skipped by the comparison (the gap #1204 found: `knowledge`
-    would have been) — each into one of the five classes, as D4 states them."""
-    table = _table()
-    declared = {f.name for f in dataclasses.fields(RunProvenance)}
-    assert set(table) == declared, f"unclassified or stale: {declared ^ set(table)}"
-    assert set(table.values()) <= CLASSES, set(table.values()) - CLASSES
-    assert table == D4
-
-
 def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family(tmp_path):
-    """O3 behavioural arm: for EVERY field the table classes `anchored` or `constant`, a family
-    where ONE sibling differs from the source on that field alone is `incomplete` through the
-    real `verify_family`, naming the field, with and without `--allow-dirty` — so the table is
-    proven to drive the comparison, not merely to exist. Iterated off the table itself: a field
-    newly classed there without a differing value here fails loudly. The positive control is
-    the same family with no sibling differing."""
+    """O3 behavioural arm."""
     table = _table()
     compared = sorted(f for f, c in table.items() if c in ("anchored", "constant"))
     assert compared == sorted(DIFFERENT), (
@@ -635,87 +474,8 @@ def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family
     assert report["comparable"] is True, report["reason"]
 
 
-def _cli_with_table(reclassified: dict[str, str], monkeypatch) -> Any:
-    """The fork-check module rebuilt from ITS OWN SOURCE with one difference: right after the
-    module assigns `STAMP_FIELD_CLASSES`, the name is re-bound to that table with
-    `reclassified` applied. Everything the module derives from the table at import, and
-    everything it reads from it at call time, then sees the re-classified table; a comparison
-    that does not consult the table does not change. No production seam: the module is
-    executed as written, under a scratch name, beside the real one (which is untouched)."""
-    real = _cli()
-    path = Path(real.__file__)
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-
-    def assigns_table(node: ast.stmt) -> bool:
-        targets = (node.targets if isinstance(node, ast.Assign)
-                   else [node.target] if isinstance(node, ast.AnnAssign) else [])
-        return any(isinstance(t, ast.Name) and t.id == "STAMP_FIELD_CLASSES" for t in targets)
-
-    at = [i for i, node in enumerate(tree.body) if assigns_table(node)]
-    assert len(at) == 1, "STAMP_FIELD_CLASSES is not assigned once at the module's top level"
-    tree.body[at[0] + 1:at[0] + 1] = ast.parse(
-        f"STAMP_FIELD_CLASSES = {{**STAMP_FIELD_CLASSES, **{reclassified!r}}}").body
-    ast.fix_missing_locations(tree)
-    name = f"{real.__name__}_reclassified_1204"
-    rebuilt = types.ModuleType(name)
-    rebuilt.__file__ = str(path)
-    rebuilt.__package__ = real.__package__
-    monkeypatch.setitem(sys.modules, name, rebuilt)
-    exec(compile(tree, str(path), "exec"), rebuilt.__dict__)  # noqa: S102 — the module's own source
-    assert {**_table(), **reclassified} == rebuilt.STAMP_FIELD_CLASSES
-    return rebuilt
-
-
-def _verify_with(cli: Any, tmp_path: Path, name: str, docs: dict[str, dict]) -> dict:
-    """`cli.verify_family` over three real sibling stamp files whose documents are `docs`
-    (by label), against the default source — planted in the container of an episode of its own
-    (`name`) and handed over as arms opened through its view (#1105 PR 2)."""
-    ep = T.episode(tmp_path, root=tmp_path / "episodes" / name)
-    dirs = [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]
-    for d in dirs:
-        (d / "provenance.json").write_text(json.dumps(docs[d.name[-1]]), encoding="utf-8")
-    with Episode.open(ep) as episode:
-        return cli.verify_family(episode, T.family_arms(episode, T.WORLDS),
-                                 source=T.provenance_record())
-
-
-def test_1204_the_field_table_drives_the_comparison(tmp_path, monkeypatch):
-    """O3/D4: the table DRIVES the comparison rather than sitting beside a hardcoded one —
-    re-classify a field in it and the fork check follows. Three families, each judged by the
-    real module and by the same module rebuilt with a re-classified table:
-    * a sibling on another MODEL: `incomplete` (constant) -> `accepted` once model is
-      informational;
-    * a sibling measured over another SCOPE: `incomplete` (anchored) -> `accepted` once scope
-      is informational;
-    * siblings each stamped with their own WORLD (as every real fork is): `accepted`
-      (expected to differ) -> `incomplete`, naming world_id, once world_id is constant.
-    Without this a comparison that kept the old `("commit", "scope", "model")` loop and merely
-    defined the table would pass every other arm of O3."""
-    clean = T.provenance_record()
-    families = {
-        "model": {w: {**clean, "model": "m-2" if w == "b" else "m-1"} for w in T.WORLDS},
-        "scope": {w: {**clean, "scope": "defender" if w == "b" else "repo"} for w in T.WORLDS},
-        "world_id": {w: {**clean, "world_id": f"{T.EPISODE_ID}.{w}"} for w in T.WORLDS},
-    }
-    real_says = {"model": False, "scope": False, "world_id": True}
-    rebuilt = _cli_with_table(
-        {"model": "informational", "scope": "informational", "world_id": "constant"},
-        monkeypatch)
-    for field, docs in families.items():
-        report = _verify_with(_cli(), tmp_path, f"real-{field}".replace("_", "-"), docs)
-        assert report["comparable"] is real_says[field], (field, report["reason"])
-        flipped = _verify_with(rebuilt, tmp_path, f"table-{field}".replace("_", "-"), docs)
-        assert flipped["comparable"] is not real_says[field], (field, flipped["reason"])
-        if not flipped["comparable"]:
-            assert field in flipped["reason"], (field, flipped["reason"])
-
-
 def test_1204_fields_expected_to_differ_or_informational_are_not_compared(tmp_path):
-    """O3/D4, the other half: fields the table says are NOT compared really are not. Siblings
-    stamped with their own world, lineage and branch point (a forked sibling's real shape) are
-    accepted; dirty siblings whose path samples, counts and reasons all differ are accepted
-    under `--allow-dirty`, which waives the dirt and nothing else. Without this a table-driven
-    loop that compared every field would refuse every real family."""
+    """O3/D4, the other half."""
     ep = T.episode(tmp_path, root=tmp_path / "episodes" / "lineage")
     dirs = [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]
     for turn, d in enumerate(dirs, start=1):

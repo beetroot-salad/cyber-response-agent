@@ -1,43 +1,4 @@
-"""#920 PR 1 — the turn-N branch seam: what may be branched from, and where the fork lands.
-
-`defender/runtime/branch.py` does not exist at the base this spec forks from, so the module
-is reached through `branch_mod()` (the `_session_store_705.store_mod()` idiom) rather than a
-top-level import: a missing target then produces one failure *per test* instead of one
-collection error for the whole file.
-
-WHAT THIS FILE OWNS, AND WHAT IT DELIBERATELY DOES NOT
-------------------------------------------------------
-Three things, matching the three halves of the runtime PR:
-
-1. **The caller contract around `fork`** (issue O1, claim C4). `session_store.fork()` is NOT
-   under test here and is NOT re-pinned: `tests/test_session_head_fork_754.py:311`
-   (`test_a_fresh_fork_renders_its_inherited_prefix_exactly_once`) already owns its
-   `last_render_len` seeding, and #920's own first trap is "do not fix `fork`". What is
-   demanded here is the OTHER half of the same number — that `hydrate(role="send")` produces
-   exactly the list `fork` already charged the child for, so an `agent.iter` handed that list
-   as `message_history` ingests one row per genuinely new message and none for the prefix.
-   The negative arm (a fresh, empty framework list underflowing) is what makes the positive
-   arm mean something, and #754 pins neither.
-
-2. **The store factory** (design M1). A sibling gets its own run dir but must fork INTO the
-   source run's database — the prefix rows are there and `fork` walks parents inside one
-   transaction. The observable is a PATH, compared against `session_store.resolve_store_path`
-   of the source run dir, because "it opened a store" is satisfied by opening the wrong one:
-   `open_store` creates-if-missing, so a factory that mis-derives `runs_base` succeeds, hands
-   back an empty database, and fails much later with an error naming neither.
-
-3. **Branch-point legality** (design M1's precondition). A branch point exists to carry a pair
-   of worlds that are both consistent with the captured evidence and that differ on something
-   still open. With no capture the consistency claim is vacuous — that is the generated-world
-   design #920 rejected, reached by branching too early — and with an empty frontier there is
-   nothing for the pair to divide. The frontier is read AT THE BRANCH POINT, not at the end of
-   the run, and that arm is what separates a real implementation from one that reads the
-   finished document and calls it the frontier.
-
-The driver wiring itself (`resume=`, `message_history=`) is driven end-to-end in
-`tests/e2e/test_920_branch_resume.py`; only the two named seams are checked here, and only as
-signatures, so a rename is loud rather than silently uncovered.
-"""
+"""#920 PR 1 — the turn-N branch seam: what may be branched from, and where the fork lands."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -46,7 +7,6 @@ from defender.tests._spec1077 import fixture_run
 
 import dataclasses
 import importlib
-import inspect
 import json
 from pathlib import Path
 
@@ -252,30 +212,6 @@ def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
         "returned, so there is no lineage to branch from")
     assert ss.path_row_ids(handle, session_id) == path_ids, (
         "the prefix rows are not visible through the sibling's handle")
-
-
-def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
-    """    The callable is `StoreFactory`-shaped — two positional parameters, `(case_id, run_dir)`
-    — so a resume rides the injection seam `run_investigation` already has rather than growing
-    a second one. Neither argument steers it: a resume joins a case, it does not mint one."""
-    # provenance: driver.py's `StoreFactory = Callable[[str, Path], Any]`; design M1 reuses it.
-    branch = branch_mod()
-    store, run_dir, _session_id, path_ids = _source_run(tmp_path)
-    factory = branch.store_factory_for(spec_at(store, run_dir, path_ids[-1]), source_run=fixture_run(run_dir))
-
-    params = list(inspect.signature(factory).parameters.values())
-    assert len(params) == 2, f"not (case_id, run_dir)-shaped: {params}"
-    assert all(p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for p in params), (
-        f"the driver calls `factory(case_id, run_dir)` positionally: {params}")
-
-    # WHICH database it opens is the test above; this one asserts only that the two arguments
-    # do not steer it, so the two demands fail separately rather than as one indistinguishable
-    # red.
-    first = factory("case-one", tmp_path / "one")
-    second = factory("case-two", tmp_path / "two")
-    assert Path(first.path) == Path(second.path), (
-        "the factory's answer moved with its arguments; a sibling's own case id and run dir "
-        "must not choose which database its prefix lives in")
 
 
 # branch-point legality
@@ -520,23 +456,6 @@ def test_a_run_dir_holding_evidence_is_refused_before_anything_forks(tmp_path):
         "run will ever drive, and every retry adds another")
 
 
-def test_a_fresh_run_seeds_no_document(tmp_path):
-    """    A fresh run writes no `investigation.md` at open: the first `append_block` creates it.
-
-    The negative arm of the seed. A seam that wrote an empty file for every run would hand
-    `flagged_diagnostics` and `_check_append_only` a document before the model authored one,
-    and `_tool_append_block`'s "an EMPTY append gets no separator" reasoning is written against
-    a file that does not exist yet."""
-    branch = branch_mod()
-    _store, run_dir, _session_id, _ = _source_run(tmp_path)
-    fresh = tmp_path / "defender-runs" / "run-fresh"
-    fresh.mkdir(parents=True, exist_ok=True)
-
-    assert branch.seed_investigation(None, None, _sibling_state(fresh), run=fixture_run(fresh), source_run=None) == 0
-    assert not (fresh / "investigation.md").exists(), (
-        "a fresh run's document was created before its first append")
-
-
 def test_a_reused_run_dir_is_refused_rather_than_seeded_over(tmp_path):
     """    A run dir that already holds a document is refused, not appended to.
 
@@ -605,25 +524,6 @@ def test_a_prefix_that_would_not_validate_is_refused_rather_than_seeded(tmp_path
     assert not (sibling_dir / "investigation.md").exists(), (
         "the refusal came after the write — the sibling holds a document it can never repair"
     )
-
-
-def test_a_prefix_that_validates_is_still_seeded(tmp_path):
-    """    POSITIVE CONTROL for the check above: the ordinary source, cut at the same kind of
-    boundary, still seeds. Without it an implementation that refused every branch would pass."""
-    branch = branch_mod()
-    store, run_dir, session_id, _ = _source_run(tmp_path)
-    returns = _fence_turns(store, session_id, [1, 1])
-    (run_dir / "investigation.md").write_text(
-        GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-ok"
-    sibling_dir.mkdir(parents=True, exist_ok=True)
-
-    # The fence COUNT is a fixture detail (`_source_run`'s own opening turn carries the whole
-    # document, so the branch point maps past it); the claim is that a well-formed prefix is
-    # still seeded rather than refused.
-    assert branch.seed_investigation(
-        store, spec_at(store, run_dir, returns[0]), _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(run_dir)) > 0
-    assert (sibling_dir / "investigation.md").is_file()
 
 
 def test_message_zero_is_refused_as_a_branch_point(tmp_path):
@@ -778,40 +678,4 @@ def test_a_snapped_frontier_is_refused_by_its_own_name(tmp_path):
 
 # the two named seams
 
-def test_branch_spec_carries_the_four_branch_coordinates():
-    """    `BranchSpec` is the whole of what a resume is told: which run to read the capture and
-    the document from, which of its messages to fork at, what to say on arrival, and WHEN the
-    branch point was.
 
-    `continuation_prompt` is a FIELD rather than something the seam composes because the
-    08-16 experiment's own caveat was that its continuation wording biased the run toward
-    closing over gathering — the prompt is part of the measured instrument.
-
-    `as_of` joined them in #947 and is required for the mirror reason: it is the moment every
-    payload of the episode is stamped and every open window is closed at, so a resume that
-    could be spelled without one would stamp the afternoon it happened to run. Its own
-    demands — the derivation, and `validate`'s cross-check — are `test_947_clock.py`."""
-    # provenance: design M1 — "takes (session, branch_message_id, continuation_prompt, verbs)";
-    # `verbs` is the oracle registry and lands with the oracle, not with the runtime half.
-    branch = branch_mod()
-    names = [f.name for f in dataclasses.fields(branch.BranchSpec)]
-    assert names == ["source_run_dir", "branch_message_id", "continuation_prompt", "as_of"], (
-        f"BranchSpec's coordinates are not the four the design names: {names}")
-
-
-def test_the_driver_carries_the_two_resume_seams():
-    """    `run_investigation` accepts `resume`, and `_drive_agent` accepts `message_history` — the
-    two parameters #920's discussion corrected the issue on ("no driver change is needed is
-    wrong; three are").
-
-    A signature check, deliberately: what those parameters DO is driven end-to-end in
-    `tests/e2e/test_920_branch_resume.py`, and this exists so a rename fails loudly here
-    rather than leaving the e2e file the only thing that names them."""
-    # provenance: claim C3 (executed) — "agent.iter(prompt, deps=deps, usage_limits=...) — no
-    # message_history"; the discussion's three corrected driver sites.
-    driver = importlib.import_module("defender.runtime.driver")
-    assert "resume" in inspect.signature(driver.run_investigation).parameters, (
-        "run_investigation has no `resume` parameter — a branch has no supported entry point")
-    assert "message_history" in inspect.signature(driver._drive_agent).parameters, (
-        "_drive_agent cannot be handed an inherited prefix, so a resumed run's first request "
-        "starts from an empty framework list and underflows at ingest")

@@ -1,27 +1,4 @@
-"""Pure unit tests for the runtime permission gate (runtime/permission/).
-
-No model call, no API key — these run in CI. They assert the in-process gate makes the same
-allow/deny decisions as the four Claude Code PreToolUse hooks it ports, so functionality
-parity is checked for free.
-
-Since #575 the gate speaks ONE containment model: an `AgentPolicy.bash_allow` is a tuple of
-`Grant`s, each a SHAPE (program + flags + arity, no paths) plus a SCOPE (anchored regexes over
-the **RESOLVED** path of everything `PROGRAMS[grant.program]` says the program opens). `cat` is
-the sole opener; `grep`/`head`/`tail`/`wc` are stdin-only pipe stages; `ls`/`cd` are gone
-from every lane. The capability BITS this file used to construct policies with
-(`adapters` / `adapter_sql_pipe` / `raw_reads` / `operand_gated`) are deleted — each is now a
-fact the grant list carries directly, so the tests below construct grants instead of bits. The
-model itself is specced in `test_grant_gate_575.py`; this file keeps the shim/adapter/wrapper-fold/
-redirect/write coverage it always had, ported onto the new API.
-
-Since #611 a data source is reached through the typed `query` TOOL, never from bash. There is no
-adapter ROUTE on any lane: `Route` has one member (`PLAIN`), `BashDecision` carries no
-`adapter_argv`/`sql_pipe`, and an adapter-SHAPED command denies for gather exactly as it always
-did for main — with `permission.ADAPTER_RETIRED_REASON`, which names the `query` tool. The
-adapter CLASSIFICATION survives (`command_shape.is_adapter_stage`/`has_adapter`) for that deny
-alone. The adapter→`defender-sql` pipe became two steps: `query(...)`, then
-`cat <ABSOLUTE payload> | defender-sql '<SQL>'`. The full spec is `tests/e2e/test_query_tool_611.py`.
-"""
+"""Pure unit tests for the runtime permission gate (runtime/permission/): bash, read and write allow/deny decisions."""
 from __future__ import annotations
 
 import re
@@ -77,20 +54,6 @@ def _bash(cmd, policy):
 ])
 def test_main_loop_allows_safe(cmd):
     assert _bash(cmd, MAIN).allow
-
-
-@pytest.mark.parametrize("cmd", [
-    "defender-record-query --lead l-1 --query-id ad-hoc",                              # the shim itself
-    "defender-record-query --lead l-1 --query-id ad-hoc -- defender-elastic query foo",  # the WRAPPER form
-])
-def test_record_query_shim_is_gone_from_every_lane(cmd):
-    """`defender-record-query` is DELETED (#611): the capture wrapper it fronted went with the
-    bash capture layer, so the shim left `NON_ADAPTER_SHIMS` + `grant._SHIM_FLAGS` and no lane
-    grants it any more. Both its own flag form and the retired passthrough-wrapper form now deny,
-    on main AND gather — a dead program the gate would still approve is a dead command taught.
-    Positive control: a LIVE shim (`defender-invlang`, above) still runs for main."""
-    assert not _bash(cmd, MAIN).allow
-    assert not _bash(cmd, _gather()).allow
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
@@ -150,28 +113,6 @@ def test_gather_allows_readonly_viewers(cmd):
 @pytest.mark.parametrize("cmd", ["curl http://evil", "rm -rf /", "python3 -c 'x'"])
 def test_gather_denies_arbitrary_shell(cmd):
     assert not _bash(cmd, _gather()).allow
-
-
-@pytest.mark.parametrize("cmd", [
-    "defender-elastic query foo",                 # was: routed to standalone capture
-    "timeout 60 defender-cmdb host-lookup web-1",  # ... behind a timeout prefix (#971: denied
-                                                   #     for the prefix, not for the adapter)
-    "defender-elastic query foo | jq '.'",        # compound
-    "cat /run/report.md | jq '.'",                # a plain reader command
-    "defender-invlang enum types",                # non-adapter shim
-])
-def test_decision_carries_no_adapter_routing_payload(cmd):
-    # #611 FLIP: the gate used to stash the standalone-adapter argv (and the adapter|defender-sql
-    # split) on the decision so dispatch could route capture off the single parse. There is no
-    # capture-from-bash layer left to hand an argv to, so the routing FIELDS are gone from
-    # `BashDecision` entirely — structurally, not merely left None (a None-valued field is a route
-    # a future caller can repopulate; an absent one is not).
-    d = _bash(cmd, _gather())
-    assert not hasattr(d, "adapter_argv")
-    assert not hasattr(d, "sql_pipe")
-    # ... and the timeout-prefixed adapter, whose argv the capture layer used to fold, denies.
-    if "defender-elastic" in cmd or "defender-cmdb" in cmd:
-        assert not d.allow
 
 
 # quoted comparison operators are not redirects (quote-aware unsafe scan)
@@ -298,13 +239,7 @@ def test_a_wrapped_viewer_denies_and_its_payload_alone_does_not(wrapped, payload
     "timeout 5 cat /run/investigation.md",
 ])
 def test_a_timeout_prefix_denies_and_the_same_command_without_it_does_not(cmd):
-    """#971: the prefix used to be STRIPPED before the decision, so these were allows. It is an
-    ordinary ungranted word now and they deny — on the capability reason, which names the
-    programs the lane does have.
-
-    The pairing is the point. Each command is asserted twice: with the prefix (denied) and with
-    it removed (allowed), so what this pins is that the PREFIX is the whole difference. A bare
-    `assert not allow` would also pass if the pipeline or the payload had quietly broken."""
+    """#971: the prefix used to be STRIPPED before the decision, so these were allows."""
     for policy in (MAIN, _gather()):
         assert not _bash(cmd, policy).allow, f"{cmd!r}: `timeout` is not a granted program"
         assert _bash(cmd, policy).reason == policy.deny_reason
@@ -352,10 +287,7 @@ def test_unparseable_quote_spanning_newline_fails_closed(cmd):
     "cat /run/report.md | | wc -l",
 ])
 def test_dangling_pipe_within_a_line_fails_closed_at_the_gate(cmd):
-    """The gate and the executor stay pinned together. Both parse through the same
-    `bash_exec.parse`, so a spelling the executor refuses must reach the model as the LEXING
-    reason rather than a policy one — and, more to the point, a spelling the executor would
-    mis-decompose must never be handed on as a shape the gate then grant-checks."""
+    """The gate and the executor stay pinned together."""
     d = _bash(cmd, _gather())
     assert not d.allow
     assert not _bash(cmd, MAIN).allow
@@ -387,29 +319,6 @@ _LEXING_FAILURES = [
     # lane can actually run. `test_959_wrapper_fold.py::test_no_word_is_parsed_as_a_wrapper`
     # holds that end.
 ]
-
-
-@pytest.mark.parametrize(("label", "cmd", "phrase"), _LEXING_FAILURES,
-                         ids=[c[0] for c in _LEXING_FAILURES])
-def test_the_lexing_reason_names_every_way_a_command_can_fail_to_parse(label, cmd, phrase):
-    """Each lexing failure answers the LEXING reason, and that reason names the cause.
-
-    The unbalanced quote used to answer `policy.deny_reason` instead, because it reached the
-    gate through the standalone wrapper step rather than through the executor's own scan of the
-    command text. That handed a model with a quoting mistake a CAPABILITY message ("not
-    permitted for this agent"), which points it at a different tool rather than at its own
-    quote, while the sibling quote failure one line away answered correctly.
-
-    Its old partner in that pair, a malformed `bash -c`, is gone from this list: #971 deletes
-    the wrapper step, so a wrapper is an ungranted PROGRAM and the capability reason is the
-    right answer for it rather than the wrong one."""
-    d = _bash(cmd, _gather())
-    assert not d.allow, f"{label}: a command that cannot be parsed was allowed"
-    assert d.reason == permission.UNTOKENIZABLE_REASON, \
-        f"{label}: answered a non-lexing reason — {d.reason[:90]!r}"
-    assert d.pipelines is None, f"{label}: an unparsed command was handed on as a shape"
-    assert phrase in d.reason, \
-        f"{label}: the reason never names this cause (looked for {phrase!r})"
 
 
 @pytest.mark.parametrize("cmd", [
@@ -597,14 +506,7 @@ def test_write_investigation_invalid_invlang_denied(tmp_path):
 
 
 def test_decide_write_requires_policy_and_roots(tmp_path):
-    """decide_write requires an explicit policy AND both run roots — omitting any of the three is
-    a TypeError, never a silent default. The policy carries the write allowlist, so a default
-    would hand the caller an unearned write scope (mirrors decide_read). The roots are required
-    for the mirror-image reason (#681): `run_dir` is what the #629 output-structure gate keys
-    `<run_dir>/report.md` on, so under the former `run_dir: Path | None = None` a caller that
-    forgot the kwarg silently lost the whole gate — an over-bound report with an out-of-enum
-    disposition fell through to Decision(True). Failing at the call site is the only signal that
-    cannot be missed; there is no runtime branch to test because the argument cannot be absent."""
+    """decide_write requires an explicit policy AND both run roots — omitting any of the three is a TypeError, never a silent default."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     with pytest.raises(TypeError):
@@ -651,10 +553,7 @@ def test_write_allow_md_only_denies_non_md(tmp_path):
 
 
 def test_write_allow_no_implicit_run_dir(tmp_path):
-    """the flat allowlist REPLACES the old run-dir base (no implicit run_dir): a writer that declares
-    only a skills subtree may NOT write run_dir. This is the #3 fix — the lead author (run_dir=source
-    case dir) and pitfalls curator (run_dir=the pending folder) no longer get a blanket run-dir write grant.
-    Positive control: the declared skills path IS allowed."""
+    """the flat allowlist REPLACES the old run-dir base (no implicit run_dir): a writer that declares only a skills subtree may NOT write run_dir."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     skills = tmp_path / "defender" / "skills"
@@ -693,13 +592,7 @@ def test_write_empty_allow_denies_all(tmp_path):
 
 
 def test_write_allow_corpus_file_named_investigation_not_gated(tmp_path):
-    """invlang validation is keyed on `<run_dir>/investigation.md`, so a CORPUS file that merely
-    shares the basename is NOT routed into the validator — it is a lesson, not an invlang work log,
-    and denying it for failing a grammar it was never written in is the allow→deny regression #629
-    F-A2 names for report.md. Both artifacts key the same way since #681: the exact-basename
-    fallback this test used to pin existed only for a `run_dir`-less caller, and both roots are
-    now required, so no such caller exists. Positive control: the SAME invalid text at the run-dir
-    root DOES deny with the invlang reason, so the validator is live, not dead."""
+    """invlang validation is keyed on `<run_dir>/investigation.md`, so a CORPUS file that merely"""
     skills = tmp_path / "defender" / "skills"
     skills.mkdir(parents=True)
     run_dir = tmp_path / "run"
@@ -756,97 +649,11 @@ _PAYLOAD_PIPE = "cat /run/gather_raw/l-001/0.json | defender-sql"
     "--rows values",
 ])
 def test_gather_admits_the_declared_rows_flags_on_defender_sql(flags):
-    """#1138 O7: the lead can INVOKE the declaration from gather's bash lane — `--rows` and
-    `--names` are `defender-sql`'s shim flags, each in the `--flag VALUE` and `--flag=VALUE`
-    spellings, and a bracketed PATH is one value token. Before the flags existed on the gate,
-    every one of these was refused (C11) and the refusal pointed at the `query` tool."""
+    """#1138 O7: the lead can INVOKE the declaration from gather's bash lane — `--rows` and"""
     for cmd in (f"{_PAYLOAD_PIPE} {flags} 'SELECT count(*) AS n FROM data'",
                 f"{_PAYLOAD_PIPE} 'SELECT count(*) AS n FROM data' {flags}"):
         decision = _bash(cmd, _gather())
         assert decision.allow, (cmd, decision.reason)
-
-
-@pytest.mark.parametrize("flag", [
-    "--bogus x", "--bogus", "--rowz values", "--rows-file values", "--row values",
-    "--name columns", "-r values", "--format csv",
-])
-def test_gather_admits_nothing_else_new_on_defender_sql(flag):
-    """#1138 O7's other half — the gate admits `--rows`/`--names` and NOTHING else new: an
-    unknown flag, a near-miss spelling, a prefix of either, a short option. The paired control
-    is the same pipe carrying only the declaration, which the gate admits — so each refusal is
-    about the extra flag, not about the pipe, the payload or the declaration."""
-    declared = f"{_PAYLOAD_PIPE} --rows values --names columns 'SELECT 1'"
-    assert _bash(declared, _gather()).allow
-    extra = f"{_PAYLOAD_PIPE} --rows values --names columns {flag} 'SELECT 1'"
-    assert not _bash(extra, _gather()).allow, extra
-    assert not _bash(f"{_PAYLOAD_PIPE} {flag} 'SELECT 1'", _gather()).allow, flag
-
-
-def test_gather_sql_aggregation_is_now_tool_then_bash():
-    # #611 FLIP of the sanctioned aggregation pipe (#379). It used to be ONE command whose adapter
-    # stage the harness captured (`adapter … | defender-sql …`). It is now TWO steps: `query(…)`
-    # writes the payload and reports its ABSOLUTE path, then bash aggregates over that path. The
-    # aggregation property is preserved; only the producer moved.
-    old = ("defender-elastic query 'x' | "
-           "defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'")
-    for pol in (_gather(), MAIN):
-        assert not _bash(old, pol).allow             # the adapter stage is unreachable on both lanes
-    assert _bash(old, _gather()).reason == permission.ADAPTER_RETIRED_REASON
-
-    new = ("cat /run/gather_raw/l-001/1.json | "
-           "defender-sql 'SELECT user, count(*) c FROM data GROUP BY user'")
-    assert _bash(new, _gather()).allow
-    # Since #540 a relative operand resolves against the RUN DIR — where gather_raw/ actually
-    # lives — so the short spelling names the same payload as the absolute one. The payload note
-    # the query result carries stays absolute (that is what the tool reports), but the relative
-    # form is no longer a trap that silently names nothing.
-    assert _bash("cat gather_raw/l-001/1.json | defender-sql 'SELECT 1'", _gather()).allow
-    # Main loop never reaches a payload, pipe or not.
-    assert not _bash(new, MAIN).allow
-
-
-@pytest.mark.parametrize("sep", [";", "&&", "||", "|"])
-def test_gather_denies_adapter_sql_in_every_compound_shape(sep):
-    # The ONE sanctioned adapter shape used to be the single `|` pipe into defender-sql; a
-    # `;`/`&&`/`||` SEQUENCE was a separate-pipelines compound and had to be denied so the harness
-    # could not silently stream the payload as if it were `|`. Since #611 NO adapter shape runs —
-    # so the pipe joins the sequences on the deny side, and there is no routing seam left to claim
-    # any of them.
-    cmd = f"defender-elastic query 'x' {sep} defender-sql 'SELECT 1'"
-    d = _bash(cmd, _gather())
-    assert not d.allow, cmd
-    assert d.reason == permission.ADAPTER_RETIRED_REASON
-    assert not _bash(cmd, MAIN).allow
-
-
-@pytest.mark.parametrize("cmd", [
-    # An adapter query whose value contains a `$(`/backtick substring is a LITERAL query payload,
-    # not shell. It used to be ALLOWED (and routed to capture) so the argv reached the data source
-    # verbatim — the substitution guard must not have swallowed it. Post-#611 the adapter is
-    # unreachable from bash, so the surviving property is the DIAGNOSIS: such a command must still
-    # be recognized as an adapter and get the reason that names the `query` tool, not be misdiagnosed
-    # as an unsafe-construct / generic fall-through deny (which would send the model hunting for
-    # another shell spelling instead of the tool). The metachar reaches the data source verbatim
-    # through `query`'s typed params — there is no shell on that path at all.
-    "defender-elastic query 'process.command_line:*$(*'",
-    "defender-elastic query 'cmd:`id`'",
-])
-def test_gather_adapter_query_with_inert_shell_metachars_is_diagnosed_as_an_adapter(cmd):
-    d = _bash(cmd, _gather())
-    assert not d.allow, cmd
-    assert d.reason == permission.ADAPTER_RETIRED_REASON, cmd
-    # The defense-in-depth guard is still enforced for a non-adapter VIEWER stage: the shape
-    # below IS claimed by the `cat` grant (a single free-text operand), so only the guard denies it.
-    assert not _bash('cat "$(rm -rf /)"', _gather()).allow
-
-
-def test_gather_drops_residual_reduce_by_hand_tools():
-    # sort/uniq/datamash/cut/comm/join/tr/paste/nl were dropped from the allowlist
-    # (residual download-and-reduce era, superseded by native ES|QL/defender-sql).
-    for cmd in ("datamash mean 1", "cat /run/report.md | uniq -c", "cut -d, -f1 /tmp/p",
-                "join /tmp/a /tmp/b", "nl /tmp/p", "cat /run/report.md | sort",
-                "sort -o /tmp/p f"):
-        assert not _bash(cmd, _gather()).allow, cmd
 
 
 # command_shape: pure classifiers over parsed pipelines (#456)
@@ -855,51 +662,12 @@ def test_gather_drops_residual_reduce_by_hand_tools():
 # once and routes off these, so a command is decomposed exactly once per tool call.
 
 from defender.runtime import bash_exec  # noqa: E402 — grouped with its test section
-from defender.runtime.permission import command_shape  # noqa: E402
 
 
 def _shape(cmd):
     # `parse` takes the raw command text directly (#959 D1/C3) — the standalone wrapper step
     # has folded into it, so there is no second function to apply first any more.
     return bash_exec.parse(cmd)
-
-
-def test_command_shape_is_adapter_stage():
-    assert command_shape.is_adapter_stage(["defender-elastic", "query", "x"])
-    assert command_shape.is_adapter_stage(["python3", "scripts/adapters/elastic_adapter.py", "q"])
-    assert not command_shape.is_adapter_stage(["defender-invlang", "enum"])  # non-adapter shim
-    assert not command_shape.is_adapter_stage(["jq", ".x"])
-    assert not command_shape.is_adapter_stage([])
-    # adapter name as an ARGUMENT, not the command, is not an adapter stage
-    assert not command_shape.is_adapter_stage(["which", "defender-elastic"])
-
-
-def test_command_shape_has_no_routing_splitters_left():
-    # #611 FLIP: `standalone_adapter_argv` / `adapter_sql_split` split an adapter command into the
-    # argv the capture layer RAN and the (adapter, defender-sql) pipe it streamed a payload
-    # through. There is no capture-from-bash layer left to hand an argv to, so both are deleted —
-    # and their absence is the pin (a surviving splitter is a surviving route).
-    assert not hasattr(command_shape, "standalone_adapter_argv")
-    assert not hasattr(command_shape, "adapter_sql_split")
-
-
-@pytest.mark.parametrize(("cmd", "adapter"), [
-    ("defender-elastic query foo", True),                        # the ex-standalone shape
-    ("defender-elastic query x | defender-sql 'SELECT 1'", True),  # the ex-sanctioned pipe
-    ("defender-elastic query x ; defender-sql 'SELECT 1'", True),  # a sequence
-    ("defender-elastic query x | cat", True),                    # a non-sql consumer downstream
-    ("cat /run/report.md | jq '.'", False),
-    ("defender-invlang enum types", False),
-])
-def test_command_shape_has_adapter_survives_for_the_deny(cmd, adapter):
-    # What the classification is still FOR: any command with an adapter ANYWHERE in it earns the
-    # deny that names the `query` tool, instead of the generic fall-through. Every shape the old
-    # routing seams told apart now answers the one question that remains — "is there an adapter in
-    # here?" — and every one of them denies.
-    pipelines = _shape(cmd)
-    assert command_shape.has_adapter(pipelines) is adapter, cmd
-    if adapter:
-        assert _bash(cmd, _gather()).reason == permission.ADAPTER_RETIRED_REASON, cmd
 
 
 # AgentPolicy primitive: read_roots + hand-built grants

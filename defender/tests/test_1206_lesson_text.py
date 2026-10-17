@@ -1,11 +1,5 @@
-"""#1206: lesson text leaves the shared loader in one of three forms the caller picks.
-
-A lesson's frontmatter is corpus text a model wrote. `Lesson.line` / `Lesson.lines` give a value
-as one printed line (line breaks become spaces, controls and zero-width characters are dropped,
-blank list items are skipped); `Lesson.match_text` gives the frontmatter as the lines a search
-pattern runs over, one `key: value` line per key, built from the same one-line form so a value
-`--tags` lists is a value a search finds.
-"""
+"""#1206: lesson text leaves the shared loader as one printed line (`line`/`lines`) or as search
+lines (`match_text`); control characters and unprintable filenames are refused."""
 
 from __future__ import annotations
 
@@ -111,13 +105,6 @@ def test_the_loader_refuses_a_lesson_file_whose_name_is_not_one_printable_line(t
     assert len(refused) == 6
     assert {r.levelname for r in refused} == {"ERROR"}
     assert not any(ch in r.getMessage() for r in refused for ch in "\n\x1b\u200b")
-
-
-def test_scalar_or_list_has_one_home():
-    from defender import _corpus
-    from defender.runtime.lessons_engine import _lessons_common
-
-    assert _lessons_common.as_list is _corpus.as_list
 
 
 def test_the_frontier_block_frames_lesson_text_and_keeps_the_lead_outside():

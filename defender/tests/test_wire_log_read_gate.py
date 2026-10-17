@@ -1,37 +1,4 @@
-"""The run's wire log is not readable by the agents that write into it.
-
-`llm_requests.jsonl` is the run's ONE wire log: MAIN, every gather subagent (`gather:{lead_id}`)
-and every review stage (`review:{lens}`) log through the same `RequestLogger`, which is what
-makes all three priceable. That sharing is also what makes the file a boundary: it holds, in
-full and verbatim, the raw gather payload bytes `decide_read` refuses MAIN one call earlier with
-`RAW_DENY_REASON`, and MAIN's transcript that GATHER has never been shown.
-
-At the run ROOT it was readable by both of them. MAIN's and GATHER's run-dir read shape is
-`under(run, SEG)` (`permission/policies/_common.read_shapes`, the builder those two share) and
-`SEG` spells ONE path segment, so the shape admits every run-root file — the read tool and the
-bash `cat` lane alike, since they share the shape OBJECT. `is_untrusted_read` does not fire on
-the log either, so neither lane salt-framed the read: the bytes arrived as ordinary text.
-
-The fix is one directory, not one clamp: the log moved to `<run_dir>/wire_logs/llm_requests.jsonl`,
-one level down and therefore outside a single-segment shape, for MAIN and GATHER symmetrically
-and with no shape edited. `test_the_subdirectory_is_what_denies` is the falsification — it plants
-the same filename back at the run root and shows the gate admits it there, so these tests cannot
-pass for some reason other than the one they name.
-
-THE OFFLINE LANE IS THE SAME DEFECT AND NOT THE SAME FIX (the second class below). Every
-learning stage logs through the same `RequestLogger` into the learning run dir, and that dir is
-the gray-box ACTOR's own root — so `judge_trace.jsonl` at its root handed the actor the payload
-exemplars `judge/compare.unredacted_exemplar` puts in the judge's prompt UNREDACTED, which is
-exactly what `decide_read`'s `gather_raw` deny exists to keep from it. Both legs of an
-`inconclusive` case run CONCURRENTLY against one `LegDirs`, and a re-LEARN reopens the dir with
-the previous pass's traces still in it, so the actor is alive while those files exist.
-
-A subdirectory alone does NOT close that one, which is why the deny is a component rule rather
-than a shape: the ACTOR declares no read shape at all (root containment only admits every
-depth) and the JUDGE's `cat` scope is `under(run, TREE)` (a subdirectory fullmatches). So
-`wire_logs/` is denied OUTRIGHT by `files.names_wire_log_dir`, on both read surfaces, for every role —
-and `test_the_component_is_what_denies_in_the_learning_lane` is that half's falsification.
-"""
+"""The run's wire log (wire_logs/llm_requests.jsonl, holding raw gather payloads and MAIN's transcript) is unreadable by the agents that write into it: it sits one directory below the run root, outside MAIN's and GATHER's single-segment read shape, for the read tool and the bash cat lane alike, and no learning role can read a stage trace."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -149,13 +116,7 @@ def test_the_subdirectory_is_what_denies(env, which):
 
 
 def _run_dir_section(out: str) -> str:
-    """Just the map's `## Run dir` listing.
-
-    Asserted on rather than the whole document because the rest of the map is generated from
-    the REAL `workspace_map.DEFENDER_DIR` — the skills dirs, the adapter filenames, the query
-    systems — and a bare substring test over that would turn red the day someone adds a skill
-    whose name happens to contain `wire_logs`, for a reason that has nothing to do with the
-    suppression this test is about."""
+    """Just the map's `## Run dir` listing."""
     body = out.split("## Run dir", 1)[1]
     return body.split("\n## ", 1)[0]
 
@@ -176,17 +137,7 @@ def test_the_workspace_map_does_not_name_the_observe_dir(env):
 @pytest.fixture
 def lenv(tmp_path):
     """A learning run dir with a stage trace where `run_stage` puts it, a staged `gather_raw/`
-    tree beside it, and a bound learning role to ask the gate about.
-
-    THE STAGES CHANGED WITH #922, THE PROPERTY DID NOT. It used to build the actor's and the
-    judge's policies and check that neither could read the other's trace; both roles are
-    deleted. The curator is the surviving bindable learning role, and what the demands below
-    still state is the one that matters: a learning role does not read a wire-log trace, and
-    does not read the staged raw payloads beside it — traces carry unredacted exemplars.
-
-    `stage_trace_path` is used rather than a hand-joined path for the reason the production
-    call site uses it: the location is the thing under test, so a test that spelled it itself
-    would keep passing after the writer moved."""
+    tree beside it, and a bound learning role to ask the gate about."""
     lrd = tmp_path / "learning-run"
     (lrd / "gather_raw" / "l-001").mkdir(parents=True)
     (lrd / "gather_raw" / "l-001" / "0.json").write_text('{"user": "root"}\n', encoding="utf-8")
@@ -211,21 +162,6 @@ def lenv(tmp_path):
 
 
 #: TWO LEARNING-LANE DEMANDS LEFT WITH #922, recorded because their absence weakens this file.
-#:
-#: `test_the_bash_lane_denies_a_trace_for_the_judge` measured the `cat` lane at a role whose
-#: scope was `under(run, TREE)` — fullmatching at any depth, so the deny could only be carried
-#: by `files.names_wire_log_dir` itself. No surviving learning role has that shape: the
-#: curator's `cat` is its own corpus, where a subdirectory rule would exclude the file anyway,
-#: which is the vacuity that test existed to avoid.
-#:
-#: `test_the_deny_is_scoped_to_observe_and_nothing_else` was the POSITIVE CONTROL for the
-#: learning half — the judge still read the payloads it graded, the actor still read its own
-#: inputs — and both roles are gone. The curator reads nothing in a learning run dir
-#: (`read_allow == ()`), so there is no surviving learning role the control can be stated on.
-#: The runtime half's own control (`READERS`, below) still fires, so the class is not
-#: uncontrolled; the LEARNING half is, and that is the reduction.
-#:
-#: Restore both when a learning role is next granted a read scope over a run dir.
 LEARNING_READERS = ("curator",)
 
 
@@ -241,13 +177,7 @@ def test_a_learning_stage_trace_lands_under_observe(lenv):
 
 
 def test_a_learning_role_cannot_read_a_stage_trace_or_the_staged_payloads(lenv):
-    """The reported crossing, in the lane it actually lives in.
-
-    The actor must write its story WITHOUT the payloads; `decide_read`'s `gather_raw` branch is
-    what enforces that, and the assertion below it is the positive control proving that branch
-    is still doing its job here. The judge's prompt carries those same payloads UNREDACTED
-    (`compare.unredacted_exemplar`), so its trace at the learning run dir's root was the same
-    bytes by another name — and the actor's `read_allow` is EMPTY, so no shape filter ever ran."""
+    """The reported crossing, in the lane it actually lives in."""
     assert not _read(lenv, lenv.traces["judge_trace.jsonl"], "curator").allow
     assert not _read(lenv, lenv.traces["questioner_trace.jsonl"], "curator").allow
     assert not _read(lenv, lenv.run / "gather_raw" / "l-001" / "0.json", "curator").allow

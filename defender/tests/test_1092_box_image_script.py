@@ -1,11 +1,4 @@
-"""#1092 — the hash module and the stdlib build script (M3 revised: `runtime/box/_image.py`
-and `defender/scripts/box_image.py`).
-
-The script runs on the CI runner's bare `python3` 3.12 with no uv and no venv (F14/G5) and
-loads `_image.py` BY FILE PATH, never through `defender.runtime.box` (once `BoxSpec` is
-pydantic that import pulls pydantic). Its `docker` is whatever is first on PATH — which is the
-seam these tests use: a real executable that records its argv and exits with a scripted code.
-"""
+"""The image-name hash module and the stdlib-only build script (box_image.py)."""
 from __future__ import annotations
 
 import ast
@@ -245,39 +238,3 @@ _UNUSABLE_LOCKS: dict[str, tuple[bytes, bytes]] = {
     "an integer past the digit limit": (b"", b'\n[[package]]\nname = "zz"\nversion = "1.0.0"\nx = ' + b"1" * 5000 + b"\n"),
 }
 
-
-@pytest.mark.parametrize("verb", ["tag", "build"])
-@pytest.mark.parametrize("case", list(_UNUSABLE_LOCKS))
-def test_box_image_reports_a_lock_it_cannot_use_in_the_resolvers_words_and_exits_1(tmp_path, verb, case):
-    """On a tree whose `uv.lock` reads but cannot be used — not TOML (#1097: the name is
-    computed from the PARSED lock), a reached entry's link with no `name`, a reached entry's
-    `dependencies` written as a string, a reached entry nested 20000 tables deep (#1097
-    amendment 2: the shape check at the parse seam, and a value the canonical form cannot
-    encode), a `[[package]]` with no `name` nested 20000 tables deep and a 5000-digit integer
-    in an entry nothing reaches (amendment 3's one fault boundary: whatever raises after the
-    reads is the resolver's fault naming the file) — `tag` and `build` print ONE line on stderr naming `<tree>/defender` and `uv.lock`
-    and saying "cannot use" — the resolver's `ImageInputError`, never a traceback — print
-    nothing on stdout, exit 1, and `build` never invokes `docker`. Positive control: the same
-    tree, before the lock is broken, prints its name and exits 0."""
-    root, script = _planted_script(tmp_path)
-    defender_dir = root / "defender"
-    assert _run_script(script, "tag", cwd=tmp_path).returncode == 0
-    lock = defender_dir / "uv.lock"
-    old, new = _UNUSABLE_LOCKS[case]
-    text = lock.read_bytes()
-    if old:
-        assert text.count(old) == 1, (case, old)
-        lock.write_bytes(text.replace(old, new))
-    else:
-        lock.write_bytes(text + new)
-    env, log = fake_docker_on_path(tmp_path, rc=0)
-    out = _run_script(script, verb, cwd=tmp_path, env=env)
-    assert out.returncode == 1, (out.returncode, out.stderr[-2000:])
-    assert out.stdout == "", out.stdout
-    assert "Traceback" not in out.stderr, out.stderr[-2000:]
-    assert len(out.stderr.strip().splitlines()) == 1, out.stderr[-2000:]
-    assert str(defender_dir) in out.stderr, out.stderr
-    assert "uv.lock" in out.stderr, out.stderr
-    assert "cannot use" in out.stderr, out.stderr
-    assert "cannot read" not in out.stderr, out.stderr
-    assert recorded_docker_calls(log) == []

@@ -149,12 +149,20 @@ def run_grants(settings_dir: Path) -> RunGrants:
     )
 
 
+def gather_query_systems(grants: RunGrants) -> frozenset[str]:
+    """The systems on which a run's grants give gather a query verb — any verb but
+    `health-check`, which reaches no data. The one reading of "gather can query": the grant
+    check below asks it of the table, and run start asks it again of the systems that are up
+    (#1256 O-8, `system_status.require_usable`)."""
+    return frozenset(system for system, verb, _ in grants.gather.entries if verb != HEALTH_CHECK)
+
+
 def require_gather_query(grants: RunGrants) -> None:
     """Refuse a run's grants under which gather can query nothing.
 
     A `health-check` grant alone is not a query: such a table loads, then denies every `query`
     mid-run after model calls are spent. Shared by the run start and `defender-policy`."""
-    if not any(verb != HEALTH_CHECK for _system, verb, _ in grants.gather.entries):
+    if not gather_query_systems(grants):
         raise DispositionError(
             f"{grants.path} grants gather no query verb — a run could query nothing (a "
             f"`{HEALTH_CHECK}` grant alone reaches no data). Grant gather at least one (system, "
@@ -408,6 +416,7 @@ __all__ = [
     "DispositionWarning",
     "census_gaps",
     "dispositions_path",
+    "gather_query_systems",
     "grant_for",
     "load_dispositions",
     "require_gather_query",

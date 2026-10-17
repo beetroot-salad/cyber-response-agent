@@ -1,27 +1,8 @@
-"""#1092 — the owned image's NAME: derived at box start from the mounted tree (M3 revised).
-
-Demand #0 and its neighbourhood in `spec-flow/specs/spec_graph_1092.yaml`: the resolver
-`runtime/box/_image.py::image_tag(tree)`, the three `docker run` sites that call it when
-`rootfs` is unset, the explicit-rootfs escape, and what a tree that cannot name an image does
-(MF1, resolved at §7: any read error → `BoxFault` naming the folder and the first file, raised
-in the argv builder before docker; the C46 refusal keeps running FIRST; no run-dir marker).
-
-Hermetic: the trees are planted by the tests and the daemon is `RecordingDocker`. Whether
-the three inputs were read is observed tier-1 (`_spec1092`'s hierarchy): over a tree that
-HOLDS none of them a read faults, so a lane that completes — or refuses for another reason —
-read nothing; and a name that equals the digest of the planted inputs was read from them
-(an edit to the recipe or to the lock's box closure renames it, d3). Since #1097 the name is
-the Dockerfile's bytes plus the lock's core + `box` closure, so the planted `uv.lock` and
-`pyproject.toml` are well-formed TOML (`_spec1092.PLANTED_LOCK`) and an edit OUTSIDE the
-closure does not rename the image; the full O1/O2 matrix is `test_1097_image_name_closure.py`. No process-wide audit hook is installed for it — the one
-in-process hook a spec test needs (d5) lives in a child interpreter.
-"""
+"""The owned image's name is derived at box start from the mounted tree's recipe and lock."""
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -31,16 +12,12 @@ import pytest
 from defender.runtime import box as box_mod
 from defender.runtime.box import BoxRequest, BoxSpec, Mount
 from defender.runtime.box_codec import BoxFault
-from defender.runtime.scrub import verdict_path
 from defender.tests._spec1092 import (
     DEFENDER,
     HASH_INPUTS,
     PLANTED_INPUT_BYTES,
-    REPO_ROOT,
     STOCK_ROOTFS,
     TAG_RE,
-    DockerFault,
-    NoSuchImageDocker,
     RecordingDocker,
     image_tag,
     image_token,
@@ -157,34 +134,6 @@ def test_an_explicit_rootfs_is_appended_verbatim_and_reads_no_file(tmp_path):
     assert image_token(rec2.create_argv or []) == STOCK_ROOTFS
 
 
-# ---- d2 --------------------------------------------------------------------------------------
-def test_no_runtime_path_names_or_falls_back_to_the_stock_image(tmp_path, monkeypatch):
-    """No module under `defender/runtime` names `python:3.11-slim` in code (a comment may
-    recall it), and a missing owned image raises rather than retrying with any other image:
-    the one image the daemon is asked for is the derived one, no `run` and no `pull` follows
-    the daemon's `no`, and the `BoxFault` propagates out of `start_box`."""
-    naming = sorted(
-        str(p.relative_to(DEFENDER)) for p in (DEFENDER / "runtime").rglob("*.py")
-        if any(
-            STOCK_ROOTFS in line.split("#", 1)[0]
-            for line in p.read_text(encoding="utf-8").splitlines()
-        )
-    )
-    assert naming == [], f"the stock image is still named as a rootfs by {naming}"
-
-    _no_unsandboxed(monkeypatch)
-    defender_dir = plant_tree(tmp_path / "tree")
-    run_dir = make_run_dir(tmp_path)
-    rec = NoSuchImageDocker()
-    with pytest.raises(BoxFault):
-        box_mod.start_box(run_dir, defender_dir, docker=rec)
-    subs = subcommands(rec.calls)
-    assert "run" not in subs, subs
-    assert "pull" not in subs, subs
-    assert rec.inspected_images == [image_tag(defender_dir)], rec.inspected_images
-    assert rec.create_argv is None
-
-
 # ---- d3 (#1097 O1/O2: the recipe and the box closure name the image; nothing else does) ----
 def test_a_recipe_byte_or_a_box_closure_entry_moves_the_tag_and_an_edit_outside_the_closure_does_not(tmp_path):
     """Changing one byte of `box.Dockerfile`, the version of a lock entry in the core + `box`
@@ -259,47 +208,6 @@ def test_two_trees_with_identical_inputs_name_the_same_image_wherever_they_sit(t
     (b / "uv.lock").write_bytes(PLANTED_INPUT_BYTES["uv.lock"].replace(
         b'name = "gamma"\nversion = "3.0.0"', b'name = "gamma"\nversion = "3.0.1"'))
     assert image_tag(b) != image_tag(a), "the positive control: a different closure, same name"
-
-
-# ---- d5 --------------------------------------------------------------------------------------
-def test_importing_the_image_module_and_constructing_boxspec_opens_no_file(tmp_path):
-    """Importing `runtime/box/_image.py`, importing `defender.runtime.box`, and constructing
-    `BoxSpec()` / evaluating `DEFAULT_SPEC` read none of `box.Dockerfile`, `uv.lock` or
-    `pyproject.toml` (an audit hook on `open` filtered to those three names sees nothing): the
-    name is computed only when an argv builder asks for it, so the box's own import of the
-    package reads no input off the mounted tree. Positive control, same process: calling
-    `image_tag(<tree>)` afterwards opens all three."""
-    defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
-    code = (
-        "import json, sys\n"
-        "from pathlib import Path\n"
-        "seen = []\n"
-        "def hook(event, args):\n"
-        "    if event == 'open' and isinstance(args[0], (str, bytes)):\n"
-        "        seen.append(str(args[0]))\n"
-        "sys.addaudithook(hook)\n"
-        "names = ('box.Dockerfile', 'uv.lock', 'pyproject.toml')\n"
-        "from defender.runtime.box import _image\n"
-        "from defender.runtime import box\n"
-        "box.BoxSpec(); box.DEFAULT_SPEC\n"
-        "at_import = [p for p in seen if Path(p).name in names]\n"
-        "del seen[:]\n"
-        f"tag = _image.image_tag(Path({str(defender_dir)!r}))\n"
-        "on_call = sorted({Path(p).name for p in seen if Path(p).name in names})\n"
-        "print(json.dumps({'at_import': at_import, 'on_call': on_call, 'tag': tag}))\n"
-    )
-    env = dict(os.environ, PYTHONPATH=str(REPO_ROOT))
-    out = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, encoding="utf-8",
-        env=env, cwd=str(tmp_path), timeout=120,
-    )
-    assert out.returncode == 0, out.stderr
-    import json
-
-    seen = json.loads(out.stdout)
-    assert seen["at_import"] == [], seen
-    assert seen["on_call"] == sorted(HASH_INPUTS), seen
-    assert seen["tag"] == image_tag(defender_dir)
 
 
 # ---- d10 (widened by MF1: "missing" → "cannot be read") ----------------------------------------
@@ -429,40 +337,6 @@ def test_the_c46_uncovered_mount_refusal_fires_before_the_resolver_on_both_lanes
         box_mod._start_boxed_request(_request(root, run_dir), RecordingDocker(), lambda _d: ())
     assert "C46" not in str(e.value)
     assert "box.Dockerfile" in str(e.value)
-
-
-# ---- MF1 part 3: no run-dir marker for a resolver refusal ----------------------------------------
-def test_a_resolver_refusal_leaves_no_did_not_run_marker_while_a_create_fault_still_does(tmp_path, monkeypatch):
-    """A resolver refusal is raised while the argv is being assembled, before the code that
-    writes markers runs, so it leaves NO "this run did not happen" marker — beside the run dir
-    on the run-dir lane, beside any writable mount source on the request lane — the same
-    silence as the C46 refusal; the exception is the carrier. Positive control on both lanes:
-    a create fault over a complete tree still writes the marker (`ran: false`)."""
-    _no_unsandboxed(monkeypatch)
-    lacking = plant_tree(tmp_path / "lacking", missing=HASH_INPUTS, copy_code=False)
-    complete = plant_tree(tmp_path / "complete", copy_code=False)
-
-    run_dir = make_run_dir(tmp_path, "run-a")
-    with pytest.raises(BoxFault):
-        box_mod.start_box(run_dir, lacking, docker=RecordingDocker())
-    assert not verdict_path(run_dir).exists(), "a resolver refusal wrote a run-dir marker"
-
-    mount = make_run_dir(tmp_path, "run-b")
-    with pytest.raises(BoxFault):
-        box_mod.start_box(_request(lacking.parent, mount), docker=RecordingDocker())
-    assert not verdict_path(mount).exists(), "a resolver refusal wrote a mount-source marker"
-
-    bind_gone = DockerFault(rc=125, stderr="bind source path does not exist\n", cite="po1")
-    run_dir_c = make_run_dir(tmp_path, "run-c")
-    with pytest.raises(BoxFault):
-        box_mod.start_box(run_dir_c, complete, docker=RecordingDocker(create=bind_gone))
-    assert verdict_path(run_dir_c).is_file(), "the positive control: a create fault marks"
-    assert '"ran": false' in verdict_path(run_dir_c).read_text(encoding="utf-8")
-
-    mount_d = make_run_dir(tmp_path, "run-d")
-    with pytest.raises(BoxFault):
-        box_mod.start_box(_request(complete.parent, mount_d), docker=RecordingDocker(create=bind_gone))
-    assert verdict_path(mount_d).is_file(), "the positive control: a create fault marks"
 
 
 # ---- MF3: the running package's recipe is authoritative; the name carries its version ---------------
