@@ -43,4 +43,4 @@ State **ready**, **blocked/incomplete**, or **contract repair required**, togeth
 - Actual checks and their results, expected reds, unexercised assertions and environmental gaps, each required later check and its code-stage owner/completion condition.
 - Open blockers, if any, and the precise next action. No known blocker accompanies a ready verdict.
 
-The code stage owns exploit-based attacks and implementation-stage verification. Name `write-code-from-tests` as the next implementer. The old `write-code-from-spec` entry delegates to that same workflow and preserves existing tests-first refs on historical resumes.
+The code stage owns exploit-based attacks and implementation-stage verification. Name `write-code-from-tests` as the next implementer.
