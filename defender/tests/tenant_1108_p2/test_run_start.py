@@ -163,7 +163,8 @@ def test_explicit_unsandboxed_lane_reads_the_accepted_path_before_message_zero(
         # folder — not the inherited value, and not the tenant clone's host path.
         ((seen, ident),) = observed_env
         assert seen != '/wrong/inherited/agent', 'fallback subprocess inherited the wrong agent path'
-        assert Path(seen).name == 'agent' and seen != str(tenant.agent), seen
+        assert Path(seen).name == 'agent', seen
+        assert seen != str(tenant.agent), seen
         assert ident == (tenant.id + '\r\n').encode(), (
             f'the agent half the fallback hands its programs does not hold the accepted '
             f'identity: {ident!r}')

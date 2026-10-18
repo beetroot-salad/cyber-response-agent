@@ -123,8 +123,9 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
     assert len(writable) == 1, f"the box has more than one read-write bind: {writable}"
     # #1255 (design rev 4, P1) flipped the TARGETS to the model view: the run folder is bound at
     # `/runs/current`, the checkout at `/defender`; the SOURCES still name this host's trees.
-    assert f"source={run_dir}," in writable[0] and "target=/runs/current" in writable[0], (
-        "N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
+    assert f"source={run_dir}," in writable[0], ("N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
+        "wire protocol with the model, and the run dir stays its one rw bind (at /runs/current)")
+    assert "target=/runs/current" in writable[0], ("N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
         "wire protocol with the model, and the run dir stays its one rw bind (at /runs/current)")
     readonly = [m for m in mounts if "readonly" in m]
     # the defender tree and, since #1222, the run's input directory are the two named read-only

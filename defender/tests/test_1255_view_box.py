@@ -139,7 +139,7 @@ def test_b1_two_host_layouts_render_the_same_create_command(tmp_path):
     ma, mb = V.masked_create(ca.argv), V.masked_create(cb.argv)
     assert ma == mb, (
         "the create command depends on the host layout:\n"
-        + "\n".join(f"  A: {x}\n  B: {y}" for x, y in zip(ma, mb) if x != y))
+        + "\n".join(f"  A: {x}\n  B: {y}" for x, y in zip(ma, mb, strict=False) if x != y))
     assert ca.env == cb.env, {k: (ca.env.get(k), cb.env.get(k))
                               for k in set(ca.env) | set(cb.env)
                               if ca.env.get(k) != cb.env.get(k)}
@@ -229,7 +229,7 @@ def test_b1_o2_an_arm_and_a_natural_run_get_the_same_create_command(tmp_path, mo
     mn, ma = V.masked_create(cn.argv), V.masked_create(ca.argv)
     assert mn == ma, (
         "an arm's box differs from a natural run's:\n"
-        + "\n".join(f"  natural: {x}\n  arm:     {y}" for x, y in zip(mn, ma) if x != y))
+        + "\n".join(f"  natural: {x}\n  arm:     {y}" for x, y in zip(mn, ma, strict=False) if x != y))
     assert cn.target_of(Path(natural.run_dir)) is not None, cn.mounts
     assert ca.target_of(Path(arm.run_dir)) == cn.target_of(Path(natural.run_dir)), (
         "the arm's own run folder is not bound where the natural run's is", ca.mounts, cn.mounts)

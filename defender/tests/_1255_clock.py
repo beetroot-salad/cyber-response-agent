@@ -520,9 +520,10 @@ def record_source(tmp_path: Path, *, limits: dict | None = None) -> tuple[str, P
                     (0, H.Turn(text="Summary: one query, no hits.")))
     out = run_main(natural_argv(RunPaths(seed).alert, tenant_id), clock=clock, main=main,
                    gather=gather, limits=limits)
-    assert out.exit == 0 and out.run_dir is not None, (
-        f"the source run did not complete through run.main: exit={out.exit} "
+    assert out.exit == 0, (f"the source run did not complete through run.main: exit={out.exit} "
         f"refusal={out.refusal}")
-    assert main.calls == 5 and gather.calls == 2, (
-        f"the source's script did not play out: main {main.seen} gather {gather.seen}")
+    assert out.run_dir is not None, (f"the source run did not complete through run.main: exit={out.exit} "
+        f"refusal={out.refusal}")
+    assert main.calls == 5, f"the source's script did not play out: main {main.seen} gather {gather.seen}"
+    assert gather.calls == 2, f"the source's script did not play out: main {main.seen} gather {gather.seen}"
     return tenant_id, out.run_dir

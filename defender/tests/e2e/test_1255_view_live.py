@@ -66,7 +66,8 @@ def test_b8_live_the_shims_environment_in_a_real_box_is_the_model_view(tmp_path)
         assert not hits, "the box's environment shows host layout:\n" + "\n".join(hits)
 
         rc, out, err = _in_box(box, f"cat {V.MODEL_ALERT}")
-        assert rc == 0 and "v2-cross-tier-ssh-pivot" in out, (rc, err[:300])
+        assert rc == 0, (rc, err[:300])
+        assert "v2-cross-tier-ssh-pivot" in out, (rc, err[:300])
 
         rc, out, err = _in_box(box, "defender-invlang sequence")
         m = re.search(r"loaded (\d+)/(\d+) cases", err)
@@ -92,7 +93,8 @@ def test_b8_live_u1_the_mount_points_are_the_model_view_and_sources_are_recorded
         for point in (V.MODEL_RUN, f"{V.MODEL_RUN}/{RUN_LAYOUT.alert_input_dir}",
                       V.MODEL_DEFENDER, V.MODEL_AGENT):
             assert point in points, f"no mount at {point}: {sorted(points)}"
-        assert str(run_dir) not in points and str(layout.checkout) not in points, sorted(points)
+        assert str(run_dir) not in points, sorted(points)
+        assert str(layout.checkout) not in points, sorted(points)
 
         sources = V.scan(out, V.host_tokens(layout))
         record_property("u1_runtime", box.spec.runtime)

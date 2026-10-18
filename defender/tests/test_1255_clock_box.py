@@ -179,8 +179,8 @@ def arm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, natural: Captured) -> C
 def _trees_are_bound(cap: Captured) -> None:
     """Positive control for the clock-mount filter: the run's own trees ARE on the argv."""
     sources = {Path(m["source"]) for m in cap.docker.mounts()}
-    assert cap.run_dir in sources and C.DEFENDER in sources, (
-        f"the run's own trees are not bound, so the filter proves nothing: {cap.docker.mounts()}")
+    assert cap.run_dir in sources, f"the run's own trees are not bound, so the filter proves nothing: {cap.docker.mounts()}"
+    assert C.DEFENDER in sources, f"the run's own trees are not bound, so the filter proves nothing: {cap.docker.mounts()}"
 
 
 def test_k1_a_natural_runs_box_carries_one_read_only_clock_mount(natural):
@@ -536,11 +536,13 @@ def test_k2_the_gate_refuses_main_and_gather_a_read_of_the_clock_mount(natural, 
 
     *clock_answers, alert_read, alert_cat = answers
     alert = RunPaths(natural.run_dir).alert.read_text(encoding="utf-8").strip()
-    assert alert_read[0] == "return" and alert in alert_read[1], (
-        f"positive control: {role}'s read_file of the alert at {V.MODEL_ALERT} did not read it "
+    assert alert_read[0] == "return", (f"positive control: {role}'s read_file of the alert at {V.MODEL_ALERT} did not read it "
         f"back: {alert_read}")
-    assert alert_cat[0] == "return" and len(box.calls) == 1, (
-        f"positive control: {role}'s cat of the alert did not reach the box exactly once "
+    assert alert in alert_read[1], (f"positive control: {role}'s read_file of the alert at {V.MODEL_ALERT} did not read it "
+        f"back: {alert_read}")
+    assert alert_cat[0] == "return", (f"positive control: {role}'s cat of the alert did not reach the box exactly once "
+        f"(answer {alert_cat}, box calls {[c['command'] for c in box.calls]})")
+    assert len(box.calls) == 1, (f"positive control: {role}'s cat of the alert did not reach the box exactly once "
         f"(answer {alert_cat}, box calls {[c['command'] for c in box.calls]})")
     for (tool, args), (kind, text) in zip(calls[:4], clock_answers, strict=True):
         assert kind == "retry", (
@@ -636,7 +638,8 @@ def test_k3_an_arms_preload_and_clock_variables_are_the_natural_runs(natural, ar
     two boxes with no preload and no clock variables at all do not pass as "the same". Positive
     control: both create commands carry an environment."""
     env_n, env_a = natural.docker.env(), arm.docker.env()
-    assert env_n and env_a, "a create command carries no environment to compare"
+    assert env_n, "a create command carries no environment to compare"
+    assert env_a, "a create command carries no environment to compare"
     config = {"natural": _time_configuration(natural), "arm": _time_configuration(arm)}
     for side, conf in config.items():
         assert conf["preload"], (
@@ -690,8 +693,8 @@ def _box_reads(seen: dict[str, Any], reading: dt.datetime, out: C.Launched) -> N
     stamps = [C.instant(s.replace(" ", "T")) for s in _STAMP.findall(sql_out)]
     assert len(stamps) >= 5, f"the SQL answer carries fewer timestamps than asked: {sql_out}"
     for stamp in stamps:
-        assert stamp is not None and abs(stamp - reading) <= _SLACK, (
-            f"an in-box SQL time {stamp} is not the run clock's {reading}: {sql_out}")
+        assert stamp is not None, f"an in-box SQL time {stamp} is not the run clock's {reading}: {sql_out}"
+        assert abs(stamp - reading) <= _SLACK, f"an in-box SQL time {stamp} is not the run clock's {reading}: {sql_out}"
     dates = set(_DATE.findall(sql_out))
     assert dates == {reading.date().isoformat()}, f"an in-box SQL date is not the run clock's: {dates}"
     rc, py_out, err = seen["py"]
