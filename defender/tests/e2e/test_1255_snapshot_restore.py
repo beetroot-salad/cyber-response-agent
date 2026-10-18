@@ -763,3 +763,61 @@ def test_p3_the_fork_snapshot_is_not_kept_in_the_run_folder_or_the_tenant_agent_
     assert arm.document == source.document, (
         f"the arm did not restore exactly after the run folder lost {removed}")
 
+
+
+def test_d2_a_call_time_configuration_fault_stays_down_after_the_fork(tmp_path):
+    """#1255 D2 + #1256 O-5b: a fork continues a run's permanent system refusal.
+
+    The source starts healthy, then a real query raises ConfigFault before the cut.
+    A newly healthy adapter in the arm must not reopen that system or dispatch its lead.
+    """
+    from pydantic_ai.messages import RetryPromptPart, ToolReturnPart
+
+    from defender.scripts.adapters.faults import ConfigFault
+
+    reason = "FORK1255_REQUIRED_FEED_KEY"
+    source_calls = []
+
+    def fault_after_start(verb, params):
+        source_calls.append(verb)
+        if verb == "query":
+            raise ConfigFault(f"{reason} is not set")
+        return envelope(S.DOCS)
+
+    source = S.drive_source(
+        tmp_path, (S.append(CHUNKS[0]), S.dispatch("l-001"), S.echo("after-down"),
+                   S.dispatch("l-002"), S.done()),
+        leads={"l-001": (LEAD_QUERY, Turn(text="configuration is missing")),
+               "l-002": (LEAD_QUERY, Turn(text="must not run"))},
+        answer=fault_after_start)
+    assert source_calls.count("query") == 1, "the source retried a permanently down adapter"
+    assert "l-001" in source.gather.asked, "the faulting lead never ran"
+    assert "l-002" not in source.gather.asked, "the source did not retain its escaped fault"
+    point = S.tool_calling_responses(source.store)[2]
+    (call,) = S.calls_of(S.message_at(source.store, point))
+    assert call.args_as_dict().get("command") == "echo after-down"
+
+    recovered_calls = []
+
+    def healthy_again(verb, params):
+        recovered_calls.append(verb)
+        return envelope(S.DOCS)
+
+    rec = VerbRecorder()
+    arm = S.drive_arm(
+        tmp_path, S.spec_for(source, point),
+        S.Recorder([S.dispatch("l-002"), S.done()]),
+        leads={"l-002": (LEAD_QUERY, Turn(text="must not run"))},
+        verbs=elastic_backend(rec, healthy_again))
+    _arm_launched(arm)
+    assert "l-002" not in arm.gather.asked, "the fork reopened its source's down system"
+    assert recovered_calls == [], "the recovered adapter ran despite the inherited refusal"
+    assert len(arm.main.requests) >= 2, "the arm never observed its post-fork dispatch answer"
+    answers = [str(part.content) for part in arm.main.requests[1][-1].parts
+               if isinstance(part, ToolReturnPart | RetryPromptPart)
+               and part.tool_name == "gather"]
+    assert answers, "the arm never observed its post-fork dispatch refusal"
+    refusal = "\n".join(answers)
+    assert "not configured" in refusal.lower(), refusal
+    assert reason in refusal, "the fork lost the original configuration-fault reason"
+    assert "tripped" not in refusal.lower(), "configuration faults must not become breaker trips"
