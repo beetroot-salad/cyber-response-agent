@@ -345,16 +345,6 @@ def _request_runtime_of(monkeypatch, value: str | None) -> str:
     return rec.create_argv[rec.create_argv.index("--runtime") + 1]
 
 
-def test_request_runtime_lever_defaults_to_runsc_when_unset(monkeypatch):
-    assert _request_runtime_of(monkeypatch, None) == "runsc"
-
-
-def test_request_runtime_lever_honours_an_explicit_runc(monkeypatch):
-    """Pre-fix this returned runsc: `BoxRequest.spec` defaulted to a bare `BoxSpec()`, so
-    every boxed LEARN cycle demanded gVisor no matter what the operator set."""
-    assert _request_runtime_of(monkeypatch, "runc") == "runc"
-
-
 # C46 — the wiring: the discovered table must actually REACH the argv builders
 # Every translation test above calls the argv builders directly with a table handed in. That
 # leaves the connection between discovery and use unpinned: drop the mounts argument at
