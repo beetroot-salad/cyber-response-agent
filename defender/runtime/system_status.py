@@ -364,8 +364,7 @@ def snapshot_down(state: RunState) -> dict[str, dict[str, str]]:
 
     Reasons already passed their source run's `ReasonScope`; the scope itself belongs
     to the current run and is never copied into an arm.
-
-    @owns fork_system_down"""
+    """
     with state.lock:
         return {
             system: {"kind": "not_configured" if isinstance(cause, NotConfigured)
