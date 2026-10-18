@@ -23,7 +23,7 @@ import pytest
 
 from _box665 import requires_live_box  # noqa: E402
 
-from defender.run_repository import RUN_LAYOUT  # noqa: E402
+from defender.run_repository import RUN_LAYOUT, RunPaths  # noqa: E402
 from defender.runtime import bash_exec  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.tests import _1255_view as V  # noqa: E402
@@ -44,6 +44,10 @@ def _in_box(box, command: str) -> tuple[int, str, str]:
 def _real_box(tmp_path: Path, run_id: str):
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     run_dir = V.natural_run(layout, ALERT, run_id)
+    # The corpus enumerates investigation documents; materializing an alert alone is not a case.
+    golden = Path(__file__).resolve().parents[2] / "fixtures-e2e" / "golden-sshpivot-ab3"
+    RunPaths(run_dir).investigation.write_text(
+        (golden / "investigation.md").read_text(encoding="utf-8"), encoding="utf-8")
     box = box_mod.start_box(run_dir, layout.checkout, docker=box_mod._docker,
                             tenant_agent=layout.agent, tenant_id=layout.tenant.id)
     return layout, run_dir, box
