@@ -675,12 +675,12 @@ def _box_probe(out: C.Launched, seen: dict[str, Any]) -> Any:
     from defender.runtime import bash_exec
 
     def probe(_text: str) -> Any:
-        box, run_dir = out.kwargs["box"], Path(out.kwargs["run"].run_dir)
+        box = out.kwargs["box"]
         seen["probed"] = True
         sql = f"printf '{{\"x\": 1}}' | defender-sql \"{_SQL}\""
         for name, cmd in (("sql", sql), ("py", _PY)):
-            res = box.run_parsed(bash_exec.parse(cmd), command=cmd, cwd=run_dir, timeout=60)
-            seen[name] = (res.rc, res.out, res.err)
+            res = box.run_parsed(bash_exec.parse(cmd), command=cmd, cwd=Path(V.MODEL_RUN), timeout=60)
+            seen[name] = (res.rc, res.out.decode("utf-8"), res.err.decode("utf-8"))
         return C.DONE
 
     return probe
