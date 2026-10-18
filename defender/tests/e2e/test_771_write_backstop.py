@@ -598,7 +598,7 @@ def test_the_gated_model_writers_refuse_a_planted_hard_link(tool, name, seed, dr
 
     refused = False
     try:
-        drive(deps, str(run / name))
+        drive(deps, f"/runs/current/{name}")
     except Exception:  # noqa: BLE001 — ModelRetry today; the demand is that it refuses at all
         refused = True
 
@@ -621,7 +621,7 @@ def test_the_gated_model_write_lands_when_nothing_is_planted(tool, name, seed, d
     artifact = run / name
     artifact.write_text(seed, encoding="utf-8")   # `edit_file` needs a baseline to edit
 
-    result = drive(deps, str(artifact))
+    result = drive(deps, f"/runs/current/{name}")
 
     assert name in result, f"{tool} did not report the artifact it wrote: {result!r}"
     assert artifact.read_text(encoding="utf-8"), f"{tool} left {name} empty"
@@ -647,7 +647,7 @@ def test_report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted(
 
     refused = False
     try:
-        drive(deps, str(artifact))
+        drive(deps, f"/runs/current/{name}")
     except Exception:  # noqa: BLE001 — ModelRetry today; the demand is that it refuses at all
         refused = True
 
