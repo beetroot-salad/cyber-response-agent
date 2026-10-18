@@ -12,7 +12,7 @@ an `--episode` run); `run._world_seams` settles the world's oracle side; `run._d
 builds the `WorldRegistry` over the checkout's roster with that tenant and the source run's
 pre-branch keys, exactly as `run.main`'s lifecycle does, and hands it to its `investigate` seam,
 which here runs the REAL driver (`_replay_harness.drive`, `resume=` the `BranchSpec` the world's
-manifest names) with scripted models. The source run is `_branch_947.legal_source` — a finished
+manifest names) with scripted models. The source run is `_branch_947.planted_source` — a snapshotted fixture
 run a branch may legally be taken from — and the world is the episode's control world (no facts),
 whose every call is answered from the family's base recording when the recording holds it
 (`passthrough`, no oracle turn, no provider call).
@@ -49,7 +49,9 @@ from defender.run_repository import RunPaths  # noqa: E402
 from defender.run_repository import Run  # noqa: E402
 from defender.tests import _tenants1106 as T6  # noqa: E402
 from defender.tests import _triplet_947 as T947  # noqa: E402
-from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at  # noqa: E402
+from defender.tests._branch_947 import (  # noqa: E402
+    GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
+)
 from defender.tests._data_root_1078 import current_data_root  # noqa: E402
 from defender.tests.e2e import _lead_zero_808 as LZ  # noqa: E402
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
@@ -72,7 +74,6 @@ LEAD = "l-001"
 CAPTURE_MARK = "FD1256-CAPTURED-OWNER-OF-WEB-1"
 #: The key the sibling's settings lose between the source run and the branch.
 DROPPED = "CMDB_URL_BASE"
-CONTINUATION = "Continue the investigation from here."
 
 
 def _plant_tenant() -> tuple[Path, Any]:
@@ -89,8 +90,7 @@ def _episode(where: Path, spec: Any, source_dir: Path) -> Path:
     as_of = spec.as_of.isoformat().replace("+00:00", "Z")
     doc = S.family_v2(worlds=[S.control_world("a")], source_run_dir=str(source_dir),
                       served_systems=("cmdb", "elastic"), as_of=as_of,
-                      branch_message_id=spec.branch_message_id,
-                      continuation_prompt=spec.continuation_prompt)
+                      branch_message_id=spec.branch_message_id)
     capture = S.captured("cmdb", "get-host", {"host": HOST},
                          {"host": HOST, "owner": CAPTURE_MARK})
     return S.episode_v2(where, doc=doc, root=where / "episodes", base_rows=[capture])
@@ -183,9 +183,9 @@ def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -
 
     The resumed sibling's surfaces carry the status (the design's resume non-obligation: "the rebuilt gather index, `list_verbs`, and dispatch refusals carry the down status"; adversary A3): the lead's first prompt — the system index the resumed run builds — and its `list_verbs(cmdb)` answer each name cmdb not configured with the dropped key. In the configured sibling neither does, and `list_verbs(cmdb)` lists cmdb's verbs."""
     knowledge, accepted = _plant_tenant()
-    store, source_dir, _session, path_ids = legal_source(
+    store, source_dir, _session, path_ids = planted_source(
         tmp_path / "source", investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
-    spec = spec_at(store, source_dir, path_ids[-1], prompt=CONTINUATION)
+    spec = spec_at(store, source_dir, path_ids[LEGACY_BRANCH_CALL])
 
     # Control: settings unchanged since the source run — the capture answers the call.
     configured = _sibling(tmp_path, "configured", accepted=accepted, spec=spec,
