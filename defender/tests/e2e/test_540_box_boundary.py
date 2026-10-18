@@ -218,11 +218,13 @@ def _run(box, command: str, *, cwd: Path) -> BoxResult:
 
 
 def _write_probe(run_dir: Path, name: str, source: str) -> Path:
-    """Plant a probe script on the rw bind. The bytes are written HERE, by the
+    """Plant a probe script on the rw bind and return its model-visible path.
+
+    The bytes are written HERE, by the
     test, through the real filesystem — the fault (or the capability) is real."""
     script = run_dir / f"_probe_{name}.py"
     script.write_text(source, encoding="utf-8")
-    return script
+    return Path("/runs/current") / script.name
 
 
 def _probe(box, run_dir: Path, name: str, source: str, *args: str) -> dict:
@@ -231,7 +233,7 @@ def _probe(box, run_dir: Path, name: str, source: str, *args: str) -> dict:
     the errno and the exact class — never on an exception subclass (C56)."""
     script = _write_probe(run_dir, name, source)
     argv = " ".join([f"python3 {script}", *args])
-    res = _run(box, argv, cwd=run_dir)
+    res = _run(box, argv, cwd=Path("/runs/current"))
     assert res.rc == 0, f"probe {name} did not complete: rc={res.rc} err={res.err!r}"
     return json.loads(res.out.decode("utf-8"))
 
@@ -440,7 +442,7 @@ def test_host_path_outside_the_binds_is_absent(box, run_dir, tmp_path):
         "path means something mounted it and a matcher refused, which is not the boundary"
     )
     assert "HOST-ONLY-SECRET-99" not in _run(
-        box, f"cat {outside}", cwd=run_dir).out.decode("utf-8", "replace")
+        box, f"cat {outside}", cwd=Path("/runs/current")).out.decode("utf-8", "replace")
 
 
 @pytest.mark.skipif(not _DOOD, reason="not docker-outside-of-Docker — there is no "
@@ -449,8 +451,7 @@ def test_host_path_outside_the_binds_is_absent(box, run_dir, tmp_path):
 @requires_box
 def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
     """C46, on the topology it exists for. Under DooD `source=` and `target=` must DIVERGE:
-    the daemon resolves the source in its own namespace while every downstream reader
-    (artifacts, orient's workspace map, `raw_command`) keeps the target this process uses.
+    the daemon resolves the source in its own namespace while the model sees the stable `/runs/current` and `/defender` targets.
 
     The `box` fixture already started, which means F8's startup sentinel round-tripped a
     token through the real bind — the divergence below is therefore a working mapping, not
@@ -463,9 +464,9 @@ def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
         for spec in argv if spec.startswith("type=bind,")
     ]
     by_target = {b["target"]: b["source"] for b in binds}
-    for target in (run_dir, DEFENDER):
+    for target, host in ((Path("/runs/current"), run_dir), (Path("/defender"), DEFENDER)):
         assert str(target) in by_target, f"{target} is not bound at all: {by_target}"
-        assert by_target[str(target)] != str(target), (
+        assert by_target[str(target)] != str(host), (
             f"the bind source for {target} was not translated: {by_target} — under DooD an "
             "untranslated source names nothing on the daemon and is silently created as an "
             "EMPTY dir (C46)"
@@ -473,7 +474,7 @@ def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
 
     host_bytes = b"C46-ROUND-TRIP-\xe2\x9c\x93\n"
     (run_dir / "c46.txt").write_bytes(host_bytes)
-    got = _probe(box, run_dir, "c46", _READ_PATH, str(run_dir / "c46.txt"))
+    got = _probe(box, run_dir, "c46", _READ_PATH, "/runs/current/c46.txt")
     assert got["read"] == host_bytes.decode("utf-8"), (
         f"the translated bind did not map the host tree: {got}")
 
@@ -489,8 +490,8 @@ def test_run_dir_and_defender_dir_are_readable_in_box(box, run_dir):
     (run_dir / "sentinel.txt").write_bytes(host_bytes)
     skill = DEFENDER / "SKILL.md"
 
-    got_run = _probe(box, run_dir, "readrun", _READ_PATH, str(run_dir / "sentinel.txt"))
-    got_defender = _probe(box, run_dir, "readdef", _READ_PATH, str(skill))
+    got_run = _probe(box, run_dir, "readrun", _READ_PATH, "/runs/current/sentinel.txt")
+    got_defender = _probe(box, run_dir, "readdef", _READ_PATH, "/defender/SKILL.md")
 
     assert got_run["read"] == host_bytes.decode("utf-8")
     assert got_defender["read"] == skill.read_text(encoding="utf-8")
@@ -509,7 +510,7 @@ def test_write_under_defender_dir_fails_erofs_by_errno(box, run_dir):
         DEFENDER / "runtime" / "permission" / "bash.py",
     ]
     for i, target in enumerate(targets):
-        res = _probe(box, run_dir, f"erofs{i}", _WRITE_PATH, str(target))
+        res = _probe(box, run_dir, f"erofs{i}", _WRITE_PATH, str(Path("/defender") / target.relative_to(DEFENDER)))
         assert res["wrote"] is False, f"the box wrote into the ro bind at {target}"
         assert res["errno"] == errno_mod.EROFS, f"{target}: errno={res['errno']}"
         assert res["exc"] == "OSError", (
@@ -527,7 +528,7 @@ def test_defender_dir_imports_from_the_ro_bind(box, run_dir):
     res = _probe(box, run_dir, "roimport", _IMPORT_DEFENDER)
 
     for key in ("seg", "bash_exec"):
-        assert res[key].startswith(str(DEFENDER)), (
+        assert res[key].startswith("/defender/"), (
             f"{key} imported from {res[key]!r}, not from the ro bind at {DEFENDER}")
 
 
@@ -557,13 +558,13 @@ def test_bytes_written_in_box_appear_on_the_host(box, run_dir):
     """`run_dir` is the one writable directory and the writable mount IS the
     exit: bytes a boxed process writes appear on the host as written, with no
     copy step. Positive control for every filesystem negative above."""
-    written = _probe(box, run_dir, "hostwrite", _WRITE_PATH, str(run_dir / "artifact.bin"))
+    written = _probe(box, run_dir, "hostwrite", _WRITE_PATH, "/runs/current/artifact.bin")
     assert written["wrote"] is True, written
     assert (run_dir / "artifact.bin").read_bytes() == b"box-was-here"
 
     raw = (
         "import json, os\n"
-        f"d = {str(run_dir / 'gather_raw' / 'l-042')!r}\n"
+        "d = '/runs/current/gather_raw/l-042'\n"
         "os.makedirs(d, exist_ok=True)\n"
         "fd = os.open(os.path.join(d, '1.json'), os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o644)\n"
         "n = os.write(fd, b'{\"seq\": 1}')\n"
@@ -588,7 +589,7 @@ def test_dotdot_operand_cannot_name_a_sibling_run(box, run_dir, sibling_run):
                            defender_dir=DEFENDER)
     assert decision.allow is False, "the host-side gate should refuse the .. escape"
 
-    res = _run(box, f"cat {escape}", cwd=run_dir)
+    res = _run(box, f"cat {escape}", cwd=Path("/runs/current"))
     combined = (res.out + res.err).decode("utf-8", "replace")
     assert "SIBLING-RUN-SECRET-42" not in combined, combined
     assert res.rc != 0, "the .. escape resolved to something readable"
@@ -760,8 +761,7 @@ def test_box_env_contains_exactly_the_allowlist(box, run_dir):
     """The tenant-free fixture carries the required box allowlist keys plus what the
     container runtime injects. The optional `DEFENDER_AGENT_DIR` is absent because
     this box has no tenant agent mount. `DEFENDER_RUNS_BASE` names
-    `run_dir.parent`, which is NOT mounted — so the box is told where runs live
-    and still cannot reach them."""
+    the neutral `/runs` parent; sibling host runs are never mounted."""
     daemon_injected = {"HOSTNAME", "HOME", "PWD", "SHLVL", "_", "OLDPWD", "TERM"}
 
     box_env = _probe(box, run_dir, "envexact", _ENV_DUMP)
@@ -770,11 +770,12 @@ def test_box_env_contains_exactly_the_allowlist(box, run_dir):
     assert set(box_env) - daemon_injected == expected, (
         f"box env is {sorted(box_env)}; expected is {sorted(expected)}")
     assert "DEFENDER_AGENT_DIR" not in box_env
-    assert box_env["DEFENDER_RUN_DIR"] == str(run_dir)
-    assert box_env["DEFENDER_RUNS_BASE"] == str(run_dir.parent)
+    assert box_env["DEFENDER_RUN_DIR"] == "/runs/current"
+    assert box_env["DEFENDER_RUNS_BASE"] == "/runs"
 
-    unreachable = _probe(box, run_dir, "runsbase", _READ_PATH, box_env["DEFENDER_RUNS_BASE"])
-    assert unreachable["read"] is None, "DEFENDER_RUNS_BASE names a mounted path"
+    siblings = _probe(box, run_dir, "runsbase",
+                      'import json, os; print(json.dumps({"entries": os.listdir("/runs")}))')
+    assert siblings["entries"] == ["current"], "the model runs parent exposes sibling runs"
 
 
 def test_run_env_provider_key_strip_still_governs_host_subprocesses(
@@ -826,7 +827,7 @@ def test_boundary_holds_with_decide_bash_approving_everything(box, run_dir, sibl
         decision = decide_bash(command, policy=policy, run_dir=run_dir,
                                defender_dir=DEFENDER)
         assert decision.allow is False, f"expected the gate to deny: {command!r}"
-        res = _run(box, command, cwd=run_dir)
+        res = _run(box, command, cwd=Path("/runs/current"))
         text = (res.out + res.err).decode("utf-8", "replace")
         assert "O4-HOST-SECRET" not in text, command
         assert "SIBLING-RUN-SECRET-42" not in text, command
@@ -837,7 +838,7 @@ def test_boundary_holds_with_decide_bash_approving_everything(box, run_dir, sibl
     assert accepted == []
 
     poison = _probe(box, run_dir, "o4erofs", _WRITE_PATH,
-                    str(DEFENDER / "lessons" / "o4.md"))
+                    "/defender/lessons/o4.md")
     assert poison["errno"] == errno_mod.EROFS, poison
     assert not (DEFENDER / "lessons" / "o4.md").exists()
 
@@ -887,14 +888,14 @@ def test_boundary_holds_under_both_runc_and_runsc(run_dir, sibling_run, tmp_path
     with _box(run_dir, spec=BoxSpec.from_env({BoxSpec.ENV_VAR: runtime})) as b:
         absent = _probe(b, run_dir, f"floor-abs-{runtime}", _READ_PATH, str(outside))
         erofs = _probe(b, run_dir, f"floor-ro-{runtime}", _WRITE_PATH,
-                       str(DEFENDER / "lessons" / "floor.md"))
+                       "/defender/lessons/floor.md")
         sibling = _probe(b, run_dir, f"floor-sib-{runtime}", _READ_PATH,
                          str(sibling_run / "gather_raw" / "l-001.lead.json"))
         with _echo_listener() as (host, port, accepted):
             egress = _probe(b, run_dir, f"floor-net-{runtime}", _TCP_CONNECT, host, str(port))
         (run_dir / "alive.txt").write_text("alive", encoding="utf-8")
         alive = _probe(b, run_dir, f"floor-alive-{runtime}", _READ_PATH,
-                       str(run_dir / "alive.txt"))
+                       "/runs/current/alive.txt")
 
     assert alive["read"] == "alive", f"{runtime}: the box could not read its own rw bind"
     assert absent["read"] is None, absent
@@ -921,7 +922,7 @@ def test_a_script_on_the_tmpfs_cannot_execute(box, run_dir):
     staged = _probe(box, run_dir, "tmpfsstage", stage)
     assert staged["exists"] is True, "the tmpfs is not even writable — wrong failure"
 
-    res = _run(box, "/tmp/staged.sh", cwd=run_dir)
+    res = _run(box, "/tmp/staged.sh", cwd=Path("/runs/current"))
 
     text = (res.out + res.err).decode("utf-8", "replace")
     assert "staged-ran" not in text, "a script on the tmpfs executed"
@@ -938,7 +939,7 @@ def test_a_script_on_the_rw_bind_executes(box, run_dir):
     script.write_text("#!/bin/sh\necho staged-ran\n", encoding="utf-8")
     script.chmod(0o755)
 
-    res = _run(box, str(script), cwd=run_dir)
+    res = _run(box, "/runs/current/staged.sh", cwd=Path("/runs/current"))
 
     assert res.rc == 0, (res.rc, res.err)
     assert res.out.decode() == "staged-ran\n"
@@ -965,7 +966,7 @@ def test_tmpfs_exhaustion_fails_the_run_loudly(run_dir):
     with _box(run_dir, spec=small) as b:
         res = _probe(b, run_dir, "fill", _FILL_TMPFS)
         script = _write_probe(run_dir, "unguarded", unguarded)
-        loud = _run(b, f"python3 {script}", cwd=run_dir)
+        loud = _run(b, f"python3 {script}", cwd=Path("/runs/current"))
 
     assert res["exc"] == "OSError", f"ENOSPC must be a bare OSError (C56b): {res}"
     assert res["errno"] == errno_mod.ENOSPC, res
@@ -983,8 +984,8 @@ def test_defender_namespace_package_imports_in_the_box(box, run_dir):
     a module. A mount destination that broke this would make the entrypoint
     unimportable rather than merely awkward."""
     res = _probe(box, run_dir, "nspkg", _IMPORT_DEFENDER)
-    assert res["seg"].startswith(str(DEFENDER))
-    assert res["bash_exec"].startswith(str(DEFENDER))
+    assert res["seg"].startswith("/defender/")
+    assert res["bash_exec"].startswith("/defender/")
 
     findspec = (
         "import importlib.util, json\n"
@@ -993,7 +994,7 @@ def test_defender_namespace_package_imports_in_the_box(box, run_dir):
     )
     entrypoint = _probe(box, run_dir, "entrypoint", findspec)
     assert entrypoint["origin"] is not None, "the box entrypoint module is not importable"
-    assert entrypoint["origin"].startswith(str(DEFENDER))
+    assert entrypoint["origin"].startswith("/defender/")
 
 
 @requires_box
@@ -1013,6 +1014,6 @@ def test_the_granted_bash_repertoire_runs_inside_the_box(box, run_dir):
     assert missing == [], f"granted but absent from the rootfs: {missing}"
 
     (run_dir / "corpus.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
-    res = _run(box, f"cat {run_dir / 'corpus.txt'} | grep -n beta", cwd=run_dir)
+    res = _run(box, "cat /runs/current/corpus.txt | grep -n beta", cwd=Path("/runs/current"))
     assert res.rc == 0, res.err
     assert res.out.decode() == "2:beta\n"

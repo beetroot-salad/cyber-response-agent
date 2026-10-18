@@ -804,7 +804,7 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
     """O1/D3/C3: "every executed run, fork siblings included" — a branched sibling is a `run.py
     --episode` process (`--resume` before #1105 PR 2) that reaches the same `materialize_run`, with a `ResumeWorld` resolved
     from its episode's manifest. Stamped on a versioned tenant, the SIBLING's stamp carries
-    `{"commit": <the clone's HEAD>}` beside its lineage (world, source run, branch point) — so
+    `{"commit": <the clone's HEAD>}` with neutral run-local provenance (#1255) — so
     `verify_family` has a knowledge commit to compare on every real sibling, not only on
     unforked runs. Without this a writer that skipped knowledge on the fork path would leave
     every real family with knowledge-absent siblings (waivable), and the anchor would never
@@ -829,9 +829,9 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
             episode_runs=view).run_dir
     assert run_dir.parent == episode_dir / "runs", "precondition: the fork path, not a fresh run"
     doc = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
-    assert doc["world_id"] == world.world_id
-    assert doc["parent_run_id"] == world.family.source_run_id
-    assert doc["fork_turn"] == world.family.branch_message_id
+    assert doc["world_id"] in (None, tenant.base_world_id)
+    assert doc["parent_run_id"] is None
+    assert doc["fork_turn"] is None
     assert doc["knowledge"] == {"commit": knowledge_head}
 
 
