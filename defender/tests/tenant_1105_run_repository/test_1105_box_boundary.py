@@ -204,11 +204,11 @@ def _session(root: Path, runtime: str, *, defender_dir: Path = H.DEFENDER) -> di
 
     script = run_dir / "_probe_s3_1105.py"
     script.write_text(_PROBE, encoding="utf-8")
-    command = f"python3 {script} {run_dir} {runs}"
+    command = f"python3 /runs/current/{script.name} /runs/current /runs"
     box = start_box(run_dir, defender_dir, spec=BoxSpec(runtime=runtime))
     sandboxed, name = box.sandboxed, box.name
     try:
-        result = box.run_parsed(parse(command), command=command, cwd=run_dir,
+        result = box.run_parsed(parse(command), command=command, cwd=Path("/runs/current"),
                                 timeout=EXEC_TIMEOUT)
     finally:
         stop_box(box)
@@ -304,7 +304,7 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
         f"the box for a 206-byte run id did not start sandboxed (name {s['name']!r})")
     assert s["probe"] is not None, f"the probe did not complete in the box: rc={s['rc']} {s['err']}"
     listing = s["probe"]["listing"]
-    assert listing == [RUN_ID], (
+    assert listing == ["current"], (
         f"inside the box the run folder's parent must hold the run's own folder only: {listing!r}")
     assert _writes(s)["control"]["ok"] is True, (
         "positive control: the run's own folder is the box's writable bind")
