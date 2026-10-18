@@ -86,6 +86,7 @@ from defender.runtime import box as box_mod
 from defender.tests import _1255_clock as C
 from defender.tests import _1255_view as V
 from defender.tests import _triplet_947 as T
+from defender.tests._alert_plant import plant_alert
 from defender.tests._spec1092 import STOCK_ROOTFS
 from defender.tests.e2e._box665 import RecordingDocker, reaped_after_create, requires_live_box
 
@@ -763,6 +764,12 @@ def test_a_clock_mount_must_round_trip_before_the_box_is_returned(tmp_path, monk
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    plant_alert(run_dir)
+    healthy = RecordingDocker()
+    box = box_mod.start_box(run_dir, C.DEFENDER, docker=healthy,
+                            spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS))
+    assert box is not None, "positive control: the run fixture cannot start a healthy box"
+    box_mod.stop_box(box, docker=healthy)
     docker = RecordingDocker(existing_token="self")
     clock_reads = []
 
