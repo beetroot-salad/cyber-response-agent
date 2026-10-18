@@ -188,8 +188,8 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
     try:
         probe = run_dir / "_probe_store.py"
         probe.write_text(_READ_PATH, encoding="utf-8")
-        cmd = f"python3 {probe} {store.path}"
-        res = box.run_parsed(parse(cmd), command=cmd, cwd=run_dir, timeout=60)
+        cmd = f"python3 /runs/current/{probe.name} {store.path}"
+        res = box.run_parsed(parse(cmd), command=cmd, cwd=Path("/runs/current"), timeout=60)
         assert res.rc == 0, res.err
         got = json.loads(res.out.decode("utf-8"))
         assert got["read"] is None, f"the box read the store: {got}"
@@ -199,12 +199,12 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
             "boundary")
 
         cat = f"cat {store.path}"
-        out = box.run_parsed(parse(cat), command=cat, cwd=run_dir, timeout=60)
+        out = box.run_parsed(parse(cat), command=cat, cwd=Path("/runs/current"), timeout=60)
         assert SECRET not in out.out.decode("utf-8", "replace")
 
         # positive control: the run dir IS reachable and writable from inside the box
-        ctl = f"cat {run_dir / 'sentinel.txt'}"
-        control = box.run_parsed(parse(ctl), command=ctl, cwd=run_dir, timeout=60)
+        ctl = "cat /runs/current/sentinel.txt"
+        control = box.run_parsed(parse(ctl), command=ctl, cwd=Path("/runs/current"), timeout=60)
         assert "RUN-DIR-IS-READABLE" in control.out.decode("utf-8")
     finally:
         stop_box(box)

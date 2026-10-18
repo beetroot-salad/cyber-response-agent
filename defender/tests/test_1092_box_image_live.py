@@ -203,7 +203,7 @@ def test_duckdb_imports_inside_the_box(image_run_base):
     # Thread sizing under runsc is out of scope (#66); the wheel's cost is C15's (#10)."""
     run_dir = make_run_dir(image_run_base)
     with real_box(run_dir) as box:
-        res = box_run(box, "python3 -c 'import duckdb'", cwd=run_dir)
+        res = box_run(box, "python3 -c 'import duckdb'", cwd=Path("/runs/current"))
         seen = box_probe(box, run_dir, "duckdb", _IMPORTS, "duckdb")
     assert res.rc == 0, res.err
     assert seen["duckdb"], seen
@@ -396,12 +396,12 @@ def test_each_granted_shim_run_inside_the_box_takes_an_interpreter_whose_package
         where = run_dir / "_probe1092_where.py"
         where.write_text(_WHERE, encoding="utf-8")
         for shim in SHIMS:
-            res = box_run(box, f"bash -x {DEFENDER / 'bin' / shim} --help", cwd=run_dir)
+            res = box_run(box, f"bash -x /defender/bin/{shim} --help", cwd=Path("/runs/current"))
             execs = [ln for ln in res.err.decode("utf-8", "replace").splitlines() if ln.startswith("+ exec ")]
             assert execs, (shim, res.err)
             interpreter = execs[-1].split()[2]
             assert ".venv" not in interpreter, (shim, execs[-1])
-            asked = box_run(box, f"{interpreter} {where}", cwd=run_dir)
+            asked = box_run(box, f"{interpreter} /runs/current/{where.name}", cwd=Path("/runs/current"))
             assert asked.rc == 0, (shim, asked.err)
             seen = json.loads(asked.out.decode("utf-8"))
             assert seen["pydantic"].startswith(SITE + "/"), (shim, seen)
@@ -445,7 +445,7 @@ def test_the_live_suites_duckdb_startup_probe_exits_zero_in_a_box_from_the_owned
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
-        res = box_run(box, "python3 -c 'import duckdb'", cwd=DEFENDER.parent)
+        res = box_run(box, "python3 -c 'import duckdb'", cwd=Path("/"))
     finally:
         box_mod.stop_box(box)
     assert res.rc == 0, res.err
