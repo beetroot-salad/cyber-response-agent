@@ -85,6 +85,7 @@ from defender.tests import _tenants1106  # noqa: E402
 from defender.tests._alert_plant import plant_alert  # noqa: E402
 from defender.tests.e2e._box665 import (  # noqa: E402
     BoxLifecycleRecorder,
+    RecordingDocker,
     drive_worktree_batch,
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -1135,19 +1136,12 @@ def test_path_identity_sentinel_fails_closed(tmp_path):
     with pytest.raises(BoxFault):
         start_box(run, DEFENDER, docker=wrong)
 
-    def echo(verb: str):
-        if verb != "exec":
-            return (0, "", "")
-        planted = sorted(p for p in run.iterdir() if p.name not in before)
-        if not planted:
-            # #771 M2's alias-ban probe execs right after the sentinel readback succeeds — by
-            # which point `_probe_sentinel` has already unlinked `.box-sentinel`, so this
-            # second `exec` (keyed only on `verb`, indistinguishable from the first at this
-            # fake's granularity) has nothing new to echo. Answer with the healthy verdict.
-            return (0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
-        return (0, planted[-1].read_text(encoding="utf-8"), "")
-
-    assert start_box(run, DEFENDER, docker=FakeDocker(echo)) is not None
+    # Read each actual sentinel through the captured bind table, including the clock bind.
+    # A reply keyed only on the run tree cannot model a healthy independent clock mount.
+    docker = RecordingDocker()
+    box = start_box(run, DEFENDER, docker=docker)
+    assert box is not None
+    stop_box(box, docker=docker)
 
 
 def test_mid_run_exec_failure_degrades_to_a_tool_error(gate_env):
