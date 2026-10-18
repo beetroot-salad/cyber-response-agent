@@ -36,7 +36,8 @@ from defender._io import read_jsonl_rows, read_text_utf8
 from defender._query_rules import ParamsTooDeep, _json_safe_params
 from defender.learning.core.config import OracleSettings
 from defender.hooks.budget_enforcer import oracle_turn_closed, oracle_turn_opened
-from defender.scripts.gather_tools.record_query import payload_text_of
+from defender.runtime.payload_view import payload_text_of
+from defender.runtime.case_ticket import read_posted_comments
 from defender.runtime.verbs import (
     CALL_DELIVERY,
     CALL_ID,
@@ -573,12 +574,10 @@ class WorldRegistry(ModuleVerbRegistry):
     def _source_writes(self) -> list[tuple[str, str]]:
         """The source run's own writes to the world after the branch point (#1255 P5, O6): the
         comments it posted on its case ticket when it closed, read off its host-only record
-        (`ticket_writer.read_posted_comments`). The host never transitions a case, so its
+        (`case_ticket.read_posted_comments`). The host never transitions a case, so its
         comments are the writes there are. `[]` with no source run, or none posted."""
         if self._source_run is None:
             return []
-        from defender.scripts.case_history.ticket_writer import read_posted_comments
-
         return [(f"its comment on case ticket {key}", body)
                 for key, body in read_posted_comments(self._source_run)]
 

@@ -27,7 +27,7 @@ from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault
-from defender.runtime.payload_view import render as _render_payload
+from defender.runtime.payload_view import payload_text_of, render as _render_payload
 from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.runtime.tools import DeadEnd
 from defender.scripts.gather_tools.record_query import (
@@ -42,7 +42,6 @@ from defender.scripts.gather_tools.record_query import (
     names_something_readable,
     payload_digest,
     payload_status,
-    payload_text_of,
     persist_payload as _persist_payload,  # noqa: F401
     raw_command,
     rejection_budget_trip,

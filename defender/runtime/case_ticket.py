@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import logging
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -12,6 +13,8 @@ from defender._model import model
 from defender._report import ReportUnreadable, require_report
 from defender.run_repository import Run
 from defender.runtime.tenant_settings import pointer_to, read_regular_bytes
+
+_logger = logging.getLogger(__name__)
 
 
 #: The mapping's path inside a tenant's `settings/` folder, which every reader is handed.
@@ -474,3 +477,22 @@ def ticket_event_time(ticket: Any, *, mapping: CaseMapping | CaseTicketError) ->
         if isinstance(lbl, str) and lbl.startswith(prefix):
             return lbl[len(prefix):] or None
     return None
+
+
+def read_posted_comments(run: Run) -> list[tuple[str, str]]:
+    """Every comment this run posted on its case ticket, as `(key, body)` in posting order —
+    its own writes to the world (`ticket_writer._record_posted_comment`). `[]` when it posted
+    none. A record
+    that cannot be read, or a line that is not a `{key, body}` of strings, is a warning and is
+    left out: the oracle is then not told that write."""
+    rows, torn, read = run.observability.ticket_comments.read_rows()
+    if read.reason is not None and not read.absent:
+        _logger.warning(f"{run.run_dir.name}: its posted-comment record could not be read "
+                        f"({read.reason})")
+        return []
+    out = [(r["key"], r["body"]) for r in rows
+           if isinstance(r.get("key"), str) and isinstance(r.get("body"), str)]
+    if torn or len(out) != len(rows):
+        _logger.warning(f"{run.run_dir.name}: {torn + len(rows) - len(out)} line(s) of its "
+                        "posted-comment record could not be read")
+    return out

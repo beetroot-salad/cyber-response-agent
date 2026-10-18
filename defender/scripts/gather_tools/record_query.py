@@ -79,17 +79,6 @@ def _sha256_hex(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
-def payload_text_of(payload: Any) -> str:
-    """@owns payload_text — the payload sidecar's spelling: an adapter's answer as the
-    text the query tool persists (`gather_raw/<lead>/<seq>.json`) and hands the model: the
-    answer's own key order, never re-sorted, `default=str` so a `datetime` or `Decimal` cannot
-    raise mid-call.
-
-    A branched world serves an answer read live in exactly this spelling (#1255 G8), so the
-    investigator's file and tool result are the bytes a natural run over the same system gets."""
-    return json.dumps(payload, default=str)
-
-
 def payload_sha256(payload_text: str) -> str:
     """The row's content identity: `sha256` of the exact text persisted to the sidecar.
 

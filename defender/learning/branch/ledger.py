@@ -87,7 +87,7 @@ def payload_text(payload: Any) -> str:
 
     Never the bytes a world serves (#1255 G8): a world serves an answer in the spelling the
     investigator would get from the system itself — the source's own sidecar for a recorded
-    answer, the query tool's spelling (`record_query.payload_text_of`) for a live read or an
+    answer, the query tool's spelling (`payload_view.payload_text_of`) for a live read or an
     oracle's submission. A row is found by its request key, which is canonical whatever its
     payload's spelling.
 
