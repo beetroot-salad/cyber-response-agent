@@ -324,6 +324,14 @@ jobs:
         # nothing but flakier teardown.
         run: uv run pytest tests/e2e/test_540_box_boundary.py -v -rs
 
+      - name: Verify the model view and run clock under gVisor
+        working-directory: defender
+        env:
+          DEFENDER_BUDGET_ENFORCE: "1"
+        run: >-
+          uv run pytest tests/e2e/test_1255_view_live.py
+          tests/test_1255_clock_box.py -m live -v -rs
+
   # The #540 boundary suite under docker-outside-of-Docker — the topology C46 exists for, and
   # the one the `test` job structurally cannot reach. There the driver and the daemon share a
   # path namespace, so box.py's bind-source translation is the IDENTITY and every assertion
