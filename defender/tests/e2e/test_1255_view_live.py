@@ -1,18 +1,4 @@
-"""#1255 slice B — what only a real box shows (design rev 4: "A gated live test covers what only a
-real box shows: the shims' environment and `/proc/self/mountinfo`").
-
-`live`-marked and exercised explicitly by CI's native-box job. The ordinary test shards
-deselect live tests; this file skips without a native daemon (`_box665.requires_live_box`). Each test starts the run box through the real `start_box`
-for a natural run made under a set-up tenant, and asks the box itself — `box.run_parsed`, the
-executor's own transport, below the permission gate on purpose: the gate is not what is being
-observed here.
-
-U1 (does gVisor's mountinfo show host bind sources?) is a RESIDUAL in the design, not an
-obligation: it is held by the read scope (G10, `test_1255_view_replay::
-test_b2_g10_proc_stays_outside_read_scope`). The U1 test therefore asserts what the design does
-promise (the mount POINTS are the model view) and RECORDS whether host sources show, as a
-`record_property` and a warning, without failing on it.
-"""
+"""Probe environment, mount points, and corpus isolation inside a real box."""
 from __future__ import annotations
 
 import re
@@ -44,7 +30,6 @@ def _in_box(box, command: str) -> tuple[int, str, str]:
 def _real_box(tmp_path: Path, run_id: str):
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     run_dir = V.natural_run(layout, ALERT, run_id)
-    # The corpus enumerates investigation documents; materializing an alert alone is not a case.
     golden = Path(__file__).resolve().parents[2] / "fixtures-e2e" / "golden-sshpivot-ab3"
     RunPaths(run_dir).investigation.write_text(
         (golden / "investigation.md").read_text(encoding="utf-8"), encoding="utf-8")
@@ -54,11 +39,6 @@ def _real_box(tmp_path: Path, run_id: str):
 
 
 def test_b8_live_the_shims_environment_in_a_real_box_is_the_model_view(tmp_path):
-    """P1 / O3, live: inside a real box, the environment every program (every shim) runs under
-    carries `DEFENDER_RUN_DIR=/runs/current`, `DEFENDER_RUNS_BASE=/runs`, `DEFENDER_DIR=/defender`,
-    `DEFENDER_AGENT_DIR=/agent`, and no value names the data root, the tenant, the checkout or
-    the home. The run's alert is at its model path (`cat` succeeds, control), and invlang's corpus
-    walk over `/runs` scans exactly the one mounted run (H2)."""
     layout, run_dir, box = _real_box(tmp_path, "20261015t120000z-view-live-env")
     try:
         rc, out, err = _in_box(box, "env")
@@ -84,11 +64,6 @@ def test_b8_live_the_shims_environment_in_a_real_box_is_the_model_view(tmp_path)
 def test_b8_live_u1_the_mount_points_are_the_model_view_and_sources_are_recorded(
     tmp_path, record_property,
 ):
-    """P1 (Box bullet), live: the box's own mount table has its binds at `/runs/current`,
-    `/runs/current/alert_input`, `/defender` and `/agent`, and at no host path of this layout.
-    U1 (residual): whether the table's SOURCE column shows host paths under this runtime is
-    recorded (`u1_host_sources_visible`) and warned about, not failed on — `/proc` stays outside
-    every agent's read scope (G10), which is the holding control."""
     layout, run_dir, box = _real_box(tmp_path, "20261015t120000z-view-live-u1")
     try:
         rc, out, err = _in_box(box, "cat /proc/self/mountinfo")

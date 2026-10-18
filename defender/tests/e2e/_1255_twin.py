@@ -1,59 +1,4 @@
-"""#1255 slice E — the twin check's machinery (O5). NO test scripts.
-
-The design's "Twin check (O5)": record a natural run with a scripted model and an injected
-clock, fork a control-world arm from it at a tool-calling main turn (D1), drive the arm with
-the same script, and compare — at every model request after the fork, for main, gather and
-review — the full request the provider would be sent (messages, tool results, tool
-definitions; part timestamps are never sent and are left out) and, after each tool call, every
-file in the model's read scope. Only the named O4 list is normalised. The pair runs under two
-different host layouts (data root, tenant name, checkout path) and must still compare equal;
-every compared request and file is also scanned for host layout and arm identity.
-
-WHAT IS PRODUCTION AND WHAT IS NOT
-----------------------------------
-Both runs go through `run.main` — the natural run as `run.py <alert> --tenant T`, the arm as
-`run.py --tenant T --episode <ep> --world <control>` — with the orchestrator's fixed arm
-composition (dossier "Arm composition"): `lifecycle=partial(run._run_investigation_lifecycle,
-investigate=partial(run._drive_investigation, investigate=<driver call>), start_box=…,
-stop_box=…, scrub=…)`. Everything between the argv and the driver is production: tenant
-acceptance, materialisation, the episode door, the world and its registry, the lifecycle.
-
-The seams this module fills, and why each is the honest one:
-
-* the MODEL — `make_model` hands the driver `FunctionModel`s that replay a script and record
-  every request (`RoleModel`); `override_allow_model_requests(False)` keeps the run hermetic;
-* the REVIEW stages — the run's `review_stages=` bundle, as recording stages answering `holds`;
-* the CLOCK — `run_investigation(clock=…)` (the orchestrator's run-clock seam), a fake that
-  steps deterministically and keeps every reading. Passed only when the driver accepts the
-  keyword; before slice D the seam does not exist, and the twin check then fails on that
-  precondition rather than comparing: only a clocked recording says which times are the run
-  clock's (forgiven inside their window, `ClockWindow`) and which are not (compared exactly);
-* the BOX — `start_box=partial(box.start_box, docker=_no_docker_daemon)` under
-  `DEFENDER_ALLOW_UNSANDBOXED=1`: production's own unboxed mode (the design's "Every mode",
-  which is what lets the twin run in CI without a box). The docker double only fails to start;
-  `stop_box`/`scrub` are no-ops because an unsandboxed box has nothing to stop or scan;
-* the DATA SOURCE of the natural run only — `_drive_investigation(registry_cls=…)`, the
-  drive function's existing registry seam, given a `ModuleVerbRegistry` whose verbs keep the
-  real adapters' signatures, grant and roster and answer canned envelopes instead of reaching
-  a cluster (`canned_registry`). The arm builds its own `WorldRegistry` (production) and is
-  served from the family's recording that `prime_base` took from the natural run's capture.
-
-The episode the arm opens is composed from the launcher's own steps (`cli.prepare_episode`,
-`cli.branch_point_clock`, the episode view's `create_container`) plus a manifest built by
-slice A's `_triplet_947.family_doc` with one control world. The launcher's questioner and
-pre-flight replay are not run: neither changes what a control arm sees.
-
-TWO LAYOUTS, AND WHY A SUBPROCESS
----------------------------------
-`run.DEFENDER_DIR` and `run_common.REPO_ROOT` are `Path(__file__).resolve()` at import, so the
-checkout path a run sees is fixed by where `defender` was imported from. A symlinked tree
-resolves back to the real one (probe P-E1 in the slice return); only a COPY moves it. So each
-layout is a copy of the checkout (`copy_checkout`) run in its own interpreter with
-`PYTHONPATH` at the copy (`record_layout`), with its own data root and tenant name. The child
-writes its recording as JSON; the parent compares.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Record natural and control-arm requests, compare only permitted O4 differences, and scan identity leaks."""
 from __future__ import annotations
 
 import asyncio
@@ -61,7 +6,6 @@ import dataclasses
 import datetime as dt
 import functools
 import getpass
-import inspect
 import json
 import os
 import re
@@ -76,21 +20,10 @@ from typing import Any
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
 
-# --------------------------------------------------------------------------------------
-# The script. One natural run, written for the model view (P1): every path the model hands
-# back is a model path or a run-relative operand, so the same script is valid in both runs
-# before and after the view lands.
-# --------------------------------------------------------------------------------------
 
-#: The lead MAIN dispatches at the branch turn. Its gather is re-run in the arm (D1: gather
-#: calls at the branch turn are re-run, never inherited), against the arm's world.
 LEAD = "l-001"
-#: The correlation lead the harness dispatches before MAIN's first turn (natural run only).
 CORRELATION_LEAD = "l-00c"
 
-#: The canned answer documents. Keys deliberately NOT in sorted order: a world that
-#: re-serialises with sorted keys (G8) changes the bytes the model reads, and the twin must
-#: see that.
 _LEAD_DOCS = [
     {"@timestamp": "2026-05-25T15:20:00.000Z", "user.name": "dev.dana",
      "source.ip": "172.18.0.15", "message": "Accepted password for dev.dana",
@@ -104,11 +37,8 @@ _CORRELATION_DOCS = [
      "kibana.alert.rule.name": "v2 sshd success after failures", "host.name": "office-ws-1"},
 ]
 
-#: Where on MAIN's turns the branch point sits (0-based): the gather dispatch. The arm forks at
-#: this response — a main response that called tools whose answers are not in the history.
 BRANCH_TURN = 1
 
-#: Each query a script issues, by lead.
 LEAD_QUERY = {"system": "elastic", "verb": "query",
               "params": {"native_query": "user.name:dev.dana AND event.action:ssh_login"}}
 CORRELATION_QUERY = {"system": "elastic", "verb": "alerts",
@@ -128,25 +58,11 @@ def _golden_fences() -> list[str]:
             scan_fences(golden.read_text(encoding="utf-8")).bodies]
 
 
-#: The signature the alert's record carries — what the corpus walk is keyed on.
 SIGNATURE = "v2-sshd-success-after-failures"
 
 
 def main_script() -> list[Any]:
-    """MAIN's turns, the same for the natural run and (from `BRANCH_TURN + 1`) the arm.
-
-    0. land the golden's FIRST block (an open frontier: 2 open slots, measured by slice A's
-       `branchable_investigation`), so the branch point has a question to divide;
-    1. dispatch one gather lead — THE BRANCH POINT (D1: a tool-calling main response);
-    2. read the queries table and the lead's summary through `cat`, by run-relative operands
-       (what the box's working directory makes of them in either run);
-    3. walk the corpus through the invlang shim: its listing names example cases by their run
-       folder (P-U6), and the shim runs on the run's environment;
-    4. read the document back through the file tool, by its model path (P1);
-    5. land the rest of the golden document (the lessons push answers every append);
-    6. close `inconclusive` on the golden's own ceiling tests, which runs the review gate;
-    7. end.
-    """
+    """MAIN's turns, the same for the natural run and (from `BRANCH_TURN + 1`) the arm."""
     from defender.tests.e2e._replay_harness import Turn
 
     fences = _golden_fences()
@@ -179,18 +95,11 @@ def gather_scripts() -> dict[str, list[Any]]:
     }
 
 
-# --------------------------------------------------------------------------------------
-# The natural run's data source: the real adapters' verbs, signatures and grant; canned bodies.
-# --------------------------------------------------------------------------------------
-
 _ALERT_ID_FIELD = "kibana.alert.uuid"
 
 
 def _answer(system: str, verb: str, params: Mapping[str, Any]) -> Any:
-    """What the natural run's elastic answers. The alert's shell fetch (item 1's by-alert-id
-    call) gets the alert's own document; the correlation lead's call and the lead's call get
-    their own envelopes. Built by the REAL `search_envelope`, so no shape the adapter could
-    not produce is served."""
+    """What the natural run's elastic answers."""
     from defender.scripts.adapters.elastic_adapter import search_envelope
     from defender.tests.e2e._lead_zero_808 import ALERTS_INDEX, EVENTS_INDEX, shell_doc
 
@@ -206,10 +115,7 @@ def _answer(system: str, verb: str, params: Mapping[str, Any]) -> Any:
 
 
 def canned_registry(answer: Callable[[str, str, Mapping[str, Any]], Any] = _answer) -> type:
-    """A `ModuleVerbRegistry` class for `_drive_investigation(registry_cls=…)`: the real roster,
-    the real grant, each real verb's signature and markers (`functools.wraps`), and a body
-    that returns `answer(system, verb, params)` instead of reaching a backend. It decides
-    nothing: validation, capture, rows and the breaker stay production's."""
+    """Keep real verb signatures and grants while returning canned backend answers."""
     from defender.runtime.verbs import ModuleVerbRegistry
 
     class CannedBodies(ModuleVerbRegistry):
@@ -228,27 +134,15 @@ def _canned(system: str, verb: str, fn: Any, answer: Callable[..., Any]) -> Any:
     return call
 
 
-# --------------------------------------------------------------------------------------
-# Recording: what each model request carried, and the read-scope files at that moment.
-# --------------------------------------------------------------------------------------
-
-#: The roles whose requests carry a read-scope snapshot, and the policy each reads through.
-#: The review roles are left out: they hold no tool at all (`review_roles._review_def`:
-#: `tools=ToolSet()`), so their whole model-visible input is the prompt they are handed, which
-#: their request records.
 READING_ROLES = ("main", "gather")
 
 
 def read_policies(run_dir: Path, defender_dir: Path, tenant: Any) -> dict[str, Any]:
-    """The run's compiled read policies, per role, exactly as the driver binds them: MAIN's
-    definition, and gather's over the run's gather grant (`gather_def_for`), both scoped with
-    the tenant's agent half (`RunScope(tenant_agent=…)`). Every gather lead reads through the
-    same read shapes whichever verb grant it holds (the correlation lead's is narrower in verbs
-    only), so one gather policy serves every lead."""
+    """Compile MAIN and gather read policies with the tenant agent scope."""
     from defender.runtime.agent_definition import RunScope, compile_policy_for
     from defender.runtime.driver import MAIN_DEF, gather_def_for
 
-    scope = RunScope(tenant_agent=getattr(tenant, "agent", None))
+    scope = RunScope(tenant_agent=tenant.agent)
     return {
         "main": compile_policy_for(MAIN_DEF, run_dir, defender_dir=defender_dir, scope=scope),
         "gather": compile_policy_for(gather_def_for(tenant.grants.gather), run_dir,
@@ -273,9 +167,7 @@ def _text(path: Path) -> str:
 
 
 def files_snapshot(run_dir: Path | None, *, defender_dir: Path | None, policy: Any) -> dict[str, str]:
-    """Every file of the run folder the role's gate admits a read of, as text (bytes that are
-    not UTF-8 are shown as their repr, so a difference still names itself). Decided per file by
-    the gate itself, so the snapshot is what the role could read, not a copy of the rules."""
+    """Capture every readable run file, preserving invalid UTF-8 as a byte repr."""
     if run_dir is None or defender_dir is None or policy is None or not run_dir.is_dir():
         return {}
     out: dict[str, str] = {}
@@ -289,9 +181,7 @@ def files_snapshot(run_dir: Path | None, *, defender_dir: Path | None, policy: A
 
 def corpus_snapshot(run_dir: Path, defender_dir: Path, tenant_agent: Path | None,
                     policy: Any) -> dict[str, str]:
-    """The read-only half of the read scope: every `.md` under `lessons|skills|examples` of the
-    checkout and the tenant's agent half that MAIN's gate admits, keyed by the tree it sits in
-    and its relative path. It never changes during a run and is compared once per run."""
+    """Capture readable checkout and tenant-agent Markdown by tree and relative path."""
     out: dict[str, str] = {}
     for label, base in (("checkout", defender_dir), ("agent", tenant_agent)):
         if base is None or not base.is_dir():
@@ -307,13 +197,6 @@ def corpus_snapshot(run_dir: Path, defender_dir: Path, tenant_agent: Path | None
     return out
 
 
-#: PARITY ONLY — never what the twin snapshots by. The run-folder half of each role's read
-#: scope, written out from `runtime/permission/policies/_common.read_shapes` (the run root one
-#: segment deep; `gather_summaries/<one>`; the alert input directory one deep; and, for gather
-#: alone — `raw=True` — `gather_raw/l-<lead>/<n>.json`) and `files.decide_read`'s denies
-#: (`gather_raw/` without a shape naming it, anything under `wire_logs/`, `provenance.json` at
-#: the run root), at base 4b3628ed. `test_1255_twin_read_scope_parity` holds the gate to it, so
-#: a change in the rules shows as a parity failure rather than as a quietly different snapshot.
 _RUN_ROOT_DENIED = frozenset({"provenance.json"})
 _RAW_PAYLOAD = re.compile(r"gather_raw/l-[A-Za-z0-9]{1,64}/[0-9]+\.json")
 
@@ -340,8 +223,7 @@ def in_read_scope(rel: Path, role: str) -> bool:
 
 
 def _part_wire(part: Any) -> dict[str, Any]:
-    """The fields of one message part a provider is sent. Timestamps, provider bookkeeping and
-    usage are not sent and are left out (design: "part timestamps are never sent")."""
+    """Project provider-visible part fields; exclude timestamps and provider bookkeeping."""
     kind = getattr(part, "part_kind", type(part).__name__)
     out: dict[str, Any] = {"part_kind": kind}
     for name in ("content", "tool_name", "tool_call_id", "args"):
@@ -359,8 +241,7 @@ def _tool_def_wire(tool: Any) -> dict[str, Any]:
 
 
 def wire_request(messages: list[Any], info: Any) -> dict[str, Any]:
-    """One model request as the provider would be sent it: every message's parts (sent fields
-    only) and instructions, the tool definitions, the output tools and the settings."""
+    """Capture messages, instructions, tool definitions, output tools, and model settings."""
     msgs = []
     for msg in messages:
         entry: dict[str, Any] = {"kind": getattr(msg, "kind", type(msg).__name__),
@@ -381,22 +262,16 @@ def wire_request(messages: list[Any], info: Any) -> dict[str, Any]:
 
 @dataclasses.dataclass
 class Recording:
-    """One run's record: every model request (role, lead, its index within that role/lead, the
-    wire request, the files that role's gate admits at that moment, how many times the run
-    clock's source had been read by then), the review stages' prompts, the corpus once, every
-    reading the clock source gave, and the driver's summary."""
+    """Collect provider requests, role-scoped files, corpus, clock readings, and run outcome."""
 
     label: str
     run_dir: Path | None = None
     requests: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     corpus: dict[str, str] = dataclasses.field(default_factory=dict)
     summary: dict[str, Any] = dataclasses.field(default_factory=dict)
-    clock_injected: bool = False
     exit_code: Any = None
     refusal: str | None = None
     run_id: str | None = None
-    #: Held off the JSON: the clock source handed to the run, the run's compiled read policies
-    #: per role (`read_policies`), and the tree the run reads.
     clock: Any = dataclasses.field(default=None, repr=False)
     policies: dict[str, Any] = dataclasses.field(default_factory=dict, repr=False)
     defender_dir: Path | None = None
@@ -417,57 +292,39 @@ class Recording:
         return {"label": self.label, "run_dir": str(self.run_dir) if self.run_dir else None,
                 "run_id": self.run_id, "requests": self.requests, "corpus": self.corpus,
                 "summary": json.loads(json.dumps(self.summary, default=repr)),
-                "clock_injected": self.clock_injected, "exit_code": self.exit_code,
+                "exit_code": self.exit_code,
                 "refusal": self.refusal,
                 "clock_readings": [t.isoformat() for t in readings]}
 
 
-#: The lead id a gather dispatch names, read off the gather's first request (the Dispatch
-#: block `tools_gather` renders) — the replay harness's own pattern.
 _DISPATCHED_LEAD = re.compile(r"\n## Dispatch\n```yaml\n(?:.*\n)*?lead_id: (\S+)\n")
 
 
 class RoleModel:
-    """A `FunctionModel` callable for one role: records every request into `recording`, then
-    answers the next scripted turn. For the gather role, the script is chosen per lead (the
-    lead id is read off the conversation), so concurrent leads are recorded per lead."""
+    """Record requests and replay turns independently for each gather lead."""
 
     __name__ = "RoleModel"
 
     def __init__(self, recording: Recording, role: str, turns: list[Any] | None = None,
                  by_lead: Mapping[str, list[Any]] | None = None) -> None:
+        from defender.tests.e2e._replay_harness import ReplayFn
+
         self.recording, self.role = recording, role
-        self._turns = list(turns or [])
-        self._by_lead = {k: list(v) for k, v in (by_lead or {}).items()}
-        self._used: dict[str | None, int] = {}
-
-    def _lead_of(self, messages: list[Any]) -> str | None:
-        if self.role != "gather":
-            return None
-        from defender.tests.e2e._replay_harness import messages_text
-
-        found = _DISPATCHED_LEAD.search(messages_text(messages[:1]))
-        return found.group(1) if found else None
+        self._replays = {None: ReplayFn(list(turns or [])),
+                         **{lead: ReplayFn(list(script)) for lead, script in (by_lead or {}).items()}}
 
     def __call__(self, messages: list[Any], info: Any) -> Any:
-        from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+        from defender.tests.e2e._replay_harness import messages_text
 
-        lead = self._lead_of(messages)
+        found = (_DISPATCHED_LEAD.search(messages_text(messages[:1]))
+                 if self.role == "gather" else None)
+        lead = found.group(1) if found else None
         self.recording.add(self.role, lead, wire_request(messages, info))
-        script = self._turns if self.role != "gather" else self._by_lead.get(lead or "", [])
-        n = self._used.get(lead, 0)
-        self._used[lead] = n + 1
-        if n >= len(script):
-            return ModelResponse(parts=[TextPart(content="(replay exhausted)")])
-        turn = script[n]
-        parts: list[Any] = [TextPart(content=turn.text)] if turn.text else []
-        parts += [ToolCallPart(tool_name=name, args=args) for name, args in turn.tool_calls]
-        return ModelResponse(parts=parts or [TextPart(content="(done)")])
+        return self._replays[lead](messages, info)
 
 
 def recording_review_stages(recording: Recording) -> Any:
-    """The run's review bundle: every stage records the prompt it was handed (the review roles'
-    model-visible input) and answers as `_review_bundle` does, the composer finding `holds`."""
+    """Record review prompts while the existing review bundle answers holds."""
     from defender.runtime.review_roles import ReviewStages
     from defender.tests import _review_bundle
 
@@ -485,9 +342,7 @@ def recording_review_stages(recording: Recording) -> Any:
 
 
 class SteppingClock:
-    """The run clock's source for a test: a timezone-aware UTC reading that advances a fixed
-    step on every read, so every time the run derives is deterministic. Every reading it gave
-    is kept, so the recording can say what the clock read by each request."""
+    """Advance a fixed step per read and retain every reading."""
 
     def __init__(self, start: dt.datetime, step: dt.timedelta = dt.timedelta(seconds=1)) -> None:
         self._now, self._step = start, step
@@ -500,26 +355,13 @@ class SteppingClock:
         return now
 
 
-#: The natural run's clock source starts here; the arm's source starts months later, as a real
-#: arm launched after its source would (design: the arm's run clock starts at the snapshot's
-#: reading and advances by what its source advances). The two are far apart, and both far
-#: from the wall clock, so a time an arm channel reads off its own source — or off the wall —
-#: lies outside the run clock's window (`clock_window`) and is compared exactly, and named.
 NATURAL_CLOCK_START = dt.datetime(2026, 5, 25, 15, 30, tzinfo=dt.UTC)
 ARM_CLOCK_START = dt.datetime(2026, 9, 1, 9, 0, tzinfo=dt.UTC)
 
 
-def driver_accepts_clock() -> bool:
-    from defender.runtime import driver
-
-    return "clock" in inspect.signature(driver.run_investigation).parameters
-
-
 def _driver_call(recording: Recording, main: RoleModel, gather: RoleModel,
                  clock: SteppingClock) -> Callable[..., dict[str, Any]]:
-    """The innermost `investigate` of the arm composition: `driver.run_investigation(**kw,
-    make_model=…, review_stages=…, clock=…)`, everything else exactly as `_drive_investigation`
-    hands it over."""
+    """Inject recording models, review stages, and the required run clock into the real driver."""
     from pydantic_ai.models import override_allow_model_requests
     from pydantic_ai.models.function import FunctionModel
 
@@ -540,17 +382,13 @@ def _driver_call(recording: Recording, main: RoleModel, gather: RoleModel,
         tenant = kw["tenant"]
         recording.policies = read_policies(recording.run_dir, recording.defender_dir, tenant)
         recording.corpus = corpus_snapshot(recording.run_dir, recording.defender_dir,
-                                           getattr(tenant, "agent", None),
+                                           tenant.agent,
                                            recording.policies["main"])
-        extra: dict[str, Any] = {}
-        if driver_accepts_clock():
-            extra["clock"] = clock
-            recording.clock_injected = True
-            recording.clock = clock
+        recording.clock = clock
         with override_allow_model_requests(False):
             summary = asyncio.run(driver.run_investigation(
                 **kw, make_model=make_model, review_stages=recording_review_stages(recording),
-                **extra))
+                clock=clock))
         recording.summary = dict(summary)
         return summary
 
@@ -592,8 +430,7 @@ def _no_queue(*_a: Any, **_kw: Any) -> bool:
 
 def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
              clock: SteppingClock, registry_cls: type | None = None) -> None:
-    """`run.main(argv)` with the composition above; its exit (a return code, or the
-    `SystemExit` a refusal raises) is kept on the recording rather than raised."""
+    """Run the production CLI composition and record its return code or refusal."""
     import defender.run as run_mod
 
     try:
@@ -606,17 +443,12 @@ def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
         recording.refusal = str(refused.code)
 
 
-# --------------------------------------------------------------------------------------
-# The pair, in one process: natural run, the control episode, the arm.
-# --------------------------------------------------------------------------------------
-
 _ENV_KEYS = ("DEFENDER_DATA_ROOT", "DEFENDER_EPISODES_BASE", "DEFENDER_LEARNING_STATE_DIR",
              "DEFENDER_RUN_VISUALIZATIONS_DIR", "DEFENDER_ALLOW_UNSANDBOXED")
 
 
 def _source_run(tenant_id: str, run_id: str) -> Any:
-    """The natural run, opened by id through its tenant's runs repository (as the launcher and
-    the arm open a source)."""
+    """The natural run, opened by id through its tenant's runs repository (as the launcher and the arm open a source)."""
     from defender import _tenant
     from defender.run_repository import RunId
 
@@ -626,9 +458,7 @@ def _source_run(tenant_id: str, run_id: str) -> Any:
 
 
 def branch_message_id(source: Any, *, tool: str = "gather") -> int:
-    """The row id, on the source's MAIN path, of the main response that dispatched `tool` — the
-    branch point D1 admits: a tool-calling response whose answers are not in the history. Read
-    off the source's own store, as the launcher reads its branch point."""
+    """Find the tool-calling MAIN response for the requested branch tool."""
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
     from defender.runtime import branch, session_store
@@ -650,8 +480,7 @@ def branch_message_id(source: Any, *, tool: str = "gather") -> int:
 
 
 def _fences_at_branch(natural: Recording) -> int:
-    """How many invlang fences the document held when the branch response arrived: the
-    document in the read-scope snapshot of MAIN's request that answered with that turn."""
+    """Count document fences in MAIN's snapshot at the branch response."""
     from defender.skills.invlang.parser import scan_fences
 
     main = [r for r in natural.requests if r["role"] == "main"]
@@ -659,12 +488,7 @@ def _fences_at_branch(natural: Recording) -> int:
     return len(scan_fences(doc).bodies)
 
 
-#: The control world's label in the twin's family (slice A's `base_world`: role A, no facts).
 CONTROL = "a"
-#: A null replicate world (`role: null`, no facts): the control's sibling, launched first, so the
-#: control arm's runs folder holds a sibling as a production arm's does ("Every mode": the real
-#: runs folder "for an arm holds its siblings"). It is served the base answers too, so nothing
-#: it leaves behind may reach the control arm's model.
 REPLICATE = "r"
 
 
@@ -676,11 +500,7 @@ def replicate_world() -> dict[str, Any]:
 
 
 def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, int]:
-    """The episode a control arm of the natural run opens, composed from the launcher's own
-    steps: the episode claimed and primed from the source's capture (`prepare_episode`), T0
-    derived from the branch point (`branch_point_clock`), the manifest (slice A's builder, one
-    control world and its null replicate), and the arms' container made with the tenant's
-    record. Returns `(episode_id, branch_message_id)`."""
+    """Use launcher steps to prime the recording and create control and replicate arms."""
     from defender import _tenant
     from defender.learning.branch import cli
     from defender.tests import _triplet_947 as T
@@ -699,30 +519,11 @@ def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, in
             as_of=as_of.isoformat().replace("+00:00", "Z"),
             served_systems=cli.served_systems(run_tenant.grants.gather))
         doc.pop("source_run_dir", None)
-        if not _manifest_declares_prompt():
-            doc.pop(RETIRED_PROMPT_FIELD, None)
         T.write_family(episode.dir, doc)
         tenant.runs_repository().episode(episode.dir.name, held=episode).create_container()
         return episode.dir.name, k
     finally:
         episode.close()
-
-
-#: The manifest field #1255 removes (D1, P4: an arm is told nothing on arrival).
-RETIRED_PROMPT_FIELD = "continuation_prompt"
-
-
-def _manifest_declares_prompt() -> bool:
-    """Does this tree's family manifest still declare the continuation prompt (pre-#1255)?
-
-    Read off the loaded `Family` rather than assumed — slice A's `declares_retired_prompt`
-    rule for `BranchSpec`, applied to the manifest — so the episode composes on both sides of
-    #1255: before it the loader refuses a manifest without the field, after it the field is
-    gone. Whether it is gone is slice A's demand, never answered here. Delete with A's twin
-    once #1255 has landed."""
-    from defender.runtime.branch import _family
-
-    return RETIRED_PROMPT_FIELD in {f.name for f in dataclasses.fields(_family.Family)}
 
 
 def _resolve(tenant: Any) -> Any:
@@ -742,10 +543,7 @@ def plant_alert(path: Path) -> Path:
 
 
 def record_pair(*, tenant_id: str, alert: Path, arm: bool = True) -> dict[str, Any]:
-    """One layout's pair, in this process: the natural run through `run.main`, then (with
-    `arm`) the control episode composed from it, its replicate sibling and then the control
-    arm, each through `run.main` with the same script from the turn after the branch point.
-    Returns the recordings as JSON-able dicts plus what the pair was composed from."""
+    """Record a natural run, its replicate sibling, and its control arm through run.main."""
     natural = Recording("natural")
     run_main([str(alert), "--tenant", tenant_id, "--no-learn"], natural,
              main_turns=main_script(), clock=SteppingClock(NATURAL_CLOCK_START),
@@ -770,23 +568,9 @@ def record_pair(*, tenant_id: str, alert: Path, arm: bool = True) -> dict[str, A
     return out
 
 
-# --------------------------------------------------------------------------------------
-# O4: the ONLY differences the comparison forgives. Each rule names the O4 class it is.
-# Anything not matched here is compared byte for byte.
-# --------------------------------------------------------------------------------------
-
-#: O4 "timestamps" — but only the RUN CLOCK's (design, O4: "Time must be consistent, not
-#: equal. Every time the model can see agrees with every other one and never runs earlier than
-#: the history's last timestamp"). An ISO-8601 moment, date and time, any precision, any zone
-#: spelling (naive read as UTC), is forgiven only when it falls inside the run clock's window
-#: (`ClockWindow`): from the natural run's reading R up to R plus a run-length bound. Every
-#: other moment — the history's own times, the alert's, the data's, a time before R, a time off
-#: the arm's own clock source or off the wall — is compared exactly, so it is named.
 _TIMESTAMP = re.compile(
     r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?")
-#: What a forgiven run-clock time reads as after normalisation.
 RUN_CLOCK = "<run-clock>"
-#: The run-length bound's floor: a window is at least this long past R.
 _MIN_RUN_SPAN = dt.timedelta(hours=1)
 
 
@@ -801,8 +585,7 @@ def moment(text: str) -> dt.datetime | None:
 
 @dataclasses.dataclass(frozen=True)
 class ClockWindow:
-    """The run-clock times a comparison forgives: `start` (R, a reading of the natural run's
-    clock source) to `end` (R plus the run-length bound), both inclusive."""
+    """Inclusive run-clock range from the fork reading to a bounded run duration."""
 
     start: dt.datetime
     end: dt.datetime
@@ -817,9 +600,7 @@ def _readings(recording: Mapping[str, Any]) -> list[dt.datetime]:
 
 
 def _window_from(readings: list[dt.datetime], at: int) -> ClockWindow | None:
-    """The window from reading number `at` (0-based) on: R, and a bound of twice the run's own
-    span after R, never less than `_MIN_RUN_SPAN` — far short of the arm source's start
-    (months on) and of the wall clock."""
+    """Bound the clock window by twice the natural run span, with a minimum span."""
     if not readings:
         return None
     r = readings[min(max(at, 0), len(readings) - 1)]
@@ -827,16 +608,13 @@ def _window_from(readings: list[dt.datetime], at: int) -> ClockWindow | None:
 
 
 def start_window(recording: Mapping[str, Any]) -> ClockWindow | None:
-    """A whole run's window: from its clock source's first reading. None for a run that was
-    never handed a clock (then no time is forgiven)."""
+    """Bound natural-run times by its clock readings; unclocked recordings forgive no time."""
     return _window_from(_readings(recording), 0)
 
 
 def branch_window(natural: Mapping[str, Any], branch_turn: int = BRANCH_TURN,
                   ) -> ClockWindow | None:
-    """The window an arm of `natural` is held to: R is the natural run's last clock reading
-    before MAIN's request `branch_turn` was answered (the branch response) — taken from the
-    natural recording, never from the arm. None for an unclocked natural run."""
+    """Start the arm clock window at the natural run's last reading before the branch response."""
     readings = _readings(natural)
     mains = [r for r in natural["requests"] if r["role"] == "main"]
     if not readings or len(mains) <= branch_turn:
@@ -844,60 +622,15 @@ def branch_window(natural: Mapping[str, Any], branch_turn: int = BRANCH_TURN,
     return _window_from(readings, int(mains[branch_turn].get("clock_reads", 0)) - 1)
 
 
-#: O4 "durations": a number under a key that NAMES an elapsed measure — the closed list of
-#: production's own (`runtime/observe.py`'s result row), matched as a JSON key whether bare or
-#: inside an escaped JSON string (a row quoted in a tool result). Never a key that merely
-#: contains `ms`, `wall`, `seconds` or `elapsed` (finding F2-T: `"wall_ms": <fork turn>` was
-#: forgiven): a limit (`wall_clock_timeout`, `grace_seconds` — D2, an arm inherits its
-#: source's limits), a count, or any other number is compared exactly. On an arm, a duration
-#: equal to its fork turn is not forgiven either (`normalize_o4(fork_turn=)`).
 DURATION_KEYS = ("duration_ms", "duration_api_ms")
 _DURATION = re.compile(
     r'(\\?"(?:' + "|".join(DURATION_KEYS) + r')\\?"\s*:\s*)(-?\d+(?:\.\d+)?)')
 
-#: O4 "fresh random ids" — ONLY the ones whose producer is named, where that producer's id
-#: shows, and in the shape it mints (finding F2-T: a rule forgiving ANY 32-hex, uuid or salt let
-#: a fork turn written as `UUID(int=k)`, a world label folded into one, a constant marker, a
-#: uuid1 and a salt carrying the fork turn all pass the comparison). The run roles' minting
-#: sites (MAIN, gather, review — C12), from a grep of production for uuid4 / secrets /
-#: token_hex at this tree:
-#:
-#: * the framework's tool-call id, `pydantic_ai._utils.generate_tool_call_id`:
-#:   `pyd_ai_` + `uuid4().hex`, wherever it shows (a call, the return or retry answering it);
-#: * a frame delimiter's salt, inside `<run-SALT-tag>` / `</run-SALT-tag>`:
-#:   `defender._untrusted.wrap_fresh` / `message_salt` mint `secrets.token_hex(8)` — 16
-#:   lowercase hex, one per frame (`runtime/toon_gate`: "always 16 hex chars"); a review stage's
-#:   prompt is framed on the per-call salt `runtime.challenge_gate._fresh_stage_request` mints,
-#:   `uuid4().hex`;
-#: * the session store's session ids (`session_store.new_session`, and `fork` for an arm's
-#:   lineage child) and the driver's case id (`driver.run_investigation`), each `uuid4().hex`:
-#:   as the session half of the prompt-cache affinity key a request is SENT with
-#:   (`driver._build._affinity_key` -> `providers.openai_compat.cache_affinity`:
-#:   `model_settings.openai_prompt_cache_key = "<session_id>:<agent_id>"` — measured on a
-#:   recorded natural pair, where it is the one fresh id outside a frame or a call), and under
-#:   the key that names one (`SESSION_KEYS`; none is in a read-scope file at this tree — the
-#:   run -> case link left the run folder in #1235 — listed so a correct implementation that
-#:   shows one keeps it forgiven, and only in its producer's shape).
-#:
-#: A uuid4 has version nibble 4 and variant bits 10. Everything else is compared exactly: any
-#: other hex run or uuid (another version — a uuid1's time and host node, a uuid3/uuid5 over a
-#: name, `UUID(int=k)` —, a hyphenated uuid, a content digest), any other salt length or charset,
-#: any other key. Run ids are not on the list: at this tree a run id is `<UTC stamp>-<label>`
-#: (`RunId.mint`) — identity the O2/O3 scans find, never a fresh random id — and pydantic-ai's
-#: own run and conversation ids (uuid7, which carries the wall-clock time) are message fields
-#: the provider is never sent (`wire_request` leaves them out).
-#:
-#: Replaced by first appearance WITHIN one compared value, numbered per producer (`<SALT1>`,
-#: `<ID1>` for a tool-call id, `<SESSION1>`), so a value that reuses one id twice still has to
-#: reuse it twice — and a constant marker standing where the run mints two fresh ones (two
-#: frames, two calls) shows as one id where the natural run has two, at the place it repeats.
 SESSION_KEYS = ("session_id", "parent_session_id", "case_id")
 _UUID4_HEX = re.compile(r"[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}")
 _WRAP_FRESH_SALT = re.compile(r"[0-9a-f]{16}")
 _FRAME_SALT = re.compile(r"(</?run-)([0-9a-f]+)(-[a-z_-]+>)")
 _TOOL_CALL_ID = re.compile(r"(?<![0-9A-Za-z_])(pyd_ai_)([0-9a-f]{32})(?![0-9A-Za-z_])")
-#: The session store's ids where they show: the value of a `SESSION_KEYS` key, and the session
-#: half of the prompt-cache key (`<session_id>:<agent_id>`). Group 1 is what precedes the id.
 _SESSION_IDS = (
     re.compile(r'(\\?"(?:' + "|".join(SESSION_KEYS) + r')\\?"\s*:\s*\\?")([0-9a-f]{32})(?=\\?")'),
     re.compile(r'(\\?"openai_prompt_cache_key\\?"\s*:\s*\\?")([0-9a-f]{32})(?=:)'),
@@ -910,16 +643,12 @@ def is_uuid4_hex(value: str) -> bool:
 
 
 def is_fresh_salt(value: str) -> bool:
-    """`value` is a salt a run role's frame is minted on: `wrap_fresh`'s 16 hex, or a review
-    stage's `uuid4().hex`."""
+    """`value` is a salt a run role's frame is minted on: `wrap_fresh`'s 16 hex, or a review stage's `uuid4().hex`."""
     return _WRAP_FRESH_SALT.fullmatch(value) is not None or is_uuid4_hex(value)
 
 
 def fresh_ids(text: str) -> list[tuple[str, str, int]]:
-    """Every fresh random id `normalize_o4` forgives in `text`, as `(producer, value, offset)` —
-    the frame salts, the framework's tool-call ids and the session store's ids, each in its
-    producer's shape. The O2 scan reads these (`scan`): a value the comparison forgives must
-    not be derived from an identity either."""
+    """Return producer-tagged salts, tool-call IDs, and session IDs with their offsets."""
     out = [("frame salt", m.group(2), m.start(2)) for m in _FRAME_SALT.finditer(text)
            if is_fresh_salt(m.group(2))]
     out += [("tool-call id", m.group(2), m.start(2)) for m in _TOOL_CALL_ID.finditer(text)
@@ -931,9 +660,7 @@ def fresh_ids(text: str) -> list[tuple[str, str, int]]:
 
 def normalize_o4(text: str, window: ClockWindow | None = None, *,
                  fork_turn: int | None = None) -> str:
-    """`text` with the O4 classes replaced by placeholders and nothing else touched. A time is
-    replaced only when `window` holds it; with no window, every time stays as it is. A
-    duration equal to `fork_turn` (an arm's, when known) stays as it is."""
+    """`text` with the O4 classes replaced by placeholders and nothing else touched."""
     ids: dict[str, dict[str, str]] = {}
 
     def fresh(kind: str, token: str) -> str:
@@ -955,7 +682,6 @@ def normalize_o4(text: str, window: ClockWindow | None = None, *,
     def duration(m: re.Match[str]) -> str:
         if fork_turn is not None and float(m.group(2)) == fork_turn:
             return m.group(0)
-        # quoted where the key is bare JSON, so a request's JSON still parses
         return f"{m.group(1)}<DUR>" if m.group(1).startswith("\\") else f'{m.group(1)}"<DUR>"'
 
     out = _FRAME_SALT.sub(salt, text)
@@ -969,24 +695,14 @@ def normalize_o4(text: str, window: ClockWindow | None = None, *,
 
 
 def _normalized(value: Any, window: ClockWindow | None, fork_turn: int | None = None) -> Any:
-    """Every string leaf of a JSON value through `normalize_o4`, and the ids renumbered over the
-    WHOLE value (one request), so a call id and the return that answers it stay paired."""
+    """Normalize string leaves and pair fresh IDs across the complete request."""
     blob = json.dumps(value, sort_keys=True, ensure_ascii=False)
     return json.loads(normalize_o4(blob, window, fork_turn=fork_turn))
 
 
-# --------------------------------------------------------------------------------------
-# The comparison: every model request after the fork, per role and per lead, and the read-scope
-# files at each of them. Each difference names its channel and its first differing content.
-# --------------------------------------------------------------------------------------
-
-
 @dataclasses.dataclass(frozen=True)
 class Difference:
-    """One channel on which two recordings differ, and the first content that differs there.
-
-    `sides` names the two recordings (the arm against its natural continuation, or one layout
-    against another)."""
+    """One channel on which two recordings differ, and the first content that differs there."""
 
     channel: str
     where: str
@@ -1050,8 +766,7 @@ def _first_container_difference(a: Any, b: Any, path: str) -> tuple[str, str, st
 
 
 def _first_difference(a: Any, b: Any, path: str = "") -> tuple[str, str, str] | None:
-    """The first JSON path at which `a` and `b` differ, and each side's content there. An item
-    only one side has is shown, not counted."""
+    """Locate the first differing JSON value, including a missing item."""
     if type(a) is not type(b):
         return path or "<root>", _brief(a), _brief(b)
     if isinstance(a, (dict, list)):
@@ -1064,8 +779,6 @@ def _first_difference(a: Any, b: Any, path: str = "") -> tuple[str, str, str] | 
     return path or "<root>", repr(a), repr(b)
 
 
-#: At most this many differences are named per request: enough to see every channel a request
-#: carries without one broken request burying the rest of the report.
 _PER_REQUEST = 12
 
 
@@ -1095,10 +808,7 @@ def _message_differences(i: int, x: Mapping[str, Any], y: Mapping[str, Any],
 
 def _request_differences(wa: Mapping[str, Any], wb: Mapping[str, Any],
                          ) -> list[tuple[str, str, str]]:
-    """Every channel of one request that differs, each with its first differing content: each
-    message part on its own (a tool result, a prompt, a call), each message's instructions,
-    then the request's own fields (tool definitions per tool, output tools, settings, and a
-    review stage's prompt)."""
+    """Report the first difference in each request channel, including instructions and tool definitions."""
     out: list[tuple[str, str, str]] = []
     ma, mb = list(wa.get("messages", [])), list(wb.get("messages", []))
     for i, (x, y) in enumerate(zip(ma, mb, strict=False)):
@@ -1120,8 +830,7 @@ def _request_differences(wa: Mapping[str, Any], wb: Mapping[str, Any],
 
 
 def after_fork(recording: Mapping[str, Any], branch_turn: int) -> list[dict[str, Any]]:
-    """The natural run's requests made after its branch response arrived: everything recorded
-    after MAIN's request number `branch_turn` (the request the branch turn answered)."""
+    """Select requests after the tool-calling MAIN branch response."""
     reqs = list(recording["requests"])
     main_positions = [i for i, r in enumerate(reqs) if r["role"] == "main"]
     if len(main_positions) <= branch_turn:
@@ -1130,8 +839,7 @@ def after_fork(recording: Mapping[str, Any], branch_turn: int) -> list[dict[str,
 
 
 def streams(requests: list[dict[str, Any]]) -> dict[tuple[str, str | None], list[dict]]:
-    """Requests grouped per role and per lead, each in its own order — so concurrent gather
-    leads are compared per lead (O4: the order of concurrent work)."""
+    """Group requests by role and gather lead while preserving each stream's order."""
     out: dict[tuple[str, str | None], list[dict]] = {}
     for r in requests:
         out.setdefault((r["role"], r["lead"]), []).append(r)
@@ -1149,10 +857,7 @@ def _compare_streams(first: dict[tuple[str, str | None], list[dict]],
                      windows: tuple[ClockWindow | None, ClockWindow | None],
                      forks: tuple[int | None, int | None] = (None, None),
                      ) -> list[Difference]:
-    """Each role/lead stream of `first` against `second`, request by request: the count, each
-    request's channels (O4-normalised, each side's run-clock times by its own window, each
-    side's durations never forgiven at its own fork turn), and the read-scope files at that
-    request."""
+    """Compare request counts, provider channels, and readable files within each stream."""
     wa, wb = windows
     fa, fb = forks
     diffs: list[Difference] = []
@@ -1190,9 +895,7 @@ def _request_times(request: Mapping[str, Any], window: ClockWindow) -> set[dt.da
 
 def clock_order_faults(recording: Mapping[str, Any], window: ClockWindow | None, *,
                        label: str) -> list[Difference]:
-    """O4 "never runs earlier": per role/lead stream, a run-clock time that first shows at a
-    request must not be earlier than the latest run-clock time that stream already showed. A
-    time inside the window can still run backwards; normalising it away would hide that."""
+    """Reject newly observed run-clock times that precede a stream's previous observations."""
     if window is None:
         return []
     faults: list[Difference] = []
@@ -1212,10 +915,7 @@ def clock_order_faults(recording: Mapping[str, Any], window: ClockWindow | None,
 
 def corpus_differences(first: Mapping[str, Any], second: Mapping[str, Any],
                        sides: tuple[str, str]) -> list[Difference]:
-    """The read-only half of the read scope (`Recording.corpus`: every `lessons|skills|examples`
-    page of the checkout and the tenant's agent half that MAIN's gate admits), page by page: a
-    page only one side has, or whose text differs, is named. Compared as recorded — it is the
-    trees' own text, which no O4 value enters."""
+    """Compare readable corpus pages, including missing pages."""
     pa, pb = first.get("corpus") or {}, second.get("corpus") or {}
     diffs: list[Difference] = []
     for name in sorted(set(pa) | set(pb)):
@@ -1230,14 +930,7 @@ def corpus_differences(first: Mapping[str, Any], second: Mapping[str, Any],
 
 def compare(natural: Mapping[str, Any], arm: Mapping[str, Any], *,
             branch_turn: int = BRANCH_TURN, fork_turn: int | None = None) -> list[Difference]:
-    """O1: every difference between the arm and the natural continuation of its source after
-    the fork — per role and lead, the request count, each request's channels and the
-    read-scope files at it; the read-only corpus in the arm's read scope (design, "Twin check"
-    step 3: "every file in read scope"; finding F2-T2: an arm-only page was invisible here);
-    and every run-clock time of the arm's that runs backwards. Only the O4 list is normalised;
-    run-clock times by the natural run's branch window (`branch_window`), on both sides; and
-    no duration of the arm's that equals its `fork_turn` (the branch message id, when the
-    caller knows it) is forgiven."""
+    """Compare an arm with its natural continuation using only permitted O4 normalization."""
     window = branch_window(natural, branch_turn)
     sides = ("natural", "arm")
     return [*_compare_streams(streams(after_fork(natural, branch_turn)),
@@ -1250,19 +943,10 @@ def compare(natural: Mapping[str, Any], arm: Mapping[str, Any], *,
 def compare_layouts(first: Mapping[str, Any], second: Mapping[str, Any], *,
                     windows: tuple[ClockWindow | None, ClockWindow | None],
                     sides: tuple[str, str] = ("layout A", "layout B")) -> list[Difference]:
-    """O3: one run kind recorded under two host layouts — every request and read-scope file
-    from the first request on, and the read-only corpus. `windows` are each side's own run-clock
-    window: a natural run's `start_window`, an arm's natural run's `branch_window`."""
+    """Compare every request, readable file, and corpus page across two layouts."""
     return [*_compare_streams(streams(list(first["requests"])),
                               streams(list(second["requests"])), "whole run", sides, windows),
             *corpus_differences(first, second, sides)]
-
-
-# --------------------------------------------------------------------------------------
-# The scan: host layout (O3) and arm identity (O2) in every compared request and file. A
-# test-time detector only (design: "substring scanning for host prefixes is a test-time
-# detector only").
-# --------------------------------------------------------------------------------------
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1278,15 +962,11 @@ class Finding:
         return f"{self.channel}: {self.what} {self.token!r} in …{self.context}…"
 
 
-#: A token spelled as an id (a uuid, hyphenated or not, or a salt-length hex run): matched as a
-#: whole hex run, either case.
 _HEX_ID_TOKEN = re.compile(r"[0-9a-f]{32}|[0-9a-f]{16}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
 
 def _token_pattern(token: str) -> re.Pattern[str]:
-    """`token` as a whole path or name: not glued to a longer name on either side. A path token
-    may be followed by `/` (anything under it is still that host path). A token spelled as an
-    id is a whole hex run instead — glued to a prefix (`pyd_ai_`, `case-`) it is still that id."""
+    """`token` as a whole path or name: not glued to a longer name on either side."""
     if _HEX_ID_TOKEN.fullmatch(token):
         return re.compile(r"(?<![0-9A-Fa-f])" + re.escape(token) + r"(?![0-9A-Fa-f])",
                           re.IGNORECASE)
@@ -1294,9 +974,7 @@ def _token_pattern(token: str) -> re.Pattern[str]:
 
 
 def host_tokens(meta: Mapping[str, Any]) -> dict[str, str]:
-    """O3's list for one layout, from what the child process actually ran with: the data root
-    (as given and resolved), the tenant folder name, the checkout path and its repo root, and
-    the host user's home."""
+    """Return data-root, tenant, checkout, repository, home, and user tokens from the child layout."""
     out: dict[str, str] = {}
     for label, key in (("data root", "data_root"), ("data root (resolved)", "data_root_resolved"),
                        ("checkout path", "defender_dir"), ("checkout repo root", "repo_root"),
@@ -1312,22 +990,7 @@ def host_tokens(meta: Mapping[str, Any]) -> dict[str, str]:
 
 
 def identity_tokens(pair: Mapping[str, Any], which: str) -> dict[str, str]:
-    """O2's list (and P1's fixed names). A natural run shows no run id of its own (its folder's
-    name; `/runs/current` hides it); an arm shows none of: its own run id, its source run's id,
-    its sibling's run id, the episode id, the episode token, the world token — nor, once the
-    pair names its branch message (`branch_message_id`), the fork turn or a world label in an
-    id's spelling (`fork_tokens`). The tokens are the ones production composed (`_child`
-    records them).
-
-    The fork turn's and the labels' SHORT spellings (`59`, `3b`, `a`) are not scanned for:
-    they occur everywhere (a `15:59:00`, any hex digest). Equality covers them — a value the
-    comparison does not forgive is compared exactly — and the comparison forgives them in no
-    spelling: a fresh id or salt only in its producer's shape (`fresh_ids`: a `UUID(int=k)` is
-    version 0, a salt `3b00ff` the wrong length), a duration only under its named keys and
-    never equal to the arm's fork turn (finding F2-T). What no comparison of one pair can see
-    is a value fresh in shape but not random (a salt whose first byte is `k`): that is the
-    producers' own contract (`_untrusted.message_salt` mints `secrets.token_hex`), held where
-    they are tested, not here."""
+    """O2's list (and P1's fixed names)."""
     natural_id = str(pair["natural"]["run_id"])
     if which == "natural":
         return {"natural run id": natural_id}
@@ -1351,11 +1014,7 @@ def identity_tokens(pair: Mapping[str, Any], which: str) -> dict[str, str]:
 
 
 def fork_tokens(fork_turn: int, labels: Iterable[str]) -> dict[str, str]:
-    """The fork turn (the branch message id `k`) and each world label written as an id: `k`,
-    the label's ordinal, and the two folded into one (`(k << 8) | ord(label)`, the label's byte
-    under the turn) as uuid integers, bare hex and hyphenated, and as a salt-length (16-hex)
-    integer — what an implementation reaches for to carry them in a value the comparison might
-    take for a fresh id or a frame salt (finding F2-T)."""
+    """Return literal and folded encodings of the fork turn and world labels."""
     numbers = {"fork turn": fork_turn}
     for label in labels:
         numbers[f"world label {label}"] = ord(label)
@@ -1370,16 +1029,12 @@ def fork_tokens(fork_turn: int, labels: Iterable[str]) -> dict[str, str]:
 
 
 def _unversioned(hex32: str) -> str:
-    """A 32-hex id without its uuid version and variant nibbles — what stays of a derived value
-    once it is forced into a uuid4's shape."""
+    """Remove UUID version and variant nibbles when checking derived identities."""
     return hex32[:12] + hex32[13:16] + hex32[17:]
 
 
 def _id_shaped_forms(token: str) -> dict[str, str]:
-    """`token`'s 32-hex spellings — itself when it is one, and every derived form that is one
-    (`_1255_identity.derived_forms`: md5, the 32-character digest prefixes, uuid3/uuid5) —
-    keyed by `_unversioned`, valued by how each is made. A forgiven id equal to one of these
-    outside the version and variant nibbles is that identity forced into a fresh id's shape."""
+    """Return token-derived 32-hex forms, retaining their derivation labels."""
     from defender.tests import _1255_identity as IDN
 
     out: dict[str, str] = {}
@@ -1391,9 +1046,7 @@ def _id_shaped_forms(token: str) -> dict[str, str]:
 
 
 def _surfaces(recording: Mapping[str, Any]) -> list[tuple[str, str, str]]:
-    """`(channel, the surface a finding is reported once for, text)` for everything a
-    recording's model reads: a request stream's requests are one surface; a file is one surface
-    whichever request snapshot shows it; each corpus page is one."""
+    """Enumerate model-visible request and file text with stable deduplication keys."""
     surfaces: list[tuple[str, str, str]] = []
     for key, reqs in streams(list(recording["requests"])).items():
         for i, r in enumerate(reqs):
@@ -1408,24 +1061,14 @@ def _surfaces(recording: Mapping[str, Any]) -> list[tuple[str, str, str]]:
 
 def _as_fresh_id(forgiven: list[tuple[str, int]], id_shaped: Mapping[str, str],
                  ) -> tuple[str, int] | None:
-    """`(how, where)` for the first forgiven 32-hex id equal, outside the uuid version and
-    variant nibbles, to one of a token's 32-hex spellings (`_id_shaped_forms`)."""
+    """Find forgiven IDs matching a derived identity apart from UUID version and variant bits."""
     return next(((f"{id_shaped[_unversioned(v)]} as a fresh id", at)
                  for v, at in forgiven if _unversioned(v) in id_shaped), None)
 
 
 def scan(recording: Mapping[str, Any], tokens: Mapping[str, str], *,
          encoded: bool = False) -> list[Finding]:
-    """Every request (as sent) and every read-scope file at it, and the corpus, searched for
-    each token. One finding per (surface, token).
-
-    `encoded=True` (the O2 identity scan) also finds a token under its obvious encodings — a
-    digest or uuid3/uuid5 of it, its bytes in hex or base64, or the token inside a base64/hex
-    run (contract-repair finding R-2: an identity written as a digest or a uuid over it passed
-    a literal scan) — and in every fresh id the comparison forgives (`fresh_ids`): one equal,
-    outside the uuid version and variant nibbles, to a 32-hex spelling of the token (a digest
-    or uuid of it forced into a uuid4's shape, which the producer-shape rule alone would
-    forgive; finding F2-T). The finding's `what` then names the encoding."""
+    """Every request (as sent) and every read-scope file at it, and the corpus, searched for each token."""
     from defender.tests import _1255_identity as IDN
 
     patterns = {label: (tok, _token_pattern(tok)) for label, tok in tokens.items() if tok}
@@ -1456,21 +1099,13 @@ def scan(recording: Mapping[str, Any], tokens: Mapping[str, str], *,
     return found
 
 
-# --------------------------------------------------------------------------------------
-# A layout: a copy of the checkout, its own data root and tenant, its own interpreter.
-# --------------------------------------------------------------------------------------
-
-#: What a copy of the checkout leaves out: caches, the environment, and output folders.
 _NOT_COPIED = shutil.ignore_patterns(
     ".venv", "__pycache__", "*.pyc", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     "node_modules", "run-visualizations", "_pending")
 
 
 def copy_checkout(dest_root: Path) -> Path:
-    """A copy of this checkout's `defender/` and `knowledge/` at `dest_root` — a checkout at a
-    different path, which a symlink is not (`Path(__file__).resolve()` would follow it home).
-    The copy's `defender/.venv` names this interpreter's environment, as a checkout's does, so
-    the shims run the same Python. Returns the copy's `defender/`."""
+    """Copy code and knowledge so imports resolve to a distinct checkout; share this interpreter's venv."""
     dest_root.mkdir(parents=True, exist_ok=True)
     shutil.copytree(DEFENDER, dest_root / "defender", symlinks=True, ignore=_NOT_COPIED)
     shutil.copytree(REPO_ROOT / "knowledge", dest_root / "knowledge", symlinks=True,
@@ -1480,8 +1115,7 @@ def copy_checkout(dest_root: Path) -> Path:
 
 
 def _child_env(config: Mapping[str, Any]) -> dict[str, str]:
-    """The child's environment: this one, minus provider keys and the knobs the layout owns,
-    plus the layout's roots and production's unboxed mode."""
+    """Strip provider keys and inherited layout knobs; set this child's roots and unboxed mode."""
     env = {k: v for k, v in os.environ.items()
            if not k.endswith("_API_KEY") and not k.startswith("DEFENDER_")
            and k not in ("PYTHONPATH", "PYTEST_CURRENT_TEST")}
@@ -1499,8 +1133,7 @@ def _child_env(config: Mapping[str, Any]) -> dict[str, str]:
 
 
 def start_layout(tmp: Path, *, label: str, tenant: str, arm: bool = True) -> subprocess.Popen:
-    """Copy the checkout under `tmp/<label>/`, and start a child recording the pair there with
-    its own data root and tenant. `finish_layout` collects it."""
+    """Copy a host layout and launch its recording child process."""
     base = tmp / label
     checkout = copy_checkout(base / f"ck-{label}")
     config = {
@@ -1521,8 +1154,7 @@ def start_layout(tmp: Path, *, label: str, tenant: str, arm: bool = True) -> sub
 
 def finish_layout(proc: subprocess.Popen, tmp: Path, label: str,
                   timeout: float = 600) -> dict[str, Any]:
-    """The child's recording, or — when it produced none — a record naming why, with the tail
-    of its log, so a broken harness reads as such rather than as a comparison."""
+    """Read the child recording, or report its exit status and log tail."""
     base = tmp / label
     try:
         code = proc.wait(timeout=timeout)
@@ -1537,8 +1169,7 @@ def finish_layout(proc: subprocess.Popen, tmp: Path, label: str,
 
 
 def _child(config_path: str) -> int:
-    """The child process: set the layout's tenant up, record the pair, write it out with what
-    the run saw of the host (`meta`)."""
+    """Set up the tenant and record both executions plus their actual host layout."""
     import defender.run as run_mod
     from defender import _log, run_common
     from defender.tests._data_root_1078 import set_up_tenant
@@ -1560,7 +1191,6 @@ def _child(config_path: str) -> int:
         "data_root_resolved": str(Path(config["data_root"]).resolve()),
         "defender_dir": str(run_mod.DEFENDER_DIR), "repo_root": str(run_common.REPO_ROOT),
         "home": os.path.expanduser("~"), "user": getpass.getuser(),
-        "clock_seam": driver_accepts_clock(),
     }
     Path(config["out"]).write_text(json.dumps(pair, default=repr), encoding="utf-8")
     return 0
