@@ -448,12 +448,17 @@ def test_request_runtime_lever_honours_an_explicit_runc(monkeypatch):
 # sources again — the exact pre-fix defect. These drive the start paths instead.
 
 
-def test_the_discovered_table_reaches_the_run_dir_create_argv():
+def test_the_discovered_table_reaches_the_run_dir_create_argv(tmp_path):
+    workspace = tmp_path / "workspace"
+    run_dir = workspace / ".defender-runs" / "r1"
+    run_dir.mkdir(parents=True)
+    defender_dir = workspace / "defender"
+    defender_dir.mkdir()
+    mounts = ((workspace, Path("/home/dev/projects/repo")),)
     rec = _CapturingDocker()
     with pytest.raises(BoxFault):  # the fake refuses create; the argv is already captured
         box_mod._start_boxed(
-            Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"),
-            PINNED, rec, lambda _docker: MOUNTS,
+            run_dir, defender_dir, PINNED, rec, lambda _docker: mounts,
         )
     joined = " ".join(rec.create_argv or [])
     # Targets are the model view's fixed paths (#1255 P1); the SOURCES carry the translation.
